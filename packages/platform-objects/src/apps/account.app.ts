@@ -19,7 +19,6 @@
  * make the experience equivalent to the old account SPA for supported
  * surfaces:
  *   - `sys_oauth_application.create` — one-time client_secret reveal
- *   - `sys_account.link_social` — OAuth redirect URL
  *
  * The same objects also appear (admin-only) in `setup.app.ts`'s
  * Advanced group, gated by `manage_platform_settings`, for tenant-wide
@@ -155,10 +154,14 @@ export const ACCOUNT_APP: App = {
       expanded: true,
       children: [
         {
+          // Names `mine` like every other self-service entry here (#21972):
+          // `sys_account` no longer declares its caller-scoped view first,
+          // so an entry naming no view would open the `all_links` tab.
           id: 'nav_account_linked',
           type: 'object',
           label: 'Linked Accounts',
           objectName: 'sys_account',
+          viewName: 'mine',
           icon: 'link-2',
           requiresObject: 'sys_account',
         },

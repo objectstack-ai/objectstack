@@ -3,6 +3,7 @@
 import type { IDataEngine, IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
 import type { WebhookTriggerType } from '@objectstack/spec/automation';
 import type { EnqueueHttpInput } from '@objectstack/service-messaging';
+import { omitInternalFieldsFromWriteResponse } from '@objectstack/core';
 import {
     WEBHOOK_SECRET_FIELD,
     WEBHOOK_SECRET_REFUSAL_CODE,
@@ -20,6 +21,16 @@ import {
     WebhookLegacyCleartextError,
     type LegacyDefinitionCredentialKey,
 } from './webhook-legacy-cleartext.js';
+
+/**
+ * [#21913] The execution context the subscription cache refresh
+ * ({@link AutoEnqueuer.refresh}) reads `sys_webhook` under: the explicit system
+ * opt-in. It is the platform reading its own delivery configuration on a boot
+ * and timer path that has no caller, so it may not rely on a missing principal
+ * to pass the security middleware's principal-less hand-off, which ADR-0096 D5
+ * closes.
+ */
+const SYSTEM_CTX = { isSystem: true } as const;
 
 /**
  * The authored trigger vocabulary, taken from the spec rather than restated
@@ -377,9 +388,11 @@ export class AutoEnqueuer {
     private async doRefresh(): Promise<void> {
         let rows: any[];
         try {
-            rows = await this.engine.find(this.subscriptionsObject, {
-                where: { active: true },
-            });
+            rows = await this.engine.find(
+                this.subscriptionsObject,
+                { where: { active: true } },
+                { context: SYSTEM_CTX },
+            );
         } catch (err) {
             this.logger?.warn?.(
                 `[webhook-auto-enqueuer] failed to load ${this.subscriptionsObject}`,
@@ -946,6 +959,10 @@ export class AutoEnqueuer {
         // don't accidentally dedup.
         const eventId = `${event.object}:${recordId}:${action}:${event.timestamp}`;
 
+        // The outbound body — stored on the delivery row and sent off-box — with
+        // the record bodies projected once, for every subscription below.
+        const outboundBody = this.projectRecordBodies(event.object, payload as Record<string, unknown>);
+
         for (const sub of subs) {
             if (!sub.triggers.has(trigger)) continue;
             // [#13566] The organization dimension of the match. Decided BEFORE
@@ -993,7 +1010,7 @@ export class AutoEnqueuer {
                 // fields into the payload would have silently rewritten the
                 // `object` / `action` / `timestamp` a subscriber receives.
                 payload: {
-                    ...payload,
+                    ...outboundBody,
                     object: event.object,
                     recordId,
                     action,
@@ -1001,6 +1018,37 @@ export class AutoEnqueuer {
                 },
             }).catch((err) => this.reportWriteFailure(sub, eventId, err, 'enqueue'));
         }
+    }
+
+    /**
+     * The event payload with its record bodies (`after`, `changes`) projected
+     * through the generic-data-path non-exposure rules — credential-class
+     * fields MASKED, `internal: true` fields OMITTED — by the one helper every
+     * external write response goes through
+     * (`omitInternalFieldsFromWriteResponse`, `@objectstack/core`).
+     *
+     * The engine already projects both bodies where it publishes the event;
+     * this is defence in depth at the one place the body leaves the box and is
+     * stored (`sys_http_delivery.payload_json`, readable by administrators who
+     * may sit below the write boundary). Idempotent over an already-projected
+     * body. Pure: fresh copies, never the event the realtime bus shares with
+     * every other subscriber. No schema (an engine without `getSchema`, an
+     * unregistered object) projects nothing.
+     */
+    private projectRecordBodies(object: string, payload: Record<string, unknown>): Record<string, unknown> {
+        let schema: unknown;
+        try {
+            schema = (this.engine as { getSchema?: (name: string) => unknown }).getSchema?.(object);
+        } catch { /* schema unavailable — nothing to project against */ }
+        const out: Record<string, unknown> = { ...payload };
+        for (const key of ['before', 'after', 'changes'] as const) {
+            const body = out[key];
+            if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
+            const copy = { ...(body as Record<string, unknown>) };
+            omitInternalFieldsFromWriteResponse(schema, copy);
+            out[key] = copy;
+        }
+        return out;
     }
 
     /**

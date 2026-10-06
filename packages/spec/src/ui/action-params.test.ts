@@ -71,7 +71,7 @@ describe('validateActionParams (ADR-0104 D2)', () => {
     expect(ACTION_PARAM_BUILTIN_KEYS).toContain('objectName');
   });
 
-  it('allows the aggregate-dispatch key _selectedIds on a param-declaring action (objectui#3139)', () => {
+  it('allows the aggregate-dispatch key _selectedIds on a param-declaring action', () => {
     // The renderer's aggregate bulk dispatch injects `_selectedIds` next to
     // the user-collected params; strict mode must not 400 the whole call for
     // a key the author can never declare.
@@ -133,10 +133,10 @@ describe('validateActionParams (ADR-0104 D2)', () => {
  *    file cannot otherwise see.
  *  - Widen the match to fuzzy/Levenshtein → the two "no hint" cases go RED.
  */
-describe('#5622 — near-miss built-in hint on unknown_field', () => {
+describe('near-miss built-in hint on unknown_field', () => {
   const declaresFormat: ResolvedActionParam[] = [{ name: 'format', type: 'text' }];
 
-  it('names `_selectedIds` when the caller sent `selectedIds` (the #5568 road)', () => {
+  it('names `_selectedIds` when the caller sent `selectedIds` — the declared channel for a selection', () => {
     const issues = validateActionParams(declaresFormat, { format: 'png', selectedIds: ['dev_1', 'dev_2'] });
 
     expect(issues).toHaveLength(1);
@@ -279,7 +279,7 @@ describe('#5622 — near-miss built-in hint on unknown_field', () => {
  * have meant the contract had led its producer into a break, which is exactly
  * what a deprecation window exists to prevent.
  */
-describe('#5779 — ActionSession `positions` canonical + `roles` deprecated alias', () => {
+describe('ActionSession `positions` canonical + `roles` deprecated alias', () => {
   it('PRESERVES `positions` through a parse instead of stripping it', () => {
     const parsed = ActionSessionSchema.parse({
       userId: 'usr_1',
@@ -291,7 +291,7 @@ describe('#5779 — ActionSession `positions` canonical + `roles` deprecated ali
     expect(parsed.positions).toEqual(['sales_rep', 'org_admin']);
   });
 
-  it('accepts the DUAL-EMIT shape #5613\'s runtime half will produce — both keys, one value', () => {
+  it('accepts the DUAL-EMIT shape the runtime emits through the rename window — both keys, one value', () => {
     // The window's defining property: same array under both spellings, so a
     // reader migrates by changing the key it reads and nothing else. Pinned
     // here on the contract side BEFORE the producer exists, because that
@@ -447,7 +447,7 @@ export type FindQueryIsEngineQueryOptionsWithoutContext =
 export type FindQueryCarriesNoContextKey =
   Assert< Eq< 'context' extends keyof FindQuery ? true : false, false > >;
 
-describe('#15124 — ActionEngineFacade.find takes the engine query envelope, never a bare filter', () => {
+describe('ActionEngineFacade.find takes the engine query envelope, never a bare filter', () => {
   it('types the second parameter as the published `EngineQueryOptions` (the tsc channel)', () => {
     // The value-level half of `FindQueryIsEngineQueryOptionsWithoutContext`
     // above: a literal
@@ -479,7 +479,7 @@ describe('#15124 — ActionEngineFacade.find takes the engine query envelope, ne
       .every((q) => typeof q === 'object')).toBe(true);
   });
 
-  it('REFUSAL PIN — the bare filter #14175 declared no longer type-checks (the trap is inverted, not narrowed)', () => {
+  it('REFUSAL PIN — the bare filter the facade was first typed with no longer type-checks (the trap is inverted, not narrowed)', () => {
     // This is the pin #14175 recorded as a MEASURED GAP, flipped. The envelope
     // that returned `[]` in silence in the reporting app is now the RIGHT
     // spelling (the positive controls above), and the bare filter that used to
@@ -513,7 +513,7 @@ describe('#15124 — ActionEngineFacade.find takes the engine query envelope, ne
     expect([whereNotFilter, fieldsNotArray, limitNotNumber]).toHaveLength(3);
   });
 
-  it('#19237 REFUSAL PIN — `context` is not an envelope key on THIS facade (ADR-0049 remove arm)', () => {
+  it('REFUSAL PIN — `context` is not an envelope key on THIS facade (ADR-0049 remove arm)', () => {
     // The key the engine honours and this facade does not. It was declared
     // here and unenforced between #15124 and #19237: the write below
     // type-checked, and the runtime stamped the facade's own elevated context
@@ -572,7 +572,7 @@ type DeleteIds = Parameters<ActionEngineFacade['delete']>[1];
 // way to `unknown`. Exported for the same reason the sibling pins are.
 export type DeleteIdsAcceptsOneOrMany = Assert< Eq< DeleteIds, string | string[] > >;
 
-describe('#15117 — ActionEngineFacade.delete accepts one id or an array, both as contract', () => {
+describe('ActionEngineFacade.delete accepts one id or an array, both as contract', () => {
   it('types the second parameter as `string | string[]` (the tsc channel)', () => {
     // The value-level half of `DeleteIdsAcceptsOneOrMany` above: literals
     // annotated with the slot type, so the runtime run exercises the same

@@ -671,7 +671,7 @@ describe('strict mirror ↔ lenient schema — key parity', () => {
 // because the model happened to retry with a repaired blueprint the user never
 // saw. Two declarations of one contract, disagreeing about values.
 // ---------------------------------------------------------------------------
-describe('strict mirror ↔ lenient schema — VALUE parity (cloud#1967)', () => {
+describe('strict mirror ↔ lenient schema — VALUE parity', () => {
   /** The regex a zod string leaf enforces, or null when it enforces none. */
   const patternOf = (schema: any): string | null => {
     const checks = schema?.def?.checks;

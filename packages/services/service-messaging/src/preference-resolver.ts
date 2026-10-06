@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
+import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
 
 /** The object the preference matrix lives in. */
 export const PREFERENCE_OBJECT = 'sys_notification_preference';
@@ -178,9 +179,11 @@ export class PreferenceResolver {
         // driver-specific IN support; user filtering is done in memory.
         const base: Record<string, unknown> = {};
         if (ctx.organizationId) base.organization_id = ctx.organizationId;
+        // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: the rows are
+        // the recipients' preferences, read on their behalf, not the emitter's.
         const [specific, wildcard] = await Promise.all([
-            data.find(this.objectName, { where: { ...base, topic: ctx.topic }, limit: 10000 }),
-            data.find(this.objectName, { where: { ...base, topic: WILDCARD }, limit: 10000 }),
+            data.find(this.objectName, { where: { ...base, topic: ctx.topic }, limit: 10000 }, { context: FAN_OUT_SYSTEM_CONTEXT }),
+            data.find(this.objectName, { where: { ...base, topic: WILDCARD }, limit: 10000 }, { context: FAN_OUT_SYSTEM_CONTEXT }),
         ]);
         return [...(specific ?? []), ...(wildcard ?? [])];
     }

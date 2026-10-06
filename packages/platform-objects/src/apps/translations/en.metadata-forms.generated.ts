@@ -60,6 +60,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Name Field",
         helpText: "Field whose value titles each record (e.g. \"name\", \"subject\"). ADR-0079 canonical pointer — read by record display, ObjectQL search and related-record previews."
       },
+      imageField: {
+        label: "Image Field",
+        helpText: "Field whose value is each record's picture, drawn beside the title in the record page header. Must name a field of this object whose type is image or avatar; any other name is refused when the object is saved. Empty: no record picture, and no placeholder is drawn."
+      },
       isSystem: {
         label: "Is System",
         helpText: "System object (protected from deletion; defaults sharing to public)"
@@ -1732,6 +1736,22 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Error Message",
         helpText: "Error message shown when the action fails, in place of the raw error."
       },
+      outcomeMessages: {
+        label: "Outcome Messages",
+        helpText: "Success message per handler outcome, as JSON: each key is a snake_case `outcome` value the handler returns in its success payload, and each value is the label shown for that outcome, e.g. {\"archived\": \"Archived\", \"already_archived\": \"Already archived\"}. A label may interpolate ${result.*}. An outcome with no entry shows the success message; a key the handler never returns is never shown. Not allowed beside a result dialog or `operation: 'update'`."
+      },
+      onSuccess: {
+        label: "On Success",
+        helpText: "Navigation after the action succeeds: the route to open, and where to open it."
+      },
+      "onSuccess.navigate": {
+        label: "Navigate",
+        helpText: "Route or URL template opened after the action succeeds. It may interpolate ${param.*} (the values the params dialog collected), ${ctx.*} (origin, apiBase, user, org, recordId, selection) and ${result.*} (the server response, e.g. ${result.id}). A relative value is an in-app route."
+      },
+      "onSuccess.openIn": {
+        label: "Open In",
+        helpText: "Where the navigation opens: 'self' (the default) navigates in place; 'newTab' opens a new browser tab."
+      },
       refreshAfter: {
         label: "Refresh After",
         helpText: "Refresh the list/page after action completes"
@@ -1767,6 +1787,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       requiresFeature: {
         label: "Requires Feature",
         helpText: "Public auth feature flag gating this action. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key."
+      },
+      requiresMembershipReach: {
+        label: "Requires Membership Reach",
+        helpText: "The organization endpoint this action calls, so it is offered only to members whose grade reaches that endpoint. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key."
       },
       requiredPermissions: {
         label: "Required Permissions",

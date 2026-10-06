@@ -5580,6 +5580,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'and the semantic entry tells the author to re-declare the count they meant.',
   },
   {
+    id: 'flow-approval-node-config-contract-refused',
+    order: 84,
+    text:
+      'It also judges an `approval` flow node\'s `config` at parse against the contract the spec '
+      + 'declares for it, `ApprovalNodeConfigSchema`, WHOLE. The approval executor fails the node on any '
+      + 'issue of that contract, while `objectstack validate` and `objectstack compile` exited 0 on an '
+      + 'undeclared `escalation.bogusKey` or a `timeoutHours: 0.5` and compile copied it into the '
+      + 'artifact. The approval node now joins a declared contract map beside the builtin executor '
+      + 'contracts, read by the one judge `registerFlow` and `objectstack validate` share, with no plugin '
+      + 'loaded: an undeclared key or a refused value is refused at `nodes.N.config.<key>` in the '
+      + 'contract\'s own words, its did-you-mean included, and a key left out as before. The builtin arm '
+      + 'stays presence-only. No key is removed, so there is no tombstone, and no D2 conversion exists: '
+      + 'the platform cannot know what the author meant. Its D3 record is the semantic entry '
+      + '`flow-approval-node-config-contract-refused`.',
+  },
+  {
     id: 'flow-decision-edge-branching-first-match',
     order: 45,
     text:
@@ -6182,6 +6198,33 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`translation-widget-sub-caption-retired`.',
   },
   {
+    id: 'ui-action-group-menu-member-params-array-only',
+    order: 83,
+    text:
+      'It then closes the one static-values spelling those members still accepted and the containers drop: an '
+      + '`action:group` or `action:menu` member\'s `params` takes the input list, an `ActionParam[]` array, only, '
+      + 'unless the member\'s `type` is `api`, whose object `params` keeps its request-payload window. `params` '
+      + 'carries one shape and no second value-bag key is declared, so an object `params` on any other member, which '
+      + 'parsed and then reached no action, is refused at `actions.N.params` with the prescription to author an action '
+      + 'with static parameter values as its own `action:button` node. Read by the component-props gate (advisory); a '
+      + 'stored page still saves and loads, so no conversion is registered. Its D3 record is the semantic entry '
+      + '`ui-action-group-menu-member-params-array-only`.',
+  },
+  {
+    id: 'ui-action-group-menu-members-typed',
+    order: 82,
+    text:
+      'And it types the members of the `action:group` and `action:menu` page blocks, the last of those forks '
+      + '(the same card, fork 5, letter A): each member was an open record the container draws and runs itself, so '
+      + 'a misspelled key, a node-style `actionType` or an `endpoint` no `api` handler reads passed every door. A '
+      + 'member now takes `action:button`\'s keys with its executor spelled `type`, measured from the containers\' '
+      + 'reads — an `action:menu` item reads no `size` and declares none — with the rows\' prescriptions; '
+      + '`outcomeMessages`, a member `className` and a member `properties.params` are refused, and '
+      + '`outcomeMessages` stays undeclared on all four action blocks as one decision. Read by the '
+      + 'component-props gate (advisory); a stored page still saves and loads, so no conversion is registered. '
+      + 'Its D3 record is the semantic entry `ui-action-group-menu-members-typed`.',
+  },
+  {
     id: 'ui-ai-chat-window-retired',
     order: 65,
     text:
@@ -6422,6 +6465,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'semantic entry `ui-object-metric-compare-to-typed`.',
   },
   {
+    id: 'ui-object-metric-drill-down-report-typed',
+    order: 80,
+    text:
+      'It then types the three members the stages above held open, as the maintainer ruled them on the '
+      + 'decision card for those forks. The `object-metric` drill-down\'s `report` is `ReportSchema`, by '
+      + 'reference (fork 1, letter B): it waited until a joined report refused a block that binds no dataset, '
+      + 'and since then every report the member admits is one the drill drawer draws — a report with no '
+      + '`dataset`, a bare report name or a `{ name }` reference, which the drawer answered by listing the '
+      + 'records, is refused. Read by the component-props gate (advisory); a stored page still saves and loads, '
+      + 'so no conversion is registered. Its D3 record is the semantic entry '
+      + '`ui-object-metric-drill-down-report-typed`.',
+  },
+  {
     id: 'ui-object-metric-drill-down-typed',
     order: 72,
     text:
@@ -6433,6 +6489,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'dataset-bound report, but the spec declares no drill report yet, and declares that contract first. '
       + 'Read by the component-props gate (advisory); a stored page still saves and loads, so no conversion is '
       + 'registered. Its D3 record is the semantic entry `ui-object-metric-drill-down-typed`.',
+  },
+  {
+    id: 'ui-object-timeline-items-typed',
+    order: 81,
+    text:
+      'It types the `object-timeline` page block\'s `items` (fork 4, letter B): each entry is one of objectui\'s '
+      + 'two ruled kinds, closed — a feed entry `{ time, title, description, variant, icon, content, className }` '
+      + 'or a gantt row `{ label, items }` of bars `{ title, startDate, endDate, variant }`, each date a string or '
+      + 'epoch milliseconds — and a row refinement pairs each entry with the kind the block\'s `variant` selects, '
+      + 'so a feed entry with no `title`, or a gantt row on a feed timeline, is refused instead of drawn empty. '
+      + 'A feed entry\'s `content` (child components) is held unjudged until a writer appears. Read by the '
+      + 'component-props gate (advisory); a stored page still saves and loads, so no conversion is registered. '
+      + 'Its D3 record is the semantic entry `ui-object-timeline-items-typed`.',
   },
   {
     id: 'ui-object-timeline-mapping-typed',
@@ -7688,6 +7757,65 @@ const step18: MigrationStep = {
         + 'TTL is still refused. A route declared with `timeoutMs: 30000` aborts after 30 seconds '
         + 'exactly as `timeout: 30000` did.',
     },
+    {
+      id: 'approval-position-address-role-retired',
+      surface:
+        'approvals position address role:<position> — the approverId filter of the approvals '
+        + 'request list, the actorId of every decision, and a stored pending_approvers slot',
+      replacement:
+        '`position:<position>`, the one spelling of a position address; a flow approver authored '
+        + 'as `{ type: \'role\', value: <a position name> }` becomes '
+        + '`{ type: \'position\', value: <the position> }`',
+      reason:
+        'The fourth face of the ADR-0090 D3 `role` retirement, beside '
+        + '`actor-user-roles-to-positions` and `action-session-roles-to-positions`, and like them '
+        + 'a runtime face with no spec schema. The approvals service read `role:<position>` as a '
+        + 'second spelling of `position:<position>` wherever it compares a slot with the caller '
+        + '(the "My Pending" filter, the participant gate, `viewer.can_act`, and the slot test of '
+        + 'every decision), because 15.x-era slots and the stock console\'s identity list carried '
+        + 'it. ADR-0090 D3 retires the word with no alias window, so once the pinned console sent '
+        + '`position:<position>` the arm came out in one edit (maintainer ruling, 2026-10-04). '
+        + '`position:<position>` is now the only position address: a `role:<position>` ask matches '
+        + 'only a slot stored under that exact spelling, and a `role:<position>` actor is refused '
+        + 'with 403 `FORBIDDEN`. '
+        + 'The same ruling closed the one WRITER of the spelling. The deprecated `role` approver '
+        + 'TYPE already resolved as `org_membership_level` (the org-membership tier: owner, admin, '
+        + 'member), but when that lookup found no one the fallback slot kept the AUTHORED spelling, '
+        + '`role:<value>`, and a holder of a same-named position decided it through the arm, so '
+        + 'the runtime silently honoured a membership-tier declaration as a position. The fallback '
+        + 'now writes the canonical `org_membership_level:<value>`, and no path writes a `role:` '
+        + 'slot. '
+        + 'Two classes of pending request are therefore decided only by the privileged override, '
+        + 'or by a reassign to a real approver: a request a 15.x-era release stored as '
+        + '`role:<position>`, and a new request from a flow that still authors '
+        + '`{ type: \'role\', value: <a position name> }` and whose tier lookup finds no one. No '
+        + 'stored slot is rewritten: the ruling refused a one-time rewrite as the permanent '
+        + 'migration debt ADR-0090\'s first forcing fact names. '
+        + 'Why this is a D3 semantic TODO and not a D2 conversion, on two independent grounds. '
+        + 'FIRST, no metadata key moves: the address is runtime DATA (a request slot, a query '
+        + 'parameter, a decision body\'s actor), never a `sys_metadata` row, so there is no source '
+        + 'for a declarative transform to rewrite. SECOND, the one authored shape that leads here, '
+        + '`{ type: \'role\', value: <x> }`, is ambiguous by construction: the deprecated alias '
+        + 'means the membership TIER, and whether its author meant a position instead is a '
+        + 'judgment only that author can make, so a mechanical rewrite to either type would guess. '
+        + 'The `ApproverType` `role` alias itself is a separate retirement and is unchanged here. '
+        + 'ADR-0090 D3, ADR-0087.',
+      acceptanceCriteria:
+        'No client sends `role:<position>` as an `approverId` or an `actorId`: every such value is '
+        + '`position:<position>`, and a request routed to the position is listed for its holder, '
+        + 'served with `viewer.can_act: true`, and decided by that holder with no `actorId` named. '
+        + 'Every flow approver authored as `{ type: \'role\', value: <x> }` is reviewed by its '
+        + 'author: `<x>` a position name becomes `{ type: \'position\', value: <x> }`, and `<x>` a '
+        + 'membership tier (owner, admin, member) becomes '
+        + '`{ type: \'org_membership_level\', value: <x> }`. `os lint` reports the first as '
+        + '`approval-approver-not-membership-tier` and the second as '
+        + '`approval-approver-type-deprecated`. Every pending request whose slot reads '
+        + '`role:<position>`, or `org_membership_level:<a position name>` from such a flow, is '
+        + 'either decided by a platform admin or a tenant admin of its organization (the approve '
+        + 'or reject is recorded with `via_override: true` and resumes the run) or reassigned to '
+        + 'the position\'s holder, who then decides it. Verify on a running app, as an admin: the '
+        + 'pending list filtered by `approverId` set to each such slot address answers no rows.',
+    },
     // #15219 — maintainer ruling A for both keys (2026-09-04, director relay,
     // verbatim 「同意」): `plugins` and `devPlugins` are artifact ENVELOPE keys —
     // top level only, never inside `packages[]`. Registered as D3 SEMANTIC and
@@ -8014,6 +8142,40 @@ const step18: MigrationStep = {
         + 'this entry. No authored metadata document ever embedded a branded '
         + 'value, so no source rewrite ships and `objectstack migrate meta` has '
         + 'nothing to visit.',
+    },
+    // A write-door answer and verdict, not an authorable key: there is no D2
+    // conversion and nothing for `objectstack migrate meta` to rewrite. The entry
+    // carries the changed answer to the one reader the ledger serves here — the
+    // upgrade guide — because a client that branched on the old 403 has no schema
+    // error to find it by. No backticks in `surface`: the upgrade guide renders it
+    // inside a code span and a table cell.
+    {
+      id: 'by-id-write-unreadable-row-not-found',
+      surface:
+        'the data write doors — a by-id update or delete of a row the caller cannot read, on every '
+        + 'object and for every principal',
+      replacement:
+        'read 404 `RECORD_NOT_FOUND` on a by-id update or delete as "no row you can see has this id" — '
+        + 'the read door\'s meaning — and keep a 403 for a row the caller can read but may not write',
+      reason:
+        'A WRITE-DOOR ANSWER, made one with the read door\'s. A by-id update or delete of a row the '
+        + 'caller cannot read used to answer a 403 — `PERMISSION_DENIED` where a write-class row filter '
+        + 'binds the caller, otherwise a later gate\'s own 403, such as `FORBIDDEN` from record sharing '
+        + 'or a parent-derived gate\'s code on attachments and comments — while an id that names no row '
+        + 'answered 404, so the write door told a hidden row apart from a missing one. The by-id write '
+        + 'pre-image check now asks every principal whether it can read the row it addressed, through '
+        + 'a by-id read in its own context that every data middleware\'s visibility applies to, and '
+        + 'answers a row that read does not return with the read door\'s not-found: the same code, '
+        + 'status and body a nonexistent id gets. It also refuses a by-id write a principal no row '
+        + 'filter binds could previously land on a row hidden from it, such as an attachment\'s '
+        + 'uploader or a comment\'s author whose parent record they can no longer read. A caller who '
+        + 'can read the row but may not write it keeps its 403. Writes the platform issues under the '
+        + 'caller\'s context — the engine\'s cascade delete, a hook\'s write, the referential clear of a '
+        + 'lookup — keep their previous answer, and writes not routed by id are unchanged.',
+      acceptanceCriteria:
+        'Every client that handles a by-id update or delete treats 404 `RECORD_NOT_FOUND` as "not '
+        + 'found or not visible" and no longer reads a 403 there as proof the row exists; an operator '
+        + 'who needs a user to write a row grants that user read access to it first.',
     },
     {
       id: 'cache-warmup-scheduled-strategy-retired',
@@ -12911,6 +13073,72 @@ const step18: MigrationStep = {
         + 'the media-column move (the column step of `objectstack migrate files-to-references '
         + '--apply`).',
     },
+    // #21850 — the D3 entry for the build doors judging an `approval` node's config
+    // against the contract the spec declares for it (`ApprovalNodeConfigSchema`),
+    // whole: the declared contract map in `flow-node-config-refusals.ts`, read by
+    // the one judge `flowNodeConfigRefusals`. It narrows a flow's accept set; no key
+    // is removed, so there is no tombstone and no RETIRED_KEYS_BY_MAJOR row. There
+    // is no D2 conversion either: the platform cannot know the approvers, the key
+    // or the value the author meant, and the runtime never ran such a node.
+    //
+    // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+    // inside a code span and a table cell.
+    {
+      id: 'flow-approval-node-config-contract-refused',
+      surface:
+        'an approval flow node whose config the approval node contract (ApprovalNodeConfigSchema) refuses — '
+        + 'a key it does not declare (escalation.bogusKey, a top-level key such as steps or onApprove, an '
+        + 'alias such as escalation.timeout), a value it refuses (escalation.timeoutHours below 1, an '
+        + 'unknown behavior or escalation.action, an empty approvers list, a fallbackApprovers list under any '
+        + 'policy but fallback), or a key it requires left out (approvers; escalation.timeoutHours inside an '
+        + 'escalation block). Reachable wherever a flow is authored or stored: defineStack({ flows }) sources, '
+        + 'defineFlow(), an exported stack passed to objectstack validate or objectstack compile, a flow saved '
+        + 'from the Studio flow designer, and a flow row already sitting in sys_metadata',
+      replacement:
+        'the shape the approval contract declares, written on the node\'s `config`: `approvers` with at least '
+        + 'one approver, and inside an `escalation` block a `timeoutHours` of at least 1 (wall-clock hours; '
+        + '`timeoutHours: 1` is the shortest SLA the contract accepts). An undeclared key is renamed to the key '
+        + 'the refusal\'s did-you-mean names (`timeout` → `timeoutHours`, `mode` → `behavior`, `quorum` → '
+        + '`minApprovals`) or deleted; a process-level key (`steps`, `entryCriteria`, `onApprove`, `onReject`, '
+        + '`rejectionBehavior`) moves onto the flow graph as the refusal\'s guidance says. To turn an SLA off, '
+        + 'delete the whole `escalation` block — an `escalation: { enabled: false }` with no `timeoutHours` '
+        + 'is refused like any block missing it',
+      reason:
+        'An approval node\'s executor (`plugin-approvals`) parses `node.config` against '
+        + '`ApprovalNodeConfigSchema` before it does anything else and fails the node on ANY issue. '
+        + 'Registration already refused an undeclared key, against the descriptor\'s published `configSchema`, '
+        + 'but a refused value (`timeoutHours: 0.5`) registered and then failed every run that reached the node '
+        + '— the config is metadata, and no rerun could succeed. The build doors asked about neither: '
+        + '`FlowSchema.parse` judged only the builtin node types\' '
+        + 'executor contracts, and only for a key left out, so `objectstack validate` and `objectstack compile` '
+        + 'exited 0 on an `escalation.bogusKey` or a `timeoutHours: 0.5` and compile copied it into the '
+        + 'artifact. The contract is the spec\'s own, so the build can judge it with no plugin loaded: the '
+        + 'approval node joins a declared contract map beside the builtin executor contracts, read by the one '
+        + 'judge `FlowSchema.parse`, `AutomationEngine.registerFlow` (which parses first) and '
+        + '`objectstack validate` share (`flowNodeConfigRefusals`), and is judged WHOLE — every issue the '
+        + 'contract raises is refused, because the executor refuses on every one. An undeclared key or a '
+        + 'refused value is `node-config-refused-by-contract`, anchored at the key, in the contract\'s own '
+        + 'sentence (its did-you-mean included); a key left out keeps `node-config-key-missing` or '
+        + '`node-config-key-required-by-rule`. The builtin arm is unchanged and stays presence-only. '
+        + 'A plugin node type whose contract the spec does not declare stays outside the build doors, as '
+        + 'before. ⚠️ No D2 conversion: the platform cannot know the approvers, the key or the value the '
+        + 'author meant, and no value it could write would keep what the flow did. ⚠️ Where such a node '
+        + 'already sits the whole flow is refused: registered from the metadata registry or `sys_metadata` '
+        + 'at boot it is skipped with a `warn` naming it, its trigger not armed, while the flows beside it '
+        + 'register; a `defineStack({ flows })` source throws `StackSchemaInvalidError` for the whole stack; '
+        + 'an artifact file is refused whole at load. ADR-0087, ADR-0019.',
+      acceptanceCriteria:
+        'Run `objectstack validate` over every stack authored in config files, and boot every deployed '
+        + 'stack. Each refusal names the node and the key: `FlowSchema.parse` anchors a `custom` issue at '
+        + '`nodes.N.config.<key>` (`nodes.N.config.escalation.bogusKey`, `nodes.N.config.escalation.'
+        + 'timeoutHours`, `nodes.N.config.approvers`), `objectstack validate` prints the same path, and '
+        + '`validateStackExpressions` phrases it as `node \'gate\' (approval) config.escalation.bogusKey`. '
+        + 'For each hit write what the contract accepts, per the replacement. Two proofs. (1) For a stack '
+        + 'authored in config files, `objectstack validate` is clean. (2) Boot the stack and confirm each '
+        + 'flow REGISTERS: no `failed to register flow` warn for it — that warn line is the locator for a '
+        + 'row that exists only in `sys_metadata`. An approval node the contract accepts parses and '
+        + 'registers byte-identically to before.',
+    },
     // The absent half of the decision-branch predicate rule. A SEPARATE entry from
     // `flow-predicate-slot-blank-string-refused` on purpose: that one keeps the
     // run a blank predicate made (it evaluated `false`, so `'false'` runs the same
@@ -13276,6 +13504,42 @@ const step18: MigrationStep = {
         + 'warn line is the locator for a row that exists only in `sys_metadata`. A non-blank '
         + 'predicate parses and registers byte-identically to before, and a non-string in these '
         + 'slots keeps its own earlier refusal (at `registerFlow` and `objectstack validate`).',
+    },
+    // A value a flow reads, not an authorable key: there is no D2 conversion and
+    // nothing for `objectstack migrate meta` to rewrite. The sibling of
+    // `18.by-id-write-unreadable-row-not-found` in kind — the entry carries the
+    // changed answer to the one reader the ledger serves here, the upgrade guide,
+    // because a flow that read a credential off its trigger record has no schema
+    // error to find it by. No backticks in `surface`: the upgrade guide renders it
+    // inside a code span and a table cell.
+    {
+      id: 'flow-trigger-record-credential-masked',
+      surface:
+        'the record and previous roots a record-change flow receives — a password or secret field, '
+        + 'and an internal field, of the triggering record, on every object',
+      replacement:
+        'read a credential through a privileged binder — the flow credential channel for an http node\'s '
+        + 'signing secret, or a privileged server-side read such as the engine\'s resolveSecretField — '
+        + 'never off `record` or `previous`; on those roots '
+        + 'a set credential-class field now reads as the mask `SECRET_MASK`, an unset one as null, and an '
+        + '`internal: true` field is absent',
+      reason:
+        'ADR-0100: a credential-class value leaves the engine only through a privileged dereference, and '
+        + 'every generic channel serves the mask. The record-change trigger built a flow\'s record and '
+        + 'previous from the engine\'s own write result, which keeps the stored row whole for privileged '
+        + 'in-process callers, so a password field\'s plaintext, a secret field\'s stored handle and an '
+        + 'internal field\'s value reached the flow — and from there its variables, a paused run\'s '
+        + 'persisted state and that state\'s read doors. The trigger now projects both roots through the '
+        + 'same helper every external write response uses: a credential-class field (secret, and '
+        + 'password outside the exempt managedBy buckets) carries the mask, or null when unset, and an '
+        + 'internal field is omitted. Every other field keeps its value, every other variable is '
+        + 'untouched, and the engine\'s own write result, the stored row and the privileged read paths '
+        + 'are unchanged.',
+      acceptanceCriteria:
+        'No flow reads a password, secret or internal field off its trigger record or previous values '
+        + 'expecting the stored value; a flow that needs a credential obtains it through a privileged '
+        + 'binder; a start or edge condition that compared such a field against a literal is rewritten to '
+        + 'test whether it is set (not null).',
     },
     // #21654 — the D3 entry for `FlowSchema`'s refusal of a write node aimed at a
     // stored-metadata table: the save-time half of #21624, which applies #21520's
@@ -14184,13 +14448,13 @@ const step18: MigrationStep = {
         + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
         + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
         + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-        + 'against, `.objectui-sha` = `2e818d0b51ecdf8fdd9fcbf4b916bcd7fe9a9cf6` — names '
+        + 'against, `.objectui-sha` = `0abd4f9f8769fc4c19ad2f96707684876f74c09f` — names '
         + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-        + 'the string debounceDelay each occur 0 times across its 7579 tracked files (0 across the 10267 at ab1879721, the 10071 at 89cad75d5, the 9912 at 31971ff1e, the 9800 at e420df310, the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
+        + 'the string debounceDelay each occur 0 times across its 7650 tracked files (0 across the 7632 at 9dfaca654, the 7579 at 2e818d0b5, the 10267 at ab1879721, the 10071 at 89cad75d5, the 9912 at 31971ff1e, the 9800 at e420df310, the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
         + '8512 at f8a9d0fb0 and the 8303 at 62597c588 too), against lit '
         + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
         + 'which re-count to 13125 and 5043 respectively at 62597c588, to 13347 and 5123 at '
-        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49, to 15352 and 6024 at e420df310, to 15691 and 6206 at 31971ff1e, to 16044 and 6461 at 89cad75d5, to 16377 and 6665 at ab1879721 and to 17227 and 7134 at this pin (git grep -o -F, the method that reproduces '
+        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49, to 15352 and 6024 at e420df310, to 15691 and 6206 at 31971ff1e, to 16044 and 6461 at 89cad75d5, to 16377 and 6665 at ab1879721, to 17227 and 7134 at 2e818d0b5, to 17313 and 7186 at 9dfaca654 and to 17390 and 7209 at this pin (git grep -o -F, the method that reproduces '
         + 'every earlier count).',
       acceptanceCriteria:
         'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
@@ -14395,10 +14659,10 @@ const step18: MigrationStep = {
         + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
         + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
         + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-        + '`.objectui-sha` = `2e818d0b51ecdf8fdd9fcbf4b916bcd7fe9a9cf6`, re-read from this tree — '
+        + '`.objectui-sha` = `0abd4f9f8769fc4c19ad2f96707684876f74c09f`, re-read from this tree — '
         + 'spells resourceLimits.timeout 0 times across '
-        + '7579 tracked files, against lit controls timeout 1351, RuntimeConfig 276 and resourceLimits '
-        + '2 on the same corpus (0 across 10267, and 1348 / 273 / 2, at ab1879721; 0 across 10071, and 1331 / 273 / 2, at 89cad75d5; 0 across 9912, and 1303 / 273 / 2, at 31971ff1e; 0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
+        + '7650 tracked files, against lit controls timeout 1360, RuntimeConfig 293 and resourceLimits '
+        + '2 on the same corpus (0 across 7632, and 1360 / 293 / 2, at 9dfaca654; 0 across 7579, and 1351 / 276 / 2, at 2e818d0b5; 0 across 10267, and 1348 / 273 / 2, at ab1879721; 0 across 10071, and 1331 / 273 / 2, at 89cad75d5; 0 across 9912, and 1303 / 273 / 2, at 31971ff1e; 0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
         + '1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
         + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
         + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. ADR-0087.',
@@ -14634,10 +14898,10 @@ const step18: MigrationStep = {
         + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
         + 'and its test the only occurrences are the generated rows in '
         + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `2e818d0b51ecdf8fdd9fcbf4b916bcd7fe9a9cf6` — spells '
+        + 'objectui checkout — `.objectui-sha` = `0abd4f9f8769fc4c19ad2f96707684876f74c09f` — spells '
         + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-        + 'across its 7579 tracked files, against lit controls `useState` 2477 and `timeout` 1351 on '
-        + 'the same corpus (all four 0 across 10267, against 2476 and 1348, at ab1879721, 0 across 10071, against 2470 and 1331, at 89cad75d5, 0 across 9912, against 2469 and 1303, at 31971ff1e, 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
+        + 'across its 7650 tracked files, against lit controls `useState` 2478 and `timeout` 1360 on '
+        + 'the same corpus (all four 0 across 7632, against 2477 and 1360, at 9dfaca654, 0 across 7579, against 2477 and 1351, at 2e818d0b5, 0 across 10267, against 2476 and 1348, at ab1879721, 0 across 10071, against 2470 and 1331, at 89cad75d5, 0 across 9912, against 2469 and 1303, at 31971ff1e, 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
         + 'against 2391 and 1096, at f8a9d0fb0, and 0 across '
         + '8303, against 2389 and 1086, at 62597c588).',
       acceptanceCriteria:
@@ -16695,6 +16959,43 @@ const step18: MigrationStep = {
         + 'row, no lockfile pin. ⛔ Do not repair one by widening the check back — the grammar '
         + 'is the contract now, on nine carriers at once.',
     },
+    // A write-door answer, not an authorable key: there is no D2 conversion and
+    // nothing for `objectstack migrate meta` to rewrite. The sibling of
+    // `18.by-id-write-unreadable-row-not-found`, for the predicate door. The entry
+    // carries the changed answer to the one reader the ledger serves here — the
+    // upgrade guide — because a caller that branched on the old answer has no
+    // schema error to find it by. No backticks in `surface`: the upgrade guide
+    // renders it inside a code span and a table cell.
+    {
+      id: 'predicate-write-unreadable-row-not-matched',
+      surface:
+        'the data write doors — a predicate-scoped (multi) update or delete, on every object and for '
+        + 'every principal',
+      replacement:
+        'read a predicate update or delete as reaching only the rows the caller can read: the result '
+        + 'counts those rows alone, a predicate that reaches only hidden rows succeeds with zero rows, '
+        + 'and a predicate whose readable match exceeds one write\'s row ceiling is refused with 400 '
+        + '`INVALID_FILTER` — narrow it and write in batches',
+      reason:
+        'A WRITE-DOOR ANSWER, made one with the read door\'s, on the predicate door as on the by-id '
+        + 'door. The rows a predicate update or delete matched came from its write scope alone, so a '
+        + 'row the caller cannot read was matched whenever that scope reached it: a per-row gate then '
+        + 'refused the write with a 403, or the row was written and counted. Either answer told a '
+        + 'hidden row apart from no row. The write middleware now asks the read door which rows the '
+        + 'caller\'s own predicate returns — a read in the caller\'s context that every data '
+        + 'middleware\'s visibility applies to — and narrows the matched set to them, so a row the '
+        + 'caller cannot read is not written, not counted and not refused. A read the read door '
+        + 'refuses keeps the write\'s previous answer, and a readable match larger than one predicate '
+        + 'write\'s row ceiling is refused rather than cut off. A caller who can read a matched row but '
+        + 'may not write it keeps its answer. Writes the platform issues under the caller\'s context — '
+        + 'a cascade, a hook\'s own write, the referential clear of a lookup — keep their previous '
+        + 'answer, and by-id writes are unchanged.',
+      acceptanceCriteria:
+        'Every caller that issues a predicate update or delete reads its count as the rows it can see '
+        + 'and no longer reads a 403 there as proof a hidden row matched; an operator who needs a user '
+        + 'to change rows grants that user read access to them first; a predicate whose readable match '
+        + 'exceeds the row ceiling is narrowed and written in batches.',
+    },
     // #20289 (family `qa-runner`, verdict ENFORCE; the `requires` key ruled B) — the
     // D3 entry of the family (one D3 entry per retirement family). Registered key:
     // `qa/TestScenario:requires.plugins`. No D2 conversion: a QA suite is a loose
@@ -18400,10 +18701,12 @@ const step18: MigrationStep = {
         + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
         + '(1195 again at 9b62f54671); and the objectui '
         + 'checkout this repo builds against — this is the pin, '
-        + '`.objectui-sha` = `2e818d0b51ecdf8fdd9fcbf4b916bcd7fe9a9cf6`, re-read from this tree — '
-        + 'spells all six metrics def names and both distinctive keys 0 times across 7579 tracked '
-        + 'files at that sha, against lit controls window 4175, timeout 1351, period 238, '
-        + 'interval 195 and metrics 374 on that same corpus and sha (0 across 10267, against 4044 / '
+        + '`.objectui-sha` = `0abd4f9f8769fc4c19ad2f96707684876f74c09f`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 7650 tracked '
+        + 'files at that sha, against lit controls window 4194, timeout 1360, period 238, '
+        + 'interval 195 and metrics 401 on that same corpus and sha (0 across 7632, against 4193 / '
+        + '1360 / 238 / 195 / 401, at 9dfaca654, 0 across 7579, against 4175 / '
+        + '1351 / 238 / 195 / 374, at 2e818d0b5, 0 across 10267, against 4044 / '
         + '1348 / 231 / 196 / 354, at ab1879721, 0 across 10071, against 4002 / '
         + '1331 / 231 / 196 / 355, at 89cad75d5, 0 across 9912, against 3916 / '
         + '1303 / 234 / 196 / 354, at 31971ff1e, 0 across 9800, against 3873 / '
@@ -18621,12 +18924,14 @@ const step18: MigrationStep = {
         + 'dark control of 0; inside packages/spec the '
         + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
         + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-        + 'pinned objectui checkout — `.objectui-sha` = `2e818d0b51ecdf8fdd9fcbf4b916bcd7fe9a9cf6` — names none of it: all 37 exports of '
-        + 'tracing.zod.ts and each of the four key names occur 0 times across the 7579 files '
-        + 'tracked at that sha (the 505 Span and 57 SpanSchema hits are objectui\'s own HTML '
+        + 'pinned objectui checkout — `.objectui-sha` = `0abd4f9f8769fc4c19ad2f96707684876f74c09f` — names none of it: all 37 exports of '
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 7650 files '
+        + 'tracked at that sha (the 508 Span and 57 SpanSchema hits are objectui\'s own HTML '
         + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
-        + 'two lit controls on that same corpus and sha: 17227 hits for the bare token objectstack, '
-        + 'and 7134 for the package specifier @objectstack/spec (at ab1879721: 0 across 10267, Span 491, '
+        + 'two lit controls on that same corpus and sha: 17390 hits for the bare token objectstack, '
+        + 'and 7209 for the package specifier @objectstack/spec (at 9dfaca654: 0 across 7632, Span 508, '
+        + '17313 and 7186; at 2e818d0b5: 0 across 7579, Span 505, '
+        + '17227 and 7134; at ab1879721: 0 across 10267, Span 491, '
         + '16377 and 6665; at 89cad75d5: 0 across 10071, Span 489, '
         + '16044 and 6461; at 31971ff1e: 0 across 9912, Span 486, '
         + '15691 and 6206; at e420df310: 0 across 9800, Span 486, '
@@ -18738,9 +19043,9 @@ const step18: MigrationStep = {
         + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
         + 'and its test the only occurrences are the four generated rows in '
         + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `2e818d0b51ecdf8fdd9fcbf4b916bcd7fe9a9cf6` — spells it 0 '
-        + 'times across 7579 tracked files, against lit controls `TTL` 182 and `tenant` 1317 on the '
-        + 'same corpus (0 across 10267, against 180 and 1238, at ab1879721; 0 across 10071, against 181 and 1237, at 89cad75d5; 0 across 9912, against 181 and 1237, at 31971ff1e; 0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
+        + 'objectui checkout — `.objectui-sha` = `0abd4f9f8769fc4c19ad2f96707684876f74c09f` — spells it 0 '
+        + 'times across 7650 tracked files, against lit controls `TTL` 182 and `tenant` 1318 on the '
+        + 'same corpus (0 across 7632, against 182 and 1318, at 9dfaca654; 0 across 7579, against 182 and 1317, at 2e818d0b5; 0 across 10267, against 180 and 1238, at ab1879721; 0 across 10071, against 181 and 1237, at 89cad75d5; 0 across 9912, against 181 and 1237, at 31971ff1e; 0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
         + 'and 987, at 62597c588).',
       acceptanceCriteria:
         'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '
@@ -19276,6 +19581,89 @@ const step18: MigrationStep = {
         + 'datasource whether it is a remote database, an embedded replica on a local file, or a '
         + 'local file, and rewrite it to that spelling. Done when every turso datasource parses, the '
         + 'driver builds from it, and a replica datasource reports a file: url beside its syncUrl.',
+    },
+    // #21855 — the rows' value ratchet for one member: an `action:group` /
+    // `action:menu` member's `params` takes the array form (`ActionParam[]`) only,
+    // unless the member's `type` is `api`, whose object `params` keeps the
+    // inline-action payload window (#5777) until 18. The maintainer's ruling A on
+    // objectui#10289 keeps `params` to one shape and declares no other value-bag
+    // key, and #21704's fork 5 A refused the member's `properties.params`, so a
+    // member has no static-values spelling and the container drops a non-array
+    // `params` on any other type at run time. D3 only: page-component `properties`
+    // is not parsed on the metadata save or load path, so a stored page is never
+    // refused; there is no D2 conversion, because the only home for static values
+    // is a different node (an `action:button`), which no rewrite can build in the
+    // author's place; and the census found no writer to respell.
+    {
+      id: 'ui-action-group-menu-member-params-array-only',
+      // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+      // inside a code span.
+      surface: 'page action:group and action:menu components — a member of properties.actions whose type is not api, '
+        + 'and whose params is not an array',
+      replacement: 'Write `params` as the list of inputs to collect from the user, an `ActionParam[]` array. To run an '
+        + 'action with static parameter values, author it as its own `action:button` node, whose `params` object carries '
+        + 'them; for a `type: \'api\'` member\'s request body write `bodyExtra`. A member that needs neither drops the key.',
+      reason: 'An `action:group` or `action:menu` runs each member itself and forwards an array `params` as the input '
+        + 'list. It forwards any other `params` value only for a `type: \'api\'` member, as its request payload; for '
+        + 'every other `type`, an absent one included, it drops the value, with a development-build warning only. The '
+        + 'member declared `params` as any value, so an object `params` on such a member passed the component-props '
+        + 'gate and then had no effect: no error and no static values. `params` carries one shape, the input list, and '
+        + 'no second value-bag key is declared; a member\'s `properties.params` is already refused, so static parameter '
+        + 'values are not part of the inline action vocabulary at all, and the action that needs them is its own '
+        + '`action:button` node. The member now refuses a non-array `params` on a non-`api` type at the gate, at '
+        + '`actions.N.params`, with that prescription. The `api` member\'s object `params` is unchanged. It is read '
+        + 'where every page component\'s props are: the component-props gate reports the refusal as an advisory '
+        + '`component-props-invalid` finding on `objectstack validate`, `objectstack build` and `objectstack lint`, and a '
+        + 'stored page still saves and loads, because a page component\'s `properties` is not parsed on the metadata '
+        + 'save or load path. No conversion is registered: the static values belong on a different node, and the '
+        + 'census found no writer. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `action:group` and `action:menu` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` finding at `properties.actions.N.params`. Each member whose action needs static '
+        + 'parameter values is now its own `action:button` node, and pressing it hands the handler those values. '
+        + 'Census at the time of the change: no `action:group` / `action:menu` member authors a non-array `params` on a '
+        + 'non-`api` type in this repository, in objectui (at the pinned commit and on its main branch) or in the hotcrm '
+        + 'application, outside objectui\'s own tests asserting that the container drops it; the cloud repository was not '
+        + 'reachable.',
+    },
+    // #21464 — each member of the `action:group` / `action:menu` page blocks'
+    // `actions` was an open record: the container draws and runs the member itself,
+    // and the spec declared none of its keys. The maintainer ruled on #21704 (fork
+    // 5, letter A): the measured read set, `action:button`'s keys keyed by `type`,
+    // with the rows' prescriptions; `outcomeMessages`, a member `className` and
+    // `properties.params` refused; `outcomeMessages` undeclared on all four action
+    // blocks. D3 only: page-component `properties` is not parsed on the metadata
+    // save or load path, so a stored page is never refused; and the authored census
+    // found no working member to respell — the refused values are objectui's probes
+    // of the very reads the ruling refuses (a member `className`, `outcomeMessages`,
+    // `properties.params`) and of the host's `autoTrigger` flag.
+    {
+      id: 'ui-action-group-menu-members-typed',
+      surface: 'page `action:group` and `action:menu` components — each member of `properties.actions` (whose keys '
+        + 'used to pass unjudged)',
+      replacement: 'an inline action with `action:button`\'s keys, its executor spelled `type`: `{ name?, label?, '
+        + 'icon?, type?, variant?, visible?, disabled?, tags?, params?, description?, target?, openIn?, method?, '
+        + 'bodyExtra?, bodyShape?, operation?, patch?, confirmText?, successMessage?, errorMessage?, refreshAfter?, '
+        + 'locations?, toast?, resultDialog?, onSuccess?, objectName? }`, plus `size?` on an `action:group` member. '
+        + 'Write `actionType` as `type`, `endpoint` (and `url` / `path` / `href`) as `target`, `enabled` as `disabled` '
+        + 'with the condition inverted, and `outcomeMessages` as one `successMessage`; drop a member `className`, '
+        + '`properties`, `autoTrigger`, `undoable`, `recordIdField` and an `action:menu` member\'s `size`.',
+      reason: 'An `action:group` or `action:menu` draws and runs each member itself: it draws `label` (or `name`), '
+        + '`icon`, `variant`, `tags` and, on a group\'s inline buttons, `size`; gates the member on `visible` and '
+        + '`disabled`; places it by `locations`; and forwards its `type` and the rest of `action:button`\'s keys to the '
+        + 'action runner. The page-component rows declared each member an open record, so a misspelled key, a '
+        + 'node-style `actionType` or an `endpoint` no `api` handler reads passed the component-props gate, and the '
+        + 'container drew and ran the member without it. The rows now take a closed member: `action:button`\'s keys '
+        + 'by `type`, with the rows\' prescriptions; the keys the rows leave undecided — `outcomeMessages`, a member '
+        + '`className`, a member `properties.params` — are refused, and `outcomeMessages` stays undeclared on all four '
+        + 'action blocks as one decision. It is read where every page component\'s props are: the component-props '
+        + 'gate reports a refused value as an advisory `component-props-invalid` / `component-props-unknown-key` '
+        + 'finding on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still saves '
+        + 'and loads, because a page component\'s `properties` is not parsed on the metadata save or load path. No '
+        + 'conversion is registered: nothing on the load path refuses the shape, and the authored census found no '
+        + 'working member to respell. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `action:group` and `action:menu` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under `properties.actions`. Each member '
+        + 'is drawn with its label, icon and variant, and runs the executor its `type` names.',
     },
     {
       id: 'ui-action-undoable-unfulfillable-refused',
@@ -20562,6 +20950,39 @@ const step18: MigrationStep = {
         + 'that sets a comparison shows its trend labelled for the kind it names, over the window its own `filter` '
         + 'resolves to.',
     },
+    // #21464 — the `object-metric` page block's `drillDown.report` was `z.unknown()`:
+    // the tile hands it to the shared drill drawer, which draws a dataset-bound
+    // report and lists the records for any other value, and no spec drill shape
+    // declared it. The maintainer ruled on #21704 (fork 1, letter B) that it is
+    // `ReportSchema` by reference, once a joined report refuses a block that binds
+    // no dataset (#21702), so a report the member admits is one the drawer draws.
+    // D3 only: page-component `properties` is not parsed on the metadata save or
+    // load path, so a stored page is never refused; and the authored census found
+    // no drawn report to respell — the refused values are objectui's probes of the
+    // values the drawer does NOT draw.
+    {
+      id: 'ui-object-metric-drill-down-report-typed',
+      surface: 'page `object-metric` components — `properties.drillDown.report` (which used to accept any value)',
+      replacement: 'a report definition, the same shape as `reports[]` (`ReportSchema`): `{ name, label, dataset, '
+        + 'values, … }`, or a `joined` report whose every block binds a `dataset`. Write a bare report name, a '
+        + '`{ name }` reference or the retired `objectName` / `columns` form as the dataset-bound report itself.',
+      reason: 'The metric tile hands `drillDown.report` to the shared drill drawer, which draws it as a report — with '
+        + 'the metric\'s filter joined into the report\'s own `runtimeFilter` — when it is dataset-bound (a non-empty '
+        + '`dataset`, or a `joined` report with a block that binds one), and lists the records for any other value. '
+        + 'The page-component row declared it `z.unknown()`, so a report with no `dataset`, a misspelled report key, a '
+        + 'bare report name or a `{ name }` reference passed the component-props gate, and the drawer quietly listed '
+        + 'the records instead. The row now takes `ReportSchema` by reference — the declaration objectui already '
+        + 'names for the member — and, since a joined report refuses a block that binds no `dataset`, every report it '
+        + 'admits is one the drawer draws. It is read where every page component\'s props are: the component-props gate '
+        + 'reports a refused value as an advisory `component-props-invalid` / `component-props-unknown-key` finding on '
+        + '`objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still saves and loads, '
+        + 'because a page component\'s `properties` is not parsed on the metadata save or load path. No conversion is '
+        + 'registered: nothing on the load path refuses the shape, and the authored census found no drawn report to '
+        + 'respell. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-metric` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under `properties.drillDown.report`. Each '
+        + 'tile whose drill names a report opens that report, scoped by the metric\'s filter, instead of the record list.',
+    },
     // #21464 — the `object-metric` page block's `drillDown` was `z.unknown()`
     // although the tile reads it with one shape, so a drill `filter`, a `mode`, a
     // misspelled member or a non-numeric page size passed the component-props gate
@@ -20604,6 +21025,42 @@ const step18: MigrationStep = {
         + 'that sets a drill-down opens it as written: the panel shape `target` names, the heading `title` names, '
         + 'and the records behind the number, scoped by the metric\'s own `filter`, in the columns and page size '
         + 'written.',
+    },
+    // #21464 — the `object-timeline` page block's `items` was `z.array(z.unknown())`:
+    // each entry is objectui's authored timeline element (`TimelineFeedItem` /
+    // `TimelineGanttItem`, ruled on objectui#6356), which the spec did not declare,
+    // and the arm an entry must be is chosen by the row's `variant`. The maintainer
+    // ruled on #21704 (fork 4, letter B): both arms closed, a feed entry's `content`
+    // opaque, a row refinement pairing each entry with the arm `variant` selects,
+    // and a gantt bar's dates a string or a number. D3 only: page-component
+    // `properties` is not parsed on the metadata save or load path, so a stored page
+    // is never refused; and the authored census found no drawn entry to respell —
+    // the refused values are objectui's probes of its render-time gantt date
+    // diagnostic.
+    {
+      id: 'ui-object-timeline-items-typed',
+      surface: 'page `object-timeline` components — `properties.items` (whose entries used to accept any value)',
+      replacement: 'the entry kind the block\'s `variant` selects: on `vertical` (the default) or `horizontal`, a feed '
+        + 'entry `{ time?, title, description?, variant?, icon?, content?, className? }`; on `gantt`, a gantt row '
+        + '`{ label, items? }` whose bars are `{ title?, startDate?, endDate?, variant? }`, each date a string or epoch '
+        + 'milliseconds. Write a feed entry\'s `date` as `time` and its `color` as `variant` (`default`, `success`, '
+        + '`warning`, `danger`, `info`); move a gantt row to `variant: \'gantt\'`, or a feed entry off it.',
+      reason: 'The timeline rail draws `items` as authored, ahead of every record source, and each branch of its '
+        + 'renderer reads only its own kind of entry: the feed branches read `time`, `title`, `description`, `variant`, '
+        + '`icon`, `content` and `className`; the gantt branch reads a row\'s `label` and its bars\' `title`, '
+        + '`startDate`, `endDate` and `variant`. The page-component row declared each entry `z.unknown()`, so a '
+        + 'misspelled key, a feed entry with no `title`, or a gantt row on a feed timeline passed the component-props '
+        + 'gate, and the rail drew an empty, unlabelled entry. The row now takes objectui\'s two ruled kinds, closed, '
+        + 'and pairs each entry with the kind its `variant` selects; a feed entry\'s `content` (child components) is '
+        + 'held unjudged until a writer appears. It is read where every page component\'s props are: the '
+        + 'component-props gate reports a refused value as an advisory `component-props-invalid` / '
+        + '`component-props-unknown-key` finding on `objectstack validate`, `objectstack build` and `objectstack lint`, '
+        + 'and a stored page still saves and loads, because a page component\'s `properties` is not parsed on the '
+        + 'metadata save or load path. No conversion is registered: nothing on the load path refuses the shape, and '
+        + 'the authored census found no drawn entry to respell. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-timeline` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under `properties.items`. Each timeline '
+        + 'with authored entries draws every entry with its title (or row label), date and colour.',
     },
     // #21464 — the `object-timeline` page block's `mapping` was `z.unknown()`: its
     // contract lived only in objectui, so a bare field name, a non-string binding

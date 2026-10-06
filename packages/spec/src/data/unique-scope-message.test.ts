@@ -134,7 +134,7 @@ describe('unique scope rejection message — the two surfaces disagree about bar
   );
 });
 
-describe('unique scope — message text only: the accept/reject line does not move (#8323)', () => {
+describe('unique scope — message text only: the accept/reject line does not move, and bare `true` keeps its meaning', () => {
   // Every value an author can write on this key, accepted or refused. The
   // vocabulary (ADR-0120 D1) plus the two rejected words plus the shapes a
   // wrong type arrives as.

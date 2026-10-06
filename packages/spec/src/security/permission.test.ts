@@ -117,7 +117,7 @@ describe('ObjectPermissionSchema', () => {
     expect(result.modifyAllRecords).toBe(false);
   });
 
-  it('allowExport is optional with no default — unset stays undefined (#3544)', () => {
+  it('allowExport is optional with no default — unset stays undefined', () => {
     // Deliberately NOT defaulted: unset = inherit read (backward-compatible
     // opt-out), so adding the key changes nothing for existing permission sets.
     const result = ObjectPermissionSchema.parse({});
@@ -170,7 +170,7 @@ describe('ObjectPermissionSchema', () => {
   });
 });
 
-describe('[#16870] a depth axis beside the super-user bit that short-circuits it is REFUSED', () => {
+describe('a depth axis beside the super-user bit that short-circuits it is REFUSED', () => {
   // The defect: `PermissionEvaluator.getEffectiveScope` answers `org` on the
   // super-user bit BEFORE it consults the depth key, and `getDeclaredScope`
   // (the ADR-0090 D10 delegated-path input) carries the identical
@@ -275,7 +275,7 @@ describe('[#16870] a depth axis beside the super-user bit that short-circuits it
   });
 });
 
-describe('allowRestore / allowPurge are RETIRED (#12497, ADR-0049)', () => {
+describe('allowRestore / allowPurge are RETIRED (ADR-0049)', () => {
   // Removed by the 2026-08-26 maintainer ruling accepting #1883's
   // recommendation B: the `restore`/`purge` ObjectQL operations the bits
   // claimed to gate have never existed (no destructive lifecycle verb in the
@@ -305,7 +305,7 @@ describe('allowRestore / allowPurge are RETIRED (#12497, ADR-0049)', () => {
     }
   });
 
-  it('[#12840] the refusal is the tombstone byte-for-byte — guidance text, expected: never, located path', () => {
+  it('the refusal is the tombstone byte-for-byte — guidance text, expected: never, located path', () => {
     // The #12497 refusal shape was measured as
     // `{ expected: 'never', code: 'invalid_type', path: […, key], message: <guidance> }`.
     // The residue stage must not touch it: a non-default value never enters
@@ -352,7 +352,7 @@ describe('allowRestore / allowPurge are RETIRED (#12497, ADR-0049)', () => {
   });
 });
 
-describe('[#12840] the RETIRED DEFAULT parses as inert residue and strips (class rule)', () => {
+describe('the RETIRED DEFAULT parses as inert residue and strips (class rule)', () => {
   // Maintainer ruling 2026-08-28, recorded on objectstack-ai/cloud#1685: a
   // retired key that had a schema default is refused only when it carries a
   // NON-default value. The published `@objectstack/spec` 17.x still emitted
@@ -418,7 +418,7 @@ describe('[#12840] the RETIRED DEFAULT parses as inert residue and strips (class
     }
   });
 
-  it('[#17425] the only post-parse observation left: an EXPLICIT `undefined` survives as an own key', () => {
+  it('the only post-parse observation left: an EXPLICIT `undefined` survives as an own key', () => {
     // The consumer-facing claim this pins (prose on `ObjectPermissionSchema`):
     // on data that came from JSON no post-parse guard can ever fire — `false`
     // strips and every other JSON value throws, so the key is always
@@ -542,7 +542,7 @@ describe('[#12840] the RETIRED DEFAULT parses as inert residue and strips (class
   });
 });
 
-describe('EffectiveObjectPermissionSchema (#3391 response-side)', () => {
+describe('EffectiveObjectPermissionSchema (response side: the server-resolved operations the UI renders)', () => {
   it('carries every ObjectPermission field plus optional apiOperations', () => {
     const parsed = EffectiveObjectPermissionSchema.parse({
       allowRead: true,
@@ -990,7 +990,7 @@ describe('PermissionSetSchema - tabPermissions', () => {
 // or restriction was in place that the runtime never saw (the ADR-0049
 // asymmetry at the capability container itself). Strictness plus the shared
 // `strictUnknownKeyError` factory turns that into a loud, fixable error.
-describe('unknown keys are rejected, not stripped (#4001)', () => {
+describe('unknown keys are rejected, not stripped', () => {
   const unknownKeyIssue = (schema: { safeParse: (v: unknown) => any }, value: unknown) => {
     const result = schema.safeParse(value);
     expect(result.success).toBe(false);
@@ -1117,7 +1117,7 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
  * bypass would be the opposite lie, since on the common owner-bearing object it
  * does exactly what it says.
  */
-describe('[#6698] modifyAllRecords declares its bypass AND the limit of that bypass', () => {
+describe('modifyAllRecords declares its bypass AND the limit of that bypass', () => {
   const description = ObjectPermissionSchema.shape.modifyAllRecords.description ?? '';
 
   /** Idioms that SCOPE the bypass to the objects record sharing enforces on. */

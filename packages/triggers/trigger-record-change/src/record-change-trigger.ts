@@ -2,6 +2,7 @@
 
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { HookContext } from '@objectstack/spec/data';
+import { omitInternalFieldsFromWriteResponse } from '@objectstack/core';
 
 import { decoupleFromEngineState } from './decouple-flow-record.js';
 
@@ -213,6 +214,11 @@ export class RecordChangeTrigger implements FlowTrigger {
      * no unbounded growth.
      */
     private readonly hydrationCache = new WeakMap<object, Map<string, Promise<Record<string, unknown> | undefined>>>();
+    /**
+     * Objects whose definition {@link readObjectDefinition} already reported as
+     * unresolved — the `error` is said once per object, not once per write.
+     */
+    private readonly unresolvedDefinitionLogged = new Set<string>();
 
     constructor(engine: RecordChangeDataEngine, logger: TriggerLogger) {
         this.engine = engine;
@@ -472,6 +478,35 @@ export class RecordChangeTrigger implements FlowTrigger {
         const isolatedRecord = decoupleFromEngineState(hydrated, isolation);
         const isolatedPrevious = decoupleFromEngineState(materializedPrevious, isolation);
 
+        // ADR-0100 — the flow's trigger record is served on the GENERIC read
+        // path's terms: a credential-class field (`secret`, and `password`
+        // outside the exempt `managedBy` buckets) carries `SECRET_MASK` (or
+        // `null` when unset) and an `internal: true` field is omitted. The
+        // engine's own write result keeps the stored row whole for privileged
+        // in-process callers, so this consumer — the one that hands the row to
+        // flow authoring — is where the mask belongs, through THE one helper
+        // every other external mouth uses (no second statement of the rule).
+        // Everything downstream inherits it: the variables map (`record`,
+        // `$record`, `previous`), a paused run's persisted state and its read
+        // doors, and the run a resume rehydrates, in-process or after a
+        // restart. A flow that needs a credential reads it through a
+        // privileged binder, never off the trigger record.
+        //
+        // Applied LAST — after hydration, materialisation and the decoupling
+        // copy — so no later layer re-introduces a clear value, and IN PLACE on
+        // the decoupled copies only, so the engine's `ctx.result` /
+        // `ctx.previous` (shared with every other binding and hook on this
+        // write) are never touched. The definition is read here regardless of
+        // `groundTruth`: materialisation needs persisted state, the mask does
+        // not. No definition ⇒ nothing to mask, and nothing upstream refuses
+        // that case: the bind-time existence probe in `start()` only WARNS and
+        // still binds, so a write to an object whose definition cannot be
+        // resolved here still dispatches. `readObjectDefinition` says so once
+        // per object at `error` — the flow then receives the record unmasked.
+        const definition = object ? this.readObjectDefinition(object, binding.flowName) : undefined;
+        omitInternalFieldsFromWriteResponse(definition, isolatedRecord);
+        omitInternalFieldsFromWriteResponse(definition, isolatedPrevious);
+
         return {
             record: isolatedRecord,
             previous: isolatedPrevious,
@@ -499,6 +534,44 @@ export class RecordChangeTrigger implements FlowTrigger {
             // change on top of the aliasing fix).
             params: isolatedRecord,
         };
+    }
+
+    /**
+     * The trigger object's registered definition, through the engine's
+     * optional `getObject` accessor — `undefined` when the accessor is absent,
+     * answers nothing, or throws. Read for the ADR-0100 mask in
+     * {@link buildContext}.
+     *
+     * An unresolved definition does NOT stop the dispatch (behaviour is
+     * unchanged: the flow still runs), but it means the mask cannot be
+     * applied, so it is logged at `error` — once per object for this trigger,
+     * not once per write — naming the object, the consequence and the fix.
+     */
+    private readObjectDefinition(object: string, flowName: string): unknown {
+        const getObj = this.engine.getObject;
+        let definition: unknown;
+        let reason: string;
+        if (typeof getObj !== 'function') {
+            reason = 'the data engine exposes no getObject accessor';
+        } else {
+            try {
+                definition = getObj.call(this.engine, object) ?? undefined;
+                reason = 'getObject returned no definition';
+            } catch (err) {
+                reason = `getObject threw: ${(err as Error)?.message ?? String(err)}`;
+            }
+        }
+        if (definition === undefined && !this.unresolvedDefinitionLogged.has(object)) {
+            this.unresolvedDefinitionLogged.add(object);
+            const log = this.logger.error?.bind(this.logger) ?? this.logger.warn.bind(this.logger);
+            log(
+                `[record-change] object '${object}' definition could not be resolved (${reason}) — flow '${flowName}' still runs, ` +
+                    `but its trigger record and previous values are NOT masked: credential-class fields and internal fields reach the flow, ` +
+                    `its variables and any persisted run state as stored, and nothing else will look wrong. ` +
+                    `Fix: register the object with the data engine under this exact name so getObject resolves it.`,
+            );
+        }
+        return definition;
     }
 
     /**

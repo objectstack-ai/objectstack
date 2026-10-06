@@ -76,7 +76,11 @@ async function boot(sets: PermissionSet[], opts: { noBaseline?: boolean } = {}) 
       registerMiddleware: (mw: any) => middlewares.push(mw),
       getSchema: (name: string) => SCHEMAS[name],
       findOne: vi.fn(async (_object: string, query: any) =>
-        (query?.where?.id === LIVE_DELEGATOR ? { id: LIVE_DELEGATOR, email: 'boss@example.test' } : null)),
+        (query?.where?.id === LIVE_DELEGATOR
+          ? { id: LIVE_DELEGATOR, email: 'boss@example.test' }
+          // [#21771] An addressed by-id update asks the read door for its row;
+          // the double holds the one row the update names.
+          : query?.where?.id === PAYLOAD_VALUE.id ? { id: PAYLOAD_VALUE.id, title: 'x' } : null)),
     },
     metadata: {
       get: async (_type: string, name: string) => SCHEMAS[name],

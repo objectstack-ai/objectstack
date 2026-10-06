@@ -31,12 +31,17 @@
     "InvitationParsed": "src/identity/organization.zod.ts#InvitationParsed (type)",
     "InvitationSchema": "src/identity/organization.zod.ts#InvitationSchema (const)",
     "InvitationStatus": "src/identity/organization.zod.ts#InvitationStatus (type)",
+    "MEMBERSHIP_REACH": "src/identity/membership-reach.ts#MEMBERSHIP_REACH (const)",
+    "MEMBERSHIP_REACH_NAMES": "src/identity/membership-reach.ts#MEMBERSHIP_REACH_NAMES (const)",
     "MEMBERSHIP_ROLE_ADMIN": "src/identity/membership-role.ts#MEMBERSHIP_ROLE_ADMIN (const)",
     "MEMBERSHIP_ROLE_DELEGATED_ADMIN": "src/identity/membership-role.ts#MEMBERSHIP_ROLE_DELEGATED_ADMIN (const)",
     "MEMBERSHIP_ROLE_MEMBER": "src/identity/membership-role.ts#MEMBERSHIP_ROLE_MEMBER (const)",
     "MEMBERSHIP_ROLE_OWNER": "src/identity/membership-role.ts#MEMBERSHIP_ROLE_OWNER (const)",
     "Member": "src/identity/organization.zod.ts#Member (type)",
     "MemberSchema": "src/identity/organization.zod.ts#MemberSchema (const)",
+    "MembershipReachEntry": "src/identity/membership-reach.ts#MembershipReachEntry (type)",
+    "MembershipReachName": "src/identity/membership-reach.ts#MembershipReachName (type)",
+    "MembershipReachStatement": "src/identity/membership-reach.ts#MembershipReachStatement (type)",
     "ORGANIZATION_ADMIN": "src/identity/eval-user.zod.ts#ORGANIZATION_ADMIN (const)",
     "ORGANIZATION_ADMIN_GRANTS": "src/identity/eval-user.zod.ts#ORGANIZATION_ADMIN_GRANTS (const)",
     "ORGANIZATION_ADMIN_NO_BYPASS": "src/identity/eval-user.zod.ts#ORGANIZATION_ADMIN_NO_BYPASS (const)",
@@ -102,7 +107,9 @@
     "VerificationTokenSchema": "src/identity/identity.zod.ts#VerificationTokenSchema (const)",
     "createEvalUser": "src/identity/eval-user.zod.ts#createEvalUser (function)",
     "definePosition": "src/identity/position.zod.ts#definePosition (function)",
+    "lowerRequiresMembershipReach": "src/identity/membership-reach.ts#lowerRequiresMembershipReach (function)",
     "mapMembershipRole": "src/identity/eval-user.zod.ts#mapMembershipRole (function)",
+    "membershipReachPredicate": "src/identity/membership-reach.ts#membershipReachPredicate (function)",
     "positionForm": "src/identity/position.form.ts#positionForm (const)"
   }
 }

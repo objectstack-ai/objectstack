@@ -85,7 +85,7 @@ function accept(stack: Record<string, unknown>) {
   return result.success ? result.data.apis : undefined;
 }
 
-describe('[#5111] the flip — a well-formed `apis:` publishes', () => {
+describe('the flip — a well-formed `apis:` publishes', () => {
   it('accepts an object_operation endpoint under the stack\'s own namespace', () => {
     const apis = accept({ manifest, apis: [validObjectEndpoint] });
     expect(apis).toHaveLength(1);
@@ -149,7 +149,7 @@ describe('[#5111] the flip — a well-formed `apis:` publishes', () => {
     });
   });
 
-  it('still accepts an EMPTY and an ABSENT `apis:` — the #4936 regression pin', () => {
+  it('still accepts an EMPTY and an ABSENT `apis:` — never refused, even while a non-empty one was', () => {
     expect(ObjectStackDefinitionSchema.safeParse({ manifest, apis: [] }).success).toBe(true);
     expect(ObjectStackDefinitionSchema.safeParse({ manifest }).success).toBe(true);
     expect(() => defineStack({ manifest, apis: [] })).not.toThrow();
@@ -162,7 +162,7 @@ describe('[#5111] the flip — a well-formed `apis:` publishes', () => {
   });
 });
 
-describe('[#5111] gate (c) — namespace carve-out (ADR-0121 D1/D2)', () => {
+describe('gate (c) — namespace carve-out (ADR-0121 D1/D2)', () => {
   it('rejects a path outside the `apps/<namespace>/` mount, naming the endpoint and the shape', () => {
     const message = reject({
       manifest,
@@ -214,7 +214,7 @@ describe('[#5111] gate (c) — namespace carve-out (ADR-0121 D1/D2)', () => {
   });
 });
 
-describe('[#5310] the `path` vocabulary text is itself publishable', () => {
+describe('the `path` vocabulary text is itself publishable', () => {
   /**
    * `ApiEndpointSchema.path`'s `.describe()` is not a code comment. Since `api`
    * became a registered metadata kind (#5271) it is the field help the
@@ -273,7 +273,7 @@ describe('[#5310] the `path` vocabulary text is itself publishable', () => {
   });
 });
 
-describe('[#5111] gate (a) — the supported subset (mirrors `planEndpointTarget`)', () => {
+describe('gate (a) — the supported subset (mirrors `planEndpointTarget`)', () => {
   it("rejects `type: 'script'` with the flow prescription", () => {
     const message = reject({
       manifest,
@@ -324,7 +324,7 @@ describe('[#5111] gate (a) — the supported subset (mirrors `planEndpointTarget
   });
 });
 
-describe('[#5111] gate (b) — mapping declarations (mirrors `mappingDeclarationRejection`)', () => {
+describe('gate (b) — mapping declarations (mirrors `mappingDeclarationRejection`)', () => {
   const bodyEndpoint = {
     ...validObjectEndpoint,
     name: 'showcase_task_create',
@@ -399,7 +399,7 @@ describe('[#5111] gate (b) — mapping declarations (mirrors `mappingDeclaration
   });
 });
 
-describe('[#5111] gate (e) — policy keys (ADR-0121 D6 + the E4 refusals)', () => {
+describe('gate (e) — policy keys (ADR-0121 D6 + the E4 refusals)', () => {
   it('rejects `authRequired: false` with NO rateLimit', () => {
     const message = reject({ manifest, apis: [{ ...validFlowEndpoint, authRequired: false }] });
     expect(message).toMatch(/ADR-0121 D6|armed rate limit/i);
@@ -464,7 +464,7 @@ describe('[#5111] gate (e) — policy keys (ADR-0121 D6 + the E4 refusals)', () 
   });
 });
 
-describe('[#5111] gate (d) — one claim per METHOD + path inside a stack', () => {
+describe('gate (d) — one claim per METHOD + path inside a stack', () => {
   it('rejects two endpoints claiming the same method and path, naming BOTH', () => {
     const message = reject({
       manifest,
@@ -508,7 +508,7 @@ describe('[#5111] gate (d) — one claim per METHOD + path inside a stack', () =
   });
 });
 
-describe('[#5111] every rejection is actionable, and reaches every publish seam', () => {
+describe('every rejection is actionable, and reaches every publish seam', () => {
   it('reports one issue per offending endpoint — three bad endpoints, three rejections', () => {
     const result = ObjectStackDefinitionSchema.safeParse({
       manifest,
@@ -538,7 +538,7 @@ describe('[#5111] every rejection is actionable, and reaches every publish seam'
   });
 });
 
-describe('[#5111] the `ApiEndpoint` vocabulary itself is untouched', () => {
+describe('the `ApiEndpoint` vocabulary itself is untouched', () => {
   // Anti-vacuity for the whole file: the flip is validation logic on the
   // EXISTING keys. If a key had been added, removed or renamed, every
   // assertion above could still pass while the frozen-vocabulary constraint
@@ -565,7 +565,7 @@ describe('[#5111] the `ApiEndpoint` vocabulary itself is untouched', () => {
     expect(parsed.authRequired).toBe(true);
   });
 
-  it('keeps endpoint-level `rateLimit` in the vocabulary (#4910-Q2 routed it here)', () => {
+  it('keeps endpoint-level `rateLimit` in the vocabulary (ruled: left to the endpoint executor, not the server-level seam)', () => {
     const parsed = ApiEndpointSchema.parse({
       name: 'x_endpoint',
       path: '/api/v1/apps/showcase/x',
@@ -594,7 +594,7 @@ describe('identityFreeEndpointGateFailure — the same judge, minus stack identi
     expect(identityFreeEndpointGateFailure(ApiEndpointSchema.parse(validObjectEndpoint))).toBeUndefined();
   });
 
-  it('still refuses D6 — the gate with no runtime counterpart, and the reason #5189 exists', () => {
+  it('still refuses D6 — the gate with no runtime counterpart, so the per-item publish path runs it too', () => {
     const failure = identityFreeEndpointGateFailure(
       ApiEndpointSchema.parse({ ...validObjectEndpoint, cacheTtlSeconds: undefined, authRequired: false }),
     );

@@ -75,7 +75,7 @@ describe('Type exports', () => {
   // flips to `true` and the `false` assignment fails `tsc --noEmit`. The bare
   // `Notification(Schema)` belongs to `@objectstack/spec/api` alone (#4610);
   // `NotificationConfig(Schema)` left the spec surface entirely.
-  it('does not re-expose the bare Notification/NotificationConfig names from ./ui (#4610)', () => {
+  it('does not re-expose the bare Notification/NotificationConfig names from ./ui — the bare `Notification` belongs to ./api alone', () => {
     type UiNotificationModule = typeof import('./notification.zod');
     const hasNotificationSchema: 'NotificationSchema' extends keyof UiNotificationModule
       ? true
@@ -106,7 +106,7 @@ describe('Type exports', () => {
 // the evidence is corrected, the retirement is NOT reopened, `./api` is NOT a
 // migration target, and the methodology lesson is written down where the next
 // cross-repo liveness verdict gets made.
-describe('[#5781] ./ui notification tombstone — corrected evidence, no false FROM → TO', () => {
+describe('./ui notification tombstone — corrected evidence, no false FROM → TO', () => {
   const SOURCE = path.resolve(
     path.dirname(url.fileURLToPath(import.meta.url)),
     'notification.zod.ts',
@@ -130,7 +130,7 @@ describe('[#5781] ./ui notification tombstone — corrected evidence, no false F
       .trim();
   })();
 
-  it('finds the #4610 note at all (anti-vacuity)', () => {
+  it('finds the tombstone note at all (anti-vacuity)', () => {
     expect(tombstone).toMatch(/^\[#4610\]/);
     expect(tombstone).toMatch(/NotificationConfigSchema/);
     expect(tombstone.length).toBeGreaterThan(800);

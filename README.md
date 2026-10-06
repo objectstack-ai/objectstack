@@ -201,7 +201,7 @@ graph held inside a vendor's system.
 > The ontology is the software. Your objects, relations, actions, permissions,
 > flows, and agent and tool definitions are your business ontology — and the
 > definition layer of the AI era should be an open protocol you own.
-> [Read why](https://www.objectos.ai/en/blog/ai-ontology-open-protocol/).
+> [Read why](https://objectstack.ai/blog/the-ontology-is-the-software).
 
 ## Ship it
 

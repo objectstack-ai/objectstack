@@ -43,8 +43,10 @@
  *
  * A form action target is one way to name a view; an app's navigation is the
  * other, and it is the one an end user travels every day. `ObjectNavItemSchema`
- * documents `viewName` as *"Default list view to open. Defaults to 'all'"* — so
- * an unresolvable name does not fail, it **falls back**. Measured end to end:
+ * documents `viewName` as *"Default list view to open. When omitted, the console
+ * opens the object's default list view, else its first declared list view"* —
+ * and an unresolvable name does not fail, it **falls back** to that same view.
+ * Measured end to end:
  * mutating a real app's `viewName` to a name nothing declares leaves
  * `os validate --json` reporting `valid: true`, and `os build` green.
  *

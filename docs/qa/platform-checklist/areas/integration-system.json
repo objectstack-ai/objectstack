@@ -1522,10 +1522,10 @@
     },
     {
       "id": "integration-system.datasource-credential-refusal-matrix",
-      "title": "A datasource credential can never be authored inline NOR read back: every inline-credential door refuses at publish, and BOTH read doors redact — including legacy alias spellings already sitting in stored rows",
+      "title": "A shipped driver's datasource credential can never be authored inline NOR read back: every inline-credential door refuses at publish, and BOTH read doors redact, including legacy alias spellings already sitting in stored rows. A plugin driver's config is its author's to keep credential-free; the platform redacts only its fixed credential spellings there and does not guess",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "mixed",
       "personas": ["seeded admin", "authenticated non-admin", "anonymous"],
@@ -1537,7 +1537,9 @@
         ],
         "knownGaps": [
           "The legacy-alias clause tests a row shape the CURRENT parse refuses to create — a stored row from before the aliases moved to `guidance`. It is only reachable by writing the row directly (⚠️ NOT through the runtime wizard: POST /api/v1/datasources refuses an alias-spelled config key 400 DATASOURCE_ADMIN_ERROR — the aliases moved to `guidance`, which refuses them, #8078 — measured on a stock showcase boot with `passwd` and by QA run #21056. The run planted its rows with a direct sys_metadata write while the server was STOPPED, then booted and read through both doors). If the run cannot write such a row, that clause is blocked(fixture) and MUST be recorded — a redaction that has never been tested against the shape it exists for is an untested redaction.",
-          "`encryptionKey` (turso) is deliberately STILL WRITABLE while being redacted on read (#8081 scope item 4). Scoring it as a write refusal is a false fail; the correct expectation is write-accepted + read-redacted."
+          "`encryptionKey` (turso) is deliberately STILL WRITABLE while being redacted on read (#8081 scope item 4). Scoring it as a write refusal is a false fail; the correct expectation is write-accepted + read-redacted.",
+          "acceptance[1] (the credential-bound datasource actually connects) and acceptance[6] (judged by a connect probe after the echoed-mask round-trip) need a reachable, credential-protected database of a SHIPPED driver (postgres, mysql or mongo). Stock showcase and the QA container provide none, and every run so far recorded both clauses blocked(environment) (#21784, #21845). No recipe is proven yet. A run that has such a database (for example a postgres:16 service like the one ci.yml's live-PG job starts) binds external.credentialsRef to it and scores both clauses. A run without one records both blocked(environment). ⛔ Never score either clause from a successful publish alone, which proves the paved path is accepted, not that it connects. The stored-credential half of acceptance[6] can still be read without a database (after the PATCH, the admin door still reports hasSecret and the bound secret handle is unchanged); record that as a partial reading, separate from the connect half",
+          "the plugin-driver boundary is RULED (#21921, docs note in content/docs/data-modeling/drivers.mdx): for a driver the platform ships no contract for, the platform neither validates config nor guesses which of its keys are credentials. Keeping credentials out of a plugin driver's config, through external.credentialsRef, is the plugin author's responsibility. Only the platform's FIXED credential spellings are redacted there by name (acceptance[5]). A credential under any other key of a plugin driver's config being stored and served to administrators as written is that boundary, never a finding"
         ]
       },
       "steps": [
@@ -1547,7 +1549,7 @@
         "read the published datasource back through the datasource-admin door (GET /api/v1/datasources)",
         "read the SAME datasource back through the metadata door (GET /api/v1/meta/datasource/<name>) — a different code path with its own redaction hook",
         "plant a stored row carrying a legacy alias spelling (passwd / pwd / token / jwt / auth_token / authtoken) and read it back through both doors",
-        "author a datasource for a driver the platform ships no contract for, carrying a canonically-spelled credential key, and read it back",
+        "author a datasource for a driver the platform ships no contract for, carrying a canonically-spelled credential key (password or authToken) AND one non-canonical credential-looking key (for example apiSecret), and read it back. The second key observes the ruled boundary; it is not a redaction target",
         "for turso specifically, write `encryptionKey`, then read it back through both doors",
         "grep the full response bodies of every read above for the planted cleartext values"
       ],
@@ -1583,10 +1585,10 @@
           "evidence": "the planted row + both reads"
         },
         {
-          "clause": "an UNKNOWN driver's canonically-spelled credential keys are redacted by NAME — an unrecognized driver means 'nothing to check against', never 'nothing to protect'",
+          "clause": "an UNKNOWN (plugin-contributed) driver's config is redacted on read by NAME for exactly the platform's fixed credential spellings: the canonical keys (password, authToken), the former alias spellings, and a URL-embedded credential. Nothing else is judged: the platform does not guess which other keys of a plugin driver's config hold credentials, so a non-canonical key reads back as written (ruled boundary, #21921)",
           "oracle": "api",
-          "verify": "read back the unknown-driver datasource; the canonical credential key must be redacted despite no shipped contract for that driver",
-          "evidence": "the response body"
+          "verify": "read back the unknown-driver datasource through both doors: password / authToken are absent and a URL userinfo password is stripped, although no contract exists for that driver. The non-canonical key from step 7 reads back as written: record it as the expected boundary, not as a FAIL",
+          "evidence": "the response bodies from both doors"
         },
         {
           "clause": "the echoed-mask write guard holds: writing the mask value back verbatim is treated as 'unchanged' and does NOT overwrite the stored credential",
@@ -1606,7 +1608,7 @@
         "a door that refuses at build but accepts through the runtime admin path (or the reverse) — the two-door disagreement that lets a credential in the back way",
         "a redaction applied on the datasource-admin door but not the metadata door: the two share no dependency except spec, which is precisely why the credential-key definition was centralized there, and precisely how they could drift",
         "an alias-spelled credential surviving redaction because the redactor derived its key set from the current schema shape only",
-        "an unknown driver's credential served in cleartext on the grounds that no contract declares it a credential",
+        "an unknown driver's CANONICALLY-spelled credential (password, authToken, a former alias, or URL userinfo) served in cleartext on the grounds that no contract declares it a credential. ⛔ Not a FAIL: a non-canonical key of a plugin driver's config served as written, or the write door accepting a plugin driver's config unvalidated. Both are the ruled boundary (#21921): that config is the plugin author's to keep credential-free",
         "an echoed mask overwriting the stored credential with the literal mask string",
         "a refusal that names no replacement — an author blocked from the inline spelling with no pointer to credentialsRef will reach for a workaround"
       ],
@@ -1622,7 +1624,10 @@
         "packages/spec/src/migrations/entries/semantic/18.datasource-config-url-query-credential-refused.ts · 18.datasource-config-mongo-options-credential-refused.ts · 18.datasource-credentialsref-mongo-url-no-user-refused.ts · 18.datasource-credentialsref-mongo-composed-no-username-refused.ts (its COMPOSED-branch twin — no `url`, no `username`) · 18.datasource-config-options-nested-credential-spelling-refused.ts · 18.datasource-config-postgres-url-unparseable-refused.ts",
         "packages/spec/src/migrations/entries/retired-keys/17.data__MongoConfig__password.ts · 17.data__MysqlConfig__password.ts · 17.data__PostgresConfig__password.ts · 17.data__TursoConfig__authToken.ts",
         "#7990 / #8081 / #8126 / #8154 / #8300 (the centralization of the credential-key definition into spec)",
-        "sibling coverage this item deliberately does NOT duplicate: integration-system.datasource-admin-lifecycle (admin-door lifecycle, 'secret never echoes'), platform-core.settings-hub-roundtrip (settings secrets), records-forms.encrypted-field-behavior (ADR-0100 field-level masking)"
+        "sibling coverage this item deliberately does NOT duplicate: integration-system.datasource-admin-lifecycle (admin-door lifecycle, 'secret never echoes'), platform-core.settings-hub-roundtrip (settings secrets), records-forms.encrypted-field-behavior (ADR-0100 field-level masking)",
+        "packages/spec/src/data/driver/common.zod.ts#CANONICAL_CREDENTIAL_KEYS (the fixed canonical spellings redacted by name for a driver with no contract)",
+        "packages/spec/src/data/datasource-credential-redaction.ts#redactableConfigKeys (for a contractless driver: the canonical keys + the former aliases; URL credentials are scrubbed by value)",
+        "content/docs/data-modeling/drivers.mdx (the plugin-driver boundary: the platform does not guess which config keys hold credentials; keeping secrets out of config is the plugin author's responsibility) · #21921 (the ruling; #21840 closed as not planned) · #21927 (the docs note)"
       ],
       "history": [
         {
@@ -1636,6 +1641,12 @@
           "date": "2026-10-01",
           "change": "checklist-accuracy findings of QA run #21056. knownGaps said the wizard can plant a legacy alias row; it refuses one 400, so planting takes a stopped-server sys_metadata write. acceptance[6] said PUT the response back; the admin door updates by PATCH only. acceptance[3] names the admin door that carries hasSecret / redactedConfigKeys. steps[4] spells the metadata path GET /api/v1/meta/datasource/<name>. source gains the mongo composed-branch twin and the nested-options spelling entry, two refusal doors it did not list. Note: the URL-branch entry's text still lists the composed branch as 'Deliberately NOT refused'; the twin refuses it since #9147, and that text is a spec registry entry outside this ledger",
           "ref": "#21060"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-06",
+          "change": "two re-checks from #21932. (1) acceptance[1] and acceptance[6] (A2 and A7 in run records) have been blocked(environment) in every run (no reachable postgres, mysql or mongo). A knownGap now records the gap: what a run needs, what it may not score from (a successful publish alone), and the partial reading available without a database. No recipe is claimed, because none is proven. (2) The plugin-driver boundary is ruled (#21921, docs #21927): the platform does not guess which keys of a plugin driver's config are credentials. acceptance[5], step 7, the unknown-driver negative and the title now say that only the fixed spellings (canonical keys, former aliases, URL credentials) are redacted for such a driver. A non-canonical key served as written is the boundary, not a FAIL. Nothing about shipped drivers changes",
+          "ref": "#21932"
         }
       ]
     },

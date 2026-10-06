@@ -99,7 +99,7 @@ describe('semantic type classes', () => {
     expect(referenceTargetOf('user')).toBeUndefined();
   });
 
-  it('`referenceCarrierOf` REFUSES an unreadable carrier instead of answering "no target" (#13053)', () => {
+  it('`referenceCarrierOf` REFUSES an unreadable carrier instead of answering "no target"', () => {
     // The defect class, stated as a test. A `reference` in a shape no reader can
     // read used to come back as `undefined` — indistinguishable from a field that
     // names no target at all — so the carrier was refused by
@@ -261,7 +261,7 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
     bad({ type: 'boolean' }, 1);
   });
 
-  it('date is a calendar day, datetime a zoned instant, time a wall clock (#2004 / ADR-0053)', () => {
+  it('date is a calendar day, datetime a zoned instant, time a wall clock (ADR-0053)', () => {
     ok({ type: 'date' }, '2024-03-15');
     bad({ type: 'date' }, '2024-03-15T14:30:00.000Z');
     ok({ type: 'datetime' }, '2024-03-15T14:30:00.000Z');
@@ -274,7 +274,7 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
     bad({ type: 'time' }, 'not-a-time');
   });
 
-  it('[#20740] time carries no zone: a `Z` or an offset is refused, as the record validator refuses it', () => {
+  it('time carries no zone: a `Z` or an offset is refused, as the record validator refuses it', () => {
     ok({ type: 'time' }, '14:30:00.500');
     bad({ type: 'time' }, '14:30:00Z');
     bad({ type: 'time' }, '14:30+08:00');
@@ -306,7 +306,7 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
     ok({ type: 'lookup' }, 'acc_1', 'expanded'); // unresolvable ids stay ids
   });
 
-  it('#4455: a SERIALIZED embedded record is not an id, in either form', () => {
+  it('a SERIALIZED embedded record is not an id, in either form', () => {
     // The shape the ADR-0104 D1 scan's own header names — "a `lookup` holding
     // an expanded record object" — as it actually reaches a SQL deployment: as
     // JSON text in a TEXT column. `z.string().min(1)` accepted it, so the scan
@@ -395,7 +395,7 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
     ok({ type: 'composite' }, { label: 'x', n: 1 });
   });
 
-  it('#13802: location/address values refuse an undeclared key BY NAME — the strip that hid the showcase seed typo', () => {
+  it('location/address values refuse an undeclared key BY NAME — the strip that hid the showcase seed typo', () => {
     // Every member of both shapes is optional, so under zod's default `.strip`
     // a value with a completely wrong key set parsed GREEN and the wrong keys
     // vanished from the parse output — #13388's seed wrote `postal_code`, the

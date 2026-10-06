@@ -16,6 +16,7 @@ import {
 import { isServiceServeable } from '../service-serveable.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from '../security/actor-user.js';
 import { capabilityUnavailable } from './unavailable.js';
+import { buildApiError } from '../error-envelope.js';
 import type { IAIService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -150,8 +151,16 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         return { handled: true, response: deps.error('AI service routes not yet initialized', 503) };
     }
 
+    // [#21806] The methods the table declares for THIS path under another verb,
+    // gathered while the loop looks for an exact match, so the miss exit below
+    // can tell "this path, not this method" (405) from "no such path" (404).
+    const declaredForPath = new Set<string>();
+
     for (const route of routes) {
-        if (route.method !== method) continue;
+        if (route.method !== method) {
+            if (matchRoute(route.path, fullPath) !== null) declaredForPath.add(route.method);
+            continue;
+        }
         const params = matchRoute(route.path, fullPath);
         if (params === null) continue;
 
@@ -272,6 +281,35 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
             response: {
                 status: result.status,
                 body: result.body,
+            },
+        };
+    }
+
+    // [#21806] A method the table does not declare on a path it does declare is
+    // `405` with an `Allow` header naming exactly the declared methods, for
+    // every verb alike. This exit is the producer of that answer for `/ai/**`:
+    // the dispatcher plugin's `/ai/*` wildcards claim GET, POST, PUT, DELETE and
+    // PATCH, so for those the transport's own unmatched-method `405` (the
+    // `IHttpServer` contract in `@objectstack/spec/contracts`) never fires, and
+    // this table is the only place that knows which methods a path really
+    // declares. Hand-rolled rather than
+    // `deps.error(...)` only for the header, as in `domains/meta.ts` and
+    // `domains/mcp.ts`; the body goes through the one builder and the code is
+    // DERIVED from the status (`METHOD_NOT_ALLOWED`), never spelled here.
+    if (declaredForPath.size > 0) {
+        const allow = Array.from(declaredForPath).sort().join(', ');
+        return {
+            handled: true,
+            response: {
+                status: 405,
+                headers: { Allow: allow },
+                body: {
+                    success: false,
+                    error: buildApiError({
+                        message: `${method} is not supported for ${subPath}. Allowed: ${allow}.`,
+                        httpStatus: 405,
+                    }),
+                },
             },
         };
     }

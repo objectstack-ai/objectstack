@@ -58,7 +58,7 @@ const defOf = (s: unknown): unknown => (s as { _zod?: { def?: unknown } })?._zod
 // derivation or a coincidence. A zod upgrade that changes `clone()` semantics
 // changes the bridge's meaning, and that must be LOUD rather than silent.
 // ============================================================================
-describe('#5056 premise — which zod builders share the `_zod.def` object', () => {
+describe('the derived-clone bridge premise — which zod builders share the `_zod.def` object', () => {
   it('`.describe()` shares the def of the instance it was called on', () => {
     // THE mechanism behind #5056. `clone(inst)` without an explicit def reuses
     // `inst._zod.def`, so a described clone is def-IDENTICAL to its receiver.
@@ -104,7 +104,7 @@ describe('#5056 premise — which zod builders share the `_zod.def` object', () 
 // ============================================================================
 // 2. The three controls, on the instrument itself.
 // ============================================================================
-describe('#5056 controls — the walker finds doors, and only real ones', () => {
+describe('controls — the walker finds doors, and only real ones', () => {
   it('positive: live authoring roots resolve, and the graph is really walked', () => {
     const { verdict, nodeCount, rootCount } = measureDoors();
     expect(rootCount, 'every metadata type plus ObjectStackSchema').toBeGreaterThan(20);
@@ -153,7 +153,7 @@ describe('#5056 controls — the walker finds doors, and only real ones', () => 
 // ============================================================================
 // 3. The #5056 regression boundary itself.
 // ============================================================================
-describe('#5056 regression — the any-one-shared-property bridge stays dead', () => {
+describe('regression — the any-one-shared-property bridge stays dead; a share of the shape decides', () => {
   it('a 2-of-19 shared-leaf shape shares leaves with the live graph but is NOT derived from it', () => {
     // The reverse verification, standing rather than one-shot.
     //
@@ -213,6 +213,6 @@ describe('#5056 regression — the any-one-shared-property bridge stays dead', (
       label: I18nLabelSchema.describe('Display label'),
     });
     expect(cloneOverlap(allSharedLeaves), '2 shared of 2 keys').toBe(1);
-    expect(verdict(allSharedLeaves), 'the residual false-reachable case — see #5828').toBe('derived-clone');
+    expect(verdict(allSharedLeaves), 'the residual false-reachable case — no threshold excludes it').toBe('derived-clone');
   });
 });

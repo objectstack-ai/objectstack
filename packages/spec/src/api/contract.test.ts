@@ -701,7 +701,7 @@ describe('QueryOptimizationConfigSchema', () => {
  * unregistered code must still fail, and `ApiErrorSchema` must not have been
  * widened by the factory's existence.
  */
-describe('makeApiErrorSchema (federated ledger, #4805)', () => {
+describe('makeApiErrorSchema (federated ledger)', () => {
   const DOWNSTREAM_CODES = ['CONTACT_SALES_PLAN', 'PRODUCTION_ENV_LIMIT'] as const;
   const DownstreamApiError = makeApiErrorSchema(DOWNSTREAM_CODES);
 
@@ -778,7 +778,7 @@ describe('makeApiErrorSchema (federated ledger, #4805)', () => {
 // than a bare unrecognized-key error, and the value survives at the same
 // magnitude. Asserting the message, not just `.toThrow()`: a bare throw stays
 // green when the schema throws for some unrelated reason.
-describe('DataLoaderConfig.cacheTtl \u2192 cacheTtlSeconds (#15677)', () => {
+describe('DataLoaderConfig.cacheTtl \u2192 cacheTtlSeconds', () => {
   it('REFUSES the retired `cacheTtl` spelling with the rename in the message', () => {
     const result = DataLoaderConfigSchema.safeParse({ cacheTtl: 60 });
     expect(result.success).toBe(false);
@@ -810,7 +810,7 @@ describe('DataLoaderConfig.cacheTtl \u2192 cacheTtlSeconds (#15677)', () => {
 // contradict, the declaration is taken from the sibling channel that does speak:
 // every key in this spec that spells the unit for a processing time spells
 // milliseconds (`tracing.durationMs`, `worker.durationMs`, `worker.avgExecutionMs`).
-describe('BaseResponse.meta.duration declares milliseconds (#18124)', () => {
+describe('BaseResponse.meta.duration declares milliseconds', () => {
   it('refuses a fractional millisecond count', () => {
     const result = BaseResponseSchema.safeParse({
       success: true,

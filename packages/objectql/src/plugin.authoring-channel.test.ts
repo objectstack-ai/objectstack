@@ -274,7 +274,6 @@ describe('#6710 — the authoring channel is threaded from plugin option to prot
     const flow = brokenApprovalFlow();
     (flow.nodes[1] as any).config = {
       approvers: [{ type: 'expression', value: 'current.owner' }],
-      emptyApproverPolicy: 'reject',
     };
     const result = await (kernel.getService('protocol') as any).saveMetaItem({
       type: 'flow', name: 'leave_approval', item: flow,

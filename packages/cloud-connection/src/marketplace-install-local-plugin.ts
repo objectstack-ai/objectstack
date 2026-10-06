@@ -34,13 +34,23 @@
  *            no JSON door carries. The package's job bodies are scheduled on
  *            install and on every rehydrate; on a rehydrate, a hook with no
  *            `body` that an older build installed is warned and NOT bound.
+ *            A manifest whose `engines.protocol` excludes this runtime's major
+ *            answers `OS_PROTOCOL_INCOMPATIBLE` (422) with the handshake's
+ *            diagnostic in `error.details`, the answer `POST /api/v1/packages`
+ *            gives (ADR-0087 D1, #21762), and nothing is registered or written.
  *
  *   GET    /api/v1/marketplace/install-local
  *          → lists currently installed marketplace packages. Requires an
  *            authenticated principal (anonymous → 401); `installedBy` and
  *            `storageDir` are served only to a `manage_metadata` holder
  *            (commit 01074e551). The four routes above require `manage_metadata`
- *            outright (#8976).
+ *            outright (#8976). Each entry's `withSampleData` says whether the
+ *            caller's own scope — its active organization under a wall —
+ *            holds any of the package's seed rows, read from the rows, never
+ *            from the install-wide ledger record (#21775). An entry this boot's
+ *            rehydrate refused to load is still listed, with a `notLoaded`
+ *            marker in place of `withSampleData` carrying the refusal's code
+ *            and the declared range, and no seed row is read for it (#21822).
  *
  *   DELETE /api/v1/marketplace/install-local/:manifestId
  *          → removes the cached manifest, withdraws the package from the
@@ -57,7 +67,13 @@
  *
  * On `kernel:ready`, the plugin scans the directory and re-registers each
  * cached manifest so installs survive process restarts without further
- * cloud round-trips.
+ * cloud round-trips. An entry whose `engines.protocol` excludes this runtime's
+ * major is not loaded: it is reported at `error`, naming the replay command,
+ * and the boot continues (ADR-0087 D1, #21762). The GET listing marks it as
+ * not loaded for as long as that ledger entry stands (#21822). The reseed and
+ * purge doors run the handshake on the entry themselves and refuse such an
+ * entry with the install route's `OS_PROTOCOL_INCOMPATIBLE` (422) before any
+ * side effect; DELETE and a compatible re-install still act on it (#21834).
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
@@ -85,6 +101,19 @@ import {
 } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
+// [#21762] ADR-0087 D1's protocol handshake, its brand predicate and the ONE
+// answer both package-install doors give its refusal. Imported from the
+// producer, never restated: `POST /api/v1/packages` answers through the same
+// helper, so the two doors cannot drift apart on the wire. [#21834] The
+// sample-data doors answer a refused ledger entry through it too.
+import {
+    assertProtocolCompat,
+    checkProtocolCompat,
+    isProtocolIncompatibleError,
+    protocolIncompatibleAnswer,
+    ProtocolIncompatibleError,
+    type ProtocolIncompatibleDiagnostic,
+} from '@objectstack/metadata-core';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 import { join } from 'node:path';
@@ -97,6 +126,7 @@ import {
 } from './local-manifest-source.js';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
+import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
 import type { IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { DeletePackageRequest, UninstallCleanupOutcome } from '@objectstack/metadata-protocol';
 
@@ -282,6 +312,32 @@ function manifestIdOf(p: any): string | undefined {
 }
 
 /**
+ * The seed datasets a cached manifest bundles: its `data[]` entries that name
+ * an object and carry records. One reading for the two doors that match seed
+ * rows — the purge, and the listing's `withSampleData` (#21775).
+ */
+function seedDatasetsOf(manifest: any): PurgeSeedDataset[] {
+    return Array.isArray(manifest?.data)
+        ? manifest.data.filter((d: any) => d && d.object && Array.isArray(d.records))
+        : [];
+}
+
+/**
+ * [#21822] The marker the GET listing puts on a ledger entry this boot's
+ * `kernel:ready` rehydrate refused to load: the refusal's `code` and the range
+ * the package declares.
+ *
+ * CLOSED: exactly these two members, named one by one from the handshake's own
+ * diagnostic, the way `protocolIncompatibleAnswer` names its `details`. ⛔ Not a
+ * spread of the diagnostic: a member added to it later does not reach the
+ * listing without a decision here.
+ */
+interface NotLoadedMarker {
+    code: ProtocolIncompatibleDiagnostic['code'];
+    requiredRange: ProtocolIncompatibleDiagnostic['requiredRange'];
+}
+
+/**
  * [ADR-0093 D4/D5, ADR-0105 D1 / #5262] Is an organization wall actually IN
  * FORCE for this boot? Both seeding decisions in this plugin key off it.
  *
@@ -310,6 +366,47 @@ function organizationWallActive(ctx: PluginContext): boolean {
         /* no `tenancy` service registered — fall through */
     }
     return postureEnforcesWall(resolveTenancyPosture());
+}
+
+/**
+ * [ADR-0123 D2 / D4] The answer every sample-data door gives a walled session
+ * with NO active organization: the standard catalog's `PERMISSION_DENIED` / 403,
+ * and one sentence, built here, that names the missing active organization and
+ * the remedy.
+ *
+ * ADR-0123 D1 declares "authenticated, with no active organization" a legal,
+ * named state that every subsystem inherits instead of inventing a fourth
+ * semantics for it. Sample rows on a walled deployment are tenant-scoped writes,
+ * so D2 refuses them loudly, with the catalog code rather than a registered
+ * synonym, and D4 requires the message to say what is missing, so the reader
+ * does not go looking at permissions, which are fine.
+ *
+ * Three doors read it: the install's `seeded` report (`mode: 'refused'`, the
+ * sentence in `reason`: the package itself is installed, its rows are not),
+ * and the reseed and purge refusals (the code, the status and the sentence as
+ * the error envelope). The platform's other D2 sentences, the security layer's
+ * write wall and the sharing-rule service's, are built inline for one object
+ * and one operation; this door's subject is a package's sample data across
+ * several objects, so the sentence is this file's own, in the same words.
+ */
+const NO_ACTIVE_ORGANIZATION_CODE = 'PERMISSION_DENIED';
+const NO_ACTIVE_ORGANIZATION_STATUS = 403;
+
+/** The sample-data doors that seed or purge under the caller's active organization. */
+type SampleDataDoor = 'install' | 'reseed' | 'purge';
+
+function noActiveOrganizationRefusal(door: SampleDataDoor): string {
+    const subject = door === 'purge' ? 'Purging sample data'
+        : door === 'reseed' ? 'Reseeding sample data'
+        : 'Seeding the sample data';
+    const consequence = door === 'purge'
+        ? 'there is no organization to remove its rows from'
+        : 'there is no organization to place its rows in';
+    const remedy = door === 'install'
+        ? 'The package itself is installed. Join or select an active organization, then reseed the sample data.'
+        : 'Join or select an active organization and retry.';
+    return `${subject} was refused: sample data is scoped to an organization, and this session has no active `
+        + `organization, so ${consequence}. ${remedy}`;
 }
 
 export interface MarketplaceInstallLocalPluginConfig {
@@ -344,6 +441,22 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * install whose ledger entry went missing.
      */
     private readonly bootUserCodeIds = new Set<string>();
+    /**
+     * [#21822] What this boot's `kernel:ready` rehydrate refused to load under
+     * ADR-0087 D1's handshake, keyed by manifest id: the refused entry's
+     * `installedAt` and the marker the GET listing serves for it.
+     *
+     * The record of what the rehydrate DID, written by it alone, never a second
+     * judgement of the ledger: the listing does not re-run the handshake.
+     *
+     * `installedAt` names WHICH entry was refused. Only the install door writes
+     * a new entry for a manifest id, always with a fresh `installedAt`, and only
+     * after the same handshake admitted it. So once a compatible version
+     * replaces the refused entry, the record no longer matches the ledger and
+     * the listing stops marking it — with no write to this record from the
+     * install door or from DELETE.
+     */
+    private readonly refusedAtRehydrate = new Map<string, { installedAt: string; marker: NotLoadedMarker }>();
 
     constructor(config: MarketplaceInstallLocalPluginConfig = {}) {
         this.cloudUrl = resolveCloudUrl(config.controlPlaneUrl);
@@ -422,6 +535,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * a marketplace package).
      */
     private rehydrate = async (ctx: PluginContext): Promise<void> => {
+        // [#21822] The record describes THIS rehydrate, and nothing older.
+        this.refusedAtRehydrate.clear();
         const { entries, skipped } = this.readAll();
 
         // #5413 — BEFORE the early return, not after. A ledger whose entries
@@ -443,6 +558,29 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         for (const entry of entries) {
             try {
+                // [#21762] ADR-0087 D1: the handshake runs "before loading a
+                // package's metadata", and a rehydrate IS a load. An entry whose
+                // declared range excludes this runtime's major (installed before
+                // the install door checked, or by a runtime of another protocol
+                // sharing this ledger) is NOT loaded: nothing is registered,
+                // synced, bound or seeded for it, and the boot continues with the
+                // rest. Its ledger entry is kept, so DELETE can still remove it
+                // and a compatible version can replace it.
+                //
+                // `checkProtocolCompat` is the handshake's own judge. Only a
+                // positive incompatibility is acted on: an absent or
+                // unrecognised range rehydrates exactly as it did before.
+                const compat = checkProtocolCompat(entry.manifest);
+                if (compat.status === 'incompatible') {
+                    // [#21822] Recorded where the GET listing reads it, so the
+                    // entry is listed as not loaded rather than as installed.
+                    this.refusedAtRehydrate.set(entry.manifestId, {
+                        installedAt: entry.installedAt,
+                        marker: { code: compat.diagnostic.code, requiredRange: compat.diagnostic.requiredRange },
+                    });
+                    this.reportProtocolIncompatibleEntry(ctx, entry, compat.diagnostic);
+                    continue;
+                }
                 // Awaited: register also bridges the manifest's objects into
                 // the metadata service (late-registration bridge in
                 // ObjectQLPlugin) — wait for that so metadata consumers see
@@ -969,7 +1107,38 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const manifestId = declaredId.data;
         if (inlineManifest) packageId = manifestId;
 
-        // 1c. [#21489] ⭐ CODE THIS DOOR CANNOT RUN IS REFUSED, not installed.
+        // 1c. [#21762] ⭐ ADR-0087 D1'S PROTOCOL HANDSHAKE, before anything is
+        //     registered, written or synced: the same `assertProtocolCompat`
+        //     the other package-install door (`POST /api/v1/packages`) and the
+        //     protocol install primitive run. Before this, a manifest whose
+        //     `engines.protocol` excludes this runtime's major answered 200 here:
+        //     registered, its ledger entry written, its schemas synced, while
+        //     the other door refused the same manifest with a 422.
+        //
+        //     The refusal is that door's answer, from the one shared helper:
+        //     422 `OS_PROTOCOL_INCOMPATIBLE`, the error's own message, and the
+        //     diagnostic's five fields in `error.details`. It is 422 on BOTH
+        //     branches: a package built for another protocol is a body this
+        //     runtime cannot load, not an upstream fault, whichever branch
+        //     supplied it (the unrunnable-code refusal below reasons the same).
+        //
+        //     After the id gate, so the diagnostic names a parsed id. Ahead of
+        //     the unrunnable-code judgement, which reads the package's jobs and
+        //     hooks with THIS runtime's binder: ADR-0087 D1 checks "before
+        //     loading a package's metadata". An absent or unrecognised range is
+        //     admitted with a warning, as at every seam the handshake guards.
+        try {
+            assertProtocolCompat(manifest, undefined, (m) => ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${m}`));
+        } catch (err) {
+            if (!isProtocolIncompatibleError(err)) throw err;
+            const refusal = protocolIncompatibleAnswer(err);
+            return c.json({
+                success: false,
+                error: { code: refusal.code, message: refusal.message, details: refusal.details },
+            }, refusal.status);
+        }
+
+        // 1d. [#21489] ⭐ CODE THIS DOOR CANNOT RUN IS REFUSED, not installed.
         //     A job runs on a JSON door only through its sandboxed `body`; its
         //     deprecated `handler` names a `defineStack({ functions })` entry,
         //     which is code and travels only in the artifact's runtime module —
@@ -1237,6 +1406,31 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * the four mutating doors use, not a second session read. Two auth
      * mechanisms in one file is how the next gap gets created, and this file has
      * already produced one.
+     *
+     * ## [#21775] `withSampleData` is the caller's own scope, read from its rows
+     *
+     * Each entry's `withSampleData` answers "does MY scope hold this package's
+     * sample data?" — derived per request by {@link sampleDataInScope}, never
+     * read from the ledger's install-wide record of the same name.
+     *
+     * ## [#21822] An entry the rehydrate refused is listed, marked not loaded
+     *
+     * The `kernel:ready` rehydrate keeps an entry whose declared protocol range
+     * excludes this runtime in the ledger, and loads none of it. The listing
+     * served it like any installed package, so the console's Installed Apps
+     * said "installed" while only a boot log line said otherwise. It is listed
+     * still — DELETE and a compatible re-install act on it, and omitting it
+     * would leave the operator nothing to uninstall from — with a marker:
+     *
+     *   { …, "installedAt": "…", "notLoaded": { "code": "OS_PROTOCOL_INCOMPATIBLE", "requiredRange": "^16" } }
+     *
+     * read from what the rehydrate recorded ({@link refusedAtRehydrate}).
+     * `notLoaded` stands in place of `withSampleData`: none of the package's
+     * objects are registered, so no seed row is read for it and the listing
+     * makes no claim about its rows — omitted, not `false`, for the reason
+     * `installedBy` is omitted above. A loaded entry is served exactly as before,
+     * with no `notLoaded` key. The marker is served to every authenticated
+     * caller: it says what the runtime holds, not who installed it or where.
      */
     private handleList = async (c: any, ctx: PluginContext): Promise<Response> => {
         // Before the ledger is touched, exactly as the mutating doors refuse
@@ -1248,22 +1442,152 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         const { entries, skipped } = this.readAll();
         this.warnSkippedLedgerEntries(ctx, skipped, 'it is MISSING from the installed-apps list served to the console');
+        const notLoaded = new Map<string, NotLoadedMarker>();
+        for (const e of entries) {
+            const marker = this.notLoadedMarker(e);
+            if (marker) notLoaded.set(e.manifestId, marker);
+        }
+        const withSampleData = await this.sampleDataInScope(c, ctx, entries.filter((e) => !notLoaded.has(e.manifestId)));
         return c.json({
             success: true,
             data: {
-                items: entries.map(e => ({
-                    packageId: e.packageId,
-                    versionId: e.versionId,
-                    manifestId: e.manifestId,
-                    version: e.version,
-                    installedAt: e.installedAt,
-                    withSampleData: e.withSampleData ?? false,
-                    ...(operator ? { installedBy: e.installedBy } : {}),
-                })),
+                items: entries.map(e => {
+                    const marker = notLoaded.get(e.manifestId);
+                    return {
+                        packageId: e.packageId,
+                        versionId: e.versionId,
+                        manifestId: e.manifestId,
+                        version: e.version,
+                        installedAt: e.installedAt,
+                        ...(marker ? { notLoaded: marker } : { withSampleData: withSampleData.has(e.manifestId) }),
+                        ...(operator ? { installedBy: e.installedBy } : {}),
+                    };
+                }),
                 total: entries.length,
                 ...(operator ? { storageDir: this.storageDir } : {}),
             },
         }, 200);
+    };
+
+    /**
+     * [#21822] The not-loaded marker for a listed ledger entry, or `undefined`
+     * for one this boot loaded. Marked only when the rehydrate refused THIS
+     * entry: same manifest id, same `installedAt` (see {@link refusedAtRehydrate}).
+     */
+    private notLoadedMarker = (entry: InstalledEntry): NotLoadedMarker | undefined => {
+        const refused = this.refusedAtRehydrate.get(entry.manifestId);
+        if (!refused || refused.installedAt !== entry.installedAt) return undefined;
+        return { ...refused.marker };
+    };
+
+    /**
+     * [#21775] The listed entries whose sample data is in the CALLER'S scope —
+     * the set the listing answers each entry's `withSampleData` from.
+     *
+     * ## The rows are the authority, not the ledger
+     *
+     * The ledger's `withSampleData` / `sampleDataPurged` are install-time
+     * records: one value per install, flipped by whichever organization seeded
+     * or purged last. Under an organization wall sample data is per
+     * organization — the install, the reseed and the purge each act in the
+     * caller's active organization, and the per-organization replay seeds every
+     * new one — so the listing that read the record told organization B "no
+     * sample data" after a purge in organization A, while B held every one of
+     * its seed rows. The ledger shape stays as it is; the listing stops reading
+     * it.
+     *
+     * ## Present = at least one seed row, identified the purge's way
+     *
+     * An entry is in the set when {@link matchSeedRows} — the purge's own
+     * identification (each dataset's `externalId`), read-only — finds at least
+     * ONE of the package's seed rows in scope. Not "all", and not a count: the
+     * console reads the flag to enable its purge item and to word its reseed
+     * item ("Add sample data" / "Reseed again"), and the purge has work to do
+     * exactly when one seed row is there. A seed record the purge could not
+     * identify either (no key value, a key two rows carry) is not evidence of
+     * presence; the purge reports those when it runs.
+     *
+     * ## Scope — the purge's
+     *
+     * Under a wall, the caller's active organization, from the same
+     * `organizationWallActive` + `resolveActiveOrgId` pair the purge scopes
+     * with. Without a wall the deployment is one logical tenant and the match is
+     * table-wide, as the purge's is, so the derived answer is the one the
+     * ledger records after an install that seeded, a purge and a reseed. Where
+     * a door's write did not land whole — a purge the engine refused for some
+     * rows, rows deleted by hand — the rows answer and the record does not.
+     *
+     * A walled session with NO active organization reads nothing: every entry
+     * answers `false`, HTTP 200, and no row is read (ADR-0123 D2 — a
+     * tenant-scoped read resolves to nothing, not an error). The doors that
+     * would act on that answer, reseed and purge, refuse the same session with
+     * D2's write refusal.
+     *
+     * ## When the rows cannot be read
+     *
+     * No metadata service, a dependency graph that does not build, an object
+     * whose rows the engine will not return: the entry answers `false`, and why
+     * is logged at `warn` — once per entry per request, the way this door
+     * reports a corrupt ledger entry — to the operator, with the wire shape
+     * unchanged.
+     */
+    private sampleDataInScope = async (c: any, ctx: PluginContext, entries: InstalledEntry[]): Promise<Set<string>> => {
+        const present = new Set<string>();
+        const seeded = entries
+            .map((entry) => ({ entry, datasets: seedDatasetsOf(entry.manifest) }))
+            .filter(({ datasets }) => datasets.length > 0);
+        if (seeded.length === 0) return present;
+
+        let organizationId: string | undefined;
+        if (organizationWallActive(ctx)) {
+            const resolved = await this.resolveActiveOrgId(c, ctx);
+            // [ADR-0123 D2] No organization, so no organization's rows to read.
+            if (!resolved) return present;
+            organizationId = resolved;
+        }
+
+        const unread = (manifestId: string, why: string): void => {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] ${manifestId}: the installed-apps listing could not read this package's `
+                + `seed rows (${why}), so it answers withSampleData: false for it`,
+            );
+        };
+        let ql: IObjectQLEngine | undefined;
+        let metadata: IMetadataService | undefined;
+        try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine */ }
+        try { metadata = ctx.getService<IMetadataService>('metadata'); } catch { /* no metadata service */ }
+        if (!ql || !metadata) {
+            for (const { entry } of seeded) {
+                unread(entry.manifestId, 'the data engine (objectql) or the metadata service is not available on this runtime');
+            }
+            return present;
+        }
+
+        for (const { entry, datasets } of seeded) {
+            try {
+                // The graph the purge reads its order and its reference keys
+                // from: the loader's own, over the package's seeded objects.
+                const { SeedLoaderService } = await import('@objectstack/runtime');
+                const loader = new (SeedLoaderService as any)(ql, metadata, ctx.logger);
+                const graph = await loader.buildDependencyGraph([...new Set(datasets.map((d) => String(d.object)))]);
+                const failedReads: string[] = [];
+                const match = await matchSeedRows({
+                    engine: ql,
+                    datasets,
+                    graph,
+                    organizationId,
+                    firstOnly: true,
+                    report: (problem) => {
+                        if (problem.kind === 'read') failedReads.push(`${problem.object}: ${problem.detail}`);
+                    },
+                });
+                if (match.rows.length > 0) present.add(entry.manifestId);
+                else if (failedReads.length > 0) unread(entry.manifestId, failedReads.join('; '));
+            } catch (err: any) {
+                unread(entry.manifestId, String(err?.message ?? err));
+            }
+        }
+        return present;
     };
 
     private handleUninstall = async (c: any, ctx: PluginContext): Promise<Response> => {
@@ -1605,8 +1929,24 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *   • A purge was undone
      *   • The user wants a clean baseline back after editing demo rows
      *
+     * A success answers the loader's four counts — `inserted`, `updated`,
+     * `skipped`, `errors` — so the caller sees why nothing changed. A run over
+     * an intact baseline (every declared record already present, so all of
+     * them `skipped`) is a success with `inserted: 0`: being idempotent, the
+     * reseed has reached the state it exists to reach. `422 RESEED_NO_ROWS` is
+     * kept for a run that wrote nothing because records failed (`errors`), or
+     * because the loader had no record to process for this runtime.
+     *
      * Multi-tenant: requires an active organization on the session (same
-     * rule as install seed path).
+     * rule as install seed path). A walled session with none is refused with
+     * ADR-0123 D2 / D4's answer ({@link noActiveOrganizationRefusal}); the
+     * reseed's other declines (no seed datasets, no data engine or metadata
+     * service, a seed run that threw) stay `400 RESEED_SKIPPED`.
+     *
+     * [#21834] An entry whose declared protocol range excludes this runtime is
+     * refused first, with the install route's `422 OS_PROTOCOL_INCOMPATIBLE`
+     * ({@link refuseProtocolIncompatibleEntry}): ahead of the side effects,
+     * because both of those answers are decided after them.
      */
     private handleReseed = async (c: any, ctx: PluginContext): Promise<Response> => {
         const admission = await this.requireInstallCapability(c, ctx, 'Reseeding sample data');
@@ -1625,8 +1965,20 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (!entry) {
             return this.unreadableLedgerEntry(c, ctx, manifestId, failure, 'reseed sample data');
         }
+        // [#21834] ADR-0087 D1: the entry is judged before `applySideEffects`
+        // loads its translations and merges its seed datasets.
+        const incompatible = this.refuseProtocolIncompatibleEntry(c, entry);
+        if (incompatible) return incompatible;
 
-        const summary = await this.applySideEffects(ctx, entry.manifest, { seedNow: true, c });
+        const summary = await this.applySideEffects(ctx, entry.manifest, { seedNow: true, c, door: 'reseed' });
+        // [ADR-0123 D2 / D4] A walled session with no active organization: the
+        // reseed is a tenant-scoped write with no organization to write under.
+        if (summary.seeded.mode === 'refused') {
+            return c.json({
+                success: false,
+                error: { code: NO_ACTIVE_ORGANIZATION_CODE, message: summary.seeded.reason },
+            }, NO_ACTIVE_ORGANIZATION_STATUS);
+        }
         if (summary.seeded.mode === 'skipped') {
             return c.json({
                 success: false,
@@ -1639,16 +1991,25 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         const inserted = summary.seeded.inserted ?? 0;
         const updated = summary.seeded.updated ?? 0;
+        const skipped = summary.seeded.skipped ?? 0;
         const errors = summary.seeded.errors ?? 0;
         const wrote = inserted + updated > 0;
+        // The loader reconciles `inserted + updated + skipped + errored`
+        // against the records it processes for this runtime (`SeedLoadResult`
+        // in `@objectstack/spec/data`), so a clean run with nothing written and
+        // `skipped > 0` found every one of them already present: the intact
+        // baseline, which is a success. With `skipped` at 0 as well, it
+        // processed no record at all.
+        const intactBaseline = !wrote && errors === 0 && skipped > 0;
 
         // HONEST RESULT: the loader runs row-by-row and counts write failures
         // (locked DB, missing table, validation reject) into `errors` rather
         // than throwing. Previously this handler returned success — and flipped
         // `withSampleData` to true — even when every row failed, so the UI said
         // "done" while the database stayed empty. Treat a run that landed no
-        // rows as a failure and report why.
-        if (!wrote) {
+        // rows as a failure and report why — unless every row it would have
+        // written is already there.
+        if (!wrote && !intactBaseline) {
             return c.json({
                 success: false,
                 error: {
@@ -1661,7 +2022,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, 422);
         }
 
-        // Only mark the install as carrying sample data once rows actually landed.
+        // Only mark the install as carrying sample data once its rows are
+        // there: landed by this run, or found already present by it.
         try {
             entry.withSampleData = true;
             entry.sampleDataPurged = false;
@@ -1674,6 +2036,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 manifestId,
                 inserted,
                 updated,
+                skipped,
                 errors,
                 withSampleData: true,
             },
@@ -1683,11 +2046,35 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     /**
      * POST /api/v1/marketplace/install-local/:manifestId/purge-sample-data
      *
-     * Deletes every record whose id is declared in the cached manifest's
-     * seed datasets. Uses the `driver` service directly to bypass ACL /
-     * lifecycle hooks (same pattern as cloud purge). User-created records
-     * are never touched — only ids declared in the package's bundled
-     * datasets are removed. Already-deleted rows count as `skipped`.
+     * Deletes the rows the cached manifest's seed datasets put in the
+     * database, THROUGH THE OBJECTQL ENGINE, so the deletes run every
+     * lifecycle hook (audit, sharing, storage, the package's own) — the same
+     * posture the seed was written with (`SEED_WRITE_EXECUTION_CONTEXT`).
+     * {@link purgeSeedRows} carries the rules; this handler supplies the scope.
+     *
+     *   • A seed row is matched by the seed's own key — each dataset's
+     *     `externalId`, the key the install's upsert and the reseed match on.
+     *     A row whose key no seed record declares (user-authored data) is never
+     *     touched; a key carried by more than one row in scope is not guessed.
+     *   • Scope is the install's: under an organization wall, the caller's
+     *     active organization (the same `organizationWallActive` +
+     *     `resolveActiveOrgId` the install and reseed seed under), and a session
+     *     with none is refused the way reseed refuses it: ADR-0123 D2 / D4's
+     *     `403 PERMISSION_DENIED` naming the missing active organization
+     *     ({@link noActiveOrganizationRefusal}). Without a wall the
+     *     deployment is one logical tenant and the match is table-wide, as the
+     *     loader's upsert match is.
+     *   • Children are deleted before parents — the reverse of the loader's own
+     *     dependency order.
+     *
+     * `skipped` counts seed records no row in scope carries (already deleted);
+     * `errors` counts records that could not be purged — refused by the engine,
+     * or not identifiable — each reason logged.
+     *
+     * [#21834] An entry whose declared protocol range excludes this runtime is
+     * refused first, with the install route's `422 OS_PROTOCOL_INCOMPATIBLE`
+     * ({@link refuseProtocolIncompatibleEntry}): no row is deleted and the
+     * ledger's `withSampleData` / `sampleDataPurged` are not rewritten.
      */
     private handlePurge = async (c: any, ctx: PluginContext): Promise<Response> => {
         const admission = await this.requireInstallCapability(c, ctx, 'Purging sample data');
@@ -1706,10 +2093,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (!entry) {
             return this.unreadableLedgerEntry(c, ctx, manifestId, failure, 'purge sample data');
         }
+        // [#21834] ADR-0087 D1: the entry is judged before any row is matched,
+        // deleted, or the ledger is written.
+        const incompatible = this.refuseProtocolIncompatibleEntry(c, entry);
+        if (incompatible) return incompatible;
 
-        const datasets = Array.isArray(entry.manifest?.data)
-            ? entry.manifest.data.filter((d: any) => d && d.object && Array.isArray(d.records))
-            : [];
+        const datasets = seedDatasetsOf(entry.manifest);
 
         if (datasets.length === 0) {
             return c.json({
@@ -1718,35 +2107,45 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, 400);
         }
 
-        let driver: any;
-        try { driver = ctx.getService('driver'); } catch { /* none */ }
-        if (!driver || typeof driver.delete !== 'function') {
+        // The data engine the seed was written through, and the metadata its
+        // dependency order is read from — the pair the seed run itself needs.
+        let ql: IObjectQLEngine | undefined;
+        let metadata: IMetadataService | undefined;
+        try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine */ }
+        try { metadata = ctx.getService<IMetadataService>('metadata'); } catch { /* no metadata service */ }
+        if (!ql || !metadata) {
             return c.json({
                 success: false,
-                error: { code: 'DRIVER_UNAVAILABLE', message: 'driver service unavailable — cannot purge.' },
+                error: {
+                    code: 'DRIVER_UNAVAILABLE',
+                    message: 'The data engine (objectql) or the metadata service is not available on this runtime — cannot purge sample data.',
+                },
             }, 500);
         }
 
-        let deleted = 0;
-        let skipped = 0;
-        let errors = 0;
-        for (const ds of datasets) {
-            const object = String(ds.object);
-            for (const rec of ds.records as any[]) {
-                const id = rec?.id;
-                if (id === undefined || id === null || id === '') { skipped++; continue; }
-                try {
-                    const r = await driver.delete(object, id);
-                    if (r === false || r === 0 || r?.deleted === 0) skipped++;
-                    else deleted++;
-                } catch (err: any) {
-                    // Treat "not found" as skipped; anything else as error.
-                    const msg = String(err?.message ?? err);
-                    if (/not.?found|no row/i.test(msg)) skipped++;
-                    else { errors++; ctx.logger?.warn?.(`[MarketplaceInstallLocal] purge ${object}#${id}: ${msg}`); }
-                }
+        // Scope: the one the install and the reseed seed under (applySideEffects).
+        let organizationId: string | undefined;
+        if (organizationWallActive(ctx)) {
+            const resolved = await this.resolveActiveOrgId(c, ctx);
+            if (!resolved) {
+                return c.json({
+                    success: false,
+                    error: { code: NO_ACTIVE_ORGANIZATION_CODE, message: noActiveOrganizationRefusal('purge') },
+                }, NO_ACTIVE_ORGANIZATION_STATUS);
             }
+            organizationId = resolved;
         }
+
+        const { SeedLoaderService } = await import('@objectstack/runtime');
+        const loader = new (SeedLoaderService as any)(ql, metadata, ctx.logger);
+        const graph = await loader.buildDependencyGraph([...new Set(datasets.map((d: any) => String(d.object)))]);
+        const { deleted, skipped, errors } = await purgeSeedRows({
+            engine: ql,
+            datasets,
+            graph,
+            organizationId,
+            warn: (message) => ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${manifestId}: ${message}`),
+        });
 
         // Flip flag so UI reflects the empty baseline. `sampleDataPurged`
         // additionally tells the rehydrate-time healer this emptiness is
@@ -1757,11 +2156,48 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             this.ledger.write(entry);
         } catch { /* non-fatal */ }
 
-        ctx.logger?.info?.(`[MarketplaceInstallLocal] purged ${manifestId}: deleted=${deleted} skipped=${skipped} errors=${errors}`);
+        ctx.logger?.info?.(`[MarketplaceInstallLocal] purged ${manifestId}${organizationId ? ` (org=${organizationId})` : ''}: deleted=${deleted} skipped=${skipped} errors=${errors}`);
         return c.json({
             success: true,
             data: { manifestId, deleted, skipped, errors, withSampleData: false },
         }, 200);
+    };
+
+    /**
+     * [#21834] ADR-0087 D1's handshake on the two sample-data doors: the answer
+     * reseed and purge give a ledger entry whose declared protocol range
+     * excludes this runtime, or `undefined` for an entry they may act on.
+     *
+     * The rehydrate does not load such an entry: nothing is registered, synced,
+     * bound or seeded for it. The two doors used to act on it anyway. The reseed
+     * loaded its translations into the i18n service and merged its seed datasets
+     * into the shared `seed-datasets` list before its seed run failed on objects
+     * nobody registered; the purge rewrote the ledger's `withSampleData` with no
+     * row deleted.
+     *
+     * The answer is the install route's for the same manifest: `422
+     * OS_PROTOCOL_INCOMPATIBLE`, the error's own message, and the diagnostic's
+     * five fields in `error.details`, from the producer's one shaping helper
+     * (`protocolIncompatibleAnswer`). Each door asks this right after it has
+     * read the entry, before any side effect.
+     *
+     * Judged with `checkProtocolCompat` on the entry itself, as the rehydrate
+     * judges it, and NOT read from {@link refusedAtRehydrate}: an entry another
+     * runtime wrote to a shared ledger after this boot was never rehydrated
+     * here, and the doors refuse it all the same. Only a positive
+     * incompatibility is refused. An absent or unrecognised range is admitted,
+     * with no warning, so a loadable entry is answered exactly as before.
+     * DELETE and a compatible re-install do not ask this: they are how an
+     * operator gets out of the refused state.
+     */
+    private refuseProtocolIncompatibleEntry = (c: any, entry: InstalledEntry): Response | undefined => {
+        const compat = checkProtocolCompat(entry.manifest);
+        if (compat.status !== 'incompatible') return undefined;
+        const refusal = protocolIncompatibleAnswer(new ProtocolIncompatibleError(compat.diagnostic));
+        return c.json({
+            success: false,
+            error: { code: refusal.code, message: refusal.message, details: refusal.details },
+        }, refusal.status);
     };
 
     /**
@@ -1958,7 +2394,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *        • single-tenant: run SeedLoaderService inline (mirrors
      *          AppPlugin single-tenant branch)
      *        • multi-tenant: invoke `seed-replayer` for the caller's
-     *          active org (resolved from the request session)
+     *          active org (resolved from the request session); a session
+     *          with none reports `mode: 'refused'`, ADR-0123 D2 / D4's
+     *          sentence for `opts.door` in `reason`, and seeds nothing
      *
      * Errors are logged but never thrown — install succeeds even if
      * post-register side-effects partially fail (the manifest itself is
@@ -1968,8 +2406,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private applySideEffects = async (
         ctx: PluginContext,
         manifest: any,
-        opts: { seedNow: boolean; c?: any },
-    ): Promise<{ translationsLoaded: number; seeded: { mode: 'inline' | 'replayer' | 'skipped'; inserted?: number; updated?: number; skipped?: number; errors?: number; reason?: string; errorSample?: string } }> => {
+        opts: { seedNow: boolean; c?: any; door?: Exclude<SampleDataDoor, 'purge'> },
+    ): Promise<{ translationsLoaded: number; seeded: { mode: 'inline' | 'replayer' | 'skipped' | 'refused'; inserted?: number; updated?: number; skipped?: number; errors?: number; reason?: string; errorSample?: string } }> => {
         const appId = String(manifest?.id ?? 'unknown');
         let translationsLoaded = 0;
         let seedSummary: any = { mode: 'skipped', reason: 'no-datasets' };
@@ -2078,8 +2516,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                         const resolved = await this.resolveActiveOrgId(opts.c, ctx);
                         if (resolved) organizationId = resolved;
                         else {
-                            seedSummary = { mode: 'skipped', reason: 'multi-tenant-no-active-org' };
-                            ctx.logger?.warn?.('[MarketplaceInstallLocal] multi-tenant: no active org on request — data not seeded');
+                            // [ADR-0123 D2 / D4] Refused, not skipped: the rows are
+                            // tenant-scoped writes and this session names no tenant.
+                            const reason = noActiveOrganizationRefusal(opts.door ?? 'install');
+                            seedSummary = { mode: 'refused', reason };
+                            ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${appId}: ${reason}`);
                         }
                     }
                     if (!multiTenant || organizationId) {
@@ -2150,8 +2591,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
     /**
      * Best-effort active-org resolution. Reads the better-auth session directly
-     * and returns `session.activeOrganizationId`, falling back to the user's
-     * first org membership.
+     * and returns `session.activeOrganizationId`, or `null` when it has none.
+     *
+     * [ADR-0123 D1] `null` is an answer, not a gap to fill: "authenticated, with
+     * no active organization" is a declared state, and every caller of this read
+     * refuses the tenant-scoped write it would scope ({@link noActiveOrganizationRefusal}).
+     * ⛔ No membership fallback. Guessing from the user's memberships would be a
+     * fourth semantics for that state, and for a user in several organizations it
+     * would write into one the caller never chose. The fallback this once carried
+     * read an object no package defines, so it threw, was swallowed, and never
+     * answered once.
      *
      * ⚠️ [#8976] This is a SCOPING read, not an authorization one — which org's
      * rows a seed lands in, asked only after {@link requireInstallCapability}
@@ -2171,17 +2620,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const session = await api.getSession({ headers: c.req.raw.headers });
             const direct = session?.session?.activeOrganizationId ?? session?.activeOrganizationId ?? null;
             if (direct) return String(direct);
-            // Fall back to the user's first membership row.
-            const userId = session?.user?.id;
-            if (!userId) return null;
-            try {
-                const ql: any = ctx.getService('objectql');
-                if (ql?.find) {
-                    const rows = await ql.find('sys_organization_member', { where: { user_id: userId }, limit: 1, context: { isSystem: true } } as any);
-                    const row = Array.isArray(rows) ? rows[0] : (rows?.items?.[0] ?? null);
-                    return row?.organization_id ? String(row.organization_id) : null;
-                }
-            } catch { /* ignore */ }
         } catch { /* ignore */ }
         return null;
     };
@@ -2458,6 +2896,30 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * they are the two things that turn "an app is missing" into a fix:
      * `.objectstack/installed-packages/<file>` is the thing to repair or delete.
      */
+    /**
+     * [#21762] The one line a rehydrate prints for a ledger entry it refuses to
+     * load under ADR-0087 D1's handshake.
+     *
+     * `error`, not `warn`: the ledger says the package is installed while the
+     * running kernel holds none of it, so persisted and runtime state disagree.
+     * The GET listing still serves the entry, marked not loaded (#21822), to
+     * whoever reads it; this line is what the boot itself says. The line owes
+     * the consequence and the fix, and carries the handshake's own message,
+     * which names the replay command (`objectstack migrate meta`).
+     */
+    private reportProtocolIncompatibleEntry = (
+        ctx: PluginContext,
+        entry: InstalledEntry,
+        diagnostic: ProtocolIncompatibleDiagnostic,
+    ): void => {
+        ctx.logger?.error?.(
+            `[MarketplaceInstallLocal] ${diagnostic.code}: ${entry.manifestId}@${entry.version} is NOT loaded into `
+            + `this runtime, though its ledger entry lists it as installed — none of its objects, data or handlers `
+            + `are available: ${diagnostic.message}. Install a version of the package built for protocol `
+            + `${diagnostic.protocolVersion} (POST ${ROUTE_BASE}), or remove it (DELETE ${ROUTE_BASE}/${entry.manifestId}).`,
+        );
+    };
+
     private warnSkippedLedgerEntries = (ctx: PluginContext, skipped: SkippedManifestEntry[], what: string): void => {
         for (const { file, cause } of skipped) {
             ctx.logger?.warn?.(

@@ -219,7 +219,7 @@ describe('migration chain (ADR-0087 D3)', () => {
   // projection of it (ADR-0087 D4, `gen:upgrade-guide`), so this string IS the
   // page an author upgrading 16 → 17 reads. A stale present-tense claim here is
   // published advice, which is why it gets pinned like a prescription.
-  describe('protocol-17 rationale — the app-area section states the CURRENT fact (#5337)', () => {
+  describe('protocol-17 rationale — the app-area section states the CURRENT fact', () => {
     const rationale17 = () => MIGRATIONS_BY_MAJOR[17]!.rationale;
 
     it('does not repeat the retired "the server does not walk `areas`" claim', () => {
@@ -255,7 +255,7 @@ describe('migration chain (ADR-0087 D3)', () => {
       expect(r).toMatch(/no gate of its own/);
     });
 
-    it('keeps `visible` client-side only — the half #4722 did NOT change', () => {
+    it('keeps `visible` client-side only — the half the server-side item gate did NOT change', () => {
       // The newly tempting false belief is "areas are gated now, so `visible`
       // is fine". `visible` (CEL) is still evaluated in the browser at every
       // level, so it hides an entry that has already been served.
@@ -265,7 +265,7 @@ describe('migration chain (ADR-0087 D3)', () => {
       expect(r).toMatch(/never in `visible`/);
     });
 
-    it('still carries the #4651 history the step exists to explain', () => {
+    it('still carries the area-gate removal history the step exists to explain', () => {
       // The first half is a record of the state AT the retirement and of why
       // route B (remove) beat route A (enforce). Correcting the caveat must not
       // erase it — an upgrading author needs to know the keys were fail-open,
@@ -290,13 +290,13 @@ describe('migration chain (ADR-0087 D3)', () => {
   // barrel, two hops an import-statement-level scan cannot see (the third miss
   // of that class, after #4667 / #4709). The RETIREMENT is untouched; only the
   // sentence that justified it moves.
-  describe('protocol-17 #5015 entry — stops republishing #4610\'s falsified evidence (#5781)', () => {
+  describe('protocol-17 NotificationAction / EmbedConfig entry — stops republishing the falsified zero-consumer claim', () => {
     const entry = () =>
       MIGRATIONS_BY_MAJOR[17]!.semantic.find(
         (s) => s.id === 'ui-notification-action-embed-config-retired',
       );
 
-    it('finds the entry, and it still explains the #4610 orphaning (anti-vacuity)', () => {
+    it('finds the entry, and it still explains the dual-source orphaning (anti-vacuity)', () => {
       expect(entry()).toBeDefined();
       // The orphaning is stated in words, not by tracker number: the reason is
       // printed to the author by `os migrate meta`.
@@ -330,7 +330,7 @@ describe('migration chain (ADR-0087 D3)', () => {
   // "warned about by NEITHER channel — check those by hand" false in the
   // direction that costs a reader work. #6749 fixed the TSDoc half; this is the
   // registry channel it explicitly excluded (#6844).
-  describe('protocol-17 #5561 entry — supportsPause is enforced now, so stop asking for a hand-audit (#6844)', () => {
+  describe('protocol-17 resumeAuthority default-flip entry — supportsPause is enforced now, so stop asking for a hand-audit', () => {
     const entry = () =>
       MIGRATIONS_BY_MAJOR[17]!.semantic.find(
         (s) => s.id === 'action-descriptor-resume-authority-default-flip',
@@ -452,7 +452,7 @@ describe('migration chain (ADR-0087 D3)', () => {
   // the two, a 17 → 18 replay ended `schemaValid: false` and `os migrate meta`
   // closed with "resolve the manual changes above" over a list that named
   // neither element. This block pins the instruction back into the list.
-  describe('protocol-18 #17594 entry — the chain NAMES the bare node it leaves standing', () => {
+  describe('protocol-18 element:filter / element:form entry — the chain NAMES the bare node it leaves standing', () => {
     /** A page authored against 17, carrying both retired elements. */
     const authored = () => ({
       pages: [
@@ -552,7 +552,7 @@ describe('migration chain (ADR-0087 D3)', () => {
     // any major the floor move dropped gets a refusal, not a silent no-op
     // chain. The refusal names the floor and the other path, which is the
     // whole prescription those consumers have.
-    it('every major the #19056 floor move dropped is refused, by name', () => {
+    it('every major the floor move to 16 dropped is refused, by name', () => {
       for (const from of [10, 11, 12, 13, 14, 15]) {
         let thrown: unknown;
         try {

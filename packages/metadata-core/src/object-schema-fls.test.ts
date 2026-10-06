@@ -278,7 +278,7 @@ describe('[ADR-0106 D7] the metadata-plane query is preferred when the service o
                 getMetadataReadableFields: () => ['id'],
             },
         });
-        expect(posture).toEqual({ kind: 'project', readable: new Set(['id']) });
+        expect(posture).toMatchObject({ kind: 'project', readable: new Set(['id']) });
     });
 
     it('falls back to `getReadableFields` on a service that predates D7', async () => {
@@ -288,6 +288,6 @@ describe('[ADR-0106 D7] the metadata-plane query is preferred when the service o
             enabled: true,
             security: { getReadableFields: () => ['id'] },
         });
-        expect(posture).toEqual({ kind: 'project', readable: new Set(['id']) });
+        expect(posture).toMatchObject({ kind: 'project', readable: new Set(['id']) });
     });
 });

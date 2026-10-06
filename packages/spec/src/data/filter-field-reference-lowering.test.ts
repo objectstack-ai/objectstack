@@ -53,7 +53,7 @@ const EQUALITY_SPELLINGS = ['=', '==', 'equals', 'eq'] as const;
 
 const REF = { $field: 'budget' } as const;
 
-describe('[#7597] equality triples with a `{ $field }` comparand', () => {
+describe('equality triples with a `{ $field }` comparand — lowered to `$eq`, never a bare field spec', () => {
   // ── The fix ───────────────────────────────────────────────────────────────
 
   for (const op of EQUALITY_SPELLINGS) {

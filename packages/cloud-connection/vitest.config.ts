@@ -14,8 +14,9 @@ export default defineConfig({
     disableConsoleIntercept: true,
   },
   resolve: {
-    // One entry, for `canonical-expression-envelopes.test.ts` (#11480) — the
-    // only suite here that imports `@objectstack/lint` as a VALUE. It runs the
+    // Two entries. The first is for `canonical-expression-envelopes.test.ts`
+    // (#11480) — the only suite here that imports `@objectstack/lint` as a
+    // VALUE; the second is explained beside it below. The first runs the
     // shared canonical-envelope detector (`auditPageExpressionEnvelopes`) over
     // this package's own `Page` exports.
     //
@@ -39,6 +40,15 @@ export default defineConfig({
       {
         find: /^@objectstack\/lint$/,
         replacement: path.resolve(__dirname, '../lint/src/index.ts'),
+      },
+      // The fake engine in `marketplace-install-local-purge.test.ts` opens its
+      // `delete` with `assertEngineDeleteDispatch` (`check:engine-double-contract`):
+      // the double must be held to the dispatch contract in THIS checkout, not
+      // to a `metadata-core/dist` that may be behind it. Anchored, same reason
+      // as the entry above (`@objectstack/metadata-core` exports `./testing`).
+      {
+        find: /^@objectstack\/metadata-core$/,
+        replacement: path.resolve(__dirname, '../metadata-core/src/index.ts'),
       },
     ],
   },

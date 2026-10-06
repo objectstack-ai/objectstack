@@ -11,6 +11,12 @@ export type { RuntimeConfig } from './runtime.js';
 export { createStandaloneStack, resolveObjectStackHome, resolveStandaloneDatabase } from './standalone-stack.js';
 export type { StandaloneStackConfig, StandaloneStackResult, ResolvedStandaloneDatabase } from './standalone-stack.js';
 
+// The dev schema self-heal decision (#21733) — public because `@objectstack/cli`
+// is a reader, not a second home: its config-load fallback and its `telemetry`
+// sibling read the SAME answer the standalone stack's `default` datasource does.
+export { devAutoMigrateConfig } from './dev-auto-migrate.js';
+export type { DevAutoMigrateConfig } from './dev-auto-migrate.js';
+
 // The ONE libSQL/Turso loader (commit 68f5eccb1). Public because `@objectstack/cli` is a
 // consumer, not a second implementation: `utils/storage-driver.ts` delegates to
 // `loadTursoDriverFactory` and RE-EXPORTS `MissingDriverPackageError`, so

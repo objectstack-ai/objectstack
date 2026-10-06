@@ -230,7 +230,7 @@ describe('Joined reports refuse top-level selection keys', () => {
  * Each refusal asserts what a schema door owes: the issue `code`, its `path`,
  * and the first sentence of the prescription.
  */
-describe('A joined report draws no chart — block `chart` removed, container `chart` refused (#20161)', () => {
+describe('A joined report draws no chart — block `chart` removed, container `chart` refused', () => {
   const BLOCK = { name: 'open_block', type: 'summary', dataset: 'tasks', rows: ['status'], values: ['task_count'] } as const;
   const JOINED = { name: 'overview', label: 'Overview', type: 'joined', blocks: [BLOCK] } as const;
   const CHART = { type: 'bar', xAxis: 'status', yAxis: 'task_count' } as const;
@@ -331,7 +331,7 @@ describe('A joined report draws no chart — block `chart` removed, container `c
  * report authors (dashboard widgets had their own `options.sortBy` channel),
  * so a matrix report's date columns rendered in whatever order the rows arrived.
  */
-describe('Report ordering (#3916)', () => {
+describe('Report ordering — a report declares its own sort', () => {
   it('accepts an order over a dimension and a measure, direction defaulting to asc', () => {
     const r = ReportSchema.parse({
       name: 'hours_matrix', label: 'Hours', type: 'matrix',
@@ -423,7 +423,7 @@ describe('Report ordering (#3916)', () => {
  * so the prescribed key is proved by a full green parse of an otherwise-valid
  * report, not merely by the absence of an `unrecognized_keys` issue.
  */
-describe('ReportSchema — scope-filter aliases point at `runtimeFilter` (#5013)', () => {
+describe('ReportSchema — scope-filter aliases point at `runtimeFilter`', () => {
   const VALID = {
     name: 'pipeline', label: 'Pipeline', type: 'summary',
     dataset: 'sales', rows: ['stage'], values: ['revenue'],

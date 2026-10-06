@@ -359,10 +359,16 @@ describe('healthy sharing layer — reported exactly as before', () => {
     const stack = await makeStack({ storeFaults: ['sys_record_share'] });
     const decision = await stack.explain('read', 'unshared', HR_CTX);
     expect((await stack.request('read', 'unshared', HR_CTX)).ok).toBe(true);
-    expect(decision.record.visible).toBe(true);
+    // The org depth admits the row, so the report credits the depth layer;
+    // a fault would have answered `visible: false`, decided by sharing.
+    expect(decision.record).toEqual({ recordId: ROWS.unshared.id, visible: true, decidedBy: 'depth' });
     const sharingRecord = layerOf(decision, 'sharing').record;
-    expect(sharingRecord.outcome).toBe('admitted');
+    // An answer, not a fault: the filter is published (null, unrestricted) and
+    // judged against the row. A faulted layer publishes neither.
     expect(sharingRecord.rowFilter).toBeNull();
+    expect(sharingRecord.matchesRecord).toBe(true);
+    expect(sharingRecord.detail).not.toContain('could not be evaluated');
+    expect(layerOf(decision, 'depth').record.outcome).toBe('admitted');
   });
 });
 

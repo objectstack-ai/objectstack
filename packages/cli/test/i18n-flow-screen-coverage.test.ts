@@ -29,26 +29,24 @@
 // the spec-exported key face` test below pins list↔walker on this side, so a
 // hand-copied list here fails rather than silently offering a key nothing reads.
 
-// ## Why this file simulates a `live` ledger row (#11624)
+// ## Why this file simulates a `live` ledger row
 //
 // Everything below is the behaviour of the flow bucket ITSELF — which keys the
 // walker harvests, how the coverage report attributes them, what the skeleton
-// looks like. None of it changed in #11624. What changed is WHEN it runs: the
-// `flows` row in `@objectstack/spec/liveness/translation.json` is `planned` +
-// `authorWarn`, and `os lint` runs this bucket in the SAME pass as
-// `lintLivenessProperties`, so demanding the keys while the ledger warns
-// authors for writing them left the author with no move that satisfies both.
-// The bucket is now gated on that row, and it turns itself back on the day the
-// row flips to `live` (dropping its `authorWarn`; for `flows` that waits on
-// #20318).
+// looks like. WHEN it runs is the ledger's call: the bucket is gated on the
+// `flows` row in `@objectstack/spec/liveness/translation.json`. While that row
+// was `planned` + `authorWarn`, `os lint` would have demanded the keys in the
+// same pass that warned authors for writing them, leaving no move that
+// satisfies both, so the walk left the group out. The row is `live` now (the
+// runner reads the flow's own `label` as well as `screens`), and the bucket is
+// back on with no edit to the walker.
 //
-// So these pins are re-anchored, not retired: the mock below is the ledger
-// warning on nothing, i.e. exactly the post-flip world. Retiring them instead
-// would have left the flip with no proof the bucket still works, and a pin that
-// "passes" because the walker now emits nothing is the worst of both. The
-// GATED half — that none of this reaches an author while the row is `planned`
-// — is pinned next door in `i18n-flow-liveness-gate.test.ts`, against the real
-// shipped ledger.
+// The mock below pins the ledger to "warns on nothing", which today is also
+// the real ledger's state. It stays so that these pins keep measuring the
+// bucket whatever the shipped ledger says next: a pin that "passes" because
+// the walker emits nothing is the worst of both. The GATED half — what the
+// walk does for a group the ledger DOES warn on — is pinned next door in
+// `i18n-flow-liveness-gate.test.ts`, which also pins the real shipped ledger.
 //
 // The mock is fail-loud: if it stopped applying, every `expect(...).toContain`
 // below would go red rather than silently assert over an empty walk.
@@ -546,23 +544,27 @@ describe('a screen inside an ADR-0031 region (#17511)', () => {
     // `FLOW_REGION_SLOTS_BY_TYPE`, so a screen-shaped object sitting in its
     // payload is data, not a flow node, and must not become a bundle key.
     // This is what consulting the table buys over walking every `body`.
-    expect(
-      flowKeys({
-        flows: [
-          {
-            name: 'callout',
-            label: 'Callout',
-            nodes: [
-              {
-                id: 'post',
-                type: 'http',
-                config: { body: { nodes: [{ id: 'not_a_screen', type: 'screen', config: { title: 'Payload' } }] } },
-              },
-            ],
-          },
-        ],
-      }),
-    ).toEqual(['flows.callout.label']);
+    const callout = {
+      name: 'callout',
+      label: 'Callout',
+      nodes: [
+        {
+          id: 'post',
+          type: 'http',
+          config: { body: { nodes: [{ id: 'not_a_screen', type: 'screen', config: { title: 'Payload' } }] } },
+        },
+      ],
+    };
+    // Not even the flow's own label: the payload object is not a screen node,
+    // so the flow has none and the runner can never open on it.
+    expect(flowKeys({ flows: [callout] })).toEqual([]);
+    // The lit control for that empty answer: the same flow with one real
+    // screen node is walked, and the payload object still is not.
+    const confirmed = { ...callout, nodes: [...callout.nodes, { id: 'confirm', type: 'screen', config: { title: 'Confirm' } }] };
+    expect(flowKeys({ flows: [confirmed] }).sort()).toEqual([
+      'flows.callout.label',
+      'flows.callout.screens.confirm.title',
+    ]);
   });
 
   it('collapses a node id repeated at two depths onto its one bundle slot', () => {
@@ -599,5 +601,77 @@ describe('a screen inside an ADR-0031 region (#17511)', () => {
         flows: [{ name: 'cyclic', label: 'Cyclic', nodes: [loop, { id: 'real', type: 'screen', config: { title: 'Reached' } }] }],
       }).sort(),
     ).toEqual(['flows.cyclic.label', 'flows.cyclic.screens.real.title']);
+  });
+});
+
+// ── The flow's own label is demanded only for a flow the runner can open ────
+//
+// The console's `FlowRunner` is the one reader of `flows.<flow>.label`: it
+// names the flow in its header and its completion toast, and it opens only on
+// a run paused at a screen node. So the walker emits the label entry only for
+// a flow with a screen node somewhere in the node universe the screens walk
+// reads, at any depth. Both sides are pinned: a flow with no screen node owes
+// no label, and a flow whose only screen sits inside a region still owes it.
+
+/** A scheduled flow whose nodes include a region, and no screen at any depth. */
+const nightlyDigest = {
+  name: 'nightly_digest',
+  label: 'Nightly Digest',
+  type: 'schedule',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'each_owner', type: 'loop', config: { body: { nodes: [{ id: 'mail', type: 'send_email', label: 'Mail' }] } } },
+  ],
+  edges: [],
+};
+
+/** A flow whose only screen node sits two regions deep: loop body, then a parallel branch. */
+const guardedCapture = {
+  name: 'guarded_capture',
+  label: 'Guarded Capture',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    {
+      id: 'per_item',
+      type: 'loop',
+      config: {
+        body: {
+          nodes: [
+            {
+              id: 'fan_out',
+              type: 'parallel',
+              config: { branches: [{ name: 'ask', nodes: [{ id: 'ask_reason', type: 'screen', config: { title: 'Why?' } }] }] },
+            },
+          ],
+        },
+      },
+    },
+  ],
+  edges: [],
+};
+
+describe('the flow label is demanded only for a flow the runner can open', () => {
+  it('emits no `flows.<flow>.label` entry for a flow with no screen node', () => {
+    expect(flowKeys({ flows: [nightlyDigest] })).toEqual([]);
+  });
+
+  it('still emits it for a flow whose only screen node is region-nested', () => {
+    expect(flowKeys({ flows: [guardedCapture] }).sort()).toEqual([
+      'flows.guarded_capture.label',
+      'flows.guarded_capture.screens.ask_reason.title',
+    ]);
+  });
+
+  it('asks the coverage gate for the screen flow\'s label and not the other\'s, in one tree', () => {
+    const report = computeI18nCoverage({
+      i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] },
+      flows: [nightlyDigest, guardedCapture],
+      translations: [{ 'zh-CN': {} }],
+    });
+    const labels = userIssues(report)
+      .map((i) => i.key)
+      .filter((k) => k.endsWith('.label') && k.split('.').length === 3)
+      .sort();
+    expect(labels).toEqual(['flows.guarded_capture.label']);
   });
 });

@@ -150,7 +150,7 @@ describe('Notification Service Contract', () => {
    * Optional, and the first test is the reason: a send-only provider (SMTP,
    * Twilio, a Slack webhook) fills the slot legitimately with no inbox at all.
    */
-  describe('inbox (#4127)', () => {
+  describe('inbox — declared on the contract, and optional', () => {
     it('keeps a send-only provider valid — the inbox trio is optional', () => {
       const sendOnly: INotificationService = {
         send: async () => ({ success: true }),

@@ -23,6 +23,10 @@ import {
   runPermissionSetDriftDiagnostics,
 } from './permission-set-drift.js';
 import { permissionSetRowFields } from './permission-set-projection.js';
+import {
+  discardPermissionSetOverlay,
+  type PermissionSetOverlayDiscardDeps,
+} from './permission-set-overlay-discard.js';
 
 /**
  * Minimal in-memory ql: sys_permission_set + sys_metadata + $in support.
@@ -322,5 +326,96 @@ describe('runPermissionSetDriftDiagnostics — pin 6: a refused diagnostic write
     await runPermissionSetDriftDiagnostics(ql, { logger: { warn: (m: string, meta?: any) => { warn.push({ m, meta }); } } });
 
     expect(warn.some((l) => l.m.includes('REFUSED'))).toBe(true);
+  });
+});
+
+
+/* ------------------------------------------------------------------------- *
+ *  [#21860] the declared population is the lock classifier's, and it is the
+ *  population the Discard Overlay action accepts
+ *
+ *  A set saved into a writable runtime package carries its package id on its
+ *  registry body after the first metadata list read
+ *  (`{ _packageId: <the package>, _provenance: 'org' }`). This report read
+ *  that as "package-declared": a drifted runtime-package set with a stored
+ *  definition was diagnosed `overlay_shadow`, and the detail names Discard
+ *  Overlay as the remedy, which deleted the set's only stored definition.
+ * ------------------------------------------------------------------------- */
+
+const RUNTIME_PACKAGE = 'com.dogfood.runtime_pkg';
+
+/** Registry bodies as the hydrator registers them for each environment-authored shape. */
+const envShapes = [
+  { label: 'runtime-package set', body: { name: 'rt_pkg_set', label: 'Runtime package set', objects: { obj_a: { allowRead: true } }, _packageId: RUNTIME_PACKAGE, _provenance: 'org' }, packageId: RUNTIME_PACKAGE },
+  { label: 'org-owned set', body: { name: 'org_owned_set', label: 'Org-owned set', objects: { obj_a: { allowRead: true } }, _provenance: 'org' }, packageId: null },
+  { label: 'clone', body: { name: 'contributor_clone', label: 'Contributor (clone)', objects: { obj_a: { allowRead: true } }, _provenance: 'org' }, packageId: null },
+  // The lock module's documented runtime shadow: the `'sys_metadata'` sentinel package id.
+  { label: 'runtime shadow', body: { name: 'runtime_only_set', label: 'Runtime-only set', objects: { obj_a: { allowRead: true } }, _packageId: 'sys_metadata', _provenance: 'org' }, packageId: null },
+] as const;
+
+/** A record that DIFFERS from the body (so a judged set would be surfaced), plus its stored definition. */
+function seedDrifted(ql: ReturnType<typeof makeQl>, body: any, packageId: string | null): string {
+  const id = `ps_${body.name}`;
+  ql.permRows.push({
+    id, name: body.name, managed_by: 'admin', package_id: packageId,
+    ...permissionSetRowFields(body),
+    object_permissions: JSON.stringify({ obj_z: { allowRead: true } }),
+  });
+  ql.metaRows.push({
+    id: `meta_${body.name}`, type: 'permission', name: body.name, state: 'active', organization_id: null,
+    package_id: packageId, metadata: JSON.stringify(body),
+  });
+  return id;
+}
+
+describe('[#21860] computePermissionSetDriftDiagnostics — the declared population is the lock classifier\'s', () => {
+  for (const shape of envShapes) {
+    it(`a drifted ${shape.label} with a stored definition is never diagnosed (and never told to Discard Overlay)`, async () => {
+      const ql = makeQl([declaredSet({ _provenance: 'package' }), shape.body]);
+      ql.permRows.push(inSyncRow());
+      seedDrifted(ql, shape.body, shape.packageId);
+
+      const diagnostics = await computePermissionSetDriftDiagnostics(ql);
+
+      // Only the code-shipped set is judged; the environment's own set is not.
+      expect(diagnostics.map((d) => ({ name: d.name, status: d.status, packageId: d.packageId })))
+        .toEqual([{ name: 'ehr_quality_inspector', status: 'in_sync', packageId: 'com.example.ehr' }]);
+    });
+  }
+
+  it('the report and the Discard Overlay action judge the same population: reported ⇔ eligible', async () => {
+    const shipped = declaredSet({ _provenance: 'package' });
+    const ql = makeQl([shipped, ...envShapes.map((s) => s.body)]);
+    ql.permRows.push(inSyncRow()); // code-shipped, no overlay: eligible, and 409 for want of one
+    const ids: Record<string, string> = { [shipped.name]: 'ps_1' };
+    for (const shape of envShapes) ids[shape.body.name] = seedDrifted(ql, shape.body, shape.packageId);
+
+    const reported = new Set((await computePermissionSetDriftDiagnostics(ql)).map((d) => d.name));
+
+    const deps: PermissionSetOverlayDiscardDeps = {
+      ql,
+      resolveSets: async () => [{ name: 'platform_admin', objects: { '*': { modifyAllRecords: true } }, fields: {}, systemPermissions: [] } as any],
+      getProtocol: () => undefined,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    };
+    const verdicts: Record<string, { reported: boolean; discard: unknown }> = {};
+    for (const [name, id] of Object.entries(ids)) {
+      const discard = await discardPermissionSetOverlay(deps, { userId: 'u_admin' }, id).then(
+        () => 'accepted',
+        (e: any) => ({ code: e?.code, status: e?.status ?? e?.statusCode }),
+      );
+      verdicts[name] = { reported: reported.has(name), discard };
+    }
+
+    expect(verdicts).toEqual({
+      // Eligible (past the refusal), and nothing to discard.
+      ehr_quality_inspector: { reported: true, discard: { code: 'INVALID_STATE', status: 409 } },
+      rt_pkg_set: { reported: false, discard: { code: 'PERMISSION_DENIED', status: 403 } },
+      org_owned_set: { reported: false, discard: { code: 'PERMISSION_DENIED', status: 403 } },
+      contributor_clone: { reported: false, discard: { code: 'PERMISSION_DENIED', status: 403 } },
+      runtime_only_set: { reported: false, discard: { code: 'PERMISSION_DENIED', status: 403 } },
+    });
+    // Nothing was deleted: every stored definition is still there.
+    expect(ql.metaRows.map((r) => r.name).sort()).toEqual(['contributor_clone', 'org_owned_set', 'rt_pkg_set', 'runtime_only_set']);
   });
 });

@@ -60,6 +60,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "レコードタイトル項目",
         helpText: "各レコードのタイトルに使う項目（例: \"name\"、\"subject\"）。ADR-0079 の正規ポインタで、レコード表示・ObjectQL 検索・関連レコードのプレビューが参照します。"
       },
+      imageField: {
+        label: "レコード画像項目",
+        helpText: "各レコードの画像に使う項目で、レコードページのヘッダーでタイトルの横に表示されます。このオブジェクトの image 型または avatar 型の項目を指定してください。それ以外の名前はオブジェクトの保存時に拒否されます。空欄の場合、レコード画像は表示されず、プレースホルダーも描画されません。"
+      },
       isSystem: {
         label: "システム組み込み",
         helpText: "システムオブジェクト（削除から保護。共有の既定は公開）"
@@ -1732,6 +1736,22 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "エラーメッセージ",
         helpText: "アクションが失敗したときに、元のエラーの代わりに表示するエラーメッセージ。"
       },
+      outcomeMessages: {
+        label: "結果別の成功メッセージ",
+        helpText: "ハンドラーの結果ごとの成功メッセージ（JSON で記述）。各キーはハンドラーが成功時のペイロードで返す snake_case の `outcome` 値、各値はその結果に表示するラベルです（例：{\"archived\": \"アーカイブしました\", \"already_archived\": \"すでにアーカイブ済みです\"}）。ラベルには ${result.*} を埋め込めます。対応する項目がない結果には成功メッセージが表示され、ハンドラーが返さないキーは表示されることがありません。結果ダイアログや `operation: 'update'` とは併用できません。"
+      },
+      onSuccess: {
+        label: "成功後の遷移",
+        helpText: "アクション成功後の遷移。開くルートと、それを開く場所を指定します。"
+      },
+      "onSuccess.navigate": {
+        label: "遷移先",
+        helpText: "アクション成功後に開くルートまたは URL テンプレート。${param.*}（パラメーターダイアログで収集した値）、${ctx.*}（origin、apiBase、user、org、recordId、selection）、${result.*}（サーバーの応答。例：${result.id}）を埋め込めます。相対値はアプリ内のルートです。"
+      },
+      "onSuccess.openIn": {
+        label: "遷移を開く場所",
+        helpText: "遷移をどこで開くか。'self'（既定）はその場で遷移し、'newTab' は新しいブラウザタブで開きます。"
+      },
       refreshAfter: {
         label: "完了後に更新",
         helpText: "アクション完了後にリスト/ページを更新"
@@ -1767,6 +1787,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       requiresFeature: {
         label: "必要な認証機能",
         helpText: "このアクションの表示可否を決める公開認証機能フラグ。解析時に `visible` の述語へ畳み込まれ、出力からは取り除かれるため、下流の利用側がこのキーを見ることはありません。"
+      },
+      requiresMembershipReach: {
+        label: "必要なメンバーシップ到達先",
+        helpText: "このアクションが呼び出す組織エンドポイント。メンバーシップのグレードがそのエンドポイントに到達できるメンバーにだけ表示されます。解析時に `visible` の述語へ畳み込まれ、出力からは取り除かれるため、下流の利用側がこのキーを見ることはありません。"
       },
       requiredPermissions: {
         label: "必要な権限",

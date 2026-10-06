@@ -364,6 +364,14 @@ export interface ExplainEngineDeps {
    * explanation for a `delete` must consult this rather than the update gate.
    */
   canDeleteRecord?: (object: string, recordId: string, context: any) => Promise<boolean>;
+  /**
+   * [#21771] Enforcement's own read question for an addressed by-id write:
+   * would the read door, asked by this principal, NOT return the record?
+   * `true` only for absence; a read-time policy refusal answers `false`, and a
+   * store fault propagates — exactly as the write path asks it, so the
+   * explanation cannot drift from the answer the write gets.
+   */
+  recordAbsentToCaller?: (object: string, recordId: string, context: any) => Promise<boolean>;
 }
 
 export interface ExplainInput {
@@ -1147,13 +1155,20 @@ interface RecordAttributionContext {
   vamaSets: string[];
   /** [#20431] The object's declared columns ({@link declaredColumnsOf}); absent → values only. */
   declaredColumns: MatchesFilterOptions | undefined;
+  /**
+   * The effective depth the object-level `depth` layer published for this
+   * operation (ADR-0057 D1, already D10-intersected). The row story reads the
+   * layer's own value, never a second evaluator call, so the depth layer's
+   * object-level detail and its record block name one depth.
+   */
+  depthScope: string;
 }
 
 /**
  * [C2 / ADR-0095] Fill the per-record row story onto the pipeline. Prepends the
  * `tenant_isolation` Layer 0, tags every layer with its `kernelTier`, attaches a
- * `record` attribution to the four row-scoped layers (tenant / owd / sharing /
- * rls), and returns the top-level `record` verdict. Every row-level judgement is
+ * `record` attribution to the row-scoped layers (tenant / owd / depth / sharing /
+ * vama_bypass / rls), and returns the top-level `record` verdict. Every row-level judgement is
  * evaluated with the SAME artifacts enforcement produces:
  *   - Layer 0 / Layer 1 filters come from `computeLayeredRlsFilter` (the middleware's
  *     own `Layer0(tenant) AND Layer1(business)` split);
@@ -1168,7 +1183,7 @@ async function applyRecordAttribution(
 ): Promise<{ record: NonNullable<ExplainDecision['record']>; posture: AuthzPosture }> {
   const {
     deps, object, recordId, engineOp, context, sets, layers, owd, capsDeny, crudAllowed, vamaEffective, vamaSets,
-    declaredColumns,
+    declaredColumns, depthScope,
   } = ra;
   const isRead = engineOp === 'find';
   const posture = derivePosture(context);
@@ -1341,6 +1356,25 @@ async function applyRecordAttribution(
           'writable (fail closed), never admitted.'
         : undefined);
   const anyShareAdmits = shareRules.some((r) => r.effect === 'admits');
+  // ── read depth: did the depth-widened owner-match admit THIS row? ────────
+  // The sharing read filter is ONE predicate carrying two grants: the
+  // owner-match, which the read depth widens (own → [me], unit → my unit's
+  // owners, org → no owner-match at all, ADR-0057 D1), OR-ed with the ids of the
+  // caller's own shares. So "the filter admits the row" does not say WHICH half
+  // admitted it. Read off facts this pass already holds: a filter match on a row
+  // the caller neither owns nor holds a share on came from the owner-match
+  // beyond the caller, which only a depth wider than `own` can reach.
+  //   - An on-behalf-of read hands plugin-sharing the delegated context with no
+  //     depth stamped, so its owner-match never widens there.
+  //   - Below `org`, a `null` filter means the sharing service imposes no
+  //     owner-match on this object at all (no owner column, a bypass object),
+  //     which no depth produced.
+  const delegatedRead = context?.onBehalfOf?.userId != null;
+  const depthWidens = depthScope !== 'own';
+  const depthAdmitsRow = isRead && recordExists && !sharingFaultDetail && owd.effect === 'private'
+    && !delegatedRead && depthWidens
+    && sharingMatches === true && !ownerIsMe && !anyShareAdmits
+    && (depthScope === 'org' || sharingFilter !== null);
   let sharingOutcome: ExplainRecordAttribution['outcome'];
   if (!recordExists) {
     sharingOutcome = 'not_evaluated';
@@ -1350,6 +1384,8 @@ async function applyRecordAttribution(
     sharingOutcome = 'not_evaluated'; // baseline already grants the rows sharing would add
   } else if (canEdit !== undefined) {
     sharingOutcome = canEdit ? 'admitted' : 'excluded';
+  } else if (depthAdmitsRow) {
+    sharingOutcome = 'not_evaluated'; // read depth already admits the row sharing would add
   } else if (ownerIsMe || anyShareAdmits || sharingMatches === true) {
     sharingOutcome = 'admitted';
   } else if (sharingFilter === undefined && shares.length === 0) {
@@ -1383,13 +1419,88 @@ async function applyRecordAttribution(
                       'not ownership or a share (see the vama_bypass layer).'
                     : 'The sharing service grants write on this record (ownership or an edit/full share).')
                 : 'No ownership and no edit/full share grants write on this record.')
-            : sharingOutcome === 'admitted'
-              ? (ownerIsMe ? 'Caller owns the record — visible without a share.' : `${shareRules.length} share(s) attached; access is granted for this record.`)
-              : `${shareRules.length} share(s) attached; none grants the caller access to this record.` +
-                (vamaEffective
-                  ? ` Superseded by the View/Modify All Data bypass [${vamaSets.join(', ')}] — see the vama_bypass layer.`
-                  : '')),
+            : depthAdmitsRow
+              ? `${shareRules.length} share(s) attached; none grants the caller access to this record — read depth ` +
+                `'${depthScope}' already admits it, so sharing adds nothing here (see the depth layer).`
+              : sharingOutcome === 'admitted'
+                // A grant is named only where one exists: a share naming the
+                // caller. A filter that admits the row without one says which
+                // part of the sharing service let it through instead.
+                ? (ownerIsMe
+                    ? 'Caller owns the record — visible without a share.'
+                    : anyShareAdmits
+                      ? `${shareRules.length} share(s) attached; access is granted for this record.`
+                      : sharingFilter === null
+                        ? `${shareRules.length} share(s) attached; none grants the caller access, but the sharing ` +
+                          'service imposes no owner-match on this object (rowFilter null), so the record is admitted without one.'
+                        : `The sharing service's read filter admits this record (see rowFilter), but none of the ` +
+                          `${shareRules.length} share(s) attached names the caller directly.`)
+                : `${shareRules.length} share(s) attached; none grants the caller access to this record.` +
+                  (vamaEffective
+                    ? ` Superseded by the View/Modify All Data bypass [${vamaSets.join(', ')}] — see the vama_bypass layer.`
+                    : '')),
     };
+  }
+
+  // ── depth: what the read depth did to THIS row ───────────────────────────
+  // Judged from the facts above (`depthAdmitsRow`), never from a second filter.
+  // A row a share admits as well keeps `sharing` as its decider, the last layer
+  // to admit it in pipeline order (`decidedBy`'s published contract); below
+  // `org`, the one predicate cannot say whether the depth reached its owner
+  // too, so that cell says so rather than guess.
+  const depthLayer = layers.find((l) => l.layer === 'depth');
+  if (depthLayer) {
+    const ownerLabel = String(ownerRaw ?? 'nobody');
+    const depthRecord = (outcome: ExplainRecordAttribution['outcome'], detail: string): ExplainRecordAttribution =>
+      ({ outcome, rules: [], detail });
+    depthLayer.record = !recordExists
+      ? depthRecord('not_evaluated', 'Record not found; read depth not evaluated.')
+      : !isRead
+        ? depthRecord('not_evaluated',
+            'The write depth is judged inside the sharing service\'s per-record write gate, together with ownership ' +
+            'and shares; this report does not separate it from them (see the sharing layer).')
+        : sharingFaultDetail
+          ? depthRecord('not_evaluated',
+              "Read depth widens the sharing service's owner-match, whose read filter could not be evaluated " +
+              '(see the sharing layer).')
+          : owd.effect !== 'private'
+            ? depthRecord('not_evaluated', 'Baseline is not private — read depth adds nothing beyond it for this record.')
+            : delegatedRead
+              ? depthRecord('not_evaluated',
+                  'On an on-behalf-of read the sharing filter is asked with the delegated context as it stands, so ' +
+                  'read depth is not separated from it for this record (see the sharing layer).')
+              : !depthWidens
+                ? depthRecord('not_evaluated',
+                    "Effective read depth is 'own' — it reaches no owner beyond the caller, so it adds nothing to " +
+                    'the baseline for this record (see owd_baseline).')
+                : sharingFilter === undefined
+                  ? depthRecord('not_evaluated',
+                      "Read depth widens the sharing service's owner-match, which is unavailable on this deployment.")
+                  : ownerIsMe
+                    ? depthRecord('admitted',
+                        `Caller owns the record — inside every read depth, including '${depthScope}'; the baseline ` +
+                        'already admits it (see owd_baseline).')
+                    : depthAdmitsRow
+                      ? depthRecord('admitted', depthScope === 'org'
+                          ? "Effective read depth 'org' admits this record without a share: at org depth the sharing " +
+                            'service imposes no owner-match (ADR-0057 D1).'
+                          : `The record's owner (${ownerLabel}) is inside the caller's '${depthScope}' read depth — ` +
+                            "the sharing service's owner-match admits it without a share (ADR-0057 D1).")
+                      : sharingMatches === false
+                        ? depthRecord('excluded',
+                            `The record's owner (${ownerLabel}) is outside the caller's '${depthScope}' read depth; ` +
+                            'a share may still widen access (see the sharing layer).')
+                        : depthScope === 'org'
+                          ? depthRecord('admitted',
+                              "Effective read depth 'org' admits this record (no owner-match at org depth); a share " +
+                              'admits it as well (see the sharing layer).')
+                          : sharingFilter === null
+                            ? depthRecord('not_evaluated',
+                                'The sharing service imposes no owner-match on this object, so read depth has ' +
+                                'nothing to widen for this record (see the sharing layer).')
+                            : depthRecord('not_evaluated',
+                                `A share admits this record (see the sharing layer); whether the caller's ` +
+                                `'${depthScope}' read depth also reaches its owner is not separated from that share here.`);
   }
 
   // ── vama_bypass: what the bypass did to THIS row ─────────────────────────
@@ -1456,8 +1567,10 @@ async function applyRecordAttribution(
   // bypass where no gate answered (a deployment without plugin-sharing) and on
   // the read branch, whose row filter the bypass short-circuits identically.
   const vamaAdmitsRow = vamaEffective && recordExists;
+  // `depthAdmitsRow` is the part of the sharing filter's match the sharing
+  // layer no longer claims, so the disjunction is the one it always was.
   const businessRowAdmits = isRead
-    ? owd.effect !== 'private' || ownerIsMe || sharingOutcome === 'admitted' || vamaAdmitsRow
+    ? owd.effect !== 'private' || ownerIsMe || sharingOutcome === 'admitted' || depthAdmitsRow || vamaAdmitsRow
     : canEdit !== undefined
       ? canEdit
       : owd.effect === 'public' || ownerIsMe || sharingOutcome === 'admitted' || vamaAdmitsRow;
@@ -1483,17 +1596,22 @@ async function applyRecordAttribution(
   else if (!businessRowAdmits) { visible = false; decidedBy = owd.effect === 'private' ? 'sharing' : 'owd_baseline'; }
   else {
     visible = true;
+    // `depth` ranks with `sharing`, the other layer that widens a private
+    // baseline past its owner: a row no share and no ownership admits, but the
+    // read depth does, is the depth layer's admission.
     decidedBy = bypassWasDecisive
       ? 'vama_bypass'
       : (owd.effect === 'private' && !ownerIsMe && sharingOutcome === 'admitted')
         ? 'sharing'
-        : layer1 != null
-          ? 'rls'
-          : owd.effect === 'private' && ownerIsMe
-            ? 'owd_baseline'
-            : layer0 != null
-              ? 'tenant_isolation'
-              : 'object_crud';
+        : depthAdmitsRow
+          ? 'depth'
+          : layer1 != null
+            ? 'rls'
+            : owd.effect === 'private' && ownerIsMe
+              ? 'owd_baseline'
+              : layer0 != null
+                ? 'tenant_isolation'
+                : 'object_crud';
   }
 
   return {
@@ -1934,10 +2052,29 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   if (input.recordId) {
     const out = await applyRecordAttribution({
       deps, object, recordId: input.recordId, engineOp: dataOp, context, sets, layers, owd, capsDeny, crudAllowed,
-      vamaEffective, vamaSets, declaredColumns,
+      vamaEffective, vamaSets, declaredColumns, depthScope: scope,
     });
     recordVerdict = out.record;
     posture = out.posture;
+    // [#21771] Ruling A on the write doors: a row the principal cannot READ is
+    // a row that does not exist, so an update or delete of it answers what a
+    // nonexistent id answers. The record verdict says so in its own vocabulary
+    // — the missing-record shape, `visible: false` with no decider — wherever
+    // enforcement reaches that question: past the capability and object CRUD
+    // gates (which answer first, as they do here), for a principal with an
+    // identity, on a record that exists. (A system principal reads every row,
+    // so the question cannot change its verdict.)
+    if (
+      (operation === 'update' || operation === 'delete') &&
+      deps.recordAbsentToCaller &&
+      context?.userId &&
+      recordVerdict.decidedBy !== 'required_permissions' &&
+      recordVerdict.decidedBy !== 'object_crud' &&
+      !(recordVerdict.visible === false && recordVerdict.decidedBy === undefined) &&
+      (await deps.recordAbsentToCaller(object, input.recordId, context))
+    ) {
+      recordVerdict = { recordId: input.recordId, visible: false };
+    }
   }
 
   const decision: ExplainDecision = {

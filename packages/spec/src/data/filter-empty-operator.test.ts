@@ -82,7 +82,7 @@ function descriptionOf(shape: Record<string, unknown>, key: string): string | un
 // §1 The description IS the ruled table
 // ---------------------------------------------------------------------------
 
-describe('#20311 §1 — the $empty description is the ruled per-type table', () => {
+describe('§1 — the $empty description is the ruled per-type table', () => {
   /** The ruled table, verbatim as the operator describes it. */
   const RULED_TABLE =
     'Is-empty check by the field\'s DECLARED type. `true` matches rows whose field is empty, '
@@ -118,7 +118,7 @@ describe('#20311 §1 — the $empty description is the ruled per-type table', ()
 // §2 The schema door: $empty parses; the empty list is still refused
 // ---------------------------------------------------------------------------
 
-describe('#20311 §2 — { tags: { $empty: true } } parses; { tags: [] } is still refused', () => {
+describe('§2 — { tags: { $empty: true } } parses; { tags: [] } is still refused', () => {
   it('the enforced operator slot keeps a boolean $empty rather than stripping it', () => {
     // An undeclared key on this non-strict object is STRIPPED on parse; a
     // declared one survives. `toEqual` holding both values is the difference.
@@ -145,7 +145,7 @@ describe('#20311 §2 — { tags: { $empty: true } } parses; { tags: [] } is stil
     expect(NormalizedFilterSchema.safeParse({ $and: [{ tags: { $empty: 'yes' } }] }).success).toBe(false);
   });
 
-  it('the empty list stays refused in the equality slot — ruling 乙 on #19757 is untouched', () => {
+  it('the empty list stays refused in the equality slot — the ruled refusal of an array there is untouched', () => {
     for (const [where, path] of [
       [{ tags: [] }, 'tags'],
       [{ tags: { $eq: [] } }, 'tags.$eq'],
@@ -178,7 +178,7 @@ describe('#20311 §2 — { tags: { $empty: true } } parses; { tags: [] } is stil
 // §3 The expansion: three arms for the three field kinds, and the value test
 // ---------------------------------------------------------------------------
 
-describe('#20311 §3 — expandEmptyOperator answers the ruled arm per field definition', () => {
+describe('§3 — expandEmptyOperator answers the ruled arm per field definition', () => {
   it('is published on the data entry — the one function every compile surface imports', () => {
     expect(dataBarrel.expandEmptyOperator).toBe(expandEmptyOperator);
     expect(dataBarrel.isEmptyFilterValue).toBe(isEmptyFilterValue);
@@ -249,7 +249,7 @@ describe('#20311 §3 — expandEmptyOperator answers the ruled arm per field def
 // §4 The flip: in FILTER_OPERATORS, and the view operators lower to it
 // ---------------------------------------------------------------------------
 
-describe('#20446 §4 — $empty is IN FILTER_OPERATORS and is_empty / is_not_empty lower to it', () => {
+describe('§4 — $empty is IN FILTER_OPERATORS and is_empty / is_not_empty lower to it', () => {
   it('is in FILTER_OPERATORS, beside the other value-presence flags', () => {
     // Inverted from #20311's staging pin (the maintainer's amendment, record
     // 5868169573): every compile face answers `$empty` now (#20444, #20445),

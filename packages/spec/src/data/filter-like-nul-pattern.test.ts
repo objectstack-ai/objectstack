@@ -22,7 +22,7 @@ import {
 
 const NUL = String.fromCharCode(0x00);
 
-describe('[#20041] hasNulInLikePattern', () => {
+describe('hasNulInLikePattern — one predicate, so every door refuses a pattern holding U+0000', () => {
   it('finds U+0000 at the start, in the middle, at the end, and alone', () => {
     expect(hasNulInLikePattern(NUL + '%')).toBe(true);
     expect(hasNulInLikePattern('a' + NUL + 'b')).toBe(true);

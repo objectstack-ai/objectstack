@@ -95,7 +95,7 @@
       "title": "Studio follows the in-app locale switch — no mixed-language session",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": ["admin"],
@@ -109,12 +109,12 @@
         ]
       },
       "steps": [
-        "sign in as admin on the showcase, switch the in-app locale to zh-CN, and confirm the app shell followed (nav in zh-CN)",
+        "sign in as admin on the showcase, switch the in-app locale to zh-CN, and confirm the app shell followed (nav in zh-CN). To switch, use the avatar-menu language switcher (it writes the user's locale); seeding browser storage alone is not a language switch — a run that only seeds the UI language in browser storage leaves the user's stored locale empty, so dates follow the browser and a FAIL read off it is the harness's, not the product's",
         "navigate into Studio / metadata-admin: open the object editor for showcase_project and the dashboard designer for showcase_chart_gallery",
         "screenshot the object editor's form — its labels/sections come from the metadataForms translation group (packages/spec/src/system/translation.zod.ts: metadataForms.<type>.label / sections / fields)",
         "screenshot a metadata list surface showing relative dates ('x 天前'-style) in the switched locale",
         "reload the browser fully and re-screenshot one Studio surface — the locale choice must survive the reload",
-        "switch back to en and re-screenshot the same two Studio surfaces"
+        "switch back to en through the same avatar-menu language switcher and re-screenshot the same two Studio surfaces"
       ],
       "acceptance": [
         {
@@ -157,12 +157,14 @@
         "packages/spec/src/system/translation.zod.ts#metadataForms (metadataForms group + resolveMetadataFormLabels convention)",
         "scripts/check-i18n-coverage.mjs#baseline (platform metadata-form baseline is platform-objects-owned)",
         "scripts/i18n-coverage-baseline.json (the frozen per-config untranslated counts this item's mixed-language clause is judged against)",
-        "#7640 (i18n area run — the residual EN strings that exposed the clause/ratchet collision), #7686"
+        "#7640 (i18n area run — the residual EN strings that exposed the clause/ratchet collision), #7686",
+        "#21782 (re-run comment: the held relative-date FAIL was a harness gap — browser storage seeded, switcher never used; PASS through the avatar-menu switcher)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-08-11", "change": "the mixed-language clause is reconciled with the coverage ratchet (#7640): as written it read 'no untranslated declared string next to translated ones', which the showcase's FROZEN untranslated debt violates by design — the sibling item i18n.surface-matrix already declares that debt legitimate, so this item contradicted it and cost a clean PASS. The clause now judges against the bundle (translated key renders translated; untranslated key renders its EN SOURCE label; a raw dotted key is the unconditional FAIL), the same knownGap is declared on this item's fixtures, and the negative carries the matching qualifier", "ref": "#7686" }
+        { "revision": 3, "date": "2026-08-11", "change": "the mixed-language clause is reconciled with the coverage ratchet (#7640): as written it read 'no untranslated declared string next to translated ones', which the showcase's FROZEN untranslated debt violates by design — the sibling item i18n.surface-matrix already declares that debt legitimate, so this item contradicted it and cost a clean PASS. The clause now judges against the bundle (translated key renders translated; untranslated key renders its EN SOURCE label; a raw dotted key is the unconditional FAIL), the same knownGap is declared on this item's fixtures, and the negative carries the matching qualifier", "ref": "#7686" },
+        { "revision": 4, "date": "2026-10-05", "change": "the switch steps now name HOW to switch: through the avatar-menu language switcher, which writes the user's locale. Seeding browser storage alone is not a language switch. The 17.7 console run held a relative-date FAIL on this item, and its re-run on #21782 settled it as a harness gap: the first lane had set the UI language only in browser storage, so the user's stored locale stayed empty and dates followed the browser. Through the switcher the clause passed, so the clauses themselves are unchanged (card #21851 entry 11, filed with the follow-up run #21845)", "ref": "#21782" }
       ]
     },
     {
@@ -170,7 +172,7 @@
       "title": "Every translatable surface localizes on a zh-CN session — one pass over the full translation-group vocabulary, plus the runtime i18n routes it resolves through",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": ["admin on a zh-CN session"],
@@ -188,7 +190,7 @@
       },
       "steps": [
         "before the browser: read the served translation metadata (GET /api/v1/meta/translation, or the bundle source) and note, per variant surface, at least one key that IS translated to zh-CN — expectations derive from data, not vibes",
-        "sign in as admin, switch to zh-CN, and walk one surface per variant, screenshotting each:",
+        "sign in as admin, switch to zh-CN, and walk one surface per variant, screenshotting each. To switch, use the avatar-menu language switcher (it writes the user's locale); seeding browser storage alone is not a language switch — a run that only seeds the UI language in browser storage leaves the user's stored locale empty, so dates follow the browser and a relative-dates FAIL read off it is the harness's, not the product's:",
         "nav labels — the Showcase app sidebar groups/nodes (apps.<app>.navigation.<node_id>.label group)",
         "list headers — the showcase_task list columns (objects.<object>.fields.<field>.label; the bundle translates every surfaced column incl. status/priority OPTION labels)",
         "form labels + placeholders on a task edit form (fields group), and select options in the form and list filters (fields.<field>.options)",
@@ -308,13 +310,15 @@
         "scripts/check-i18n-coverage.mjs + scripts/i18n-coverage-baseline.json (frozen-debt ratchet)",
         "packages/spec/src/ui/component.zod.ts (record:details sections — `name` is the i18n anchor; a nameless section renders its authored label in every locale)",
         "examples/app-showcase/src/ui/views/task.view.ts + ui/views/contact.view.ts (the named-section form views this item's _sections variant is read off) vs ui/pages/task-detail.page.ts (label-only record:details)",
-        "#7640 (i18n area run), #7686 (the maintenance card this revision answers)"
+        "#7640 (i18n area run), #7686 (the maintenance card this revision answers)",
+        "#21782 (re-run comment: the held relative-dates FAIL was a harness gap — browser storage seeded, switcher never used; PASS through the avatar-menu switcher)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new matrix item: per-surface localization pass over the spec's full translation-group vocabulary, grounded in the showcase bundle and the coverage ratchet", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-08", "change": "clause-extension: runtime i18n routes (/i18n/locales configured set, /translations/:locale ⊂ declared vocabulary, /labels/:object/:locale matches the UI, unknown-locale honest degradation), plus the E11 activity-feed/audit verb-localization variant; traps gain dispatcher-vs-hono-route (the plugin mount and dispatcher /i18n domain must answer one shape, #3636/#3833)", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-08-11", "change": "two variants reconciled with what the stock fixture actually affords (#7640). _sections: the step pointed at the task DETAIL page, whose record:details block authors label-only sections — unaddressable by design per component.zod.ts. The variant is NOT unreachable, as first read: task.view.ts's tabbed/wizard/split form views and contact.view.ts's default form declare stable section names the bundle already translates, so the step now names those surfaces and the nameless record page is recorded as a knownGap plus a qualifier on the resolver negative. emptyState: no showcase view authors one, so the variant is waived as blocked(fixture) with the debt written down, never faked from console chrome", "ref": "#7686" },
-        { "revision": 4, "date": "2026-08-18", "change": "two corrections. (1) The #7714 emptyState waiver is stale: the specimen has landed — task.view.ts authors an emptyState on the urgent view and the zh-CN bundle carries objects.showcase_task._views.urgent.emptyState.{title,message} — so step 7 and the knownGap now describe a runnable variant instead of instructing blocked(fixture) (#9467 CF-1). (2) Clause 11 asserted the feed/audit verb localizes on the READER's session; audit-writers.ts renders the summary once at write time via resolveWriteLocale(tenantId, userId) and stores it, so only the tenant setting at write time moves it. The clause and its step now flip the tenant locale before writing — this premise nearly produced a false resolver FAIL (#9467 CF-2)", "ref": "#9386" }
+        { "revision": 4, "date": "2026-08-18", "change": "two corrections. (1) The #7714 emptyState waiver is stale: the specimen has landed — task.view.ts authors an emptyState on the urgent view and the zh-CN bundle carries objects.showcase_task._views.urgent.emptyState.{title,message} — so step 7 and the knownGap now describe a runnable variant instead of instructing blocked(fixture) (#9467 CF-1). (2) Clause 11 asserted the feed/audit verb localizes on the READER's session; audit-writers.ts renders the summary once at write time via resolveWriteLocale(tenantId, userId) and stores it, so only the tenant setting at write time moves it. The clause and its step now flip the tenant locale before writing — this premise nearly produced a false resolver FAIL (#9467 CF-2)", "ref": "#9386" },
+        { "revision": 5, "date": "2026-10-05", "change": "the switch step now names HOW to switch: through the avatar-menu language switcher, which writes the user's locale. Seeding browser storage alone is not a language switch. The 17.7 console run held the relative-dates variant of acceptance[0] as a FAIL, and its re-run on #21782 settled it as a harness gap: the first lane had set the UI language only in browser storage, so the user's stored locale stayed empty and dates followed the browser. Through the switcher the variant passed, so the clauses themselves are unchanged (card #21851 entry 11, filed with the follow-up run #21845)", "ref": "#21782" }
       ]
     },
     {

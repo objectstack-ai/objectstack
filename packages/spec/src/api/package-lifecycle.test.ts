@@ -22,7 +22,7 @@ import {
 } from './package-lifecycle.zod';
 import { PackagePublishResultSchema as SystemPackagePublishResultSchema } from '../system/metadata-persistence.zod';
 
-describe('the ruling-5A re-export of PackagePublishResultSchema (#12038)', () => {
+describe('the ruled re-export of PackagePublishResultSchema into the `/api` namespace', () => {
   it('is the SAME declaration as the `/system` original — a re-export, never a second copy', () => {
     expect(PackagePublishResultSchema).toBe(SystemPackagePublishResultSchema);
   });
@@ -41,7 +41,7 @@ describe('the ruling-5A re-export of PackagePublishResultSchema (#12038)', () =>
   });
 });
 
-describe('DiscardPackageDraftsResponseSchema declares the discard-drafts body (#12038)', () => {
+describe('DiscardPackageDraftsResponseSchema declares the discard-drafts body', () => {
   /** A verbatim-shaped capture of a real `discardPackageDrafts` return (one failure). */
   const realResponse = {
     success: false,
@@ -66,7 +66,7 @@ describe('DiscardPackageDraftsResponseSchema declares the discard-drafts body (#
   });
 });
 
-describe('ListPackageCommitsResponseSchema declares the commit timeline body (#12038)', () => {
+describe('ListPackageCommitsResponseSchema declares the commit timeline body', () => {
   /** A verbatim-shaped capture of the HANDLER's `{ commits }` payload (the wrapper is the handler's, not the protocol's). */
   const realResponse = {
     commits: [
@@ -111,7 +111,7 @@ describe('ListPackageCommitsResponseSchema declares the commit timeline body (#1
   });
 });
 
-describe('RevertPackageCommitResponseSchema declares the revert body (#12038)', () => {
+describe('RevertPackageCommitResponseSchema declares the revert body', () => {
   /** A verbatim-shaped capture of a real `revertCommit` return. */
   const realResponse = {
     success: true,
@@ -137,7 +137,7 @@ describe('RevertPackageCommitResponseSchema declares the revert body (#12038)', 
   });
 });
 
-describe('RollbackToPackageCommitResponseSchema declares the COMMIT-rollback body (#12038 3A)', () => {
+describe('RollbackToPackageCommitResponseSchema declares the COMMIT-rollback body (ruled: authored once the wrong-operation schema was retired)', () => {
   /** A verbatim-shaped capture of a real `rollbackToPackageCommit` return (one commit stuck). */
   const realResponse = {
     success: false,
@@ -171,7 +171,7 @@ describe('RollbackToPackageCommitResponseSchema declares the COMMIT-rollback bod
   });
 });
 
-describe('PackageExportManifestSchema declares the four fixed keys and stays open (#12038 4A)', () => {
+describe('PackageExportManifestSchema declares the four fixed keys and stays open', () => {
   /** A verbatim-shaped capture of a real `assemblePackageManifest` return. */
   const realResponse = {
     id: 'com.example.crm',
@@ -198,7 +198,7 @@ describe('PackageExportManifestSchema declares the four fixed keys and stays ope
   });
 });
 
-describe('ReassignOrphanedMetadataResponseSchema declares the adopt-orphans body (#12038)', () => {
+describe('ReassignOrphanedMetadataResponseSchema declares the adopt-orphans body', () => {
   /** A verbatim-shaped capture of a real `reassignOrphanedMetadata` return. */
   const realResponse = {
     success: true,
@@ -222,7 +222,7 @@ describe('ReassignOrphanedMetadataResponseSchema declares the adopt-orphans body
   });
 });
 
-describe('DuplicatePackageResponseSchema declares the duplicate body (#12038)', () => {
+describe('DuplicatePackageResponseSchema declares the duplicate body', () => {
   /** A verbatim-shaped capture of a real `duplicatePackage` return (one copy failure). */
   const realResponse = {
     success: false,
@@ -239,7 +239,7 @@ describe('DuplicatePackageResponseSchema declares the duplicate body (#12038)', 
     if (result.success) expect(result.data).toEqual(realResponse);
   });
 
-  it('declares the OPERATION verdict at `success` — the objectui#6593 confusion has a declared answer', () => {
+  it('declares the OPERATION verdict at `success` — the envelope-vs-payload `success` confusion has a declared answer', () => {
     // On the wire this payload rides the dispatcher envelope; the envelope's
     // `success` is transport-level and true even here. The schema declares the
     // payload's own verdict so a consumer reading the declared shape reads the

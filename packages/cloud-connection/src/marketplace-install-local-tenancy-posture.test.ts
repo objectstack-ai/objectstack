@@ -137,7 +137,8 @@ const SERVICES = (findRows: Record<string, any[]> = {}) => ({
         find: vi.fn(async (object: string) => findRows[object] ?? []),
     }),
     metadata: {},
-    driver: { delete: vi.fn(async () => true) },
+    // No bare `driver` service: no kernel registers one (drivers register as
+    // `driver.<name>`), and this suite never purges.
 });
 
 const OLD_POSTURE = process.env.OS_TENANCY_POSTURE;

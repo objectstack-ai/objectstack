@@ -15,6 +15,10 @@ import type {
   KnowledgeSource,
   ObjectKnowledgeSource,
 } from '@objectstack/spec/ai';
+import {
+  collectCredentialWriteResponseFields,
+  collectInternalWriteResponseFields,
+} from '@objectstack/core';
 
 /**
  * Minimal logger shape; falls back to no-op when none is provided.
@@ -179,7 +183,8 @@ export class KnowledgeService implements IKnowledgeService {
       };
     }
 
-    const docs = records.map((rec) => recordToDocument(source, objSource, rec));
+    const schema = this.schemaFor(objSource.object);
+    const docs = records.map((rec) => recordToDocument(source, objSource, rec, schema));
     if (docs.length > 0) {
       await adapter.upsert(docs, { source, reason: 'reindex' });
     }
@@ -239,7 +244,7 @@ export class KnowledgeService implements IKnowledgeService {
     for (const source of targets) {
       try {
         const objSource = source.source as ObjectKnowledgeSource;
-        const doc = recordToDocument(source, objSource, record);
+        const doc = recordToDocument(source, objSource, record, this.schemaFor(object));
         const adapter = this.getAdapter(source.adapter);
         await adapter.upsert([doc], { source, reason: 'event-sync' });
       } catch (err) {
@@ -247,6 +252,20 @@ export class KnowledgeService implements IKnowledgeService {
           `[knowledge] event-sync upsert failed for source '${source.id}': ${(err as Error).message}`,
         );
       }
+    }
+  }
+
+  /**
+   * The registered object definition, when the bound engine exposes one
+   * (`getSchema` is not on the `IDataEngine` contract; the ObjectQL engine
+   * carries it). `undefined` — nothing to withhold by — otherwise.
+   */
+  private schemaFor(object: string): unknown {
+    try {
+      return (this.options.dataEngine as { getSchema?: (name: string) => unknown } | undefined)
+        ?.getSchema?.(object);
+    } catch {
+      return undefined;
     }
   }
 
@@ -407,26 +426,44 @@ export function documentIdFor(sourceId: string, recordId: string): string {
 /**
  * Project an ObjectQL record into a `KnowledgeDocument` per the
  * source's `contentFields` / `metadataFields` config. Pure function.
+ *
+ * `schema` (the record's registered object definition) names the fields an
+ * index never carries: credential-class fields (the set the engine masks on
+ * read) and `internal: true` fields (the set it omits), asked through the same
+ * collectors the write-response helper uses (`@objectstack/core`). They are
+ * SKIPPED — under `'*'`, and when a source names one explicitly as content or
+ * metadata — rather than indexed masked: an index document is searchable text
+ * served to every reader the source admits, and a mask placeholder is no
+ * content. Without a schema nothing is withheld here (the engine's event body
+ * and read path still apply their own projection upstream).
  */
 export function recordToDocument(
   source: KnowledgeSource,
   objSource: ObjectKnowledgeSource,
   record: Record<string, unknown>,
+  schema?: unknown,
 ): KnowledgeDocument {
+  const withheld = new Set<string>([
+    ...collectCredentialWriteResponseFields(schema),
+    ...collectInternalWriteResponseFields(schema),
+  ]);
   const recordId = String(record.id ?? (record as any)._id ?? '');
   const contentParts: string[] = [];
   for (const field of objSource.contentFields) {
     if (field === '*') {
       for (const [k, v] of Object.entries(record)) {
+        if (withheld.has(k)) continue;
         if (typeof v === 'string' && v.length > 0 && k !== 'id') contentParts.push(v);
       }
     } else {
+      if (withheld.has(field)) continue;
       const v = record[field];
       if (v != null) contentParts.push(String(v));
     }
   }
   const metadata: Record<string, unknown> = {};
   for (const field of objSource.metadataFields ?? []) {
+    if (withheld.has(field)) continue;
     if (record[field] !== undefined) metadata[field] = record[field];
   }
   return {
@@ -434,7 +471,7 @@ export function recordToDocument(
     sourceId: source.id,
     sourceRecordId: recordId || undefined,
     content: contentParts.join('\n\n'),
-    title: typeof record.title === 'string' ? record.title : undefined,
+    title: typeof record.title === 'string' && !withheld.has('title') ? record.title : undefined,
     metadata,
   };
 }

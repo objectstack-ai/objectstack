@@ -455,14 +455,14 @@ export default function HomePage() {
               The ontology is the software. Your objects, relations, actions, permissions, and
               flows are your business ontology — views, dashboards, apps, and translations are
               projections of it, and the definition layer of the AI era should be an open
-              protocol you own.{' '}
-              <a
-                href="https://www.objectos.ai/en/blog/ai-ontology-open-protocol/"
+              protocol you own. Read the long form:{' '}
+              <Link
+                href="/blog/the-ontology-is-the-software"
                 className="inline-flex items-center gap-1 font-medium text-fd-foreground underline underline-offset-4 transition-colors hover:text-fd-primary"
               >
-                Read why
+                The Ontology Is the Software
                 <ArrowRight className="size-3.5" />
-              </a>
+              </Link>
             </p>
             <p className="mt-3 text-sm text-fd-muted-foreground">
               ObjectStack is build &amp; ask with Claude Code. Rather build &amp; ask online —

@@ -54,7 +54,7 @@ import {
 // Form follows #4988 / #5055: resolved symbol identity over every public entry
 // via the build-time `export-origins/` artifact, plus the file-deletion probe
 // in the #4988 direction (whole-file retirement, no surviving occupant).
-describe('[#8075] data/ external-lookup family retirement', () => {
+describe('data/ external-lookup family retirement', () => {
   /** The 8 names the three retired defs exported (3 schema consts + 5 types). */
   const RETIRED_NAMES = [
     'ExternalDataSourceSchema', 'ExternalDataSource',
@@ -86,7 +86,7 @@ describe('[#8075] data/ external-lookup family retirement', () => {
 
     // ── ABSENCE (every entry, not just ./data) ────────────────────────────
     for (const name of RETIRED_NAMES) {
-      expect(holdersOf(name), `${name} must have zero holders after #8075`).toEqual([]);
+      expect(holdersOf(name), `${name} must have zero holders after the external-lookup retirement`).toEqual([]);
     }
 
     // ── SURVIVAL ──────────────────────────────────────────────────────────
@@ -127,7 +127,7 @@ describe('[#8075] data/ external-lookup family retirement', () => {
       }
     };
     walk(srcRoot);
-    expect(importers, 'a resurrected import means the retirement is being undone — re-read #8075').toEqual([]);
+    expect(importers, 'a resurrected import means the retirement is being undone — the family had no consumer and accepted inline credentials').toEqual([]);
   });
 
   it('runtime namespace agrees with the compiler view', async () => {

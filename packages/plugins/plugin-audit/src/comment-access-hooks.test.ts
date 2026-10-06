@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+import { renderOperationMessage } from '@objectstack/spec/system';
 import {
   installCommentAccessHooks,
   parseCommentThreadId,
@@ -11,17 +12,46 @@ import {
 
 const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
 
+/**
+ * The caller-scoped parent read the gate's not-visible check makes through the
+ * ENGINE (#21755) — `resolveReadableParentIds`, the read middleware's own
+ * probe: `find(<parent object>, { where: { id: { $in: [...] } }, context })`.
+ * `readable` lists the parents the caller can read, keyed `object/id`; any
+ * other predicate shape is REFUSED by throwing, never answered silently.
+ */
+function readableParentFind(readable: string[], reads: Array<{ object: string; options: any }>) {
+  return (object: string, options: any) => {
+    reads.push({ object, options });
+    const where = options?.where ?? {};
+    const keys = Object.keys(where);
+    const ids = where.id?.$in;
+    if (keys.length !== 1 || keys[0] !== 'id' || !Array.isArray(ids) || Object.keys(where.id).length !== 1) {
+      throw new Error(`fake parent read: unsupported predicate ${JSON.stringify(where)}`);
+    }
+    return ids
+      .map(String)
+      .filter((id: string) => readable.includes(`${object}/${id}`))
+      .map((id: string) => ({ id }));
+  };
+}
+
 /** Capture the three registered hooks so tests can drive them directly. */
 function install(opts: {
   comments?: Array<Record<string, unknown>>;
   sharing?: CommentSharingLike | null;
+  /** Parents the CALLER can read through the engine, keyed `object/id`. */
+  readable?: string[];
+  messageTranslator?: () => ((key: string, locale: string, params?: Record<string, unknown>) => string) | undefined;
 }) {
   const hooks = new Map<string, (ctx: any) => Promise<void>>();
+  const parentReads: Array<{ object: string; options: any }> = [];
+  const parentFind = readableParentFind(opts.readable ?? [], parentReads);
   const engine: CommentAccessEngine = {
     registerHook: (event, handler) => {
       hooks.set(event, handler as any);
     },
-    find: async (_object, options: any) => {
+    find: async (object, options: any) => {
+      if (object !== 'sys_comment') return parentFind(object, options);
       const rows = (opts.comments ?? []).filter((r) =>
         Object.entries(options?.where ?? {}).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }),
       );
@@ -32,11 +62,12 @@ function install(opts: {
         Object.entries(options?.where ?? {}).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }),
       ) ?? null,
   };
-  installCommentAccessHooks(engine, () => opts.sharing, silentLogger());
+  installCommentAccessHooks(engine, () => opts.sharing, silentLogger(), opts.messageTranslator);
   return {
     beforeInsert: hooks.get('beforeInsert')!,
     beforeUpdate: hooks.get('beforeUpdate')!,
     beforeDelete: hooks.get('beforeDelete')!,
+    parentReads,
   };
 }
 
@@ -173,8 +204,14 @@ describe('comment access — beforeUpdate (author or parent editor)', () => {
     expect(canEdit).not.toHaveBeenCalled();
   });
 
-  it('a stranger without parent edit cannot rewrite someone else\'s comment', async () => {
-    const { beforeUpdate } = install({ comments: [row], sharing: { canEdit: async () => false } });
+  it('a stranger who can READ the parent but not edit it cannot rewrite someone else\'s comment', async () => {
+    // [#21755] The named refusal is the READER's answer; a caller who cannot
+    // read the parent gets the not-visible one (see the #21755 block below).
+    const { beforeUpdate } = install({
+      comments: [row],
+      sharing: { canEdit: async () => false },
+      readable: ['crm_opportunity/opp1'],
+    });
     await expect(
       beforeUpdate(writeCtx('beforeUpdate', { id: 'c1', data: { body: 'tampered' } }, { userId: 'rep2' })),
     ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403, object: 'crm_opportunity' });
@@ -224,8 +261,12 @@ describe('comment access — beforeDelete (author or parent editor)', () => {
     expect(canEdit).not.toHaveBeenCalled();
   });
 
-  it('a non-author without parent edit is rejected (403)', async () => {
-    const { beforeDelete } = install({ comments: [row], sharing: { canEdit: async () => false } });
+  it('a non-author who can READ the parent but not edit it is rejected (403)', async () => {
+    const { beforeDelete } = install({
+      comments: [row],
+      sharing: { canEdit: async () => false },
+      readable: ['crm_opportunity/opp1'],
+    });
     await expect(
       beforeDelete(writeCtx('beforeDelete', { id: 'c1' }, { userId: 'rep2' })),
     ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
@@ -249,7 +290,11 @@ describe('comment access — beforeDelete (author or parent editor)', () => {
       { ...row, id: 'c1', author_id: 'me' },
       { ...row, id: 'c2', author_id: 'someone-else' },
     ];
-    const { beforeDelete } = install({ comments: rows, sharing: { canEdit: async () => false } });
+    const { beforeDelete } = install({
+      comments: rows,
+      sharing: { canEdit: async () => false },
+      readable: ['crm_opportunity/opp1'], // the refused row's parent is readable → the named refusal
+    });
     await expect(
       beforeDelete(
         writeCtx(
@@ -276,9 +321,12 @@ describe('comment access — beforeDelete (author or parent editor)', () => {
     await expect(
       beforeDelete(writeCtx('beforeDelete', { id: 'c9' }, { userId: 'rep1' })),
     ).resolves.toBeUndefined();
+    // [#21755] Nobody reads a thread naming no record (the read middleware
+    // drops it), so the refusal is the not-visible one — and does not echo
+    // the thread back.
     await expect(
       beforeDelete(writeCtx('beforeDelete', { id: 'c9' }, { userId: 'manager' })),
-    ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE' });
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
   });
 
   it('degrades to parent READ visibility when the sharing service is absent', async () => {
@@ -286,9 +334,10 @@ describe('comment access — beforeDelete (author or parent editor)', () => {
     await expect(
       beforeDelete(writeCtx('beforeDelete', { id: 'c1' }, { userId: 'reader', visible: ['crm_opportunity/opp1'] })),
     ).resolves.toBeUndefined();
+    // [#21755] In degraded mode a refusal always means "cannot read" → not-visible.
     await expect(
       beforeDelete(writeCtx('beforeDelete', { id: 'c1' }, { userId: 'reader', visible: [] })),
-    ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE' });
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
   });
 
   it('bypasses for system context; a no-match delete is not blocked', async () => {
@@ -444,7 +493,9 @@ describe('#7141 — caller envelope forwarded to the sharing gate', () => {
     // is documented to fail CLOSED on `onBehalfOf` — it can only do that if the
     // field reaches it.
     const canEdit = sharingCanEditDouble({ ownerId: 'other_owner', setsWithBypass: ['admin_full_access'] });
-    const { beforeDelete } = install({ comments: [row], sharing: { canEdit } });
+    // The parent is READABLE: the subject is the edit verdict, so the gate's
+    // own named refusal is what proves it refused (#21755).
+    const { beforeDelete } = install({ comments: [row], sharing: { canEdit }, readable: ['crm_opportunity/opp1'] });
     await expect(
       beforeDelete(
         envelopeWriteCtx('beforeDelete', { id: 'c1' }, {
@@ -464,7 +515,9 @@ describe('#7141 — caller envelope forwarded to the sharing gate', () => {
       ownerId: 'other_owner',
       setsWithBypass: [DEPLOYMENT_BASELINE_SET],
     });
-    const { beforeDelete } = install({ comments: [row], sharing: { canEdit } });
+    // The parent is READABLE: the subject is the edit verdict, so the gate's
+    // own named refusal is what proves it refused (#21755).
+    const { beforeDelete } = install({ comments: [row], sharing: { canEdit }, readable: ['crm_opportunity/opp1'] });
     await expect(
       beforeDelete(
         envelopeWriteCtx('beforeDelete', { id: 'c1' }, {
@@ -481,7 +534,9 @@ describe('#7141 — caller envelope forwarded to the sharing gate', () => {
     // gate asks about `crm_opportunity`. Forwarding it whole would widen one
     // object's question with another object's answer.
     const canEdit = sharingCanEditDouble({ ownerId: 'other_owner' });
-    const { beforeDelete } = install({ comments: [row], sharing: { canEdit } });
+    // The parent is READABLE: the subject is the edit verdict, so the gate's
+    // own named refusal is what proves it refused (#21755).
+    const { beforeDelete } = install({ comments: [row], sharing: { canEdit }, readable: ['crm_opportunity/opp1'] });
     await expect(
       beforeDelete(
         envelopeWriteCtx('beforeDelete', { id: 'c1' }, {
@@ -589,7 +644,17 @@ function makeWiredDriver() {
     if (!where || typeof where !== 'object') return true;
     for (const [k, v] of Object.entries(where)) {
       if (k.startsWith('$')) throw new Error(`wired stub driver: unsupported combinator ${k}`);
-      if (v !== null && typeof v === 'object') throw new Error(`wired stub driver: unsupported operator value on ${k}`);
+      if (v !== null && typeof v === 'object') {
+        // `{ $in: [...] }` alone — the gate's parent-read probe (#21755) and
+        // the read middleware's. Every other operator value refuses.
+        const ops = Object.keys(v);
+        const list = (v as { $in?: unknown }).$in;
+        if (ops.length !== 1 || ops[0] !== '$in' || !Array.isArray(list)) {
+          throw new Error(`wired stub driver: unsupported operator value on ${k}`);
+        }
+        if (!list.map(String).includes(String(row[k]))) return false;
+        continue;
+      }
       if ((row[k] ?? null) !== (v ?? null)) return false;
     }
     return true;
@@ -733,6 +798,7 @@ describe('unscoped multi-DELETE (no id, no where) — #4630 through the wired en
     const { ql, remaining } = await bootWired({
       comments: [wiredComment('c1', 'me'), wiredComment('c2', 'someone-else')],
       sharing: { canEdit: async () => false },
+      opportunities: [{ id: 'opp1', name: 'opp' }], // a readable parent → the named per-row refusal (#21755)
     });
     await expect(
       ql.delete('sys_comment', {
@@ -891,6 +957,7 @@ describe('unscoped multi-UPDATE (no id, no where) — #4630 through the wired en
     const { ql, bodies } = await bootWired({
       comments: [wiredComment('c1', 'me'), wiredComment('c2', 'someone-else')],
       sharing: { canEdit: async () => false },
+      opportunities: [{ id: 'opp1', name: 'opp' }], // a readable parent → the named per-row refusal (#21755)
     });
     await expect(
       ql.update('sys_comment', { body: 'rewritten' }, {
@@ -957,6 +1024,7 @@ describe('unscoped multi-UPDATE (no id, no where) — #4630 through the wired en
     const { ql, bodies } = await bootWired({
       comments: [wiredComment('c1', 'me'), wiredComment('c2', 'someone-else')],
       sharing: { canEdit: async () => false },
+      opportunities: [{ id: 'opp1', name: 'opp' }], // a readable parent → the named per-row refusal (#21755)
     });
     await expect(
       ql.update('sys_comment', { body: 'rewritten' }, {
@@ -972,5 +1040,224 @@ describe('unscoped multi-UPDATE (no id, no where) — #4630 through the wired en
       }),
     );
     expect(bodies()).toEqual(['body of c1', 'body of c2']);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// #21755 — a caller who cannot READ the parent is told nothing about it
+//
+// The sibling of the attachment gate's pin (`attachment-access-hooks.test.ts`
+// in @objectstack/service-storage). The gate's named refusal names the parent
+// record (`object/id`) — or, for a thread naming no record, the raw
+// `thread_id` — in the message, and the parent's object on the envelope. For a
+// caller who cannot read that parent the read door answers "not found" for the
+// comment, so the write door naming it was a disclosure across the read
+// boundary. Such a caller now gets the platform's not-visible refusal — the
+// by-id write pre-image check's own answer (`PERMISSION_DENIED`, 403, the
+// catalog's `record_access_denied` sentence, which names nothing). A caller who
+// CAN read the parent but may not edit it keeps `RECORD_NOT_ACCESSIBLE`. Who
+// may write does not change.
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Distinctive spellings, so "named anywhere" is a substring question. */
+const HIDDEN_PARENT_OBJECT = 'crm_hidden_parent';
+const HIDDEN_PARENT_ID = 'rec_hidden_77';
+const hiddenComment = {
+  id: 'cmt_row_1',
+  thread_id: `${HIDDEN_PARENT_OBJECT}:${HIDDEN_PARENT_ID}`,
+  author_id: 'author',
+  body: 'words',
+};
+
+/** The platform's not-visible sentence, from the shared catalog's producer. */
+const notVisibleSentence = (locale?: string) =>
+  renderOperationMessage({ messageKey: 'record_access_denied' }, { locale });
+
+/** Everything a door could put on the wire from a thrown error: its message
+ * and every own property (code, status, object, details, developerMessage…). */
+function everythingOn(err: unknown): string {
+  const e = err as Record<string, unknown> & Error;
+  return JSON.stringify({ message: e.message, name: e.name, ...Object.fromEntries(Object.entries(e)) });
+}
+
+/** Run `p`, expecting a rejection, and hand back what it threw. */
+async function rejection(p: Promise<unknown>): Promise<any> {
+  return p.then(
+    () => {
+      throw new Error('expected a refusal, got success');
+    },
+    (e: unknown) => e,
+  );
+}
+
+function expectNotVisible(err: any, mustNotName: string[], locale?: string): void {
+  expect(err).toMatchObject({
+    code: 'PERMISSION_DENIED',
+    status: 403,
+    statusCode: 403,
+    name: 'PermissionDeniedError',
+  });
+  // The sentence is the catalog's, byte for byte — the same producer the
+  // pre-image check renders through, so the two answers cannot drift apart.
+  expect(err.message).toBe(notVisibleSentence(locale));
+  // No envelope field a door could carry the parent on.
+  expect(err.object).toBeUndefined();
+  expect(err.details).toBeUndefined();
+  expect(err.developerMessage).toBeUndefined();
+  // …and no parent identity, nor the comment's link to it, anywhere at all.
+  const all = everythingOn(err);
+  for (const token of mustNotName) expect(all).not.toContain(token);
+}
+
+const HIDDEN = [HIDDEN_PARENT_OBJECT, HIDDEN_PARENT_ID];
+
+describe('a refusal on a parent the caller cannot read names nothing', () => {
+  it('delete: a non-author who cannot read the parent gets the not-visible refusal', async () => {
+    const { beforeDelete } = install({ comments: [hiddenComment], sharing: { canEdit: async () => false } });
+    const err = await rejection(beforeDelete(writeCtx('beforeDelete', { id: 'cmt_row_1' }, { userId: 'outsider' })));
+    expectNotVisible(err, HIDDEN);
+  });
+
+  it('update: a non-author who cannot read the parent gets the not-visible refusal', async () => {
+    const { beforeUpdate } = install({ comments: [hiddenComment], sharing: { canEdit: async () => false } });
+    const err = await rejection(
+      beforeUpdate(writeCtx('beforeUpdate', { id: 'cmt_row_1', data: { body: 'x' } }, { userId: 'outsider' })),
+    );
+    expectNotVisible(err, HIDDEN);
+  });
+
+  it('a reader who may not edit still gets the NAMED refusal on both verbs — they already see the parent', async () => {
+    const { beforeDelete, beforeUpdate } = install({
+      comments: [hiddenComment],
+      sharing: { canEdit: async () => false },
+      readable: [`${HIDDEN_PARENT_OBJECT}/${HIDDEN_PARENT_ID}`],
+    });
+    const del = await rejection(beforeDelete(writeCtx('beforeDelete', { id: 'cmt_row_1' }, { userId: 'reader' })));
+    expect(del).toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403, object: HIDDEN_PARENT_OBJECT });
+    expect(del.message).toContain(`${HIDDEN_PARENT_OBJECT}/${HIDDEN_PARENT_ID}`);
+    const upd = await rejection(
+      beforeUpdate(writeCtx('beforeUpdate', { id: 'cmt_row_1', data: { body: 'x' } }, { userId: 'reader' })),
+    );
+    expect(upd).toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403, object: HIDDEN_PARENT_OBJECT });
+  });
+
+  it('who may write is unchanged: the author and a parent editor still pass, and the read probe is never asked', async () => {
+    const { beforeDelete, beforeUpdate, parentReads } = install({
+      comments: [hiddenComment],
+      sharing: { canEdit: async (_o, _r, c: any) => c.userId === 'editor' },
+    });
+    await expect(beforeDelete(writeCtx('beforeDelete', { id: 'cmt_row_1' }, { userId: 'author' }))).resolves.toBeUndefined();
+    await expect(beforeDelete(writeCtx('beforeDelete', { id: 'cmt_row_1' }, { userId: 'editor' }))).resolves.toBeUndefined();
+    await expect(
+      beforeUpdate(writeCtx('beforeUpdate', { id: 'cmt_row_1', data: { body: 'x' } }, { userId: 'editor' })),
+    ).resolves.toBeUndefined();
+    // The readability question is asked only of a row about to be refused.
+    expect(parentReads).toEqual([]);
+  });
+
+  it("asks the read door's own question: one caller-scoped engine read of the parent, minus the operation-private keys", async () => {
+    const { beforeDelete, parentReads } = install({ comments: [hiddenComment], sharing: { canEdit: async () => false } });
+    await rejection(
+      beforeDelete(envelopeWriteCtx('beforeDelete', { id: 'cmt_row_1' }, { ...DELEGATED_ENVELOPE, userId: 'outsider' })),
+    );
+    expect(parentReads).toHaveLength(1);
+    const [read] = parentReads;
+    expect(read!.object).toBe(HIDDEN_PARENT_OBJECT);
+    expect(read!.options.where).toEqual({ id: { $in: [HIDDEN_PARENT_ID] } });
+    expect(read!.options.context.userId).toBe('outsider');
+    expect(read!.options.context.isSystem).toBe(false);
+    // `sys_comment`'s depth must not widen the parent read (#7141's rule).
+    for (const key of ['__readScope', '__writeScope', '__delegatorReadScope', '__delegatorWriteScope', '__expandRead']) {
+      expect(read!.options.context).not.toHaveProperty(key);
+    }
+  });
+
+  it('a thread naming no record is read by nobody → not-visible, the thread value not echoed, without a probe', async () => {
+    const dangling = { ...hiddenComment, thread_id: 'secret_project_watercooler' };
+    const { beforeDelete, beforeUpdate, parentReads } = install({
+      comments: [dangling],
+      sharing: { canEdit: async () => true },
+    });
+    expectNotVisible(
+      await rejection(beforeDelete(writeCtx('beforeDelete', { id: 'cmt_row_1' }, { userId: 'manager' }))),
+      ['secret_project_watercooler'],
+    );
+    expectNotVisible(
+      await rejection(
+        beforeUpdate(writeCtx('beforeUpdate', { id: 'cmt_row_1', data: { body: 'x' } }, { userId: 'manager' })),
+      ),
+      ['secret_project_watercooler'],
+    );
+    expect(parentReads).toEqual([]);
+    // Its author still governs it.
+    await expect(beforeDelete(writeCtx('beforeDelete', { id: 'cmt_row_1' }, { userId: 'author' }))).resolves.toBeUndefined();
+  });
+
+  it('degraded mode (no sharing service): the refusal of an unreadable parent is not-visible too', async () => {
+    const { beforeDelete } = install({ comments: [hiddenComment], sharing: null });
+    const err = await rejection(
+      beforeDelete(writeCtx('beforeDelete', { id: 'cmt_row_1' }, { userId: 'outsider', visible: [] })),
+    );
+    expectNotVisible(err, HIDDEN);
+  });
+
+  it("speaks the caller's locale and honours the deployment override — the catalog's own ladder", async () => {
+    const zh = install({ comments: [hiddenComment], sharing: { canEdit: async () => false } });
+    const zhErr = await rejection(
+      zh.beforeDelete(envelopeWriteCtx('beforeDelete', { id: 'cmt_row_1' }, { userId: 'outsider', locale: 'zh-CN' })),
+    );
+    expectNotVisible(zhErr, HIDDEN, 'zh-CN');
+    expect(zhErr.message).not.toBe(notVisibleSentence('en'));
+
+    const overridden = install({
+      comments: [hiddenComment],
+      sharing: { canEdit: async () => false },
+      messageTranslator: () => (key) => (key === 'errors.record_access_denied' ? 'Deployment wording.' : key),
+    });
+    const ovErr = await rejection(
+      overridden.beforeDelete(writeCtx('beforeDelete', { id: 'cmt_row_1' }, { userId: 'outsider' })),
+    );
+    expect(ovErr).toMatchObject({ code: 'PERMISSION_DENIED', status: 403, message: 'Deployment wording.' });
+
+    // A misbehaving i18n lookup never turns the 403 into anything else.
+    const broken = install({
+      comments: [hiddenComment],
+      sharing: { canEdit: async () => false },
+      messageTranslator: () => {
+        throw new Error('i18n not registered');
+      },
+    });
+    expectNotVisible(
+      await rejection(broken.beforeDelete(writeCtx('beforeDelete', { id: 'cmt_row_1' }, { userId: 'outsider' }))),
+      HIDDEN,
+    );
+  });
+
+  it('through the wired engine: a parent that does not answer the caller read → not-visible; one that does → named', async () => {
+    const hidden = await bootWired({
+      comments: [wiredComment('c1', 'someone-else')],
+      sharing: { canEdit: async () => false },
+    });
+    const delErr = await rejection(
+      hidden.ql.delete('sys_comment', { where: { id: 'c1' }, context: { userId: 'outsider' } } as any),
+    );
+    expect(delErr).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(everythingOn(delErr)).not.toContain('crm_opportunity');
+    const updErr = await rejection(
+      hidden.ql.update('sys_comment', { body: 'x' }, { where: { id: 'c1' }, context: { userId: 'outsider' } } as any),
+    );
+    expect(updErr).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(everythingOn(updErr)).not.toContain('crm_opportunity');
+    expect(hidden.bodies()).toEqual(['body of c1']);
+
+    const seen = await bootWired({
+      comments: [wiredComment('c1', 'someone-else')],
+      sharing: { canEdit: async () => false },
+      opportunities: [{ id: 'opp1', name: 'opp' }],
+    });
+    await expect(
+      seen.ql.delete('sys_comment', { where: { id: 'c1' }, context: { userId: 'reader' } } as any),
+    ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403, object: 'crm_opportunity' });
+    expect(seen.remaining()).toBe(1);
   });
 });

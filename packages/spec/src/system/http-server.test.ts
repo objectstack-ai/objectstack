@@ -23,7 +23,7 @@ import { ApiEndpointSchema } from '../api/endpoint.zod';
  * what is pinned HERE is that the export is gone and that nothing else went
  * with it.
  */
-describe('HttpServerConfig retirement (#4938)', () => {
+describe('HttpServerConfig retirement', () => {
   // `HttpServerConfigSchema` and `HttpServerConfig` were both runtime VALUES
   // (the latter via `Object.assign(HttpServerConfigSchema, { create })`), so a
   // runtime `in` check is a real witness for them — reverse-verified by pasting
@@ -207,7 +207,7 @@ describe('MiddlewareConfigSchema', () => {
  * being removed. Replacing them wholesale with the pins below is the third
  * fixture disposition in the retirement playbook.
  */
-describe('server runtime vocabulary retirement (#5295)', () => {
+describe('server runtime vocabulary retirement', () => {
   // All four were runtime VALUES (`z.enum` and `lazySchema` both produce one),
   // so an `in` check is a real witness. Reverse verification, direction
   // predicted before running it: pasting any limb back turns exactly these

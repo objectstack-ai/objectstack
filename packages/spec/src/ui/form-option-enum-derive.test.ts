@@ -284,7 +284,7 @@ describe('ruling 乙 item 1, on real spec enums — each case with a firing and 
     });
   });
 
-  describe('a spellable enum row with a labelled inline list (`object.sharingModel`, the #19331 shape)', () => {
+  describe('a spellable enum row with a labelled inline list (`object.sharingModel`, as its form row writes it)', () => {
     const members = servedEnum('object', 'sharingModel');
     const LABELS: Record<string, string> = {
       private: 'Private — owner only',

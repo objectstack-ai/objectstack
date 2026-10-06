@@ -1,5 +1,198 @@
 # @objectstack/core
 
+## 17.7.0
+
+### Minor Changes
+
+- eb9ef79: New export `objectNotFoundError(object)`: the one `OBJECT_NOT_FOUND` envelope the data door and the engine's in-process verbs refuse an unresolved object name with
+  
+  Clause-②: yes
+  
+  `@objectstack/core` exports `objectNotFoundError(object: string): Error`. The error it returns carries `code: 'OBJECT_NOT_FOUND'`, `status: 404`, the requested name on `object`, and the message `Object '<name>' not found`. It lives here beside `recordNotFoundError`, and for the same reason: the engine cannot import `@objectstack/metadata-protocol`, where the data door first wrote this envelope (ADR-0076 D2). The data door's object-existence gate and `@objectstack/objectql`'s resolver both build their refusal from it, so the two answer one name space with one envelope. Additive: nothing that existed before changes.
+- 1ac7308: fix(core)!: the plugin artifact signature contract refuses any key that is not Ed25519, so its `ed25519` label now holds (#21524)
+  
+  **BREAKING**: `signPayload` and `verifyPayload` (the plugin artifact signature contract in `@objectstack/core`) now refuse a key whose type is not Ed25519. Until now they accepted any asymmetric key. node's `sign(null, …)` and `verify(null, …)` follow the key they are handed, so an RSA, EC or Ed448 key signed under the `ed25519:KEYID:SIG` label and verified against its own public half. `os plugin sign --key` with an RSA private key exited 0, printed `Plugin signed`, and wrote an `ed25519:`-labelled sidecar over an RSA signature.
+  
+  What is refused now:
+  
+  - **`signPayload`** throws when the private key is not Ed25519. The error names the key type found (`rsa`, `ec`, `ed448`, and `secret` for a symmetric key).
+  - **`verifyPayload`** throws when the verifying key's type is not the algorithm the signature's label names. The label is checked against the key, not trusted, and the only label the contract parses is `ed25519`. The error names the key type found.
+  - **`verifyPublisherSignature`, `verifyPlatformSignature` and `verifyPluginArtifact`** verify through `verifyPayload`. So a publisher key registry entry or a platform key that is not Ed25519 makes them throw, or reject, with that same error. It is not folded into a `false` or an `ok: false` result, because a wrong key is the verifier's own configuration, not a verdict on the artifact.
+  - **`os plugin sign`** prints one `✗ Signing failed: signPayload: …` line naming the key type, exits 1, and writes no sidecar.
+  
+  Each refusal is a plain `Error`, the error style the module already used.
+  
+  **The fix:** sign with an Ed25519 key, generated with `openssl genpkey -algorithm ed25519` or `generateEd25519KeyPair()`. Configure Ed25519 public keys for the publisher key registry and the platform key. A signature made earlier with a non-Ed25519 key cannot be verified any more. Sign the artifact again with an Ed25519 key.
+  
+  **Unchanged:** an Ed25519 key signs and verifies exactly as before, with the same deterministic signature bytes. That holds for a PEM string, a `KeyObject`, and the PEM buffer, DER and JWK inputs node also accepts. A malformed signature string, a signature that does not verify, and a key that cannot be read still answer `false`. The signature string format and every export are unchanged.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of non-Ed25519 signing and verifying keys by the plugin artifact signature functions in @objectstack/core. No authorable key, spelling, export or stored metadata shape moves: the change is which cryptographic keys signPayload and verifyPayload accept, and a key is an operational secret that no ledger entry or os migrate meta run can rewrite. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers the signature contract (not already-registered); and the changed exports are functions whose behaviour narrows, not an interface or type declaration (not runtime-interface-only or type-surface-only). -->
+
+### Patch Changes
+
+- c205b6c: Provenance comments in `@objectstack/core` cite the commits that decided them, not tracker numbers that no longer resolve
+  
+  Clause-②: no
+  
+  Docblocks and comments across the package cited issue-tracker numbers that now answer 404 on GitHub.
+  Each now cites the commit in this repository's history that made the decision it describes, except
+  three source comments: one in `resolve-authz-context.ts` that quotes a maintainer ruling now cites
+  ADR-0131's 2026-09-17 amendment, which records that ruling verbatim, and two on the unpack-time
+  integrity re-verification leg, which pointed at a tracker for work that was never built, now say in
+  words that the leg is unbuilt. One test comment named a maintainer-ruling comment that also answers
+  404; it now cites ADR-0025 §3.7, which records that ruling's effect. Some of these docblocks sit on
+  exported members, so the reworded text appears in the published declaration files (`index.d.ts` /
+  `index.d.cts`), and the comments esbuild keeps appear in the JavaScript output (`index.js` /
+  `index.cjs`).
+  
+  Comment only: no export, type, error code, status, message text or runtime behaviour changes.
+- 30af17e: `jsonColumnOperatorRefusalText` takes an optional fourth argument: the class of JSON column the refused operator met, `JsonColumnFieldClass` (now exported). `'multi-value-or-json'` is the default, and its words are unchanged. `'single-value-media'` words the refusal for a single-value file-class field that a SQL deployment still stores as a JSON column.
+  
+  Clause-②: no
+  
+  A single-value file-class field (`file`, `image`, `avatar`, `video`, `audio`) is stored as a JSON column only on a deployment inside the ADR-0104 dual-encoding window, whose media columns have not moved. There it holds one JSON string, so `$contains` with the field's exact id answers no rows. That class's refusal no longer prescribes `$contains`. It says that the field answers these operators again once the deployment finishes the media-column move (the column step of `objectstack migrate files-to-references --apply`), and it still names `$null` / `$empty` for "no value". The message stays under the REST envelope's 500-character bound. Which operators are refused, and on which fields, does not change.
+- 10454b3: fix(core): a resumed migration run is compared against the chunk plan it started over, so `os migrate resume` completes an interrupted `recorded-by` run that had committed a chunk or was started with a non-default `--chunk-size` (#21528)
+  
+  Clause-②: no
+  
+  `runMigrationJournal` recomputed a resumed run's chunk plan from the rows `load()` returned at resume time, at the plan's current chunk size, and refused `PLAN_CHANGED` when that plan's hash differed from the one `run_started` recorded. Two kinds of interrupted run could differ. A plan whose `load()` selects only the work still to do, which `recorded-by`'s plan does, returns fewer rows once a chunk has committed. And the plan handed back for a resume carries its own chunk size, not the one the run was started with. So `os migrate resume` listed such a run as `resumable: true`, and `os migrate resume --run <id> --yes` then refused it.
+  
+  A resume now reads the chunk plan back from the journal's `run_started` record:
+  
+  - **Identity.** The plan's id and step names are hashed with the recorded chunk boundaries and compared with the recorded hash. A plan whose id or steps changed is still refused `PLAN_CHANGED`. The run resumes at the chunk size it started with.
+  - **Rows.** Each step's rows are bound to that chunk plan. If `load()` returns every row the run started over, each chunk's rows are where the journal put them, as before. If it returns exactly the rows of the chunks not yet committed, those rows go, in order, to those chunks. Any other row count is refused `PLAN_CHANGED`, and the message names the step.
+  - **Unwind.** If a chunk fails after a resume that bound its rows the second way, the runner compensates the chunks this process committed, newest first. It then stops at the newest chunk an earlier process committed and journals `run_failed`, because `load()` no longer returns that chunk's rows. It does not compensate other rows in their place, and the run ends `failed`.
+- a0176ef: Credential-class field values are now masked on every write response, as on reads.
+  
+  Clause-②: no
+  
+  - A `secret` field, and a `password` field on an object that is not `managedBy: 'better-auth'`, already read back as `SECRET_MASK` (`null` when unset) on the generic read path (ADR-0100). Every write response that returns a record (REST, batch and MCP) now answers the same way.
+  - The shared write-response helper every write door already calls (`omitInternalFieldsFromWriteResponse`, `@objectstack/core`) now applies the credential mask before it omits `internal: true` fields. New exports beside it: `maskCredentialFieldsInWriteResponse` and `collectCredentialWriteResponseFields`, which read the same `isMaskedOnReadFieldType` declaration as the engine's read mask.
+  - `callData`'s fallback create and update arms (`@objectstack/runtime`, used when no protocol service is registered) now pass their response record through the same helper.
+  - Unchanged: the engine's own write results still return the stored row whole to privileged server-side callers, and the echoed-mask write guard still treats a `SECRET_MASK` value as "leave unchanged", so a client that saves back a write response does not overwrite the stored credential.
+- d16b9fb: The platform's own `sys_metadata` reads and writes now carry the explicit system opt-in (`isSystem: true`) instead of reaching the data engine with no principal at all
+  
+  Clause-②: no
+  
+  - **What moved.** Each engine call in these functions now passes `context: { isSystem: true }`. Inside a repository transaction it passes `{ ...ctx, isSystem: true }`, so the transaction handle still rides along.
+    - `@objectstack/metadata-protocol`: the overlay reads (`findServedOverlayRow`, `overlayLockLayerAt`), the list read (`readActiveOverlayRows`, and `readFlattenedMetaItems`' draft preview), the authoring gate's stored-collection fold (`foldStoredCollection`), the audit and commit trail writes (`recordMetadataAudit`, `persistPackageCommitRow`), and the package verbs' store calls (`publishPackageDrafts`, `resolveOverlayPackageBinding`, `storedFlowBindingAgrees`, `deletePackage`, `duplicatePackage`, `reassignOrphanedMetadata`).
+    - `SysMetadataRepository`: `get`, `put`, `delete`, `promoteDraft`, `restoreVersion`, `listDrafts` and the two lineage counters.
+    - `@objectstack/objectql`: `ObjectQLPlugin`'s authored action and hook reads, at boot and on resync.
+    - `@objectstack/core`: the authored-translation read (`readAuthoredTranslationLayer`).
+  - **Why.** plugin-security passes an engine operation whose context has no user, no position, no permission set and no `isSystem` straight on to the next handler (ADR-0096's principal-less hand-off). These calls worked only because of that pass-through. They are platform plumbing: any door in front of them has already authorized the caller, and the protocol scopes its own rows by organization. So they now say so with the opt-in that already exists.
+  - **No gate verdict moves.** A system context skips the six gates the middleware still runs before that pass-through: package-managed, system-row, curated-capability, audience-anchor, engine-owned and delegated-administration. Four of them only act on other objects. The engine-owned gate never fires on a context with no user. The delegated-administration gate only acts on the RBAC link tables. So none of the six applies to the `sys_metadata` family. An instrumented run of the dogfood suite and a booted dev composition recorded no gate firing on any of these calls before the change. After the change it recorded no principal-less call from these functions.
+  - **One engine check also stands down under `isSystem`.** That is the referential-integrity check on a caller-supplied lookup. On these writes the only lookup it judged was `sys_metadata.organization_id`, which the repository fills from the door-derived organization. The instrumented runs recorded no refusal from it on any of these calls.
+  - ⛔ No new API, no export change, and no change to what any door authorizes.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [5a9292e]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [a2aadab]
+- Updated dependencies [fe10172]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [045f764]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [149153c]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [cab6396]
+- Updated dependencies [e864db5]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/types@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

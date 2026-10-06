@@ -18,7 +18,7 @@ import {
   type OrgScopingEntitlement,
 } from './tenancy-posture';
 
-describe('[#12699] PlatformGlobalObjectsSchema', () => {
+describe('PlatformGlobalObjectsSchema — the objects a deployment exempts from the Layer 0 wall', () => {
   it('accepts exact object machine names', () => {
     const parsed = PlatformGlobalObjectsSchema.safeParse([
       'sys_setting',
@@ -47,7 +47,7 @@ describe('[#12699] PlatformGlobalObjectsSchema', () => {
   });
 });
 
-describe('[#12699] OrgScopingEntitlementSchema', () => {
+describe('OrgScopingEntitlementSchema — the deployment facts Layer 0 arming reads', () => {
   it('accepts a full declaration', () => {
     const declaration: OrgScopingEntitlement = {
       supportedPostures: ['isolated'],

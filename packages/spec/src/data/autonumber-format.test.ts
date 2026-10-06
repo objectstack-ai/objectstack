@@ -20,7 +20,7 @@ const NOW = new Date('2026-06-17T21:30:00.000Z');
 // #6555 — the contract default for a format-less autonumber field. Before it,
 // the SQL driver and the engine's in-memory fallback each substituted their own
 // answer and the two disagreed (`0001` vs `1`) for the very same metadata.
-describe('DEFAULT_AUTONUMBER_FORMAT / resolveAutonumberFormat (#6555)', () => {
+describe('DEFAULT_AUTONUMBER_FORMAT / resolveAutonumberFormat — one declared default both sides read', () => {
   it('fixes the contract default at `{0000}` — four-digit zero padding', () => {
     expect(DEFAULT_AUTONUMBER_FORMAT).toBe('{0000}');
   });
@@ -33,7 +33,7 @@ describe('DEFAULT_AUTONUMBER_FORMAT / resolveAutonumberFormat (#6555)', () => {
     expect(resolveAutonumberFormat({ autonumberFormat: undefined })).toBe(DEFAULT_AUTONUMBER_FORMAT);
   });
 
-  it('prefers the canonical `autonumberFormat` over the `format` shorthand (#1603)', () => {
+  it('prefers the canonical `autonumberFormat` over the `format` shorthand', () => {
     expect(resolveAutonumberFormat({ autonumberFormat: 'INV-{0000}' })).toBe('INV-{0000}');
     expect(resolveAutonumberFormat({ format: 'TK-{00000}' })).toBe('TK-{00000}');
     expect(resolveAutonumberFormat({ autonumberFormat: 'A-{000}', format: 'B-{000}' })).toBe('A-{000}');
@@ -212,7 +212,7 @@ describe('renderAutonumber', () => {
   });
 });
 
-describe('readAutonumberCounter — the inverse of renderAutonumber (#6560)', () => {
+describe('readAutonumberCounter — the inverse of renderAutonumber', () => {
   // The rule moved here out of two hand-written copies (engine + driver-sql)
   // that PR #6553 left behind; these cases mirror what that PR's own tests pin
   // on each side, so a change here fails in spec before it can diverge there.

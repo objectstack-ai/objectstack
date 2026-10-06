@@ -129,7 +129,12 @@ function boot() {
     } as any;
 
     return {
-        dispatcher: new HttpDispatcher(kernel),
+        // The environment-membership gate is not this file's subject, and this
+        // fixture composes no ObjectQL engine — which the gate refuses as an
+        // outage (503) rather than letting the request through (#21941). It is
+        // switched off here the way the dispatcher option documents for tests
+        // that seed no membership.
+        dispatcher: new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false }),
         getMetaItem,
         saveMetaItem,
         deleteMetaItem,

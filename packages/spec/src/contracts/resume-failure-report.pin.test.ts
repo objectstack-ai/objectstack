@@ -134,7 +134,7 @@ function interfaceDocblockOf(iface: string): string {
   return CONTRACT_SOURCE.slice(docStart, declaredAt);
 }
 
-describe('[#16559] ResumeFailureReport — the resume failure a success answer carries (batch #76)', () => {
+describe('ResumeFailureReport — the resume failure a success answer carries', () => {
   it('1. the wire schema parses a report and hands the three shared members back out (declared once, measured)', () => {
     // A strip-mode object drops undeclared keys silently and would parse
     // anything — so parse success alone proves nothing; the shared values

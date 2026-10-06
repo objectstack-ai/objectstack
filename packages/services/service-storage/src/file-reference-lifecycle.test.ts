@@ -924,30 +924,75 @@ describe('File Reference Ownership (ADR-0104 D3 wave 2)', () => {
       },
     });
 
-    it('rejects a file larger than the declared maxSize', async () => {
+    /** The refusal a caller is owed: the ADR-0112 `code` plus the 4xx
+     * `status` the REST passthrough answers with, and the two named subjects
+     * as members. Without `status` the same throw leaves the data door as a
+     * sanitised `500 INTERNAL_ERROR` with the sentence withheld. */
+    const refusal = (constraint: 'accept' | 'maxSize') => ({
+      code: 'ERR_FILE_CONSTRAINT',
+      status: 400,
+      field: 'image',
+      constraint,
+    });
+
+    it('rejects a file larger than the declared maxSize (ERR_FILE_CONSTRAINT / 400, naming field and constraint)', async () => {
       const engine = fakeEngine({
         files: [file({ size: 5000 })],
         registry: constrained(),
       });
       install(engine);
 
-      await expect(driveInsert(engine, 'product', { image: 'file_a' }, 'p1')).rejects.toThrow(
-        FileConstraintError,
-      );
-      // The write failed, so nothing was claimed.
+      const err = await driveInsert(engine, 'product', { image: 'file_a' }, 'p1')
+        .then(() => null)
+        .catch((e) => e);
+
+      expect(err).toBeInstanceOf(FileConstraintError);
+      expect(err).toMatchObject(refusal('maxSize'));
+      expect(err.message).toContain("'image'");
+      // The write failed before the driver: no row, and nothing was claimed.
+      expect(engine.tables.product ?? []).toHaveLength(0);
       expect(engine.tables.sys_file[0].ref_id).toBeUndefined();
     });
 
-    it('rejects a file whose MIME type is outside the declared accept list', async () => {
+    it('rejects a file whose MIME type is outside the declared accept list (ERR_FILE_CONSTRAINT / 400, naming field and constraint)', async () => {
       const engine = fakeEngine({
         files: [file({ mime_type: 'application/pdf', name: 'a.pdf', size: 10 })],
         registry: constrained(),
       });
       install(engine);
 
-      await expect(driveInsert(engine, 'product', { image: 'file_a' }, 'p1')).rejects.toThrow(
-        /not permitted by the accept list/,
-      );
+      const err = await driveInsert(engine, 'product', { image: 'file_a' }, 'p1')
+        .then(() => null)
+        .catch((e) => e);
+
+      expect(err).toBeInstanceOf(FileConstraintError);
+      expect(err).toMatchObject(refusal('accept'));
+      expect(err.message).toMatch(/not permitted by the accept list/);
+      expect(err.message).toContain("'image'");
+      expect(engine.tables.product ?? []).toHaveLength(0);
+      expect(engine.tables.sys_file[0].ref_id).toBeUndefined();
+    });
+
+    it('refuses an UPDATE onto an oversize file with the same envelope, leaving the record and both files as they were', async () => {
+      const engine = fakeEngine({
+        files: [
+          file({ id: 'file_old', size: 10, ref_object: 'product', ref_id: 'p1', ref_field: 'image' }),
+          file({ id: 'file_big', size: 5000 }),
+        ],
+        records: { product: [{ id: 'p1', image: 'file_old' }] },
+        registry: constrained(),
+      });
+      install(engine);
+
+      const err = await driveUpdate(engine, 'product', 'p1', { image: 'file_big' })
+        .then(() => null)
+        .catch((e) => e);
+
+      expect(err).toBeInstanceOf(FileConstraintError);
+      expect(err).toMatchObject(refusal('maxSize'));
+      expect(engine.tables.product[0].image).toBe('file_old');
+      expect(engine.tables.sys_file.find((f) => f.id === 'file_old')).toMatchObject({ ref_id: 'p1' });
+      expect(engine.tables.sys_file.find((f) => f.id === 'file_big')!.ref_id).toBeUndefined();
     });
 
     it('accepts a file that satisfies both declarations', async () => {

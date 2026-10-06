@@ -32,6 +32,12 @@ import {
 // `OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES` — same value it read before,
 // no re-ruling of the package cohort as a side effect of #7020.
 import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
+// [#21727] ADR-0087 D1's protocol handshake and the brand predicate for its
+// refusal. The install branch asks the predicate ahead of its generic catch,
+// and its no-protocol fallback runs the same handshake.
+// [#21762] The refusal's answer is the shared one, which the install-local door
+// (`@objectstack/cloud-connection`) gives too: imported, never restated.
+import { assertProtocolCompat, isProtocolIncompatibleError, protocolIncompatibleAnswer } from '@objectstack/metadata-core';
 // [#7560] ADR-0070's read-only-package rule — the SAME predicate the metadata
 // authoring path asks before refusing a write INTO a platform package
 // (`saveMetaItem` → `WRITABLE_PACKAGE_REQUIRED`). Imported, never re-spelled:
@@ -603,6 +609,13 @@ function requireDuplicableSource(
  * but these call sites bypassed both, so a deliberate 404 still rendered as a
  * 500 and `fields[]` was still dropped. Route new handlers through the shared
  * helper rather than re-deriving the status here.
+ *
+ * [#21727] ONE recognised carrier answers ahead of that helper: the install
+ * branch's `ProtocolIncompatibleError`, through `protocolIncompatibleAnswer`
+ * (`@objectstack/metadata-core`, shared with the install-local door, #21762).
+ * It still answers the status the error declares. What it adds is the
+ * structured diagnostic, which the shared resolver's closed `details` list
+ * drops by design.
  */
 /**
  * [#14375 / ADR-0130 Consequences row 6] Decorate one registry row with the
@@ -1253,11 +1266,44 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const settings = request?.settings;
             let pkg: any;
             const protocolSvc = await resolveProtocol(deps, _context).catch(() => null);
-            if (protocolSvc && typeof protocolSvc.installPackage === 'function') {
-                const out = await protocolSvc.installPackage({ manifest, settings });
-                pkg = out?.package ?? out;
-            } else {
-                pkg = registry.installPackage(manifest, settings);
+            try {
+                if (protocolSvc && typeof protocolSvc.installPackage === 'function') {
+                    const out = await protocolSvc.installPackage({ manifest, settings });
+                    pkg = out?.package ?? out;
+                } else {
+                    // [#21727] The no-protocol fallback runs the SAME ADR-0087
+                    // D1 handshake the protocol primitive runs before its
+                    // registry write (`installPackage` in
+                    // `@objectstack/metadata-protocol`). Without it, a
+                    // composition with no `protocol` service installed a
+                    // package whose declared range excludes this runtime, which
+                    // the composed door refuses. The default warn hook matches
+                    // the primitive's, so no-range and unparsed ranges warn the
+                    // same way on both arms.
+                    assertProtocolCompat(manifest);
+                    pkg = registry.installPackage(manifest, settings);
+                }
+            } catch (err) {
+                // [#21727] The protocol refusal's typed carrier, recognised
+                // BEFORE the generic catch: the #9585 `FlowActionRefusal`
+                // idiom (`domains/actions.ts`), ruled for this card by triage.
+                // The shared `resolveThrownHttpError` builds `details` from a
+                // closed list that drops a thrown `.diagnostic` (#8016, #9106,
+                // #9585), so this branch carries ADR-0087 D1's structured
+                // diagnostic itself. Every other throw rethrows to the generic
+                // catch unchanged.
+                if (isProtocolIncompatibleError(err)) {
+                    // [#21762] The shared answer, in this door's envelope:
+                    // `code` rides `details` into the promotion slot, so it
+                    // lands in `error.code` (ADR-0112 D5) and `error.details`
+                    // carries the answer's five members and nothing else.
+                    const refusal = protocolIncompatibleAnswer(err);
+                    return {
+                        handled: true,
+                        response: deps.error(refusal.message, refusal.status, { code: refusal.code, ...refusal.details }),
+                    };
+                }
+                throw err;
             }
             // [#18058 → #18877] HONOUR `enableOnInstall`, which this door declared
             // and ignored. `PackageInstallRequestSchema` has carried

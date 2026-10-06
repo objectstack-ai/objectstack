@@ -327,7 +327,7 @@
       "title": "A read-only package actually locks Studio editing surfaces",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -336,7 +336,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the writable-package contrast side (step 5, acceptance clause 3) needs a writable target package — obtained at runtime via POST /packages/:id/duplicate (ADR-0070 D4 'duplicate base'), not a stock fixture"
+          "the writable-package contrast side (step 5, acceptance clause 3) needs a writable BASE package: a scratch base created at runtime through POST /api/v1/packages, not a stock fixture. ⛔ Not POST /packages/:id/duplicate: requireDuplicableSource refuses a code-package source with 422 DUPLICATE_SOURCE_NOT_A_BASE (#14451), and com.example.showcase is a code package"
         ]
       },
       "steps": [
@@ -344,7 +344,7 @@
         "screenshot the surface; then read the DOM state of the edit affordances (checkboxes, Save)",
         "attempt the edit through the UI anyway (click a checkbox / Save) and capture what the client does",
         "forge the write directly: PUT /api/v1/meta/object/<packaged object name> with a trivial field change, as the same admin session",
-        "POST /packages/com.example.showcase/duplicate {targetPackageId: <scratch id>} (ADR-0070 D4 'duplicate base' — the platform's supported writable-base route) to clone the showcase base into a writable target, then repeat the same PUT against an object in that writable package to prove the guard discriminates by package writability, not by blanket denial"
+        "POST /api/v1/packages to create a scratch writable base package, author an object into it (PUT /api/v1/meta/object/<scratch object>?package=<scratch id>), then repeat the same trivial-change PUT against that object to prove the guard discriminates by package writability, not by blanket denial. ⛔ Do not duplicate com.example.showcase: POST /packages/com.example.showcase/duplicate answers 422 DUPLICATE_SOURCE_NOT_A_BASE, because the source must be a base (#14451)"
       ],
       "acceptance": [
         {
@@ -354,16 +354,16 @@
           "evidence": "screenshot + disabled-state DOM read"
         },
         {
-          "clause": "the SERVER refuses the same write: direct PUT /api/v1/meta/object/<name> on the read-only package answers 4xx with a ledgered metadata-protocol code (WRITABLE_PACKAGE_REQUIRED, or ITEM_LOCKED for _lock'd items) — UI absence never suffices (ADR-0124 D1)",
+          "clause": "the SERVER refuses the same write: direct PUT /api/v1/meta/object/<name> on the read-only package answers 4xx with a ledgered metadata-protocol code (NOT_OVERRIDABLE for the bare PUT — object is not org-overridable; WRITABLE_PACKAGE_REQUIRED, or ITEM_LOCKED for _lock'd items, when the write names ?package=) — UI absence never suffices (ADR-0124 D1)",
           "oracle": "api",
-          "verify": "PUT response status >=400 and error.code ∈ {WRITABLE_PACKAGE_REQUIRED, ITEM_LOCKED} (packages/spec/src/api/error-code-ledger.zod.ts, @objectstack/metadata-protocol entry)",
+          "verify": "PUT response status >=400 and error.code ∈ {NOT_OVERRIDABLE, WRITABLE_PACKAGE_REQUIRED, ITEM_LOCKED} (packages/spec/src/api/error-code-ledger.zod.ts, @objectstack/metadata-protocol entry) — record which spelling of the PUT produced which code",
           "evidence": "PUT trace"
         },
         {
-          "clause": "the same PUT against a writable object — obtained through the platform's own duplicate-base route, not a stock fixture — SUCCEEDS for the same admin — the lock keys on package writability, not on the route (both sides of the gate)",
+          "clause": "the same PUT against an object in a writable base package (created via POST /api/v1/packages — not duplicate, which refuses code sources per #14451) succeeds for the same admin and a follow-up GET shows the change.",
           "oracle": "api",
-          "verify": "POST /packages/com.example.showcase/duplicate (ADR-0070 D4) to clone the showcase base into a writable target package, then PUT on an object in that target answers 2xx and a follow-up GET shows the change",
-          "evidence": "both traces"
+          "verify": "POST /api/v1/packages creates the scratch base; the PUT on an object authored into it answers 2xx, and a follow-up GET shows the change",
+          "evidence": "the package-create, PUT and GET traces"
         },
         {
           "clause": "the denied write leaves the packaged object byte-identical (persistence of the lock)",
@@ -383,7 +383,7 @@
         "#3358 §5",
         "packages/spec/src/api/error-code-ledger.zod.ts (@objectstack/metadata-protocol codes)",
         "ADR-0010 §3.3 (_lock)",
-        "packages/runtime/src/domains/packages.ts#packages (POST /packages/:id/duplicate — ADR-0070 D4 'duplicate base', the writable-target route)",
+        "packages/runtime/src/domains/packages.ts#requireDuplicableSource (POST /packages/:id/duplicate refuses a code-package source with 422 DUPLICATE_SOURCE_NOT_A_BASE, #14451 — so the writable contrast is a scratch base created through POST /api/v1/packages)",
         "docs/adr/0070-package-first-authoring.md §D4 ('clone a base into a new writable package')"
       ],
       "history": [
@@ -404,6 +404,12 @@
           "date": "2026-08-31",
           "change": "retargeted the writable-package contrast side (step 5, acceptance clause 3) at the platform's supported runtime path per the maintainer ruling on #9788 (2026-08-19, 「接受你的所有建议」; reaffirmed 2026-08-25, 「其他接受」): the stock showcase does NOT boot with a writable package, so the runner instead clones the showcase base via POST /packages/:id/duplicate (ADR-0070 D4 'duplicate base') to get the writable contrast object. Added a fixtures.requires line naming the runtime route explicitly, since the item previously left the writable side as an unqualified 'a WRITABLE (draft/app-local) object'. Mirrors the sibling half landed for automation.rollup-summary-filter (PR #11913, bb62d4d08).",
           "ref": "#9788"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-05",
+          "change": "clause 3, step 5, the fixture line and clause 2's code set re-pointed (stale, #21784 VF4; the lane had it as an assertion defect, and the verifier's disposition is used). POST /packages/com.example.showcase/duplicate answers 422 DUPLICATE_SOURCE_NOT_A_BASE: requireDuplicableSource (runtime/src/domains/packages.ts, #14451) refuses a code-package source. This predates 17.6.0 (and 17.5.0), and it supersedes the duplicate route revision 3 adopted under the #9788 ruling. The clause uses the verifier's wording: the writable contrast is a scratch base created through POST /api/v1/packages. Clause 2's code set adds NOT_OVERRIDABLE, the bare PUT's answer, per the run's FE7 (ITEM_LOCKED only with ?package=)",
+          "ref": "#21797"
         }
       ]
     },
@@ -1206,7 +1212,7 @@
       "title": "The audit-log browser surfaces attributable events over sys_audit_log with correct actor/object, filters, and a before/after payload drawer",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1226,17 +1232,17 @@
         "generate 3 attributable events with distinct action/actor/object: (a) a fresh member SIGNS IN (action 'login', actor = the member); (b) as admin DELETE a showcase_task via /api/v1/data/showcase_task/<id> (action 'delete', object_name showcase_task, record_id set); (c) write a setting (action 'config_change')",
         "open /system/audit-log; wait for the table to settle; screenshot",
         "locate all three events in the page and read their action / object / actor cells",
-        "narrow to writes and confirm the narrowing is server-side; capture the re-issued /api/v1/data/sys_audit_log request with its $filter. ⚠️ There is no Action dropdown on this console: use the prebuilt filtered views (Recent / Writes / Auth / Config) or the generic Filter Records → Where → Add filter builder to constrain action",
-        "click an UPDATE row (e.g. PATCH a showcase_contact first) → the side drawer opens; screenshot the Before (old_value) / After (new_value) JSON panels. Since 17.6.0 no delete row is served to the page (#21194), so the drawer is checked on an update row",
+        "narrow to writes and confirm the narrowing is server-side; capture the re-issued /api/v1/data/sys_audit_log request with its $filter. /system/audit-log (AuditLogPage) has an Action select in its filter bar that writes action into the request's $filter. The sys_audit_log object list (the nav entry) offers the prebuilt filtered views (Recent / Writes / Auth / Config) and the generic Filter Records → Where → Add filter builder instead. Either is a valid server-side narrowing",
+        "click an UPDATE row (e.g. PATCH a showcase_contact first) → the side drawer opens; screenshot the Before (old_value) / After (new_value) JSON panels — the update event is the shape that carries both",
         "cross-check the API twin directly: GET /api/v1/data/sys_audit_log?$filter=... for each of the three actions and compare actor/object/action to the page",
         "attempt to forge the trail: POST and PATCH /api/v1/data/sys_audit_log — both must be refused (get+list only)"
       ],
       "acceptance": [
         {
-          "clause": "all three ops produce audit rows with the correct action, actor and target: login→action 'login' attributed to the member; settings write→action 'config_change' — both SERVED on the data API; delete→action 'delete' with object_name showcase_task + record_id is WRITTEN but, since 17.6.0, NOT served to a non-system reader (administrators included): the ledger serves only rows about records the reader can read, and a deleted record is readable by nobody (30c530e5, #21194)",
+          "clause": "all three ops produce audit rows with the correct action, actor and target: login→action 'login' attributed to the member; settings write→action 'config_change' — both SERVED on the data API; delete -> action 'delete' (showcase_task + record_id) is served to a reader holding view_all_audit_log (platform admins by default, #21296) and withheld from a non-holder who cannot read the deleted record (#21194).",
           "oracle": "api",
-          "verify": "GET /api/v1/data/sys_audit_log returns the login and config_change rows with action/actor(user_id)/object_name/record_id matching what each op did (fields per packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts), and returns NO row for $filter action='delete' even to the admin who deleted; the delete row's existence and attribution are proven from the store itself (the audit table in the telemetry database, read under system context or with the server stopped) — a delete row SERVED on the data API is the FAIL, and so is a delete row missing from the store",
-          "evidence": "the two served rows + the delete row's stored copy + the empty delete-filtered read"
+          "verify": "GET /api/v1/data/sys_audit_log as the admin returns the login, config_change AND delete rows, each with action / actor (user_id) / object_name / record_id matching what the op did (fields per packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts). The admin holds view_all_audit_log through ADMIN_FULL_ACCESS_CAPABILITIES, which exempts the holder from the ledger's parent-record read gate. The same $filter action='delete' read by a non-holder who cannot read the deleted record (e.g. the fresh member) returns NO row. A delete row withheld from the admin, or served to the non-holder, is the FAIL",
+          "evidence": "the admin's three served rows + the non-holder's empty delete-filtered read"
         },
         {
           "clause": "the browser renders those same rows: after a screenshot confirms the table painted, the DOM rows carry the same action/actor/object the API returned — the page shows server truth, not a recomputation",
@@ -1245,9 +1251,9 @@
           "evidence": "screenshot + the row DOM read"
         },
         {
-          "clause": "narrowing by action is server-side, not a client-side table filter — the Writes view (or an equivalent Where clause on action) constrains the result set at the server",
+          "clause": "narrowing by action is server-side, not a client-side table filter — the page's Action select (or, on the sys_audit_log object list, the Writes view or a Where clause on action) constrains the result set at the server",
           "oracle": "network",
-          "verify": "selecting the Writes view (or adding a Where clause on action) re-issues GET /api/v1/data/sys_audit_log with an action constraint in its $filter, and the table then shows only the matching events. ⛔ Do not look for an 'Action filter' dropdown — the console offers the prebuilt views plus the generic Filter Records builder, and a runner hunting the named control reads its absence as a missing capability",
+          "verify": "choosing an action in /system/audit-log's Action select re-issues GET /api/v1/data/sys_audit_log with action in its $filter (on the object list, the Writes view or a Where clause on action does the same), and the table then shows only the matching events",
           "evidence": "the filtered request + the single-row table"
         },
         {
@@ -1257,9 +1263,9 @@
           "evidence": "the drawer screenshot annotated 'before/after panels, not a diff'"
         },
         {
-          "clause": "the API twin reconciles with the page: GET /api/v1/data/sys_audit_log returns the same served events (login, config_change) with matching actor/object, and both omit the delete — a page row without a backing API row (or vice versa) is a FAIL",
+          "clause": "API and page agree row-for-row for the same principal (admin: login, config_change and delete).",
           "oracle": "api",
-          "verify": "field-by-field compare of the page's rows against the /api/v1/data/sys_audit_log bodies",
+          "verify": "field-by-field compare of the page's rows against the /api/v1/data/sys_audit_log bodies read in the same admin session — a page row without a backing API row (or vice versa) is a FAIL",
           "evidence": "API list vs page rows"
         },
         {
@@ -1291,7 +1297,8 @@
           "ref": "claude/platform-test-checklist-ocwugl"
         },
         { "revision": 2, "date": "2026-08-18", "change": "re-pointed clause 2 and step 5 at controls that exist. The item named an 'Action filter' dropdown; this console offers prebuilt filtered views (Recent / Writes / Auth / Config) plus a generic Filter Records / Where / Add filter builder. Server-side narrowing — the property the clause is actually for — is provable through the Writes view; naming a control that does not exist invites the absence-inference trap (#9453 CF-9)", "ref": "#9386" },
-        { "revision": 3, "date": "2026-10-02", "change": "re-pointed clause 1 (and the clauses that counted its three rows) at 17.6.0's ledger read rule. 30c530e5 (#21194) serves a non-system reader, administrators included, only audit rows about records it can read, so the delete row is written but never served on the data API; the 17.6.0 release-verification run measured the admin's delete-filtered read at 0 rows while the stored row carried correct attribution. The clause now asserts the login and config_change rows served, the delete row stored and NOT served; step 6's drawer check moves to an update row, since no delete row reaches the page", "ref": "#21330" }
+        { "revision": 3, "date": "2026-10-02", "change": "re-pointed clause 1 (and the clauses that counted its three rows) at 17.6.0's ledger read rule. 30c530e5 (#21194) serves a non-system reader, administrators included, only audit rows about records it can read, so the delete row is written but never served on the data API; the 17.6.0 release-verification run measured the admin's delete-filtered read at 0 rows while the stored row carried correct attribution. The clause now asserts the login and config_change rows served, the delete row stored and NOT served; step 6's drawer check moves to an update row, since no delete row reaches the page", "ref": "#21330" },
+        { "revision": 4, "date": "2026-10-05", "change": "clauses 1, 3 and 5 and steps 5-6 re-pointed (stale after 17.6.0, #21784 VF4 + FE7). 7ebb543164 (#21296, fixes #21260, 2026-10-02) gives platform admins view_all_audit_log by default (ADMIN_FULL_ACCESS_CAPABILITIES). That exempts them from the ledger's parent-record read gate, so the admin's read serves the delete row. Revision 3 was measured on 17.6.0 and encodes only #21194. Clauses 1 and 5 use the verifier's wording: the delete row is served to a view_all_audit_log holder and withheld from a non-holder who cannot read the deleted record. FE7: revision 2's 'there is no Action dropdown' is false at the console pin, because AuditLogPage has an Action select that narrows through $filter. Clause 3 and step 5 now name it beside the object list's prebuilt views. Re-read at objectui 9dfaca6543: unchanged", "ref": "#21797" }
       ]
     },
     {
@@ -1502,11 +1509,121 @@
       ]
     },
     {
+      "id": "access-security.public-form-withdrawal-layers",
+      "title": "A public form's withdrawal holds across metadata layers: an organization overlay cannot re-open a form the env-wide definition withdrew, only an explicit false withdraws, a package's shipped false withdraws, and the env-wide definition may open a package-closed form",
+      "since": "v17.7",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "anonymous (no Authorization header, no cookie) on both public form doors, GET /api/v1/forms/:slug and POST /api/v1/forms/:slug/submit",
+        "platform admin (the seeded admin), saving the form at two scopes from one session: env-wide (no active organization) and in the Default Organization, which is the organization the anonymous doors read on a single-posture boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the stock public form: examples/app-showcase/src/ui/views/inquiry.view.ts#InquiryViews, formViews.contact (enabled and allowAnonymous true, publicLink '/forms/contact-us'), served as the flattened view item showcase_inquiry.contact with its sharing at config.sharing",
+          "the stock single tenancy posture and its Default Organization, whose owner is the seeded admin (packages/plugins/plugin-auth/src/ensure-default-organization.ts#ensureDefaultOrganization). The doors resolve the organization through tenancy.defaultOrgId(), and the admin moves between scopes with POST /api/v1/auth/organization/set-active (organizationId null for env-wide). Under a walled posture the doors read no organization, and an org-scoped change of intake is refused for that reason instead (packages/metadata-protocol/src/protocol.ts#anonymousFormIntakeOrgScopeRefusal): out of this item",
+          "a boot you own (pnpm dev -- --fresh -p <port>): the steps leave an env-wide row and an organization overlay of the stock form behind, which would change access-security.public-form-intake's next run on a shared boot. Teardown is discarding the tempdir"
+        ],
+        "knownGaps": [
+          "THE RULED KNOWN LIMIT (#21835 comment 6005722623, 「保持现状，写进文档」): the anonymous doors judge a form by the name of the view item they serve, and the save check runs only on an organization-scoped save or publish. So an organization overlay that was stored before the env-wide withdrawal, or that a rollback or commit revert restores (neither is gated), and that keeps the form open under a different key or slot than the env-wide definition, can still be served. content/docs/ui/public-data-collection.mdx states it under 'Known limit.'. This item neither stages nor scores it: a run that meets it records it against that ruling, never as a FAIL and never as a new finding. Withdrawing the form in that organization's overlay closes it",
+          "acceptance[4] and acceptance[5] (package-shipped forms) have no stock fixture: the showcase ships its public form open, and no stock package ships one closed. Score both from the pins named in their verify (oracle test) and record that the verdict rests on the pins. ⛔ Do not edit a package's artifact on disk to plant one",
+          "acceptance[2] (only an explicit false withdraws) is pinned at the doors and at the write door by unit tests only; the dogfood drives explicit false switches alone, so steps 8-9 are its only end-to-end reading. Its premise is the stored body: a view save stores the authored keys and does not materialise schema defaults (packages/metadata-protocol/src/protocol.ts#projectStorableViewBody), so an omitted allowAnonymous stays absent. If step 8's env-wide read serves an allowAnonymous key at all, the premise failed: record acceptance[2] blocked(fixture) instead of scoring it",
+          "two packages that each ship a view of the same name are outside this item's fixture and are not scored here. The package rule is the one the docs page's 'Known limit: packages and names' states at the run's commit; #21934 (open when this item was written) may narrow it"
+        ]
+      },
+      "steps": [
+        "boot showcase on a fresh DB you own, on the stock posture; sign in as the admin. Read GET /api/v1/auth/get-session and record session.activeOrganizationId as ORG (the Default Organization); if it is null, read the one sys_organization row as the admin and set it active. Prove the scope server-side before every save below: the save response's message names org=ORG for an organization save and 'env-wide' for an env-wide one",
+        "the probe, anonymous, from a client with no cookie jar and no Authorization header: GET /api/v1/forms/contact-us, then POST /api/v1/forms/contact-us/submit with name set to a fresh unique marker, plus email and message; capture each status and body code. Then, as the admin, count the showcase_inquiry rows carrying that marker (GET /api/v1/data/showcase_inquiry?name=MARKER). Baseline: run the probe once on the stock form (open: 200, 201, one row)",
+        "as the admin, GET /api/v1/meta/view/showcase_inquiry.contact and keep the item with every key that starts with '_' removed. Every save below PUTs this body back to the same path and changes only config.sharing",
+        "precondition: set-active ORG; PUT the body with config.sharing.allowAnonymous true (an organization overlay that keeps the form open); run the probe",
+        "env-wide withdrawal: set-active null; PUT the body with config.sharing.allowAnonymous false, publicLink kept; run the probe",
+        "write door: set-active ORG; PUT the overlay again with allowAnonymous true (the overlay as it was before the withdrawal) and capture status and code; PUT it with allowAnonymous false and capture; PUT it with allowAnonymous true again and capture; after each refusal, GET the item at ORG and compare its config.sharing with the previous read; run the probe",
+        "the organization narrows for itself: set-active null; PUT the body with allowAnonymous true env-wide (open env-wide while the organization's overlay stays withdrawn from step 6); run the probe",
+        "explicit only, an absent switch: set-active null; PUT the body with the config.sharing.allowAnonymous key deleted (enabled true, publicLink kept); GET the item env-wide and confirm the served config.sharing carries no allowAnonymous key (the premise, see knownGaps); set-active ORG; PUT the body with allowAnonymous true and capture the status; run the probe",
+        "explicit only, no link: set-active null; PUT the body with config.sharing set to enabled false and allowAnonymous false and NO publicLink; set-active ORG; PUT the body with allowAnonymous true again and capture the status; run the probe",
+        "control, open at both layers: set-active null; PUT the body with allowAnonymous true (the stock sharing); set-active ORG; PUT allowAnonymous true; run the probe, and as the admin read the landed row's organization_id",
+        "run the pins named in automated.ref; acceptance[4] and acceptance[5] are scored from the metadata-protocol and metadata-core files"
+      ],
+      "acceptance": [
+        {
+          "clause": "an env-wide withdrawal is not re-opened by an organization overlay: with the organization's overlay open (step 4's probe served) and the env-wide definition withdrawing the form with its link kept (step 5), both doors answer 404 with code FORM_NOT_FOUND and the probe leaves no row",
+          "oracle": "api",
+          "verify": "step 4's probe is recorded first (a form closed at both layers is closed for an unrelated reason); then step 5's GET and POST status and body code, and the admin's count for step 5's marker, which is 0. Mechanism: packages/rest/src/rest-server.ts#registerFormEndpoints reads the env-wide view list beneath the organization's read and drops a candidate that packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeWithdrawnIn finds withdrawn",
+          "evidence": "the probes of steps 4 and 5 (status, code, row count) and the two save responses with the scope each names"
+        },
+        {
+          "clause": "an organization-scoped save cannot leave the withdrawn form open: re-saving the overlay as it was before the withdrawal, and re-opening it after a withdrawal, both answer 403 with code NOT_OVERRIDABLE and change nothing; the save that keeps the form withdrawn answers 200; both doors stay closed",
+          "oracle": "api",
+          "verify": "step 6's three responses (status, then the code at the top level or under error), the organization reads around each refusal (unchanged), and step 6's probe (404 FORM_NOT_FOUND twice, no row). Mechanism: packages/metadata-protocol/src/protocol.ts#anonymousFormIntakeReopenRefusal, reached from saveMetaItem and from the draft promotion of publishMetaItem; the draft-promotion half is pinned by the metadata-protocol file only",
+          "evidence": "step 6's save responses, the organization reads and the probe"
+        },
+        {
+          "clause": "only an explicit false withdraws: an env-wide definition that keeps the link but leaves allowAnonymous absent, or a sharing that names no public link, withdraws nothing, so the organization-scoped save that opens the form answers 200 and both doors serve it (GET 200, POST 201, one row)",
+          "oracle": "api",
+          "verify": "steps 8 and 9: the premise read (no allowAnonymous key served env-wide), the organization save's status, and each probe. Mechanism: packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormExplicitWithdrawals (a sharing withdraws only when it keeps a non-empty publicLink and sets enabled or allowAnonymous to false)",
+          "evidence": "the premise read, the two organization save responses and the two probes"
+        },
+        {
+          "clause": "an organization can always narrow for itself, and a form open at every layer is served: open env-wide with the organization's overlay withdrawn, both doors answer 404 FORM_NOT_FOUND; open at both layers, both doors accept and the landed row's organization_id is ORG",
+          "oracle": "api",
+          "verify": "step 7's probe (closed) and step 10's probe (open) with the landed row's organization_id",
+          "evidence": "the two probes and the landed row read"
+        },
+        {
+          "clause": "a package's shipped false withdraws (#21835 comment 6005722623, 「包内的 false 算显式关闭」): a package artifact parsed by the stack schema (strict defineStack, the default) whose form keeps its publicLink without switching enabled on carries the schema default enabled false, which counts as an explicit withdrawal, so an organization-scoped save that opens it answers 403 NOT_OVERRIDABLE and stores nothing. An artifact that reached the runtime unparsed (defineStack with strict false, a hand-built manifest) is judged as written",
+          "oracle": "test",
+          "verify": "pnpm --filter @objectstack/metadata-protocol exec vitest run --maxWorkers=2 src/protocol.org-scoped-write-refused.test.ts, the 'single: a package-shipped form' cases 'the parsed artifact carries an explicit `false` that keeps the link' and 'a schema-parsed `false` is a withdrawal: an org-scoped save that opens it is refused'; and pnpm --filter @objectstack/metadata-core exec vitest run --maxWorkers=2 src/anonymous-form-intake.test.ts, the case 'a schema-parsed `false` that keeps the link IS a withdrawal (a package artifact fails closed)'. No stock fixture (knownGaps)",
+          "evidence": "the two test runs, naming the cases above as passed"
+        },
+        {
+          "clause": "the env-wide definition may open a package-closed form (#21835 comment 6005722623, 「不算，环境级是开关」): the package artifact is part of the env-wide definition, not a layer beneath it, so an env-wide save with both switches on is accepted, the env-wide list the doors read then serves that open body as the only item of its name, and an organization-scoped save that keeps it open is accepted",
+          "oracle": "test",
+          "verify": "the same metadata-protocol run, the case 'the env-wide definition is the switch: an env-wide save opens it, and the env-wide list serves that body'. The row anchor that makes the artifact the env-wide body is packages/metadata-protocol/src/protocol.ts#envWideRawViewRows (for a form one package ships: the active env-wide row of the name, else that package's artifact). No stock fixture (knownGaps)",
+          "evidence": "the metadata-protocol run, naming the case above as passed"
+        }
+      ],
+      "negative": [
+        "a 200 or 201, or a landed row, at either door in step 5 or step 6 is the #21835 regression (an organization overlay re-opening an env-wide withdrawal): FAIL",
+        "a 200 to an organization-scoped save in step 6 that leaves the form open is a FAIL of the write door even while the doors stay closed: the platform accepted a change it will never honour",
+        "with the premise read holding, a closed door in step 8 or step 9 is a FAIL of the explicit-only rule (#21835 comment 5994082238, 「不算，写进文档」): an absent switch or a missing link withdraws nothing",
+        "a door probed with the admin's cookie or bearer token scores the admin, not the public: re-run it anonymously (auth-state-leak)",
+        "the ruled known limit (knownGaps, first entry) is not a FAIL"
+      ],
+      "traps": [
+        "auth-state-leak"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/showcase-public-form-withdrawal-layers.dogfood.test.ts ('showcase: a public form withdrawal at any metadata layer holds', 5 cases: acceptance[0], [1] and [3] end to end on a showcase boot with an organization) + packages/rest/src/public-form-withdrawal.test.ts ('a public form withdrawal is a kill switch: layering only narrows intake': the doors, including 'only an explicit false withdraws: env-wide link + enabled true with allowAnonymous absent does not close the org's open form' and 'not a withdrawal: the public link cleared env-wide leaves the organization's open form served') + packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts ('org-scoped anonymous form intake changes the anonymous doors cannot see': the write door, including 'single: a package-shipped form') + packages/metadata-core/src/anonymous-form-intake.test.ts (the anonymousFormIntakeWithdrawnIn cases). acceptance[2] has no end-to-end pin, and acceptance[4] and [5] have no stock fixture (knownGaps)"
+      },
+      "source": [
+        "packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeWithdrawnIn (the one judgement the doors and the write door share: a body of the same view name withdraws a candidate matched by slot or by slug; the package is not compared)",
+        "packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormExplicitWithdrawals (explicit only: a sharing that keeps its publicLink and sets enabled or allowAnonymous to false; a schema-parsed artifact carries the default enabled false, which counts)",
+        "packages/rest/src/rest-server.ts#registerFormEndpoints (resolveFormBySlug: the organization from tenancy.defaultOrgId(), and the env-wide view list read beneath it as the layer; a withdrawn form answers 404 FORM_NOT_FOUND on both doors)",
+        "packages/metadata-protocol/src/protocol.ts#anonymousFormIntakeReopenRefusal (the write door: 403 NOT_OVERRIDABLE, judged on the expanded body against the env-wide list and on the raw body against the row anchor; reached from saveMetaItem and from the draft promotion, never from rollbackMetaItem or revertCommit, which is the second half of the ruled known limit)",
+        "packages/metadata-protocol/src/protocol.ts#envWideRawViewRows (the row anchor, for a form one package ships: the active env-wide row of the name, else that package's artifact. How it resolves when several packages ship the name is #21934's)",
+        "content/docs/ui/public-data-collection.mdx, section '4. Withdraw a public form' (the published rules and both known limits)",
+        "#21835 (the 17.7 regression; rulings in comments 5994082238 and 6005722623) · PR #21864 (the fix, merge 3c7785d4ab) · #21934 (open when this item was written: package-identity follow-ups of the same fix)",
+        "sibling: access-security.public-form-intake owns the single-layer half (whitelist, forged-anchor strip, publicFormGrant, unpublish kills the link). This item owns how a withdrawal composes across layers"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-06",
+          "change": "new: PR #21864 made a public form's withdrawal a kill switch across metadata layers, and no item asserted it; access-security.public-form-intake covers the single-layer withdrawal only. Adds the #21835 row of #21932: an env-wide withdrawal is not re-opened by an organization overlay (both doors and the write door), only an explicit false withdraws, a package's shipped false withdraws, and the env-wide definition may open a package-closed form. The ruled known limit (#21835 comment 6005722623) is recorded as a knownGap, not a clause",
+          "ref": "#21932"
+        }
+      ]
+    },
+    {
       "id": "access-security.share-link-capability-tokens",
-      "title": "Share-link capability tokens: anon resolve renders the record minus redactFields, password/audience gates hold, revoke/expire refuse without leaking",
+      "title": "Share-link capability tokens: anon resolve renders the record minus redactFields, password/audience gates hold, revoke/expire refuse without leaking, the stored password hash never leaves the server, the password travels in the X-Share-Password header, and public answers are never cached",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1534,7 +1651,10 @@
         "mint audience:'signed_in'; anon resolve → 401 SIGN_IN_REQUIRED; mint audience:'email' and resolve with an email OFF the allowlist → refused",
         "DELETE /api/v1/share-links/<idOrToken> (revoke); anon resolve → 410 EXPIRED_OR_REVOKED; mint a short-expiry link and, after it expires, resolve → 410 — the record must never appear",
         "delete the shared record r, then anon resolve the still-live (un-passworded, link_only) token → 404 INVALID_OR_EXPIRED, byte-identical to the answer for an unknown token (fail-closed, #5190: \"that record is gone\" is itself information) — capture it beside an unknown-token resolve for the byte comparison",
-        "GET /api/v1/share-links?object=F&recordId=r as the minter vs a SECOND member — the list returns only the caller's own links"
+        "GET /api/v1/share-links?object=F&recordId=r as the minter vs a SECOND member — the list returns only the caller's own links",
+        "the stored hash never leaves: mint a password-gated link and capture the MINT response, the LIST (GET /api/v1/share-links?object=F&recordId=r as the minter) and a SUCCESSFUL resolve. Search every body for the key password_hash and for any hash-shaped value",
+        "the password travels in a header: resolve the password-gated link with the password ONLY in the X-Share-Password request header (no ?password=). Then send a wrong value in the header, then the right password as ?password= (the compatibility form). Send a CORS preflight for the resolve route from another origin, with Access-Control-Request-Headers: x-share-password",
+        "public answers are never cached: on every public resolve outcome above (200; 401 NEEDS_PASSWORD and WRONG_PASSWORD; 404 for an unknown token; 410 after revoke) and on GET /api/v1/share-links/<token>/messages (a refusal on open-framework showcase, see knownGaps; the refusal is the answer being scored here), read the response HEADERS. Then read the headers of the authenticated create, list and revoke responses"
       ],
       "acceptance": [
         {
@@ -1572,11 +1692,32 @@
           "oracle": "api",
           "verify": "minter's list contains the token; the second member's list for the same object/recordId excludes it (share-links.ts createdBy pin)",
           "evidence": "both list bodies"
+        },
+        {
+          "clause": "the stored password hash never leaves the server: no exit (the mint response, the list, the redemption result) carries password_hash or any form of the stored hash",
+          "oracle": "api",
+          "verify": "none of the captured bodies contains the key password_hash or a hash-shaped value of it (share-link-service.ts withoutPasswordHash is the one exit projection). A client reads a link's password state from the resolve route's NEEDS_PASSWORD answer, as before",
+          "evidence": "the mint, list and resolve bodies, searched in full"
+        },
+        {
+          "clause": "the password is accepted from the X-Share-Password request header, the preferred form because a header stays out of the request URL: header-only with the right password answers 200 and a wrong header value answers 401 WRONG_PASSWORD. The ?password= query form is still accepted. A cross-origin preflight allows the header by default",
+          "oracle": "api",
+          "verify": "the three resolve traces (header right → 200, header wrong → 401 WRONG_PASSWORD, query right → 200) and the preflight's Access-Control-Allow-Headers naming x-share-password (DEFAULT_CORS_ALLOW_HEADERS in plugin-hono-server; a deployment passing its own allowHeaders must add it itself)",
+          "evidence": "the three traces and the preflight response headers"
+        },
+        {
+          "clause": "public share-link answers are never cached: BOTH public routes (/:token/resolve and /:token/messages) answer Cache-Control: no-store and Vary: X-Share-Password on EVERY outcome, success and refusal alike. The authenticated create, list and revoke routes do not carry these headers",
+          "oracle": "api",
+          "verify": "each public response's headers carry exactly Cache-Control: no-store and Vary: X-Share-Password (200, 401 x2, 404, 410, and the messages refusal); the authenticated list response carries neither",
+          "evidence": "the header block of every public response and of the authenticated list response"
         }
       ],
       "negative": [
         "a resolve that returns the record after revoke/expiry, that includes a redactField, or that leaks another user's tokens in the list, is a FAIL",
-        "the /:token/messages branch is ai_conversations-only (Cloud/EE) — a knownGap, not a stock clause; do not tick it on open-framework showcase"
+        "the /:token/messages branch is ai_conversations-only (Cloud/EE) — a knownGap, not a stock clause; do not tick it on open-framework showcase",
+        "password_hash, or any stored form of the share-link password, in a mint, list or resolve body is a FAIL",
+        "a header-only correct password answering 401 NEEDS_PASSWORD is a FAIL: the route ignored the header, so a client is pushed back to putting the password in the URL",
+        "a public share-link response without Cache-Control: no-store, on ANY outcome including a refusal, is a FAIL. A cached answer can serve a password-released record to the next person on a shared browser or proxy"
       ],
       "variants": [
         "audience link_only",
@@ -1586,7 +1727,9 @@
         "redactFields stripped",
         "revoked",
         "expired",
-        "record-gone (fail-closed)"
+        "record-gone (fail-closed)",
+        "password in the X-Share-Password header",
+        "password in ?password= (compatibility)"
       ],
       "traps": [
         "wrong-persona"
@@ -1597,7 +1740,14 @@
         "packages/runtime/src/route-ledger.ts (share-links rows incl. public resolve/messages)",
         "packages/plugins/plugin-sharing/src/objects/sys-share-link.object.ts",
         "ADR-0047, ADR-0111 D8, #5190",
-        "cross-ref access-security.share-link-landing-page — the /s/:token console rendering of this surface (UI half): resolve/password/audience/revoke SEMANTICS are scored HERE, what the page renders of them is scored THERE (one defect, one count)"
+        "cross-ref access-security.share-link-landing-page — the /s/:token console rendering of this surface (UI half): resolve/password/audience/revoke SEMANTICS are scored HERE, what the page renders of them is scored THERE (one defect, one count)",
+        "packages/plugins/plugin-sharing/src/share-link-service.ts#withoutPasswordHash (the one exit projection: every copy of a link that leaves the service drops password_hash)",
+        "packages/plugins/plugin-sharing/src/share-link-routes.ts#SHARE_LINK_PUBLIC_RESPONSE_HEADERS (the plugin mount: no-store + Vary on both public routes; the x-share-password header read)",
+        "packages/runtime/src/domains/share-links.ts#PUBLIC_RESPONSE_HEADERS (the dispatcher mount: the same headers on every public outcome, including a throw outside the body try)",
+        "packages/plugins/plugin-hono-server/src/adapter.ts#DEFAULT_CORS_ALLOW_HEADERS (X-Share-Password in the default preflight allow-list)",
+        "packages/plugins/plugin-sharing/src/share-link-password.ts#hashShareLinkPassword (the stored form is the platform slow password hash; legacy forms still verify and are upgraded on the first successful redemption)",
+        "pins: packages/plugins/plugin-sharing/src/share-link-password.test.ts ('[#21839] the stored hash never leaves the server', '[#21839] how the password travels in', '[#21839] the public routes are never cached') · packages/runtime/src/domains/share-links-public-cache-headers.test.ts ('[#21839] dispatcher public share-link routes are never cached') · packages/plugins/plugin-hono-server/src/hono-plugin.test.ts ('should allow X-Share-Password by default')",
+        "content/docs/protocol/kernel/http-protocol.mdx (X-Share-Password in the allowed request headers) · #21839 · PR #21890"
       ],
       "history": [
         {
@@ -1623,6 +1773,12 @@
           "date": "2026-10-04",
           "change": "A5 record-gone leg and step 7 re-pointed to the measured answer: a deleted record's still-live link resolves 404 INVALID_OR_EXPIRED, byte-identical to an unknown token, never 410 RECORD_GONE (resolveToken's #5190 fail-closed record probe — share-link-service.ts loadRecordForServing — returns null, and the route's row probe in share-links.ts falls through to its one generic refusal, invalidOrExpired). Revoke/expiry legs unchanged (410 EXPIRED_OR_REVOKED). Stale clause found by the 17.7 pre-release runs",
           "ref": "#21735"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-06",
+          "change": "three clauses added for the rules PR #21890 landed (#21839), with a step and a negative each: the stored password hash leaves the server on no exit (mint, list, redemption); the password is accepted from the X-Share-Password header (the ?password= form is still accepted, and the default CORS allow-list carries the header); and both public routes answer Cache-Control: no-store and Vary: X-Share-Password on every outcome, while the authenticated routes do not. The messages route is scored on its refusal, since its success half stays the Cloud/EE knownGap. Existing clauses, steps and indices are unchanged",
+          "ref": "#21932"
         }
       ]
     },

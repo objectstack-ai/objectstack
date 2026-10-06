@@ -61,8 +61,20 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `2e818d0b5`, `packages/plugin-grid`; re-measured at
-  // that pin, 2026-10-04: `ObjectGrid.tsx` and `hooks/useBulkExecutor.ts` are
+  // (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+  // At `9dfaca654`, `packages/plugin-grid`; re-measured at
+  // that pin, 2026-10-05: on the hop off `2e818d0b5`, `ObjectGrid.tsx` changed
+  // in three type docblocks only (9 insertions, 6 deletions: objectui#8347
+  // re-wording its `BaseSchema` index-signature notes in the past tense), all
+  // above the selection block, which only MOVED by +3:
+  // `ObjectGrid.tsx:4813-4840` here (`4810-4837` at `2e818d0b5`), still
+  // hashing to `c88443302d40c2db739ddb235470bafa29056e2e` (hash-object of the
+  // block), re-READ with the same reading below; `hooks/useBulkExecutor.ts` is
+  // byte-identical to `2e818d0b5` and its `:298-303` still hashes to
+  // `01083348330f10a201cdf1078b4c21c236402b6a`. At `2e818d0b5`, 2026-10-04:
+  // `ObjectGrid.tsx` and `hooks/useBulkExecutor.ts` are
   // byte-identical across the hop off `ab1879721` (`git diff --quiet`), so
   // every anchor held unmoved. Re-measured at `ab1879721`, 2026-10-03. On the
   // hop off `89cad75d5`, `ObjectGrid.tsx` changed
@@ -190,7 +202,7 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
     "ADR-0092 D2's identity write guard admits). No console surface multi-selects " +
     'API keys — the grid renders no checkbox column because the object grants no ' +
     'delete affordance — and a promoted bulk revoke would fan out per row through ' +
-    'the action runner rather than hitting /batch (#7802).',
+    'the action runner rather than hitting /batch.',
   // #15873 — maintainer ruling 2026-09-07 (decision batch #64, option (a),
   // verbatim 「同意」): the data door admits `update` so an administrator can set
   // the four platform-owned columns (`require_mfa`, `parent_organization_id`,
@@ -218,12 +230,12 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // both stand.
   sys_organization:
     'Administrators set the platform-owned columns through single-record PATCH ' +
-    'and the derived update-mode import door (#15873 ruled `update`; both are ' +
+    'and the derived update-mode import door (a ruling grants `update`; both are ' +
     'column-clamped per row by ADR-0092 D2). `bulk` — /batch and the *Many ' +
     'routes — is not granted: no console surface multi-selects organizations ' +
     '(the list view declares no bulk actions and the object grants no delete ' +
     'affordance), and a promoted bulk edit would fan out per row through the ' +
-    'action runner rather than hitting /batch (#7802).',
+    'action runner rather than hitting /batch.',
 };
 
 /** Every `*.object.ts` under `packages/`, skipping build output and deps. */
@@ -283,7 +295,7 @@ function collectWhitelists(): Whitelist[] {
 
 const WHITELISTS = collectWhitelists();
 
-describe('apiMethods conformance — single-record writes imply batch (#3026)', () => {
+describe('apiMethods conformance — single-record writes imply batch', () => {
   it('scans a plausible number of declarations (guards a silently empty sweep)', () => {
     // A scan that matches nothing passes every assertion below vacuously — the
     // exact failure mode this file exists to prevent. Pin a floor instead.

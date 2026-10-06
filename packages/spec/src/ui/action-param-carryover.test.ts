@@ -14,7 +14,7 @@
 import { describe, it, expect } from 'vitest';
 import { ActionParamSchema } from './action.zod';
 
-describe('ActionParamSchema.carryOver (#11992, #11753 ruling)', () => {
+describe('ActionParamSchema.carryOver — seeded from the row, shown read-only, submitted verbatim', () => {
   describe('accept pins', () => {
     it('accepts carryOver on a field-backed defaultFromRow param and carries it in the parse output', () => {
       const r = ActionParamSchema.safeParse({

@@ -6,10 +6,23 @@ import type { SettingsManifest } from '@objectstack/spec/system';
  * Localization — workspace-wide regional defaults (ADR-0053 Phase 2 follow-up).
  *
  * The single source of truth for the platform's reference timezone, language,
- * currency, and display formats. `resolveExecutionContext` reads `timezone`
- * and `locale` from here (cascade: platform default → global → tenant) onto
- * every `ExecutionContext`, so formulas (`today()`), analytics date bucketing,
- * and rendered `datetime` instants all resolve against the org's region.
+ * country and currency. `resolveLocalizationContext` (`@objectstack/core`)
+ * reads `timezone`, `locale` and `currency` from here (cascade: platform
+ * default → global → tenant) onto every `ExecutionContext`, so formulas
+ * (`today()`), analytics date bucketing, and rendered `datetime` instants all
+ * resolve against the org's region.
+ *
+ * Display formats follow the locale. How dates, times and numbers are written,
+ * and which day a week starts on, come from `locale` (language and region), the
+ * way Salesforce derives them from a user's Locale. Four separate settings for
+ * them (`date_format`, `time_format`, `number_format`, `first_day_of_week`)
+ * were offered here until #21958 and nothing ever read them; they were retired
+ * rather than implemented (the ruling recorded on objectui#11675). Removing
+ * them is why `version` is 2: the spec's `SettingsManifest.version` contract is
+ * "increment when keys are renamed/removed". A `sys_setting` row stored for one
+ * of them is kept, never deleted. The service no longer resolves it (it does
+ * not appear in `GET /api/settings/localization`), and a write naming the key
+ * is refused `400 UNKNOWN_KEY`, the answer every undeclared key gets.
  *
  * Scope is `tenant`: one org per physical tenant (ADR-0002) sets its regional
  * defaults; the manifest `default` of each key is the platform built-in, and a
@@ -18,10 +31,10 @@ import type { SettingsManifest } from '@objectstack/spec/system';
  */
 export const localizationSettingsManifest: SettingsManifest = {
   namespace: 'localization',
-  version: 1,
+  version: 2,
   label: 'Localization',
   icon: 'Globe',
-  description: 'Default timezone, language, currency, and date/number formats.',
+  description: 'Default timezone, language, country, currency, and fiscal year.',
   scope: 'tenant',
   readPermission: 'setup.access',
   writePermission: 'setup.write',
@@ -76,45 +89,6 @@ export const localizationSettingsManifest: SettingsManifest = {
       // to nobody. The domain constrains membership; both still apply.
       pattern: '^[A-Za-z]{2}$', minLength: 2, maxLength: 2,
       valueDomain: 'iso_3166_alpha2',
-    },
-
-    // ── Formats ───────────────────────────────────────────────────────────
-    { type: 'group', id: 'formats', label: 'Formats', required: false },
-    {
-      type: 'select', key: 'date_format', label: 'Date format', required: false, default: 'YYYY-MM-DD',
-      options: [
-        { value: 'YYYY-MM-DD', label: '2026-06-17 (ISO)' },
-        { value: 'MM/DD/YYYY', label: '06/17/2026 (US)' },
-        { value: 'DD/MM/YYYY', label: '17/06/2026 (EU)' },
-        { value: 'DD.MM.YYYY', label: '17.06.2026' },
-        { value: 'DD-MMM-YYYY', label: '17-Jun-2026' },
-      ],
-    },
-    {
-      type: 'select', key: 'time_format', label: 'Time format', required: false, default: '24h',
-      options: [
-        { value: '24h', label: '24-hour (14:30)' },
-        { value: '12h', label: '12-hour (2:30 PM)' },
-      ],
-    },
-    {
-      type: 'select', key: 'number_format', label: 'Number format', required: false, default: '1,234.56',
-      description: 'Grouping and decimal separators for displayed numbers.',
-      options: [
-        { value: '1,234.56', label: '1,234.56 (comma / dot)' },
-        { value: '1.234,56', label: '1.234,56 (dot / comma)' },
-        { value: '1 234,56', label: '1 234,56 (space / comma)' },
-        { value: '1,23,456.78', label: '1,23,456.78 (Indian)' },
-      ],
-    },
-    {
-      type: 'select', key: 'first_day_of_week', label: 'First day of week', required: false, default: 'monday',
-      description: 'Anchors weekly analytics buckets and calendar grids.',
-      options: [
-        { value: 'monday', label: 'Monday (ISO)' },
-        { value: 'sunday', label: 'Sunday' },
-        { value: 'saturday', label: 'Saturday' },
-      ],
     },
 
     // ── Finance ───────────────────────────────────────────────────────────

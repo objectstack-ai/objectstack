@@ -232,18 +232,21 @@ describe('showcase: seeded invoice/line owner isolation on the shipped contribut
         expect(foreign.owner).not.toBe(p.email);
         expect(foreign.status).not.toBe('paid');
         const target = await lineUnder(foreign.id);
+        // The holder cannot read a line under a foreign invoice: on the write
+        // doors that row answers what a nonexistent id answers (ruling A).
         const r = await stack.apiAs(tok(), 'PATCH', `/data/showcase_invoice_line/${target.id}`, { quantity: 9 });
-        expect(r.status, 'foreign line PATCH').toBe(403);
-        expect(((await r.json()) as any)?.code).toBe('PERMISSION_DENIED');
+        expect(r.status, 'foreign line PATCH').toBe(404);
+        expect(((await r.json()) as any)?.code).toBe('RECORD_NOT_FOUND');
         const after = await ql.findOne('showcase_invoice_line', { where: { id: target.id }, context: SYS });
         expect(after?.quantity, 'the foreign line is unchanged').toBe(target.quantity);
       });
 
       it('cannot re-own a foreign invoice to itself', async () => {
         const foreign = await invoice(p.foreignUnpaidInvoice);
+        // A foreign invoice is a row this holder cannot read (ruling A).
         const r = await stack.apiAs(tok(), 'PATCH', `/data/showcase_invoice/${foreign.id}`, { owner: p.email });
-        expect(r.status).toBe(403);
-        expect(((await r.json()) as any)?.code).toBe('PERMISSION_DENIED');
+        expect(r.status).toBe(404);
+        expect(((await r.json()) as any)?.code).toBe('RECORD_NOT_FOUND');
         expect((await invoice(p.foreignUnpaidInvoice)).owner, 'owner unchanged').toBe(foreign.owner);
       });
 

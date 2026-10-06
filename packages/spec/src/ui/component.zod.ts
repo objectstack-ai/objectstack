@@ -68,6 +68,11 @@ import { ChartDrillDownSchema, ChartGroupBySchema } from './chart.zod';
 // [#21464] `object-metric.compareTo.kind` is the dashboard widget comparison's
 // own `kind` vocabulary, by reference — the executor's two kinds.
 import { DashboardWidgetSchema } from './dashboard.zod';
+// [#21464] `object-metric.drillDown.report` is the report contract itself, by
+// reference (decision card #21704, fork 1, letter B): a joined report refuses a
+// block that binds no dataset, so a report this schema admits is one the drill
+// drawer draws.
+import { ReportSchema } from './report.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
@@ -825,7 +830,18 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `2e818d0b5`; re-derived at that pin 2026-10-04 —
+     * (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+     * every objectui file this record cites is byte-identical across the hop
+     * from `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+     * At `9dfaca654`; re-derived at that pin 2026-10-05 —
+     * `containers.tsx` changed across the hop from `2e818d0b5` (89 insertions,
+     * 0 deletions: objectui#11619's record picture in the record chrome — three
+     * import lines at the top of the file, and the `recordPictureUrl` helpers
+     * and the `page:header` picture read below both anchors), so both anchors
+     * were re-READ rather than carried, and BOTH MOVED down three lines with
+     * their text byte-identical: the icon block `945-951` -> `948-954` and the input
+     * `1004` -> `1007`; `lib/lazy-icon.tsx` is byte-identical. At `2e818d0b5`,
+     * re-derived there 2026-10-04 —
      * every objectui file this record cites is byte-identical across the hop
      * from `ab1879721` (`git diff --quiet`), so both anchors held unmoved. At
      * `ab1879721`, re-derived there 2026-10-03, `containers.tsx` changed
@@ -869,12 +885,12 @@ export const PageTabsProps = strictObject({
      * lines byte-identical and the registration input `789` -> `912` with its
      * LINE rewritten — it declares `of: 'object'` and carries a longer
      * description — while the member list this record cites stayed
-     * unchanged): `containers.tsx:945-951`
+     * unchanged): `containers.tsx:948-954`
      * renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `TabsTrigger`, left of the label span (`mr-1.5 h-3.5 w-3.5 shrink-0
      * opacity-70`, `aria-hidden`), and the renderer's registration publishes
-     * the key to the Studio block designer at `:1004` (the `items` input,
+     * the key to the Studio block designer at `:1007` (the `items` input,
      * documented as `[{ label, value?, icon?, count?, visibleWhen?, children
      * }]`).
      *
@@ -1036,7 +1052,13 @@ export const PageCardProps = strictObject({
  * declarations identical.
  *
  * Each clause is read off the objectui pin this repo builds against
- * (`.objectui-sha` = `2e818d0b51ec`, re-read there 2026-10-04: across the hop
+ * (`.objectui-sha` = `0abd4f9f8769`, re-read there 2026-10-05:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9dfaca654311` (`git diff --quiet`), so every anchor held unmoved.
+ * At `9dfaca654311`, re-read there 2026-10-05: across the hop
+ * from `2e818d0b51ec` all four `record-*.tsx` renderers and the three
+ * `permissions` files are byte-identical (`git diff --quiet`), so NO anchor
+ * below moved. At `2e818d0b51ec`, re-read there 2026-10-04: across the hop
  * from `ab1879721595` all four `record-*.tsx` renderers and the three
  * `permissions` files are byte-identical (`git diff --quiet`), so NO anchor
  * below moved. At `ab1879721595`, re-read there 2026-10-03: across the hop
@@ -2232,15 +2254,20 @@ export const RecordLineItemsProps = lazySchema(() => strictObject({
   guidance: {
     // The four detail-entry keys this panel does not read — the spellings an
     // author moving a child collection over from `object-master-detail-form`
-    // carries along. Measured at the pin: the panel hands the grid no
-    // `add_label` / `sort_field` and no `onRowExpand` (`:694-710`, `:806-817`).
+    // carries along. Measured at the `.objectui-sha` pin `9dfaca654311`: the
+    // panel hands the grid no `addLabel` / `sortField` and no `onRowExpand`
+    // (`plugin-form/src/LineItemsPanel.tsx:696-720`, `:816-827`). The grid's
+    // own keys are camelCase there (objectstack-ai/objectui#11610); earlier
+    // pins measured the same absence under `add_label` / `sort_field`.
     // `sortField` has since left the detail entry too (#21589, a tombstone
     // there): the line-position field is derived from the child object and
-    // never authored, so its answer names no block that takes it.
+    // never authored, so its answer names no child-record block that takes it.
+    // [#21768] An inline `grid` form field does take one, for the rows of its
+    // own value rather than child records — hence "for child records" below.
     addLabel: '`record:line_items` does not read `addLabel`: its grid draws the built-in, localized '
       + 'Add button. `addLabel` belongs to an `object-master-detail-form` detail entry.',
     sortField: '`record:line_items` does not read `sortField`: its grid stamps no line position, so a '
-      + 'drag-reorder is not saved. No block takes an authored `sortField`: an '
+      + 'drag-reorder is not saved. No block takes an authored `sortField` for child records: an '
       + '`object-master-detail-form` detail entry derives the line-position field from the child '
       + `object's ${INLINE_GRID_SORT_FIELD_LIST} field.`,
     formFields: '`record:line_items` draws an editable grid only, with no per-row expand form, so it '
@@ -2329,7 +2356,18 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `2e818d0b5`; re-derived at that pin 2026-10-04 —
+     * (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+     * every objectui file this record cites is byte-identical across the hop
+     * from `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+     * At `9dfaca654`; re-derived at that pin 2026-10-05 —
+     * `containers.tsx` changed across the hop from `2e818d0b5` (89 insertions,
+     * 0 deletions: objectui#11619's record picture in the record chrome — three
+     * import lines at the top of the file, and the `recordPictureUrl` helpers
+     * and the `page:header` picture read below both anchors), so both anchors
+     * were re-READ rather than carried, and BOTH MOVED down three lines with
+     * their text byte-identical: the icon block `1170-1176` -> `1173-1179` and the input
+     * `1219` -> `1222`; `lib/lazy-icon.tsx` is byte-identical. At `2e818d0b5`,
+     * re-derived there 2026-10-04 —
      * every objectui file this record cites is byte-identical across the hop
      * from `ab1879721` (`git diff --quiet`), so both anchors held unmoved. At
      * `ab1879721`, re-derived there 2026-10-03, `containers.tsx` changed
@@ -2374,12 +2412,12 @@ export const PageAccordionProps = strictObject({
      * lines byte-identical and the registration input `966` -> `1116` with its
      * LINE rewritten — it declares `of: 'object'` and carries a longer
      * description — while the member list this record cites stayed
-     * unchanged): `containers.tsx:1170-1176`
+     * unchanged): `containers.tsx:1173-1179`
      * renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `AccordionTrigger`, grouped with the label in the trigger's one wrapping
      * span, and the renderer's registration publishes the key to the Studio
-     * block designer at `:1219` (the `items` input, documented as
+     * block designer at `:1222` (the `items` input, documented as
      * `[{ label, icon?, collapsed?, children }]`).
      *
      * Vocabulary is Lucide, resolved through objectui's `LazyIcon`
@@ -2662,10 +2700,17 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `2e818d0b5`; re-derived at that pin 2026-10-04 —
-   * `button.tsx`, `lib/lazy-icon.tsx`, `renderers/action/resolve-icon.ts` and the
-   * generated `lucide-record-icon-names.ts` are all byte-identical to `ab1879721`
-   * (`git diff --quiet`) across the hop onto this pin, so every anchor below
+   * (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+   * At `9dfaca654`; re-derived at that pin 2026-10-05 —
+   * `button.tsx` (both the `renderers/form` registration and the `ui`
+   * primitive), `lib/lazy-icon.tsx`, `renderers/action/resolve-icon.ts` and
+   * the generated `lucide-record-icon-names.ts` are all byte-identical to
+   * `2e818d0b5` (`git diff --quiet`) across the hop onto this pin, so every
+   * anchor below holds unmoved; at `2e818d0b5`, re-derived there 2026-10-04,
+   * they were all byte-identical to `ab1879721`
+   * (`git diff --quiet`) across the hop onto that pin, so every anchor below
    * holds unmoved; at `ab1879721`, re-derived there 2026-10-03, they were
    * all byte-identical to `89cad75d5`
    * across the hop onto that pin, so every anchor below holds unmoved and was
@@ -3141,9 +3186,15 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * had no row for — `action:button`, `action:group`, `action:menu`,
  * `action:icon`, `element:definition-list`, `element:repeater`
  * (`core/src/registry/public-blocks.ts:117-122` at the pin this repo builds
- * against, `.objectui-sha` = `2e818d0b5`; first measured at `.objectui-sha`
- * pin `f8a9d0fb0`, every read point below re-derived at the current pin
- * 2026-10-04: every objectui file this record cites is byte-identical across
+ * against, `.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+ * At `9dfaca654`; first measured at `.objectui-sha`
+ * pin `f8a9d0fb0`, every read point below re-derived at that pin
+ * 2026-10-05: every objectui file this record cites is byte-identical across
+ * the hop from `2e818d0b5` (`git diff --quiet`), so every anchor held
+ * unmoved. At `2e818d0b5`, 2026-10-04: every objectui file this record cites
+ * is byte-identical across
  * the hop from `ab1879721` (`git diff --quiet`), so every anchor held
  * unmoved. At `ab1879721`, 2026-10-03: `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`,
  * `basic/data-list.tsx` and `ui/button.tsx` are byte-identical to `89cad75d5`
@@ -3524,44 +3575,259 @@ export type ActionIconProps = z.input<typeof ActionIconPropsSchema>;
 export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
 
 /**
- * The member list `action:group` and `action:menu` both read — a LIST, as the
- * renderers read it (`schema.actions || []`, then `.filter` / `.map`). Both
- * registrations published the input as `type: 'object'` through `db11afd49`;
- * since objectui#11168 slice 1 both publish `type: 'array', of: 'object'`, the
- * shape declared here.
+ * [#21464] The members of `action:group` / `action:menu` — the S-final stage,
+ * per the maintainer's ruling on the decision card #21704, fork 5, letter A
+ * (record 5979239990): the measured read set, `action:button`'s keys by `type`,
+ * with the rows' prescriptions; `outcomeMessages`, a member `className` and
+ * `properties.params` refused; `outcomeMessages` undeclared on all four action
+ * blocks alike. Until this stage each member was an open record
+ * (`z.record(z.string(), z.unknown())`), so a misspelled key, a node-style
+ * `actionType` or an `endpoint` passed and the container drew and ran the
+ * member without it.
+ *
+ * The list itself is what both renderers read (`schema.actions || []`, then
+ * `.filter` / `.map`); both registrations publish it as `type: 'array', of:
+ * 'object'` since objectui#11168 slice 1. A bare string is refused: an action
+ * NAME list is `record:quick_actions`' `actionNames`, and a string member would
+ * draw an unlabeled button that runs nothing.
+ *
+ * ## The read set, measured (not transcribed from `UIActionSchema`)
  *
  * Each member is an action object the container draws and runs ITSELF, never
- * through `SchemaRenderer`, so a member is not a page component and this row
- * does not judge its keys: the members' value contract is the runner's. What
- * the containers read off a member, at the pin: `visible` / `disabled` /
- * `enabled`, `icon`, `variant`, `className`, `label` (falling back to `name`),
- * `tags` (a `separator-before` tag draws a divider), `name` (the React key) and
- * the runner forward — which hands the runner the member's own `type`, not
- * `actionType` (a member is an action entry, and an action entry's executor is
- * `type`), its `objectName`, and its static values off the member's OWN
- * `properties.params`, evaluated by the container
- * (`readMemberStaticParamValues`, `static-params.ts:142-148`). A bare string
- * is refused here: an action NAME list is `record:quick_actions`'
- * `actionNames`, and a string member would render as an unlabeled button that
- * runs nothing.
+ * through `SchemaRenderer`, so it is not a page component. Read at the
+ * `.objectui-sha` pin `2e818d0b51ec` (`components/src/renderers/action/`; every
+ * file byte-identical from `ab1879721595`, where the fork was measured, and at
+ * objectui `main` `2abec3a96`):
+ *
+ * - **drawn**, in `action-group.tsx` — the inline button (`InlineActionButton`,
+ *   `:91-174`) and the dropdown item (`DropdownActionItem`, `:188-247`) — and in
+ *   `action-menu.tsx`'s item (`ActionMenuItem`, `:92-150`): `visible` (the
+ *   shared fail-closed gate, group `:81-86`, menu `:78-85`), `disabled`
+ *   (group `:119` + `:159-165`, `:208` + `:219-223`; menu `:108` + `:132-136`),
+ *   `icon` (group `:122`, `:213`; menu `:111-115`), `label` falling back to
+ *   `name` (group `:171`, `:243`; menu `:147`), `variant` (group inline `:123`,
+ *   `primary` drawn as `default`; the dropdown and menu items `:236` / `:142`,
+ *   where `destructive` draws the item red) and `tags` (`:224` / `:408`: a
+ *   `separator-before` tag draws a divider above the item);
+ * - **`size`**, on an `action:group` member only: its inline button reads it,
+ *   `md` drawn as `default` (`:124`). An `action:menu` item reads no `size`,
+ *   so that member declares none — the `action:icon` precedent, measured per
+ *   block;
+ * - **placed**: `locations`, through `actionRendersAt` on the group (`:304`),
+ *   and forwarded by both;
+ * - **forwarded** to the runner (group `:329-382`, menu `:264-328`), each
+ *   value as `action:button` declares it: the member's own `type` (the
+ *   executor — a member is an action entry, whose executor is `type`, where a
+ *   node spells it `actionType`), `name`, `label`, `description`, `target`,
+ *   `openIn`, `method`, `params` (an array is the input list; an object is
+ *   the request payload of a `type: 'api'` member only, `static-params.ts:172-183`,
+ *   and refused on every other member — below),
+ *   `bodyExtra`, `bodyShape`, `operation`, `patch`, `confirmText`,
+ *   `successMessage`, `errorMessage`, `refreshAfter`, `locations`, `toast`,
+ *   `resultDialog`, `onSuccess` and `objectName`.
+ *
+ * `undoable` and `recordIdField`, which `action:button` forwards, are not
+ * forwarded by either container, so a member declares neither.
+ *
+ * ## Read, and refused anyway — by the ruling, or with the rows' prescription
+ *
+ * - `outcomeMessages` (forwarded since objectui#11344, group `:363`, menu
+ *   `:307`): undeclared on all four action blocks, as one decision, until an
+ *   inline writer appears;
+ * - a member `className` (group `:145`, `:237`; menu `:143`) and the member's
+ *   own `properties.params` bag of static values (`readMemberStaticParamValues`,
+ *   `static-params.ts:142-148`, from group `:329` and menu `:264`);
+ * - `endpoint` (forwarded, group `:346`, menu `:290`): read by no console `api`
+ *   handler, refused onto `target` through the rows' alias table;
+ * - `enabled` (group `:120`, `:209`; menu `:109`), the legacy fallback beside
+ *   `disabled`, and `autoTrigger` (menu `:189`, through `useAutoTriggerOnce`;
+ *   the group never reads it), a host transport flag — each with the rows'
+ *   prescription.
+ *
+ * A code-composed `onClick` (group `:314`, menu `:249`) is a function, which
+ * metadata cannot carry.
+ *
+ * ## `params` takes the array form only, unless the member's `type` is `api`
+ *
+ * [#21855] The rows' value ratchet for this one member, with its own
+ * inventory. A member's `params` is its `ActionParam[]` input list: both
+ * containers forward an array as `actionParams` (group `:330-335`, menu
+ * `:265-270`; the renderer directory is byte-identical at the current
+ * `.objectui-sha` pin `0abd4f9f8` and at objectui `main` `f1a177c41`). Any
+ * other value goes through `readActionEntryParamValues`
+ * (`static-params.ts:172-182`), which returns it unchanged for a `type: 'api'`
+ * member — the inline-action payload window (#5777), as the request payload
+ * until 18 — and for every other `type`, an absent one included, returns
+ * nothing (with a development-build warning only). So an object `params` on a
+ * non-`api` member parsed here and was dropped at run time: no error and no
+ * effect. The maintainer's ruling A on objectui#10289 (record 5825589480)
+ * keeps `params` to one shape and declares no other value-bag key, and fork
+ * 5 A on #21704 refused the member's `properties.params`, so a member has no
+ * static-values spelling at all: {@link actionContainerMemberParamsFitType}
+ * refuses a non-array `params` on a non-`api` member at the gate, with the
+ * member prescription the `properties` guidance gives — static values belong
+ * on an `action:button` node, whose `params` object carries them. The value
+ * stays `z.unknown()` (the runner reason): the `api` window and the array's
+ * elements are untouched. Census before the change: no `action:group` /
+ * `action:menu` member authors a non-array `params` on a non-`api` type in
+ * objectstack, objectui (pin and `main`) or hotcrm, outside objectui's own
+ * probes of the drop.
+ *
+ * The two members differ only in `size`, so one shape builder serves both
+ * ({@link actionContainerMemberShape}); each container's member is built once.
+ * A factory the rows call, not a {@link lazySchema}, for the reason
+ * {@link objectGanttMarker} gives.
  */
+function actionContainerMemberShape() {
+  return {
+    name: z.string().optional()
+      .describe('Action name, forwarded to the action runner, and the item\'s text when there is no `label`. Optional: a member is not a registered object action, and the runner dispatches a nameless one on its `type`'),
+    label: z.string().optional()
+      .describe('The item\'s text. A literal string, placed as-is — localize through the translation bundle entry for this component id'),
+    icon: z.string().optional()
+      .describe('Lucide icon name drawn before the label, resolved through the shared action-icon resolver (an unknown name draws no icon)'),
+    type: z.string().optional()
+      .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. A member is an action entry, so its executor is `type` (on an `action:button` node it is `actionType`)'),
+    variant: z.enum([...BUTTON_PRIMITIVE_VARIANTS, 'primary']).optional()
+      .describe('Item variant — the Button primitive\'s vocabulary, plus `primary` (drawn as `default`). An inline `action:group` button draws it (falling back to the group\'s `variant`); a dropdown or `action:menu` item draws `destructive` red and every other variant plainly'),
+    visible: actionCondition().optional()
+      .describe('Visibility predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope, evaluated against the row the host binds; the item is not drawn when it is FALSE, and a predicate that fails to evaluate hides it. Omit for always-visible'),
+    disabled: actionCondition().optional()
+      .describe('Disabled predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope; the item is drawn but cannot be pressed while it is TRUE, and a predicate that fails to evaluate disables it. Omit for never-disabled'),
+    tags: z.array(z.enum(['separator-before'])).optional()
+      .describe('Item tags — `separator-before` draws a divider above the item in a dropdown or menu (not above the first item); no other tag is drawn'),
+    params: z.unknown().optional()
+      .describe('Action parameters, forwarded to the runner: an array is the list of inputs to collect from the user before the action runs. Only a `type: \'api\'` member takes any other value, forwarded as its request payload (use `bodyExtra` for that); on every other member a non-array `params` is refused — author an action with static parameter values as its own `action:button` node'),
+    description: z.string().optional()
+      .describe('Action description, forwarded to the runner — the parameter dialog shows it under its title'),
+    target: z.string().optional()
+      .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `type`'),
+    openIn: z.enum(['self', 'new-tab']).optional()
+      .describe('For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab'),
+    method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
+    bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
+    bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
+    operation: z.unknown().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`'),
+    patch: z.unknown().optional().describe('Field values the declarative `operation` writes, forwarded to the runner'),
+    confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
+    successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
+    errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),
+    refreshAfter: z.boolean().optional().describe('Refresh the surrounding data after the action runs'),
+    locations: z.array(ActionLocationSchema).optional()
+      .describe('Action locations, forwarded to the runner — an `action:group` with a `location` draws only the members that list it, and the console uses them to tell a record-scoped action from an object-level one'),
+    toast: z.unknown().optional().describe('Toast behaviour, forwarded to the runner'),
+    resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
+    onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
+    objectName: z.string().optional()
+      .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
+  };
+}
+
 /**
- * [#21464] The members of `action:group` / `action:menu`: HELD as open
- * records, in the enumeration pin's ledger as a fork the S-objectui-held stage
- * reported. Each member is objectui's `UIActionSchema`
- * (`types/src/ui-action.ts:571` at the `.objectui-sha` pin `ab1879721595`),
- * drawn and run by the container itself (`action-group.tsx:91-249`,
- * `:303-382`; `action-menu.tsx:80-147`, `:264-328`, `:408`). Measured from
- * those reads, the key set this section's method gives is mostly
- * `action:button`'s, keyed by `type` rather than `actionType` (a member is not
- * a node) — but it also takes keys whose declaration the rows
- * above leave undecided: `outcomeMessages` (forwarded, and recorded on
- * `action:button` / `action:icon` as "a contract decision, not a pin
- * re-measure"), a member `className` (a node key on the rows), the member's own
- * `properties.params` bag of static values (`static-params.ts:142-160`) and
- * `endpoint` (refused on the rows since #21005).
+ * The prescriptions a container member answers an undeclared key with. The
+ * `enabled` one is the rows' own; the rest name what a member writes instead.
  */
-const actionMemberList = () => z.array(z.record(z.string(), z.unknown()));
+const actionContainerMemberGuidance = (container: 'action:group' | 'action:menu') => ({
+  enabled: ACTION_NODE_GUIDANCE.enabled,
+  autoTrigger: container === 'action:menu'
+    ? ACTION_NODE_GUIDANCE.autoTrigger
+    : '`autoTrigger` is a host transport flag, not metadata: a host sets it on a schema it composes at runtime '
+      + 'to run an action once on mount. An `action:group` member does not read it at all, so the action never '
+      + 'runs on mount. Remove it.',
+  outcomeMessages:
+    '`outcomeMessages` is not a key an inline action declares: per-outcome success copy is declared on an '
+    + 'object\'s registered action (`actions[]`), and on none of the four action blocks yet. Write the success '
+    + 'toast as `successMessage`.',
+  className:
+    'A member is drawn by its container, not as a page component, and carries no `className`. Style it with its '
+    + '`variant` (`destructive` draws it red), or style the whole container with the node\'s own `className`.',
+  properties:
+    'A member carries no `properties` bag: its static parameter values (`properties.params`) are not part of the '
+    + 'inline action vocabulary. For a `type: \'api\'` member\'s request body write `bodyExtra`; to run an action '
+    + 'with static parameter values, author it as its own `action:button` node, whose `params` object carries them.',
+  undoable:
+    '`undoable` reaches the runner only from an `action:button` node: a container member does not forward it. '
+    + 'Author the action as its own `action:button`, or remove the key.',
+  recordIdField:
+    '`recordIdField` reaches the runner only from an `action:button` node: a container member does not forward '
+    + 'it. Author the action as its own `action:button`, or remove the key.',
+});
+
+/** What a container member's undeclared keys used to cost. */
+const actionContainerMemberHistory = (container: string) =>
+  `Until this shape was declared, each \`${container}\` member was an open record: a misspelled key passed, `
+  + 'and the container drew and ran the member without it.';
+
+/**
+ * [#21855] A container member's `params` fits its `type`: the array form only,
+ * unless the member's `type` is `api` (see "`params` takes the array form only"
+ * on {@link actionContainerMemberShape}). A refinement on the member, so the
+ * issue lands at `actions.N.params`; the unknown-key refusal stays terminal
+ * (`strictObject`), so a member already refused for a key is not judged twice.
+ */
+function actionContainerMemberParamsFitType(container: 'action:group' | 'action:menu') {
+  return (member: { type?: string; params?: unknown }, ctx: z.RefinementCtx): void => {
+    const { params, type } = member;
+    if (params === undefined || Array.isArray(params) || type === 'api') return;
+    const written = params !== null && typeof params === 'object' ? 'the object written here' : 'the value written here';
+    const typed = type === undefined ? 'this member names no `type`' : `this member's \`type\` is \`'${type}'\``;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['params'],
+      message:
+        `\`params\` on an \`${container}\` member is the list of inputs the runner collects from the user before the `
+        + 'action runs — an `ActionParam[]` array. The container forwards any other `params` value only for a '
+        + `\`type: 'api'\` member, as its request payload (write \`bodyExtra\` for that), and ${typed}, so `
+        + `${written} is dropped and never reaches the action. A member's static parameter values are not part of the `
+        + 'inline action vocabulary: to run an action with static parameter values, author it as its own '
+        + '`action:button` node, whose `params` object carries them.',
+    });
+  };
+}
+
+/** The aliases a container member answers: the rows' table, with the executor key turned round. */
+const ACTION_CONTAINER_MEMBER_ALIASES = {
+  actionType: 'type',
+  visibleWhen: 'visible',
+  visibility: 'visible',
+  ...ACTION_TARGET_ALIASES,
+} as const;
+
+/** [#21464] One `action:group` member: {@link actionContainerMemberShape}, plus the inline button's `size`. */
+function buildActionGroupMember() {
+  return strictObject({
+    surface: 'this `action:group` member',
+    history: actionContainerMemberHistory('action:group'),
+    aliases: ACTION_CONTAINER_MEMBER_ALIASES,
+    guidance: actionContainerMemberGuidance('action:group'),
+  }, {
+    ...actionContainerMemberShape(),
+    size: z.enum([...BUTTON_PRIMITIVE_SIZES, 'md']).optional()
+      .describe('Inline button size — the Button primitive\'s vocabulary, plus `md` (drawn as `default`), falling back to the group\'s `size`. A dropdown item reads no size'),
+  }).superRefine(actionContainerMemberParamsFitType('action:group'));
+}
+let actionGroupMemberOnce: ReturnType<typeof buildActionGroupMember> | undefined;
+/** The one {@link buildActionGroupMember} instance. */
+const actionGroupMember = () => (actionGroupMemberOnce ??= buildActionGroupMember());
+
+/** [#21464] One `action:menu` member: {@link actionContainerMemberShape}; a menu item reads no `size`. */
+function buildActionMenuMember() {
+  return strictObject({
+    surface: 'this `action:menu` member',
+    history: actionContainerMemberHistory('action:menu'),
+    aliases: ACTION_CONTAINER_MEMBER_ALIASES,
+    guidance: {
+      ...actionContainerMemberGuidance('action:menu'),
+      size:
+        'An `action:menu` item reads no `size`: each member is drawn as a menu item, and only the trigger is a sized '
+        + 'button (the menu\'s own `size`). Remove it, or put the action in an `action:group`, whose inline buttons '
+        + 'read a member\'s `size`.',
+    },
+  }, actionContainerMemberShape()).superRefine(actionContainerMemberParamsFitType('action:menu'));
+}
+let actionMenuMemberOnce: ReturnType<typeof buildActionMenuMember> | undefined;
+/** The one {@link buildActionMenuMember} instance. */
+const actionMenuMember = () => (actionMenuMemberOnce ??= buildActionMenuMember());
 
 /**
  * `action:group` — a row or dropdown of actions
@@ -3619,8 +3885,8 @@ export const ActionGroupPropsSchema = lazySchema(() => strictObject({
       + 'Each member action\'s own `name` is what identifies it. Remove the key.',
   },
 }, {
-  actions: actionMemberList().optional()
-    .describe('The actions in this group, in order — each an action object the group draws and runs itself (`name`, `label`, `icon`, `type`, `target`, `visible`, `disabled`, …); a member\'s executor is its `type`'),
+  actions: z.array(actionGroupMember()).optional()
+    .describe('The actions in this group, in order — each an action object the group draws and runs itself (`name`, `label`, `icon`, `type`, `target`, `visible`, `disabled`, `size`, …); a member\'s executor is its `type`'),
   display: z.enum(['inline', 'dropdown']).optional()
     .describe('Display mode: `inline` renders every action as a button row; `dropdown` renders one trigger button and lists the actions in its menu (renderer default: `inline`)'),
   location: ActionLocationSchema.optional()
@@ -3677,7 +3943,7 @@ export const ActionMenuPropsSchema = lazySchema(() => strictObject({
   guidanceSets: [COMPONENT_NODE_KEYS_GUIDANCE],
   aliases: { visibleWhen: 'visible', visibility: 'visible' },
 }, {
-  actions: actionMemberList().optional()
+  actions: z.array(actionMenuMember()).optional()
     .describe('The menu\'s actions, in order — each an action object the menu draws and runs itself (`name`, `label`, `icon`, `type`, `target`, `visible`, `disabled`, `tags`, …); a member\'s executor is its `type`'),
   label: z.string().optional()
     .describe('Trigger text and accessible label; omit for an icon-only trigger labelled "More actions". A literal string — localize through the translation bundle entry for this component id'),
@@ -4014,13 +4280,21 @@ const GridOperationsSchema = lazySchema(() => strictObject({
  * control `schema.editable` in `ObjectGrid.tsx`. It was declared ahead of its
  * reader on purpose (the BUILD objectui#11068 chose), and its describe carried
  * the `[EXPERIMENTAL — not enforced]` marker that said so. Re-measured at the
- * pin this repo builds against (`.objectui-sha` = `2e818d0b5`, 2026-10-04;
- * `ObjectGrid.tsx` and `data-table.tsx` are byte-identical across the hop
+ * pin this repo builds against (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+ * `ObjectGrid.tsx` and `data-table.tsx` are byte-identical across the hop from
+ * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved, and the same
+ * method still finds 15 hit lines against 3 for the control.
+ * At `9dfaca654`, 2026-10-05;
+ * `data-table.tsx` is byte-identical across the hop from `2e818d0b5` and
+ * `ObjectGrid.tsx` changed there in three type docblocks only (+9/-6,
+ * objectui#8347), above the read, which MOVED `5458` -> `5461` byte-identical;
+ * at `2e818d0b5`, 2026-10-04, `ObjectGrid.tsx` and `data-table.tsx` were
+ * byte-identical across the hop
  * from `ab1879721`, so every anchor below held unmoved, 2026-10-03 at
  * `ab1879721`): the BUILD landed — objectui `154075ab1` (objectui#11068), inside
  * `89cad75d5570..ab1879721595` — and the grid reads the key. The same method
- * finds 0 hit lines at `89cad75d5570` and 15 at `ab1879721595` and at this pin, against 3 for the
- * control `schema.editable` in `ObjectGrid.tsx` at both: `ObjectGrid.tsx:5458`
+ * finds 0 hit lines at `89cad75d5570` and 15 at `ab1879721595`, at `2e818d0b51ec` and at this pin, against 3 for the
+ * control `schema.editable` in `ObjectGrid.tsx` at each: `ObjectGrid.tsx:5461`
  * hands `schema.keyboardNavigation ?? inlineEditable` to the `data-table` it
  * renders, and `components/src/renderers/complex/data-table.tsx` acts on it.
  * So the marker is gone, as the member's record prescribed; see the member.
@@ -4099,12 +4373,18 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * same members, and objectui's grid follows this declaration.
    *
    * ⚠️ That gap is closed at the pin this repo builds against (`.objectui-sha`
-   * = `2e818d0b5`, re-measured 2026-10-04: `ObjectGrid.tsx` is byte-identical
+   * = `0abd4f9f8`, re-read there 2026-10-05:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+   * At `9dfaca654`, re-measured 2026-10-05: `ObjectGrid.tsx` changed across the
+   * hop from `2e818d0b5` in three type docblocks only (+9/-6, objectui#8347),
+   * all above both reads, which MOVED by +3 byte-identical; at `2e818d0b5`,
+   * re-measured 2026-10-04, it was byte-identical
    * across the hop from `ab1879721`, where it was measured 2026-10-03): objectui#11227 (carried by objectui
    * `6158e4c93`) resolves both members against the display locale before they
    * reach `DataEmptyState` —
    * `resolveInlineI18nLabel(authoredEmptyState?.title, displayLocale)` and the
-   * same for `message` (`ObjectGrid.tsx:6468-6469`, drawn at `:6485-6486`) — so
+   * same for `message` (`ObjectGrid.tsx:6471-6472`, drawn at `:6488-6489`) — so
    * both `I18nLabel` forms draw, and a locale map with no usable entry keeps
    * that member's default. At `89cad75d5570` the two still reached
    * `DataEmptyState` raw.
@@ -4481,13 +4761,21 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * `ComponentPropsMap` key. This record said to drop the marker in the change
    * that lands the BUILD at the pin, and it is dropped here.
    *
-   * Read at the pin this repo builds against (`.objectui-sha` = `2e818d0b5`,
-   * re-measured 2026-10-04: `ObjectGrid.tsx` and `data-table.tsx` are
+   * Read at the pin this repo builds against (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+   * At `9dfaca654`,
+   * re-measured 2026-10-05: `data-table.tsx` is byte-identical across the hop
+   * from `2e818d0b5`, so its anchors held unmoved, and `ObjectGrid.tsx`
+   * changed there in three type docblocks only (+9/-6, objectui#8347), above
+   * both of its reads, which MOVED by +3 byte-identical — `5458` -> `5461` and
+   * `1812` -> `1815`; at `2e818d0b5`, re-measured 2026-10-04, `ObjectGrid.tsx`
+   * and `data-table.tsx` were
    * byte-identical across the hop from `ab1879721`, where they were measured
    * 2026-10-03; the BUILD is objectui `154075ab1`, objectui#11068):
-   * `plugin-grid/src/ObjectGrid.tsx:5458` hands the data table
+   * `plugin-grid/src/ObjectGrid.tsx:5461` hands the data table
    * `keyboardNavigation: schema.keyboardNavigation ?? inlineEditable`, where
-   * `inlineEditable` (`:1812`) is the authored `editable` AND the viewer's
+   * `inlineEditable` (`:1815`) is the authored `editable` AND the viewer's
    * write verdict — so an absent key follows whether the grid RENDERS
    * editable, `true` turns the navigation on for a read-only grid, and `false`
    * turns it off on an editable one. `components/src/renderers/complex/data-table.tsx`
@@ -4713,7 +5001,8 @@ const ObjectMetricTrendSchema = lazySchema(() => strictObject({
  *   drill-to-record for a clicked row and the metric has no row. The chart's
  *   drill-down declares `filter`, which is why the chart's shape is not taken
  *   whole.
- * - `report` is HELD at `z.unknown()` — see the member.
+ * - `report` is this package's {@link ReportSchema}, by reference — a member
+ *   the chart's drill-down does not declare (see the member).
  */
 const ObjectMetricDrillDownSchema = lazySchema(() => strictObject({
   surface: 'this `object-metric` drill-down',
@@ -4753,39 +5042,48 @@ const ObjectMetricDrillDownSchema = lazySchema(() => strictObject({
   columns: ChartDrillDownSchema.shape.columns,
   maxRows: ChartDrillDownSchema.shape.maxRows,
   /**
-   * [#21464] HELD at `z.unknown()`, not typed: the spec declares no drill
-   * report yet, and the spec declares each such contract first. It waited for
-   * the `objectui-held` stage, which reported it as a fork (the last paragraph
-   * below); the enumeration pin's ledger records it under `fork`.
+   * [#21464] The report the drill opens instead of the record list — this
+   * package's {@link ReportSchema}, BY REFERENCE: the maintainer's ruling on
+   * the decision card #21704, fork 1, letter B (record 5978663135). Until the
+   * S-final stage the member was `z.unknown()`, so a report missing its
+   * `dataset`, a misspelled report key or a bare report name passed the
+   * component-props gate, and the drawer quietly listed the records instead.
    *
-   * Read at the `.objectui-sha` pin `ab1879721595`: the tile hands `report`
-   * to the shared drawer (`ObjectMetricWidget.tsx:742`), and
+   * Read at the `.objectui-sha` pin `2e818d0b51ec` (both files byte-identical
+   * from `ab1879721595`, where the fork was measured, and at objectui `main`
+   * `2abec3a96`): the tile hands `report` to the shared drawer verbatim
+   * (`plugin-dashboard/src/ObjectMetricWidget.tsx:742`), and
    * `DrillDownDrawer.tsx` draws it as a `report` node when
    * `isDatasetBoundReport` holds (`:92`, used at `:115`) — a non-empty
    * `dataset`, or a `joined` report with a block that binds one — joining the
-   * metric's filter into the report's `runtimeFilter`; any other value lists
-   * the records instead. objectui#11506 (`8366acc`) put that predicate in place
-   * of the old "carries `columns` or `objectName`" one, and objectui#11517
-   * (`9ed8d0f`) refuses the named `{ name }` arm on objectui's faces. objectui
-   * types the member as this spec's `ReportSchema` author input
-   * (`types/src/data-display.ts:2592`, `SpecReportInput`), but no spec drill
-   * shape declares a `report` member — the chart's drill-down refuses it — so
-   * the conclusion stage 4 recorded stands: the tile draws a value the
-   * by-reference drill shape refuses, and the member waits for the spec to
-   * declare it.
+   * metric's filter into the report's own `runtimeFilter` (`:150-153`); any
+   * other value lists the records. objectui types the member as this package's
+   * `ReportSchema` author input (`types/src/data-display.ts`,
+   * `SpecReportInput`), so the reference is the declaration both sides already
+   * name.
    *
-   * The S-objectui-held stage measured the by-reference candidate
-   * (`ReportSchema`, `report.zod.ts`) against that predicate and kept the hold, reporting
-   * a fork: every drawn report the census found parses, but the two do not
-   * agree. `ReportSchema` admits a `joined` report none of whose blocks binds a
-   * `dataset` (a block's `dataset` is optional there), which
-   * `isDatasetBoundReport` does not draw — the drawer lists the records
-   * instead, the silent fallback this card closes — and it refuses a
-   * dataset-bound report with no `name`, `label` or `values`, which the drawer
-   * does draw.
+   * ## Admitted implies drawn
+   *
+   * The fork existed because `ReportSchema` admitted a `joined` report none of
+   * whose blocks binds a `dataset`, which the drawer does not draw. Since #21702
+   * its joined arm refuses every block with no `dataset`, at
+   * `blocks[i].dataset`; every other type needs a `dataset` and `values`. So
+   * every report this member admits satisfies `isDatasetBoundReport`, and is
+   * drawn as a report.
+   *
+   * The two still differ in one direction, which no measured writer reaches:
+   * the drawer also draws a dataset-bound report this schema refuses for its
+   * own reasons — one with no `name` or `label`, a non-joined one with no
+   * `values`, a joined one with a container `dataset`, or one whose other
+   * blocks bind none. Those are incomplete reports, and the census found none
+   * written on this member.
+   *
+   * The parsed member carries `ReportSchema`'s defaults (`type: 'tabular'`,
+   * `drilldown: true`); a page component's `properties` is not parsed on the
+   * way to the renderer, so the drawer still reads the report as written.
    */
-  report: z.unknown().optional()
-    .describe('Drill into a report instead of the record list — not typed on this row yet: the tile draws a dataset-bound report here, but no spec drill shape declares a `report` member yet (the chart\'s drill-down refuses it)'),
+  report: ReportSchema.optional()
+    .describe('Drill into a report instead of the record list — a report definition (the same shape as `reports[]`): `{ name, label, dataset, values, … }`, or a `joined` report whose every block binds a `dataset`. The drawer draws it as a report, with the metric\'s filter joined into its `runtimeFilter`'),
 }));
 
 /**
@@ -4861,7 +5159,20 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `2e818d0b5`; re-derived at that pin 2026-10-04 —
+   * (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+   * At `9dfaca654`; re-derived at that pin 2026-10-05 —
+   * `ObjectMetricWidget.tsx`, `MetricWidget.tsx`, `MetricCard.tsx` and
+   * `lazy-icon.tsx` are byte-identical to `2e818d0b5` (`git diff --quiet`), so
+   * their anchors hold unmoved; `plugin-dashboard/src/index.tsx` (+37/-2)
+   * gained objectui#11605's `requiresObject` gate on `ObjectMetricBlock` (six
+   * lines above the `object-metric` registration) and turned the
+   * registration's `objectName` input from a one-line `required: true` entry
+   * into a commented, described, non-required one (twelve net lines above the
+   * icon input), so its start MOVED `256` -> `262` and the icon input `281`
+   * -> `299`, both byte-identical, still `{ name: 'icon', type: 'string' }`.
+   * At `2e818d0b5`, re-derived there 2026-10-04 —
    * `ObjectMetricWidget.tsx`, `MetricWidget.tsx`, `MetricCard.tsx` and
    * `lazy-icon.tsx` are byte-identical to `ab1879721` (`git diff --quiet`), so
    * their anchors hold unmoved; `plugin-dashboard/src/index.tsx` (+13/-1)
@@ -4930,7 +5241,7 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * `{ name: 'icon', type: 'string' }`. The four render-path anchors moved
    * with their cited text byte-identical), and the chain
    * runs three files:
-   * `plugin-dashboard/src/index.tsx:281` publishes it as a designer input
+   * `plugin-dashboard/src/index.tsx:299` publishes it as a designer input
    * on the registered `object-metric` block;
    * `ObjectMetricWidget.tsx:304` destructures it and forwards it at `:753` to
    * `MetricWidget`; `MetricWidget.tsx:371-380` resolves it via
@@ -4998,10 +5309,10 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * [#21464] The click-through to the records behind the number — see
    * {@link ObjectMetricDrillDownSchema}. Its five list members are the chart
    * drill-down's by reference; `filter` and `mode` are refused by name; its
-   * `report` is held open until the spec declares a drill report.
+   * `report` is {@link ReportSchema}, by reference.
    */
   drillDown: ObjectMetricDrillDownSchema.optional()
-    .describe('Click-through drill config `{ enabled?, title?, target?, columns?, maxRows?, report? }` — opens the records behind the number, scoped by the metric\'s own `filter`; a present block is on unless `enabled: false`. `filter` and `mode` are refused: a metric tile has no click context and no row'),
+    .describe('Click-through drill config `{ enabled?, title?, target?, columns?, maxRows?, report? }` — opens the records behind the number, scoped by the metric\'s own `filter` — or draws the report `report` defines; a present block is on unless `enabled: false`. `filter` and `mode` are refused: a metric tile has no click context and no row'),
   /**
    * [#21464] The period-over-period comparison — see
    * {@link ObjectMetricCompareToSchema}. `kind` is the dashboard widget
@@ -5013,11 +5324,13 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectMetricProps = z.input<typeof ObjectMetricPropsSchema>;
 /**
- * ADR-0122: the parsed state differs from the authored state on exactly one
- * key — `filter` carries `z.array(ViewFilterRuleSchema)` (the ui#6206-B family
+ * ADR-0122: the parsed state differs from the authored state on two keys —
+ * `filter` carries `z.array(ViewFilterRuleSchema)` (the ui#6206-B family
  * convergence, #15449), whose own input ≠ infer (`operator` is normalized on
- * parse). So `object-metric` leaves the type-alias convention pin's default-free
- * family the way `object-grid` did, taking the `ObjectGridPropsParsed` route.
+ * parse), and `drillDown.report` carries {@link ReportSchema}, whose defaults
+ * (`type`, `drilldown`) materialize on a report the author wrote (#21464). So
+ * `object-metric` leaves the type-alias convention pin's default-free family
+ * the way `object-grid` did, taking the `ObjectGridPropsParsed` route.
  */
 export type ObjectMetricPropsParsed = z.infer<typeof ObjectMetricPropsSchema>;
 
@@ -5082,8 +5395,16 @@ const ObjectKanbanLaneSchema = lazySchema(() => strictObject({
  * DESIGNER's spelling with
  * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
  * `limit` (#16503) was measured later, at the pin this repo builds against
- * (`.objectui-sha` = `2e818d0b5`; re-measured there 2026-10-04 —
- * `ObjectKanban.tsx` is byte-identical across the hop from `ab1879721`
+ * (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+ * At `9dfaca654`; re-measured there 2026-10-05 —
+ * `ObjectKanban.tsx` changed across the hop from `2e818d0b5`, +35/-5
+ * (objectui#8347: a type import edited in place, and a private
+ * `GateBoundKanbanSchema` read type, a re-worded docblock and a widened
+ * `schema` binding above the fetch), so the anchor was re-READ and MOVED
+ * `722` -> `752` with its text byte-identical. At `2e818d0b5` (2026-10-04)
+ * `ObjectKanban.tsx` was byte-identical across the hop from `ab1879721`
  * (`git diff --quiet`), so the anchor did not move. At `ab1879721`
  * (2026-10-03) `ObjectKanban.tsx` was byte-identical across the hop from
  * `89cad75d5` (`git diff --quiet`), so the anchor did not move and was
@@ -5121,7 +5442,7 @@ const ObjectKanbanLaneSchema = lazySchema(() => strictObject({
  * having put a refusal in front of it — a contract-refused row cap is dropped
  * and reported at `:554` instead of being sent. The pinned fact is unchanged:
  * `schema.limit` still lowers into the query's top-level `$top`):
- * `ObjectKanban.tsx:722`, the `$top` of the
+ * `ObjectKanban.tsx:752`, the `$top` of the
  * board's one query — its docblock below carries the four-face record.
  */
 export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
@@ -5174,7 +5495,30 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
    * 2026-09-07, option A: the contract declares the capability that already
    * ships, is documented and is in use). Measured at the objectui pin this
-   * repo builds against (`.objectui-sha` = `2e818d0b5`; re-measured there
+   * repo builds against (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+   * At `9dfaca654`; re-measured there
+   * 2026-10-05 — `plugin-kanban/src/types.ts` (still no row-cap member),
+   * `element-data-source.ts` and `plugin-kanban.mdx` are byte-identical to
+   * `2e818d0b5`, so `:268-272` did not move and the `limit` row and the
+   * `limit: 250` snippet did not change; `ElementDataSourceGate.tsx` changed
+   * only below `:600` (+75/-0, objectui#11605's `requiresObject` prop and its
+   * "no object named" hint), so `:218-220` and `:437-456` did not move;
+   * `ObjectKanban.tsx` changed (+35/-5, objectui#8347): the type import at
+   * `:10` was edited in place and still imports `ObjectKanbanSchema` (beside
+   * a new `SortConfig`), and above the query the component now reads
+   * `schema` through a private `GateBoundKanbanSchema` — `ObjectKanbanSchema`
+   * plus the gate-written `sort`, so `limit` is still `ObjectKanbanSchema`'s
+   * member — so the default `:97` did not move and the query `715-725` ->
+   * `745-755` and the `queryFilter` resolution `:584-585` -> `:614-615`
+   * MOVED byte-identical; `plugin-kanban/src/index.tsx` (+34/-3) gained one
+   * docblock line above the mapping (objectui#8347), which MOVED
+   * byte-identical `487-491` -> `488-492`, and objectui#11605's
+   * `requiresObject` gate and non-required `objectName` input below it; and
+   * `objectql.ts` (+85/-45: objectui#11615, objectui#11266 and objectui#8347)
+   * MOVED the member `4720` -> `4754` byte-identical, still inside
+   * `ObjectKanbanSchema`. At `2e818d0b5`, re-measured there
    * 2026-10-04 — `ObjectKanban.tsx`, `plugin-kanban/src/types.ts` (still no
    * row-cap member), `plugin-kanban/src/index.tsx`, `ElementDataSourceGate.tsx`
    * and `element-data-source.ts` are byte-identical to `ab1879721`, so every
@@ -5284,8 +5628,8 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * while this map refused the key by name: the board's one query is
    * `dataSource.find(objectName, { $filter: queryFilter, $orderby: …, $top:
    * resolveRowLimit(schema.limit, DEFAULT_KANBAN_FETCH_BATCH_SIZE) })`
-   * (`plugin-kanban/src/ObjectKanban.tsx:715-725`, where `queryFilter` is
-   * `schema.filter` with its context tokens resolved at `:584-585` —
+   * (`plugin-kanban/src/ObjectKanban.tsx:745-755`, where `queryFilter` is
+   * `schema.filter` with its context tokens resolved at `:614-615` —
    * objectui#10666; at `f8a9d0fb0` the member read `schema.filter` verbatim —
    * the default `100` at `:97`, named `DEFAULT_KANBAN_LIMIT` until
    * objectui#9853 — a REAL top-level `$top` since objectui#4025;
@@ -5293,11 +5637,11 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * bare `??` became `resolveRowLimit` in objectui#9925, which drops and
    * reports a cap the contract refuses instead of sending it),
    * `OBJECT_KANBAN_DATA_SOURCE` maps `limit: 'limit'`
-   * (`plugin-kanban/src/index.tsx:487-491`), the type the board reads `schema`
+   * (`plugin-kanban/src/index.tsx:488-492`), the type the board reads `schema`
    * through is `ObjectKanbanSchema` — ⚠️ `KanbanSchema` was RETIRED on this hop
    * (maintainer ruling 2026-09-09) and `plugin-kanban/src/types.ts` no longer
    * declares the member at all — imported at `ObjectKanban.tsx:10` and
-   * declaring `limit?: number` at `packages/types/src/objectql.ts:4720`,
+   * declaring `limit?: number` at `packages/types/src/objectql.ts:4754`,
    * and `content/docs/plugins/plugin-kanban.mdx`
    * teaches it with a typed snippet (`limit: 250`) plus a Properties row. So
    * an author following the published docs wrote a node the save gate
@@ -5392,7 +5736,22 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * quick-add control and no block a document can name offers one either).
    *
    * Measured at the objectui pin this repo builds against
-   * (`.objectui-sha` = `2e818d0b5`; re-measured there 2026-10-04 — every
+   * (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved, and
+   * `ObjectKanban.tsx` still names `quickAdd` and `onQuickAdd` 2 times each
+   * against 11 for `onCardClick`.
+   * At `9dfaca654`; re-measured there 2026-10-05 —
+   * `KanbanImpl.tsx` and `KanbanBoardCore.tsx` are byte-identical to
+   * `2e818d0b5` (`git diff --quiet`), so `:624`, `:637` and `:78` did not
+   * move; `ObjectKanban.tsx` changed above its spread (+35/-5, objectui#8347's
+   * private `GateBoundKanbanSchema` read type and widened `schema` binding),
+   * which MOVED `1639` -> `1669` byte-identical; `plugin-kanban/src/index.tsx`
+   * changed only below the pass-through (+34/-3: one objectui#8347 docblock
+   * line at `:368`, objectui#11605's `requiresObject` gate and non-required
+   * `objectName` input), which did not move from `345-346`; and the counts
+   * re-read the same, 2 / 2 / 11. At `2e818d0b5`, re-measured there
+   * 2026-10-04 — every
    * objectui file this record cites is byte-identical across the hop from
    * `ab1879721` (`git diff --quiet`), so every anchor held unmoved. At
    * `ab1879721`, re-measured there 2026-10-03 —
@@ -5464,7 +5823,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * `object-kanban` node. `ObjectKanban.tsx` names neither half of the pair
    * in code (0 occurrences each, against 11 for the sibling `onCardClick` in the same
    * file — re-counted at `db11afd49`, at `f8a9d0fb0` and at `62597c588`; at
-   * `e420df310`, at `31971ff1e`, at `89cad75d5` and again at this pin 2 each, all four inside the two
+   * `e420df310`, at `31971ff1e`, at `89cad75d5`, at `2e818d0b5` and again at this pin 2 each, all four inside the two
    * objectui#11234 comments that record the cut, and still 11 for
    * `onCardClick`; this record said 6, which the identical
    * file at `87af769e9` does not reproduce either, so the control was
@@ -5552,7 +5911,20 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * element schemas).
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `2e818d0b5`; re-measured there 2026-10-04 — `ObjectKanban.tsx` and
+   * `0abd4f9f8`, re-read there 2026-10-05:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+   * At `9dfaca654`; re-measured there 2026-10-05 — `useNavigationOverlay.ts` is
+   * byte-identical to `2e818d0b5` (`git diff --quiet`), and `ObjectKanban.tsx`
+   * changed above every anchor here (+35/-5, objectui#8347: a type import
+   * edited in place, a private `GateBoundKanbanSchema` read type — still
+   * `ObjectKanbanSchema`, with its declared `navigation`, plus the
+   * gate-written `sort` — a re-worded docblock and a widened `schema`
+   * binding), so each MOVED by 30 with its cited text byte-identical: the
+   * read `1280` -> `1310`, the hand-off `1288-1289` -> `1318-1319`, the
+   * overlay render `1538` -> `1568` and its `NavigationOverlay` `1554-1567`
+   * -> `1584-1597`, and the card click `1663` -> `1693`. At `2e818d0b5`,
+   * re-measured there 2026-10-04 — `ObjectKanban.tsx` and
    * `useNavigationOverlay.ts` are byte-identical to `ab1879721`
    * (`git diff --quiet`), so every anchor held unmoved. At `ab1879721`,
    * re-measured there 2026-10-03 — both are byte-identical to `89cad75d5`
@@ -5602,11 +5974,11 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * re-READ at `87af769e9` 2026-09-22 — every anchor re-derived from that
    * tree rather than carried, none of them at its `53ded82bf` number and one
    * of them no longer spelled the way this record quoted it):
-   * `ObjectKanban.tsx:1280`
+   * `ObjectKanban.tsx:1310`
    * reads `schema.navigation ?? { mode: 'drawer' }` and hands it to
-   * `useNavigationOverlay` (`:1288-1289`), whose result drives the card click
-   * (`:1663`) and the detail overlay (`:1538`, whose `NavigationOverlay` is
-   * `:1554-1567`) — on a STANDALONE board, with no enclosing view to resolve
+   * `useNavigationOverlay` (`:1318-1319`), whose result drives the card click
+   * (`:1693`) and the detail overlay (`:1568`, whose `NavigationOverlay` is
+   * `:1584-1597`) — on a STANDALONE board, with no enclosing view to resolve
    * a mode from. ⚠️ The `(schema as any)` cast this record used to quote is
    * GONE at this pin: the read is spelled `schema.navigation`, and it now
    * compiles through a DECLARED `ObjectKanbanSchema.navigation` member
@@ -5739,7 +6111,17 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * `object-kanban`'s above.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `2e818d0b5`; re-measured there 2026-10-04 — `ObjectCalendar.tsx` and
+   * `0abd4f9f8`, re-read there 2026-10-05:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+   * At `9dfaca654`; re-measured there 2026-10-05 — `ObjectCalendar.tsx` changed
+   * across the hop from `2e818d0b5` in one comment only, line for line
+   * (`:97-98`, objectui#8347 putting `BaseSchema`'s index signature in the
+   * past tense), and `useNavigationOverlay.ts` is byte-identical, so every
+   * anchor held unmoved and was re-read in place: the read `1018`, the
+   * hand-off `1020-1021`, the event click `1413`, the overlay render `1333`
+   * and its `NavigationOverlay` `1346-1359`. At `2e818d0b5`, re-measured
+   * there 2026-10-04 — `ObjectCalendar.tsx` and
    * `useNavigationOverlay.ts` are byte-identical to `ab1879721`
    * (`git diff --quiet`), so every anchor held unmoved. At `ab1879721`,
    * re-measured there 2026-10-03 — `ObjectCalendar.tsx` changed
@@ -5955,17 +6337,103 @@ const formFieldNameList = () => z.array(z.string({
 // ---------------------------------------------------------------------------
 
 /**
- * The `grid` widget's eight field-level keys, spelled snake_case.
+ * [#21768] The `grid` widget's eight field-level keys, as the runtime form
+ * field declares them — camelCase, each value type the widget's own
+ * (`GridFieldMetadata`, `types/src/field-types.ts:1031-1088` at the
+ * `.objectui-sha` pin `9dfaca654311`, which `FormField` carries by reference at
+ * `types/src/form.ts:2079-2094`; objectui's zod mirror states the same types at
+ * `types/src/zod/form.zod.ts:1102-1117`).
  *
- * The widget reads them off a `type: 'grid'` field (`GridFieldMetadata`,
- * `fields/src/widgets/GridField.tsx:588`), so the form does draw them; they are
- * left out of {@link objectFormRuntimeField} by the ruling itself, because this
- * package spells configuration keys in camelCase. They come in once the widget
- * reads a camelCase spelling (objectstack-ai/objectui#11610 carries the rename).
+ * The widget reads them off the field it is handed (`const cfg = field`,
+ * `fields/src/widgets/GridField.tsx:669`): `allowAdd` / `allowDelete` (`:749-750`,
+ * each `!== false` and off on a read-only or disabled grid), `minRows` /
+ * `maxRows` (`:762-763`; Remove stops at `minRows`, `:882`, and Add, Duplicate
+ * and the blank entry row stop at `maxRows`, `:808`, `:850`, `:892`, `:1077`),
+ * `totalField` (`:771`, summed into the footer at `:919-923`), `sortField`
+ * (`:778`, stamped on every row by `emit`, `:785-790`), `allowReorder` (`:783`)
+ * and `addLabel` (`:1322`, `:1491`). That is the whole read set: a key no line
+ * above reads is not declared.
+ *
+ * Their spelling is objectstack-ai/objectui#11610's (merge `2abec3a96c`, an
+ * ancestor of the pin): until it, the widget read these keys in snake_case
+ * only, and ruling B on #21704 fork 2 (record 5978663135) kept them out of this
+ * camelCase contract. {@link OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS} keeps the
+ * snake_case spellings refused by name.
+ *
+ * ⚠️ `totalField` here names the CHILD column the grid sums. On the
+ * `record:line_items` block and an `object-master-detail-form` detail entry the
+ * same spelling names the PARENT field the sum is saved to, and their
+ * `amountField` is the child column — which the line-items panel and the
+ * master-detail form hand the grid AS its `totalField`
+ * (`plugin-form/src/LineItemsPanel.tsx:710`, `MasterDetailForm.tsx:876`). The
+ * grid writes no parent field. The describe says so, and
+ * `component-form-custom-fields-sections-typed.pin.test.ts` §5 pins the
+ * opposite meanings side by side.
  */
-const OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS = [
-  'min_rows', 'max_rows', 'allow_add', 'allow_delete', 'allow_reorder', 'total_field', 'add_label', 'sort_field',
-] as const;
+function objectFormRuntimeFieldGridMembers() {
+  return {
+    minRows: z.number().optional()
+      .describe('A `grid` field\'s minimum row count: its Remove action is disabled at this many rows (no minimum when unset). Read only by the `grid` widget'),
+    maxRows: z.number().optional()
+      .describe('A `grid` field\'s maximum row count: its Add and Duplicate actions are disabled, and no blank entry row is drawn, at this many rows (no maximum when unset). Read only by the `grid` widget'),
+    allowAdd: z.boolean().optional()
+      .describe('Whether a `grid` field offers Add, and each row\'s Duplicate (a duplicate is an add): on unless `false`. A read-only or disabled grid offers neither. Read only by the `grid` widget'),
+    allowDelete: z.boolean().optional()
+      .describe('Whether a `grid` field offers each row\'s Delete: on unless `false`. A read-only or disabled grid never offers it. Read only by the `grid` widget'),
+    allowReorder: z.boolean().optional()
+      .describe('Whether a `grid` field\'s rows can be reordered by dragging: on unless `false`. A read-only or disabled grid never offers it. Read only by the `grid` widget'),
+    totalField: z.string().optional()
+      .describe('The CHILD column a `grid` field sums into its footer total — the `name` of one of its `columns`; no total shows when unset. Not the PARENT field a master-detail or `record:line_items` sum is saved to: those blocks spell that `totalField` and the child column `amountField`, and the grid writes no parent field. Read only by the `grid` widget'),
+    addLabel: z.string().optional()
+      .describe('Label of a `grid` field\'s Add button, also named in its empty state (the locale\'s own wording when unset). A plain string. Read only by the `grid` widget'),
+    sortField: z.string().optional()
+      .describe('A field on each row that a `grid` field stamps with the row\'s index (0, 1, 2, …) on every change, so the order a drag-reorder leaves is saved with the rows (rows carry no position when unset). A row field, not one of `columns`: a column of that name has its typed value overwritten. Read only by the `grid` widget'),
+  };
+}
+/** One of the `grid` widget's camelCase field-level keys ({@link objectFormRuntimeFieldGridMembers}). */
+type ObjectFormRuntimeFieldGridKey = keyof ReturnType<typeof objectFormRuntimeFieldGridMembers>;
+
+/**
+ * The `grid` widget's retired snake_case field-level keys, each mapped to the
+ * camelCase key the runtime form field declares in its place — the pairing
+ * objectui's `GRID_FIELD_RETIRED_KEYS` holds (`types/src/field-types.ts:1159`
+ * at the `.objectui-sha` pin `9dfaca654311`).
+ *
+ * objectstack-ai/objectui#11610 retired the eight with no dual read: at the
+ * pin nothing reads a snake_case spelling, and every objectui face refuses
+ * each by name — the widget draws a refusal instead of the grid
+ * (`fields/src/widgets/GridField.tsx:643-650`), both TS faces tombstone it
+ * (`types/src/field-types.ts:1106-1141`, `types/src/form.ts:2108-2143`) and the
+ * zod mirror names the camelCase key (`types/src/zod/form.zod.ts:1122-1129`).
+ * So this contract refuses each too, and each refusal names its own camelCase
+ * key: the map feeds one guidance set per entry, because a set
+ * answers once per message and an author who wrote two of them is owed both
+ * renames.
+ *
+ * [#21768] Until then this was a plain list whose one prescription said the
+ * keys "come in once the widget reads a camelCase spelling" — the condition
+ * the pin `9dfaca654311` made true.
+ */
+const OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS = {
+  min_rows: 'minRows',
+  max_rows: 'maxRows',
+  allow_add: 'allowAdd',
+  allow_delete: 'allowDelete',
+  allow_reorder: 'allowReorder',
+  total_field: 'totalField',
+  add_label: 'addLabel',
+  sort_field: 'sortField',
+} as const satisfies Readonly<Record<string, ObjectFormRuntimeFieldGridKey>>;
+
+/** The prescription a retired snake_case `grid` key meets: the camelCase key to write, and what stays the same. */
+function objectFormGridWidgetSnakeKeyPrescription(snake: string, camel: ObjectFormRuntimeFieldGridKey): string {
+  const meaning = camel === 'totalField'
+    ? ' It still names the CHILD column summed into the grid\'s footer, not a parent field.'
+    : '';
+  return `\`${snake}\` is the \`grid\` widget's retired snake_case spelling of \`${camel}\`: the widget reads `
+    + 'only the camelCase key, and refuses a field that carries the snake_case one instead of drawing the '
+    + `grid. Rename the key to \`${camel}\`; its value stays the same.${meaning}`;
+}
 
 /** What an inline form field's undeclared keys used to cost. */
 const OBJECT_FORM_RUNTIME_FIELD_HISTORY =
@@ -6131,7 +6599,11 @@ function buildObjectFormRuntimeOption() {
  *   (`NumberField.tsx:88-89`), `minLength` / `maxLength` (`form.tsx:4080`,
  *   `:4146`), `pattern` (the built-in input's attribute), `returnType`
  *   (`FormulaField.tsx:22`), `summaryOperations` (`SummaryField.tsx:15`) and
- *   `columns` (`GridField.tsx:589`).
+ *   `columns` (`GridField.tsx:589`);
+ * - **the `grid` widget's field-level keys** ([#21768], read at the
+ *   `.objectui-sha` pin `9dfaca654311`): `minRows`, `maxRows`, `allowAdd`,
+ *   `allowDelete`, `allowReorder`, `totalField`, `addLabel` and `sortField` —
+ *   read points and value types on {@link objectFormRuntimeFieldGridMembers}.
  *
  * Where this package already declares the member, its value schema is taken
  * by reference — the object field's (`FieldSchema`) for the widget metadata
@@ -6143,8 +6615,6 @@ function buildObjectFormRuntimeOption() {
  *
  * ## Read, and refused anyway
  *
- * - the `grid` widget's snake_case keys ({@link OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS}),
- *   by the ruling;
  * - `visibleOn` (`form.tsx:2767`) and the legacy `condition` (`:2717`): two
  *   more spellings of the conditional-visibility predicate, which this package
  *   spells `visibleWhen` (ADR-0089);
@@ -6153,6 +6623,14 @@ function buildObjectFormRuntimeOption() {
  *   name), so it adds nothing;
  * - `fields`: the member claim of the section-divider row the form builds from
  *   a section, not a member of a field.
+ *
+ * ## Read by nothing, and refused by name
+ *
+ * The `grid` widget's retired snake_case spellings
+ * ({@link OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS}), each answered with the camelCase
+ * key to write. Until #21768 these were the keys the widget read, held out of
+ * this camelCase contract by the ruling; objectstack-ai/objectui#11610 renamed
+ * them, and the widget now refuses the snake_case spellings itself.
  *
  * Measured outside objectui's 45 members: `group` (above) is declared, and
  * `defaultValue` is refused — an inline field's default seeds nothing (the
@@ -6193,15 +6671,13 @@ function buildObjectFormRuntimeField() {
         '`field` is the identity key of the form view\'s section entry (`{ field: \'email\', … }`, which only '
         + 'a section\'s `fields` takes); an inline form field is keyed by `name`. Write one or the other.',
     },
-    guidanceSets: [{
+    // One set per retired spelling, all under the map's name: a set answers once
+    // per message, and each written key is owed its own camelCase replacement.
+    guidanceSets: Object.entries(OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS).map(([snake, camel]) => ({
       name: 'OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS',
-      keys: OBJECT_FORM_GRID_WIDGET_SNAKE_KEYS,
-      prescription:
-        'This is one of the `grid` widget\'s snake_case field-level keys (`min_rows`, `max_rows`, `allow_add`, '
-        + '`allow_delete`, `allow_reorder`, `total_field`, `add_label`, `sort_field`). This contract spells '
-        + 'configuration keys in camelCase, and these come in once the widget reads a camelCase spelling; until '
-        + 'then a `grid` field takes its `columns` and the widget\'s own defaults.',
-    }],
+      keys: [snake],
+      prescription: objectFormGridWidgetSnakeKeyPrescription(snake, camel),
+    })),
   }, {
     name: z.string().min(1).describe('The field\'s name: its identity, and the key its value is submitted under. A member naming a field the object declares replaces that field\'s whole definition'),
     label: z.string().optional().describe('The label drawn beside the control (a plain string)'),
@@ -6236,6 +6712,9 @@ function buildObjectFormRuntimeField() {
     returnType: FieldSchema.shape.returnType.describe('The value type a formula field displays (number / text / boolean / date)'),
     summaryOperations: FieldSchema.shape.summaryOperations.describe('The roll-up a summary field displays — the object field\'s own `{ object, field, function, … }`'),
     columns: FieldSchema.shape.inlineColumns.describe('The columns of a `grid` field — the strict, name-keyed inline grid column a relationship field\'s `inlineColumns` takes'),
+    // [#21768] The `grid` widget's eight field-level keys, camelCase since
+    // objectstack-ai/objectui#11610 — read points and types on the builder.
+    ...objectFormRuntimeFieldGridMembers(),
   });
 }
 let objectFormRuntimeFieldOnce: ReturnType<typeof buildObjectFormRuntimeField> | undefined;
@@ -6466,7 +6945,11 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
    * in camelCase, keyed by `name` — merged over the generated fields
    * (`plugin-form/src/customFieldsMerge.ts:78-108`). Until then it was
    * `z.unknown()`: objectui's own field is open (an index signature beside
-   * forty-five members) and spells eight of them in snake_case.
+   * forty-five members), and at the `.objectui-sha` pin `2e818d0b51ec` it spelled
+   * eight of them, the `grid` widget's field-level keys, in snake_case.
+   * [#21768] objectstack-ai/objectui#11610 camelCased those eight (the pin
+   * `9dfaca654311` carries it), and the runtime field now declares them under
+   * the camelCase names, the snake_case spellings refused by name.
    */
   customFields: z.array(objectFormRuntimeField()).optional()
     .describe('Field definitions merged over the set generated from the object\'s metadata — each a closed inline field `{ name, label?, type?, required?, … }`: a member naming a field the object declares replaces that field\'s whole definition, any other is added after the generated fields. With no object behind the form, the members are its only fields'),
@@ -6658,7 +7141,13 @@ const MASTER_DETAIL_DETAIL_HISTORY =
  * `deriveMasterDetail.ts:540`), carried on the resolved entry and handed to
  * the grid as `sort_field` (`:874`). The pin crossed that change without the
  * spec half, so an authored `sortField` published green, and a drag-reorder
- * stamped the derived field, or none.
+ * stamped the derived field, or none. [#21768] At the pin `9dfaca654311` the
+ * grid's own key is camelCase (objectstack-ai/objectui#11610), so the derived
+ * field is handed over as `sortField` (`:877`, from `deriveDetail` at
+ * `deriveMasterDetail.ts:475-498`); `MasterDetailDetailConfig` still has no
+ * such member (`:83`), and the entry key stays a tombstone. The grid key is
+ * the one an inline `grid` form field declares
+ * ({@link objectFormRuntimeFieldGridMembers}), for the rows of its own value.
  *
  * The live mechanism is the child object's own field: its first field named
  * one of {@link INLINE_GRID_SORT_FIELD_LIST}, on an entry the renderer
@@ -6821,7 +7310,16 @@ const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-map` (objectui `plugin-map/src/ObjectMap.tsx` plus the registry shell
  * `plugin-map/src/index.tsx`, read at the pin this repo builds against —
- * `.objectui-sha` = `2e818d0b5`, re-measured there 2026-10-04: `ObjectMap.tsx`,
+ * `.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+ * At `9dfaca654`, re-measured there 2026-10-05: `ObjectMap.tsx`
+ * and `core/src/utils/record-source.ts` are byte-identical across the hop from
+ * `2e818d0b5` (`git diff --quiet`), and `index.tsx` changed there in one
+ * docblock only, line for line (`:144-146`, objectui#8347 putting
+ * `BaseSchema`'s index signature in the past tense), below every anchor this
+ * record cites in it, so every anchor held unmoved. At `2e818d0b5`
+ * (2026-10-04) `ObjectMap.tsx`,
  * `index.tsx` and `core/src/utils/record-source.ts` are byte-identical across
  * the hop from `ab1879721` (`git diff --quiet`), so every anchor held
  * unmoved. At `ab1879721` (2026-10-03) all three were byte-identical across
@@ -6989,7 +7487,15 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
    * orthography every `filter` door in this map shares (ui#6206-B reaching the
    * `object-*` family: #15449, decision batch #55, option A). Measured at the
-   * pin this repo builds against (`.objectui-sha` = `2e818d0b5`, re-measured
+   * pin this repo builds against (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+   * At `9dfaca654`, re-measured
+   * there 2026-10-05: `ObjectMap.tsx` is byte-identical to `2e818d0b5`
+   * (`git diff --quiet`) and `plugin-map/src/index.tsx` changed there in one
+   * docblock only, line for line, below its inputs (`:144-146`,
+   * objectui#8347), so all three anchors and the `filter` input held
+   * unmoved. At `2e818d0b5`, re-measured
    * there 2026-10-04: `ObjectMap.tsx` and `plugin-map/src/index.tsx` are
    * byte-identical to `ab1879721` (`git diff --quiet`), so all three anchors
    * and the `filter` input held unmoved. At `ab1879721`, re-READ there
@@ -7040,7 +7546,15 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * Marker order — the `SortItem` ARRAY form, the one sort orthography every
    * DECLARED `sort` door on this platform carries (objectui#8221, decision batch
    * #77, option B). Measured at the pin this repo builds against
-   * (`.objectui-sha` = `2e818d0b5`, re-measured there 2026-10-04 —
+   * (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+   * At `9dfaca654`, re-measured there 2026-10-05 —
+   * `ObjectMap.tsx` is byte-identical to `2e818d0b5` (`git diff --quiet`) and
+   * `plugin-map/src/index.tsx` changed there in one docblock only, line for
+   * line, below its inputs (`:144-146`, objectui#8347), so both anchors and
+   * the `sort` input held unmoved. At `2e818d0b5`, re-measured there
+   * 2026-10-04 —
    * `ObjectMap.tsx` and `plugin-map/src/index.tsx` are byte-identical to
    * `ab1879721` (`git diff --quiet`), so both anchors and the `sort` input
    * held unmoved. At `ab1879721`, re-READ there 2026-10-03 — `ObjectMap.tsx`
@@ -7213,7 +7727,24 @@ function objectGanttMarker() {
 /**
  * `object-gantt` (objectui `plugin-gantt/src/ObjectGantt.tsx` plus the registry
  * shell `plugin-gantt/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `2e818d0b5`, re-measured there 2026-10-04:
+ * — `.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+ * At `9dfaca654`, re-measured there 2026-10-05:
+ * `record-source.ts` is byte-identical to `2e818d0b5` (`git diff --quiet`), so
+ * its anchors held unmoved; `plugin-gantt/src/index.tsx` changed there in one
+ * docblock only, line for line, below the `gantt` input (`:215-217`,
+ * objectui#8347), which did not move; and `ObjectGantt.tsx` +4/-3 grew one
+ * line in the `ObjectGanttProps` docblock above `getGanttConfig`
+ * (objectui#8347 putting the index-signature note in the past tense), so
+ * every anchor in it MOVED by 1 (`:612-614` -> `:613-615`, `:724` -> `:725`,
+ * `:920` -> `:921`, `:1065`/`:1066` -> `:1066`/`:1067`, `:1074`/`:1076` ->
+ * `:1075`/`:1077`, `:887-890` -> `:888-891`, `:1080-1085` -> `:1081-1086`,
+ * `:1678`/`:1679` -> `:1679`/`:1680`, `:1830`/`:1832` -> `:1831`/`:1833`,
+ * `:1968` -> `:1969`, `:2035` -> `:2036`, `:2347` -> `:2348`, `:2505`-`:2513`
+ * -> `:2506`-`:2514`, `:2548-2554` -> `:2549-2555`), each with its cited text
+ * byte-identical; NONE changed content. At `2e818d0b5`, re-measured there
+ * 2026-10-04:
  * `plugin-gantt/src/index.tsx`, `record-source.ts` and `ObjectGantt.tsx` are
  * byte-identical to `ab1879721` (`git diff --quiet`), so every anchor held
  * unmoved. At `ab1879721`, re-measured there 2026-10-03:
@@ -7300,46 +7831,46 @@ function objectGanttMarker() {
  * every number was re-derived from that tree, and the `label` one moved far
  * enough that the retired reading now lands in an unrelated callback.)
  * Read points per key: `data` (`resolveRecordSourceConfig` at
- * `:724` — rung 1, `core/src/utils/record-source.ts:307`), `staticData` (rung 2,
- * `record-source.ts:311`), `objectName` (rung 3; also `:1832` and `:2035` here),
- * `filter` (`:920`, read once through `useResolvedFilter`, which resolves its
- * context tokens — objectui#10666 — and `:1065` sends the held result to
- * `$filter`; at `f8a9d0fb0` it was sent verbatim), `sort` (`:1066`, through
- * `convertSortToQueryParams` to `$orderby`), `gantt` (`:612-614` —
+ * `:725` — rung 1, `core/src/utils/record-source.ts:307`), `staticData` (rung 2,
+ * `record-source.ts:311`), `objectName` (rung 3; also `:1833` and `:2036` here),
+ * `filter` (`:921`, read once through `useResolvedFilter`, which resolves its
+ * context tokens — objectui#10666 — and `:1066` sends the held result to
+ * `$filter`; at `f8a9d0fb0` it was sent verbatim), `sort` (`:1067`, through
+ * `convertSortToQueryParams` to `$orderby`), `gantt` (`:613-615` —
  * `getGanttConfig` branch 1, the author face and the registration's declared
  * `{ name: 'gantt', type: 'object' }` input (`plugin-gantt/src/index.tsx:179`),
  * validated there against this
- * repo's own {@link GanttConfigSchema}), `navigation` (`:1968`), `label`
- * (`:2550`, resolved through `resolveInlineI18nLabel` for the export file
+ * repo's own {@link GanttConfigSchema}), `navigation` (`:1969`), `label`
+ * (`:2551`, resolved through `resolveInlineI18nLabel` for the export file
  * name — this record said `resolveI18nLabel`, which the line did not read at
  * `f8a9d0fb0` either —
  * ⚠️ the retired reading `:1849` was the comment ABOVE that chain and at this
  * pin `87af769e9` was a BLANK line (nothing cites `:1849` now), two above a dependency-delete callback's own comment,
  * so it is re-READ here, not re-pointed),
- * `skipWeekends` (`:1678`), `holidays` (`:1679`), `persistLayout` (`:1830`),
- * `viewName` (`:1832`), `markers` (`:2505`), `criticalPath` (`:2508`),
- * `showBaselines` (`:2511`), `readOnly` (`:2347` and `:2512`) and
- * `mobileReadOnly` (`:2513`).
+ * `skipWeekends` (`:1679`), `holidays` (`:1680`), `persistLayout` (`:1831`),
+ * `viewName` (`:1833`), `markers` (`:2506`), `criticalPath` (`:2509`),
+ * `showBaselines` (`:2512`), `readOnly` (`:2348` and `:2513`) and
+ * `mobileReadOnly` (`:2514`).
  *
  * Measured and deliberately NOT declared: the flat `GanttConfig` spellings (the
  * flatten product — {@link OBJECT_GANTT_FLAT_CONFIG_GUIDANCE}); `title`, which
  * this renderer never reads (the export-name chain is `gantt.exportFileName` →
- * `label` → the OBJECT's label → `objectName`, `:2548-2554`); a row cap — the
+ * `label` → the OBJECT's label → `objectName`, `:2549-2555`); a row cap — the
  * reload's `$top` is the platform ceiling, spread in as core's
- * `nonGridRowCeilingQuery()` (`:1076`: one probe row past the ceiling, which
+ * `nonGridRowCeilingQuery()` (`:1077`: one probe row past the ceiling, which
  * `applyNonGridRowCeiling` slices back off; at `f8a9d0fb0` a bare
  * `$top: NON_GRID_ROW_CEILING_TOP`, until objectui#7508 homed the ceiling in
- * core) and the renderer's own comment marks it "⛔ Not authorable" (`:1074`); and
+ * core) and the renderer's own comment marks it "⛔ Not authorable" (`:1075`); and
  * the `onTaskClick` / `onRowClick` / `onBeforeTaskUpdate` callbacks, which are
  * host props. ⚠️ New at `f8a9d0fb0` and recorded, not ruled: objectui#10250
  * gave the renderer two more reads, `search` and `searchableFields`
- * (`:887-890`, sent as `$search` / `$searchFields` at `:1080-1085`), which
+ * (`:888-891`, sent as `$search` / `$searchFields` at `:1081-1086`), which
  * `ListView.tsx` writes onto the node it generates from its toolbar Search
  * box — a host-generated key pair in the same position as the flatten
  * product, and not declared here.
  *
  * VALUE posture: `gantt` is the one config block in this family whose value
- * contract is already the SPEC's — `ObjectGantt.tsx:614` validates it against
+ * contract is already the SPEC's — `ObjectGantt.tsx:615` validates it against
  * `GanttConfigSchema` imported from `@objectstack/spec/ui` — so the read point
  * names the schema and this door takes it rather than `z.unknown()`. The
  * scalars below are read as their coercions say: `!!schema.readOnly`,
@@ -7428,11 +7959,21 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
 
 /**
  * The flat `TreeConfig` spellings `getTreeConfig` reads ahead of the `tree`
- * block (`ObjectTree.tsx:281-294`) and that `ObjectView` / `ListView` EMIT when
+ * block (`ObjectTree.tsx:284-297`) and that `ObjectView` / `ListView` EMIT when
  * they flatten `options.tree` (`ListView.tsx:3770-3789`, `case 'tree'`: the
  * product carries these keys, the EFFECTIVE `filter` objectui#10250 added, and
  * NO `tree` key). Both halves re-READ at the
- * pin this repo builds against (`.objectui-sha` = `2e818d0b5`) on 2026-10-04 —
+ * pin this repo builds against (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved).
+ * At `9dfaca654`, on 2026-10-05 —
+ * `plugin-tree/src/index.tsx` and `ListView.tsx` are byte-identical to
+ * `2e818d0b5` (`git diff --quiet`), so `3770-3789` and `:3784` did not move;
+ * `ObjectTree.tsx` changed in two docblocks only (+8/-5, objectui#8347
+ * putting `BaseSchema`'s index signature in the past tense), one above each
+ * range, so `233-254` MOVED to `235-256` and `281-294` to `284-297`, each
+ * byte-identical, and the flat key set each reads or emits did not move. At
+ * `2e818d0b5`, on 2026-10-04 —
  * `ObjectTree.tsx`, `plugin-tree/src/index.tsx` and `ListView.tsx` are
  * byte-identical to `ab1879721` (`git diff --quiet`), so every anchor held
  * unmoved. At `ab1879721`, on 2026-10-03 —
@@ -7492,7 +8033,7 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
  * read rather than a moved one: `getTreeConfig`'s `?? schema.titleField` rung
  * — the `:117` this record used to cite — was removed on objectui#8841
  * because it read the FLATTENED NODE and never the block, and the docblock at
- * `ObjectTree.tsx:233-254` records the three measurements that retired it.
+ * `ObjectTree.tsx:235-256` records the three measurements that retired it.
  * The flatten half above is what keeps the key in this set; ⛔ do not restore
  * the renderer half from this record's history.
  */
@@ -7513,7 +8054,18 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-tree` (objectui `plugin-tree/src/ObjectTree.tsx` plus the registry
  * shell `plugin-tree/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `2e818d0b5`, re-measured there 2026-10-04: every
+ * — `.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+ * At `9dfaca654`, re-measured there 2026-10-05:
+ * `plugin-tree/src/index.tsx` and `core/src/utils/record-source.ts` are
+ * byte-identical to `2e818d0b5` (`git diff --quiet`), so their anchors held
+ * unmoved; `ObjectTree.tsx` changed in two docblocks only (+8/-5,
+ * objectui#8347 putting `BaseSchema`'s index signature in the past tense:
+ * +2 lines at `:135`, +1 at `:264`), so every anchor in it MOVED by 3 with
+ * its cited text byte-identical (`:634` -> `:637`, `:739` -> `:742`,
+ * `:281-294` -> `:284-297`, `:1054` -> `:1057` and the rest below). At
+ * `2e818d0b5`, re-measured there 2026-10-04: every
  * objectui file this record cites is byte-identical to `ab1879721`
  * (`git diff --quiet`), so every anchor held unmoved. At `ab1879721`,
  * re-measured there 2026-10-03:
@@ -7576,7 +8128,7 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * one was re-derived from that tree, and the ladder call changed in CONTENT
  * as well as position.)
  * Read points per key: `data` (`resolveRecordSourceConfig` at
- * `:634` — rung 1, `core/src/utils/record-source.ts:307`, which returns the
+ * `:637` — rung 1, `core/src/utils/record-source.ts:307`, which returns the
  * authored value VERBATIM once it is on the arm; that ONE site is the whole
  * support for the arm this row declares. ⚠️ At this pin the ARM this renderer
  * passes is `'view-data'`, the one its siblings pass (objectui#8348), so a
@@ -7585,18 +8137,18 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * same line. Through `db11afd49` it passed `'undeclared'`, which honoured any
  * truthy value — WIDER than this row, the harmless direction),
  * `staticData` (rung 2,
- * `record-source.ts:311`), `objectName` (rung 3; also `:1026`, `:1068` and
- * `:1140` here, each behind `resolveRecordSourceObjectName`, plus the
- * parent-field detection at `:958-959`),
- * `filter` (`:739`, read once through `useResolvedFilter`, which resolves its
- * context tokens — objectui#10666 — and holds the result: `:831` sends it to
- * `$filter` on the object fetch and `:916` on the inline `value` provider's
+ * `record-source.ts:311`), `objectName` (rung 3; also `:1029`, `:1071` and
+ * `:1143` here, each behind `resolveRecordSourceObjectName`, plus the
+ * parent-field detection at `:961-962`),
+ * `filter` (`:742`, read once through `useResolvedFilter`, which resolves its
+ * context tokens — objectui#10666 — and holds the result: `:834` sends it to
+ * `$filter` on the object fetch and `:919` on the inline `value` provider's
  * `ValueDataSource` query, objectui#9136's; at `f8a9d0fb0` both sent
- * `schema.filter` verbatim, at `:753` and `:837`), `tree` (`:282`, the
- * nested config block `getTreeConfig` (`:281-294`) reads, and the
+ * `schema.filter` verbatim, at `:753` and `:837`), `tree` (`:285`, the
+ * nested config block `getTreeConfig` (`:284-297`) reads, and the
  * registration's declared `{ name: 'tree', type: 'object' }` input
- * (`plugin-tree/src/index.tsx:47-52`)) and `navigation` (`:1054`, handed to
- * `useNavigationOverlay` at `:1046` — typed since objectui#11168 slice 3;
+ * (`plugin-tree/src/index.tsx:47-52`)) and `navigation` (`:1057`, handed to
+ * `useNavigationOverlay` at `:1049` — typed since objectui#11168 slice 3;
  * through `31971ff1e` it was `(schema as any).navigation`, at `:1063`).
  *
  * ⚠️ `data` IS declared here, and that is the measurement, not a family
@@ -7613,31 +8165,31 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `NavigationConfig`) beside `filter`, and makes `objectName` optional, on
  * `ObjectTreeSchema` and on the registration's inputs alike.
  *
- * ⛔ `:865` is NOT a second site for the object arm, and at this pin it is not
+ * ⛔ `:868` is NOT a second site for the object arm, and at this pin it is not
  * a read of the authored key at all: it is `(rest as any).data`, gated by
  * `Array.isArray(passed)` on the next line — the rows a HOST hands down as the
  * `data` React prop. objectui#8348 dropped the `?? schema.data` fallback that
  * line carried through `db11afd49` (`:862` there), the one reader that let an
  * authored bare array draw rows whatever the ladder said, and objectui#9571
  * had already stopped `SchemaRenderer` delivering the authored key as that
- * prop. One ladder site is sufficient, and `:634` is it.
+ * prop. One ladder site is sufficient, and `:637` is it.
  *
  * Measured and deliberately NOT declared: the flat `TreeConfig` spellings
  * ({@link OBJECT_TREE_FLAT_CONFIG_GUIDANCE}); the bare-array `data` shorthand,
  * which `ViewData` cannot publish (a discriminated union over OBJECT variants),
  * for which `staticData` is this block's declared door, and which the renderer
- * itself no longer accepts from an authored node at this pin (see `:865`
+ * itself no longer accepts from an authored node at this pin (see `:868`
  * above; `:862-863` accepted it through `db11afd49`); `sort` — this renderer's fetch
- * (`:830-842`) carries `$filter`, `$top` and `$expand` and NO `$orderby`, the
- * inline query (`:915-924`) carries `$filter` and `$top` only, and
+ * (`:833-845`) carries `$filter`, `$top` and `$expand` and NO `$orderby`, the
+ * inline query (`:918-927`) carries `$filter` and `$top` only, and
  * nothing else reads an order, so declaring one would publish a key with no read
  * site; a row cap, for the same reason `object-gantt` declares none (the `$top`
  * is the platform ceiling, spread in as core's `nonGridRowCeilingQuery()` at
- * `:840` and again at `:923` — a bare `$top: NON_GRID_ROW_CEILING_TOP` at
+ * `:843` and again at `:926` — a bare `$top: NON_GRID_ROW_CEILING_TOP` at
  * `f8a9d0fb0`, until objectui#7508 — marked "⛔ Not
- * authorable" at `:839`); and `filter.tree`, the legacy stash — ⚠️ no longer
+ * authorable" at `:842`); and `filter.tree`, the legacy stash — ⚠️ no longer
  * read since `f8a9d0fb0`: objectui#9549 deleted that arm, so `getTreeConfig`
- * (`:282`) takes the block from `tree` alone — which was a shape to stop
+ * (`:285`) takes the block from `tree` alone — which was a shape to stop
  * writing and is not a key to declare.
  *
  * This was also the one block of the three whose type was absent from the
@@ -7674,7 +8226,18 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * holds for them because each registers through `ElementDataSourceGate`,
    * which lowers the spec binding onto `objectName` before the renderer sees
    * the node. `plugin-tree/src/index.tsx` does NOT: at the pin this repo
-   * builds against (`.objectui-sha` = `2e818d0b5`, re-COUNTED there 2026-10-04 by
+   * builds against (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+   * re-COUNTED by the same method, all five `src/index.tsx` shells are
+   * byte-identical across the hop from `9dfaca654` (`git diff --quiet`) and
+   * read 0 for the tree, 3 each for `plugin-calendar`, `plugin-gantt` and
+   * `plugin-grid`, and 4 for `plugin-map`.
+   * At `9dfaca654`, re-COUNTED there 2026-10-05 by
+   * the same method — 0 for the tree, whose shell is byte-identical across the
+   * hop from `2e818d0b5`, 3 each for `plugin-calendar` (byte-identical),
+   * `plugin-gantt` (one docblock re-worded line for line, objectui#8347) and
+   * `plugin-grid` (objectui#11605 made its `objectName` input non-required,
+   * its wiring unchanged), and 4 for `plugin-map` (one docblock re-worded line
+   * for line, objectui#8347); re-COUNTED at `2e818d0b5` 2026-10-04 by
    * the same method — 0 for the tree, 3 each for `plugin-gantt`,
    * `plugin-calendar` and `plugin-grid`, and 4 for `plugin-map`, all five
    * `src/index.tsx` shells byte-identical across the hop from `ab1879721`;
@@ -7847,11 +8410,206 @@ const ObjectTimelineMappingSchema = lazySchema(() => strictObject({
     .describe('Field whose value picks each entry\'s marker colour (renderer default `variant`) — the only spelling this binding has'),
 }));
 
+// ---------------------------------------------------------------------------
+// [#21464] `object-timeline` `items` — the authored entry, in the shape the
+// maintainer ruled on the decision card #21704, fork 4, letter B (record
+// 5979239990): both arms closed, as objectui#6356 ruled them
+// (`TimelineFeedItem`, `TimelineGanttItem`); a feed entry's `content` an
+// opaque member; a row refinement pairing each entry with the arm the row's
+// `variant` selects; a gantt bar's dates a string or a number. Read at the
+// `.objectui-sha` pin `2e818d0b51ec`; the arm declarations and every cited
+// reader are unchanged at objectui `main` `2abec3a96` (comments only).
+// ---------------------------------------------------------------------------
+
+/**
+ * The five colours an authored timeline element names — a feed entry's marker
+ * or a gantt bar: objectui's `TimelineItemVariant`
+ * (`types/src/data-display.ts`), the "Marker Variants" its timeline guide
+ * documents. The marker primitive paints three more (`todo`, `in-progress`,
+ * `done`), reached only by the entries the object-bound rail composes from
+ * records — not an authoring vocabulary, and no gantt bar paints them.
+ */
+const OBJECT_TIMELINE_ITEM_VARIANTS = ['default', 'success', 'warning', 'danger', 'info'] as const;
+
+/** What an authored timeline entry's undeclared keys used to cost. */
+const OBJECT_TIMELINE_ITEM_HISTORY =
+  'Until this shape was declared, a timeline entry was `z.unknown()`: a misspelled key, or an entry of the '
+  + 'wrong kind for the timeline\'s `variant`, passed, and the rail drew an empty, unlabelled entry for it.';
+
+/**
+ * [#21464] One bar of a gantt row — objectui's `TimelineGanttItemBar`, closed.
+ * The gantt branch reads `startDate` / `endDate` (`renderer.tsx:1909`, the axis
+ * reduce at `:651` and `:686-688`), `variant` (`:1916`, default `default`) and
+ * `title` (`:1918`, `:1921`, inside the bar and in its tooltip). Every member
+ * is optional, as objectui#6356 left them: a bar with no usable dates is not an
+ * authoring error but the renderer's `timeline.gantt.unusableRange` diagnostic.
+ * A date is a string or a FINITE number (epoch milliseconds — `z.number()`
+ * refuses `Infinity` and `NaN`), the renderer's own date rule; its third arm, a
+ * `Date`, is one authored JSON cannot carry (the ruling: string or number).
+ */
+function buildObjectTimelineGanttBar() {
+  return strictObject({
+    surface: 'this gantt bar',
+    history: OBJECT_TIMELINE_ITEM_HISTORY,
+    aliases: { label: 'title', name: 'title', start: 'startDate', end: 'endDate', color: 'variant' },
+  }, {
+    title: z.string().optional().describe('Bar label, drawn inside the bar and in its tooltip'),
+    startDate: z.union([z.string(), z.number()]).optional()
+      .describe('Bar start — a date string (`YYYY-MM-DD`, or an ISO date-time) or epoch milliseconds'),
+    endDate: z.union([z.string(), z.number()]).optional()
+      .describe('Bar end — a date string or epoch milliseconds; a date-only `YYYY-MM-DD` end is drawn through the end of that day'),
+    variant: z.enum(OBJECT_TIMELINE_ITEM_VARIANTS).optional().describe('Bar colour (renderer default `default`)'),
+  });
+}
+
+/**
+ * The FEED arm's members (`variant` absent, `vertical` or `horizontal`) —
+ * objectui's `TimelineFeedItem`, the seven keys objectui#6356 declared, with
+ * `title` the arm's required key. Both feed branches read them: `time`
+ * (`renderer.tsx:1612-1614`, `:1703-1705`), `title` (`:1642`, `:1708`),
+ * `description` (`:1650`, `:1709`), `variant` (`:1627`, `:1699`), `icon`
+ * (`:1630`, `:1700`), `content` (`renderChildren`, `:1659`, `:1716`) and
+ * `className` (`:1623`, `:1697`).
+ *
+ * `content` is held OPAQUE (`z.unknown()`), by the ruling: it is child schema
+ * nodes the entry draws below its description (`SchemaNode | SchemaNode[]`),
+ * which this map would judge only as a slot position the page walks visit,
+ * and no measured writer fills it. It becomes a slot when a writer appears;
+ * the enumeration pin records it with that reason.
+ */
+const objectTimelineFeedItemShape = () => ({
+  time: z.string().optional().describe('When it happened — an ISO 8601 date (or date-time) string, formatted by the row\'s `dateFormat`'),
+  title: z.string().optional().describe('The entry\'s heading — required on a feed entry (the arm a feed `variant` selects)'),
+  description: z.string().optional().describe('Secondary line under the title'),
+  variant: z.enum(OBJECT_TIMELINE_ITEM_VARIANTS).optional().describe('Marker colour (renderer default `default`)'),
+  icon: z.string().optional().describe('Emoji or short text drawn inside the marker'),
+  content: z.unknown().optional()
+    .describe('Child page components drawn below the description — a component node or a list of them. Held opaque: not judged on this row'),
+  className: z.string().optional().describe('Tailwind classes for the entry'),
+});
+
+/**
+ * The GANTT arm's members (`variant: 'gantt'`) — objectui's
+ * `TimelineGanttItem`: `label` (`renderer.tsx:1899-1900`, the row-label
+ * gutter), the arm's required key, and `items`, the row's bars
+ * (`classifyGanttRows`, `:617-621`; drawn at `:1908`), optional because a row
+ * with no bars yet is an ordinary empty state.
+ */
+const objectTimelineGanttRowShape = () => ({
+  label: z.string().optional().describe('Row label, drawn in the row-label gutter — required on a gantt row (the arm `variant: \'gantt\'` selects)'),
+  items: z.array(buildObjectTimelineGanttBar()).optional()
+    .describe('The row\'s bars, each `{ title?, startDate?, endDate?, variant? }`'),
+});
+
+/**
+ * [#21464] One authored `object-timeline` entry: every member of BOTH arms,
+ * each optional, closed against anything else — objectui's own element shape
+ * (`types/src/zod/data-display.zod.ts`, `TimelineItemSchema`). Which arm an
+ * entry must be is decided by the ROW's `variant`, so it is judged where the
+ * row is visible: {@link objectTimelineItemsFitVariant}. Not a union of the two
+ * arms, for the reason objectui gives: when neither arm accepts an entry, a
+ * union reports one `invalid_union` at the entry and folds each arm's issues
+ * beneath it, so an off-shape bar or an unknown key would lose its own path.
+ *
+ * The keys the object-bound rail composes onto an entry it maps from a record
+ * (`color`, `group`, `meta`, `startDate`, `endDate`) are renderer-internal,
+ * not authorable — objectui#6356 refuses them on its strict face — and are
+ * refused here with what to write instead.
+ *
+ * A factory the row calls, not a {@link lazySchema}, for the reason
+ * {@link objectGanttMarker} gives.
+ */
+function buildObjectTimelineItem() {
+  return strictObject({
+    surface: 'this timeline entry',
+    history: OBJECT_TIMELINE_ITEM_HISTORY,
+    aliases: { date: 'time', timestamp: 'time', heading: 'title' },
+    guidance: {
+      color:
+        'A timeline entry\'s colour is `variant` (`default`, `success`, `warning`, `danger`, `info`): `color` is a '
+        + 'key the record-bound rail composes onto the entries it maps, not one an authored entry carries. Write '
+        + 'it as `variant`.',
+      startDate:
+        '`startDate` is a gantt BAR\'s key, written inside a gantt row\'s `items`; a feed entry\'s date is `time`. '
+        + 'On a feed timeline write `time`; on `variant: \'gantt\'` write `{ label, items: [{ startDate, endDate }] }`.',
+      endDate:
+        '`endDate` is a gantt BAR\'s key, written inside a gantt row\'s `items`; a feed entry has one date, `time`. '
+        + 'On a feed timeline write `time`; on `variant: \'gantt\'` write `{ label, items: [{ startDate, endDate }] }`.',
+      group:
+        '`group` is a key the record-bound rail composes onto the entries it maps (the date bucket it groups them '
+        + 'under), not one an authored entry carries. Remove it — authored entries are drawn in the order written.',
+      meta:
+        '`meta` is a key the record-bound rail composes onto the entries it maps, not one an authored entry '
+        + 'carries. Put the text in the entry\'s `description`, or remove it.',
+    },
+  }, {
+    ...objectTimelineFeedItemShape(),
+    ...objectTimelineGanttRowShape(),
+  });
+}
+let objectTimelineItemOnce: ReturnType<typeof buildObjectTimelineItem> | undefined;
+/** The one {@link buildObjectTimelineItem} instance. */
+const objectTimelineItem = () => (objectTimelineItemOnce ??= buildObjectTimelineItem());
+
+/**
+ * [#21464] The row refinement that pairs each `items` entry with the arm the
+ * row's `variant` selects (absent ⇒ `vertical`) — objectui's node-level
+ * refinement (`timelineItemsFitVariant`, `types/src/zod/data-display.zod.ts`),
+ * restated for this row: each branch of the renderer reads only its own arm's
+ * keys, so a gantt row on a feed timeline, or a feed entry on a gantt one, drew
+ * an empty, unlabelled entry.
+ *
+ * Two refusals per entry, each at the key it names: the arm's REQUIRED key is
+ * absent (`title` on a feed entry, `label` on a gantt row), or a key only the
+ * OTHER arm declares is present. An undeclared key is the entry shape's own
+ * refusal. The arm key lists are read off the two shapes above, never
+ * restated, so a key added to an arm is judged the moment it is declared.
+ */
+function objectTimelineItemsFitVariant() {
+  const feedKeys = Object.keys(objectTimelineFeedItemShape());
+  const ganttKeys = Object.keys(objectTimelineGanttRowShape());
+  const ARMS = {
+    feed: { name: 'feed entry', plural: 'feed entries', variants: "`variant: 'vertical'` (the default) or `'horizontal'`", required: 'title', keys: feedKeys },
+    gantt: { name: 'gantt row', plural: 'gantt rows', variants: "`variant: 'gantt'`", required: 'label', keys: ganttKeys },
+  } as const;
+  return (row: { variant?: string; items?: readonly unknown[] }, ctx: z.RefinementCtx): void => {
+    if (!Array.isArray(row.items)) return;
+    const variant = row.variant ?? 'vertical';
+    const [arm, other] = variant === 'gantt' ? [ARMS.gantt, ARMS.feed] : [ARMS.feed, ARMS.gantt];
+    const draws = `\`variant: '${variant}'\`${row.variant === undefined ? ' (the default)' : ''} draws ${arm.plural} \`{ ${arm.keys.join(', ')} }\``;
+    row.items.forEach((entry, index) => {
+      if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return;
+      const item = entry as Record<string, unknown>;
+      if (item[arm.required] === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['items', index, arm.required],
+          message: `\`${arm.required}\` is required on a ${arm.name}: ${draws}, and an entry without it is drawn empty and unlabelled.`,
+        });
+      }
+      for (const key of other.keys) {
+        if (arm.keys.includes(key) || item[key] === undefined) continue;
+        ctx.addIssue({
+          code: 'custom',
+          path: ['items', index, key],
+          message: `\`${key}\` is a ${other.name} key, and ${draws}; author ${other.plural} under ${other.variants}.`,
+        });
+      }
+    });
+  };
+}
+
 /**
  * `object-timeline` (objectui `plugin-timeline/src/ObjectTimeline.tsx`, the
  * presentational `plugin-timeline/src/renderer.tsx` it composes into, and the
  * registry shell `plugin-timeline/src/index.tsx` — all read at the pin this
- * repo builds against (`.objectui-sha` = `2e818d0b5`), re-measured there
+ * repo builds against (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved).
+ * At `9dfaca654`, re-measured there
+ * 2026-10-05: `ObjectTimeline.tsx`, `renderer.tsx` and `index.tsx` are
+ * byte-identical to `2e818d0b5` (`git diff --quiet`), so every anchor held
+ * unmoved. At `2e818d0b5`, re-measured there
  * 2026-10-04: `ObjectTimeline.tsx`, `renderer.tsx` and `index.tsx` are
  * byte-identical to `ab1879721` (`git diff --quiet`), so every anchor held
  * unmoved. At `ab1879721`, re-measured there
@@ -7992,9 +8750,10 @@ const ObjectTimelineMappingSchema = lazySchema(() => strictObject({
  * optional field names), written here first and then taken; it was
  * `z.unknown()` while that contract lived only in objectui
  * (`TimelineMappingSchema`), the `object-calendar.calendar` posture this
- * section's header prescribes for exactly that case. `items` stays
- * `z.array(z.unknown())`: that stage found two viable spec shapes for the
- * authored entry (see the member). `navigation` takes
+ * section's header prescribes for exactly that case. `items` takes
+ * {@link buildObjectTimelineItem} since #21464's S-final stage: objectui's two
+ * ruled arms, closed, with the row's {@link objectTimelineItemsFitVariant}
+ * pairing each entry with the arm `variant` selects. `navigation` takes
  * {@link NavigationConfigSchema}, by reference, for the reason the ruling gives.
  *
  * ⚠️ `variant: 'gantt'` is declared because the registration declares it
@@ -8054,7 +8813,17 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
    * first publishes a refusal for a key the renderer honours.
    *
    * Read points at the pin this repo builds against (`.objectui-sha` =
-   * `2e818d0b5`, re-measured there 2026-10-04 — the file and
+   * `0abd4f9f8`, re-read there 2026-10-05:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+   * At `9dfaca654`, re-measured there 2026-10-05 — the file and
+   * `record-source.ts` are byte-identical across the hop from `2e818d0b5`
+   * (`git diff --quiet`), so every anchor held unmoved; `SchemaRenderer.tsx`
+   * changed (+3/-4, objectui#8347) in two docblocks only, putting the
+   * `BaseSchema` index signature's removal in the past tense, not in the
+   * `properties.*` hoist, its strip list or the `createElement` spread, so
+   * the prop channel above still carries the key. At `2e818d0b5`,
+   * re-measured there 2026-10-04 — the file and
    * `record-source.ts` are byte-identical across the hop from `ab1879721`
    * (`git diff --quiet`), so every anchor held unmoved; `SchemaRenderer.tsx`
    * changed (+21/-20, objectui#11466) in its type import and in the
@@ -8118,22 +8887,19 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
   data: z.array(z.unknown()).optional()
     .describe("Pre-fetched records — read FIRST as the rail's row source, ahead of the data-scope binding and the fetch, and composed into entries through the same `timeline` field bindings a fetched row takes; authoring it suppresses the object query entirely. Distinct from `items`, which is the already-composed entry shape and wins over this key when both are written"),
   /**
-   * [#21464] HELD at `z.unknown()` elements, in the enumeration pin's ledger as
-   * a fork the S-objectui-held stage reported. Each element is objectui's
-   * declared authored timeline entry (`types/src/data-display.ts` at the
-   * `.objectui-sha` pin `ab1879721595`: `TimelineFeedItem`, `:2973`, or
-   * `TimelineGanttItem`, `:3042`, ruled on objectui#6356), handed to the rail
-   * verbatim (`ObjectTimeline.tsx:587`). Writing that contract here needs two
-   * decisions no ruling has made: a feed entry's `content` is child schema nodes
-   * (`SchemaNode | SchemaNode[]`), which this map either declares as a slot
-   * position the page walks judge or keeps as an opaque member; and the arm an
-   * entry must match is chosen by the PARENT's `variant`, which objectui judges
-   * in a node-level refinement and a spec row would either repeat or replace
-   * with a plain union of the two arms. (A gantt bar's dates also take a `Date`
-   * there, which authored JSON cannot carry.)
+   * [#21464] The authored entries — typed in the S-final stage, per the
+   * maintainer's ruling on the decision card #21704, fork 4, letter B (record
+   * 5979239990). Each element is objectui's declared authored timeline entry
+   * (`types/src/data-display.ts` at the `.objectui-sha` pin `2e818d0b51ec`:
+   * `TimelineFeedItem` or `TimelineGanttItem`, ruled on objectui#6356), handed
+   * to the rail verbatim (`ObjectTimeline.tsx:587`) — see
+   * {@link buildObjectTimelineItem}. The arm an entry must be is the one this
+   * row's `variant` selects, judged by the row's refinement
+   * ({@link objectTimelineItemsFitVariant}). A feed entry's `content` is held
+   * opaque; a gantt bar's dates are a string or a number.
    */
-  items: z.array(z.unknown()).optional()
-    .describe("Static inline entries — read ahead of every record source, `data` above included, and bypasses the object query entirely (the renderer becomes a pass-through). Each element is objectui's declared timeline element, `@object-ui/types`'s `TimelineFeedItem` (`variant` absent / `vertical` / `horizontal`) or `TimelineGanttItem` (`variant: 'gantt'`), the arm this node's `variant` selects"),
+  items: z.array(objectTimelineItem()).optional()
+    .describe("Static inline entries — read ahead of every record source, `data` above included, and bypasses the object query entirely (the renderer becomes a pass-through). Each entry is the kind this node's `variant` selects: a feed entry `{ time?, title, description?, variant?, icon?, content?, className? }` (`variant` absent / `vertical` / `horizontal`), or a gantt row `{ label, items? }` (`variant: 'gantt'`) whose bars are `{ title?, startDate?, endDate?, variant? }`, each date a string or epoch milliseconds"),
   variant: z.enum(['vertical', 'horizontal', 'gantt']).optional()
     .describe("Rail layout (renderer default `vertical`). ⚠️ `gantt` needs authored `items`: the object-bound path composes flat feed entries, which the gantt branch cannot draw, and refuses that combination with a named diagnostic instead of drawing an empty chart"),
   dateFormat: z.enum(['short', 'long', 'iso']).optional()
@@ -8158,7 +8924,7 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
    */
   navigation: NavigationConfigSchema.optional()
     .describe("Entry-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation })"),
-}));
+}).superRefine(objectTimelineItemsFitVariant()));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectTimelineProps = z.input<typeof ObjectTimelinePropsSchema>;
 /**
@@ -8338,7 +9104,12 @@ export const ComponentPropsMap = {
   // set from this map's keys), on the three-part evidence that vocabulary's
   // string-arm ledger asks of a type admitted without an enum member — all
   // measured at the pin this repo builds against (`.objectui-sha` =
-  // `2e818d0b5`; re-measured there 2026-10-04: all four files below are
+  // `0abd4f9f8`, re-read there 2026-10-05:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+  // At `9dfaca654`; re-measured there 2026-10-05: all four files below are
+  // byte-identical to `2e818d0b5` (`git diff --quiet`), so every anchor held
+  // unmoved; at `2e818d0b5`, re-measured 2026-10-04: all four were
   // byte-identical to `ab1879721` (`git diff --quiet`), so every anchor held
   // unmoved; at `ab1879721`, re-measured 2026-10-03: `data-list.tsx`,
   // `public-blocks.ts`, `block-types.ts` and `block-config.ts` all
@@ -8402,7 +9173,15 @@ export const ComponentPropsMap = {
   // authority for map and gantt while tree's rung-1 `data` read stayed
   // undeclared on every face. Key sets measured from the renderers' read
   // points at the pin this repo builds against (`.objectui-sha` =
-  // `2e818d0b5`), all three re-measured there 2026-10-04 (`ObjectMap.tsx`,
+  // `0abd4f9f8`, re-read there 2026-10-05:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `9dfaca654` (`git diff --quiet`), so every anchor held unmoved).
+  // At `9dfaca654`, all three re-measured there 2026-10-05 (`ObjectMap.tsx` is
+  // byte-identical to `2e818d0b5`; `ObjectTree.tsx` (+8/-5) and
+  // `ObjectGantt.tsx` (+4/-3) changed in docblocks only, objectui#8347 putting
+  // `BaseSchema`'s index signature in the past tense, so their anchors MOVED
+  // byte-identical and the `schema.*` read set of each is unchanged; at
+  // `2e818d0b5`, 2026-10-04, `ObjectMap.tsx`,
   // `ObjectTree.tsx` and `ObjectGantt.tsx` are byte-identical to `ab1879721`,
   // so every anchor held unmoved; at `ab1879721`, 2026-10-03, `ObjectMap.tsx` and
   // `ObjectTree.tsx` are byte-identical to `89cad75d5`; `ObjectGantt.tsx`
@@ -8456,7 +9235,13 @@ export const ComponentPropsMap = {
   // it — so `object-timeline` was unjudged in both directions, a real key and
   // a typo riding through alike. Key set measured from the renderer's read
   // points at the pin this repo builds against (`.objectui-sha` =
-  // `2e818d0b5`), re-measured there 2026-10-04 (`renderer.tsx`,
+  // `0abd4f9f8`, re-read there 2026-10-05:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `9dfaca654` (`git diff --quiet`), so every anchor held unmoved).
+  // At `9dfaca654`, re-measured there 2026-10-05 (`renderer.tsx`,
+  // `ObjectTimeline.tsx` and `index.tsx` byte-identical to `2e818d0b5`, so
+  // every anchor held unmoved and no declared key set moved; at `2e818d0b5`,
+  // 2026-10-04, `renderer.tsx`,
   // `ObjectTimeline.tsx` and `index.tsx` byte-identical to `ab1879721`, so
   // every anchor held unmoved and no declared key set moved; at `ab1879721`,
   // 2026-10-03, `renderer.tsx`,

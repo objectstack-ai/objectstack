@@ -78,7 +78,7 @@ const rejectField = (patch: Record<string, unknown>): string =>
 // ===========================================================================
 // 1. inlineColumns — the strict name-keyed grid column
 // ===========================================================================
-describe('#9227 inlineColumns — strict name-keyed element', () => {
+describe('inlineColumns — strict name-keyed element', () => {
   it('accepts identity-only entries (the showcase invoice fixture form)', () => {
     const parsed = acceptField({
       inlineEdit: 'grid',
@@ -226,7 +226,7 @@ describe('#9227 inlineColumns — strict name-keyed element', () => {
    * (GridField.tsx), which throws `RangeError` above 100. Asserted THROUGH the
    * door, like everything else in this file.
    */
-  it('refuses a computed column whose `scale` is past the renderer ceiling (#18972)', () => {
+  it('refuses a computed column whose `scale` is past the renderer ceiling', () => {
     acceptField({
       inlineEdit: 'grid',
       inlineColumns: [{ name: 'amount', computed: true, expr: 'quantity * unit_price', scale: 100 }],
@@ -250,7 +250,7 @@ describe('#9227 inlineColumns — strict name-keyed element', () => {
 // ===========================================================================
 // 2. relatedListColumns — child field-name strings only
 // ===========================================================================
-describe('#9227 relatedListColumns — strings only', () => {
+describe('relatedListColumns — strings only', () => {
   it('accepts the in-repo showcase spellings', () => {
     const parsed = acceptField({
       relatedListColumns: ['name', 'status', 'total', 'issued_on'],

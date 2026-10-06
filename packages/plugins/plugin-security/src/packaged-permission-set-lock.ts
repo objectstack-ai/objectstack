@@ -87,6 +87,8 @@
  * direction that cannot be undone (an overlay, once minted, wins forever).
  */
 
+import { isTenantAuthored } from '@objectstack/metadata-core';
+
 /**
  * ⛔ This module imports NOTHING from the rest of the plugin, and that is
  * structural rather than stylistic: `permission-set-projection.ts` imports
@@ -146,7 +148,24 @@ export type LayeredProbe =
   | { status: 'read'; envelope: unknown }
   | { status: 'failed'; reason: string };
 
-/** Is this registry/layer item a real shipped artifact for `name`? */
+/**
+ * Is this registry/layer item a real shipped artifact for `name`?
+ *
+ * [#21789] A package id on the item does not answer that by itself. The
+ * registry holds stored rows as well as artifacts: the metadata layer hydrates
+ * env-wide `sys_metadata` rows into it, and the list read (`getMetaItems`)
+ * stamps the row's `package_id` column onto the body as `_packageId` on the
+ * way. A set saved into a writable runtime package therefore carries a package
+ * id just as a code-shipped one does, and reading "has a package id" as
+ * "shipped by code" locked it after the first list read. What tells the two apart is the
+ * provenance the hydrator writes on every stored row (ADR-0010
+ * `_provenance: 'org'`), read through `isTenantAuthored`: the exclusion
+ * `isCodeArtifactBody` and `SchemaRegistry.getArtifactItem` already apply, so
+ * this is the platform's one answer, not a second one. A stored row of a name a
+ * code package ships is hydrated wearing the artifact's envelope
+ * (`_provenance: 'package'`), and the artifact itself is in the same list, so a
+ * code-shipped set stays locked.
+ */
 function declaredPackageIdOf(item: any, name: string): string | null {
   if (!item || typeof item !== 'object') return null;
   if (item.name !== name) return null;
@@ -155,6 +174,9 @@ function declaredPackageIdOf(item: any, name: string): string | null {
   // set look packaged on the next pass, which is a lock that latches on the
   // wrong evidence.
   if (item[ENV_PROJECTION_MARKER]) return null;
+  // A stored (tenant-authored) row is never a shipped artifact, whatever
+  // package it is bound to. See the doc comment.
+  if (isTenantAuthored(item)) return null;
   const packageId = item._packageId ?? item.packageId;
   if (typeof packageId !== 'string' || packageId === '') return null;
   if (packageId === RUNTIME_SHADOW_PACKAGE_ID) return null;
@@ -241,6 +263,44 @@ export function classifyPackagedPermissionSet(
 }
 
 /**
+ * The refusals' guidance, addressed to the END USER — the `userMessage` each
+ * refusal below declares.
+ *
+ * A thrown `userMessage` is the producer-side opt-in every HTTP door reads
+ * through `declaredUserMessage` (`@objectstack/types`; see
+ * `ThrownHttpError.userMessage` there): it rides the wire envelope beside
+ * `code`, and the console renders it verbatim in place of the generic sentence
+ * it substitutes for every unmarked 403 ("You don't have permission to save
+ * this record."). Unmarked, the clone guidance in `message` never reached the
+ * admin who hit the lock in Setup.
+ *
+ * The two channels have two audiences, so they carry different text:
+ *
+ *  - `message` is the DIAGNOSTIC, for logs and developers. It names the set,
+ *    the package and the API path, and it is unchanged.
+ *  - `userMessage` is the GUIDANCE, for the admin. It names no machine name,
+ *    id, package id or API path (the console's friendly-copy rule), so it
+ *    carries no host state either: a sandboxed body that catches this error
+ *    receives static text.
+ *
+ * English, like every platform refusal: there is no localization path for a
+ * thrown `userMessage`, and these texts do not invent one.
+ */
+const LOCKED_UPDATE_USER_MESSAGE =
+  `This permission set is provided by an installed package and can't be edited here. Clone it instead `
+  + `with the Clone action, then edit the clone. The clone is your organization's own permission set, `
+  + `and package upgrades keep reaching the original.`;
+
+const LOCKED_INSERT_USER_MESSAGE =
+  `This name belongs to a permission set provided by an installed package. Choose a different name for `
+  + `your permission set, or clone the packaged one with the Clone action and edit the clone.`;
+
+const PROVENANCE_UNKNOWN_USER_MESSAGE =
+  `This permission set can't be saved right now, because the system couldn't confirm whether an installed `
+  + `package provides it. Try again in a moment. To customize a permission set that a package provides, `
+  + `clone it with the Clone action and edit the clone.`;
+
+/**
  * The refusal a write door throws for a package-declared set.
  *
  * `NOT_OVERRIDABLE` / 403 is deliberately the SAME envelope the metadata
@@ -265,11 +325,16 @@ export function classifyPackagedPermissionSet(
  * (`mapDataError` passes a domain error through on `.status`; the runtime
  * dispatcher's `errorFromThrown` reads `.status` then falls back to
  * `.statusCode`), and this throws on the DATA path, which reaches both.
+ *
+ * `userMessage` carries the same guidance for the end user, per operation —
+ * see the note on the texts above.
  */
 export class PackagedPermissionSetLockedError extends Error {
   readonly code = 'NOT_OVERRIDABLE';
   readonly status = 403;
   readonly statusCode = 403;
+  /** The guidance addressed to the end user; `message` stays the diagnostic. */
+  readonly userMessage: string;
   constructor(name: string, packageId: string, operation: 'insert' | 'update') {
     super(
       `[Security] Permission set '${name}' is declared by package '${packageId}' and is locked in this `
@@ -283,14 +348,22 @@ export class PackagedPermissionSetLockedError extends Error {
           + `flowing to '${name}' untouched.`),
     );
     this.name = 'PackagedPermissionSetLockedError';
+    this.userMessage = operation === 'insert' ? LOCKED_INSERT_USER_MESSAGE : LOCKED_UPDATE_USER_MESSAGE;
   }
 }
 
-/** Thrown when provenance could not be determined at all — fail-closed. */
+/**
+ * Thrown when provenance could not be determined at all — fail-closed.
+ *
+ * Its `userMessage` says to retry or clone and leaves the unreadable source's
+ * `reason` in `message`, where the diagnostic belongs.
+ */
 export class PackagedPermissionSetProvenanceUnknownError extends Error {
   readonly code = 'NOT_OVERRIDABLE';
   readonly status = 403;
   readonly statusCode = 403;
+  /** The guidance addressed to the end user; `message` stays the diagnostic. */
+  readonly userMessage: string;
   constructor(name: string, reason: string) {
     super(
       `[Security] Permission set '${name}' cannot be saved right now: this environment could not determine `
@@ -299,6 +372,7 @@ export class PackagedPermissionSetProvenanceUnknownError extends Error {
       + `once the metadata layer is readable; if you meant to customize a packaged set, clone it instead.`,
     );
     this.name = 'PackagedPermissionSetProvenanceUnknownError';
+    this.userMessage = PROVENANCE_UNKNOWN_USER_MESSAGE;
   }
 }
 

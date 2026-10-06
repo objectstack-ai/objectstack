@@ -84,7 +84,7 @@ function publishedRetiredAfter(id: string): string | null {
 const RETIRED = ALL_CONVERSIONS.filter((c) => c.retiredFromLoadPath === true);
 const LIVE = ALL_CONVERSIONS.filter((c) => c.retiredFromLoadPath !== true);
 
-describe('[#20390] retiredAfter census — every retired entry stamped from the published tarballs', () => {
+describe('retiredAfter census — every retired entry stamped from the published tarballs', () => {
   it('the census is well-formed: stable releases in ascending order, never ahead of the package label', () => {
     expect(CENSUS.releases.length).toBeGreaterThan(0);
     const versions = [CENSUS.precedingRelease, ...CENSUS.releases.map((r) => r.version)];

@@ -53,7 +53,7 @@ function resolvesToZodSchema(name: string): boolean {
   return !!candidate && typeof (candidate as { safeParse?: unknown }).safeParse === 'function';
 }
 
-describe('#3899 — catalog schema references resolve and sit on the right methods', () => {
+describe('catalog schema references resolve and sit on the right methods', () => {
   it('every requestSchema names a Zod schema exported from @objectstack/spec/api', () => {
     for (const ep of allEndpoints()) {
       if (!ep.requestSchema) continue;
@@ -87,7 +87,7 @@ describe('#3899 — catalog schema references resolve and sit on the right metho
     }
   });
 
-  it('at least the routes wired in #3899 still declare their request schemas', () => {
+  it('at least the routes wired to the request-schema gate still declare their request schemas', () => {
     // Anti-erosion floor: the gate above is vacuous if declarations are simply
     // deleted. These five are validated at their mounted routes.
     const declared = new Map(

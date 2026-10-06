@@ -24,7 +24,7 @@ import type { IShareLinkService } from './share-link-service';
 type Expect<T extends true> = T;
 type Equals<A, B> = (<G>() => G extends A ? 1 : 2) extends (<G>() => G extends B ? 1 : 2) ? true : false;
 
-describe('CoreServiceName → contract map (#4127)', () => {
+describe('CoreServiceName → contract map', () => {
     it('maps every key to a declared CoreServiceName slot', () => {
         // The map's keys are checked against the enum at compile time below;
         // this asserts the same thing at runtime so a rename shows up as a
@@ -70,7 +70,7 @@ describe('CoreServiceName → contract map (#4127)', () => {
     });
 });
 
-describe('slot → contract ledger beyond the enum (#4127 batch 3)', () => {
+describe('slot → contract ledger beyond the enum', () => {
     it('keeps every core binding', () => {
         // The extension must not shadow or drop a core entry — `data` staying
         // `IDataEngine` is what makes the `objectql` alias below meaningful.
@@ -96,7 +96,7 @@ describe('slot → contract ledger beyond the enum (#4127 batch 3)', () => {
         expect(true).toBe(true);
     });
 
-    it('resolves objectql to the FULL engine contract, a strict widening of data (#4251 B3)', () => {
+    it('resolves objectql to the FULL engine contract, a strict widening of data', () => {
         // Same instance, two views: `data` is the engine as IDataEngine (the
         // data plane), `objectql` is the whole engine. The subtype relation is
         // the claim that they cannot drift apart — every IObjectQLEngine IS an

@@ -122,11 +122,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
-      me: {
-        label: "My Profile"
-      },
       all_users: {
         label: "All Users"
+      },
+      me: {
+        label: "My Profile"
       },
       unverified: {
         label: "Unverified"
@@ -376,11 +376,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
-      mine: {
-        label: "My Sessions"
-      },
       all_sessions: {
         label: "All"
+      },
+      mine: {
+        label: "My Sessions"
       },
       revoked: {
         label: "Revoked"
@@ -460,37 +460,20 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_links: {
+        label: "All"
+      },
       mine: {
         label: "My Links"
       },
       by_provider: {
         label: "By Provider"
-      },
-      all_links: {
-        label: "All"
       }
     },
     _actions: {
-      link_social: {
-        label: "Link Social Account",
-        params: {
-          provider: {
-            label: "Provider",
-            options: {
-              google: "Google",
-              github: "GitHub",
-              microsoft: "Microsoft",
-              apple: "Apple",
-              facebook: "Facebook",
-              gitlab: "GitLab",
-              discord: "Discord"
-            }
-          }
-        }
-      },
       unlink_account: {
         label: "Unlink Account",
-        description: "Unlink this identity link? The user will no longer be able to sign in with this provider until they re-link it from their account settings.",
+        description: "Unlink this identity link? The user will no longer be able to sign in with this provider until they re-link it.",
         successMessage: "Identity link removed"
       }
     }
@@ -1039,6 +1022,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_keys: {
+        label: "All"
+      },
       mine: {
         label: "My Keys"
       },
@@ -1047,9 +1033,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked: {
         label: "Revoked"
-      },
-      all_keys: {
-        label: "All"
       }
     },
     _actions: {
@@ -1242,14 +1225,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_preferences: {
+        label: "All"
+      },
       mine: {
         label: "My Preferences"
       },
       by_user: {
         label: "By User"
-      },
-      all_preferences: {
-        label: "All"
       }
     }
   },
@@ -1403,6 +1386,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_apps: {
+        label: "All"
+      },
       mine: {
         label: "My Applications"
       },
@@ -1411,9 +1397,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       disabled_apps: {
         label: "Disabled"
-      },
-      all_apps: {
-        label: "All"
       }
     },
     _actions: {

@@ -44,7 +44,7 @@ const ONE_RELEASE_SLICE = {
 };
 const SCOPE = { fromVersion: '17.3.0', toVersion: '17.4.0' };
 
-describe('aggregate export arrays declare the range they really cover (#18978)', () => {
+describe('aggregate export arrays declare the range they really cover', () => {
   it('carries the published-version pair the diff was taken between', () => {
     const aggregate = composeSpecChanges(MIGRATION_SUPPORT_FLOOR, PROTOCOL_MAJOR, {
       ...ONE_RELEASE_SLICE,

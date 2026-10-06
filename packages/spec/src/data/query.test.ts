@@ -127,7 +127,7 @@ describe('QuerySchema - Basic', () => {
  * carries the prescription rather than zod's "expected string, received object":
  * the parse error is the channel an upgrading consumer actually hits.
  */
-describe('FieldNode — the nested-select object form is REMOVED (#4196)', () => {
+describe('FieldNode — the nested-select object form is REMOVED', () => {
   // The dotted half is a NON-NARROWING guard, not a feature pin (#7601): the
   // refusal of dotted projections (#7532) is a SEMANTIC verdict at the ingress
   // gate (`assertProjectionFieldsExist`, `400 INVALID_FIELD`), where the field
@@ -189,7 +189,7 @@ describe('FieldNode — the nested-select object form is REMOVED (#4196)', () =>
  * (`direction` → `order` is not a typo), which is why the alias table is the
  * load-bearing half.
  */
-describe('SortNode — closed, and `direction` carries its translation (#4721)', () => {
+describe('SortNode — closed, and `direction` carries its translation', () => {
   it('accepts the canonical two-key node, defaulting `order` to asc', () => {
     expect(SortNodeSchema.parse({ field: 'updated_at', order: 'desc' }))
       .toEqual({ field: 'updated_at', order: 'desc' });
@@ -199,7 +199,7 @@ describe('SortNode — closed, and `direction` carries its translation (#4721)',
 
   it('REJECTS `direction` instead of silently sorting the other way', () => {
     const r = SortNodeSchema.safeParse({ field: 'updated_at', direction: 'desc' });
-    expect(r.success, 'this parsed to `order: asc` before #4721').toBe(false);
+    expect(r.success, 'this parsed to `order: asc` before the sort node was closed').toBe(false);
     expect(r.error!.issues[0].message).toContain('`direction` → `order`');
   });
 
@@ -337,7 +337,7 @@ describe('QuerySchema - Aggregations', () => {
     expect(() => QuerySchema.parse(query)).not.toThrow();
   });
 
-  it('rejects the retired per-aggregation `distinct` flag (#6815)', () => {
+  it('rejects the retired per-aggregation `distinct` flag', () => {
     // Was `should accept aggregation with distinct flag`. `count` + `distinct`
     // is the exact shape `count_distinct` already spells portably, and it is
     // the shape the removal is loudest about: the two answered the same number
@@ -620,7 +620,7 @@ describe('QuerySchema - Aggregations', () => {
  * silently STRIPPED the keys (the ADR-0104 class); `retiredKey()` keeps the
  * removal audible in both channels (`tsc` and the parse).
  */
-describe('QueryAST.joins — REMOVED (#4286)', () => {
+describe('QueryAST.joins — REMOVED', () => {
   it('rejects a query carrying `joins` with the prescription, even as an empty array', () => {
     expect(() => QuerySchema.parse({ object: 'order', joins: [] }))
       .toThrow(/query\.joins.*removed.*expand/s);
@@ -648,7 +648,7 @@ describe('QueryAST.joins — REMOVED (#4286)', () => {
   });
 });
 
-describe('QueryAST.windowFunctions — REMOVED (#4286)', () => {
+describe('QueryAST.windowFunctions — REMOVED', () => {
   it('rejects a query carrying `windowFunctions` with the prescription naming the door', () => {
     expect(() => QuerySchema.parse({
       object: 'order',
@@ -663,7 +663,7 @@ describe('QueryAST.windowFunctions — REMOVED (#4286)', () => {
   });
 });
 
-describe('QueryAST.cursor — REMOVED (#4286)', () => {
+describe('QueryAST.cursor — REMOVED', () => {
   it('rejects a caller-built cursor with the prescription pointing at the manual keyset', () => {
     expect(() => QuerySchema.parse({ object: 'customer', cursor: { id: 'rec_9' } }))
       .toThrow(/query\.cursor.*removed.*where.*sort key/s);
@@ -682,7 +682,7 @@ describe('QueryAST.cursor — REMOVED (#4286)', () => {
   });
 });
 
-describe('QueryAST.distinct — REMOVED (#4286)', () => {
+describe('QueryAST.distinct — REMOVED', () => {
   it('rejects the flag with the prescription naming the live spellings — either value', () => {
     expect(() => QuerySchema.parse({ object: 'account', distinct: true }))
       .toThrow(/query\.distinct.*removed.*count_distinct/s);
@@ -698,7 +698,7 @@ describe('QueryAST.distinct — REMOVED (#4286)', () => {
   // `AggregationNode.filter` (marked EXPERIMENTAL), and the per-aggregation
   // flag was neither. It IS still a different member — with the same verdict
   // one level down, reached separately in #6815.
-  it('per-aggregation `distinct` is a DIFFERENT member with its OWN prescription (#6815)', () => {
+  it('per-aggregation `distinct` is a DIFFERENT member with its OWN prescription', () => {
     expect(() => QuerySchema.parse({
       object: 'order',
       aggregations: [{ function: 'count', field: 'customer_id', distinct: true, alias: 'unique_customers' }],
@@ -713,7 +713,7 @@ describe('QueryAST.distinct — REMOVED (#4286)', () => {
   });
 });
 
-describe('AggregationNode.distinct — REMOVED (#6815, ADR-0049)', () => {
+describe('AggregationNode.distinct — REMOVED (ADR-0049)', () => {
   it('refuses either value — `false` was as divergent as `true`', () => {
     // `distinct: false` selected the SQL faces' behaviour on the in-memory
     // path, so it was never inert: it was one of the two answers. The
@@ -905,7 +905,7 @@ describe('QuerySchema - Edge Cases and Null Handling', () => {
     expect(() => QuerySchema.parse(query)).not.toThrow();
   });
 
-  it('refuses a mixed aggregation list the moment ONE entry carries `distinct` (#6815)', () => {
+  it('refuses a mixed aggregation list the moment ONE entry carries `distinct`', () => {
     // Was `should handle optional distinct flag in aggregation`. The mixed
     // list is the interesting shape: the second entry is untouched by the
     // retirement, so the refusal has to come from the first ENTRY rather than

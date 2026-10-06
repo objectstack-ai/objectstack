@@ -58,7 +58,7 @@ function reject(value: unknown): string {
   return JSON.stringify(r.success ? [] : r.error.issues);
 }
 
-describe('#5011 — compareTo is the executor contract, projected', () => {
+describe('compareTo is the executor contract, projected', () => {
   it('accepts `{ kind }` with `dimension` omitted — the executor resolves it', () => {
     const r = DashboardWidgetSchema.safeParse(widget({ kind: 'previousPeriod' }));
     expect(r.success).toBe(true);
@@ -114,7 +114,7 @@ describe('#5011 — compareTo is the executor contract, projected', () => {
   });
 });
 
-describe('#5011 — every retired spelling is rejected WITH its upgrade', () => {
+describe('compareTo — every retired spelling is rejected WITH its upgrade', () => {
   it('the bare string arms carry a prescription naming the exact replacement', () => {
     const period = reject('previousPeriod');
     expect(period).toContain('was removed in');
@@ -157,7 +157,7 @@ describe('#5011 — every retired spelling is rejected WITH its upgrade', () => 
     expect(reject({ offset: '1y' })).toContain('previousYear');
   });
 
-  it('the words #5042 measured authors spelling `offset` with all reach the same prescription', () => {
+  it('every word authors were measured spelling `offset` with reaches the same prescription', () => {
     // These were `aliases: { period: 'offset', … }` before the convergence —
     // i.e. an empirical claim about what authors write on this slot. The claim
     // survives; its target does not, so each now resolves to the retirement
@@ -208,7 +208,7 @@ describe('#5011 — every retired spelling is rejected WITH its upgrade', () => 
  * reaches the wire. This pin is what makes that a property of the schema rather
  * than a claim in a comment: reintroduce a union here and it goes red.
  */
-describe('#5011 — the converged slot is union-free, so its prescriptions reach the author', () => {
+describe('compareTo — the converged slot is union-free, so its prescriptions reach the author', () => {
   const issuesFor = (compareTo: unknown) => {
     const r = DashboardWidgetSchema.safeParse(widget(compareTo));
     expect(r.success).toBe(false);
@@ -245,7 +245,7 @@ describe('#5011 — the converged slot is union-free, so its prescriptions reach
  * a lookalike. Checked structurally, because "these two look the same" is
  * exactly the review that failed for a whole major.
  */
-describe('#5011 — widget and executor declare ONE vocabulary', () => {
+describe('compareTo — widget and executor declare ONE vocabulary', () => {
   it('a parsed widget `compareTo` is assignable to `DatasetCompareTo` with no mapping', () => {
     const r = DashboardWidgetSchema.parse(widget({ kind: 'previousYear', dimension: 'close_date' }));
     // No `as`, no re-spelling, no `??` — if the shapes ever diverge this line

@@ -223,7 +223,7 @@ describe('§2 population — every non-catchall `never` leaf on this surface is 
     }
   });
 
-  it('[#20051] every pinned-absent key is reached, and carries its own curated refusal', () => {
+  it('every pinned-absent key is reached, and carries its own curated refusal', () => {
     expect(pinned.map((l) => l.path).sort()).toEqual(Object.keys(REFUSED_ABSENT_LEAVES).sort());
     for (const leaf of pinned) {
       expect(leaf.message, leaf.path).toMatch(REFUSED_ABSENT_LEAVES[leaf.path]!);

@@ -88,7 +88,7 @@ const formWithField = (field: unknown) => ({ type: 'simple', sections: [{ fields
 // ===========================================================================
 // 1. The doors — a parse must exist, or none of the rest means anything
 // ===========================================================================
-describe('#4001 批 18 — the doors these shapes are reachable through', () => {
+describe('批 18, unknown keys refused — the doors these shapes are reachable through', () => {
   it('the `view` metadata type resolves to a registered schema (the save-time 422 door)', () => {
     expect(getMetadataTypeSchema('view')).toBeDefined();
   });
@@ -114,7 +114,7 @@ describe('#4001 批 18 — the doors these shapes are reachable through', () => 
 // ===========================================================================
 // 2. Every closed site, at its own path
 // ===========================================================================
-describe('#4001 批 18 — closed sites reject unknown keys where they live', () => {
+describe('批 18 — closed sites reject unknown keys where they live', () => {
   describe('ViewDataSchema — all four provider arms', () => {
     it.each([
       ['object', { provider: 'object', object: 'crm_lead' }],
@@ -146,7 +146,7 @@ describe('#4001 批 18 — closed sites reject unknown keys where they live', ()
       .toContain('notAnOptionKey');
   });
 
-  it('GanttConfigSchema.tooltipFields — a CLOSED entry, and since #15469 a CLOSED parent too', () => {
+  it('GanttConfigSchema.tooltipFields — a CLOSED entry, and since the renderer-ahead `.passthrough()` was removed a CLOSED parent too', () => {
     const gantt = { startDateField: 's', endDateField: 'e', titleField: 't' };
     // 批 18 closed this ENTRY while the parent stayed `.passthrough()` (its
     // stated non-goal: renderer-ahead knobs reached plugin-gantt through the
@@ -196,7 +196,7 @@ describe('#4001 批 18 — closed sites reject unknown keys where they live', ()
 // ===========================================================================
 // 3. Curation — the entries that make a rejection fixable
 // ===========================================================================
-describe('#4001 批 18 — the rejection carries a usable prescription', () => {
+describe('批 18 — the rejection carries a usable prescription', () => {
   it('`object` → `childObject` on a subform — the word every neighbouring block uses', () => {
     expect(reject(FormViewSchema, { ...FORM_BASE, subforms: [{ childObject: 'x', object: 'crm_line' }] }))
       .toContain('`object` → `childObject`');
@@ -239,7 +239,7 @@ describe('#4001 批 18 — the rejection carries a usable prescription', () => {
     expect(reject(ListViewSchema, { ...LIST_BASE, emptyState: { action: {} } })).toContain('addRecord');
   });
 
-  describe('UserFiltersSchema — closed at #5073, after `allowAddTab` was promoted', () => {
+  describe('UserFiltersSchema — closed, after `allowAddTab` was promoted', () => {
     // 批 18 left this shape open because closing it would have 422'd
     // `allowAddTab`: objectui's renderer reads the key
     // (`plugin-list/src/UserFilters.tsx:182` / `:742`), and `saveMetaItem`
@@ -306,7 +306,7 @@ describe('#4001 批 18 — the rejection carries a usable prescription', () => {
         .not.toContain('→ `showAllRecords`');
     });
 
-    it('the object variant still DERIVES its shape from the base (#2231), not a transcription', () => {
+    it('the object variant still DERIVES its shape from the base, not a transcription', () => {
       // The reason it is `.omit()` + spread rather than a hand-listed shape: a
       // key added to the base must appear here, or the two drift into the fork
       // derive-by-reference exists to prevent.
@@ -326,7 +326,7 @@ describe('#4001 批 18 — the rejection carries a usable prescription', () => {
 // ===========================================================================
 // 4. Union error behaviour — pinned honestly, including what does NOT arrive
 // ===========================================================================
-describe('#4001 批 18 — union error behaviour (#5014), pinned as it really is', () => {
+describe('批 18 — union error behaviour (where a branch prescription gets buried), pinned as it really is', () => {
   it('submitBehavior discriminates on `kind`, so ONE member reports and the prescription survives', () => {
     // This is why the block is `z.discriminatedUnion` and not `z.union`. With a
     // plain union of four strict members the error is `invalid_union` carrying
@@ -360,8 +360,8 @@ describe('#4001 批 18 — union error behaviour (#5014), pinned as it really is
 // ===========================================================================
 // 5. The shapes left OPEN — with the evidence, so nobody "finishes" them
 // ===========================================================================
-describe('#4001 批 18 — the shapes left open, and what became of them', () => {
-  it('[RESOLVED at #5074] ViewItemSchema SPLIT — the authoring gate closed, the wire member kept the round-trip', () => {
+describe('批 18 — the shapes left open, and what became of them', () => {
+  it('[RESOLVED by the ruled split] ViewItemSchema SPLIT — the authoring gate closed, the wire member kept the round-trip', () => {
     // 批 18 left this open and filed the design question as #5074; the
     // maintainer ruled "split" and it has landed, so this case is replaced
     // rather than deleted — the trace it recorded is still the reason the wire
@@ -400,7 +400,7 @@ describe('#4001 批 18 — the shapes left open, and what became of them', () =>
     ).toBe(false);
   });
 
-  it('[RESOLVED at #5074] ListViewSchema.sort CLOSED — the console `id` is stripped on the wire instead', () => {
+  it('[RESOLVED with the ruled split] ListViewSchema.sort CLOSED — the console `id` is stripped on the wire instead', () => {
     // 批 18 closed this (with `direction → order`, the #4721 alias for the
     // identical tuple), hit a live 422 and reverted (#5070). The revert was
     // provisional pending #5074, so the case is replaced with what actually

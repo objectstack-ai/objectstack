@@ -43,8 +43,19 @@ import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
 import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
-import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
-import { packagedBaseRegimeSentence } from './packaged-base-regime.js';
+import { DraftConflictError, SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
+import { isOriginGatedType, packagedBaseRegimeSentence } from './packaged-base-regime.js';
+import {
+    resolveArtifactLockLayer,
+    resolveItemLock,
+    resolveItemLockLazily,
+    resolveOverlayLockLayer,
+    storedRowDocument,
+    withItemLockFamily,
+    type ItemAddress,
+    type ItemLock,
+    type StoredOverlayRow,
+} from './item-lock.js';
 import {
     bumpWriteEpoch,
     metaOverlayCacheTtlMs,
@@ -92,6 +103,10 @@ import {
     // The one rule for which forms a `view` body opens to anonymous intake —
     // the same rule the anonymous form doors in `@objectstack/rest` serve by.
     anonymousFormIntakeSlugs,
+    // A withdrawal is a kill switch: the doors' layer predicate, which the
+    // org-scoped write door asks before accepting a re-opening write.
+    anonymousFormIntakeCandidates,
+    anonymousFormIntakeWithdrawnIn,
     // [#21476] The posture IN FORCE, read off the `tenancy` service the one way
     // the anonymous form doors read it — the runtime authoring gate's input for
     // its public-form intake advisory (see `tenancyPostureInForce()`).
@@ -134,7 +149,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
-import type { IObjectQLEngine, IPubSub } from '@objectstack/spec/contracts';
+import type { IObjectQLEngine, IPubSub, ISecurityService } from '@objectstack/spec/contracts';
 import { applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
@@ -1710,26 +1725,65 @@ function viewIdentityPatch(overlay: Record<string, unknown>, baseline: unknown):
 }
 
 /**
+ * [#21803] The packages that can ship an item of one type, read once from the
+ * registry's listings: per name, and the ones probed for every name. See
+ * `ObjectStackProtocolImplementation.shippingPackagesOf`.
+ */
+type ShippingPackages = {
+    readonly byName: ReadonlyMap<string, ReadonlySet<string>>;
+    readonly anyName: ReadonlySet<string>;
+};
+
+/**
  * ADR-0010 §3.3 — Overlay the artifact's metadata-protection envelope
  * onto a returned item so artifact-level lock/packageId/provenance
  * always wins over whatever was persisted in the `sys_metadata` overlay
  * row. Returns `item` unchanged when no artifact baseline is available.
  *
- * The artifact's `_lock`, `_lockReason`, `_packageId`, `_packageVersion`,
- * and `_provenance` are the source of truth — an overlay copy may
- * pre-date the artifact's protection declaration and would otherwise
- * mask it.
+ * The artifact's `_packageId`, `_packageVersion` and `_provenance` are the
+ * source of truth — an overlay copy may pre-date the artifact's protection
+ * declaration and would otherwise mask it.
+ *
+ * [#21738] The lock family (`_lock`, `_lockReason`, `_lockDocsUrl`,
+ * `_lockSource`) is NOT decided here: it follows the one item-lock resolution
+ * ({@link resolveItemLock}). The artifact's family is copied over the item's
+ * only when the artifact's lock is the one that binds, which is exactly the
+ * case the sentence above exists for (an overlay never masks a packaged lock).
+ * An artifact that declares no lock, or an explicit `'none'`, leaves the
+ * item's own family in place. Before this, any declared artifact `_lock` was
+ * copied, `'none'` included, so an artifact's explicit `'none'` erased a
+ * stored row's `'full'` from the served body and from the read envelope while
+ * the write door, which skips `'none'`, still refused the save.
+ *
+ * [#21761, #21803] A read that resolved the item's lock from its address
+ * ({@link resolveArtifactLockLayer} and {@link resolveOverlayLockLayer} into
+ * {@link resolveItemLock}) passes that answer as `itemLock`, and the body
+ * carries ITS lock family ({@link withItemLockFamily}): the binding row's or
+ * the binding package's, which need not be the document the body was served
+ * from, and no `_lock*` key at all when nothing binds. `artifactItem` then
+ * contributes the provenance fields only: content, and with it provenance,
+ * stays prefer-local (ADR-0048). Without `itemLock` the item's own body
+ * stands in for the overlay layer over `artifactItem` alone, as before: the
+ * registry's hydration and a previewed draft, neither of which is a read's
+ * lock answer.
  */
-function mergeArtifactProtection(item: unknown, artifactItem: unknown): unknown {
+function mergeArtifactProtection(
+    item: unknown,
+    artifactItem: unknown,
+    itemLock?: ItemLock,
+): unknown {
     if (item === undefined || item === null) return item;
+    if (itemLock !== undefined) item = withItemLockFamily(item, itemLock);
     if (artifactItem === undefined || artifactItem === null) return item;
     const a = artifactItem as Record<string, unknown>;
     if (typeof a !== 'object') return item;
     const out: Record<string, unknown> = { ...(item as Record<string, unknown>) };
-    if (a._lock !== undefined) out._lock = a._lock;
-    if (a._lockReason !== undefined) out._lockReason = a._lockReason;
-    if (a._lockDocsUrl !== undefined) out._lockDocsUrl = a._lockDocsUrl;
-    if (a._lockSource !== undefined) out._lockSource = a._lockSource;
+    if (itemLock === undefined && resolveItemLock({ artifact: [a], overlay: item }).layer === 'artifact') {
+        if (a._lock !== undefined) out._lock = a._lock;
+        if (a._lockReason !== undefined) out._lockReason = a._lockReason;
+        if (a._lockDocsUrl !== undefined) out._lockDocsUrl = a._lockDocsUrl;
+        if (a._lockSource !== undefined) out._lockSource = a._lockSource;
+    }
     if (a._packageId !== undefined) out._packageId = a._packageId;
     if (a._packageVersion !== undefined) out._packageVersion = a._packageVersion;
     if (a._provenance !== undefined) out._provenance = a._provenance;
@@ -1886,6 +1940,122 @@ function storedRowDiscriminator(type: string, record: unknown): string | undefin
 }
 
 /**
+ * One place a stored `sys_metadata` row of an item can sit, as
+ * {@link servedOverlayRowCandidates} orders them: a scope (the organization's,
+ * or env-wide with `organizationId: null`), a spelling of the type
+ * (`'canonical'`, or `'other'`, the type's singular/plural twin, pre-#4432
+ * residue), and the package the row is bound to: the address's package, `null`
+ * for the package-less row, or `undefined` for any row (an address that names
+ * no package).
+ */
+interface ServedOverlayRowCandidate {
+    readonly scope: 'org' | 'env';
+    readonly organizationId: string | null;
+    readonly spelling: 'canonical' | 'other';
+    readonly packageId: string | null | undefined;
+}
+
+/**
+ * [#21804] Where a stored row the list read sits, beside the package it is
+ * bound to: the scope it was read from (`null` for env-wide) and the type
+ * spelling it is stored under (the row's own `type` column).
+ */
+interface StoredRowPlace {
+    readonly organizationId: string | null;
+    readonly type: string;
+}
+
+/**
+ * [#21804, ADR-0005, ADR-0048] THE served-row resolution: the order in which
+ * the stored rows of one item are tried for the CONTENT a read serves. The
+ * first candidate that holds a row is the served row.
+ *
+ *  - Scope first (ADR-0005): the organization's rows, then the env-wide rows.
+ *    Precedence, never a merge.
+ *  - Then the spelling: the canonical type, then the other spelling (the
+ *    at-rest tolerance the reads have always had, #4432).
+ *  - Then the package (ADR-0048 prefer-local): with a `packageId`, that
+ *    package's own row, then the package-less row, never another package's;
+ *    with none, any row.
+ *
+ * Both readers of stored content take this order, so they cannot pick
+ * differently: {@link ObjectStackProtocolImplementation.findServedOverlayRow}
+ * (`getMetaItem`, its draft-preview arm, `getMetaItemLayered`) asks the store
+ * candidate by candidate, and {@link mergePackageAwareOverlay} (the list's
+ * active and draft-preview merges, a list scoped to a package included, whose
+ * package-less rows enter as stand-ins, #21817) asks the rows it already read. Before
+ * #21804 the list took the LATEST of a package's row and the package-less row
+ * in row order, so in one order the list served the package-less body for a
+ * package whose by-name read served the package's own row.
+ *
+ * It decides content only. The lock is selected separately, from every row in
+ * scope (`resolveOverlayLockLayer` in `item-lock.ts`, #21761).
+ */
+function servedOverlayRowCandidates(address: {
+    readonly organizationId: string | undefined;
+    readonly packageId: string | undefined;
+}): ServedOverlayRowCandidate[] {
+    const scopes: Array<Pick<ServedOverlayRowCandidate, 'scope' | 'organizationId'>> = address.organizationId
+        ? [{ scope: 'org', organizationId: address.organizationId }, { scope: 'env', organizationId: null }]
+        : [{ scope: 'env', organizationId: null }];
+    const packages: Array<string | null | undefined> = address.packageId ? [address.packageId, null] : [undefined];
+    return scopes.flatMap((scope) => (['canonical', 'other'] as const).flatMap((spelling) =>
+        packages.map((packageId) => ({ ...scope, spelling, packageId }))));
+}
+
+/**
+ * [#21967, ADR-0048] The package dimension of
+ * {@link servedOverlayRowCandidates}, in its order: with a package, that
+ * package (`packageId`) and then the package-less rows (`null`); with none,
+ * `undefined`, which matches a row of any package.
+ */
+function addressPackages(packageId: string | undefined): ReadonlyArray<string | null | undefined> {
+    return [...new Set(servedOverlayRowCandidates({ organizationId: undefined, packageId })
+        .map((candidate) => candidate.packageId))];
+}
+
+/**
+ * [#21967, ADR-0048] The stored view container expansion that serves `name`
+ * at the address of `packageId`, among `expansions`
+ * ({@link ObjectStackProtocolImplementation.expandStoredViewContainers}, each
+ * paired with the container row it came from); `undefined` when none does.
+ *
+ * The package order is the package dimension of
+ * {@link servedOverlayRowCandidates}, the one prefer-local resolution: with a
+ * package, the expansion of that package's own container row first, then the
+ * expansion of a package-less one, which stands in for every package with no
+ * container row of its own, and never another package's; with none, any
+ * expansion. Within one package the last expansion of the name wins, as
+ * before (two containers of one package that expand one name are refused at
+ * the save door).
+ *
+ * Both doors select through this function: the list read
+ * ({@link ObjectStackProtocolImplementation.readFlattenedMetaItems}) for each
+ * package's slot of the name, and the by-name read
+ * ({@link ObjectStackProtocolImplementation.resolveRowlessExpandedView}) for
+ * the package it names. So a package's slot in the list and the by-name read
+ * naming that package serve the same expansion. Before, the list upserted the
+ * last expansion of a name over every package's item of it, so one package's
+ * stored copy of a container displaced another package's item of each name
+ * the copy expands, a withdrawn public form included.
+ */
+function servedViewExpansion<E extends { packageId: string | undefined }>(
+    expansions: ReadonlyArray<{ item: Record<string, unknown>; container: E }>,
+    name: string,
+    packageId: string | undefined,
+): { item: Record<string, unknown>; container: E } | undefined {
+    for (const pkg of addressPackages(packageId)) {
+        let served: { item: Record<string, unknown>; container: E } | undefined;
+        for (const expanded of expansions) {
+            if (expanded.item.name !== name) continue;
+            if (pkg === undefined || (expanded.container.packageId ?? null) === pkg) served = expanded;
+        }
+        if (served !== undefined) return served;
+    }
+    return undefined;
+}
+
+/**
  * ADR-0048 (#1828) — package-aware overlay merge for the unscoped metadata list.
  *
  * `baseItems` (the lower layer: registry artifacts, or the running result) and
@@ -1895,16 +2065,36 @@ function storedRowDiscriminator(type: string, record: unknown): string | undefin
  *   • Two installed packages shipping the same `type/name` stay TWO rows —
  *     resolution is per `(package, name)`, not bare `name`, so a higher-layer
  *     row no longer collapses a same-name row from a different package.
- *   • For each package `P` that owns a row of a given name, the winner is the
- *     LATEST contribution that is either `P`'s own row or a package-less
- *     ("global", `package_id IS NULL`) row — mirroring
- *     `getMetaItem(name, packageId=P)`'s "scoped-then-global-fallback"
- *     resolution, so the list and single-item paths agree. This is also why a
- *     legacy row whose active/draft layers disagree on package attribution
- *     still collapses (a package-less active row + its `package_id`-bearing
- *     draft resolve to the one package slot, draft winning).
+ *   • For each package `P` that owns a row of a given name, the winner is
+ *     `P`'s own row or a package-less ("global", `package_id IS NULL`) row,
+ *     the higher layer winning — `getMetaItem(name, packageId=P)`'s
+ *     "scoped-then-global-fallback" resolution, so the list and single-item
+ *     paths agree. This is also why a legacy row whose active/draft layers
+ *     disagree on package attribution still collapses (a package-less active
+ *     row + its `package_id`-bearing draft resolve to the one package slot,
+ *     draft winning).
+ *   • [#21804] When `records` are stored rows the caller read (`rowsRead`,
+ *     each record's `stored` place), the winner among them is the one
+ *     {@link servedOverlayRowCandidates} picks for `P`: the organization's row
+ *     before the env-wide one, then `P`'s own before the package-less one. It
+ *     is the resolution `getMetaItem` takes, so it does not depend on the
+ *     order the store returned the rows in. Without `rowsRead` (the
+ *     MetadataService merge, whose `records` are already-resolved items),
+ *     the LATEST contribution wins, as before.
  *   • A name with NO package-owned row resolves to its latest package-less
  *     contribution — the pre-existing env-wide behaviour, unchanged.
+ *   • [#21817] A list scoped to one package passes the package-less rows in
+ *     its scope as STAND-INS (`standIn` on a record). A stand-in serves a
+ *     slot the package seats, by the same served-row resolution, so the
+ *     scoped list's slot is what `getMetaItem` naming the package serves:
+ *     the package's own row, else the package-less row. A stand-in never
+ *     seats a slot itself, so the scoped list still lists only the items the
+ *     package ships. A slot that only stand-ins reach is emitted with its
+ *     latest stand-in and recorded in `unseated`, and an item recorded there
+ *     that arrives as a base item counts as a stand-in again: a later layer
+ *     (the draft preview, the MetadataService listing) may still seat that
+ *     slot, and the caller drops what is still recorded once the last layer
+ *     has merged.
  *
  * `transform(data, prev)` runs on each `records` body before it enters the
  * merge (view-identity healing, draft tagging); `prev` is the base row it
@@ -1926,33 +2116,56 @@ function storedRowDiscriminator(type: string, record: unknown): string | undefin
  * its buckets are unchanged.
  *
  * @param type Canonical (singular) metadata type of every row being merged.
+ * @param unseated [#21817] The scoped list's record of stand-ins no
+ *        contribution has seated yet (see the stand-in bullet above).
  */
 function mergePackageAwareOverlay(
     type: string,
     baseItems: unknown[],
-    records: Array<{ data: unknown; packageId: string | undefined }>,
+    records: Array<{ data: unknown; packageId: string | undefined; stored?: StoredRowPlace; standIn?: boolean }>,
     transform?: (data: any, prev: any) => any,
+    rowsRead?: { readonly organizationId: string | undefined },
+    unseated?: WeakSet<object>,
 ): unknown[] {
     // Per-SLOT, layer-ordered contributions; `pkg: undefined` = package-less.
-    const buckets = new Map<string, Array<{ pkg: string | undefined; item: any }>>();
+    // `stored` marks a contribution that is a stored row the caller read;
+    // `standIn` one that serves a slot without seating it ([#21817]).
+    type Contribution = { pkg: string | undefined; item: any; stored?: StoredRowPlace; standIn?: true };
+    const buckets = new Map<string, Contribution[]>();
     const order: string[] = []; // first-seen slot order → stable output
     const slotOf = (item: unknown, name: unknown): string => {
         const disc = itemDiscriminator(type, item);
         return disc === undefined ? String(name) : `${String(name)}\u0000${disc}`;
     };
-    const push = (slot: string, pkg: string | undefined, item: any) => {
+    const push = (slot: string, pkg: string | undefined, item: any, stored?: StoredRowPlace, standIn?: boolean) => {
         let list = buckets.get(slot);
         if (!list) { buckets.set(slot, (list = [])); order.push(slot); }
-        list.push({ pkg, item });
+        const c: Contribution = stored ? { pkg, item, stored } : { pkg, item };
+        if (standIn) c.standIn = true;
+        list.push(c);
+    };
+    // [#21804] The stored row the served-row resolution picks for package
+    // `real` among a slot's contributions: the first candidate of
+    // {@link servedOverlayRowCandidates} that one of the rows sits at.
+    const servedStoredRow = (list: readonly Contribution[], real: string | undefined): any => {
+        for (const candidate of servedOverlayRowCandidates({ organizationId: rowsRead?.organizationId, packageId: real })) {
+            const hit = list.find((c) => c.stored !== undefined
+                && c.stored.organizationId === candidate.organizationId
+                && (c.stored.type === type ? 'canonical' : 'other') === candidate.spelling
+                && (candidate.packageId === undefined || (c.pkg ?? null) === candidate.packageId));
+            if (hit) return hit.item;
+        }
+        return undefined;
     };
 
     for (const raw of baseItems) {
         const item = raw as any;
         if (item && typeof item === 'object' && 'name' in item) {
-            push(slotOf(item, item.name), (item._packageId ?? undefined) as string | undefined, item);
+            push(slotOf(item, item.name), (item._packageId ?? undefined) as string | undefined, item,
+                undefined, unseated?.has(item));
         }
     }
-    for (const { data, packageId } of records) {
+    for (const { data, packageId, stored, standIn } of records) {
         const body = data as any;
         if (!(body && typeof body === 'object' && 'name' in body)) continue;
         // The base row this record shadows at its own slot (for view-identity
@@ -1965,23 +2178,39 @@ function mergePackageAwareOverlay(
                 ?? list.find((c) => c.pkg === undefined)?.item
                 ?? list[0]?.item)
             : undefined;
-        push(slot, packageId, transform ? transform(body, prev) : body);
+        push(slot, packageId, transform ? transform(body, prev) : body, rowsRead ? stored : undefined, standIn);
     }
 
     const out: unknown[] = [];
     for (const slot of order) {
         const list = buckets.get(slot)!;
+        // [#21817] Only stand-ins reach this slot: no item of the package is
+        // here (yet), so the stand-in is held back, not served as one.
+        if (list.every((c) => c.standIn)) {
+            // The stand-in the one candidate order picks among the stored
+            // rows here, else (no stored row: a stand-in held back by an
+            // earlier merge) the latest.
+            let held = rowsRead ? servedStoredRow(list, undefined) : undefined;
+            if (held === undefined) held = list[list.length - 1].item;
+            unseated?.add(held);
+            out.push(held);
+            continue;
+        }
         const reals = Array.from(new Set(list.filter((c) => c.pkg !== undefined).map((c) => c.pkg)));
         if (reals.length === 0) {
             out.push(list[list.length - 1].item); // latest package-less row wins
             continue;
         }
         for (const real of reals) {
-            // getMetaItem(name, real) resolution: latest row that is `real`'s
-            // own or package-less (global fallback).
-            let chosen: any;
-            for (const c of list) {
-                if (c.pkg === real || c.pkg === undefined) chosen = c.item;
+            // getMetaItem(name, real) resolution. [#21804] A stored row is
+            // chosen by the served-row resolution, whatever order the rows
+            // came back in; with no stored row of `real`'s own or package-less,
+            // the latest lower-layer contribution of either stands, as before.
+            let chosen: any = rowsRead ? servedStoredRow(list, real) : undefined;
+            if (chosen === undefined) {
+                for (const c of list) {
+                    if ((c.pkg === real || c.pkg === undefined) && c.stored === undefined) chosen = c.item;
+                }
             }
             if (chosen === undefined) continue;
             // A package-less body standing in for package `real` must carry
@@ -4660,6 +4889,24 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  * field. The compound door's parity argument is a statement about ONE pair of
  * routes that spell one name two ways; it is not a general licence, and the
  * dispatcher is not the third member of that pair.
+ *
+ * ## [#21841] The external-table import, and why it went the dispatcher's way
+ *
+ * "Import as Object" (`@objectstack/service-datasource`) saves through this
+ * gate since #21788, so a re-import that would shrink an object it created is
+ * refused here and relayed as `400 EXTERNAL_IMPORT_ERROR`. The import route
+ * reads no `force`, so the default clause sent that caller round in a circle.
+ * It states `'external-import'` and gets a clause of its own rather than a
+ * `force`, for the reasons the dispatcher did and one more: the route has no
+ * twin that reads `?force`, and no first-party caller re-imports through it
+ * (the console's import dialog saves its draft through
+ * `PUT /api/v1/meta/object/:name`, the very door this clause names), so a
+ * `force` there would be a new capability with nothing pulling on it. Unlike
+ * the dispatcher, a door that DOES read `?force` exists for the same item, so
+ * the clause names it instead of only telling the caller to reconcile.
+ *
+ * ⛔ Same warning as above: the import is not a twin of the `PUT` door, and
+ * giving it a `force` to "match" would be a new surface, not a repair.
  */
 /**
  * [commit 82cb6e849 / commit d806081dd] Which write door a `saveMetaItem` refusal is being
@@ -4692,8 +4939,16 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  * case rather than a hypothetical — which is why {@link specValidationFindings}
  * lists the two faces on one `case` instead of letting `'meta-dispatch'` fall
  * to a default that was never written for it.
+ *
+ * ⚠️ [#21841] `'external-import'` differs from `'meta-dispatch'` on that SAME
+ * second question, in the other direction: the import route relays a refusal
+ * as `sendError(res, 400, 'EXTERNAL_IMPORT_ERROR', message)` and nothing else,
+ * so no `issues[]` reaches its caller and the message is the sole carrier of
+ * the findings. It therefore stays OUT of {@link specValidationFindings}'
+ * trimming case and keeps the full-prose default — the polarity that comment
+ * defends, working as designed for a door added after it.
  */
-type MetadataWriteFace = 'package-duplicate' | 'meta-envelope' | 'meta-dispatch';
+type MetadataWriteFace = 'package-duplicate' | 'meta-envelope' | 'meta-dispatch' | 'external-import';
 
 function destructiveChangeRemedy(
     face: MetadataWriteFace | undefined,
@@ -4724,6 +4979,20 @@ function destructiveChangeRemedy(
             return `this save cannot be forced: the dispatcher's \`PUT /meta\` accepts no \`force\`. `
                 + `Re-submit '${name}' with a body that keeps the fields and types named above, `
                 + `or reconcile that stored item first.`;
+        case 'external-import':
+            // [#21841] "Import as Object" (`@objectstack/service-datasource`),
+            // relayed by the import route as `400 EXTERNAL_IMPORT_ERROR`. That
+            // route reads no `force` and was deliberately not given one (see the
+            // section above `MetadataWriteFace`). Both remedies are things the
+            // caller can do from where they stand: import the table under a
+            // name nothing stores yet, or save the changed definition through
+            // the metadata door, which reads `?force=true` for this very item
+            // and is where a destructive change is acknowledged on purpose.
+            // Same grammar as the two faces above — name the door, deny the
+            // mechanism, then prescribe.
+            return `this import cannot be forced: the external-table import route accepts no \`force\`. `
+                + `Import the table under a new \`name\`, or save the changed definition of '${name}' `
+                + `through \`PUT /api/v1/meta/object/${name}?force=true\`, which accepts the destructive change on purpose.`;
         default:
             return 're-submit with ?force=true to proceed.';
     }
@@ -5209,13 +5478,15 @@ function isNonCanonicalStoredType(type: string): boolean {
  * [#21442] A stored `sys_metadata` row as the list read parses it: its own
  * name, its body (stored-row conversions replayed), and the package and
  * organization it is bound to (`organizationId: null` for an environment-wide
- * row).
+ * row). [#21804] `type` is the spelling the row is stored under (its own
+ * `type` column), which the served-row resolution reads.
  */
 interface StoredOverlayEntry {
     name: string;
     data: any;
     packageId: string | undefined;
     organizationId: string | null;
+    type: string;
 }
 
 /**
@@ -6114,8 +6385,10 @@ export class ObjectStackProtocolImplementation implements
         try {
             const scopes: (string | null)[] = organizationId ? [null, organizationId] : [null];
             const read = async (type: string, oid: string | null): Promise<Record<string, unknown>[]> => {
+                // [#21911] The explicit system opt-in — see findServedOverlayRow.
                 const rs = await this.engine.find('sys_metadata', {
                     where: { type, state: 'active', organization_id: oid },
+                    context: { isSystem: true },
                 });
                 return (rs ?? []) as Record<string, unknown>[];
             };
@@ -7816,6 +8089,7 @@ export class ObjectStackProtocolImplementation implements
                     : [];
             const pkgSet = new Set<string>();
             let lockedCount = 0;
+            let shipping: ShippingPackages | undefined;
             for (const item of items) {
                 scannedItems += 1;
                 const pkg = (item?._packageId ?? null) as string | null;
@@ -7825,8 +8099,23 @@ export class ObjectStackProtocolImplementation implements
                 // alone: a packaged base the write doors refuse reads locked on
                 // its item envelope, so the per-type tile counts it too. The
                 // derivation reads the registry only — no store read per item.
+                // [#21738] Its lock is the one item-lock resolution
+                // ({@link resolveItemLock}) over the item's artifact layer —
+                // [#21803] every installed package that ships the name, from
+                // the address the list's own merge used (ADR-0048 package
+                // scope) — and the document the list serves for it.
                 const itemName = typeof item?.name === 'string' ? item.name : '';
-                const served = this.servedLockState(t, itemName, item, this.isArtifactBacked(t, itemName));
+                shipping ??= this.shippingPackagesOf(t);
+                const itemLock = resolveItemLock({
+                    artifact: this.artifactLockLayerAt({
+                        type: t,
+                        name: itemName,
+                        organizationId: request.organizationId,
+                        packageId: request.packageId ?? (item?._packageId as string | undefined),
+                    }, shipping),
+                    overlay: item,
+                });
+                const served = this.servedLockState(t, itemName, item, this.isArtifactBacked(t, itemName), itemLock);
                 if (served.lock !== 'none') lockedCount += 1;
                 const diag: MetadataDiagnostics | undefined =
                     item?._diagnostics ?? computeMetadataDiagnostics(t, item);
@@ -8686,7 +8975,10 @@ export class ObjectStackProtocolImplementation implements
         // [#20913] A shipped flow name serves the loader's entries only — see
         // {@link isShippedFlowName}. This is the registry half: a stored row
         // the hydration registered under the bare key is not one of them.
-        items = items.filter((it) => !this.isStoredFlowEntryOfShippedName(request.type, it));
+        // [#21922] …and a code-defined datasource name serves the
+        // MetadataService's code definition, merged in below. One predicate
+        // for both: {@link declinesStoredRow}, whose registry half this is.
+        items = items.filter((it) => !this.isStoredEntryOfDeclinedName(request.type, it));
 
         // Always consult the DB so metadata persisted by the seeder /
         // bulkRegister shows up even when the registry already has unrelated
@@ -8698,6 +8990,23 @@ export class ObjectStackProtocolImplementation implements
         // each env has its own physical DB. We surface both org-scoped overlays
         // (when an active org is provided) and env-wide (organization_id IS NULL)
         // overlays; org-scoped rows win on name collision.
+        // [#21761] Every active row of the type in this caller's scopes,
+        // whichever package each is bound to: what each listed item's lock is
+        // selected from ({@link overlayLockLayerAt}'s selection, below). A list
+        // scoped to a package reads its rows with that package only, so it
+        // reads the package-agnostic set too (the overlay cache answers it).
+        let lockRows: readonly any[] = [];
+        // [#21817] A list scoped to a package serves, in each slot the package
+        // seats, the row `getMetaItem` naming that package serves: the
+        // package's own row, else the package-less row (ADR-0048), by the one
+        // candidate order ({@link servedOverlayRowCandidates}). Its row read
+        // names the package, so the package-less rows come from the
+        // package-agnostic read above, filtered back to the package-less ones.
+        // They enter each merge as stand-ins ({@link mergePackageAwareOverlay}):
+        // a stand-in serves a slot the package seats and never seats one, so
+        // the list's membership stays the items the package ships. A stand-in
+        // no layer seated is recorded here and dropped after the last merge.
+        const unseated = packageId ? new WeakSet<object>() : undefined;
         try {
             // [#21442] The row set this read consults — the overlay cache
             // included — is {@link readActiveOverlayRows}, and each row is
@@ -8706,7 +9015,9 @@ export class ObjectStackProtocolImplementation implements
             // the two doors cannot disagree about which containers are in
             // scope for one caller.
             const records = await this.readActiveOverlayRows(request, orgId);
-            if (records && records.length > 0) {
+            lockRows = packageId ? await this.readActiveOverlayRows({ type: request.type }, orgId) : records;
+            const standInRows = packageId ? lockRows.filter((row) => (row?.package_id ?? null) === null) : [];
+            if ((records && records.length > 0) || standInRows.length > 0) {
                 const isView = (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view';
                 const overlays = this.storedOverlayEntries(request, records);
 
@@ -8723,10 +9034,27 @@ export class ObjectStackProtocolImplementation implements
                 // [#20913] …and the stored-row half: a row of a shipped flow name
                 // is not merged into the package's slot. It is still hydrated
                 // below, as the tenant row it is, so the boot pull reports it.
+                // [#21922] The same for a row under a code-defined datasource
+                // name ({@link declinesStoredRow}): the MetadataService's code
+                // definition, merged in below, is the item the list serves.
                 const mergeable = overlays.filter(
-                    ({ data }) => !this.isShippedFlowName(request.type, (data as { name?: unknown } | null)?.name),
+                    ({ data }) => !this.declinesStoredRow(request.type, (data as { name?: unknown } | null)?.name),
                 );
-                items = mergePackageAwareOverlay(request.type, items, mergeable, (data, prev) => {
+                // [#21804] Each row travels with its place (scope and stored
+                // spelling), so the merge picks a package's slot by the
+                // served-row resolution the by-name read takes
+                // ({@link servedOverlayRowCandidates}), not by row order.
+                const placed = mergeable.map(({ data, packageId: recPkg, organizationId: recOrg, type: recType }) => ({
+                    data, packageId: recPkg, stored: { organizationId: recOrg, type: recType },
+                }));
+                // [#21817] The package-less rows, placed the same way, as
+                // stand-ins: the same parse and the same stored-row rule.
+                const standIns = this.storedOverlayEntries(request, standInRows)
+                    .filter(({ data }) => !this.declinesStoredRow(request.type, (data as { name?: unknown } | null)?.name))
+                    .map(({ data, organizationId: recOrg, type: recType }) => ({
+                        data, packageId: undefined, stored: { organizationId: recOrg, type: recType }, standIn: true,
+                    }));
+                items = mergePackageAwareOverlay(request.type, items, [...placed, ...standIns], (data, prev) => {
                     if (isView && data && typeof data === 'object') {
                         const patch = viewIdentityPatch(data as Record<string, unknown>, prev);
                         if (patch) Object.assign(data as Record<string, unknown>, patch);
@@ -8744,7 +9072,7 @@ export class ObjectStackProtocolImplementation implements
                     return this.foldObjectExtendersFromRegistry(
                         request.type, (data as { name?: unknown } | null)?.name, data,
                     );
-                });
+                }, { organizationId: orgId }, unseated);
 
                 // [#13407] Expand any aggregated `defineView` container this
                 // READ just merged in, INLINE into this response's own `items`
@@ -8781,20 +9109,131 @@ export class ObjectStackProtocolImplementation implements
                 // override for it (ADR-0005 keys an overlay by its own name);
                 // an expansion fills only a name with no row of its own. The
                 // test is {@link namesWithOwnStoredRow} over this caller's
-                // `records`, the one the by-name read asks, so the two doors
-                // answer the same row for the name. An item the registry or a
-                // package supplies under the name is still replaced, as before.
-                if (isView) {
-                    const byName = new Map<string, unknown>();
+                // `records` at the slot's package ([#21967]), the one the
+                // by-name read asks, so the two doors answer the same row for
+                // the name. An item the registry or a package supplies under the
+                // name is still replaced, as before.
+                //
+                // [#21817] In a list scoped to a package, a package-less row
+                // of the name stands in ahead of the expansion too: the by-name
+                // read naming the package serves that row before it asks any
+                // expansion. The expansion still seats the slot, so a stand-in
+                // held back by the merge is served there, as the package's.
+                //
+                // [#21934] Only a name an expansion writes is upserted. Every
+                // other name keeps what the package-aware merge seated for it:
+                // one item per package that ships the name (ADR-0048), as the
+                // list serves it when no row is stored. The env-wide list is the
+                // layer the anonymous form doors judge a withdrawal against, so
+                // it holds every package's body of a name.
+                //
+                // [#21967] …and a name an expansion writes is upserted per
+                // package, never over every package's item of the name. Each
+                // slot of the name (the package of an item listed under it, or
+                // of a container row that expands it) serves
+                // {@link servedViewExpansion} for that package: the expansion of
+                // the package's own container row, else of a package-less one,
+                // which stands in for every package with no container row of its
+                // own (ADR-0048), as the by-name read naming the package serves
+                // it. A slot neither reaches keeps its item. Before, the last
+                // expansion of the name replaced every package's item of it, so
+                // one package's stored copy of a container displaced another
+                // package's item of each name the copy expands, and the
+                // anonymous form doors could miss that package's withdrawal of a
+                // form, shipped or saved. In a list scoped to a package the
+                // package-less container rows stand in the same way, in the
+                // slots the package seats only: a stand-in never seats a slot
+                // ([#21817]).
+                if (isView && (records.length > 0 || standInRows.length > 0)) {
+                    // [#21510, #21967] The names a stored row of its own holds
+                    // at a slot's package ({@link namesWithOwnStoredRow}, the
+                    // predicate the by-name read asks for the package it
+                    // names): an expansion never displaces such a row, and a
+                    // row of one package keeps no other package's slot.
+                    const ownRowNamesAt = new Map<string | undefined, ReadonlySet<string>>();
+                    const ownRowNames = (pkg: string | undefined): ReadonlySet<string> => {
+                        let names = ownRowNamesAt.get(pkg);
+                        if (names === undefined) ownRowNamesAt.set(pkg, (names = this.namesWithOwnStoredRow(records, pkg)));
+                        return names;
+                    };
+                    const standInNames = this.namesWithOwnStoredRow(standInRows);
+                    const expansions = this.expandStoredViewContainers(
+                        request.type,
+                        packageId ? [...overlays, ...this.storedOverlayEntries(request, standInRows)] : overlays,
+                    );
+                    const written = new Set(expansions.map(({ item: vi }) => vi.name as string));
+                    const boundNames = new Set(expansions
+                        .filter(({ container }) => container.packageId !== undefined)
+                        .map(({ item: vi }) => vi.name as string));
+                    // The package of an item's slot, as the package-aware merge
+                    // keys it; a list scoped to a package seats every item in
+                    // that package's slot.
+                    const slotPackage = (it: Record<string, unknown>): string | undefined => packageId
+                        ?? (typeof it._packageId === 'string' && it._packageId !== '' ? it._packageId : undefined);
+                    const slotKey = (name: string, pkg: string | undefined) => `${name}\u0000${pkg ?? ''}`;
+                    const filled = new Set<string>();
+                    const filledNames = new Set<string>();
+                    const serve = (
+                        name: string,
+                        pkg: string | undefined,
+                        held: Record<string, unknown> | undefined,
+                    ): Record<string, unknown> | undefined => {
+                        filled.add(slotKey(name, pkg));
+                        filledNames.add(name);
+                        const served = servedViewExpansion(expansions, name, pkg);
+                        // [#21817] In a list scoped to a package, a package-less
+                        // row of the name stands in ahead of the expansion too:
+                        // the by-name read naming the package serves that row
+                        // before it asks any expansion. The package's own
+                        // expansion still seats the slot, so a stand-in held back
+                        // by the merge is served there, as the package's: a copy
+                        // the `unseated` record does not hold, stamped as the
+                        // merge stamps a stand-in.
+                        if (held !== undefined && standInNames.has(name)) {
+                            if (unseated?.has(held) && served !== undefined && served.container.packageId !== undefined) {
+                                return held._packageId === undefined ? { ...held, _packageId: pkg } : { ...held };
+                            }
+                            return held;
+                        }
+                        if (served === undefined || ownRowNames(pkg).has(name)) return held;
+                        const own = served.container.packageId;
+                        if (own !== undefined) filled.add(slotKey(name, own));
+                        // A package-less container's expansion standing in for a
+                        // package carries that package's provenance, as a
+                        // package-less row standing in does
+                        // ({@link mergePackageAwareOverlay}), so the last pass
+                        // below grafts that package's artifact envelope on it, as
+                        // the by-name read naming the package does.
+                        return pkg !== undefined && own === undefined ? { ...served.item, _packageId: pkg } : served.item;
+                    };
+                    const merged: unknown[] = [];
                     for (const it of items as any[]) {
-                        if (it && typeof it === 'object' && typeof it.name === 'string') byName.set(it.name, it);
+                        if (!it || typeof it !== 'object' || typeof it.name !== 'string') continue;
+                        if (!written.has(it.name)) {
+                            merged.push(it);
+                            continue;
+                        }
+                        const pkg = slotPackage(it);
+                        if (filled.has(slotKey(it.name, pkg))) continue;
+                        merged.push(serve(it.name, pkg, it));
                     }
-                    const ownRowNames = this.namesWithOwnStoredRow(records);
-                    for (const { item: vi } of this.expandStoredViewContainers(request.type, overlays)) {
-                        if (ownRowNames.has(vi.name as string)) continue;
-                        byName.set(vi.name as string, vi);
+                    // A slot no listed item holds. A package's own container
+                    // row's expansion seats that package's slot of the name. A
+                    // package-less container's expansion of a name nothing else
+                    // serves is listed on its own, in a list scoped to no package
+                    // only.
+                    for (const { item: vi, container } of expansions) {
+                        const name = vi.name as string;
+                        const own = container.packageId;
+                        if (own !== undefined) {
+                            if (filled.has(slotKey(name, own))) continue;
+                        } else if (packageId !== undefined || filledNames.has(name) || boundNames.has(name)) {
+                            continue;
+                        }
+                        const out = serve(name, own, undefined);
+                        if (out !== undefined) merged.push(out);
                     }
-                    items = Array.from(byName.values());
+                    items = merged;
                 }
 
                 // Only hydrate the global registry for unscoped (control-plane)
@@ -8842,27 +9281,37 @@ export class ObjectStackProtocolImplementation implements
         // process-wide registry or to non-preview reads.
         if (request.previewDrafts) {
             try {
-                const queryDrafts = async (oid: string | null): Promise<any[]> => {
+                const queryDrafts = async (oid: string | null, pkg: string | undefined): Promise<any[]> => {
                     const whereClause: Record<string, unknown> = { type: request.type, state: 'draft', organization_id: oid };
-                    if (packageId) whereClause.package_id = packageId;
-                    let rs = await this.engine.find('sys_metadata', { where: whereClause });
+                    if (pkg) whereClause.package_id = pkg;
+                    // [#21911] The explicit system opt-in — see findServedOverlayRow.
+                    let rs = await this.engine.find('sys_metadata', { where: whereClause, context: { isSystem: true } });
                     if (!rs || rs.length === 0) {
                         const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
                         if (alt) {
                             const altWhere: Record<string, unknown> = { type: alt, state: 'draft', organization_id: oid };
-                            if (packageId) altWhere.package_id = packageId;
-                            rs = await this.engine.find('sys_metadata', { where: altWhere });
+                            if (pkg) altWhere.package_id = pkg;
+                            rs = await this.engine.find('sys_metadata', { where: altWhere, context: { isSystem: true } });
                         }
                     }
                     return rs ?? [];
                 };
-                const draftRecords = [...(await queryDrafts(null)), ...(orgId ? await queryDrafts(orgId) : [])];
-                if (draftRecords.length > 0) {
+                const draftRecords = [...(await queryDrafts(null, packageId)), ...(orgId ? await queryDrafts(orgId, packageId) : [])];
+                // [#21817] A list scoped to a package previews the package-less
+                // drafts as stand-ins, as its active arm does: the
+                // package-agnostic draft read, filtered back to the
+                // package-less rows. The by-name preview arm naming the
+                // package serves that draft when the package has none.
+                const standInDraftRecords = packageId
+                    ? [...(await queryDrafts(null, undefined)), ...(orgId ? await queryDrafts(orgId, undefined) : [])]
+                        .filter((record) => (record?.package_id ?? null) === null)
+                    : [];
+                if (draftRecords.length > 0 || standInDraftRecords.length > 0) {
                     // ADR-0048 (#1828) — package-aware draft overlay (parity with
                     // the active-overlay merge above): a package-scoped draft
                     // previews only its own package's entry, so two packages'
                     // same-name drafts stay distinct. Draft rows win over active.
-                    const drafts = draftRecords.map((record) => {
+                    const placeDraft = (record: any) => {
                         const data = this.convertStoredItem(
                             String(record.type ?? request.type),
                             typeof record.metadata === 'string' ? JSON.parse(record.metadata) : record.metadata,
@@ -8871,15 +9320,26 @@ export class ObjectStackProtocolImplementation implements
                         if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
                             (data as any)._packageId = recPkg;
                         }
-                        return { data, packageId: recPkg };
-                    });
+                        // [#21804] The draft's place, as for the active rows:
+                        // a package's previewed slot is the draft the
+                        // by-name read's preview arm serves, in any row order.
+                        const stored = {
+                            organizationId: (record as { organization_id?: string | null }).organization_id ?? null,
+                            type: String(record.type ?? request.type),
+                        };
+                        return { data, packageId: recPkg, stored };
+                    };
+                    const drafts = [
+                        ...draftRecords.map(placeDraft),
+                        ...standInDraftRecords.map((record) => ({ ...placeDraft(record), standIn: true })),
+                    ];
                     // [#7774] Same bundle slot as the active merge above — a
                     // draft of one locale must preview over that locale, not
                     // over the whole bundle.
                     items = mergePackageAwareOverlay(request.type, items, drafts, (data) => {
                         if (data && typeof data === 'object') (data as any)._draft = true;
                         return data;
-                    });
+                    }, { organizationId: orgId }, unseated);
                 }
             } catch (error) {
                 // [#5532] Same rule as the active-overlay read above. Serving
@@ -8964,10 +9424,20 @@ export class ObjectStackProtocolImplementation implements
                             packageId: ((it as any)?._packageId ?? undefined) as string | undefined,
                         })),
                     );
+                    // [#21817] A stand-in still held back here takes the
+                    // package's runtime item of its slot as the item it serves
+                    // (the latest contribution, stamped as the package's): a
+                    // seated copy, which `unseated` does not hold.
                 }
             }
         } catch {
             // MetadataService not available or doesn't support this type
+        }
+
+        // [#21817] A stand-in no layer seated is a package-less row of an item
+        // the package does not ship: it is not in the package's list.
+        if (unseated) {
+            items = (items as any[]).filter((it) => !(it && typeof it === 'object' && unseated.has(it)));
         }
 
         // Hide metadata owned by a disabled package. `listItems` already drops
@@ -9052,23 +9522,59 @@ export class ObjectStackProtocolImplementation implements
             });
         }
 
-        const governed = (items as any[]).map((it) => {
+        // [#21761] Each listed item's lock is selected from ITS address, by the
+        // selection the by-name reads and the `_lock` gate make
+        // ({@link overlayLockLayerAt}), over the rows read above: the strictest
+        // lock among the item's rows in scope. The list still SERVES the body
+        // its own merge chose; only the lock family on it follows the binding
+        // layer, so the body and the directory tile ({@link getMetaDiagnostics}
+        // counts these bodies) state the lock the item's envelope reports. A
+        // previewed draft keeps its own family: it is the pending edit, not
+        // the item the doors gate. [#21803] The artifact layer likewise: every
+        // installed package that ships the item's name
+        // ({@link artifactLockLayerAt}), the packages read once for the type.
+        const otherType = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
+        const lockRowsByName = new Map<string, any[]>();
+        for (const row of lockRows) {
+            const name = String(row?.name);
+            const list = lockRowsByName.get(name);
+            if (list) list.push(row);
+            else lockRowsByName.set(name, [row]);
+        }
+        let shipping: ShippingPackages | undefined;
+        const governed: any[] = [];
+        for (const it of items as any[]) {
+            const itemName = (it as any)?.name;
+            const itemPackageId = packageId ?? ((it as any)?._packageId as string | undefined);
             // ADR-0048 — scope the artifact lookup to THIS item's owning
             // package so a same-name collision grafts each item's own
-            // protection envelope, not the first-registered package's.
+            // provenance envelope, not the first-registered package's.
             // (`requested` packageId, when the whole list is scoped,
             // takes priority; else the item's own `_packageId`.)
-            const a = this.lookupArtifactItem(
-                request.type,
-                (it as any)?.name,
-                packageId ?? ((it as any)?._packageId as string | undefined),
-            );
+            const a = this.lookupArtifactItem(request.type, itemName, itemPackageId);
+            let itemLock: ItemLock | undefined;
+            if (typeof itemName === 'string' && (it as any)?._draft !== true) {
+                const address: ItemAddress = {
+                    type: request.type,
+                    name: itemName,
+                    organizationId: orgId,
+                    packageId: itemPackageId,
+                };
+                shipping ??= this.shippingPackagesOf(request.type);
+                itemLock = resolveItemLock({
+                    artifact: this.artifactLockLayerAt(address, shipping),
+                    overlay: await resolveOverlayLockLayer(address, (organizationId, spelling) =>
+                        (lockRowsByName.get(itemName) ?? []).filter((row) =>
+                            (row.organization_id ?? null) === organizationId
+                            && row.type === (spelling === 'canonical' ? request.type : otherType)), { otherSpelling: true }),
+                });
+            }
             // [#4513] Same governance as the single-item read — the list
             // is the other exit a client reads field metadata from, and
             // an overlay row wins over the (already-governed) registry
             // entry in the merge above, so it carries the same lie.
-            return this.governServedObject(request.type, mergeArtifactProtection(it, a)) as any;
-        });
+            governed.push(this.governServedObject(request.type, mergeArtifactProtection(it, a, itemLock)));
+        }
         return {
             type: request.type,
             // [#20552] Served: diagnostics + per-type credential redaction.
@@ -9103,13 +9609,14 @@ export class ObjectStackProtocolImplementation implements
                 organization_id: oid,
             };
             if (packageId) whereClause.package_id = packageId;
-            let rs = await this.engine.find('sys_metadata', { where: whereClause });
+            // [#21911] The explicit system opt-in — see findServedOverlayRow.
+            let rs = await this.engine.find('sys_metadata', { where: whereClause, context: { isSystem: true } });
             if ((!rs || rs.length === 0)) {
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
                 if (alt) {
                     const altWhere: Record<string, unknown> = { type: alt, state: 'active', organization_id: oid };
                     if (packageId) altWhere.package_id = packageId;
-                    rs = await this.engine.find('sys_metadata', { where: altWhere });
+                    rs = await this.engine.find('sys_metadata', { where: altWhere, context: { isSystem: true } });
                 }
             }
             return rs ?? [];
@@ -9226,18 +9733,22 @@ export class ObjectStackProtocolImplementation implements
             // merged row set is env-wide rows PLUS this org's rows, and
             // the two are only distinguishable here, at the row.
             const recOrg = (record as { organization_id?: string | null }).organization_id ?? null;
-            return { name: String(record.name), data, packageId: recPkg, organizationId: recOrg };
+            return {
+                name: String(record.name), data, packageId: recPkg, organizationId: recOrg,
+                type: String(record.type ?? request.type),
+            };
         });
     }
 
     /**
      * [#21442] Every item the stored view containers in `overlays` expand, in
-     * the order the list read upserts them by name (a later expansion of a
-     * name replaces an earlier one), each paired with the stored row it was
-     * expanded from. The one expansion pass both doors run: the list read
-     * serves the items, and {@link resolveRowlessExpandedView} also needs the
-     * row. Each container goes through {@link expandRuntimeViewContainer},
-     * unchanged.
+     * row order, each paired with the stored row it was expanded from. The one
+     * expansion pass both doors run: the list read serves the items, and
+     * {@link resolveRowlessExpandedView} also needs the row. Each container
+     * goes through {@link expandRuntimeViewContainer}, unchanged. [#21967]
+     * Which of them serves a name at a package's address is
+     * {@link servedViewExpansion}'s answer, for both doors: within one package
+     * a later expansion of a name replaces an earlier one.
      */
     private expandStoredViewContainers<E extends { data: unknown; packageId: string | undefined }>(
         type: string,
@@ -9267,11 +9778,23 @@ export class ObjectStackProtocolImplementation implements
      * so a name that has a row in one organization only is row-less for every
      * other caller. ⛔ Never a second test of "this name has its own row":
      * two tests are two rules, and the doors would disagree again.
+     *
+     * [#21967] …and both pass the package whose slot they fill, so a name that
+     * has a row in one package only is row-less for every other package's
+     * slot. With `packageId`, a row counts when it is bound to that package or
+     * package-less, the package dimension of {@link servedOverlayRowCandidates}
+     * (a package-less row stands in for every package, ADR-0048); with none,
+     * every row counts. Before, the list asked with no package for every slot,
+     * so one package's row of a name kept every other package's container
+     * expansion of it out of the list, while the by-name read naming that
+     * other package served the expansion.
      */
-    private namesWithOwnStoredRow(records: readonly any[]): ReadonlySet<string> {
+    private namesWithOwnStoredRow(records: readonly any[], packageId?: string): ReadonlySet<string> {
+        const packages = addressPackages(packageId);
         const names = new Set<string>();
         for (const record of records) {
-            if (typeof record?.name === 'string') names.add(record.name);
+            if (typeof record?.name !== 'string') continue;
+            if (packages.some((pkg) => pkg === undefined || (record?.package_id ?? null) === pkg)) names.add(record.name);
         }
         return names;
     }
@@ -9296,8 +9819,13 @@ export class ObjectStackProtocolImplementation implements
      * ({@link readActiveOverlayRows}, same `packageId`, same gated `orgId`),
      * the same parse ({@link storedOverlayEntries}) and the same expansion
      * ({@link expandStoredViewContainers} over
-     * {@link expandRuntimeViewContainer}), the last expansion of the name
-     * winning as it does in the list. Nothing is persisted or registered: an
+     * {@link expandRuntimeViewContainer}), selected for the address by the
+     * same function ({@link servedViewExpansion}). [#21967] Naming a package,
+     * that is the package's slot in the list: the expansion of the package's
+     * own container row, else of a package-less one, which stands in (the
+     * package-less rows are read as the list scoped to the package reads
+     * them); naming none, any expansion of the name, the last one winning.
+     * Nothing is persisted or registered: an
      * expansion is derived from its container on every read, so there is no
      * second copy to drift from it (ADR-0005 keys an overlay by its own name).
      * ⛔ No kernel-specific branch — every kernel answers through this path.
@@ -9315,33 +9843,47 @@ export class ObjectStackProtocolImplementation implements
     ): Promise<RowlessExpandedView | undefined> {
         if ((PLURAL_TO_SINGULAR[request.type] ?? request.type) !== 'view') return undefined;
         let records: any[] = [];
+        // [#21967] Naming a package, the package-less rows in scope stand in,
+        // read as the list scoped to that package reads them (the
+        // package-agnostic read, filtered back to the package-less rows).
+        let standInRows: any[] = [];
         try {
             records = await this.readActiveOverlayRows(
                 { type: request.type, ...(request.packageId ? { packageId: request.packageId } : {}) },
                 orgId,
             );
+            if (request.packageId) {
+                standInRows = (await this.readActiveOverlayRows({ type: request.type }, orgId))
+                    .filter((row) => (row?.package_id ?? null) === null);
+            }
         } catch (error) {
             // [#5532] The list read's rule: only an unprovisioned store means
             // "no rows". Any other failure is not answered as "nothing expands
             // this name".
             this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
-        if (this.namesWithOwnStoredRow(records).has(request.name)) return undefined;
-        let found: RowlessExpandedView | undefined;
-        for (const expanded of this.expandStoredViewContainers(request.type, this.storedOverlayEntries(request, records))) {
-            if (expanded.item.name === request.name) found = expanded;
-        }
-        return found;
+        const rows = [...records, ...standInRows];
+        if (this.namesWithOwnStoredRow(rows, request.packageId).has(request.name)) return undefined;
+        return servedViewExpansion(
+            this.expandStoredViewContainers(request.type, this.storedOverlayEntries(request, rows)),
+            request.name,
+            request.packageId,
+        );
     }
 
     /**
-     * [#21716, ADR-0005, ADR-0010 §3.3] The stored `sys_metadata` row a
-     * by-name read SERVES for `(type, name)` in `orgId`'s scope, and the
-     * scope it was read from — the ONE resolution {@link getMetaItem} (both
-     * its draft-preview arm and its row read), {@link getMetaItemLayered}
-     * and the ADR-0010 `_lock` gate's overlay limb ({@link getEffectiveLock})
-     * all call. So the row whose `_lock` a read reports is the row whose
-     * `_lock` the write doors enforce, for every request scope.
+     * [#21716, ADR-0005] The stored `sys_metadata` row a by-name read SERVES
+     * for `(type, name)` in `orgId`'s scope, and the scope it was read from —
+     * the ONE content resolution {@link getMetaItem} (both its draft-preview
+     * arm and its row read) and {@link getMetaItemLayered} call.
+     *
+     * [#21761] It decides the served CONTENT only, never the lock. The lock's
+     * `overlay` layer is {@link overlayLockLayerAt}, which every reader and
+     * the `_lock` gate call with the item's address: it reads every row of the
+     * item in scope, where this method prefers one. Before #21761 the gate
+     * called this method too, with no package, so a read naming a package
+     * reported that package's row while the gate bound whichever row
+     * `findOne` returned first.
      *
      * Precedence is ADR-0005's, and it is precedence, never a merge (the
      * ruling is recorded in {@link getMetaItem}): the org-scoped row wins,
@@ -9350,22 +9892,22 @@ export class ObjectStackProtocolImplementation implements
      * row first and then the package-less row, never another package's; with
      * none, any row.
      *
+     * [#21804] That order is {@link servedOverlayRowCandidates}, and this
+     * method is its store reader: one `findOne` per candidate, first hit
+     * served. The list's merge ({@link mergePackageAwareOverlay}) is its other
+     * reader, over the rows the list already read, so a package's list slot
+     * serves the row this method serves for that package.
+     *
      * `orgId` arrives already gated ({@link organizationIdForMetaRead}): an
      * organization only selects a row on a type the registry declares per-org
      * overridable, so a pre-#6190 phantom org row is never the served one.
      *
-     * `otherSpelling` is the one declared difference between the callers. The
-     * reads pass `true` and keep the at-rest tolerance they have always had: a
-     * row stored under the type's other spelling (pre-#4432 residue) is the
-     * last resort in each scope. The `_lock` gate passes `false`: a write
-     * addresses the canonical namespace only (#4432, #9009 — the key
-     * `SysMetadataRepository.whereFor` stores under), and extending a tolerant
-     * lookup below the folding boundary into every write is what #4432
-     * refused. So the two agree on every row stored under the canonical
-     * spelling, which is every row a live write can mint.
+     * The reads keep the at-rest tolerance they have always had: a row stored
+     * under the type's other spelling (pre-#4432 residue) is the last resort
+     * in each scope.
      *
      * Returns `undefined` when neither scope holds a row. A failed read
-     * propagates: each caller owns its #5532 / #5706 discrimination.
+     * propagates: each caller owns its #5532 discrimination.
      */
     private async findServedOverlayRow(args: {
         type: string;
@@ -9373,40 +9915,68 @@ export class ObjectStackProtocolImplementation implements
         orgId: string | undefined;
         state: 'active' | 'draft';
         packageId?: string;
-        otherSpelling: boolean;
     }): Promise<{ row: any; scope: 'org' | 'env' } | undefined> {
-        const inScope = async (oid: string | null): Promise<any | undefined> => {
-            const lookup = async (t: string): Promise<any | undefined> => {
-                const base: Record<string, unknown> = {
-                    type: t, name: args.name, state: args.state, organization_id: oid,
-                };
-                if (args.packageId) {
-                    const scoped = await this.engine.findOne('sys_metadata', {
-                        where: { ...base, package_id: args.packageId },
-                    });
-                    if (scoped) return scoped;
-                    // ADR-0048 — no package-owned row; fall back to the GLOBAL
-                    // (package-less) row only. Must NOT match a different
-                    // package's row, or a collision would serve package B's
-                    // customization for a package A read.
-                    return await this.engine.findOne('sys_metadata', {
-                        where: { ...base, package_id: null },
-                    });
-                }
-                // No package context (legacy/runtime reader) — match any.
-                return await this.engine.findOne('sys_metadata', { where: base });
+        // [#21804] The order is {@link servedOverlayRowCandidates}, the one
+        // the list's merge takes over the rows it read: per scope, the
+        // canonical spelling then the other, and within each, the package's
+        // own row then the package-less row (never another package's, or a
+        // collision would serve package B's customization for a package A
+        // read); with no package context (legacy/runtime reader), any row.
+        const other = PLURAL_TO_SINGULAR[args.type] ?? SINGULAR_TO_PLURAL[args.type];
+        for (const candidate of servedOverlayRowCandidates({ organizationId: args.orgId, packageId: args.packageId })) {
+            const type = candidate.spelling === 'canonical' ? args.type : other;
+            if (type === undefined) continue;
+            const where: Record<string, unknown> = {
+                type, name: args.name, state: args.state, organization_id: candidate.organizationId,
             };
-            const rec = await lookup(args.type);
-            if (rec || !args.otherSpelling) return rec;
-            const alt = PLURAL_TO_SINGULAR[args.type] ?? SINGULAR_TO_PLURAL[args.type];
-            return alt ? await lookup(alt) : undefined;
-        };
-        if (args.orgId) {
-            const row = await inScope(args.orgId);
-            if (row) return { row, scope: 'org' };
+            if (candidate.packageId !== undefined) where.package_id = candidate.packageId;
+            // [#21911, ADR-0096] The explicit system opt-in: a platform store
+            // read, which no caller's grants scope — the door that asked
+            // already authorized the caller, and the protocol scopes the row
+            // itself (`organization_id` above). It no longer reaches the data
+            // engine as a principal-less context.
+            const row = await this.engine.findOne('sys_metadata', { where, context: { isSystem: true } });
+            if (row) return { row, scope: candidate.scope };
         }
-        const row = await inScope(null);
-        return row ? { row, scope: 'env' } : undefined;
+        return undefined;
+    }
+
+    /**
+     * [#21761, ADR-0005, ADR-0048, ADR-0010 §3.3] The item-lock resolution's
+     * `overlay` layer ({@link resolveItemLock}) for the item at `address`:
+     * {@link resolveOverlayLockLayer}, the one selection of the rows in scope,
+     * over the item's stored ACTIVE rows, read here scope by scope with no
+     * package filter. The `_lock` gate ({@link readLockGateOverlayLayer}),
+     * {@link getMetaItem}, {@link getMetaItemLayered} and the list
+     * ({@link readFlattenedMetaItems}, from the rows it already read) select
+     * the lock this way from the address each was asked about, so a read and a
+     * door cannot bind different rows.
+     *
+     * `otherSpelling` is the one declared difference between the callers. The
+     * reads pass `true`: a row stored under the type's other spelling
+     * (pre-#4432 residue) is in scope when no canonical row is, as for the
+     * content they serve ({@link findServedOverlayRow}). The `_lock` gate
+     * passes `false`: a write addresses the canonical namespace only (#4432,
+     * #9009, the key `SysMetadataRepository.whereFor` stores under), and
+     * extending a tolerant lookup below the folding boundary into every write
+     * is what #4432 refused. So the two agree on every row stored under the
+     * canonical spelling, which is every row a live write can mint.
+     *
+     * A failed read propagates: each caller owns its #5532 / #5706
+     * discrimination.
+     */
+    private overlayLockLayerAt(address: ItemAddress, options: { readonly otherSpelling: boolean }): Promise<unknown> {
+        const other = PLURAL_TO_SINGULAR[address.type] ?? SINGULAR_TO_PLURAL[address.type];
+        return resolveOverlayLockLayer(address, async (organizationId, spelling) => {
+            const type = spelling === 'canonical' ? address.type : other;
+            if (type === undefined) return [];
+            // [#21911] The explicit system opt-in — see findServedOverlayRow.
+            const rows: StoredOverlayRow[] | null | undefined = await this.engine.find('sys_metadata', {
+                where: { type, name: address.name, state: 'active', organization_id: organizationId },
+                context: { isSystem: true },
+            });
+            return rows ?? [];
+        }, options);
     }
 
     async getMetaItem(request: { type: string, name: string, packageId?: string, organizationId?: string, state?: 'active' | 'draft', previewDrafts?: boolean }) {
@@ -9564,7 +10134,22 @@ export class ObjectStackProtocolImplementation implements
         // `orgId` is `undefined` for `flow`, which declares no org override.
         // What becomes of the stored rows themselves (keep, refuse, migrate) is
         // not decided here.
-        const shippedFlowActiveRead = readState === 'active' && this.isShippedFlowName(request.type, request.name);
+        //
+        // ── [#21922, ADR-0062 D4, ADR-0126 §3] A code-defined DATASOURCE name ──
+        //
+        // The stored-row half covers a second name class, through the same
+        // predicate ({@link declinesStoredRow}): a datasource name the host
+        // registers from code ({@link isDeclaredCodeDatasource}). "Code wins on
+        // collision": its code definition is the MetadataService's in-memory
+        // registration, which step 2 serves, and a stored row under the name is
+        // residue, never a layer of it. Adopted, the row was served here while
+        // the list, the admin door and the boot restore all served the code
+        // definition. This read needs no registry half for it: step 2 answers
+        // before step 3's bare registry slot, which is where a hydrated copy of
+        // the row sits. The row is still FOUND (`storedRowServed` below), so the
+        // `/meta` DELETE that removes it as repair stays `deletable`. A draft
+        // is answered as a draft, as above.
+        const storedRowDeclined = readState === 'active' && this.declinesStoredRow(request.type, request.name);
 
         // ADR-0033 draft-overlay preview (non-strict): when the caller opts in
         // (admin-gated upstream), prefer a `state='draft'` row if one exists, else
@@ -9583,7 +10168,6 @@ export class ObjectStackProtocolImplementation implements
                     orgId,
                     state: 'draft',
                     ...(request.packageId ? { packageId: request.packageId } : {}),
-                    otherSpelling: true,
                 }))?.row;
                 if (draftRec) {
                     const draftItem = this.convertStoredItem(
@@ -9618,8 +10202,12 @@ export class ObjectStackProtocolImplementation implements
         //    ADR-0048 prefer-local within each scope (a package id prefers that
         //    package's row, then the package-less one, mirroring
         //    `SchemaRegistry.getItem(type, name, pkg)`). [#21716] The ONE
-        //    served-row resolution, which the `_lock` gate's overlay limb
-        //    calls too — see {@link findServedOverlayRow}.
+        //    served-row resolution — see {@link findServedOverlayRow}. It
+        //    decides the CONTENT only; the lock is selected below from this
+        //    read's address ([#21761]).
+        // [#21899] Whether a stored row was found — the fact the origin-gated
+        // repair's `deletable` reads ({@link servedLockState}).
+        let storedRowServed = false;
         try {
             const record = (await this.findServedOverlayRow({
                 type: request.type,
@@ -9627,15 +10215,13 @@ export class ObjectStackProtocolImplementation implements
                 orgId,
                 state: readState,
                 ...(request.packageId ? { packageId: request.packageId } : {}),
-                otherSpelling: true,
             }))?.row;
-            // [#20946] The stored-row half — see `shippedFlowActiveRead` above.
-            if (record && !shippedFlowActiveRead) {
+            storedRowServed = record !== undefined && record !== null;
+            // [#20946, #21922] The stored-row half — see `storedRowDeclined` above.
+            if (record && !storedRowDeclined) {
                 item = this.convertStoredItem(
                     String(record.type ?? request.type),
-                    typeof record.metadata === 'string'
-                        ? JSON.parse(record.metadata)
-                        : record.metadata,
+                    storedRowDocument(record),
                 );
                 // Surface the persisted software-package binding (parity with
                 // the list path in getMetaItems) so provenance/UI can read it.
@@ -9674,6 +10260,28 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 item: decorateMetadataItem(request.type, this.governServedObject(request.type, item)),
             };
+        }
+
+        // [#21761] The item-lock resolution's `overlay` layer, selected from
+        // this read's ADDRESS ({@link overlayLockLayerAt}) by the selection
+        // the `_lock` gate makes: the strictest lock among the item's stored
+        // rows in scope, whichever package each is bound to. Not the row served
+        // above, which is the address's preferred CONTENT (ADR-0048), and read
+        // whether or not that row is adopted (a shipped flow name, #20946, and a
+        // code-defined datasource name, #21922, do not serve their stored row,
+        // and the gate binds it all the same).
+        let overlayLockLayer: unknown;
+        try {
+            overlayLockLayer = await this.overlayLockLayerAt({
+                type: request.type,
+                name: request.name,
+                organizationId: orgId,
+                packageId: request.packageId,
+            }, { otherSpelling: true });
+        } catch (error) {
+            // [#5532] The same rule as the row read above: a lock read that did
+            // not happen is not an unlocked item.
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
 
         // [#8027] An OBJECT's overlay row is a BASE LAYER, not a resolved
@@ -9773,10 +10381,12 @@ export class ObjectStackProtocolImplementation implements
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
                 if (alt) item = this.engine.registry.getItem(alt, request.name, request.packageId);
             }
-            // [#20946] The registry half — see `shippedFlowActiveRead` above.
+            // [#20946] The registry half — see `storedRowDeclined` above.
             // `getItem` answers the bare slot first, and for a shipped flow name
             // that slot holds the hydrated stored row, which is not one of the
             // loader's entries; the loader's entry is the one the list serves.
+            // [#21922] Flow-only: a code-defined datasource's definition is not
+            // in the registry, and step 2 has already served it.
             if (this.isStoredFlowEntryOfShippedName(request.type, item)) {
                 item = this.lookupArtifactItem(request.type, request.name, request.packageId);
             }
@@ -9816,12 +10426,31 @@ export class ObjectStackProtocolImplementation implements
         // declaration; we must consult the in-memory artifact registry
         // directly and let its protection envelope override.
         // ADR-0048 — scope the artifact lookup to the requested package so a
-        // same-name collision grafts the OWNING package's protection envelope
-        // (`_packageId`/`_lock`), not whichever package registered first.
+        // same-name collision grafts the OWNING package's provenance envelope
+        // (`_packageId`), not whichever package registered first.
         const artifactItem = this.lookupArtifactItem(request.type, request.name, request.packageId);
+        // [#21738] The lock is the one item-lock resolution's, over the layers
+        // this read resolved from its address: [#21803] every installed
+        // package that ships the name ({@link artifactLockLayerAt}), never the
+        // one artifact the content above came from, and [#21761] the rows in
+        // scope.
+        const itemLock = resolveItemLock({
+            artifact: this.artifactLockLayerAt({
+                type: request.type,
+                name: request.name,
+                organizationId: orgId,
+                packageId: request.packageId,
+            }),
+            overlay: overlayLockLayer,
+        });
+        // [#21761, #21803] …and the body carries that answer's lock family, so
+        // it states the lock the envelope below reports.
         let decorated = decorateMetadataItem(
             request.type,
-            this.governServedObject(request.type, mergeArtifactProtection(item, artifactItem)),
+            this.governServedObject(
+                request.type,
+                mergeArtifactProtection(item, artifactItem, itemLock),
+            ),
         );
         // ADR-0047 — list views additionally get reference-integrity
         // diagnostics (userFilters/tabs fields must exist on the source
@@ -9860,8 +10489,12 @@ export class ObjectStackProtocolImplementation implements
         // ADR-0010 — surface lock/provenance flags so Studio can render
         // the correct affordances without a second round trip. [#21670] They
         // report the write doors' verdicts — see {@link servedLockState}.
+        // [#21738] The lock is the one item-lock resolution's (above), over the
+        // layers this read resolved — never the served document's `_lock`.
         const artifactBacked = this.isArtifactBacked(request.type, request.name);
-        const lockState = this.servedLockState(request.type, request.name, decorated, artifactBacked);
+        const lockState = this.servedLockState(
+            request.type, request.name, decorated, artifactBacked, itemLock, storedRowServed,
+        );
         return {
             type: request.type,
             name: request.name,
@@ -9886,7 +10519,9 @@ export class ObjectStackProtocolImplementation implements
      * would return, i.e. overlay-wins merge — except for a flow name the
      * loader ships, where `getMetaItem` serves the loader's body, so
      * `effective` is the code layer and a stored row of that name is
-     * reported in `overlay` as a shadowed layer, #21002).
+     * reported in `overlay` as a shadowed layer, #21002; and likewise for a
+     * code-defined datasource name, whose code layer is the MetadataService's
+     * in-memory registration, #21922).
      *
      * Drives the "Code default vs Overlay vs Effective" diff tab in the
      * generic Metadata Resource Edit page. Admins can see exactly what
@@ -9949,12 +10584,13 @@ export class ObjectStackProtocolImplementation implements
         lock: MetadataLock;
         lockReason?: string;
         // `MetadataLockSource` (artifact | package | env-forced) — the only
-        // producer feeding this field on this path is `resolveLockState`,
-        // whose return is typed `MetadataLockSource | undefined`. The
-        // `'overlay'` arm this annotation used to carry was dead: the one
-        // `lockSource: 'overlay'` producer in this file belongs to
-        // `getEffectiveLock`, a write/delete-door helper that never feeds
-        // this response (commit 11b779e0f).
+        // producer feeding this field on this path is the item-lock
+        // resolution's `lockSource` ([#21738] {@link resolveItemLock}: the
+        // binding layer's declared `_lockSource`), typed
+        // `MetadataLockSource | undefined`. The `'overlay'` arm this annotation
+        // used to carry was dead: the door's `'artifact' | 'overlay'` is the
+        // resolution's `layer`, which `getEffectiveLock` reports in its refusal
+        // text and which never feeds this response (commit 11b779e0f).
         lockSource?: MetadataLockSource;
         lockDocsUrl?: string;
         provenance?: MetadataProvenance;
@@ -10117,8 +10753,10 @@ export class ObjectStackProtocolImplementation implements
             // that carries package-provenance stamps under a name no package
             // ships is the same row: the hydrator restates its authorship over
             // whatever its bytes claim, and a stamp is not an artifact read, so
-            // `resolveLockState` below reads this item's code layer as `null`
-            // too (triage's ruling, overturnable by the maintainer). A
+            // the envelope's provenance fields below read this item's code
+            // layer as `null` too (triage's ruling, overturnable by the
+            // maintainer); its lock reads no code layer at all ([#21738], the
+            // item-lock resolution below). A
             // runtime-registered item with no package carries no tenant marker
             // and keeps its code layer.
             const runtimeOnly = (item: unknown): unknown =>
@@ -10135,14 +10773,17 @@ export class ObjectStackProtocolImplementation implements
         // [#5840] The code half of the rule #5707 wrote for the overlay half,
         // eleven lines below. `code: null` is not a shrug — this method states
         // it positively ("no packaged/code-layer definition exists"), and the
-        // response then DERIVES from it: `lockSource = code ?? overlay ?? {}`
-        // feeds `resolveLockState`, so an item whose code layer declares
-        // `_lock: 'full'` is rendered `editable: true, deletable: true` when
-        // the read that would have found that lock simply failed. An
-        // availability failure widening an affordance is precisely what
-        // ADR-0110 D3 forbids, and the overlay half of this very method
-        // already refuses to do it — the two halves were asymmetric only
-        // because the loader failure was invisible on this side.
+        // response then DERIVES from it: `effective` and the envelope's
+        // provenance fields. (It used to derive the lock too, from
+        // `code ?? overlay`, so an item whose code layer declared `_lock:
+        // 'full'` was rendered `editable: true, deletable: true` when the read
+        // that would have found that lock failed. [#21738] The lock is now the
+        // item-lock resolution's, over the registry's artifact lookup, which
+        // this read cannot lose.) An availability failure stated as an
+        // authorship fact is precisely what ADR-0110 D3 forbids, and the
+        // overlay half of this very method already refuses to do it — the two
+        // halves were asymmetric only because the loader failure was invisible
+        // on this side.
         //
         // Same narrow shape as the overlay half: the benign "nothing there"
         // still returns `code: null` normally (a clean miss is not degraded),
@@ -10155,23 +10796,33 @@ export class ObjectStackProtocolImplementation implements
         // ── overlay layer: sys_metadata row (org-scoped wins, then env-wide) ──
         let overlay: unknown | null = null;
         let overlayScope: 'org' | 'env' | null = null;
+        // [#21761] The `overlay` layer of the one item-lock resolution below,
+        // selected from this read's address as in {@link getMetaItem}: the
+        // strictest lock among the item's stored rows in scope, never only the
+        // row this layer reports.
+        let overlayLockLayer: unknown;
         try {
             // ADR-0048 prefer-local within each scope. [#21716] The ONE
-            // served-row resolution {@link getMetaItem} and the `_lock` gate's
-            // overlay limb call too — see {@link findServedOverlayRow}.
+            // served-row resolution {@link getMetaItem} calls too — see
+            // {@link findServedOverlayRow}.
             const served = await this.findServedOverlayRow({
                 type: request.type,
                 name: request.name,
                 orgId,
                 state: 'active',
                 ...(request.packageId ? { packageId: request.packageId } : {}),
-                otherSpelling: true,
             });
+            overlayLockLayer = await this.overlayLockLayerAt({
+                type: request.type,
+                name: request.name,
+                organizationId: orgId,
+                packageId: request.packageId,
+            }, { otherSpelling: true });
             if (served) {
                 const rec = served.row;
                 overlay = this.convertStoredItem(
                     String(rec.type ?? request.type),
-                    typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata,
+                    storedRowDocument(rec),
                 );
                 overlayScope = served.scope;
             }
@@ -10265,15 +10916,48 @@ export class ObjectStackProtocolImplementation implements
         // package ships, keeps overlay-wins. What becomes of the stored rows
         // themselves (keep, refuse, migrate) is not decided here.
         //
+        // [#21922] The same holds for a code-defined DATASOURCE name, through
+        // the one predicate both name classes share ({@link declinesStoredRow}):
+        // `getMetaItem` serves the MetadataService's code definition, so that is
+        // `effective` here (the code layer above reads the MetadataService
+        // first), and the stored row stays reported in `overlay` — the residue
+        // the `/meta` DELETE removes as repair.
+        //
         // [#21442] A name a stored container expands (above) takes the expanded
         // item as its effective layer: the container row in `overlay` is the
         // layer it derives from, not the value the by-name read serves.
         const effectiveBase: unknown | null = expandedFrom !== undefined
             ? expandedFrom.item
-            : overlay !== null && !this.isShippedFlowName(request.type, request.name)
+            : overlay !== null && !this.declinesStoredRow(request.type, request.name)
                 ? this.foldObjectExtendersFromRegistry(request.type, request.name, overlay)
                 : code;
-        const effective: unknown | null = this.governServedObject(request.type, effectiveBase);
+        // [#21738] The lock is the one item-lock resolution's — the
+        // `getMetaItem` call over [#21803] every installed package that ships
+        // the name ({@link artifactLockLayerAt}) and [#21761] the rows in
+        // scope for its address — never `code ?? overlay`, which took the code
+        // layer's (absent) lock over a stored row's `_lock`. A row-less name a
+        // stored container expands contributes no `overlay` layer: the
+        // container's row is not this name's row, and the `_lock` gate does not
+        // read it. The provenance fields still come from the layer the
+        // response reports first.
+        const itemLock = resolveItemLock({
+            artifact: this.artifactLockLayerAt({
+                type: request.type,
+                name: request.name,
+                organizationId: orgId,
+                packageId: request.packageId,
+            }),
+            overlay: overlayLockLayer,
+        });
+        // [#21761, #21803] `effective` is what {@link getMetaItem} would
+        // return, and that read's body carries the resolution's lock family
+        // (the binding row's or the binding package's, which need not be the
+        // layer `effective` was taken from). So this one does too. `code` and
+        // `overlay` stay the layers as shipped and as stored.
+        const effective: unknown | null = withItemLockFamily(
+            this.governServedObject(request.type, effectiveBase),
+            itemLock,
+        );
 
         const _diagnostics =
             effective !== null && effective !== undefined
@@ -10283,11 +10967,12 @@ export class ObjectStackProtocolImplementation implements
         // ADR-0010 — surface lock/provenance flags so the Studio editor
         // can render the correct affordances without a second round trip.
         const artifactBacked = this.isArtifactBacked(request.type, request.name);
-        // Lock resolution: artifact wins over overlay, matching getEffectiveLock.
-        const lockSource: any = code ?? overlay ?? {};
         // [#21670] …joined with the locked-packaged-base verdict the write
         // doors answer — the same derivation `getMetaItem` publishes.
-        const lockState = this.servedLockState(request.type, request.name, lockSource, artifactBacked);
+        const lockState = this.servedLockState(
+            request.type, request.name, code ?? overlay ?? {}, artifactBacked, itemLock,
+            overlay !== null && overlay !== undefined,
+        );
 
         // [#8154] The per-type credential redaction, on the ONE read exit
         // `decorateMetadataItem` does not reach — this method never calls it
@@ -10310,7 +10995,7 @@ export class ObjectStackProtocolImplementation implements
         // rather than discover it. ⛔ It is NOT a licence to fold, govern or
         // inject on these layers — redaction subtracts, and only a credential.
         //
-        // Placed AFTER `_diagnostics` and AFTER `resolveLockState`, both of
+        // Placed AFTER `_diagnostics` and AFTER `servedLockState`, both of
         // which must read the raw bodies: the diagnostics ordering is the
         // migration-inventory badge (see `decorateMetadataItem`), and a lock
         // resolved from a redacted body would be a lock resolved from a
@@ -13360,6 +14045,34 @@ export class ObjectStackProtocolImplementation implements
      * RBAC/RLS is enforced by forwarding the caller's `context` to
      * `engine.find` so users only see records they are entitled to read.
      *
+     * ## An object the caller may not READ is outside the sweep
+     *
+     * The REST door checks authentication only, so the object-level read
+     * admission is decided per object, here: before an object is queried, the
+     * `security` service's `canReadObject` — the engine middleware's own read
+     * gate, arm for arm (`ISecurityService.canReadObject`) — is asked with the
+     * caller's context, and an object it refuses is skipped. Without this, the
+     * middleware's denial on the first unreadable object in scope failed the
+     * WHOLE search with 403, so a member who could not read every object got
+     * no results at all. The field-level half is the same question one axis
+     * down: the engine's predicate guard refuses a search that would match on
+     * a field the caller may not query, so each object's search fields are
+     * narrowed to the security service's `getQueryableFields` answer, and an
+     * object left with none is skipped too.
+     *
+     * A skipped object leaves nothing behind: it is never queried, never
+     * named, and never counted in `totalObjects`, and the decision is made
+     * before any row is read — so no hit, count or timing depends on what the
+     * object holds. An explicit `objects=` naming an unreadable object answers
+     * exactly as one naming an object that does not exist. A `false` is a
+     * narrowing only; the engine still enforces everything on the objects
+     * that ARE queried, row scope included. If `canReadObject` itself throws,
+     * the search fails rather than answering without that object. Note that
+     * plugin-security's `canReadObject` catches a permission-resolution
+     * failure itself and answers `false` (its documented fail-closed
+     * contract), so during a permission outage the sweep SKIPS objects rather
+     * than failing: nothing is disclosed, but `totalObjects` shrinks.
+     *
      * ## [#8896] A swept object that could not be READ fails the search
      *
      * `totalObjects` / `totalHits` / `truncated` describe a COMPLETE sweep of
@@ -13460,6 +14173,27 @@ export class ObjectStackProtocolImplementation implements
         const hits: Array<{ object: string; id: string; title: string; snippet?: string; record: any }> = [];
         let objectsScanned = 0;
 
+        // The caller's read admission, asked of the same authority the engine
+        // middleware enforces (see the method doc): `canReadObject` for the
+        // object, `getQueryableFields` for the fields the search may match on.
+        // Only a caller that carries a context is asked about: a context-less
+        // in-process call reaches `find` without one, so asking on its behalf
+        // would answer a question its reads never pose. No security service,
+        // or one without a method, means no pre-filter on that axis — `find`
+        // still enforces both, so the absence can only make the answer
+        // stricter (a denial propagates, as before), never wider. That is also
+        // why an `undefined` ("no answer") from `getQueryableFields` narrows
+        // nothing here: this sweep never bypasses the middleware's guards.
+        const securityService = request.context !== undefined
+            ? this.getServicesRegistry?.().get('security') as Partial<ISecurityService> | undefined
+            : undefined;
+        const canReadObject = typeof securityService?.canReadObject === 'function'
+            ? (object: string) => securityService.canReadObject!(object, request.context)
+            : undefined;
+        const getQueryableFields = typeof securityService?.getQueryableFields === 'function'
+            ? (object: string) => securityService.getQueryableFields!(object, request.context)
+            : undefined;
+
         for (const obj of allObjects) {
             if (hits.length >= overallLimit) break;
             if (!obj?.name) continue;
@@ -13558,7 +14292,7 @@ export class ObjectStackProtocolImplementation implements
             // of one helper, which is the stronger form of the same fix.
             const fieldMetaByName: Record<string, any> = {};
             for (const f of fields) if (f?.name) fieldMetaByName[f.name] = f;
-            const { allowed: searchableFields } = resolveSearchFieldResolution({
+            const { allowed: declaredSearchFields } = resolveSearchFieldResolution({
                 fields: fieldMetaByName,
                 searchableFields: obj.searchableFields,
                 // [ADR-0079] `nameField` is the canonical primary-title pointer;
@@ -13567,7 +14301,39 @@ export class ObjectStackProtocolImplementation implements
                 // a third spelling here would re-split what this card merged.
                 displayField: obj.nameField ?? obj.displayNameField,
             });
-            if (searchableFields.length === 0) continue;
+            if (declaredSearchFields.length === 0) continue;
+
+            // Skip an object the caller may not read — before any query, so
+            // nothing about its rows can shape the answer, and before the
+            // count, so `totalObjects` covers only what was swept. A throw
+            // propagates: an admission that could not be decided fails the
+            // search rather than quietly shrinking it.
+            if (canReadObject && !(await canReadObject(obj.name))) continue;
+
+            // …and match only on the fields the caller may QUERY. The engine's
+            // predicate guard refuses a search whose resolved fields include
+            // one hidden from the caller (the filter oracle: row presence would
+            // disclose the hidden value), and that 403 failed the whole sweep —
+            // `sys_user`'s searchable fields include admin-only columns, so
+            // every member's unscoped search hit it. `searchFields` only ever
+            // NARROWS the server-resolved set (ADR-0061), so handing the engine
+            // the queryable subset searches what the caller could have filtered
+            // on themselves through `searchFields`. An object left with no
+            // queryable search field is skipped like an unreadable one.
+            // An `undefined` answer narrows nothing here: unlike the contract's
+            // fallback for consumers without an answer (treat every field with a
+            // `maskingRule` as not queryable), this sweep leaves that judgement to
+            // the engine's predicate guard on `find`, which can only refuse.
+            let searchableFields = declaredSearchFields;
+            if (getQueryableFields) {
+                const queryable = await getQueryableFields(obj.name);
+                if (queryable !== undefined) {
+                    const allowed = new Set(queryable);
+                    searchableFields = declaredSearchFields.filter((f) => allowed.has(f));
+                    if (searchableFields.length === 0) continue;
+                }
+            }
+            const narrowed = searchableFields.length < declaredSearchFields.length;
 
             objectsScanned++;
 
@@ -13584,10 +14350,12 @@ export class ObjectStackProtocolImplementation implements
                     // and `search` is a declared `find` option
                     // (`EngineQueryOptionsSchema`, `ENGINE_FIND_OPTION_KEYS`) —
                     // so this is the engine's published door, not a private one.
-                    // No `searchFields`: that key only ever NARROWS the resolved
-                    // set (ADR-0061), and the palette wants the object's full
-                    // default reach.
+                    // `searchFields` only when the caller's queryable set is
+                    // narrower than the declared one (see above): that key only
+                    // ever NARROWS the resolved set (ADR-0061), and otherwise
+                    // the palette wants the object's full default reach.
                     search: q,
+                    ...(narrowed ? { searchFields: searchableFields } : {}),
                     limit: perObject,
                     orderBy: [{ field: 'updated_at', order: 'desc' }],
                 };
@@ -13643,15 +14411,19 @@ export class ObjectStackProtocolImplementation implements
                 // query error or a refused datasource all mean the object's rows
                 // may well match and simply were not seen.
                 //
-                // The comment this replaces named "RBAC denial" as a benign
-                // reason. Measured on this tree, that is not a failure mode of
-                // this seam: object-level authorization is enforced at the REST
-                // door (`enforceAuth`) BEFORE `searchAll` is reached, and
-                // row-level security narrows `find`'s result set rather than
-                // throwing. Nothing in-repo registers a `beforeFind` hook that
-                // denies by throwing. Were one added, the ruling for this family
-                // still applies: a read that could not run must not be answered
-                // "there are no matches here".
+                // A permission denial is NOT swallowed here either. The REST
+                // door (`enforceAuth`) checks authentication only; the read
+                // admission is asked BEFORE this `try`, via the security
+                // service's `canReadObject` and `getQueryableFields` (see
+                // above), so an object the caller may not read never reaches
+                // `find`, and one it may read is searched only on fields it may
+                // query. A denial that still arrives here is a verdict those
+                // answers did not foresee — a permission subsystem that could
+                // not resolve, a delegator that does not exist, a security
+                // service without those methods — and the ruling for this
+                // family applies to it: a read that could not run must not be
+                // answered "there are no matches here". Row-level security
+                // narrows `find`'s result set rather than throwing.
                 //
                 // No new response field and no new error code — the caller
                 // receives the read's own failure, envelope intact.
@@ -15393,6 +16165,8 @@ export class ObjectStackProtocolImplementation implements
         name: string;
         organizationId: string | null | undefined;
         body: unknown;
+        /** The package binding the row is saved under (a container's expansion is placed by it). */
+        packageId?: string | null;
     }): Promise<Error | null> {
         if (!args.organizationId) return null;
         const singular = PLURAL_TO_SINGULAR[args.type] ?? args.type;
@@ -15402,7 +16176,9 @@ export class ObjectStackProtocolImplementation implements
             | undefined;
         if (typeof tenancy?.defaultOrgId !== 'function') return null;
         const doorOrganization = await tenancy.defaultOrgId();
-        if (doorOrganization === args.organizationId) return null;
+        if (doorOrganization === args.organizationId) {
+            return this.anonymousFormIntakeReopenRefusal({ ...args, type: singular, organizationId: args.organizationId });
+        }
         const proposed = anonymousFormIntakeSlugs(args.body);
         const served = anonymousFormIntakeSlugs(
             ((await this.getMetaItem({ type: singular, name: args.name })) as any)?.item,
@@ -15429,6 +16205,129 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * An organization-scoped `view` write, in the organization the anonymous
+     * form doors read, that would leave open a public form the env-wide layer
+     * withdrew. Returns the refusal, or `null` when the write is fine.
+     *
+     * A withdrawal is a kill switch: an explicit withdrawal of a public form
+     * (the same view, the same slot, the link kept with `enabled` or
+     * `allowAnonymous` cleared) at any layer closes it, and layering may only
+     * narrow intake, never re-open it. The doors enforce that at read time
+     * (`registerFormEndpoints` in `@objectstack/rest` reads the env-wide layer
+     * beneath the organization's and lets its withdrawal close the form), so
+     * such a write would be accepted and then never honoured. It is refused
+     * instead, and the author is pointed at the env-wide definition, which is
+     * the switch.
+     *
+     * Judged by the doors' own verdict ({@link anonymousFormIntakeWithdrawnIn})
+     * over the env-wide `view` list, for every form this write would leave
+     * open — whether or not the organization's current definition has it open
+     * already, so re-saving an overlay that was open before the env-wide
+     * withdrawal is refused too. The body is judged as the list read serves
+     * it: a container-shaped body (`formViews`, `form`, …) is expanded into
+     * the view items the doors read ({@link expandRuntimeViewContainer}). An
+     * organization-scoped save that keeps the form withdrawn, or that opens
+     * nothing the env-wide layer withdrew, is never refused here.
+     */
+    private async anonymousFormIntakeReopenRefusal(args: {
+        type: string;
+        name: string;
+        organizationId: string;
+        body: unknown;
+        packageId?: string | null;
+    }): Promise<Error | null> {
+        if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) return null;
+        const raw = args.body as Record<string, unknown>;
+        // The name stamp the container-collision judge applies (a body with no
+        // `name` is a container under the save name); a view item is the save
+        // name's own row.
+        const stamped = raw.name ? raw : { ...raw, name: args.name };
+        const served: unknown[] = isAggregatedViewContainer(stamped)
+            ? this.expandRuntimeViewContainer(args.type, stamped, { packageId: args.packageId ?? undefined })
+            : [{ ...raw, name: args.name }];
+        const open = served.flatMap((view) => anonymousFormIntakeCandidates(view).map((c) => ({ view, c })));
+        if (open.length === 0) return null;
+        const envWide: any = await this.getMetaItems({ type: args.type });
+        const layer: unknown[] = Array.isArray(envWide?.items) ? envWide.items : [];
+        const closed = new Set(
+            open.filter(({ view, c }) => anonymousFormIntakeWithdrawnIn(layer, view, c)).map(({ c }) => c.slug),
+        );
+        // The same judgement anchored on the stored ROW this overlay is keyed
+        // by: the env-wide body of row `name`, as stored (a container is not
+        // expanded, so a form moved to another key or slot, renamed through
+        // `form.name`, or renamed by an expansion collision is still matched
+        // against the form it was, by slot or by slug). [#21934] One body per
+        // package that holds the name ({@link envWideRawViewRows}), so every
+        // package's withdrawal of it is judged, whatever the registry order.
+        const envRows = (await this.envWideRawViewRows(args.type, args.name)).map((r) => ({ ...r, name: args.name }));
+        if (envRows.length > 0) {
+            const own = { ...raw, name: args.name };
+            for (const c of anonymousFormIntakeCandidates(own)) {
+                if (anonymousFormIntakeWithdrawnIn(envRows, own, c)) closed.add(c.slug);
+            }
+        }
+        const reopened = [...closed].sort();
+        if (reopened.length === 0) return null;
+        const list = reopened.map((s) => `'/forms/${s}'`).join(', ');
+        const err: any = new Error(
+            `Metadata item 'view/${args.name}' cannot keep public form ${list} open for anonymous intake `
+            + `in organization '${args.organizationId}': the env-wide definition withdraws it. A withdrawal is `
+            + `a kill switch, so an organization overlay may narrow a public form's intake but never re-open it, `
+            + `and the anonymous form doors keep answering it as not found. Save this overlay with the form's `
+            + `sharing withdrawn (enabled or allowAnonymous false), or, to publish the form again, save it `
+            + `env-wide (retry with no active organization) with sharing enabled and anonymous access allowed. `
+            + `See docs/adr/0005-metadata-customization-overlay.md.`
+        );
+        err.code = 'NOT_OVERRIDABLE';
+        err.status = 403;
+        // The sentence an end user is shown (the producer-declared channel).
+        err.userMessage = `This public form was withdrawn for the whole environment, so it cannot be open `
+            + `for one organization. Publish it again from the environment-wide form definition.`;
+        err.organizationId = args.organizationId;
+        err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
+        return err;
+    }
+
+    /**
+     * The env-wide bodies of the `view` row `name`, as stored, for every
+     * package that holds the name. [#21934] Resolved per package, the way the
+     * list read resolves each package's item (ADR-0048): the package's own
+     * active env-wide `sys_metadata` row (the env-wide overlay is keyed by its
+     * own name, ADR-0005), else the package-less env-wide row, which stands in
+     * for every package's row of the name, else that package's artifact of
+     * the name. So a stored row of one package anchors that package only, and
+     * every package that ships the name is judged on its own definition,
+     * whatever the registry order. Empty when no package holds the name.
+     *
+     * Read raw, never through the list read: that serves a container only as
+     * its expansion, whose item names and slots the overlay author chooses,
+     * and the kill switch anchors identity on the row instead.
+     */
+    private async envWideRawViewRows(type: string, name: string): Promise<Record<string, unknown>[]> {
+        let records: any[] = [];
+        try {
+            records = await this.readActiveOverlayRows({ type }, undefined);
+        } catch (error) {
+            // [#5532] Only an unprovisioned store means "no rows".
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        }
+        const stored = this.storedOverlayEntries({ type }, records)
+            .filter((e) => e.name === name && e.organizationId === null)
+            .filter((e) => !!e.data && typeof e.data === 'object' && !Array.isArray(e.data));
+        const bodies = stored.map((e) => e.data as Record<string, unknown>);
+        const withOwnRow = new Set(stored.map((e) => e.packageId));
+        // The package-less row stands in for every package without a row of its own.
+        if (withOwnRow.has(undefined)) return bodies;
+        for (const artifact of this.shippedArtifactsOf(type, name)) {
+            if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) continue;
+            const pkg = (artifact as { _packageId?: unknown })._packageId;
+            if (typeof pkg === 'string' && withOwnRow.has(pkg)) continue;
+            bodies.push(artifact as Record<string, unknown>);
+        }
+        return bodies;
+    }
+
+    /**
      * Does an artifact (npm-package-loaded) item exist at `(type, name)`?
      *
      * The schema registry's `_packageId` tag is set only when
@@ -15445,8 +16344,9 @@ export class ObjectStackProtocolImplementation implements
      *
      * [#7743] …and it must answer that question about the artifact as SHIPPED,
      * not about how the registry happens to key it. See
-     * {@link isNestedArtifactField} for the one declared type whose artifacts
-     * are not standalone registry items at all.
+     * {@link isNestedArtifactField} and [#21899] {@link isDeclaredCodeDatasource}
+     * for the two declared types whose artifacts are not standalone registry
+     * items at all.
      */
     private isArtifactBacked(type: string, name: string): boolean {
         // `lookupArtifactItem` only returns items whose `_packageId` marks a
@@ -15454,7 +16354,7 @@ export class ObjectStackProtocolImplementation implements
         // excluded), and — via `SchemaRegistry.getArtifactItem` — is immune
         // to plain-key shadows hydrated from overlay rows.
         if (this.lookupArtifactItem(type, name) !== undefined) return true;
-        return this.isNestedArtifactField(type, name);
+        return this.isNestedArtifactField(type, name) || this.isDeclaredCodeDatasource(type, name);
     }
 
     /**
@@ -15498,6 +16398,19 @@ export class ObjectStackProtocolImplementation implements
      * artifact disagree, so widening this to a class would be widening it past
      * what was measured.
      *
+     * [#21899] The census missed one type, and it is a SECOND non-standalone
+     * shape rather than a second nesting: `datasource`. A code-defined
+     * datasource is registered neither standalone nor nested in the
+     * SchemaRegistry — the runtime registers it in the MetadataService, in
+     * memory only — so `getArtifactItem('datasource', 'showcase_external')`
+     * missed on the showcase's own `*.datasource.ts` (measured on a booted
+     * showcase) and `PUT /api/v1/meta/datasource/showcase_external` answered
+     * 200 on the `runtime-only` intent. Its resolver is
+     * {@link isDeclaredCodeDatasource}, beside this one and in this shape:
+     * a containment boolean, read from what the installed code packages
+     * ship. Two resolvers, each for the one type it measured — still not a
+     * nesting rule.
+     *
      * ## Shape decisions
      *
      *  - **Containment, not a synthetic envelope.** This returns a boolean
@@ -15531,6 +16444,85 @@ export class ObjectStackProtocolImplementation implements
         const fields = objectArtifact?.fields;
         if (!fields || typeof fields !== 'object') return false;
         return Object.prototype.hasOwnProperty.call(fields, name.slice(sep + 1));
+    }
+
+    /**
+     * [#21899] Is `(datasource, name)` a datasource an installed code package
+     * declares — a code-defined datasource?
+     *
+     * ## Why this predicate needs a resolver of its own
+     *
+     * The second non-standalone shape in {@link isNestedArtifactField}'s
+     * census. A code-defined datasource never reaches the SchemaRegistry as an
+     * item: `AppPlugin` registers it in the MetadataService, in memory only,
+     * stamped `origin: 'code'` (ADR-0062), so the artifact-only lookup misses
+     * every one. That miss was the whole defect: {@link isArtifactBacked}
+     * answered false, the save took the `runtime-only` intent, and
+     * `allowRuntimeCreate: true` let `PUT /api/v1/meta/datasource/:name`
+     * persist an edit of a datasource the published contract
+     * (`DatasourceSchema.origin`: "code — authored as `*.datasource.ts`,
+     * GitOps-owned, read-only in the UI") and the datasource-admin service both
+     * call read-only. Seen here, the package door and the repository's write
+     * intent refuse it the way they refuse every code-shipped item of a type
+     * with no overlay channel.
+     *
+     * ## What it reads
+     *
+     *  - **The installed package records** the engine registry holds
+     *    (`getAllPackages()`), each record's manifest `datasources`.
+     *    `registerApp` installs that record from the same manifest it indexes
+     *    the datasource definitions from, and `AppPlugin` registers what the
+     *    package bodies declare — so this is the set the runtime treats as
+     *    code-defined, read from where the package ships it.
+     *  - **In its one canonical form**: the array
+     *    `ObjectStackDefinitionSchema.datasources` declares. The name-keyed map
+     *    is authorable, but `defineStack` normalizes it to the array before any
+     *    artifact is built (`MAP_SUPPORTED_FIELDS`), and the showcase's
+     *    installed record carries the array (measured). No map fallback: Prime
+     *    Directive #12 keeps one contract.
+     *  - **Every installed package, a disabled one included**: the registry
+     *    never filters package records, and a disabled package still ships the
+     *    datasource the runtime registered for it — the artifact-only lookup
+     *    answers for a disabled package's items the same way.
+     *  - [#21944] **The host's code-datasource set**, the kernel service
+     *    `'code-datasource-names'`: every datasource name the host registers
+     *    from code, filled by the runtime in Phase 1 (`AppPlugin` with what the
+     *    artifact declares, `DefaultDatasourcePlugin` with the host's own
+     *    `default`). It is how this predicate sees `default`, which no package
+     *    declares — `DefaultDatasourcePlugin` registers it from the host's
+     *    definition, and the datasource-admin service refuses to edit or remove
+     *    it as code-defined. The same set decides the datasource-admin plugin's
+     *    boot restore (#21922), so the two doors read one answer. Read per
+     *    call through the services registry, by name (its producer is
+     *    `@objectstack/runtime`'s `code-datasource-names.ts`, which this
+     *    package does not depend on); absent on a host that composes no
+     *    code-datasource producer, where nothing is added to the packages'
+     *    answer.
+     *  - ⛔ **Never the MetadataService slot's `origin`**: a stored row the
+     *    datasource-admin plugin restored at boot overwrote that slot, `origin`
+     *    and all, so the slot answers what was stored last, not what a package
+     *    ships. ⛔ **Never a request body's `origin`**: the caller sets it.
+     *
+     * ## What it does not see
+     *
+     *  - **A name neither a package declares nor the host registers from
+     *    code** answers false and keeps the `runtime-only` intent: a runtime
+     *    datasource stays creatable, editable and removable through this door.
+     */
+    private isDeclaredCodeDatasource(type: string, name: string): boolean {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'datasource') return false;
+        const hostCode = this.getServicesRegistry?.().get('code-datasource-names') as { has?: unknown } | undefined;
+        if (typeof hostCode?.has === 'function' && (hostCode as { has(n: string): boolean }).has(name)) return true;
+        const registry = (this.engine as any)?.registry;
+        if (typeof registry?.getAllPackages !== 'function') return false;
+        for (const record of registry.getAllPackages() as unknown[]) {
+            const declared = (record as { manifest?: { datasources?: unknown } } | null | undefined)
+                ?.manifest?.datasources;
+            if (Array.isArray(declared) && declared.some((ds) => (ds as { name?: unknown } | null)?.name === name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -15622,19 +16614,26 @@ export class ObjectStackProtocolImplementation implements
     /**
      * [#21670, ADR-0010 §5, ADR-0126 §2] The protection envelope a metadata READ
      * publishes beside the document — `lock`, `editable`, `deletable` and the
-     * rest — for `(type, name)`, whose served document is `document`. The ONE
-     * derivation both reads call: {@link getMetaItem} and
-     * {@link getMetaItemLayered} — and [#21694] the per-type `locked` count of
-     * {@link getMetaDiagnostics}, so the directory tile and the item agree.
+     * rest — for `(type, name)`, whose served document is `document` and whose
+     * item lock is `itemLock`. The ONE derivation both reads call:
+     * {@link getMetaItem} and {@link getMetaItemLayered} — and [#21694] the
+     * per-type `locked` count of {@link getMetaDiagnostics}, so the directory
+     * tile and the item agree.
      *
      * The flags are a promise about the write doors: `editable` says whether a
      * write of this item is refused on lock grounds, `deletable` whether its
      * removal is. Two limbs refuse such a write, so both are asked here, and
      * neither is re-derived:
      *
-     *  - the item's own ADR-0010 `_lock` — `resolveLockState`, unchanged. Its
-     *    door ({@link lockWriteRefusal} / {@link assertLockAllowsDelete})
-     *    answers on every topology since #21694, as the package limb does;
+     *  - the item's own ADR-0010 `_lock` — `itemLock`, the answer of the one
+     *    item-lock resolution ({@link resolveItemLock}, [#21738]) that the
+     *    `_lock` gate ({@link getEffectiveLock}, behind {@link lockWriteRefusal}
+     *    / {@link assertLockAllowsDelete}) takes too. The caller hands it the
+     *    layers it resolved; this method never reads a lock off `document`,
+     *    whose `_lock` used to be the reads' own derivation and disagreed with
+     *    the gate on the artifact layer (an explicit artifact `'none'`; the
+     *    layered read's `code ?? overlay`). The gate answers on every topology
+     *    since #21694, as the package limb does;
      *  - the locked packaged base: an item a code package ships, on a type with
      *    no overlay channel — {@link packagedBaseRefusal}, the verdict the
      *    `/meta` doors and the `/automation` doors already share (`NOT_OVERRIDABLE`,
@@ -15653,25 +16652,39 @@ export class ObjectStackProtocolImplementation implements
      * the shape the spec declares for it: `editable` false iff `lock` is
      * `no-overlay` or `full`, `deletable` false iff `no-delete` or `full`. An
      * item's own `_lock` and the package verdict JOIN; neither replaces the
-     * other. `lockReason` / `lockSource` / `lockDocsUrl` stay what the document
-     * declares: the package limb adds no prose of its own, and `provenance` /
-     * `packageId` already name the package.
+     * other. `lockReason` / `lockSource` / `lockDocsUrl` are the binding
+     * layer's, from the same resolution, and absent when no layer binds: the
+     * package limb adds no prose of its own, and `provenance` / `packageId` /
+     * `packageVersion` (read off `document`, unchanged) already name the
+     * package.
      *
      * ⛔ Not a policy. Which writes are refused is decided at the doors; this
      * method only reports their answer, so a door that moves moves this read
      * with it.
+     *
+     * [#21899] One removal verdict depends on the store, not the registry: an
+     * origin-gated code-defined item ({@link originGatedRemovalRefusal}) is
+     * refused removal unless a stored row exists, whose delete is repair. So
+     * `storedRowServed` — whether the read found a stored row for the item —
+     * is the one store fact this derivation takes, and only that verdict reads
+     * it: `deletable` is true while there is such a row to remove, false once
+     * there is none. Every other removal verdict ignores it. The diagnostics
+     * tile passes none (it counts `lock !== 'none'`, which both answers are).
      */
     private servedLockState(
         type: string,
         name: string,
         document: unknown,
         artifactBacked: boolean,
+        itemLock: ItemLock,
+        storedRowServed = false,
     ): ReturnType<typeof resolveLockState> {
-        const declared = resolveLockState(document, artifactBacked);
-        const editable = declared.editable
+        const { provenance, packageId, packageVersion } = extractProtection(document);
+        const editable = evaluateLockForWrite(itemLock.lock) === null
             && this.packagedBaseRefusal({ type, name, operation: 'save' }) === null;
-        const deletable = declared.deletable
-            && this.packagedBaseRefusal({ type, name, operation: 'delete' }) === null;
+        const removalRefusal = this.packagedBaseRefusal({ type, name, operation: 'delete' });
+        const deletable = evaluateLockForDelete(itemLock.lock) === null
+            && (removalRefusal === null || (storedRowServed && isOriginGatedType(type)));
         const lock = MetadataLockSchema.options.find((state) =>
             (evaluateLockForWrite(state) === null) === editable
             && (evaluateLockForDelete(state) === null) === deletable);
@@ -15683,7 +16696,18 @@ export class ObjectStackProtocolImplementation implements
                 `No ADR-0010 lock state answers editable=${editable}, deletable=${deletable}.`,
             );
         }
-        return { ...declared, lock, editable, deletable };
+        return {
+            lock,
+            lockReason: itemLock.lockReason,
+            lockSource: itemLock.lockSource,
+            lockDocsUrl: itemLock.lockDocsUrl,
+            provenance,
+            packageId,
+            packageVersion,
+            editable,
+            deletable,
+            resettable: artifactBacked,
+        };
     }
 
     /**
@@ -15698,7 +16722,9 @@ export class ObjectStackProtocolImplementation implements
      * neither merged into the package's slot nor lets it stand in for it —
      * {@link isStoredFlowEntryOfShippedName} for the registry's list, this
      * predicate by NAME for a row read from the store, whose own bytes decide
-     * nothing. Merged, such a row was served under the package's provenance
+     * nothing ([#21922] the reads ask both through {@link declinesStoredRow}
+     * and its registry half, which add the code-defined datasource names).
+     * Merged, such a row was served under the package's provenance
      * and the automation engine's `kernel:ready` sync armed it over the body
      * the boot pull had armed: the stored body dispatched while every receipt
      * named the package.
@@ -15717,6 +16743,13 @@ export class ObjectStackProtocolImplementation implements
      * effective layer — the loader's body — is what the door serves, and in
      * every other case the door serves the stored row as before. One decision
      * point for the three reads; the doors hold no copy of the rule.
+     *
+     * [#21922] The layered read asks this predicate through
+     * {@link declinesStoredRow}, which also declines the stored row of a
+     * code-defined datasource name. The published doors ask this predicate
+     * alone, so for such a name they still serve the stored row: the active
+     * overlay row, as the route's spec describes it. That door is not moved
+     * here.
      */
     isShippedFlowName(type: string, name: unknown): boolean {
         if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'flow') return false;
@@ -15735,6 +16768,61 @@ export class ObjectStackProtocolImplementation implements
      */
     private isStoredFlowEntryOfShippedName(type: string, item: unknown): boolean {
         return this.isShippedFlowName(type, (item as { name?: unknown } | null | undefined)?.name)
+            && !isCodeArtifactBody(item);
+    }
+
+    /**
+     * [#21922, ADR-0062 D4, ADR-0126 §3] Is `name` one whose STORED row the
+     * active reads never adopt, judged by NAME? The one decision the by-name
+     * read ({@link getMetaItem}), the flattened view
+     * ({@link readFlattenedMetaItems}, both faces) and the layered read's
+     * effective layer ({@link getMetaItemLayered}) take before they serve a
+     * stored row. ⛔ No read carries a copy of it, and it opens no precedence
+     * path of its own: the row is skipped, and each read falls through to the
+     * code layer it already reads next.
+     *
+     * Exactly two answers, each its own type's, neither re-derived here:
+     *
+     *  - a FLOW name the loader's set holds ({@link isShippedFlowName},
+     *    #20913 / #20946 / #21002) — Regime C, "never an overlay read path";
+     *    the reads serve the loader's entry;
+     *  - a CODE-DEFINED DATASOURCE name ({@link isDeclaredCodeDatasource}: the
+     *    host's code-datasource set, then the installed packages'
+     *    declarations) — "code wins on collision", the datasource-admin
+     *    service's invariant, which the boot restore obeys too. The code
+     *    definition is the MetadataService's in-memory registration, and that
+     *    is the layer the reads serve. A stored row under such a name is never
+     *    a layer of it, only residue ({@link originGatedRemovalRefusal}): it
+     *    stays at rest, the boot restore names it in a warning, and the `/meta`
+     *    DELETE removes it as repair.
+     *
+     * ⛔ Never a row's, slot's or body's `origin` — the caller sets it.
+     *
+     * Every other type, and a name neither predicate holds for, keeps
+     * ADR-0005's read order: the stored overlay wins. Each caller scopes it to
+     * the ACTIVE read, so a draft is answered as a draft.
+     *
+     * What it does not move: whether a read FOUND a stored row
+     * (`storedRowServed`, the fact {@link servedLockState}'s `deletable`
+     * reads), the `_lock` gate's overlay layer ({@link overlayLockLayerAt},
+     * read whether or not the row is adopted), and the DELETE's own row probe.
+     */
+    private declinesStoredRow(type: string, name: unknown): boolean {
+        if (this.isShippedFlowName(type, name)) return true;
+        return typeof name === 'string' && name !== '' && this.isDeclaredCodeDatasource(type, name);
+    }
+
+    /**
+     * [#21922] The registry half of {@link declinesStoredRow}: a registry entry
+     * under such a name that is not a code artifact body — the stored row
+     * {@link hydrateOverlayIntoRegistry} registered under the bare key,
+     * tenant-marked. For a flow name it answers what
+     * {@link isStoredFlowEntryOfShippedName} answers. A code-defined datasource
+     * is never a SchemaRegistry item at all (its code definition is the
+     * MetadataService's), so every entry it matches is a hydrated row.
+     */
+    private isStoredEntryOfDeclinedName(type: string, item: unknown): boolean {
+        return this.declinesStoredRow(type, (item as { name?: unknown } | null | undefined)?.name)
             && !isCodeArtifactBody(item);
     }
 
@@ -15921,8 +17009,10 @@ export class ObjectStackProtocolImplementation implements
      */
     private async storedFlowBindingAgrees(name: string, packageId: string): Promise<boolean> {
         try {
+            // [#21911] The explicit system opt-in — see findServedOverlayRow.
             const row = await this.engine.findOne('sys_metadata', {
                 where: { type: 'flow', name, package_id: packageId },
+                context: { isSystem: true },
             });
             return row != null;
         } catch (error) {
@@ -16102,6 +17192,54 @@ export class ObjectStackProtocolImplementation implements
         }
     }
 
+    /**
+     * [#21899, ADR-0126 §3] The removal verdict on an item of an ORIGIN-GATED
+     * type ({@link isOriginGatedType} — `datasource`: code-defined read-only,
+     * runtime-created free) when the item is code-defined: the package door's
+     * own refusal, {@link packagedBaseRefusal} for `delete`, held for
+     * {@link deleteMetaItem} to answer at its row probe. `null` for an item of
+     * any other type, for a runtime item of this one (nothing ships the name),
+     * and with `OS_METADATA_WRITABLE` open on the type — each keeps the verdict
+     * it had.
+     *
+     * ## The one removal it lifts, and the one it keeps
+     *
+     * `deleteMetaItem` throws it when NO stored row exists under the name: the
+     * delete would remove nothing, and a code-defined datasource is not
+     * removable at runtime — the datasource-admin service's verdict, now the
+     * `/meta` door's too, in the same `NOT_OVERRIDABLE` / 403 its save gets.
+     * When a stored row DOES exist, the delete goes ahead and removes it.
+     *
+     * That second half is not a new rule. It is the one {@link saveMetaItem}'s
+     * #5086 record states and #6960 extended, applied to the save refusal this
+     * card adds: "removing a code-only row that predates this refusal is
+     * repair, and must stay possible", because the removal restores the
+     * code-declared state — the narrowing direction, which cannot widen
+     * anything. Rows that predate it exist (#21899 measured them: a `/meta`
+     * save of a code-defined datasource persisted one, and at boot it shadows
+     * the code definition in both doors), and before this refusal the `/meta`
+     * door was the one door that could clear them; refusing every delete would
+     * leave them to database surgery.
+     *
+     * #6960's own carve-out ({@link mergesOverlayAtRead}) does not reach it,
+     * and is not widened to: it is keyed on `supportsOverlay`, which
+     * `datasource` does not declare — and `object`, which shares those flags,
+     * keeps refusing both verbs (ADR-0029 D9.6). What sets an origin-gated type
+     * apart is that its code-defined items are never persisted at all, so a
+     * stored row under one is never a layer of it, only residue. The
+     * repository's delete gate mirrors the lift for the same type
+     * ({@link SysMetadataRepository.assertDeleteAllowed}), because it is
+     * topology-independent and is the gate a host-config kernel asks.
+     *
+     * The read envelope reports the same verdict ({@link servedLockState}):
+     * `editable: false` always, and `deletable` true exactly while the read
+     * found a stored row for the delete to remove.
+     */
+    private originGatedRemovalRefusal(type: string, name: string): Error | null {
+        if (!isOriginGatedType(type)) return null;
+        return this.packagedBaseRefusal({ type, name, operation: 'delete' });
+    }
+
     // ───────────────────────────────────────────────────────────────────
     // ADR-0010 — metadata protection (Phase 1: L3 item-level lock)
     // ───────────────────────────────────────────────────────────────────
@@ -16137,6 +17275,122 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#21803, ADR-0010 §3.3, ADR-0048 §3.4] The item-lock resolution's
+     * `artifact` layer ({@link resolveItemLock}) for the item at `address`:
+     * {@link resolveArtifactLockLayer}, the one selection, over
+     * {@link shippedArtifactsOf}. The `_lock` gate ({@link getEffectiveLock}),
+     * {@link getMetaItem}, {@link getMetaItemLayered}, the list
+     * ({@link readFlattenedMetaItems}) and the diagnostics tile
+     * ({@link getMetaDiagnostics}) all take the artifact layer here, so no
+     * caller picks the artifact its lock comes from. Content does not come from
+     * here: each of them still serves the address's own package's artifact
+     * ({@link lookupArtifactItem} with the request's package).
+     *
+     * `shipping` is {@link shippingPackagesOf} for the type, read once by a
+     * caller that asks about many items of one type.
+     */
+    private artifactLockLayerAt(address: ItemAddress, shipping?: ShippingPackages): readonly unknown[] {
+        return resolveArtifactLockLayer(address, () => this.shippedArtifactsOf(address.type, address.name, shipping));
+    }
+
+    /**
+     * [#21803] Every artifact an installed code package registered under
+     * `(type, name)`: what the registry's artifact-only lookup
+     * ({@link lookupArtifactItem}) answers for each package that can ship the
+     * name ({@link shippingPackagesOf}), kept when it is that package's own
+     * (`_packageId` equal to the package asked for, the prefer-local hit), plus
+     * what it answers with no package at all.
+     *
+     * The registry has no enumeration of its own for this, so the reader asks
+     * its existing lookups per package. The package-less lookup is always in
+     * the set. It is the one the `_lock` gate made before #21803 (the first
+     * package registered), so the resolution over this set never answers
+     * looser than the gate did under any registration order; with no composite
+     * entry at all it is also the only way to reach an artifact registered
+     * under the plain key.
+     *
+     * An `object` has one owner (`SchemaRegistry.registerObject` refuses a
+     * second code package's claim on the name, ADR-0029 D3), and its artifact
+     * lookup reads the owner's layer whatever package is asked for, so the
+     * owner is the whole set.
+     */
+    private shippedArtifactsOf(type: string, name: string, shipping?: ShippingPackages): unknown[] {
+        const shipped: unknown[] = [];
+        const add = (artifact: unknown): void => {
+            if (artifact !== undefined && artifact !== null && !shipped.includes(artifact)) shipped.push(artifact);
+        };
+        add(this.lookupArtifactItem(type, name));
+        if ((PLURAL_TO_SINGULAR[type] ?? type) === 'object') return shipped;
+        const packages = shipping ?? this.shippingPackagesOf(type);
+        for (const packageId of new Set([...(packages.byName.get(name) ?? []), ...packages.anyName])) {
+            const own = this.lookupArtifactItem(type, name, packageId) as { _packageId?: unknown } | undefined;
+            if (own?._packageId === packageId) add(own);
+        }
+        return shipped;
+    }
+
+    /**
+     * [#21803] The packages that can ship an item of `type`, read off the
+     * registry's own listings:
+     *
+     *  - `byName`: per name, the package of every entry the registry lists for
+     *    the type under that name (both spellings);
+     *  - `anyName`: the packages the listing cannot attribute to a name, probed
+     *    for every name. The listing hides a DISABLED package's entries and the
+     *    artifact lookup does not (the `_lock` gate bound a disabled package's
+     *    artifact before #21803 when it was registered first), so every
+     *    installed package the registry reports disabled is here (every
+     *    installed package, when the registry cannot say which are disabled); so
+     *    is the package of a listed entry that carries no `name`.
+     *
+     * A registry without either listing, or whose listing throws (a
+     * metadata-only host's partial registry: listing there is best-effort
+     * context, never the reason a write fails), contributes nothing here, and
+     * {@link shippedArtifactsOf} then answers with the package-less lookup and
+     * whatever could be listed: never looser than the `_lock` gate before
+     * #21803, which asked that lookup alone.
+     */
+    private shippingPackagesOf(type: string): ShippingPackages {
+        const registry = (this.engine as any)?.registry;
+        const byName = new Map<string, Set<string>>();
+        const anyName = new Set<string>();
+        if (!registry) return { byName, anyName };
+        const isPackage = (id: unknown): id is string => typeof id === 'string' && id !== '' && id !== 'sys_metadata';
+        const listing = (read: () => unknown): readonly unknown[] => {
+            try {
+                const listed = read();
+                return Array.isArray(listed) ? listed : [];
+            } catch {
+                return []; // See this method's header: the package-less lookup still answers.
+            }
+        };
+        if (typeof registry.listItems === 'function') {
+            for (const spelling of new Set([PLURAL_TO_SINGULAR[type] ?? type, type])) {
+                for (const entry of listing(() => registry.listItems(spelling))) {
+                    const { _packageId: id, name } = (entry ?? {}) as { _packageId?: unknown; name?: unknown };
+                    if (!isPackage(id)) continue;
+                    if (typeof name !== 'string') {
+                        anyName.add(id);
+                        continue;
+                    }
+                    const ids = byName.get(name);
+                    if (ids) ids.add(id);
+                    else byName.set(name, new Set([id]));
+                }
+            }
+        }
+        if (typeof registry.getAllPackages === 'function') {
+            const canTell = typeof registry.isPackageDisabled === 'function';
+            for (const record of listing(() => registry.getAllPackages())) {
+                const r = record as { manifest?: { id?: unknown }; id?: unknown } | null | undefined;
+                const id = r?.manifest?.id ?? r?.id;
+                if (isPackage(id) && (!canTell || registry.isPackageDisabled(id))) anyName.add(id);
+            }
+        }
+        return { byName, anyName };
+    }
+
+    /**
      * True when `packageId` is a **writable base** — a DB-backed package an
      * org or the AI may author *new* metadata into (ADR-0070 D2).
      *
@@ -16164,6 +17418,18 @@ export class ObjectStackProtocolImplementation implements
      * case. It answers alike on every topology: no `environmentId` term,
      * and since #21694 neither caller gates on one.
      *
+     * ## [#21738] The rule is the one item-lock resolution's
+     *
+     * Which layer binds, and what an explicit `'none'` means, is decided by
+     * {@link resolveItemLock} — the resolution both reads' envelopes and the
+     * served body's lock family take too — never here. This method only
+     * gathers the two layers the gate reads (the artifact, then the overlay
+     * row, below) and reads the overlay row only when the artifact does not
+     * bind ({@link resolveItemLockLazily}), as it always has: a packaged lock
+     * is answered without a store read, and a store that cannot be read never
+     * turns its `ITEM_LOCKED` into a 503. The refusal's `source=` names the
+     * binding layer, as before.
+     *
      * ## [#21716] The overlay limb reads the row the READ serves
      *
      * The overlay limb used to query one row: `organization_id` equal to the
@@ -16183,9 +17449,34 @@ export class ObjectStackProtocolImplementation implements
      * organization's own row is served, that row's `_lock` does, whatever the
      * env-wide row declares (the read reports that same row). ⛔ No second
      * predicate: a change to the read's precedence moves this limb with it.
-     * The package-agnostic arm is asked (no `packageId`), as the doors carry
-     * none to this gate, under the canonical spelling only (#4432 — the one
-     * declared difference, stated on {@link findServedOverlayRow}).
+     *
+     * ## [#21761] The limb and the reads select the rows from one ADDRESS
+     *
+     * The limb used to ask {@link findServedOverlayRow} with no package, so it
+     * bound whichever of the item's rows `findOne` returned first, while a
+     * read naming a package (`?package=`, ADR-0048) reported that package's
+     * row. Now the limb hands {@link overlayLockLayerAt} the item's address,
+     * the request's `packageId` included where the door carries one (save,
+     * publish), and the reads hand it theirs. Both get the strictest lock
+     * among the item's rows in scope, whichever package each is bound to:
+     * every row this limb could bind before, so a write it refused under some
+     * row order is refused under every one, and the reads report that lock.
+     * Canonical spelling only (#4432, the one declared difference, stated on
+     * {@link overlayLockLayerAt}).
+     *
+     * ## [#21803] The artifact limb and the reads take every shipping package
+     *
+     * The artifact limb used to look the artifact up with no package, so with
+     * two installed packages shipping one name (ADR-0048 §3.4) it bound the
+     * first package registered, while a read naming a package reported that
+     * package's artifact. Now the limb hands {@link artifactLockLayerAt} the
+     * write's address and the reads hand it theirs; the resolution reads the
+     * layers once per shipping package and binds the strictest answer
+     * ({@link resolveItemLock}). The package-less artifact this limb bound
+     * before is always one of them, so no write it refused under some
+     * registration order is admitted under any. The overlay rows are read only
+     * when a shipping package's own artifact declares no lock, or none ships
+     * the name ({@link resolveItemLockLazily}).
      *
      * `'none'` is a VERDICT, not a default: both callers turn it into
      * "allow". So it is returned only when the absence of a lock was
@@ -16257,6 +17548,7 @@ export class ObjectStackProtocolImplementation implements
         type: string,
         name: string,
         organizationId: string | null | undefined,
+        packageId?: string,
     ): Promise<{
         lock: MetadataLock;
         lockReason: string | undefined;
@@ -16264,39 +17556,54 @@ export class ObjectStackProtocolImplementation implements
     }> {
         // [#9009] ONE key for BOTH limbs — see this method's header.
         const canonicalType = canonicalMetaType(type);
-        // 1. Artifact wins. `lookupArtifactItem` is shadow-immune: a
-        //    sys_metadata overlay row hydrated into the registry's plain
-        //    key cannot mask the packaged artifact's `_lock` envelope.
-        const artifactItem = this.lookupArtifactItem(canonicalType, name) as any;
-        if (artifactItem) {
-            const p = extractProtection(artifactItem);
-            if (p.lock !== 'none') {
-                return { lock: p.lock, lockReason: p.lockReason, lockSource: 'artifact' };
-            }
-        }
-        // 2. Overlay row — addressed by the SAME canonical key the repository
-        //    stores it under (`SysMetadataRepository.whereFor`), which is what
-        //    makes this limb read the row the artifact limb already folded to.
-        //    [#21716] …and the row the READ serves for this organization: the
-        //    reads' own resolution, behind the reads' own organization gate —
-        //    see this method's header. Canonical spelling only (#4432), the
-        //    one declared difference — see {@link findServedOverlayRow}.
-        try {
-            const served = await this.findServedOverlayRow({
+        // [#21738] The one item-lock resolution decides; the two readers below
+        // only gather its layers, the second only when it can bind.
+        const resolved = await resolveItemLockLazily({
+            // 1. Artifact. `lookupArtifactItem` is shadow-immune: a
+            //    sys_metadata overlay row hydrated into the registry's plain
+            //    key cannot mask the packaged artifact's `_lock` envelope.
+            //    [#21803] Every installed package that ships the name, through
+            //    the reads' own selection, from the same address — see this
+            //    method's header.
+            artifact: () => this.artifactLockLayerAt({
                 type: canonicalType,
                 name,
-                orgId: organizationIdForMetaRead(canonicalType, organizationId ?? undefined),
-                state: 'active',
-                otherSpelling: false,
-            });
-            const row = served?.row;
-            if (row) {
-                const body = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
-                const p = extractProtection(body);
-                if (p.lock !== 'none') {
-                    return { lock: p.lock, lockReason: p.lockReason, lockSource: 'overlay' };
-                }
-            }
+                organizationId: organizationId ?? undefined,
+                packageId,
+            }),
+            overlay: () => this.readLockGateOverlayLayer(canonicalType, name, organizationId, packageId),
+        });
+        return { lock: resolved.lock, lockReason: resolved.lockReason, lockSource: resolved.layer };
+    }
+
+    /**
+     * [#21738] The `_lock` gate's `overlay` layer for {@link getEffectiveLock}:
+     * [#21761] the lock document {@link overlayLockLayerAt} selects from the
+     * write's address, or `undefined` when no row in scope declares a lock (or
+     * `sys_metadata` is not provisioned yet). Throws when the rows cannot be
+     * read (#5706).
+     */
+    private async readLockGateOverlayLayer(
+        canonicalType: string,
+        name: string,
+        organizationId: string | null | undefined,
+        packageId: string | undefined,
+    ): Promise<unknown> {
+        // 2. Overlay rows — addressed by the SAME canonical key the repository
+        //    stores them under (`SysMetadataRepository.whereFor`), which is
+        //    what makes this limb read the rows the artifact limb already
+        //    folded to. [#21716] …behind the reads' own organization gate, and
+        //    [#21761] through the reads' own selection, from the same address —
+        //    see {@link getEffectiveLock}'s header. Canonical spelling only
+        //    (#4432), the one declared difference — see
+        //    {@link overlayLockLayerAt}.
+        try {
+            return await this.overlayLockLayerAt({
+                type: canonicalType,
+                name,
+                organizationId: organizationIdForMetaRead(canonicalType, organizationId ?? undefined),
+                packageId,
+            }, { otherSpelling: false });
         } catch (error) {
             // #5706 — A LOCK GATE MUST NOT FAIL OPEN. This `catch` used to
             // swallow every read failure and fall through to `'none'`, and
@@ -16337,7 +17644,7 @@ export class ObjectStackProtocolImplementation implements
             // one uncertain write beats performing one that had to be refused.
             this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
-        return { lock: 'none', lockReason: undefined, lockSource: undefined };
+        return undefined;
     }
 
     /**
@@ -16419,7 +17726,11 @@ export class ObjectStackProtocolImplementation implements
                 lock_overridden: entry.lockOverridden ?? false,
                 request_id: entry.requestId ?? null,
                 note: entry.note ?? null,
-            } as any);
+            } as any, {
+                // [#21911] The explicit system opt-in: the platform writes its
+                // own trail row; the `actor` column above names who acted.
+                context: { isSystem: true },
+            });
         } catch (err: any) {
             // Don't promote audit-table failures to API errors. Log so
             // operators can spot a misconfigured deployment.
@@ -16467,12 +17778,19 @@ export class ObjectStackProtocolImplementation implements
         type: string;
         name: string;
         organizationId?: string;
+        /**
+         * [#21761] The package the write names (ADR-0048 `?package=`), part of
+         * the item's address the gate selects the rows in scope from. It never
+         * narrows those rows; it picks whose prose a refusal carries when
+         * several rows declare the strictest lock, as it does on the reads.
+         */
+        packageId?: string;
         operation: 'save' | 'publish' | 'rollback';
         actor?: string;
         source?: string;
         requestId?: string;
     }): Promise<{ err: Error; audit: MetadataAuditEntry } | null> {
-        const state = await this.getEffectiveLock(args.type, args.name, args.organizationId ?? null);
+        const state = await this.getEffectiveLock(args.type, args.name, args.organizationId ?? null, args.packageId);
         const refusal = evaluateLockForWrite(state.lock);
         if (!refusal) return null;
         const reason = state.lockReason ?? refusal.reason;
@@ -16519,6 +17837,8 @@ export class ObjectStackProtocolImplementation implements
         type: string;
         name: string;
         organizationId?: string;
+        /** [#21761] See {@link lockWriteRefusal}. */
+        packageId?: string;
         operation: 'save' | 'publish' | 'rollback';
         actor?: string;
         source?: string;
@@ -17903,6 +19223,7 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         organizationId: string | null,
     ): Promise<string | null> {
+        // [#21911] The explicit system opt-in — see findServedOverlayRow.
         const row = await this.engine.findOne('sys_metadata', {
             where: {
                 type,
@@ -17910,6 +19231,7 @@ export class ObjectStackProtocolImplementation implements
                 organization_id: organizationId,
                 state: 'active',
             },
+            context: { isSystem: true },
         });
         return (row as { package_id?: string | null } | null)?.package_id ?? null;
     }
@@ -18134,8 +19456,9 @@ export class ObjectStackProtocolImplementation implements
      *
      * Both read doors give a name with a stored row of its own that row
      * (#21510's one predicate, {@link namesWithOwnStoredRow}), and fill a
-     * row-less name with an expansion, the last one read winning
-     * ({@link expandStoredViewContainers}). So a container whose ROW name is
+     * row-less name with an expansion, the last one read winning within a
+     * package's slot and on a by-name read that names no package
+     * ({@link servedViewExpansion}). So a container whose ROW name is
      * served from elsewhere hides that view on both doors and, being no view
      * itself, leaves no read answering a view under the name; a container
      * whose EXPANSION takes such a name replaces that view on both doors with
@@ -18583,6 +19906,7 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 organizationId: request.organizationId,
                 body: request.item,
+                ...(request.packageId ? { packageId: request.packageId } : {}),
             });
             if (intakeRefusal) throw intakeRefusal;
         }
@@ -18624,6 +19948,8 @@ export class ObjectStackProtocolImplementation implements
                 type: request.type,
                 name: request.name,
                 ...(request.organizationId ? { organizationId: request.organizationId } : {}),
+                // [#21761] The save's address carries its package, as the read's does.
+                ...(request.packageId ? { packageId: request.packageId } : {}),
                 operation: 'save',
                 ...(request.actor ? { actor: request.actor } : {}),
                 source: writeSource,
@@ -20542,22 +21868,6 @@ export class ObjectStackProtocolImplementation implements
             );
             if (orgRefusal) throw orgRefusal;
         }
-        // ADR-0010 L3 — lock blocks publish too (publishing is a write).
-        //
-        // [#8594] `lockWriteRefusal`, not `assertLockAllowsWrite`: the row rides
-        // OUT on the error and each caller records it on its own side of its own
-        // transaction. See this method's header for why it cannot be written here.
-        const _publishLockRefusal = await this.lockWriteRefusal({
-            type: request.type,
-            name: request.name,
-            ...(request.organizationId ? { organizationId: request.organizationId } : {}),
-            operation: 'publish',
-            ...(request.actor ? { actor: request.actor } : {}),
-            source: 'protocol.publishMetaItem',
-        });
-        if (_publishLockRefusal) {
-            throw withPendingAudit(_publishLockRefusal.err, _publishLockRefusal.audit);
-        }
         await this.ensureOverlayIndex();
         const orgId = request.organizationId ?? null;
         const repo = this.getOverlayRepo(orgId);
@@ -20568,9 +21878,56 @@ export class ObjectStackProtocolImplementation implements
         // Without this the gate would be trivially bypassable by anyone who
         // saves `?mode=draft` and then POSTs `/publish` — which is exactly what
         // Studio's designer surface does on every edit.
+        //
+        // The draft is read under ONE package key, and `repo.promoteDraft`
+        // below promotes under that same key, so the body judged here is the
+        // body that becomes active. ADR-0048 keys a draft by
+        // `(org, type, name, package_id)`: two packages can each hold a draft
+        // of the same name in one org, and a read without the package
+        // dimension picks either. The key is the caller's stated binding
+        // (spelled exactly as `repo.promoteDraft` receives it); with none
+        // stated, the binding of the draft row this promotion resolves, read
+        // once and then stated to the lock lookup, the read and the promotion.
+        let draftKey: string | null | undefined = 'packageId' in request ? (request.packageId ?? null) : undefined;
+        if (draftKey === undefined) {
+            // [#21934] Read ahead of the lock check, so a store that cannot be
+            // read is answered here as the lock read answers it (#5706): an
+            // unprovisioned `sys_metadata` holds no draft, and any other failure
+            // is the 503 the lock read raised before this read moved above it.
+            let draftRow: unknown;
+            try {
+                draftRow = await this.engine.findOne('sys_metadata', {
+                    where: { type: singularType, name: request.name, organization_id: orgId, state: 'draft' },
+                });
+            } catch (error) {
+                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            }
+            if (draftRow) draftKey = (draftRow as { package_id?: string | null }).package_id ?? null;
+        }
+        // ADR-0010 L3 — lock blocks publish too (publishing is a write).
+        //
+        // [#8594] `lockWriteRefusal`, not `assertLockAllowsWrite`: the row rides
+        // OUT on the error and each caller records it on its own side of its own
+        // transaction. See this method's header for why it cannot be written here.
+        const _publishLockRefusal = await this.lockWriteRefusal({
+            type: request.type,
+            name: request.name,
+            ...(request.organizationId ? { organizationId: request.organizationId } : {}),
+            // [#21761] The promotion's address carries its package, as the read's does.
+            // [#21934] It is the key resolved above, the one the gate reads the
+            // draft under and the promotion writes under: the caller's stated
+            // binding, else the resolved draft row's own.
+            ...(draftKey ? { packageId: draftKey } : {}),
+            operation: 'publish',
+            ...(request.actor ? { actor: request.actor } : {}),
+            source: 'protocol.publishMetaItem',
+        });
+        if (_publishLockRefusal) {
+            throw withPendingAudit(_publishLockRefusal.err, _publishLockRefusal.audit);
+        }
         const draftForGate = await repo.get(
             { type: singularType, name: request.name, org: orgId ?? 'env' } as Parameters<typeof repo.get>[0],
-            { state: 'draft' },
+            { state: 'draft', ...(draftKey !== undefined ? { packageId: draftKey } : {}) },
         );
         // [#21470] …and the divergent `name` refusal, on the same body and for
         // the same reason: a draft stored before `saveMetaItem` judged every
@@ -20586,11 +21943,15 @@ export class ObjectStackProtocolImplementation implements
         // The promotion half of {@link anonymousFormIntakeOrgScopeRefusal}: a
         // draft saved before that refusal existed must not reach `active`.
         if (draftForGate) {
+            // The binding the promoted row is placed by: the key the draft was
+            // read under above (a container's expansion is placed by it).
+            const draftPackageId = draftKey;
             const intakeRefusal = await this.anonymousFormIntakeOrgScopeRefusal({
                 type: singularType,
                 name: request.name,
                 organizationId: orgId,
                 body: draftForGate.body,
+                ...(draftPackageId ? { packageId: draftPackageId } : {}),
             });
             if (intakeRefusal) throw intakeRefusal;
         }
@@ -20689,11 +22050,19 @@ export class ObjectStackProtocolImplementation implements
                 // audit writer. This door's default says what happened without it.
                 message: request.message || 'publish draft',
                 intent,
-                // [#8907] Spread, not `packageId: request.packageId`: `null` is
-                // a meaningful scope (the unbound row) and `undefined` means
-                // "no package in hand", so the key must be ABSENT rather than
-                // present-and-undefined for the historical resolution to hold.
-                ...('packageId' in request ? { packageId: request.packageId ?? null } : {}),
+                // [#8907] Spread: `null` is a meaningful scope (the unbound
+                // row), so the key is ABSENT rather than present-and-undefined
+                // when there is none. The key the gated draft was read under (see `draftForGate`):
+                // the stated binding, or the resolved row's own when none was
+                // stated, so the promotion cannot pick a different package's
+                // draft than the one judged above. Absent only when no draft
+                // was found, where the promotion answers `NO_DRAFT` as before.
+                ...(draftKey !== undefined ? { packageId: draftKey } : {}),
+                // [#21934] …and the promotion writes only the draft the gate
+                // judged: the judged draft's hash (`null` when the gate found
+                // none), so a draft saved after the gate's read is refused as a
+                // conflict instead of being promoted unjudged.
+                expectedDraftHash: draftForGate ? draftForGate.hash : null,
             });
             return { singularType, orgId, advisories: runtimeAdvisories, result };
         } catch (err: any) {
@@ -20702,7 +22071,10 @@ export class ObjectStackProtocolImplementation implements
                 const conflict = await this.metadataConflictRefusal(
                     err,
                     `${request.type}/${request.name}`,
-                    `${request.type}/${request.name} published row advanced while you held the draft.`,
+                    err instanceof DraftConflictError
+                        ? `${request.type}/${request.name} draft changed after this publish judged it, so nothing was `
+                            + `published. Publish again to judge and promote the current draft.`
+                        : `${request.type}/${request.name} published row advanced while you held the draft.`,
                 );
                 // [#8594] Attached, not written — same reason as the lock gate
                 // above. The repository's own transaction has already unwound by
@@ -21557,8 +22929,10 @@ export class ObjectStackProtocolImplementation implements
                 // (env-wide drafts have env-wide active rows). Using the
                 // request's active org here would miss an env-wide edit and
                 // mis-record it as a create in the revert plan (#3115).
+                // [#21911] The explicit system opt-in — see findServedOverlayRow.
                 const activeRow = (await this.engine.findOne('sys_metadata', {
                     where: { organization_id: d.organizationId ?? null, type: d.type, name: d.name, state: 'active' },
+                    context: { isSystem: true },
                 })) as { version?: number } | null;
                 commitItems.push({
                     type: d.type,
@@ -22340,7 +23714,8 @@ export class ObjectStackProtocolImplementation implements
         // changes.
         let rows: any[];
         try {
-            rows = (await this.engine.find('sys_metadata', { where })) as any[];
+            // [#21911] The explicit system opt-in — see findServedOverlayRow.
+            rows = (await this.engine.find('sys_metadata', { where, context: { isSystem: true } })) as any[];
         } catch (e) {
             // [#12536] …through the classifier: a marked application refusal
             // is not a store fault. See {@link metadataReadFailureError}.
@@ -22672,7 +24047,8 @@ export class ObjectStackProtocolImplementation implements
                 { organization_id: null },
             ];
         }
-        const scanned = (await this.engine.find('sys_metadata', { where })) as any[];
+        // [#21911] The explicit system opt-in — see findServedOverlayRow.
+        const scanned = (await this.engine.find('sys_metadata', { where, context: { isSystem: true } })) as any[];
 
         // [#7819 tier 2] ADR-0005 overlay precedence — the caller's OWN org
         // shadows env-wide ({@link resolveMetaItemOrgScope} states the same rule
@@ -23017,7 +24393,8 @@ export class ObjectStackProtocolImplementation implements
                 { organization_id: null },
             ];
         }
-        const rows = (await this.engine.find('sys_metadata', { where })) as any[];
+        // [#21911] The explicit system opt-in — see findServedOverlayRow.
+        const rows = (await this.engine.find('sys_metadata', { where, context: { isSystem: true } })) as any[];
         const orphans = rows.filter(
             (r) => r?.package_id == null || r.package_id === '' || r.package_id === 'sys_metadata',
         );
@@ -23050,7 +24427,7 @@ export class ObjectStackProtocolImplementation implements
                 await this.engine.update(
                     'sys_metadata',
                     { package_id: request.targetPackageId },
-                    { where: { id: row.id } },
+                    { where: { id: row.id }, context: { isSystem: true } },
                 );
                 reassigned.push({ type: row.type, name: row.name });
             } catch (e: any) {
@@ -23128,7 +24505,8 @@ export class ObjectStackProtocolImplementation implements
      * again — which is precisely how the seam this repairs was born.
      */
     private async persistPackageCommitRow(row: Record<string, unknown>): Promise<void> {
-        await this.engine.insert('sys_metadata_commit', row);
+        // [#21911] The explicit system opt-in — see recordMetadataAudit.
+        await this.engine.insert('sys_metadata_commit', row, { context: { isSystem: true } });
     }
 
     /**
@@ -24669,6 +26047,12 @@ export class ObjectStackProtocolImplementation implements
         // spelling while the repository deletes under the singular — so a
         // DELETE could remove the row and leave the shadow it was meant to lift.
         request = canonicalizeMetaRequestType(request);
+        // [#21899] The removal verdict on an ORIGIN-GATED code-defined item
+        // (ADR-0126 §3: `datasource` — code-defined read-only, runtime-created
+        // free), held back until the row probe below. See
+        // {@link originGatedRemovalRefusal}: the item itself is never removed
+        // here, but a stored row under its name is, as repair.
+        const originGatedRefusal = this.originGatedRemovalRefusal(request.type, request.name);
         // Two-tier authorization for delete (mirrors saveMetaItem).
         //  • Artifact-backed item → delete becomes a tombstone overlay,
         //    requires `allowOrgOverride`…
@@ -24727,7 +26111,11 @@ export class ObjectStackProtocolImplementation implements
             // {@link refusePackagedBaseRemoval}, so a second removal door onto
             // the same packaged artifact asks this one through
             // {@link packagedBaseRefusal} instead of carrying a copy.
-            this.refusePackagedBaseRemoval(request);
+            //
+            // [#21899] An origin-gated code-defined item's verdict is that same
+            // refusal, answered at the row probe instead of here: thrown when
+            // no stored row exists, and lifted for the repair that deletes one.
+            if (originGatedRefusal === null) this.refusePackagedBaseRemoval(request);
             if (!artifactBacked && !overlayAllowed && !runtimeCreateAllowed) {
                 const err = new Error(
                     `Metadata type '${request.type}' does not allow runtime creation or deletion.`
@@ -24745,8 +26133,13 @@ export class ObjectStackProtocolImplementation implements
         // on a host-config kernel a packaged base it refuses keeps the answer
         // that kernel already gave it — the repository's delete gate when an
         // overlay row exists, a no-op that leaves the artifact standing when
-        // none does (see {@link packagedBaseRefusal}).
-        if (this.packagedBaseRefusal({ type: request.type, name: request.name, operation: 'delete' }) === null) {
+        // none does (see {@link packagedBaseRefusal}). [#21899] The
+        // origin-gated repair is a removal the doors allow, so the `_lock`
+        // gate asks about it as it asks about every other allowed removal.
+        if (
+            originGatedRefusal !== null
+            || this.packagedBaseRefusal({ type: request.type, name: request.name, operation: 'delete' }) === null
+        ) {
             const lockErr = await this.assertLockAllowsDelete({
                 type: request.type,
                 name: request.name,
@@ -24797,6 +26190,12 @@ export class ObjectStackProtocolImplementation implements
                 // Probe first — "no overlay exists" is a success/no-op, not
                 // a conflict. The repo would otherwise throw ConflictError.
                 const current = await repo.get(ref, { state: targetState });
+                // [#21899] An origin-gated code-defined item with NO stored row:
+                // the delete would remove nothing, and the item itself is not
+                // removable at runtime — refused with the package door's own
+                // verdict, the one its save gets. Rethrown as it is by the
+                // `catch` below.
+                if (!current && originGatedRefusal !== null) throw originGatedRefusal;
                 if (!current) {
                     // Self-heal: even with no overlay row, a stale runtime
                     // shadow may linger in the registry (e.g. pollution from
@@ -24942,6 +26341,10 @@ export class ObjectStackProtocolImplementation implements
                             : `Deleted ${singularTypeForRepo} '${request.name}' — it no longer exists. [seq=${result.seq}]`,
                 };
             } catch (err: any) {
+                // [#21899] The door's own verdict, not a store failure: it
+                // leaves with its envelope and sentence, never re-wrapped as an
+                // overlay delete that failed.
+                if (err === originGatedRefusal) throw err;
                 if (err instanceof ConflictError) {
                     // [#21207] Keyed values or none in the text and attributes.
                     const conflict = await this.metadataConflictRefusal(

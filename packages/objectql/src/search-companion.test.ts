@@ -182,6 +182,123 @@ describe('expandSearchToFilter with companion column (query-time, additive)', ()
   });
 });
 
+/**
+ * [#21880] The companion clause follows the effective search-field set.
+ *
+ * The companion is a normalized copy of its source fields, so it may join a
+ * search only when every field it mirrors is inside the set
+ * `resolveSearchFields` computed. A field-narrowed search that leaves a
+ * mirrored field out gets no companion clause; a search with no narrowing
+ * keeps it, so recall is unchanged there.
+ */
+describe('[#21880] the companion clause follows the effective search-field set', () => {
+  // `crm_contact`: the companion mirrors `name` (the derived display field).
+  const fields = provisionSearchCompanion(contact()).fields as any;
+  const companionClause = (term: string) => ({ [SEARCH_COMPANION_FIELD]: { $contains: term } });
+
+  it('premise: the companion is provisioned and mirrors exactly `name`', () => {
+    expect(fields[SEARCH_COMPANION_FIELD]).toBeDefined();
+    expect(resolveSearchCompanionSources({ name: 'crm_contact', fields })).toEqual(['name']);
+  });
+
+  describe('(a) a field-narrowed search that leaves the mirrored field out gets no companion clause', () => {
+    it('a `$searchFields` override without the mirrored field', () => {
+      expect(expandSearchToFilter('zhangwei', { fields, requestedFields: ['email'] })).toEqual({
+        $or: [{ email: { $icontains: 'zhangwei' } }],
+      });
+      // The comma-separated spelling a URL query parameter arrives as.
+      expect(expandSearchToFilter('zhangwei', { fields, requestedFields: 'email,notes' })).toEqual({
+        $or: [{ email: { $icontains: 'zhangwei' } }, { notes: { $icontains: 'zhangwei' } }],
+      });
+    });
+
+    it('the narrowing carried on the search term itself (`{ query, fields }`)', () => {
+      expect(expandSearchToFilter({ query: 'zhangwei', fields: ['notes'] }, { fields })).toEqual({
+        $or: [{ notes: { $icontains: 'zhangwei' } }],
+      });
+    });
+
+    it('a declared `searchableFields` set without the mirrored field', () => {
+      expect(expandSearchToFilter('zhangwei', { fields, searchableFields: ['email'] })).toEqual({
+        $or: [{ email: { $icontains: 'zhangwei' } }],
+      });
+    });
+
+    it('every term of a multi-term search', () => {
+      const filter = expandSearchToFilter('zhang wei', { fields, requestedFields: ['email'] });
+      expect(filter).toEqual({
+        $and: [
+          { $or: [{ email: { $icontains: 'zhang' } }] },
+          { $or: [{ email: { $icontains: 'wei' } }] },
+        ],
+      });
+    });
+
+    it('reads the REAL source: an explicit `nameField` pointer moves what the companion mirrors', () => {
+      // `crm_ticket` names `subject` as its title, so the companion mirrors
+      // `subject` — not `name`, although a `name` field exists.
+      const ticket = provisionSearchCompanion({
+        name: 'crm_ticket',
+        nameField: 'subject',
+        fields: { subject: { type: 'text' }, name: { type: 'text' } },
+      });
+      const ticketFields = ticket.fields as any;
+      expect(resolveSearchCompanionSources(ticket)).toEqual(['subject']);
+
+      const withoutSubject = expandSearchToFilter('zhangwei', {
+        fields: ticketFields, displayField: 'subject', requestedFields: ['name'],
+      });
+      expect(withoutSubject).toEqual({ $or: [{ name: { $icontains: 'zhangwei' } }] });
+
+      const withSubject = expandSearchToFilter('zhangwei', {
+        fields: ticketFields, displayField: 'subject', requestedFields: ['subject'],
+      });
+      expect(withSubject.$or).toContainEqual(companionClause('zhangwei'));
+    });
+  });
+
+  describe('(b) a search with no narrowing keeps the companion clause (recall unchanged)', () => {
+    it('the auto-default set, which leads with the mirrored field', () => {
+      expect(expandSearchToFilter('ZhangWei', { fields })).toEqual({
+        $or: [
+          { name: { $icontains: 'ZhangWei' } },
+          { email: { $icontains: 'ZhangWei' } },
+          { notes: { $icontains: 'ZhangWei' } },
+          companionClause('zhangwei'),
+        ],
+      });
+    });
+
+    it('a narrowed set that still holds the mirrored field', () => {
+      expect(expandSearchToFilter('zw', { fields, requestedFields: ['name'] })).toEqual({
+        $or: [{ name: { $icontains: 'zw' } }, companionClause('zw')],
+      });
+    });
+
+    it('the gate reads the RESOLVED set: a request naming no allowed field falls back to the full set', () => {
+      // `resolveSearchFields` drops unknown names and falls back to the
+      // allowed set when none survives — so the effective set holds `name`.
+      const filter = expandSearchToFilter('zw', { fields, requestedFields: ['no_such_field'] });
+      expect(filter.$or).toContainEqual(companionClause('zw'));
+    });
+  });
+
+  describe('(c) a CJK term still skips the companion clause, as before', () => {
+    it('with and without narrowing', () => {
+      expect(expandSearchToFilter('张伟', { fields })).toEqual({
+        $or: [
+          { name: { $icontains: '张伟' } },
+          { email: { $icontains: '张伟' } },
+          { notes: { $icontains: '张伟' } },
+        ],
+      });
+      expect(expandSearchToFilter('张伟', { fields, requestedFields: ['name'] })).toEqual({
+        $or: [{ name: { $icontains: '张伟' } }],
+      });
+    });
+  });
+});
+
 describe('containsCJK / isCompanionMatchableTerm', () => {
   it('detects Han characters', () => {
     expect(containsCJK('张伟')).toBe(true);

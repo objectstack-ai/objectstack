@@ -88,7 +88,7 @@ const REPORTER_CTX = ctxFor(U_REPORTER, 'dept_reporter');
  */
 const UNIT_OWNERS = [U_LEAD, U_REPORTER];
 
-type RowKey = 'shared' | 'owned' | 'unshared';
+type RowKey = 'shared' | 'owned' | 'unshared' | 'ruled' | 'lead_shared';
 
 const ROWS: Record<RowKey, Record<string, unknown>> = {
   /** Owned by the admin; the reporter holds a `read` share on it. */
@@ -97,6 +97,10 @@ const ROWS: Record<RowKey, Record<string, unknown>> = {
   owned: { id: 'kle_owned', name: 'Owned', value: 1, owner_id: U_REPORTER, created_by: U_ADMIN, organization_id: 'org1' },
   /** Neither shared with nor owned by the reporter or the lead's unit. */
   unshared: { id: 'kle_unshared', name: 'Unshared', value: 1, owner_id: U_ADMIN, created_by: U_ADMIN, organization_id: 'org1' },
+  /** Owned by the admin; a criteria sharing rule grants the reporter `read` on it. */
+  ruled: { id: 'kle_ruled', name: 'Ruled', value: 9, owner_id: U_ADMIN, created_by: U_ADMIN, organization_id: 'org1' },
+  /** Owned by the reporter (inside the lead's unit) AND shared to the lead and to the HR reviewer. */
+  lead_shared: { id: 'kle_lead_shared', name: 'LeadShared', value: 1, owner_id: U_REPORTER, created_by: U_ADMIN, organization_id: 'org1' },
 };
 
 const READ_SHARE = {
@@ -104,12 +108,27 @@ const READ_SHARE = {
   recipient_type: 'user', recipient_id: U_REPORTER, access_level: 'read', source: 'manual',
 };
 
+/**
+ * The row a criteria sharing rule materialises for the user it matched:
+ * `source: 'rule'`, `source_id` naming the rule (sharing-rule-service.ts).
+ */
+const RULE_SHARE = {
+  id: 'shr_rule', object_name: OBJECT, record_id: ROWS.ruled.id,
+  recipient_type: 'user', recipient_id: U_REPORTER, access_level: 'read', source: 'rule', source_id: 'rule_high_value',
+};
+
+/** Two manual shares on a row whose owner is already inside the lead's unit. */
+const DEPTH_AND_SHARE = [U_LEAD, U_HR].map((recipient) => ({
+  id: `shr_both_${recipient}`, object_name: OBJECT, record_id: ROWS.lead_shared.id,
+  recipient_type: 'user', recipient_id: recipient, access_level: 'read', source: 'manual',
+}));
+
 // ── in-memory engine ───────────────────────────────────────────────────────
 
 function makeEngine(schema: Record<string, unknown>) {
   const tables: Record<string, any[]> = {
     [OBJECT]: (Object.keys(ROWS) as RowKey[]).map((k) => ({ ...ROWS[k] })),
-    sys_record_share: [{ ...READ_SHARE }],
+    sys_record_share: [{ ...READ_SHARE }, { ...RULE_SHARE }, ...DEPTH_AND_SHARE.map((r) => ({ ...r }))],
   };
   // `$or` / `$and` conjoin WITH their sibling keys, the way a real driver ANDs
   // them (#7620). An operator this double does not know THROWS rather than
@@ -288,13 +307,18 @@ describe('explain(read) agrees with the find, cell by cell (private OWD)', () =>
 });
 
 describe('the read depth: explain stamps it the way step 2.6 does', () => {
-  it('an org-depth reader is admitted by the sharing layer on an unshared, not-owned row', async () => {
+  it('an org-depth reader is admitted by the read depth on an unshared, not-owned row — not by a share', async () => {
     const decision = await expectCell(await makeStack(), 'unshared', HR_CTX, true);
     const sharingRecord = decision.layers.find((l: any) => l.layer === 'sharing').record;
     // `org` depth: plugin-sharing imposes no owner-match, which is what the
     // find saw (its AST carries only the id and tenant terms).
-    expect(sharingRecord.outcome).toBe('admitted');
     expect(sharingRecord.rowFilter).toBeNull();
+    // No share names the reviewer, so the sharing layer claims no admission
+    // and states no grant; the depth layer is the one that admitted the row.
+    expect(sharingRecord.outcome).toBe('not_evaluated');
+    expect(sharingRecord.detail).not.toContain('access is granted');
+    expect(decision.layers.find((l: any) => l.layer === 'depth').record.outcome).toBe('admitted');
+    expect(decision.record.decidedBy).toBe('depth');
   });
 
   it('a depth the CALLER brings does not decide — explain computes it, as step 2.6 overwrites it (widening)', async () => {
@@ -308,6 +332,53 @@ describe('the read depth: explain stamps it the way step 2.6 does', () => {
   it('a depth the CALLER brings does not decide — explain computes it, as step 2.6 overwrites it (narrowing)', async () => {
     const forged = { ...HR_CTX, __readScope: 'own' };
     await expectCell(await makeStack(), 'unshared', forged, true);
+  });
+});
+
+describe('the decider of a visible row: read depth or a share, through the real sharing service', () => {
+  // `visible` is unchanged from the cells above (each one still agrees with
+  // the find); what is pinned here is WHICH layer the report credits.
+  const layerRecord = (decision: any, layer: string) => decision.layers.find((l: any) => l.layer === layer).record;
+  const cells: Array<[string, RowKey, string, any]> = [
+    ['hr_reviewer (org depth), unshared row', 'unshared', 'depth', HR_CTX],
+    ['hr_reviewer (org depth), a row shared to someone else', 'shared', 'depth', HR_CTX],
+    ['team_lead (unit depth), owned inside the unit', 'owned', 'depth', LEAD_CTX],
+    ['dept_reporter (own depth) via a manual share', 'shared', 'sharing', REPORTER_CTX],
+    ['dept_reporter (own depth) via a criteria rule', 'ruled', 'sharing', REPORTER_CTX],
+    ['dept_reporter (own depth) as owner', 'owned', 'owd_baseline', REPORTER_CTX],
+    // Both admit: the last layer to admit, in pipeline order, decides.
+    ['team_lead (unit depth) holding a share on a row inside the unit', 'lead_shared', 'sharing', LEAD_CTX],
+    ['hr_reviewer (org depth) holding a share', 'lead_shared', 'sharing', HR_CTX],
+  ];
+  it.each(cells)('%s × %s row → decidedBy %s', async (_label, rowKey, decider, context) => {
+    const decision = await expectCell(await makeStack(), rowKey, context, true);
+    expect(decision.record.decidedBy).toBe(decider);
+  });
+
+  it('a depth-only row carries a depth-layer record block naming the owner and the depth', async () => {
+    const decision = await expectCell(await makeStack(), 'owned', LEAD_CTX, true);
+    const depth = layerRecord(decision, 'depth');
+    expect(depth.outcome).toBe('admitted');
+    expect(depth.detail).toContain(`owner (${U_REPORTER}) is inside the caller's 'unit' read depth`);
+    const sharing = layerRecord(decision, 'sharing');
+    expect(sharing.outcome).toBe('not_evaluated');
+    expect(sharing.detail).toContain('0 share(s) attached; none grants the caller access');
+    expect(sharing.detail).not.toContain('access is granted');
+  });
+
+  it("the criteria rule's row still reads '1 share(s) attached; access is granted'", async () => {
+    const decision = await expectCell(await makeStack(), 'ruled', REPORTER_CTX, true);
+    const sharing = layerRecord(decision, 'sharing');
+    expect(sharing.outcome).toBe('admitted');
+    expect(sharing.detail).toBe('1 share(s) attached; access is granted for this record.');
+    expect(sharing.rules[0]).toMatchObject({ kind: 'sharing_rule', name: 'rule_high_value', effect: 'admits' });
+  });
+
+  it('a row outside the unit is excluded by the depth layer and the sharing layer alike', async () => {
+    const decision = await expectCell(await makeStack(), 'unshared', LEAD_CTX, false);
+    expect(decision.record.decidedBy).toBe('sharing');
+    expect(layerRecord(decision, 'depth').outcome).toBe('excluded');
+    expect(layerRecord(decision, 'sharing').outcome).toBe('excluded');
   });
 });
 

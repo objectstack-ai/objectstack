@@ -74,7 +74,7 @@ const loweredOperatorOf = (op: string): string | undefined => {
   return Object.keys(spec).find((key) => key.startsWith('$'));
 };
 
-describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#9228)', () => {
+describe('the list-comparand shape door runs inside parseFilterAST', () => {
   // ── the escape this card closes ────────────────────────────────────────
 
   it.each([
@@ -776,7 +776,7 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
       .toMatch(/^count\('deal'\): /);
   });
 
-  it('the whole refusal fits under the 500-char client bound (#5423)', () => {
+  it('the whole refusal fits under the 500-char client bound the REST layer truncates at', () => {
     // `rest-server.ts` truncates a declared-4xx message at 500 before it
     // reaches the client, and the "NOT applied" sentence sits at the END — so
     // an overflow loses exactly the sentence the refusal exists to deliver.
@@ -937,7 +937,7 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
 // face (measured on `origin/main` `b94a2a727`, and again by this PR's
 // ablation), and the analytics lowering bound the list's first member.
 
-describe('[#21448] a LIST at every other scalar operator is refused — whatever the column type', () => {
+describe('a LIST at every other scalar operator is refused — whatever the column type', () => {
   /** The declared vocabulary, read off the enforced operator schema. */
   const declared = Object.keys(FieldOperatorsSchema.shape);
   /** Its list half: the operators whose enforced slot ACCEPTS an array. */
@@ -1065,7 +1065,7 @@ describe('[#21448] a LIST at every other scalar operator is refused — whatever
     expect(parseFilterAST({ acct: { amount: { $gt: [1] } } })).toEqual({ acct: { amount: { $gt: [1] } } });
   });
 
-  it('the whole refusal fits under the 500-char client bound (#5423)', () => {
+  it('the whole refusal fits under the 500-char client bound the REST layer truncates at', () => {
     // The sibling arms' bound test above, on this arm: one prescription pair
     // plus the received list, the long list cut at the shared 60-char preview
     // bound, at every one of its operators, under the same context prefix.

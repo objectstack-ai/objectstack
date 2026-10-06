@@ -8,8 +8,9 @@
 # yet, where the alternative is pinning a required check red indefinitely, and
 # a permanently red required check is worth exactly as much as no scan at all.
 #
-# This ledger currently holds ZERO exemptions. That is the intended steady
-# state, not a coincidence — read the whole header before you change it.
+# This ledger's intended steady state is ZERO exemptions, not a coincidence:
+# every entry below is a dated exception with its own renewal date. Read the
+# whole header before you change it.
 #
 # ---------------------------------------------------------------------------
 # Three conventions govern every entry (decided on #4965)
@@ -83,3 +84,8 @@
 #
 # Verify locally:  node scripts/check-osv-exemptions.mjs
 # Prove the check: node scripts/check-osv-exemptions.mjs --self-test
+
+[[IgnoredVulns]]
+id = "GHSA-hp3w-g68c-fv3c"
+ignoreUntil = 2026-11-05
+reason = "https://github.com/advisories/GHSA-hp3w-g68c-fv3c — no fixed sprintf-js exists (1.1.3, the latest release, is the last affected version), and it arrives only transitively through tedious 18.6.2 (driver-sql's optional mssql peer) and fengari 0.1.5 (under ioredis-mock, a service-cluster-redis devDependency), whose latest releases (tedious 20.3.3, fengari 0.1.5) still require ^1.1.3; remove when sprintf-js publishes a fix or both parents drop it."

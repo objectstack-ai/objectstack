@@ -1,5 +1,367 @@
 # @objectstack/plugin-security
 
+## 17.7.0
+
+### Minor Changes
+
+- 7aab759: fix(plugin-security)!: a row-level policy that compares a numeric column with a comparand that is not a number is refused at the RLS compile seam, read and write alike, as the engine's `where` refuses the same comparison
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a compiled policy comparand at the RLS compile seam, the same comparand the engine's where door already refuses: no authorable key, spelling, export or stored shape moves. RowLevelSecurityPolicySchema and every permission set parse and save as before, the predicate's text is untouched, @objectstack/plugin-security exports the same names, and no stored row is read or rewritten. Which number the author meant is not something a ledger entry can decide, so there is nothing for objectstack migrate meta to rewrite. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a filter comparand's type and this diff adds none (not registered / already-registered); and the change is runtime behaviour plus one ADDITIVE optional member (number) on the published RlsFieldGuard type, with no published interface or type narrowed or removed (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows which row-level policies the RLS compile seam hands to its two consumers, the read and the write check. It ships as `minor` under the launch-window convention for accept-set narrowings. No export is added or removed. One published type gains a member: `RlsFieldGuard`, the type of the optional `fieldGuard` argument of the root-exported `RLSCompiler.compileFilter`, gains the optional `number` member (each declared column's `type`, and a formula's `returnType`). It is an additive optional member, not a change of what is accepted.
+  
+  **What was accepted before.** A policy such as `record.amount <= '9999-12-31'` on a `number` column compiled, and its `using` and `check` both reached their consumers unjudged. Measured through `ObjectQL.insert` and `SecurityPlugin` on `SqlDriver` (better-sqlite3), as a member: the write of `amount: 5` was admitted (`@objectstack/formula`'s deleted whole-day copy read the number as an instant), and the read showed the stored row, because SQLite orders an integer before any text. That read was measured on SQLite only; PostgreSQL was not run for this change. The same comparison in a caller's `where` is refused `INVALID_FILTER` / 400 by the engine's number-comparand door.
+  
+  **What is refused now.** The seam runs the spec's number-comparand verdict (`numberComparandDoorVerdict`, `@objectstack/spec/data`), the one the engine's `where` door consults, on every compiled policy filter, after the shape door and before the comparand-type door. On a column the object declares numeric, a comparand that is not a number (a string the platform's numeric grammar does not read, such as `'9999-12-31'` or `'abc'`, a boolean, a `Date` or a list) drops the policy through the existing fail-closed route: the read is filtered by the deny sentinel and returns no rows, the write is refused `PERMISSION_DENIED` / 403, and a WARN line names the policy, the clause and the comparand. The line's detail is written for the clause it refused: for `check`, which the write check evaluates in-process, it names no driver bind. A granting sibling policy still grants.
+  
+  **Narrowed, as in `where`.** A numeric string (`'10'`, `'1e3'`) is replaced by the number it names before either consumer runs. So `record.amount == '10'` now matches a stored `10` on the write check, which compared the text with the number and refused it, while the read showed the row.
+  
+  **The remedy.** Compare a numeric column with a number: `record.amount <= 9999`, not `record.amount <= '9999-12-31'`.
+  
+  **Unchanged.** A numeric literal, a column that is not numeric, a `{ $field }` reference, and an object whose declaration cannot be read (nothing is judged without one).
+- 8b123c0: Row-level security policies and the analytics native-SQL path judge a comparand against a declared boolean field by the platform's boolean-comparand rule, the one the data engine's `where` already applies
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal or narrowing of a filter comparand against a declared boolean column at two compilers outside the engine's where door, the same comparand that door already judges: no authorable key, spelling, export or stored shape moves. RowLevelSecurityPolicySchema, every permission set, every dataset, cube and analytics query parse and save as before, the predicate's and the filter's text are untouched, @objectstack/plugin-security and @objectstack/service-analytics export the same names with the same types, and no stored row is read or rewritten. Which boolean the author meant by a refused comparand is not something a ledger entry can decide, so there is nothing for objectstack migrate meta to rewrite. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers a filter comparand's type and this diff adds none (not registered / already-registered); and the change is runtime behaviour with no published interface or type changed (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what two compilers outside the engine's `where` door accept. The RLS compile seam now drops a row-level policy, and the analytics native-SQL face now refuses a query, when either compares a declared boolean field with a comparand outside the accepted set. It ships as `minor` under the launch-window convention for accept-set narrowings. No export, type or error code changes.
+  
+  - **Row-level security (`@objectstack/plugin-security`).** A compiled `using` / `check` predicate on a `boolean` or `toggle` column (or a `formula` returning `boolean`) is judged by `booleanComparandDoorVerdict` from `@objectstack/spec/data`, in the same pass as the number rule. `'true'` / `'false'`, `'1'` / `'0'` and `1` / `0` are read as the boolean each names. Anything else the rule refuses (a string such as `'yes'`, `'TRUE'` or `''`, a number other than `1` / `0`) drops the policy as a refused comparand: the read is filtered by the deny sentinel, the write is refused 403, and the WARN line names the clause, the field and the position. Before, `record.flag != 'true'` kept every row on SQLite and the write check admitted every row, so the exclusion the author wrote was not applied.
+  - **Analytics native SQL (`@objectstack/service-analytics`).** The query's `where` (and the dataset query's `runtimeFilter`, which is merged into it), each measure's own `filter` and a dataset's own `filter` are judged by the same rule before the statement compiles. An accepted spelling is read as its boolean, and anything else the rule refuses is refused `INVALID_FILTER` / 400 with the rule's own message, before any statement runs. The native strategy now answers what the engine-aggregate strategy answers. Before, `{ flag: 'true' }` counted no rows on SQLite, `{ flag: { $ne: 'true' } }` counted every row, and `{ flag: 'yes' }` answered 200.
+  - **What you may notice.** A policy or analytics filter that compared a boolean field with a value outside the accepted set now refuses instead of answering. Write `true` / `false`. A policy `record.flag == 1` now admits writing a `true` row, which its read already showed.
+  - **Unchanged.** A boolean literal, a column that is not boolean, a `{ $field }` reference, and an object whose declaration cannot be read (nothing is judged without one).
+- 3eb38ae: A user who can edit a record may delete another user's attachment on it, as the attachment gate declares (#21729).
+  
+  Clause-②: yes (widening)
+  
+  - **What was refused.** The attachment gate's delete rule is "the uploader OR a user who can edit the parent record". For every member holding `org_member`, the platform's row-level delete floor in `member_default` (`owner_only_deletes`: only the rows you created) answered first, so a parent editor's delete of someone else's attachment was refused with `PERMISSION_DENIED` before the gate ran.
+  - **`@objectstack/service-storage`** contributes a delete-only alternate match for `sys_attachment` (`sys_attachment_parent_editor_delete`, every row) when it installs the attachment gate, and only then. The gate decides: a parent editor's delete answers 200, and a caller who can read the attachment but neither uploaded it nor can edit the parent is refused with `ATTACHMENT_DELETE_DENIED`. A caller who cannot read the parent cannot see the attachment, and is still refused with `PERMISSION_DENIED` before the gate runs, so the parent is not named to them.
+  - **Without `@objectstack/service-storage`** nothing is contributed. A deployment that registers `sys_attachment` without the storage service keeps the floor, and only a row's creator may delete it.
+  - **The edit limb is unchanged.** Editing another user's attachment row is still refused by the floor for a member it binds, a parent editor included.
+  - **`@objectstack/plugin-security`** gains the seam: `contributeOwnershipFloorAlternates(plugin, alternates)` on the registered `security` service, an extension of `ISecurityService` that callers feature-detect. Each alternate names one object (never `'*'`), one floor limb (`update` or `delete`; `all` is refused) and a `using` predicate. It lands beside each enabled floor policy of that limb, in that policy's own `positions` domain, so it reaches only the principals the floor binds. A plugin's second call replaces its first, and an empty list withdraws it. A contribution that breaks these rules throws.
+  
+  Nothing that was admitted before is refused now. No principal outside the floor's domain, and no other object or operation, changes.
+- 53021e3: fix(plugin-security)!: on the write doors, a row the caller cannot read answers what a nonexistent id answers
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered by-id-write-unreadable-row-not-found -->
+  
+  **BREAKING**: a by-id update or delete of a row the caller cannot read now answers `404 RECORD_NOT_FOUND`, with exactly the body an id that names no row gets, for every principal class. On the write doors, "hidden" and "gone" are now one answer to a caller who cannot read the row. It ships as `minor` under the launch-window convention for accept-set narrowings. No export is added or removed, and no error code is new.
+  
+  **What changed.** The answer used to depend on which gate saw the row first. Where a write-class row filter binds the caller, the by-id write pre-image check answered `403 PERMISSION_DENIED`. Where none binds it, a later gate answered with its own 403: `FORBIDDEN` from record sharing, or a parent-derived gate's code on attachments and comments. Meanwhile a nonexistent id answered `404`. So the write door could tell a hidden row apart from a missing one. The pre-image check now asks the read door's own question first, for the by-id write the caller addressed: a by-id read in the caller's context, every data middleware's visibility included. A row that read does not return gets the read door's not-found producer. A store fault propagates as raised, and a read-time policy refusal is not treated as absence.
+  
+  **What is refused now that was not.** A principal that no write-class row filter binds could have its by-id write admitted on a row the read door hides from it. One example is the uploader of an attachment, or the author of a comment, whose parent record they can no longer read. That write is now refused with the not-found answer, as it already was for every principal a row filter binds.
+  
+  **FROM → TO.** A by-id update or delete of a row hidden from the caller: FROM a `403` (`PERMISSION_DENIED`, `FORBIDDEN`, or a parent-derived gate's code) → TO `404 RECORD_NOT_FOUND`, the body a nonexistent id gets.
+  
+  **If you are affected.** A client that read a by-id write's `403` as "the row exists, but you may not change it" should read `404 RECORD_NOT_FOUND` the way the read door means it: no row you can see has this id.
+  
+  **Unchanged.**
+  - A caller who can read the row but may not write it keeps its 403. They already see the row.
+  - By-id writes the platform issues under the caller's context keep their previous answer, because the caller never named their target: the engine's cascade delete of a dependent row, a hook's write, and the referential clear of a lookup.
+  - Writes that are not routed by id are unchanged.
+  
+  `security/explain` follows enforcement. Its record verdict for an update or delete of a record the principal cannot read is now the missing-record shape: `visible: false`, with no decider.
+- 833d57c: The packaged-permission-set lock refusal carries its guidance as `userMessage`, so the console tells the admin to clone the set instead of showing its generic "You don't have permission to save this record." (#21794).
+  
+  Clause-②: yes (widening)
+  
+  - **`PackagedPermissionSetLockedError.userMessage`**, a new `readonly` member. A save that targets a permission set an installed package ships still answers `403 NOT_OVERRIDABLE` with the same `message`. That holds at the data door (`PATCH` / `POST /api/v1/data/sys_permission_set`) on every kernel. It also holds at the metadata door (`PUT /api/v1/meta/permission/:name`) on a kernel with no environment id, such as a self-hosted app server, where this lock is the refusal that answers. On an environment kernel the metadata protocol's own package-door refusal answers that `PUT` first, and it is unchanged. The error envelope now also carries `userMessage`, the field `ApiErrorSchema` already declares and the console renders verbatim. An edit is told to clone the set with the Clone action and edit the clone. A new set named like a packaged one is told to choose a different name, or clone.
+  - **`PackagedPermissionSetProvenanceUnknownError.userMessage`**, the same member on the fail-closed refusal (the platform could not tell whether a package ships the set). It tells the admin to try again, or clone. The unreadable source stays in `message`.
+  - The texts name no set, package, id or API path; `message` keeps that diagnostic for logs and developers. They are English, like every platform refusal.
+  
+  Nothing that was accepted is refused now, and nothing that was refused is accepted. Both refusals keep their `code`, `status` and `message`.
+- cab6396: fix(plugin-security)!: a predicate-scoped update or delete matches only the rows the caller can read
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered predicate-write-unreadable-row-not-matched -->
+  
+  **BREAKING**: a predicate-scoped (`multi: true`) update or delete now matches only the rows the caller can read. A row the read door would not return to the caller is not written, not counted and not refused, so a predicate that reaches only such rows answers exactly what a predicate that matches nothing answers: success, zero rows. This is the by-id write doors' rule ("hidden" and "gone" are one answer to a caller who cannot read the row) carried to the predicate door. It ships as `minor` under the launch-window convention for accept-set narrowings. No export is added or removed, and no error code is new.
+  
+  **What changed.** The rows a predicate write matched came from its write scope alone. A row the caller cannot read was matched whenever that scope reached it, for example through a write-class row-level policy wider than the read policy, or on an object whose read visibility follows a parent record. A per-row gate then refused the whole write with a `403`, or the row was written and counted. Either answer told a hidden row apart from no row. The write middleware now asks the read door which rows the caller's own predicate returns, through a read in the caller's context that every data middleware's visibility applies to, and narrows the write to those rows: readable ∩ writable. A read the read door refuses (no read grant on the object) keeps the write's previous answer. A store fault on that read propagates as raised.
+  
+  **What is refused or narrowed now that was not.**
+  - A predicate write no longer writes, counts or refuses rows its caller cannot read, including rows its write scope reaches.
+  - A predicate write whose predicate matches more than 10 000 rows the caller can read is refused with `400 INVALID_FILTER`, before anything is written, rather than narrowed by a cut-off list. The limit is the platform's existing row ceiling for one predicate write.
+  
+  **FROM → TO.**
+  - A predicate update or delete reaching rows the caller cannot read: FROM a per-row gate's `403`, or those rows written and counted → TO those rows not matched; success with zero rows when no readable row matches.
+  - A predicate update or delete whose readable match exceeds 10 000 rows: FROM attempted → TO `400 INVALID_FILTER`, nothing written.
+  
+  **If you are affected.** An operator who needs a user to change rows grants that user read access to them first. A caller that read a predicate write's `403` as "a row exists here" reads the result as the count of rows it can see. A predicate whose readable match is over the ceiling is narrowed and written in batches.
+  
+  **Unchanged.**
+  - A caller who can read a matched row but may not write it keeps its answer.
+  - Writes the platform issues under the caller's context keep their previous answer, because the caller never addressed them: a cascade, a hook's own write, and the referential clear of a lookup.
+  - By-id writes keep their answers. System-context writes are not narrowed.
+  - `security/explain` takes no predicate, so it has no predicate-write verdict to change.
+
+### Patch Changes
+
+- e3ad492: Security refusals, explain details, field help and log lines no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  Some strings the security plugin shows to administrators, authors and operators pointed at an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - The curated capability-name refusal says a curated name is refused at authoring so that no admin-authored row can collide with the row the platform seeds for it.
+  - The two delegation anchor refusals say the business-unit anchor roots the delegate's business-unit visibility, so a delegation may only narrow it.
+  - The `managed_by` field help on `sys_permission_set` and `sys_position`, in every shipped locale, says capabilities, permission sets and positions all share one platform / package / admin vocabulary.
+  - The explain details for an unresolvable security posture and for the View/Modify All Data bypass drop their citations; those sentences already said that access fails closed and that the write path consults the same bypass.
+  - The derived-capability boot warning says the derivation refreshes a row's label and description only when it can prove the row is the platform's own, and that the seeder neither adopts a row it cannot prove is its own nor backfills provenance on the operator's behalf.
+  - The fail-closed log lines say what each denial protects: a `controlled_by_parent` child is readable and writable only where its master is, and a chain the derivation cannot resolve admits no child; only a resolved sharing allow (Modify All Data or an edit-level share) may replace the platform ownership floor; an authored-policy verdict that cannot be resolved never lifts the sharing refusal; a path that bypasses the engine middleware never runs without the owner and share scope a direct read applies; a delegated read is never scoped wider than its delegator's own; an unreadable posture never defaults to public or uncontracted.
+  - The public-form line says an anonymous submission cannot set ownership, tenancy or audit columns; the uninstall line says a package's permission rows are removed by `package_id`, so no grant outlives the package; the platform-owner wall-bypass line says only the declared platform owner's reads cross the wall and writes stay walled for everyone. The org-scoping entitlement, masking-rule, permission-set resolution, vocabulary-normalization and service-registration lines drop their citations, and the log lines that carried a tracker number in their `[security/…]` prefix now open with `[security]`.
+  
+  Text only: no status, error code, field, route or control flow moves. A client or log filter that matches the old text (for example a tracker-number suffix or prefix) needs the new spelling.
+- 1878ef9: fix(plugin-security,platform-objects): an org member reading a colleague's `sys_user` row is no longer served the identity object's `Admin` field group, directly or through the activity stream (#21237)
+  
+  Clause-②: no
+  
+  - **What a member was served.** The platform baseline `member_default` opens every org peer's `sys_user` row (the `sys_user_org_members` policy) and declared no field-level security on it. An org member reading a colleague's row was therefore served the whole `Admin` field group: the sign-in trail, the lockout state, the ban reason and expiry, the password and MFA stamps, the legacy platform role scalar and the AI-seat flag. With object-level read on `sys_activity`, the colleague's activity metadata carried the same fields, because the activity field redaction serves exactly what the data plane serves.
+  - **What changes.** `member_default` and `viewer_readonly` now declare the `Admin` group `readable: false` through the permission set's existing `fields` entries. The withheld set is built from the identity object's declaration, so a field the declaration adds to the group is withheld from the day it is declared. `admin_full_access` and `organization_admin` (and so `organization_admin_no_bypass`) declare the group readable and editable, the same state as a field no set names, so an administrator's reads and writes are unchanged. `member_default` is the additive baseline every authenticated user resolves, and field grants merge most-permissively, which is why the admin sets carry that keeping entry.
+  - **What a member sees now.** On the direct read, the list read and the activity metadata, a member is served no `Admin`-group field of a colleague's row. The directory fields (name, email, image) are still served. Field-level security does not distinguish rows, so the member's own row read through the generic data API is withheld the group too; every platform reader of those fields on a member's own row (the auth gates, the sign-in stamps, the session, the AI-seat resolution) reads under system or auth context and is unaffected. A member's query that filters or sorts on a withheld field is refused (`403 PERMISSION_DENIED`, the filter-oracle rule). A member's user-context write that names a withheld field is refused by the field-level write gate (`403 PERMISSION_DENIED`), and a payload mixing such a field with profile fields no longer lands partially.
+  - **The deactivation flag is directory data.** `sys_user.banned` moves from the `Admin` field group to the `Account` group in `@objectstack/platform-objects`, so members are still served it. Every user picker filters its candidates on it, and a filter on a withheld field would be refused. Its reason and expiry stay in the `Admin` group. In a record form the field now renders in the `Account` section.
+  
+  **Migration.** None for shipped apps. A custom permission set that grants an org member read on `sys_user` and is meant to show them the `Admin` group must name those fields `readable: true` in its `fields` entries. A client that filtered members' `sys_user` queries on an `Admin`-group field must drop that predicate or run it with an administrator's grant.
+- 97239c3: fix(plugin-security): a row-level `check` refuses an operator the read refuses on a field declared JSON-stored, with the read's `INVALID_FILTER` / 400, so a policy whose read is refused no longer admits writes (#21254)
+  
+  Clause-②: no
+  
+  The read a row-level policy scopes refuses a scalar comparison, an ordering or a text operator (`@objectstack/core`'s `JSON_COLUMN_INCOMPATIBLE_OPERATORS`, and implicit equality) on a field the object declares JSON-stored: a structured-JSON type (`json`, `address`, …), or a multi-valued field (`tags`, `multiselect`, `checkboxes`, or a `select` / `lookup` / `user` / `file` / `image` flagged `multiple: true`). The write `check` evaluated the same operators against the stored list instead. Measured through `ObjectQL.insert` with `SecurityPlugin` on two SQLite driver families, as a member resolving a permission set, with the same predicate as `using` and `check`:
+  
+  | `check` | written | write, before | read |
+  |---|---|---|---|
+  | `record.tags != 'x'` | `['x']` or `'x'` | admitted, stored `["x"]` | 400 |
+  | `!(record.tags in ['x'])` | `['x']` | admitted, stored `["x"]` | 400 |
+  | `record.tags == 'x'` / `record.tags in ['x']` | `['x']` | 403 | 400 |
+  | `record.tags > 'a'` | `['x']` | 400 | 400 |
+  | `record.meta != 'x'` / `record.meta == 'x'` (`meta` is `json`) | a scalar | admitted, stored | 400 |
+  
+  Now the write check refuses every one of these with the read's answer: `INVALID_FILTER` / 400 and the read's words, which withhold the field and the operator. The refusal reads the object's declaration, never the record, so a policy is refused for every row or for none, on the insert, a by-id update and a predicate update. The diagnostic, which names the field, the operator and the policy, goes to the server log. Rows that already refused still store nothing; their answer is now the read's.
+  
+  Unchanged: `contains` and its negation (`$contains` / `$notContains`), and the presence checks (`== null`, `!= null`), answer on such a field as before; a field declared neither way keeps every operator; an object whose schema cannot be loaded is judged as before. To repair a refused policy, test membership with `contains` (for example `!record.tags.contains('x')`).
+- ee75aae: fix(plugin-security): `security/explain` answers the read's `INVALID_FILTER` / 400 for a row-level policy that aims an operator the read refuses at a field declared JSON-stored, instead of a "visible" verdict for a request enforcement refuses (#21319)
+  
+  Clause-②: no
+  
+  The read a row-level policy scopes refuses a scalar comparison, an ordering or a text operator (`@objectstack/core`'s `JSON_COLUMN_INCOMPATIBLE_OPERATORS`, and implicit equality) on a field the object declares JSON-stored: a structured-JSON type (`json`, `address`, …), or a multi-valued field (`tags`, `multiselect`, `checkboxes`, or a `select` / `radio` / `lookup` / `user` / `file` / `image` flagged `multiple: true`). The row-level write `check` refuses them too, by the same rule. `security/explain` (the `security` service's `explain()` and `POST /api/v1/security/explain`) evaluated them in JS instead. Measured with `SecurityPlugin` on two SQLite driver families, as a member resolving a permission set whose `using` is the predicate:
+  
+  | `using` | find | explain, before |
+  |---|---|---|
+  | `record.tags != 'x'` (`tags` is `tags`, multi-valued) | 400 | `visible: true`, decided by `rls` |
+  | `record.meta == 'x'` (`meta` is `json`) | 400 | `visible: true`, decided by `rls` |
+  | `!(record.tags in ['x'])` | 400 | `visible: true`, decided by `rls` |
+  | `record.owners != 'x'` (a `select` or `lookup` flagged `multiple`) | 400 | `visible: true`, decided by `rls` |
+  
+  The report without a record id said `allowed: true`, and a record id no row carries was reported `visible: false`. Now explain answers every one of these with the read's refusal, `INVALID_FILTER` / 400 and no verdict, for every operation, the answer it already gives a policy comparing two fields of different classes; a by-id update or delete is itself refused 403, at the row-level gate whose pre-image re-read is the refused read. The message leads with the full diagnostic, which names the field and the operator and says how to repair the policy, then the policy that carries it; the error's `cause` carries the read's refusal, with the find's code, status and message. The rule is the one the write check applies, and it reads the object's declaration, never the record.
+  
+  Unchanged: `contains` and its negation (`$contains` / `$notContains`), and the presence checks (`== null`, `!= null`), answer on such a field as before; a field declared neither way keeps every operator; an object whose schema cannot be loaded is judged as before. To repair a refused policy, test membership with `contains` (for example `!record.tags.contains('x')`).
+- ab52182: fix(cloud-connection,plugin-security): a package installed into a running runtime fires its record-change flows and has its permission sets in `sys_permission_set` right away, not after a restart
+  
+  Clause-②: no
+  
+  **Before**, `os package install ./dist/objectstack.json` into a running `os start` (the install-local route) registered the package, bound its script actions and body hooks, and stopped there. Two things the boot does for a package happen at `kernel:ready`, and that moment had already passed. The automation engine binds flows at `kernel:ready`, so the package's record-change flows never fired: a task updated to `done` wrote no note. The security plugin seeds declared permission sets at `kernel:ready`, so the package's set had no `sys_permission_set` row. `/meta/permission` listed the set, but an admin could not grant it. A restart fixed both, because the restart re-registers the package before those two steps run. Nothing in the CLI output or the install response said a restart was needed.
+  
+  **Now** the install route announces `metadata:reloaded` once the package is registered, bound, persisted and seeded. That is the same event a Studio package publish, a per-item publish and an artifact reload already announce. The automation engine already re-syncs its flows on it. The security plugin now re-runs its declared-permission seeding on it: the same function and organization passes as the boot, with the same provenance rules (`managed_by: 'package'`, `package_id`). Right after the install, the flow fires and the set's row exists, with the same state a restart gives. The seeding is idempotent and writes nothing when no permission set changed. It runs only after the boot's own pass has finished. A failed re-sync does not fail the install. It is logged at `warn` with the restart that repairs it.
+  
+  **Unchanged.** The restart path (the ledger rehydrate) announces nothing and behaves as before. The install response and the CLI output keep their fields and text. A package's `defineStack({ jobs })` are still not scheduled by install-local, on install or after a restart, because a job's handler is code from the artifact's runtime module and an inline install carries only the JSON.
+- 520f66f: `PermissionDeniedError` declares its 403 as `status` as well as `statusCode`, so a permission refusal answers 403 at every door (#21405).
+  
+  Clause-②: no
+  
+  The class declared `statusCode` alone, unlike every other error class in `errors.ts`, and a door that reads `status` alone derived no status from it. On a showcase boot, a plain member's `POST /api/v1/share-links` on a record they cannot read answered `500` with code `PERMISSION_DENIED` through `plugin-sharing`'s route door, while the runtime dispatcher's `/share-links` domain answered the same refusal with `403`. Both doors now answer `403 PERMISSION_DENIED`. The code, the message and `statusCode` are unchanged.
+- f9a8eb8: The seed-ownership claim now runs whenever a seed settles, on every boot, not only on the boot that promotes the first platform admin.
+  
+  Clause-②: no
+  
+  - **Before:** a later boot whose seed replay inserted rows into a database that already had a platform admin left those rows `owner_id` NULL for good. An in-budget seed settles before `kernel:ready`, and the bootstrap that runs there finds the existing admin (`already_have_admin`) and promotes nobody, so neither path reached the claim. A `readScope: 'own'` grant never saw those rows.
+  - **Now:** when a seed settles (`app:seeded`) before this boot's bootstrap has named a claim target, the handler resolves the target itself: the existing platform admin, by the bootstrap's own `already_have_admin` rule. The claim then hands the replayed rows to that admin. The handler subscribes in `init()`, so a seed that settles before this plugin's `start()` is heard too. That happens on any composition that registers the app first.
+  - Unchanged: the claim's predicates (`owner_id` NULL or `usr_system`), its object filter and the first-boot promotion path. A row someone else owns is never touched. Under a walled tenancy posture no claim runs, as before.
+  - Log lines: the claim report reads `handed N seeded record(s) to platform admin USER_ID`, where it used to say `first admin`. Its provisional and failure lines now say when the claim actually runs next: the next seed settle, on this boot or a later one, or the next platform-admin promotion. `os meta resync` is not such a run.
+- 234d1d8: fix(plugin-security): a permission set the environment cloned no longer logs `permission_set_declaration_unowned` on every boot (#21669)
+  
+  Clause-②: no
+  
+  The declared-permission seeding pass walks every `permission` item in the engine registry. That registry also holds the permission sets an environment authored itself, which boot hydration loads from their `sys_metadata` rows. A set made with Setup's **Clone** action is one of them, and it carries no package id because it has none. The pass judged "no owning package" before it looked at the set's row, so on every boot, and on every `metadata:reloaded`, it logged one warning per cloned set: `[permission_set_declaration_unowned] declared permission set "…" has no owning package — not materialized … the Setup admin surface reads sys_permission_set and cannot see this set`. That is false for a clone. Its row exists (`managed_by: admin`), and Setup lists it and edits it.
+  
+  The pass now checks the row first. A registry item with no package id whose `sys_permission_set` row the environment owns (`managed_by` other than `package`) is the environment's own set. It is counted as `skippedEnvAuthored`, the count a package declaration over an environment row already gets, and no warning is logged. The pass reads that row from the existence read it already makes, so no query is added. On a per-organization pass, the environment door's organization-less row counts too.
+  
+  Unchanged: a declaration with no owning package and no environment row still logs `permission_set_declaration_unowned`, with the same text, and still counts as `skippedUnowned`. If the row could not be read, the warning still fires, because an unreadable row does not prove the environment owns the set. The publish-time materializer is unchanged. Nothing is written or granted differently: only the false warning stops, and the clone moves from the `skippedUnowned` count to the `skippedEnvAuthored` count in the pass's summary line.
+- c7a60e1: `POST /api/v1/security/explain` with `{ object, operation: 'read', recordId }` now credits read depth for a row that only the caller's read depth admits.
+  
+  Clause-②: no
+  
+  - **Before.** The object's OWD is private. The caller's read depth is wider than `own` (`own_and_reports`, `unit`, `unit_and_below` or `org`). The caller reads a row they do not own and hold no share on. Explain answered `decidedBy: 'sharing'` for that row, with the sharing layer `admitted` and the detail "0 share(s) attached; access is granted for this record." No share granted anything; the read depth did. `depth` is a member of the published `decidedBy` enum, and no answer ever produced it.
+  - **Now.** That row answers `decidedBy: 'depth'`. The `depth` layer carries a `record` block: `admitted`, naming the depth and, below `org`, the owner it reached. The sharing layer is `not_evaluated`, and its detail says that no share grants the row and that read depth already admits it.
+  - **The sharing detail names a grant only when one exists**, meaning a share that names the caller. A filter that admits a row with no such share now says which part of the sharing service let the row through.
+  - **A row a share admits keeps `decidedBy: 'sharing'`** and its "N share(s) attached; access is granted for this record." detail, also when the read depth admits it too. Of the two layers that admit it, sharing comes last in the pipeline, and the `decidedBy` contract names the last layer to admit.
+  - **No access decision changes.** `visible` is the same for every record; only the layer the report credits moves. No key is added. `depth` and `not_evaluated` are existing values.
+  - **The `depth` layer's `record` block is new on every record-grained request.** On a write it is `not_evaluated`, because the write depth is judged inside the sharing service's per-record write gate together with ownership and shares, and this report does not separate them.
+- c9be1f1: A permission set an organization owns, a clone of a packaged set, and a set saved into a writable runtime package are no longer locked as if a code package shipped them
+  
+  Clause-②: no
+  
+  The packaged-permission-set lock decides "is this set shipped by a code package?" from the engine registry. The registry also holds the stored definition rows, and a metadata list read (`GET /api/v1/meta/permission`, which every Studio page load issues) stamps a stored row's package binding onto it. A set saved into a writable runtime package (`PUT /api/v1/meta/permission/:name?package=<id>`) therefore looked code-shipped after the first list read, and every later edit of it answered `403 NOT_OVERRIDABLE` at both the metadata door and the data door. The lock now skips a stored row by its provenance (`_provenance: 'org'`, which every stored row carries), the same test the platform's code-artifact check applies, so those edits are accepted again.
+  
+  The read had the matching defect. The security plugin keeps a marked in-memory copy of each stored definition for the permission evaluator, and the layered read (`GET /api/v1/meta/permission/:name/layers`) serves that copy as the item's `code` layer. The copy carried no provenance, so an org's own set, a clone and a runtime-package set all reported a `code` layer with no `provenance`, which the console's permission-matrix editor renders as "locked by a code package" while the server accepted the save. The copy now carries `_provenance: 'org'` exactly when the lock judges the set not code-shipped, so the layered read reports `provenance: 'org'` for those sets.
+  
+  Unchanged: a set a code package ships is still refused at both doors with `403 NOT_OVERRIDABLE` and the same message naming the clone path, and its layered read still reports `provenance: 'package'`, its package id and `editable: false`. No error code, route or field moves.
+- 5e0b489: Discard Overlay no longer deletes the stored definition of a permission set saved into a writable runtime package
+  
+  Clause-②: no
+  
+  The Discard Overlay action (`POST /api/v1/security/permission-sets/:id/discard-overlay`) is declared to refuse any set that is not package-declared, so that it can never destroy a set the environment authored. It decided that by asking whether any engine-registry item of the set's name carried a package id. The registry also holds the stored definition rows, and a metadata list read (`GET /api/v1/meta/permission`, which every Studio page load issues) stamps a stored row's package binding onto it. A set saved into a writable runtime package (`PUT /api/v1/meta/permission/:name?package=<id>`) therefore passed the check after the first list read: the action answered `200` and deleted the set's only `sys_metadata` row. It now asks the same classifier the packaged-permission-set lock's write doors ask, and refuses every set that classifier does not judge shipped by a code package (including when it cannot decide), with the action's existing `403 PERMISSION_DENIED`.
+  
+  The drift diagnostics behind the record's `drift_status` / `drift_detail` (whose `overlay_shadow` detail names Discard Overlay as the remedy) read the package id the same way. They now judge the same population: only sets a code package ships.
+  
+  Unchanged: a set a code package ships still has its overlay discarded and its record resynced to the shipped artifact, its drift is still reported as before, and no error code, route or field moves. The refusal's message now says the set is not shipped by any installed code package.
+- 07c842d: A data-door edit of a permission set saved into a writable runtime package updates that set's stored definition instead of forking it
+  
+  Clause-②: no
+  
+  Setup saves a permission set through the data door (`PATCH /api/v1/data/sys_permission_set/:id`), which redirects the edit into the metadata store. A stored definition row is keyed by its package as well as its name, and the redirected save named no package. For a set saved into a writable runtime package (`PUT /api/v1/meta/permission/:name?package=<id>`), whose only stored row is bound to that package, the save therefore created a second, package-less row carrying the edit and left the package's row untouched: two active definitions for one name, with the package's copy no longer receiving the organization's edits. The save now goes into the package the edited row is bound to, read from that row through the metadata door's own item read, so the edit lands on the set's one row and the row stays in its package.
+  
+  Unchanged: a set with no package binding still saves with none, and a set a code package ships is still refused with `403 NOT_OVERRIDABLE` before anything is read or written. The edit answers `200` as before; no error code, route or field moves.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [0a0debb]
+- Updated dependencies [c98a72d]
+- Updated dependencies [48fa7a3]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1878ef9]
+- Updated dependencies [7aab759]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [83b3d32]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [a2aadab]
+- Updated dependencies [fe10172]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [a6a7547]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [045f764]
+- Updated dependencies [75ddcd1]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [a0176ef]
+- Updated dependencies [e1790fd]
+- Updated dependencies [149153c]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [607463d]
+- Updated dependencies [cab6396]
+- Updated dependencies [e864db5]
+- Updated dependencies [7665c54]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [e6dc7a2]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [f76c622]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [3c7785d]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/platform-objects@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/formula@17.7.0
+  - @objectstack/metadata-core@17.7.0
+  - @objectstack/types@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

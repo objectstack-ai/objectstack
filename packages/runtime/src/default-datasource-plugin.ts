@@ -9,6 +9,7 @@ import {
   type IDatasourceDriverFactory,
 } from '@objectstack/service-datasource';
 import type { SqliteAbsentFileMode } from '@objectstack/driver-sql';
+import { contributeCodeDatasourceNames } from './code-datasource-names.js';
 
 /**
  * DefaultDatasourcePlugin — the `default` datasource as a DECLARATION
@@ -62,7 +63,15 @@ export interface DefaultDatasourceDefinition {
 }
 
 export interface DefaultDatasourcePluginOptions {
-  /** Arms the shared factory's dev sqlite step-down (#2229) + loosen-only self-heal passthroughs. */
+  /**
+   * Arms the shared factory's dev sqlite step-down (#2229): native
+   * better-sqlite3 → wasm → in-memory when the native binding cannot load.
+   * That is ALL it arms. The dev schema self-heal does not ride here: it rides
+   * in the definition's `config.autoMigrate`, which the host decides with
+   * `devAutoMigrateConfig` (`dev-auto-migrate.ts`, #21733) before it builds
+   * this plugin — so `dev: true` with a definition that carries no
+   * `autoMigrate` boots without the self-heal.
+   */
   dev?: boolean;
   /**
    * Forwarded to the shared factory: what a `sqlite` default does when its
@@ -132,6 +141,14 @@ export class DefaultDatasourcePlugin implements Plugin {
   }
 
   init = async (ctx: PluginContext) => {
+    // [#21944] `default` is a code datasource of this host: it joins the
+    // host's code-datasource set here, in Phase 1, before any `start()` — so
+    // the datasource-admin plugin's boot restore never registers a stored row
+    // over it (or opens a pool from one), and the `/meta` door refuses to edit
+    // it as the admin door does. Before the connect, which may throw: whatever
+    // the connect's outcome, `start()` still lists `default` as code below.
+    contributeCodeDatasourceNames(ctx, ['default']);
+
     const connection = new DatasourceConnectionService({
       factory: () => this.factory ?? createDefaultDatasourceDriverFactory({
         dev: this.dev,

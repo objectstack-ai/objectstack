@@ -49,7 +49,7 @@ import {
 // Every `not`-shaped assertion carries an anti-vacuity guard, because the
 // failure mode of an absence pin is passing for the wrong reason (a path typo,
 // an entry that stops resolving, an empty enumeration).
-describe('[#5015] NotificationAction / EmbedConfig removal — no entry exports either name', () => {
+describe('NotificationAction / EmbedConfig removal — no entry exports either name', () => {
   /** The two schema names + the type aliases they published. */
   const RETIRED = [
     'NotificationActionSchema',

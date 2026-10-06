@@ -107,7 +107,10 @@ function makeKernel(label: string, opts: { memberOf?: string[]; withRegistry?: b
             return [{ manifest: { id: `pkg.of.${label}` }, status: 'installed', enabled: true }];
         }),
         getPackage: vi.fn(() => undefined),
-        getObject: vi.fn(() => null),
+        // Registers `sys_environment_member` and nothing else: the membership
+        // gate asks the registry before it reads, and an engine that registers
+        // no such object declares the gate inapplicable (#21941).
+        getObject: vi.fn((name: string) => (name === 'sys_environment_member' ? { name } : null)),
         getRegisteredTypes: vi.fn(() => []),
     };
 

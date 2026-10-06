@@ -36,7 +36,8 @@
  *    enumerable — it is every `secret`-typed field on every registered object,
  *    including tenant-authored ones.
  *  - ✅ The audit trail records digests, not handles (`old_hash` / `new_hash`
- *    are content digests; `SettingsService` passes the provider's `digest()`),
+ *    are content digests; `SettingsService` passes the provider's
+ *    `keyedDigest()` for secret-valued keys, `digest()` otherwise),
  *    so audit stays readable after a ciphertext is destroyed — and, the other
  *    way round, audit can never be used to reconstruct which handles existed.
  *

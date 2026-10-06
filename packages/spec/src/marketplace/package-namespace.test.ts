@@ -182,7 +182,7 @@ describe('two gates, one vocabulary (§A.7)', () => {
   });
 });
 
-describe('TemplateManifestSchema declares namespace as a scaffold-only extra (#6861)', () => {
+describe('TemplateManifestSchema declares namespace as a scaffold-only extra', () => {
   /** A template manifest that is valid except for whatever a case changes. */
   function templateManifest(overrides: Record<string, unknown> = {}) {
     return {

@@ -74,7 +74,7 @@ function expectRuledRemedy(message: string): void {
   expect(message).not.toMatch(/currencyConfig|precision/);
 }
 
-describe('#20045 — `scale` on a currency inline grid column is refused at parse', () => {
+describe('`scale` on a currency inline grid column is refused at parse', () => {
   it('refuses the card\'s repro (computed currency column, `scale: 4`), located at the column\'s `scale`, with the ruled remedy', () => {
     const result = parseColumns([
       { name: 'quantity' },
@@ -126,7 +126,7 @@ describe('#20045 — `scale` on a currency inline grid column is refused at pars
   });
 });
 
-describe('#20045 — CONTROLS: what the refusal must leave alone', () => {
+describe('CONTROLS: what the refusal must leave alone', () => {
   it('`scale` on a `number` column parses, computed or not, and keeps its value', () => {
     for (const computed of [{}, { computed: true, expr: 'quantity * unit_price' }]) {
       const result = parseColumns([{ name: 'weight', type: 'number', ...computed, scale: 3 }]);
@@ -169,7 +169,7 @@ describe('#20045 — CONTROLS: what the refusal must leave alone', () => {
   });
 });
 
-describe('#20045 — SHAPE PARITY with the currency FIELD refusal (ruling B carried, not reworded)', () => {
+describe('SHAPE PARITY with the currency FIELD refusal (its ruled text carried, not reworded)', () => {
   it('both refusals open with the same sentence, subject swapped, and share the minor-unit clause', () => {
     const field = FieldSchema.safeParse({ name: 'amount', label: 'Amount', type: 'currency', scale: 2 }) as Result;
     const column = parseColumns([{ name: 'amount', type: 'currency', scale: 2 }]);
@@ -185,7 +185,7 @@ describe('#20045 — SHAPE PARITY with the currency FIELD refusal (ruling B carr
   });
 });
 
-describe('#20045 — the column describes', () => {
+describe('the column describes', () => {
   const shape = InlineGridColumnSchema.shape as Record<string, { description?: string }>;
 
   it('`prefix` replaces the resolved currency symbol and promises no default', () => {
@@ -202,7 +202,7 @@ describe('#20045 — the column describes', () => {
   });
 });
 
-describe('#20045 — the ADR-0087 D3 entry', () => {
+describe('the ADR-0087 D3 entry', () => {
   it('is registered under protocol major 18 with a replacement that deletes the key and names no carrier', () => {
     const entry = MIGRATIONS_BY_MAJOR[18]?.semantic.find((e) => e.id === 'inline-grid-column-currency-scale-refused');
     expect(entry).toBeDefined();

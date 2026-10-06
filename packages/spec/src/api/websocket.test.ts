@@ -709,7 +709,7 @@ describe('WebSocketConfigSchema', () => {
 // than a bare unrecognized-key error, and the value survives at the same
 // magnitude. Asserting the message, not just `.toThrow()`: a bare throw stays
 // green when the schema throws for some unrelated reason.
-describe('WebSocket durations carry their unit (#15677)', () => {
+describe('WebSocket durations carry their unit in the key name', () => {
   const url = 'wss://example.com/ws';
 
   it.each([

@@ -55,7 +55,7 @@ function comparandAt(c: BooleanComparandDoorCase, filter: Record<string, unknown
 
 // ── The accepted spellings ───────────────────────────────────────────────────
 
-describe('[#21333] the accepted spellings', () => {
+describe('the accepted spellings', () => {
   it('are exactly the record validator\'s write-side set: true / false, 1 / 0, "1" / "0", "true" / "false"', () => {
     expect([...BOOLEAN_COMPARAND_SPELLINGS.entries()]).toEqual([
       [1, true], [0, false], ['1', true], ['0', false], ['true', true], ['false', false],
@@ -99,7 +99,7 @@ describe('[#21333] the accepted spellings', () => {
 
 // ── Which fields, which positions ────────────────────────────────────────────
 
-describe('[#21333] the judged fields and positions', () => {
+describe('the judged fields and positions', () => {
   it('are BOOLEAN_VALUE_TYPES itself, by identity — nothing re-listed', () => {
     expect(BOOLEAN_COMPARAND_DOOR_JUDGED_TYPES).toBe(BOOLEAN_VALUE_TYPES);
     expect([...BOOLEAN_COMPARAND_DOOR_JUDGED_TYPES].sort()).toEqual(['boolean', 'toggle']);
@@ -135,7 +135,7 @@ describe('[#21333] the judged fields and positions', () => {
 
 // ── The verdict ──────────────────────────────────────────────────────────────
 
-describe('[#21333] booleanComparandDoorVerdict', () => {
+describe('booleanComparandDoorVerdict — an accepted spelling narrows to its boolean, any other is refused', () => {
   const field = { type: 'boolean' };
 
   it('refuses "yes" on a boolean field with the INVALID_FILTER / 400 envelope and its form', () => {
@@ -158,7 +158,7 @@ describe('[#21333] booleanComparandDoorVerdict', () => {
     }
   });
 
-  it('[#21382] refuses a number other than 1 / 0, a Date and an array — each by what it is, with the 400 envelope', () => {
+  it('refuses a number other than 1 / 0, a Date and an array — each by what it is, with the 400 envelope', () => {
     const refusal = (form: string) => ({ verdict: 'door-refusal', form, code: 'INVALID_FILTER', status: 400 });
     for (const type of ['boolean', 'toggle']) {
       for (const n of [2, -1, 0.5, -0.5, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER]) {
@@ -179,7 +179,7 @@ describe('[#21333] booleanComparandDoorVerdict', () => {
     }
   });
 
-  it('[#21382] reads a bigint as the number it names — 1n / 0n narrow like 1 / 0, any other is refused as a number', () => {
+  it('reads a bigint as the number it names — 1n / 0n narrow like 1 / 0, any other is refused as a number', () => {
     expect(readBooleanComparand(1n)).toEqual({ boolean: true, value: true });
     expect(readBooleanComparand(0n)).toEqual({ boolean: true, value: false });
     expect(readBooleanComparand(-0n)).toEqual({ boolean: true, value: false });
@@ -192,7 +192,7 @@ describe('[#21333] booleanComparandDoorVerdict', () => {
     }
   });
 
-  it('[#21382] the accepted set is unchanged — the widening adds refusals only', () => {
+  it('the accepted set is unchanged — the non-string widening adds refusals only', () => {
     // Every accepted spelling still narrows, a boolean still passes, null is still the null test.
     for (const [spelling, value] of BOOLEAN_COMPARAND_SPELLINGS) {
       expect(booleanComparandDoorVerdict(field, spelling)).toEqual({ verdict: 'narrows', value });
@@ -215,7 +215,7 @@ describe('[#21333] booleanComparandDoorVerdict', () => {
 
 // ── The words ────────────────────────────────────────────────────────────────
 
-describe('[#21333] booleanComparandRefusalMessage', () => {
+describe('booleanComparandRefusalMessage', () => {
   const site = { field: 'active', declaredType: 'boolean', path: 'where.active.$ne', value: 'yes', form: 'not-a-boolean' as const };
 
   it('names the field, its declared type, the comparand, its position and the remedy — behind the caller prefix', () => {
@@ -243,7 +243,7 @@ describe('[#21333] booleanComparandRefusalMessage', () => {
     for (const m of messages) expect(m).not.toMatch(/#\d/);
   });
 
-  it('[#21382] renders a non-string comparand as what it is — a Date by name, a non-finite number by name, never as JSON null', () => {
+  it('renders a non-string comparand as what it is — a Date by name, a non-finite number by name, never as JSON null', () => {
     const at = (value: unknown, form: 'number' | 'date' | 'array') =>
       booleanComparandRefusalMessage({ ...site, path: 'where.active.$eq', value, form });
     expect(at(2, 'number')).toContain("against 2 at where.active.$eq, which is not a boolean: only the numbers 1 and 0 are read as a boolean");
@@ -286,7 +286,7 @@ describe('[#21333] booleanComparandRefusalMessage', () => {
 
 // ── The fixture and the case table ───────────────────────────────────────────
 
-describe('[#21333] the fixture', () => {
+describe('the fixture', () => {
   it('every field is a legal FieldSchema input, and the object a legal ObjectSchema input', () => {
     const names = BOOLEAN_COMPARAND_DOOR_FIXTURE_FIELDS.map((f) => f.name);
     expect(new Set(names).size).toBe(names.length);
@@ -306,7 +306,7 @@ describe('[#21333] the fixture', () => {
   });
 });
 
-describe('[#21333] BOOLEAN_COMPARAND_DOOR_CASES', () => {
+describe('BOOLEAN_COMPARAND_DOOR_CASES', () => {
   it('has unique case names — they are used as test names', () => {
     const names = BOOLEAN_COMPARAND_DOOR_CASES.map((c) => c.name);
     expect(new Set(names).size).toBe(names.length);
@@ -333,7 +333,7 @@ describe('[#21333] BOOLEAN_COMPARAND_DOOR_CASES', () => {
     }
   });
 
-  it('[#21382] the value group refuses every non-string form at every position the shape door leaves to it', () => {
+  it('the value group refuses every non-string form at every position the shape door leaves to it', () => {
     const value = BOOLEAN_COMPARAND_DOOR_CASES.filter((c) => c.name.startsWith('[value]'));
     const refused = value.filter(isRefusal);
     expect(new Set(refused.map((c) => c.form))).toEqual(new Set(NON_BOOLEAN_VALUE_FORMS));

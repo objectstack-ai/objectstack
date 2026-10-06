@@ -94,6 +94,7 @@ export const SysUser = ObjectSchema.create({
       // and every add flows through better-auth invitations, never bespoke
       // sys_user CRUD.
       requiresFeature: 'organization',
+      requiresMembershipReach: 'invite_member',
       successMessage: 'Invitation sent',
       refreshAfter: true,
       params: [
@@ -600,11 +601,28 @@ export const SysUser = ObjectSchema.create({
   ],
 
   listViews: {
-    // Self-service profile entry — surfaced by the Account App so every
-    // authenticated user can view / edit their own basic profile (name,
-    // email, avatar). Filtered to a single row (the caller) via the
-    // `{current_user_id}` template variable; RLS additionally enforces
-    // that non-admins cannot read other users' rows.
+    // [#21972] Declared FIRST on purpose: a route that names no view opens the
+    // first declared list view — Setup's Users entry, which names this view
+    // explicitly (#21960), and the bare-object doors (the record page's
+    // object breadcrumb, the object switcher), which name none. So the
+    // caller-scoped `me` is never first.
+    all_users: {
+      type: 'grid',
+      name: 'all_users',
+      label: 'All Users',
+      data: { provider: 'object', object: 'sys_user' },
+      columns: ['name', 'email', 'phone_number', 'email_verified', 'source', 'two_factor_enabled', 'created_at'],
+      sort: [{ field: 'name', order: 'asc' }],
+      pagination: { pageSize: 50 },
+    },
+    // The caller's own row, as a tab of this object's view switcher.
+    // Filtered to a single row via the `{current_user_id}` template
+    // variable — presentation scope only; which other users' rows a caller
+    // may read is RLS's decision (`member_default` admits the caller's own
+    // row and their organization's users). No navigation entry names this
+    // view: the Account App's profile entry is the `account:profile_card`
+    // component (`account.app.ts`), which reads the signed-in user from the
+    // session, not from this list.
     me: {
       type: 'grid',
       name: 'me',
@@ -614,15 +632,6 @@ export const SysUser = ObjectSchema.create({
       filter: [{ field: 'id', operator: 'equals', value: '{current_user_id}' }],
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 1 },
-    },
-    all_users: {
-      type: 'grid',
-      name: 'all_users',
-      label: 'All Users',
-      data: { provider: 'object', object: 'sys_user' },
-      columns: ['name', 'email', 'phone_number', 'email_verified', 'source', 'two_factor_enabled', 'created_at'],
-      sort: [{ field: 'name', order: 'asc' }],
-      pagination: { pageSize: 50 },
     },
     unverified: {
       type: 'grid',

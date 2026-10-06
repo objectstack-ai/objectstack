@@ -208,6 +208,19 @@ export const SysOauthApplication = ObjectSchema.create({
   ],
 
   listViews: {
+    // [#21972] Declared FIRST on purpose: a route that names no view opens the
+    // first declared list view, so a caller-scoped view (`mine`) is never
+    // first. Setup's `nav_oauth_apps` names this view; the Account app's entry
+    // names `mine`.
+    all_apps: {
+      type: 'grid',
+      name: 'all_apps',
+      label: 'All',
+      data: { provider: 'object', object: 'sys_oauth_application' },
+      columns: ['name', 'client_id', 'type', 'disabled', 'created_at'],
+      sort: [{ field: 'name', order: 'asc' }],
+      pagination: { pageSize: 50 },
+    },
     mine: {
       type: 'grid',
       name: 'mine',
@@ -216,8 +229,8 @@ export const SysOauthApplication = ObjectSchema.create({
       columns: ['name', 'client_id', 'type', 'disabled', 'created_at'],
       // Self-service Account view — scope to the signed-in user's own
       // registrations so they don't see other developers' apps. Admins
-      // get the unfiltered `active` / `disabled_apps` / `all_apps` views
-      // via the Setup → OAuth Applications nav.
+      // get the unfiltered `all_apps` / `active` / `disabled_apps` views
+      // via the Setup → OAuth Applications nav, which names `all_apps`.
       filter: [{ field: 'user_id', operator: 'equals', value: '{current_user_id}' }],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
@@ -240,15 +253,6 @@ export const SysOauthApplication = ObjectSchema.create({
       columns: ['name', 'client_id', 'type', 'updated_at'],
       filter: [{ field: 'disabled', operator: 'equals', value: true }],
       sort: [{ field: 'updated_at', order: 'desc' }],
-      pagination: { pageSize: 50 },
-    },
-    all_apps: {
-      type: 'grid',
-      name: 'all_apps',
-      label: 'All',
-      data: { provider: 'object', object: 'sys_oauth_application' },
-      columns: ['name', 'client_id', 'type', 'disabled', 'created_at'],
-      sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 50 },
     },
   },

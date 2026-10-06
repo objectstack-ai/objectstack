@@ -65,7 +65,7 @@ export {
   FileReferenceCopyError,
   FileConstraintError,
 } from './file-reference-lifecycle.js';
-export type { FileReferenceEngine, FileReferenceLogger } from './file-reference-lifecycle.js';
+export type { FileConstraint, FileReferenceEngine, FileReferenceLogger } from './file-reference-lifecycle.js';
 export {
   verifyFileReferences,
   formatFileReferenceReport,

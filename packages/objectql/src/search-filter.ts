@@ -42,6 +42,13 @@
  * `resolveSearchFields` still returns only source fields (the companion is
  * invisible to `$searchFields` overrides and to clients).
  *
+ * [#21880] …and bounded by the same set. The companion is a normalized copy of
+ * named source fields, so its clause is a match on THOSE fields. It joins a
+ * search only when every field it mirrors is inside the effective search-field
+ * set `resolveSearchFields` computed — after any `$searchFields` narrowing — and
+ * a set that leaves a mirrored field out leaves the companion out with it. See
+ * {@link companionWithinSearchFields}.
+ *
  * [#21009] A field the object declares MULTI-VALUED (`isMultiValueField`: a
  * `tags` / `multiselect` / `checkboxes` field, or a `select` / `lookup` /
  * `user` / … declared `multiple: true`) is matched by MEMBERSHIP, `$contains`,
@@ -68,7 +75,12 @@ import {
   type SearchFieldMeta,
   type SearchFieldResolutionOptions,
 } from '@objectstack/spec/data';
-import { SEARCH_COMPANION_FIELD, isCompanionMatchableTerm } from './search-companion.js';
+import {
+  SEARCH_COMPANION_FIELD,
+  isCompanionMatchableTerm,
+  resolveSearchCompanionSources,
+  type CompanionObjectMeta,
+} from './search-companion.js';
 
 export {
   resolveSearchFields,
@@ -148,6 +160,44 @@ function fieldClausesForTerm(field: string, term: string, meta: SearchFieldMeta)
 }
 
 /**
+ * [#21880] May the `__search` companion clause join a search over
+ * `searchFields`? Only when every source field the companion mirrors is in
+ * that set.
+ *
+ * The mirrored fields are read from {@link resolveSearchCompanionSources} —
+ * the one function the registry's provisioning seam and plugin-pinyin-search's
+ * populate hook already derive the companion from — over the same `fields` and
+ * the same display-field pointer the engine handed in. So the answer is the
+ * companion's real source, never a second guess at it.
+ *
+ * ⛔ The gate is `searchFields` and nothing else: the set `resolveSearchFields`
+ * already computed, with the declared/auto-default precedence and any
+ * `$searchFields` narrowing applied. No second eligibility rule for the
+ * companion is consulted here — whatever a caller's narrowing removed from the
+ * source columns, it removes from their normalized copy too.
+ *
+ * The companion is ONE column holding the normalized form of its sources, so
+ * the test is "every source is in the set", never "some source is": a clause
+ * over the shared column matches through every field it mirrors at once.
+ * A search whose set holds every mirrored field — any search with no
+ * narrowing, whenever the display/name field is in the object's searchable
+ * set — keeps the clause, so recall there is unchanged.
+ *
+ * An empty source list passes vacuously. The registry never provisions a
+ * companion without a source (`provisionSearchCompanion` returns early on an
+ * empty list), so that case is only an author-declared `__search` column —
+ * an ordinary field the platform does not fill — and it keeps today's answer.
+ */
+function companionWithinSearchFields(searchFields: readonly string[], opts: ExpandSearchOptions): boolean {
+  const sources = resolveSearchCompanionSources({
+    nameField: opts.displayField,
+    fields: opts.fields as CompanionObjectMeta['fields'],
+  });
+  const inSet = new Set(searchFields);
+  return sources.every((f) => inSet.has(f));
+}
+
+/**
  * Expand a `$search` term into a `{ $or: [...] }` (single term) or
  * `{ $and: [{ $or: [...] }, ...] }` (multi-term) filter. Returns `null` when
  * there's nothing to search (empty query or no resolvable fields) so the caller
@@ -177,10 +227,14 @@ export function expandSearchToFilter(raw: unknown, opts: ExpandSearchOptions): a
   // different mechanism from the source-column clauses in
   // `fieldClausesForTerm`, which compare against raw stored text and therefore
   // need `$icontains`. Do not "align" the two.
-  const hasCompanion = !!opts.fields[SEARCH_COMPANION_FIELD];
+  //
+  // [#21880] …and only when the companion mirrors no field outside
+  // `searchFields` — see `companionWithinSearchFields`.
+  const withCompanion = !!opts.fields[SEARCH_COMPANION_FIELD]
+    && companionWithinSearchFields(searchFields, opts);
   const andClauses = terms.map((term) => {
     const clauses = searchFields.flatMap((f) => fieldClausesForTerm(f, term, opts.fields[f] || {}));
-    if (hasCompanion && isCompanionMatchableTerm(term)) {
+    if (withCompanion && isCompanionMatchableTerm(term)) {
       clauses.push({ [SEARCH_COMPANION_FIELD]: { $contains: term.toLowerCase() } });
     }
     return { $or: clauses };

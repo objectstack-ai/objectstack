@@ -101,6 +101,7 @@ import type {
   IDatasourceDriverFactory,
 } from '@objectstack/service-datasource';
 import {
+  devAutoMigrateConfig,
   loadTursoDriverFactory as loadRuntimeTursoDriverFactory,
   namesRetiredMemoryEngine,
   retiredMemoryEngineMessage,
@@ -365,9 +366,13 @@ export function resolveStorageDefinition(
   opts: ResolveStorageDefinitionOptions,
 ): StorageDefinitionResolution | null {
   const { databaseUrl, isDev, authToken } = opts;
-  // #2186: dev-only loosen-only self-heal, honored by the factory for the SQL
-  // kinds. Never in production, never destructive.
-  const autoMigrate = isDev ? ({ autoMigrate: 'safe' } as const) : {};
+  // #2186's dev self-heal is NOT decided here (#21733). Every arm below spreads
+  // `devAutoMigrateConfig(<its kind>, isDev)` — the ONE decision, in
+  // `@objectstack/runtime`, that the standalone stack's `default` datasource
+  // reads too — so which kinds carry `autoMigrate: 'safe'`, and when, is that
+  // module's answer and never this file's. It used to be an inline
+  // `isDev ? { autoMigrate: 'safe' } : {}` here, and the standalone stack (every
+  // plain `os dev`) had no copy at all.
 
   // ONE vocabulary since commit e2798fab7 (`@objectstack/spec`'s driver table). The arms
   // below therefore branch on the CANONICAL id and never on a spelling: the
@@ -425,7 +430,9 @@ export function resolveStorageDefinition(
     const url = databaseUrl!;
     return {
       driverId: 'mongodb',
-      config: { url },
+      // The shared self-heal decision answers `{}` for this kind: its
+      // contract declares no `autoMigrate`.
+      config: { url, ...devAutoMigrateConfig('mongodb', isDev) },
       trackName: 'MongoDBDriver',
       label: 'MongoDBDriver',
       displayUrl: url,
@@ -439,7 +446,7 @@ export function resolveStorageDefinition(
       .replace(/^sql:\/\//, '');
     return {
       driverId: 'sqlite',
-      config: { filename: filePath, ...autoMigrate },
+      config: { filename: filePath, ...devAutoMigrateConfig('sqlite', isDev) },
       trackName: 'SqlDriver',
       label: 'SqlDriver(better-sqlite3)',
       displayUrl: databaseUrl ?? ':memory:',
@@ -459,7 +466,9 @@ export function resolveStorageDefinition(
       driverId: 'sqlite-wasm',
       // `persist` passthrough: the CLI kept `on-disconnect` semantics here
       // (the factory's default for file-backed wasm is `on-write`).
-      config: { filename: filePath, persist: 'on-disconnect' },
+      // No self-heal for this kind: its contract declares no `autoMigrate`, so
+      // the shared decision answers `{}`.
+      config: { filename: filePath, persist: 'on-disconnect', ...devAutoMigrateConfig('sqlite-wasm', isDev) },
       trackName: 'SqliteWasmDriver',
       label: 'SqliteWasmDriver',
       displayUrl: databaseUrl ?? ':memory:',
@@ -469,7 +478,7 @@ export function resolveStorageDefinition(
   if (kind === 'postgres') {
     return {
       driverId: 'postgres',
-      config: { url: databaseUrl, ...autoMigrate },
+      config: { url: databaseUrl, ...devAutoMigrateConfig('postgres', isDev) },
       trackName: 'PostgresDriver',
       label: 'SqlDriver(pg)',
       displayUrl: databaseUrl,
@@ -479,7 +488,7 @@ export function resolveStorageDefinition(
   if (kind === 'mysql') {
     return {
       driverId: 'mysql',
-      config: { url: databaseUrl, ...autoMigrate },
+      config: { url: databaseUrl, ...devAutoMigrateConfig('mysql', isDev) },
       trackName: 'MySQLDriver',
       label: 'SqlDriver(mysql2)',
       displayUrl: databaseUrl,
@@ -494,16 +503,17 @@ export function resolveStorageDefinition(
   // hatch and the retained Setup → Datasources status are therefore identical to
   // every other kind (#3826); only the construction differs.
   //
-  // No `autoMigrate` passthrough: unlike the postgres/mysql/sqlite branches,
-  // `TursoDriverConfig` declares no such key, and handing it one would be a config
-  // the driver silently ignores. No `sqliteFilePath` either — the telemetry sibling
-  // is provisioned next to an on-disk SQLite primary, which a libSQL endpoint is not.
+  // No `autoMigrate`: unlike the postgres/mysql/sqlite branches, `TursoDriverConfig`
+  // declares no such key, so the shared self-heal decision answers `{}` — handing
+  // it one would be a config the driver silently ignores. No `sqliteFilePath`
+  // either — the telemetry sibling is provisioned next to an on-disk SQLite
+  // primary, which a libSQL endpoint is not.
   if (kind === 'turso') {
     // The no-URL refusal is the shared one above; by here a URL is present.
     const url = databaseUrl!.trim();
     return {
       driverId: 'turso',
-      config: { url, ...(authToken ? { authToken } : {}) },
+      config: { url, ...(authToken ? { authToken } : {}), ...devAutoMigrateConfig('turso', isDev) },
       trackName: 'TursoDriver',
       label: 'TursoDriver(libsql)',
       displayUrl: url,
@@ -517,7 +527,7 @@ export function resolveStorageDefinition(
   if (isDev) {
     return {
       driverId: 'sqlite',
-      config: { filename: ':memory:', ...autoMigrate },
+      config: { filename: ':memory:', ...devAutoMigrateConfig('sqlite', isDev) },
       trackName: 'SqlDriver',
       label: 'SqlDriver(better-sqlite3)',
       displayUrl: ':memory:',

@@ -247,10 +247,11 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
         // [#21095] 48 → 49: `outcomeMessages` joined the accepted set, and it
         // is named in the sample below so the served schema is held to
         // carrying it, not merely to having one more key than before.
-        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(49);
+        // [#21795] 49 → 50: `requiresMembershipReach` joined the accepted set.
+        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(50);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
-        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages']) {
+        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach']) {
             expect(Object.keys(properties)).toContain(key);
         }
     });

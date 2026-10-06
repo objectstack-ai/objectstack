@@ -78,7 +78,7 @@ const parsedUndeclaredKey: ViewMetadataParsed = { type: 'grid', columns: ['name'
 const parsedScalar: ViewMetadataParsed = 42;
 void [parsedFromUnknown, parsedUndeclaredKey, parsedScalar];
 
-describe('[#19871] ViewMetadata is a view body, not unknown', () => {
+describe('ViewMetadata is a view body, not unknown', () => {
   it('has a typed body for every member of the union', () => {
     expect(Object.keys(BODY_OF_EACH_MEMBER).sort()).toEqual([...VIEW_METADATA_BRANCHES].sort());
   });
@@ -92,7 +92,7 @@ describe('[#19871] ViewMetadata is a view body, not unknown', () => {
   }
 });
 
-describe('[#19920] ViewMetadataParsed is a parsed view body, not unknown', () => {
+describe('ViewMetadataParsed is a parsed view body, not unknown', () => {
   for (const branch of VIEW_METADATA_BRANCHES) {
     it(`the ${branch} member's parse output and diagnoseViewMetadata's data are both ViewMetadataParsed`, () => {
       const memberOutput: ViewMetadataParsed = VIEW_METADATA_MEMBERS[branch].parse(BODY_OF_EACH_MEMBER[branch]);

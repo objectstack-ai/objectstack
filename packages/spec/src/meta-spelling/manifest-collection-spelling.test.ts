@@ -30,7 +30,7 @@ import {
   META_URL_TO_SINGULAR,
 } from './index';
 
-describe('#11503 — the manifest-collection vocabulary is the SAME contract on both entries', () => {
+describe('the manifest-collection vocabulary is the SAME contract on both entries', () => {
   it('`/meta-spelling` and `/shared` hand out identical bindings (one declaration, two entries)', async () => {
     const shared = await import('../shared/metadata-collection.zod');
     expect(shared.PLURAL_TO_SINGULAR).toBe(PLURAL_TO_SINGULAR);
@@ -47,7 +47,7 @@ describe('#11503 — the manifest-collection vocabulary is the SAME contract on 
   });
 });
 
-describe('#8424 — widening the entry did not merge the two spelling contracts', () => {
+describe('widening the entry did not merge the two spelling contracts', () => {
   it('keeps the manifest map and the URL map distinct symbols', () => {
     expect(PLURAL_TO_SINGULAR).not.toBe(META_URL_TO_SINGULAR);
   });

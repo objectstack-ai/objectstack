@@ -9,7 +9,7 @@ import { CONVERSION_TODO_CODE, type ConversionNotice, type ConversionTodoNotice 
 // rest was written under some past protocol and has no author to be taught by
 // a tombstone, so `retiredFromLoadPath` entries — which the authored load seam
 // skips — MUST apply here.
-describe('applyConversionsToStoredItem (stored sys_metadata rows, #3903)', () => {
+describe('applyConversionsToStoredItem (stored sys_metadata rows)', () => {
   it('replays a RETIRED conversion over a stored object row (conditionalRequired → requiredWhen)', () => {
     const row = {
       name: 'crm_task',
@@ -46,7 +46,7 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows, #3903)', () =>
   // drops the meaningless key (behaviour-preserving — #7501's enforcement
   // deliberately skipped malformed declarations, so it enforced nothing)
   // and the rest of the row survives byte-identically.
-  it('drops a malformed stored scale/precision instead of breaking the row (#8321)', () => {
+  it('drops a malformed stored scale/precision instead of breaking the row', () => {
     const row = {
       name: 'crm_deal',
       label: 'Deal',
@@ -124,7 +124,7 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows, #3903)', () =>
   // stored pass MUST serve it canonical, because the factory now reads exactly
   // one spelling per key (deleting the fallbacks without this replay would
   // silently move a sqlite `file:` row's data to `:memory:`).
-  describe('stored datasource rows (datasource-config-driver-key-aliases, #4456)', () => {
+  describe('stored datasource rows (datasource-config-driver-key-aliases)', () => {
     // The fourth column is the driver id the stored pass SERVES, which differs
     // from the stored one for exactly one row: commit e2798fab7 renamed the canonical mongo
     // id to `mongodb`, and `datasource-driver-mongo-to-mongodb` converges the
@@ -173,7 +173,7 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows, #3903)', () =>
   // replayed a translation conversion over one. The item door's `settings` is
   // the case that made it matter: a stored item's copy overrides the
   // platform's, because the runtime-authored layer is read over the bundles.
-  describe('stored translation rows (translation-per-app-settings-removed, #19620)', () => {
+  describe('stored translation rows (translation-per-app-settings-removed)', () => {
     const storedItem = () => ({
       name: 'zh-CN',
       locale: 'zh-CN',

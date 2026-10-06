@@ -43,7 +43,7 @@ const regionPage = (...components: unknown[]) => ({
 const componentAt = (stack: Record<string, unknown>, ...steps: (string | number)[]) =>
   steps.reduce<any>((node, step) => node[step], (stack.pages as any[])[0]);
 
-describe('#6775 — a conversion reaches a component nested in another component', () => {
+describe('a conversion reaches a component nested in another component', () => {
   /**
    * The four container shapes this walker descends, spelled out by hand as the
    * fixture — `body` included: it is a RETIRED spelling the authoring walks
@@ -100,7 +100,7 @@ describe('#6775 — a conversion reaches a component nested in another component
     });
   }
 
-  it('reaches every position `pageComponentSlotPositions()` names, the retired spelling included (#20940)', () => {
+  it('reaches every position `pageComponentSlotPositions()` names, the retired spelling included', () => {
     const positions = pageComponentSlotPositions();
     // Guards the case against passing vacuously on an empty list, and ties it
     // to the four explicit shapes above.
@@ -186,7 +186,7 @@ describe('#6775 — a conversion reaches a component nested in another component
   });
 });
 
-describe('#6775 — the page-component walk stays copy-on-write and shape-gated', () => {
+describe('the page-component walk stays copy-on-write and shape-gated', () => {
   it('returns the identical reference when nothing nested converts', () => {
     const clean = regionPage({
       type: 'page:section',

@@ -80,7 +80,7 @@ function issueAt(
 // §1 the `$` dialect door — FilterConditionSchema
 // ---------------------------------------------------------------------------
 
-describe('#19514 §1 — the $ dialect refuses what the table declares refused', () => {
+describe('§1 — the $ dialect refuses what the table declares refused', () => {
   it.each([
     ['the EMPTY comparand', '', 'EMPTY STRING'],
     ['a NUMBER comparand', 42, 'not a string'],
@@ -156,7 +156,7 @@ describe('#19514 §1 — the $ dialect refuses what the table declares refused',
 // §2 the infix/view dialect door — ViewFilterRuleSchema
 // ---------------------------------------------------------------------------
 
-describe('#19514 §2 — the view vocabulary refuses the same two comparands', () => {
+describe('§2 — the view vocabulary refuses the same two comparands', () => {
   const rule = (value?: unknown) =>
     ViewFilterRuleSchema.safeParse(
       value === undefined
@@ -241,7 +241,7 @@ describe('#19514 §2 — the view vocabulary refuses the same two comparands', (
 // §3 both doors are DRIVEN BY the table, not by a copy of it
 // ---------------------------------------------------------------------------
 
-describe('#19514 §3 — a row added to FILTER_TEXT_CASES reaches both doors', () => {
+describe('§3 — a row added to FILTER_TEXT_CASES reaches both doors', () => {
   it('the table still carries rows for this operator, so this suite is not vacuous', () => {
     expect(TABLE_ROWS.length).toBeGreaterThan(0);
   });

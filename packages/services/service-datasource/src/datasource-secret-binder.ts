@@ -31,10 +31,24 @@ interface SecretRow {
   ciphertext: string;
 }
 
-/** Minimal data-engine surface used to read/write the `sys_secret` store. */
+/**
+ * [#21913] The execution context every `sys_secret` read and write below runs
+ * under: the explicit system opt-in. `sys_secret` is the platform's own cipher
+ * store, written and read here on behalf of a datasource record the admin
+ * doors already authorized (or of boot rehydration, which has no caller at
+ * all). None of these calls may rely on a missing principal to pass the
+ * security middleware's principal-less hand-off, which ADR-0096 D5 closes.
+ */
+const SYSTEM_CTX = { isSystem: true } as const;
+
+/**
+ * Minimal data-engine surface used to read/write the `sys_secret` store. Every
+ * call passes `context` (the explicit system opt-in); an adapter over a data
+ * engine forwards it verbatim.
+ */
 export interface SecretStoreEngineLike {
   insert(object: string, data: Record<string, unknown>, options?: unknown): Promise<unknown>;
-  delete(object: string, options: { where: Record<string, unknown> }): Promise<unknown>;
+  delete(object: string, options: { where: Record<string, unknown>; context?: Record<string, unknown> }): Promise<unknown>;
   /**
    * Read `sys_secret` rows for the `resolve()` path. Optional so existing
    * callers that only bind/unbind keep working; `resolve()` no-ops when absent.
@@ -110,14 +124,14 @@ export function createDatasourceSecretBinder(deps: DatasourceSecretBinderDeps): 
         alg: handle.alg,
         version: handle.version,
         ciphertext: handle.ciphertext,
-      });
+      }, { context: SYSTEM_CTX });
       return toCredentialsRef(handle.id);
     },
 
     async unbind(credentialsRef) {
       const id = parseCredentialsRef(credentialsRef);
       if (!id) return; // not ours (or already cleared) — nothing to do
-      await engine.delete('sys_secret', { where: { id } });
+      await engine.delete('sys_secret', { where: { id }, context: SYSTEM_CTX });
     },
 
     async resolve(credentialsRef) {
@@ -130,6 +144,7 @@ export function createDatasourceSecretBinder(deps: DatasourceSecretBinderDeps): 
           // Secrets are scoped through their owning datasource artefact, so
           // skip the tenant-audit warning (mirrors SettingsService's store).
           bypassTenantAudit: true,
+          context: SYSTEM_CTX,
         });
         const rows = (Array.isArray(result) ? result : (result as { data?: unknown[] })?.data) ?? [];
         const row = rows[0] as SecretRow | undefined;

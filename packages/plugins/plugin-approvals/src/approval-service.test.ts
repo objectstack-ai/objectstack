@@ -130,6 +130,26 @@ const CTX = { userId: 'u1', tenantId: 't1', positions: [], permissions: [] } as 
 const SYS = { isSystem: true, positions: [], permissions: [] } as any;
 
 /**
+ * Store an open request's slot the way a 15.x-era request stored it:
+ * `role:<p>`, the spelling ADR-0090 D3 retired, in the CSV source of truth —
+ * then let the plugin's own boot backfill (`rebuildApproverIndex`) bring the
+ * index in line, as it does on an upgraded deployment. No current writer
+ * produces the spelling, so a pin on a stored slot has to plant it.
+ */
+async function storeLegacyRoleSlot(
+  engine: ReturnType<typeof makeFakeEngine>,
+  svc: ApprovalService,
+  requestId: string,
+  slot = 'role:sales_manager',
+): Promise<void> {
+  await engine.update('sys_approval_request', { id: requestId, pending_approvers: slot });
+  await svc.rebuildApproverIndex();
+  const indexed = (engine._tables['sys_approval_approver'] ?? []).filter(r => r.request_id === requestId);
+  // The plant landed — a pin on a slot that is not there would pass vacuously.
+  expect(indexed.map(r => r.approver)).toEqual([slot]);
+}
+
+/**
  * Every session shape that could plausibly be read as "this caller is an admin"
  * — pinned as NOT exempt by the guards in `lifecycle-hooks.ts` (#4839).
  *
@@ -896,12 +916,15 @@ describe('ApprovalService (node era)', () => {
     expect(deprecated.pending_approvers).toEqual(['u1']);
   });
 
-  // The fallback literal keeps the AUTHORED spelling: `sys_approval_approver`
-  // rows and `pending_approvers` slots written by 15.x carry `role:<v>`, and
-  // canonicalising the literal here would orphan every one of them.
-  it('deprecated `role` alias keeps its legacy literal on fallback (no orphaned slots)', async () => {
+  // The fallback literal is written in the CANONICAL type (ADR-0090 D3): no
+  // path writes a `role:` slot, a spelling no reader addresses. A slot a
+  // 15.x-era request stored as `role:<v>` stays as stored — nothing rewrites
+  // it — and is decided by the privileged override (pinned in the
+  // `role:` retirement block below).
+  it('deprecated `role` alias falls back to the canonical literal, in the slate and in the index', async () => {
     const req = await svc.openNodeRequest(tierInput('role'), CTX);
-    expect(req.pending_approvers).toEqual(['role:admin']);
+    expect(req.pending_approvers).toEqual(['org_membership_level:admin']);
+    expect((engine._tables['sys_approval_approver'] ?? []).map(r => r.approver)).toEqual(['org_membership_level:admin']);
   });
 
   it('org_membership_level falls back to its own canonical literal', async () => {
@@ -3602,12 +3625,13 @@ describe('ApprovalService — participant visibility (#3590)', () => {
 // ── "My Pending" reads the acting path's position addresses (#21350) ───
 //
 // A request routed to a position nobody held when it opened keeps the literal
-// `position:<p>` slot (a 15.x-era one reads `role:<p>`), and the console asks
-// "My Pending" under `role:<p>`. `resolveActor` has always admitted a holder of
-// `p` under either spelling, but the list filter matched the caller's
-// `approverId` literally and the participant gate keyed on the user id alone —
-// so the request was missing from the inbox of the very user who could decide
-// it. All three now read ONE equivalence (`approver-address.ts`).
+// `position:<p>` slot. The list filter used to match the caller's `approverId`
+// literally and the participant gate keyed on the user id alone — so the
+// request was missing from the inbox of the very user who could decide it. All
+// three now read ONE equivalence (`approver-address.ts`), whose one position
+// spelling is `position:<p>`: ADR-0090 D3 retired `role:<p>`, so a `role:` ask
+// finds nothing, and a slot a 15.x-era request stored under it is decided by
+// the privileged override (the retirement block below).
 describe('ApprovalService — "My Pending" position addresses (#21350)', () => {
   const svcFor = (engine: any) => {
     let n = 0;
@@ -3636,33 +3660,42 @@ describe('ApprovalService — "My Pending" position addresses (#21350)', () => {
     return out;
   };
 
-  it('a holder of the position finds the request under EITHER spelling — list, count and the request itself', async () => {
+  it('a holder of the position finds the request under `position:` — list, count and the request itself — and no longer under `role:`', async () => {
     const engine = makeFakeEngine();
     const svc = svcFor(engine);
     const req = await open(svc, routedTo('position')); // submitter u1
     expect(req.pending_approvers).toEqual(['position:sales_manager']);
 
-    for (const spelling of SPELLINGS) {
-      // The console's own identity list: user id, then the position address.
-      const filter = { status: 'pending' as const, approverId: ['u_reviewer', spelling] };
-      const listed = await svc.listRequests(filter, REVIEWER);
-      expect(listed.map(r => r.id), `listed under '${spelling}'`).toEqual([req.id]);
-      expect(await svc.countRequests(filter, REVIEWER), `counted under '${spelling}'`).toBe(1);
-    }
+    // The console's own identity list: user id, then the position address.
+    const filter = { status: 'pending' as const, approverId: ['u_reviewer', 'position:sales_manager'] };
+    expect((await svc.listRequests(filter, REVIEWER)).map(r => r.id)).toEqual([req.id]);
+    expect(await svc.countRequests(filter, REVIEWER)).toBe(1);
     expect(await svc.getRequest(req.id, REVIEWER)).not.toBeNull();
+
+    // ADR-0090 D3: the retired spelling is no ask for the same slot.
+    const retired = { status: 'pending' as const, approverId: ['u_reviewer', 'role:sales_manager'] };
+    expect(await svc.listRequests(retired, REVIEWER), 'listed under role:').toEqual([]);
+    expect(await svc.countRequests(retired, REVIEWER), 'counted under role:').toBe(0);
   });
 
-  it('a 15.x-era `role:` slot is found under the `position:` spelling too', async () => {
+  it('a stored 15.x-era `role:` slot is no position address: not found under `position:`, hidden from the holder; the deprecated type writes no such slot any more', async () => {
     const engine = makeFakeEngine();
     const svc = svcFor(engine);
-    // `role` is the deprecated approver type; its literal keeps the authored spelling.
-    const req = await open(svc, routedTo('role'));
-    expect(req.pending_approvers).toEqual(['role:sales_manager']);
+    const req = await open(svc, routedTo('position'));
+    await storeLegacyRoleSlot(engine, svc, req.id);
 
+    // SYS sees every row: the slot is there, under its own spelling only.
+    expect((await svc.listRequests({ approverId: 'role:sales_manager' }, SYS)).map(r => r.id)).toEqual([req.id]);
+    expect(await svc.listRequests({ approverId: 'position:sales_manager' }, SYS)).toEqual([]);
     for (const spelling of SPELLINGS) {
       const listed = await svc.listRequests({ status: 'pending', approverId: ['u_reviewer', spelling] }, REVIEWER);
-      expect(listed.map(r => r.id), `listed under '${spelling}'`).toEqual([req.id]);
+      expect(listed, `listed under '${spelling}'`).toEqual([]);
     }
+    expect(await svc.getRequest(req.id, REVIEWER)).toBeNull();
+
+    // The deprecated approver TYPE now falls back to the canonical literal.
+    const fresh = await open(svc, { ...routedTo('role'), recordId: 'opp2', runId: 'run_2', record: { id: 'opp2', amount: 100 } });
+    expect(fresh.pending_approvers).toEqual(['org_membership_level:sales_manager']);
   });
 
   it('negative control: a user who does not hold the position sees nothing, under either spelling', async () => {
@@ -3685,8 +3718,8 @@ describe('ApprovalService — "My Pending" position addresses (#21350)', () => {
     const req = await open(svc, routedTo('position'));
 
     // SYS sees every row, so a miss here is the FILTER's verdict alone.
-    expect((await svc.listRequests({ approverId: 'role:sales_manager' }, SYS)).map(r => r.id)).toEqual([req.id]);
-    for (const address of ['team:sales_manager', 'org_membership_level:sales_manager', 'sales_manager']) {
+    expect((await svc.listRequests({ approverId: 'position:sales_manager' }, SYS)).map(r => r.id)).toEqual([req.id]);
+    for (const address of ['role:sales_manager', 'team:sales_manager', 'org_membership_level:sales_manager', 'sales_manager']) {
       expect(await svc.listRequests({ approverId: address }, SYS), `'${address}' must not fold`).toEqual([]);
     }
   });
@@ -3705,14 +3738,16 @@ describe('ApprovalService — "My Pending" position addresses (#21350)', () => {
     expect(out.request.status).toBe('approved');
   });
 
-  // `resolveActor` must admit EXACTLY what it admitted before the equivalence
-  // moved into `approver-address.ts`. The oracle is the pre-extraction
-  // predicate, verbatim; the matrix crosses both spellings with near misses and
-  // with position names that contain a prefix themselves.
-  it('resolveActor admits exactly the identities the pre-extraction predicate admitted', async () => {
+  // `resolveActor` must admit EXACTLY what the pre-extraction predicate
+  // admitted, minus its retired `role:` arm (ADR-0090 D3). The oracle is that
+  // predicate with the arm removed; the matrix crosses both spellings with near
+  // misses and with position names that contain a prefix themselves, so every
+  // `role:` row is a refusal and every `position:` row of a held position an
+  // admission.
+  it('resolveActor admits exactly `position:<p>` for a held position — the pre-extraction predicate without its role: arm', async () => {
     const svc = svcFor(makeFakeEngine());
     const preExtraction = (named: string, positions: unknown[]) =>
-      positions.some((position) => named === `position:${position}` || named === `role:${position}`);
+      positions.some((position) => named === `position:${position}`);
     const NAMED = [
       'position:cfo', 'role:cfo', 'team:cfo', 'org_membership_level:cfo', 'positions:cfo', 'Position:cfo',
       'cfo', 'position:', 'role:', 'position:role:cfo', 'role:position:cfo', 'position:cfo ', 'u_other',
@@ -3730,8 +3765,9 @@ describe('ApprovalService — "My Pending" position addresses (#21350)', () => {
         if (admitted) admittedCount++;
       }
     }
-    // Both arms of the matrix are exercised — not a sweep of refusals only.
-    expect(admittedCount).toBeGreaterThan(5);
+    // Both arms of the matrix are exercised — not a sweep of refusals only:
+    // position:cfo twice, position:role:cfo, position: and position:7.
+    expect(admittedCount).toBe(5);
   });
 });
 
@@ -3743,8 +3779,8 @@ describe('ApprovalService — "My Pending" position addresses (#21350)', () => {
 // slot test, the already-acted probe and — for a `user` approver authored as
 // an email — the participant gate's email half. A holder of a position whose
 // slot reads `position:<p>` therefore saw the request with `can_act: false`,
-// was refused with the default actor and with the console's `role:<p>`,
-// could decide it only by naming `position:<p>`, and lost sight of it after.
+// was refused with the default actor, could decide it only by naming
+// `position:<p>`, and lost sight of it after.
 // One pin per reader below; `approver-address-readers.test.ts` enumerates
 // them and fails on a slot-against-caller comparison written anywhere else.
 describe('ApprovalService — every slot reader takes the acting addresses (#21379)', () => {
@@ -3821,10 +3857,10 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
     }
   });
 
-  it('decision slot test: the default actor and BOTH spellings take the position slot; the decision records the person in actor_id and the slot\'s stored spelling in acted_as', async () => {
+  it('decision slot test: the default actor and `position:` take the position slot, `role:` does not; the decision records the person in actor_id and the slot\'s stored spelling in acted_as', async () => {
     const engine = makeFakeEngine();
     const svc = svcFor(engine);
-    for (const actorId of [undefined, 'role:sales_manager', 'position:sales_manager']) {
+    for (const actorId of [undefined, 'position:sales_manager']) {
       const req = await open(svc, toPosition);
       const out = await svc.decideNode(req.id, { decision: 'approve', actorId } as any, HOLDER);
       expect(out.finalized, `actor ${actorId ?? '(default)'}`).toBe(true);
@@ -3836,12 +3872,20 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
         `recorded for actor ${actorId ?? '(default)'}`,
       ).toEqual(['u_holder', SLOT, false]);
     }
-    // A 15.x-era slot keeps its own spelling, under the default actor too.
-    const legacy = await open(svc, [{ type: 'role', value: 'sales_manager' }]);
-    expect(legacy.pending_approvers).toEqual(['role:sales_manager']);
-    await svc.decideNode(legacy.id, { decision: 'reject' } as any, HOLDER);
-    const [rejected] = actionsOf(engine, legacy.id, 'reject');
-    expect([rejected.actor_id, rejected.acted_as]).toEqual(['u_holder', 'role:sales_manager']);
+    // ADR-0090 D3: the holder naming the retired spelling is refused — it is
+    // no identity the server can prove — and nothing is recorded.
+    const named = await open(svc, toPosition);
+    await expect(svc.decideNode(named.id, { decision: 'approve', actorId: 'role:sales_manager' }, HOLDER))
+      .rejects.toThrow(/^FORBIDDEN: cannot act as 'role:sales_manager'/);
+    expect(actionsOf(engine, named.id, 'approve')).toEqual([]);
+
+    // A stored 15.x-era `role:` slot is no position address: its holder takes
+    // nothing there, under the default actor either.
+    const legacy = await open(svc, toPosition);
+    await storeLegacyRoleSlot(engine, svc, legacy.id);
+    await expect(svc.decideNode(legacy.id, { decision: 'reject' } as any, HOLDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u_holder' is not a pending approver");
+    expect(actionsOf(engine, legacy.id, 'reject')).toEqual([]);
 
     // This widens nobody: holding A position is not holding THIS one.
     const req = await open(svc, toPosition);
@@ -3951,6 +3995,162 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
     expect(out.request.pending_approvers).toEqual([SLOT]);
     const [act] = actionsOf(engine, req.id, 'approve');
     expect([act.actor_id, act.acted_as]).toEqual(['u_holder', 'u_holder']);
+  });
+});
+
+// ── The `role:` arm retired (ADR-0090 D3) ───────────────────────────────
+//
+// `position:<p>` is the ONE spelling of a position address: `role:<p>` is no
+// alias of it, and the deprecated `role` approver TYPE writes its canonical
+// `org_membership_level:<v>` literal when its membership-tier lookup finds
+// nobody, so no path writes a `role:` slot. Two classes of request are left
+// to the privileged override (or a reassign to a real approver), and the
+// ruling accepted both: a slot a 15.x-era request stored as `role:<p>`, and a
+// new request from a flow that still authors `{ type: 'role', value: <a
+// position name> }`. These pin the holder's half — the position slot, listed,
+// `can_act` and decided with the default actor; `role:<p>` no address of it —
+// and the rescue, end to end through `decide()`, for both classes.
+describe('ApprovalService — the `role:` arm retired; the override decides what it leaves (ADR-0090 D3)', () => {
+  const svcFor = (engine: any) => {
+    let n = 0;
+    return new ApprovalService({ engine, clock: { now: () => new Date(1758000000000 + (n++) * 1000) } });
+  };
+  const holding = (userId: string, positions: unknown[], extra: Record<string, unknown> = {}) =>
+    ({ userId, tenantId: 't1', positions, permissions: [], ...extra }) as any;
+  /** Staffed into the position the requests are routed to; neither the submitter nor an admin. */
+  const HOLDER = holding('u_holder', ['sales_manager']);
+  const SLOT = 'position:sales_manager';
+  const toPosition = [{ type: 'position', value: 'sales_manager' }];
+  /** The three override doors, each holding no slot (same org as every request here: `t1`). */
+  const RESCUERS: Array<[string, any]> = [
+    ['a platform admin (admin_full_access)', holding('root', [], { permissions: ['admin_full_access'] })],
+    ['a platform admin (PLATFORM_ADMIN posture)', holding('root2', [], { posture: 'PLATFORM_ADMIN' })],
+    ['a same-org tenant admin (TENANT_ADMIN posture)', holding('tadmin', [], { posture: 'TENANT_ADMIN' })],
+  ];
+
+  let recordSeq = 0;
+  const open = async (svc: ApprovalService, approvers: any[]) => {
+    const recordId = `ret_${++recordSeq}`;
+    const out = await svc.openNodeRequest({
+      object: 'opportunity', recordId, runId: `run_ret${recordSeq}`, nodeId: 'approve_step',
+      flowName: 'deal_approval',
+      config: { approvers, behavior: 'first_response' as any },
+      record: { id: recordId, amount: 100 },
+    }, CTX);
+    if (!('id' in out)) throw new Error('scene did not open: the empty slate auto-approved');
+    return out;
+  };
+  const actionsOf = (engine: any, requestId: string, action: string) =>
+    (engine._tables['sys_approval_action'] ?? []).filter((a: any) => a.request_id === requestId && a.action === action);
+  /** `can_act` as `attachViewers` serves it — for a caller the participant gate hides the request from too. */
+  const servedCanAct = async (svc: ApprovalService, row: any, ctx: any) => {
+    const copy = { ...row };
+    (svc as any).attachViewers([copy], ctx, await (svc as any).actingCaller(ctx));
+    return copy.viewer.can_act as boolean;
+  };
+
+  /** The two request classes the retirement leaves to the override, each with the slot it carries. */
+  const LEFT_BEHIND: Array<[string, (engine: any, svc: ApprovalService) => Promise<{ id: string; slot: string }>]> = [
+    ['a slot a 15.x-era request stored as role:<p>', async (engine, svc) => {
+      const req = await open(svc, toPosition);
+      await storeLegacyRoleSlot(engine, svc, req.id);
+      return { id: req.id, slot: 'role:sales_manager' };
+    }],
+    ['a new request from { type: role, value: <a position name> } whose tier lookup finds no one', async (_engine, svc) => {
+      const req = await open(svc, [{ type: 'role', value: 'sales_manager' }]);
+      return { id: req.id, slot: 'org_membership_level:sales_manager' };
+    }],
+  ];
+
+  it('a position:<p> slot is listed, decidable and can_act for its holder, with the default actor', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, toPosition);
+    expect(req.pending_approvers).toEqual([SLOT]);
+
+    const filter = { status: 'pending' as const, approverId: ['u_holder', SLOT] };
+    expect((await svc.listRequests(filter, HOLDER)).map(r => r.id)).toEqual([req.id]);
+    expect(await svc.countRequests(filter, HOLDER)).toBe(1);
+    expect((await svc.getRequest(req.id, HOLDER))?.viewer?.can_act).toBe(true);
+
+    const out = await svc.decideNode(req.id, { decision: 'approve' } as any, HOLDER);
+    expect(out.finalized).toBe(true);
+    expect(out.request.status).toBe('approved');
+    const [act] = actionsOf(engine, req.id, 'approve');
+    expect([act.actor_id, act.acted_as, act.via_override]).toEqual(['u_holder', SLOT, false]);
+  });
+
+  it('role:<p> is no longer an address of that slot: not listed, not counted, not an actor — and the slot is untouched', async () => {
+    const engine = makeFakeEngine();
+    const svc = svcFor(engine);
+    const req = await open(svc, toPosition);
+
+    const retired = { status: 'pending' as const, approverId: ['u_holder', 'role:sales_manager'] };
+    expect(await svc.listRequests(retired, HOLDER)).toEqual([]);
+    expect(await svc.countRequests(retired, HOLDER)).toBe(0);
+    // SYS sees every row, so this miss is the filter's verdict alone.
+    expect(await svc.listRequests({ approverId: 'role:sales_manager' }, SYS)).toEqual([]);
+
+    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'role:sales_manager' }, HOLDER))
+      .rejects.toThrow(/^FORBIDDEN: cannot act as 'role:sales_manager'/);
+    const after = await svc.getRequest(req.id, SYS);
+    expect([after?.status, after?.pending_approvers]).toEqual(['pending', [SLOT]]);
+    expect(actionsOf(engine, req.id, 'approve')).toEqual([]);
+  });
+
+  describe.each(LEFT_BEHIND)('left to the override: %s', (_label, plant) => {
+    it('the holder of the same-named position cannot decide it: not listed, not visible, can_act false, refused', async () => {
+      const engine = makeFakeEngine();
+      const svc = svcFor(engine);
+      const { id, slot } = await plant(engine, svc);
+      const row = await svc.getRequest(id, SYS);
+      expect(row?.pending_approvers).toEqual([slot]);
+
+      for (const spelling of [SLOT, 'role:sales_manager']) {
+        const listed = await svc.listRequests({ status: 'pending', approverId: ['u_holder', spelling] }, HOLDER);
+        expect(listed, `listed under '${spelling}'`).toEqual([]);
+      }
+      expect(await svc.getRequest(id, HOLDER)).toBeNull();
+      expect(await servedCanAct(svc, row, HOLDER)).toBe(false);
+      await expect(svc.decideNode(id, { decision: 'approve' } as any, HOLDER))
+        .rejects.toThrow("FORBIDDEN: actor 'u_holder' is not a pending approver");
+      await expect(svc.decideNode(id, { decision: 'approve', actorId: 'role:sales_manager' }, HOLDER))
+        .rejects.toThrow(/^FORBIDDEN: cannot act as 'role:sales_manager'/);
+      expect(actionsOf(engine, id, 'approve')).toEqual([]);
+    });
+
+    it.each(RESCUERS)('%s decides it through decide() — by the override, and the run resumes', async (_who, admin) => {
+      const engine = makeFakeEngine();
+      const svc = svcFor(engine);
+      const resumed: Array<{ runId: string; signal: any }> = [];
+      svc.attachAutomation({ async resume(runId: string, signal: any) { resumed.push({ runId, signal }); } });
+      const { id } = await plant(engine, svc);
+      expect((await svc.getRequest(id, admin))?.viewer).toMatchObject({ can_act: false, can_override: true });
+
+      // What `POST /approvals/requests/:id/approve` calls: the actor is the caller.
+      const out = await svc.decide(id, { decision: 'approve', actorId: admin.userId }, admin);
+      expect(out.finalized).toBe(true);
+      expect(out.request.status).toBe('approved');
+      expect(out.resumed).toBe(true);
+      expect(resumed).toHaveLength(1);
+      expect(resumed[0].signal).toMatchObject({ branchLabel: 'approve' });
+      const [act] = actionsOf(engine, id, 'approve');
+      expect([act.actor_id, act.acted_as, act.via_override]).toEqual([admin.userId, null, true]);
+    });
+
+    it('a reassign to the holder rescues it too: the holder then decides with the default actor', async () => {
+      const engine = makeFakeEngine();
+      const svc = svcFor(engine);
+      const { id } = await plant(engine, svc);
+      const [, admin] = RESCUERS[2];
+      const moved = await svc.reassign(id, { actorId: admin.userId, to: 'u_holder' } as any, admin);
+      expect(moved.request.pending_approvers).toEqual(['u_holder']);
+      const out = await svc.decideNode(id, { decision: 'approve' } as any, HOLDER);
+      expect(out.finalized).toBe(true);
+      expect(out.request.status).toBe('approved');
+      const [act] = actionsOf(engine, id, 'approve');
+      expect([act.actor_id, act.acted_as, act.via_override]).toEqual(['u_holder', 'u_holder', false]);
+    });
   });
 });
 

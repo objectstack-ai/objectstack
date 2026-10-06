@@ -22,6 +22,7 @@ import type { SettingsAuditWriter, SettingsEngine, SettingsSecretStore } from '.
 import type { CryptoAdapter } from './crypto-adapter.js';
 import { LocalCryptoProvider } from './local-crypto-provider.js';
 import { buildConfigChangeAuditSink } from './config-change-audit.js';
+import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import {
   settingsObjects,
@@ -476,6 +477,18 @@ export function buildSettingAuditWriter(
   return {
     write: async (entry) => {
       try {
+        // Under the opt-in below the engine no longer checks that `actor_id`
+        // names a user, so the writer keeps that refusal; this `catch` reports
+        // it exactly as it reported the engine's (see assertUserReferenceResolves).
+        await assertUserReferenceResolves(
+          (id) => eng.findOne(USER_OBJECT, { where: { id }, fields: ['id'] }, { context: { isSystem: true } }),
+          {
+            object: 'sys_setting_audit',
+            field: 'actor_id',
+            label: registeredLabel(eng, { object: 'sys_setting_audit', field: 'actor_id' }, 'Actor'),
+          },
+          entry.actorId ?? null,
+        );
         await eng.insert('sys_setting_audit', {
           namespace: entry.namespace,
           key: entry.key,
@@ -489,7 +502,12 @@ export function buildSettingAuditWriter(
           request_id: entry.requestId ?? null,
           reason: entry.reason ?? null,
           created_at: new Date().toISOString(),
-        }, { bypassTenantAudit: true });
+          // The explicit system opt-in, as the settings row write carries:
+          // `sys_setting_audit` is the platform's own ledger, written after
+          // the settings door already authorized the change, and not a
+          // write that may rely on a missing principal to pass the security
+          // middleware's principal-less hand-off (ADR-0096 D5).
+        }, { bypassTenantAudit: true, context: { isSystem: true } });
       } catch (err: any) {
         logger?.warn?.('SettingsServicePlugin: setting-audit write failed: ' + (err?.message ?? err));
       }

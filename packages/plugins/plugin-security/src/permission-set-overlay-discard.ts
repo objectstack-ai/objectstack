@@ -38,19 +38,33 @@
  *
  * ## Eligibility — pin: refuses what it must
  *
- * "Package-declared" is decided by asking the SAME source
- * `bootstrapDeclaredPermissions` reads — `readDeclared(ql, 'permission')` —
- * for an item whose `name` matches AND carries a resolvable owning package
- * (`_packageId ?? packageId`), never by trusting the row's `managed_by`
- * column. This is deliberate: `managed_by` is exactly the column the
- * `provenance_skip` mechanism gets wrong, so gating on it would refuse the
- * one case this action most needs to fix (a genuinely package-declared set
- * whose row's `managed_by` was never 'package' to begin with — the
- * field-reported shape, where BOTH mechanisms compounded on one row). A name
- * with no current package declaration is treated as genuinely
- * environment-authored and refused — the maintainer's cited hazard verbatim:
- * "a name collision with a genuinely env-authored set would be destroyed
- * without a trace".
+ * "Package-declared" means SHIPPED BY A CODE (artifact) PACKAGE, and it is
+ * decided by {@link classifyPackagedPermissionSet} — the classifier the
+ * write-door lock and the overlay detection reading already ask, over the
+ * engine SchemaRegistry `bootstrapDeclaredPermissions` seeds from — never by
+ * trusting the row's `managed_by` column. This is deliberate: `managed_by` is
+ * exactly the column the `provenance_skip` mechanism gets wrong, so gating on
+ * it would refuse the one case this action most needs to fix (a genuinely
+ * package-declared set whose row's `managed_by` was never 'package' to begin
+ * with — the field-reported shape, where BOTH mechanisms compounded on one
+ * row). Any other verdict is refused — the maintainer's cited hazard
+ * verbatim: "a name collision with a genuinely env-authored set would be
+ * destroyed without a trace".
+ *
+ * [#21860] ⛔ A package id on a registry item does NOT answer the question,
+ * and this action used to read it as if it did (`_packageId ?? packageId`).
+ * The registry holds stored rows as well as artifacts, and the metadata list
+ * read stamps a stored row's `package_id` column onto its body as
+ * `_packageId`, so a set saved into a WRITABLE RUNTIME package — the
+ * environment's own work, whose `sys_metadata` row is its only stored
+ * definition — read as package-declared after the first list read, and this
+ * action deleted that row. The classifier tells the two apart (a stored row is
+ * tenant-authored, an artifact is not); its `org` AND `unknown` verdicts both
+ * refuse here, because the safe direction for a destructive action is the
+ * reading's, not the write door's: a set this environment cannot PROVE a code
+ * package ships is never deleted. `permission-set-drift.ts` gates its declared
+ * population on the same verdict, so the diagnostic that names this action as
+ * the remedy never names it for a set the action refuses.
  *
  * ## The audit entry may never be optimistic
  *
@@ -83,6 +97,7 @@ import {
   logSeedDurabilityFailure,
 } from './per-organization-catalog.js';
 import { readDeclared } from './bootstrap-declared-permissions.js';
+import { classifyPackagedPermissionSet } from './packaged-permission-set-lock.js';
 import { PermissionDeniedError } from './errors.js';
 import { isTenantAdmin } from './delegated-admin-gate.js';
 
@@ -200,20 +215,33 @@ export async function discardPermissionSetOverlay(
   const row = (await tryFind(ql, 'sys_permission_set', { id }, 1, organizationId))[0];
   if (!row) throw new PermissionSetNotFoundError(id);
 
-  // Eligibility: package-declared, decided from the ARTIFACT registry — never
-  // from `row.managed_by`, which is exactly the column the confounded
-  // provenance-skip + overlay-shadow case gets wrong. See module header.
-  const declaredItem = readDeclared(ql, 'permission').find(
-    (item: any) => item?.name === row.name && (item?._packageId ?? item?.packageId),
-  );
-  if (!declaredItem) {
+  // Eligibility: shipped by a code package, decided by the lock's classifier
+  // over the ARTIFACT registry — never from `row.managed_by`, which is exactly
+  // the column the confounded provenance-skip + overlay-shadow case gets
+  // wrong, and never from "an item of this name carries a package id", which a
+  // set saved into a writable runtime package also does. See module header.
+  const verdict = classifyPackagedPermissionSet(String(row.name), ql);
+  if (verdict.status !== 'packaged') {
     throw new PermissionDeniedError(
-      `[Security] Access denied: '${String(row.name)}' is not currently declared by any installed package — ` +
-        `discarding its overlay would destroy environment-authored work with no trace and no recovery path. ` +
-        `This action targets package-declared sets only.`,
+      verdict.status === 'unknown'
+        ? `[Security] Access denied: this environment could not determine whether '${String(row.name)}' is ` +
+          `shipped by an installed code package (${verdict.reason}) — the discard is refused rather than risk ` +
+          `deleting environment-authored work with no trace and no recovery path. Retry once the metadata ` +
+          `layer is readable.`
+        : `[Security] Access denied: '${String(row.name)}' is not shipped by any installed code package — it ` +
+          `is this environment's own set (created here, cloned, or saved into a writable runtime package), and ` +
+          `discarding its stored definition would destroy environment-authored work with no trace and no ` +
+          `recovery path. This action targets sets a code package ships only.`,
       { id, name: row.name },
     );
   }
+  // The declared body, for the degraded-kernel resync below. Picked among the
+  // items of a name the classifier has just called code-shipped, by the same
+  // selector as before, so for every set this action accepts the body and the
+  // audited package are exactly what they were.
+  const declaredItem = readDeclared(ql, 'permission').find(
+    (item: any) => item?.name === row.name && (item?._packageId ?? item?.packageId),
+  );
 
   const overlays = await findActiveOverlayRows(ql, String(row.name));
   if (overlays.length === 0) {

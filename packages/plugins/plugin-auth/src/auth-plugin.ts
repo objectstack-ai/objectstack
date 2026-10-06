@@ -41,20 +41,19 @@ import {
   DEFAULT_AUTH_BASE_PATH,
   type AuthManagerOptions,
 } from './auth-manager.js';
-import {
-  ensureDefaultOrganization,
-  isDefaultOrganizationBootstrapTrigger,
-} from './ensure-default-organization.js';
+import { isDefaultOrganizationBootstrapTrigger } from './ensure-default-organization.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
+import { withSystemContext } from './objectql-adapter.js';
 import type { AuthEventAuditSurface } from './auth-session-audit.js';
 import { createTenancyService, type TenancyService } from './tenancy-service.js';
 import {
-  backfillMemberships,
   isMembershipPolicy,
   MEMBERSHIP_POLICIES,
   type MembershipPolicy,
 } from './reconcile-membership.js';
+import { runOneTimeMembershipBackfill } from './membership-backfill-ledger.js';
+import { createEnsureDefaultOrganizationOnce } from './default-org-bootstrap-once.js';
 import {
   registerIdentityWriteGuard,
   registerManagedUpdateWhitelist,
@@ -1142,16 +1141,32 @@ export class AuthPlugin implements Plugin {
     // seed-ownership step injected. One crisp owner per posture, and the open
     // package never bootstraps an organization for a deployment whose
     // multi-organization runtime it does not provide.
+    // The one-time ADR-0093 D6 backfill (below) is handed to the bootstrap so
+    // the moment the default organization first EXISTS is a moment it runs:
+    // until then the pass has no target and records nothing, and deferring it
+    // to the next boot would let it judge users created during this uptime,
+    // whose membership was already decided at their creation.
+    let runBackfillOnDefaultOrg: ((source: string) => Promise<void>) | undefined;
     if (this.options.autoDefaultOrganization !== false && !postureEnforcesWall(resolveTenancyPosture())) {
+      // ADR-0093 D7 — the platform admin's owner bind is decided ONCE
+      // (`default-org-bootstrap-once.ts`, the gate the walled wiring in
+      // `@objectstack/organizations` calls too): recorded in the
+      // `sys_migration` ledger and latched in-process, after which this hook
+      // still recreates a missing default organization but binds nobody.
+      const ensureOnce = createEnsureDefaultOrganizationOnce({ logger: ctx.logger });
       const runEnsure = async () => {
         try {
           const ql = ctx.getService<IDataEngine>('objectql');
           if (!ql) return;
-          const res = await ensureDefaultOrganization(ql, { logger: ctx.logger });
+          const res = await ensureOnce(ql);
           if (res.defaultOrgCreated) {
             ctx.logger.info(
               `[auth] created Default Organization ${res.defaultOrgId} for the platform admin (single-org)`,
             );
+            // Not awaited: this can run inside the `sys_user` insert that
+            // created the platform admin, and the pass is serialized on its
+            // own chain, which never rejects.
+            void runBackfillOnDefaultOrg?.('default-org-created');
           }
         } catch (e) {
           ctx.logger.warn?.('[auth] ensureDefaultOrganization failed', {
@@ -1184,7 +1199,8 @@ export class AuthPlugin implements Plugin {
     }
 
     // ADR-0093 D6 — backfill memberships for pre-existing member-less users
-    // (historical create-user / import rows from before the reconciler existed).
+    // (historical create-user / import rows from before the reconciler existed),
+    // ONCE per deployment (`membership-backfill-ledger.ts`, ADR-0093 D7).
     // Registered AFTER the default-org bootstrap hook so a target org exists by
     // the time it runs. `backfillMemberships` self-guards: it no-ops under
     // `invite-only` policy and in multi-org (tenancy.defaultOrgId() → null),
@@ -1196,8 +1212,14 @@ export class AuthPlugin implements Plugin {
       // `app:seeded` from multiple app bundles) don't race the same scan and
       // trip the (organization_id, user_id) unique index into warn noise.
       let backfillChain: Promise<void> = Promise.resolve();
+      // Latched once the one-time pass has decided in this process — read
+      // from the ledger, or carried out now. A record that failed to land
+      // ('ran-unrecorded') does not unlatch it: a second trigger in this
+      // process must not run the pass again (ADR-0093 D7).
+      let backfillDecided = false;
       const runBackfill = (source: string): Promise<void> => {
         backfillChain = backfillChain.then(async () => {
+          if (backfillDecided) return;
           try {
             // #5152 — the policy this pass runs under is a SETTING, so bind the
             // namespace before reading it. This hook is registered in `init()`
@@ -1218,12 +1240,24 @@ export class AuthPlugin implements Plugin {
             // guard is a precondition, not a degraded mode.
             const manager = this.authManager;
             if (!ql || !tenancy || !manager) return;
-            const res = await backfillMemberships(ql, {
-              policy: manager.getMembershipPolicy(),
-              resolveTargetOrg: () => tenancy.defaultOrgId(),
-              logger: ctx.logger,
-            });
-            if (res.bound > 0) {
+            // ADR-0093 D7 — membership is decided at creation, so this pass is
+            // ONE-TIME per deployment: it runs until it reaches a verdict, the
+            // verdict is recorded in the `sys_migration` ledger, and every later
+            // trigger reads the record and binds nobody.
+            const outcome = await runOneTimeMembershipBackfill(
+              ql,
+              {
+                policy: manager.getMembershipPolicy(),
+                resolveTargetOrg: () => tenancy.defaultOrgId(),
+                logger: ctx.logger,
+              },
+              ctx.logger,
+            );
+            if (outcome.status === 'ran' || outcome.status === 'ran-unrecorded' || outcome.status === 'already-run') {
+              backfillDecided = true;
+            }
+            const res = outcome.backfill;
+            if (res && res.bound > 0) {
               ctx.logger.info(
                 `[auth] membership backfill (${source}) bound ${res.bound} member-less user(s) to the default organization (ADR-0093 D6)`,
                 res,
@@ -1238,12 +1272,14 @@ export class AuthPlugin implements Plugin {
         });
         return backfillChain;
       };
+      runBackfillOnDefaultOrg = runBackfill;
       ctx.hook('kernel:ready', () => runBackfill('kernel:ready'));
       // #2996: app seeds insert `sys_user` via raw engine.insert, bypassing
       // better-auth's `user.create.after` reconciler. A seed that overruns
       // OS_INLINE_SEED_BUDGET_MS finishes in the background AFTER kernel:ready,
-      // so its users miss the one-shot backfill above. Re-run the (idempotent)
-      // backfill when the app plugin signals seed settle.
+      // so its users would miss a kernel:ready pass that had no target yet.
+      // The trigger stays; the ledger makes it a no-op once the one-time pass
+      // has been recorded.
       ctx.hook('app:seeded', () => runBackfill('app:seeded'));
     }
 
@@ -2344,10 +2380,18 @@ export class AuthPlugin implements Plugin {
         // better-auth's own endpoint invocation context. This is the same
         // physical row the better-auth runtime reads at introspect / token
         // / authorize time, so the toggle is fully honoured.
-        const dataEngine: any = this.authManager!.getDataEngine();
-        if (!dataEngine) {
+        //
+        // And through the same WRAPPER: `withSystemContext`, so the read and
+        // the write both carry the explicit system opt-in (`isSystem: true`).
+        // The platform-admin judge above is this route's authorization; the
+        // raw engine would have handed the security middleware a context with
+        // no principal and no opt-in — the principal-less hand-off (ADR-0096),
+        // which is not an authorization at all.
+        const rawEngine = this.authManager!.getDataEngine();
+        if (!rawEngine) {
           return c.json({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'Data engine unavailable' } }, 503);
         }
+        const dataEngine: any = withSystemContext(rawEngine);
 
         const existing = await dataEngine.findOne('sys_oauth_application', {
           where: { client_id: clientId },

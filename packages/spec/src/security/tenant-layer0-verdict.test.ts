@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { TenantLayer0VerdictSchema } from './tenant-layer0-verdict';
 
-describe('[#15813] TenantLayer0VerdictSchema — the four verdicts', () => {
+describe('TenantLayer0VerdictSchema — the four verdicts the wall records on an operation', () => {
   it.each([
     ['none', { kind: 'none' }],
     ['organization', { kind: 'organization', organizationId: 'org_acme' }],
@@ -27,7 +27,7 @@ describe('[#15813] TenantLayer0VerdictSchema — the four verdicts', () => {
   });
 });
 
-describe('[#15813] TenantLayer0VerdictSchema — junk is refused, never read as an organization', () => {
+describe('TenantLayer0VerdictSchema — junk is refused, never read as an organization', () => {
   it.each([
     ['an unknown kind', { kind: 'organisation', organizationId: 'org_acme' }],
     ['an empty organization id', { kind: 'organization', organizationId: '' }],

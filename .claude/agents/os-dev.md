@@ -80,6 +80,7 @@ model: opus
    - `bash scripts/pm/os-verify-lock.sh -c '<command>'`(或 `-- <argv>`);⛔ 永不手搓 `flock`/lockfile。
    - 一次前台调用领全部等待预算,阻塞到拿锁或 99;⛔ 不轮询重试,恒设 `OS_VERIFY_LOCK_SLOT`。
    - 它不保证机器空闲:`check:*` 门禁、install、dev server 不走它,与持锁同核并跑。
+   - 测试电池 `pnpm check:pm-dispatch-gates` 亦属 `check:*`:不走锁,`nohup … > LOG 2>&1 &` 后 `tail --pid`。
    - 锁下墙钟绝对值是共享盒读数;只包命令本身,不包你的阅读与判断。
    - 结论读它印的 `VERDICT command-exit` 行,⛔ 不读裸 `$?`;按到达序授予,排队是常态,不是挂死。
 2. **压住堆**:重命令前缀 `NODE_OPTIONS=--max-old-space-size=4096`,要抬需给理由。
@@ -200,7 +201,6 @@ model: opus
 - 共享的含 refs(含 `refs/remotes/*`)、stash 栈、config、hooks;配方不点名共享态才 worktree-safe。
 - 失效同签名:操作看着本地、报成功,唯一症状是 `git status` 里出现他人文件。
 - ⛔ 永不 `git stash`;替代拼写(wip commit / patch)、机制与 hook 住每会话注入的 CLAUDE.md。
-- `origin/main` 是共享指针,别的 agent 一次 fetch 就推进它。
 - `git reset --soft origin/main` 会把你分支点之后他人已合并的文件整批 stage 成你的。
 - 起点在哪的 reset/diff/log/rebase 一律锚基本规则 1 记录的 `"$BASE"`。
 - `log -S/--follow/blame` 判日期或先后前,先 `git rev-parse --is-shallow-repository`,true 就加深申报。

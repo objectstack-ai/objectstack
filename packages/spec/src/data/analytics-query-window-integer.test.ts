@@ -67,7 +67,7 @@ const ACCEPTED: ReadonlyArray<[string, Record<string, unknown>]> = [
 ];
 
 for (const [name, schema, base] of DOORS) {
-  describe(`[#21365] ${name} — the window is a non-negative integer`, () => {
+  describe(`${name} — the window is a non-negative integer`, () => {
     for (const [label, window, key, code] of REFUSED) {
       it(`refuses ${label} at \`${key}\``, () => {
         const r = schema.safeParse({ ...base, ...window });
@@ -88,7 +88,7 @@ for (const [name, schema, base] of DOORS) {
   });
 }
 
-describe('[#21365] the dataset selection holds the query\'s own declarations, not a copy', () => {
+describe('the dataset selection holds the query\'s own declarations, not a copy', () => {
   it('`limit` and `offset` on DatasetSelectionSchema are the AnalyticsQuerySchema instances', () => {
     expect(DatasetSelectionSchema.shape.limit).toBe(AnalyticsQuerySchema.shape.limit);
     expect(DatasetSelectionSchema.shape.offset).toBe(AnalyticsQuerySchema.shape.offset);

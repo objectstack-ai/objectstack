@@ -60,6 +60,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Campo de título",
         helpText: "Campo cuyo valor titula cada registro (p. ej. \"name\", \"subject\"). Puntero canónico de ADR-0079: lo leen la presentación del registro, la búsqueda de ObjectQL y las vistas previas de registros relacionados."
       },
+      imageField: {
+        label: "Campo de imagen",
+        helpText: "Campo cuyo valor es la imagen de cada registro, mostrada junto al título en el encabezado de la página del registro. Debe nombrar un campo de este objeto de tipo image o avatar; cualquier otro nombre se rechaza al guardar el objeto. Vacío: sin imagen del registro y sin marcador de posición."
+      },
       isSystem: {
         label: "Integrado del sistema",
         helpText: "Objeto de sistema (protegido contra eliminación; el uso compartido predeterminado es público)"
@@ -1732,6 +1736,22 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Mensaje de error",
         helpText: "Mensaje de error que se muestra cuando la acción falla, en lugar del error original."
       },
+      outcomeMessages: {
+        label: "Mensajes por resultado",
+        helpText: "Mensaje de éxito por cada resultado del manejador, en JSON: cada clave es un valor `outcome` en snake_case que el manejador devuelve en su carga útil de éxito, y cada valor es la etiqueta que se muestra para ese resultado, p. ej., {\"archived\": \"Archivado\", \"already_archived\": \"Ya estaba archivado\"}. Una etiqueta puede interpolar ${result.*}. Un resultado sin entrada muestra el mensaje de éxito; una clave que el manejador nunca devuelve no se muestra nunca. No se admite junto a un diálogo de resultado ni con `operation: 'update'`."
+      },
+      onSuccess: {
+        label: "Al completarse",
+        helpText: "Navegación tras completarse la acción: la ruta que se abre y dónde se abre."
+      },
+      "onSuccess.navigate": {
+        label: "Navegar a",
+        helpText: "Ruta o plantilla de URL que se abre tras completarse la acción. Puede interpolar ${param.*} (los valores que recogió el diálogo de parámetros), ${ctx.*} (origin, apiBase, user, org, recordId, selection) y ${result.*} (la respuesta del servidor, p. ej., ${result.id}). Un valor relativo es una ruta dentro de la aplicación."
+      },
+      "onSuccess.openIn": {
+        label: "Abrir navegación en",
+        helpText: "Dónde se abre la navegación: 'self' (el valor predeterminado) navega en la misma pestaña y 'newTab' abre una pestaña nueva del navegador."
+      },
       refreshAfter: {
         label: "Actualizar después",
         helpText: "Actualiza la lista/página tras completar la acción"
@@ -1767,6 +1787,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       requiresFeature: {
         label: "Requiere función",
         helpText: "Indicador público de función de autenticación que condiciona esta acción. Se traslada al predicado `visible` durante el análisis y se elimina de la salida, así que ningún consumidor posterior llega a ver la clave."
+      },
+      requiresMembershipReach: {
+        label: "Requiere alcance de membresía",
+        helpText: "El endpoint de la organización al que llama esta acción, de modo que solo se ofrece a los miembros cuyo grado alcanza ese endpoint. Se traslada al predicado `visible` durante el análisis y se elimina de la salida, así que ningún consumidor posterior llega a ver la clave."
       },
       requiredPermissions: {
         label: "Permisos requeridos",

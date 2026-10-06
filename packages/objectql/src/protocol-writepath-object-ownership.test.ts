@@ -455,13 +455,18 @@ describe('#4636 — rollback re-registers under the row\'s own package binding',
         // The concurrent publish lands between `restoreVersion`'s parent read
         // and `put`'s optimistic-lock read. That second read is identified by
         // the one property only it has — it runs INSIDE the write transaction,
-        // so the engine call carries a `context` — rather than by counting
-        // reads, which would silently stop covering anything the day a read is
-        // added to the rollback path.
+        // so its context carries the transaction handle — rather than by
+        // counting reads, which would silently stop covering anything the day
+        // a read is added to the rollback path. [#21911] Every repository read
+        // now carries the explicit system opt-in, so a bare `context` no
+        // longer singles it out; the handle does. The engine hands its
+        // callback one here, as `ObjectQL.transaction` does.
+        engine.transaction = async (cb: (ctx: unknown, info: { owned: boolean }) => Promise<unknown>) =>
+            cb({ transaction: 'trx' }, { owned: true });
         let fired = false;
         engine.findOne = async (table: string, opts: Record<string, any>) => {
             const row = await realFindOne(table, opts);
-            if (!fired && table === 'sys_metadata' && row && 'context' in opts && opts.where?.state === 'active') {
+            if (!fired && table === 'sys_metadata' && row && opts.context?.transaction !== undefined && opts.where?.state === 'active') {
                 fired = true;
                 (row as any).checksum = `sha256:${'a'.repeat(64)}`; // someone else published
             }

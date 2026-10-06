@@ -63,7 +63,7 @@ describe('AnalyticsEndpoint', () => {
   });
 });
 
-describe('AnalyticsQueryRequestSchema — the BARE AnalyticsQuery shape (#3878)', () => {
+describe('AnalyticsQueryRequestSchema — the BARE AnalyticsQuery shape', () => {
   it('should accept a minimal bare query', () => {
     const req = AnalyticsQueryRequestSchema.parse({
       cube: 'orders',
@@ -104,7 +104,7 @@ describe('AnalyticsQueryRequestSchema — the BARE AnalyticsQuery shape (#3878)'
     ).toThrow();
   });
 
-  it('should reject the retired {cube, query: {...}} envelope (#3891 shim dialect)', () => {
+  it('should reject the retired {cube, query: {...}} envelope (the degraded shim dialect)', () => {
     expect(() =>
       AnalyticsQueryRequestSchema.parse({
         cube: 'orders',
@@ -384,7 +384,7 @@ describe('GetAnalyticsMetaRequestSchema', () => {
  * replaced by the assertion that carries the actual load of this change: the
  * previously-declared shape is now rejected.
  */
-describe('AnalyticsMetadataResponseSchema — the CubeMeta[] projection (#6442)', () => {
+describe('AnalyticsMetadataResponseSchema — the CubeMeta[] projection', () => {
   /**
    * A real `GET /analytics/meta` body: what `AnalyticsService.getMeta` builds —
    * measure/dimension names CUBE-QUALIFIED, `title` projected from the

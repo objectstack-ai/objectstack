@@ -60,7 +60,7 @@ const ROWS = {
   'element:repeater': ElementRepeaterPropsSchema,
 } as const;
 
-describe('the six rows exist and are the exported schemas (#20371)', () => {
+describe('the six rows exist and are the exported schemas', () => {
   it.each(Object.entries(ROWS))('`%s` dispatches to its exported schema', (type, schema) => {
     expect(Object.keys(ComponentPropsMap)).toContain(type);
     expect((ComponentPropsMap as Record<string, unknown>)[type]).toBe(schema);
@@ -313,7 +313,7 @@ describe('what the measurement decided, pinned', () => {
       expect(schema.parse({ label: 'Close child', objectName: 'task' })).toEqual({ label: 'Close child', objectName: 'task' });
     }
     // `action:group` / `action:menu` forward each MEMBER's `objectName`: it
-    // rides the member object, which this row does not judge ...
+    // rides the member object, which declares it (#21464, the S-final stage) ...
     for (const schema of [ActionGroupPropsSchema, ActionMenuPropsSchema]) {
       const member = { name: 'close', label: 'Close', type: 'script', objectName: 'task' };
       expect(schema.safeParse({ actions: [member] }).success).toBe(true);

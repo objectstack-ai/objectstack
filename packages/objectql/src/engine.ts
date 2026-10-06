@@ -119,6 +119,11 @@ import {
   // The data door's object-existence 404, shared for the same reason: an
   // in-process verb refuses a name the registry does not resolve with it.
   objectNotFoundError,
+  // The one write-response non-exposure helper (credential mask + `internal`
+  // omission); a record-change event body is an external exit of the same
+  // write, so it is projected through the same rule — see
+  // {@link projectEventRecordBody}.
+  omitInternalFieldsFromWriteResponse,
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
@@ -298,6 +303,9 @@ import {
   rowsWithDeclaredColumnsOnly,
   withDeclaredColumnsOnly,
 } from './declared-read-columns.js';
+// [#21777] "Is this schema the remote's?" One predicate, shared with the boot sync.
+// [#21910, #21918] And its injected-column refinement, which both cascade walks ask.
+import { isFederatedObject, isFederatedUnprovisionedInjectedColumn } from './federated-object.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
   resolveEngineDeleteDispatch,
@@ -3363,6 +3371,33 @@ function redactEventMetadataBody(
   return rest;
 }
 
+/**
+ * Project a `data.record.*` event body (`after` / `changes`) through the
+ * generic-data-path non-exposure rules — credential-class fields MASKED,
+ * `internal: true` fields OMITTED — by the ONE helper every external write
+ * response already goes through (`omitInternalFieldsFromWriteResponse`,
+ * `@objectstack/core`). ⛔ Never a second copy of that rule here.
+ *
+ * The event is an external exit of the write: its subscribers (outbound
+ * deliveries, search indexes, flows that snapshot the record) store or forward
+ * what they receive to readers below the write boundary, so the body carries
+ * what a read of the same row would answer — never the stored value the
+ * engine's own write result keeps whole for the privileged in-process caller.
+ *
+ * Pure with respect to the write result: the helper deletes and assigns in
+ * place, so it runs on a fresh shallow copy and the caller's record (the
+ * engine's return value) is never touched.
+ */
+function projectEventRecordBody(
+  schema: unknown,
+  body: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (body === undefined) return body;
+  const copy = { ...body };
+  omitInternalFieldsFromWriteResponse(schema, copy);
+  return copy;
+}
+
 /** `DataEvent.userId` — the acting user, when the execution context names one. */
 function eventUserId(execCtx?: ExecutionContext): string | undefined {
   const userId = execCtx?.userId;
@@ -5483,10 +5518,10 @@ export class ObjectQL implements IObjectQLEngine {
     // of their own and were riding the same wrong connection.
     const hasTx = tx !== undefined && this.transactionCoversDriverFor(object, tx);
     const objectSchema = this._registry.getObject(object) as any;
-    // `external != null` is the same predicate `syncObjectSchema` routes a
+    // `isFederatedObject` is the same predicate every schema-sync seam routes a
     // federated object by — one spelling of "this schema is the remote's",
     // not a second reading of it.
-    const isFederated = objectSchema?.external != null;
+    const isFederated = isFederatedObject(objectSchema);
     const hasTenant =
       execCtx?.tenantId !== undefined &&
       !isTenancyDisabled(objectSchema) &&
@@ -5730,7 +5765,7 @@ export class ObjectQL implements IObjectQLEngine {
     // A federated object's schema is the REMOTE's (ADR-0015); the platform's
     // injected column says nothing about it, which is the same reason
     // `buildDriverOptions` withholds `tenantId` there.
-    if (objectSchema?.external != null) return undefined;
+    if (isFederatedObject(objectSchema)) return undefined;
     const tenantField = resolveTenantFieldName(objectSchema);
     if (!tenantField) return undefined;
     // A row that names its own organization has carried one explicitly. Only a
@@ -7570,17 +7605,23 @@ export class ObjectQL implements IObjectQLEngine {
 
     try {
       const timestamp = new Date().toISOString();
-      const changes = redactEventMetadataBody(object, eventRecordBody(input.changes), input.after);
-      const after = redactEventMetadataBody(object, eventRecordBody(input.after), input.after);
+      const schema = this._registry.getObject(object);
+      // Credential mask + `internal` omission on both bodies, the same rule
+      // the write response gets ({@link projectEventRecordBody}).
+      const changes = projectEventRecordBody(
+        schema,
+        redactEventMetadataBody(object, eventRecordBody(input.changes), input.after),
+      );
+      const after = projectEventRecordBody(
+        schema,
+        redactEventMetadataBody(object, eventRecordBody(input.after), input.after),
+      );
       const userId = eventUserId(input.context);
       // [#14970] The RECORD's organization, off the row itself — ⛔ never
       // `input.context.tenantId`, which is the CALLER's. See
       // {@link eventOrganizationId}; omitted, never `''`/`undefined`, because
       // absence has exactly one spelling in the schema.
-      const organizationId = eventOrganizationId(
-        this._registry.getObject(object),
-        input.organizationRow,
-      );
+      const organizationId = eventOrganizationId(schema, input.organizationRow);
       const event: DataEvent = DataEventSchema.parse({
         id: generateEventUuid(),
         type: `data.record.${action}`,
@@ -8410,7 +8451,7 @@ export class ObjectQL implements IObjectQLEngine {
         // caller that is not SYSTEM its rows are the ones its OWN read returns,
         // through every enforcement layer; any other id is 'unreadable', stored or not.
         let ownRead: Set<string> | undefined;
-        if (bound && (targetSchema?.external != null || resolveTenantFieldName(targetSchema) === null)) {
+        if (bound && (isFederatedObject(targetSchema) || resolveTenantFieldName(targetSchema) === null)) {
           const own = await this.find(target, {
             where: { id: { $in: [...ids] } }, fields: ['id'], context: caller as EngineQueryOptions['context'],
           }) as Array<Record<string, unknown>>;
@@ -15792,7 +15833,7 @@ export class ObjectQL implements IObjectQLEngine {
         const childName = (child as any)?.name as string | undefined;
         const fields = (child as any)?.fields as Record<string, any> | undefined;
         if (!childName || !fields) continue;
-        for (const fdef of Object.values(fields)) {
+        for (const [fieldName, fdef] of Object.entries(fields)) {
           if (!fdef || (fdef.type !== 'master_detail' && fdef.type !== 'lookup')) continue;
           // [#18550] The carrier is read through the ONE arbiter, so a
           // `reference` no reader can read REFUSES here instead of reading as
@@ -15816,6 +15857,13 @@ export class ObjectQL implements IObjectQLEngine {
           let resolvedRef: string | undefined;
           try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
           if (ref !== name && resolvedRef !== name) continue;
+          // [#21910, #21918] The scan skips every column the registry injected
+          // into a federated object and the object does not provision, so this
+          // walk does too: the participant test stays the scan's own, as the
+          // comment above requires. A federated object this walk still reaches
+          // through a relation its author declared keeps the verdict
+          // `'split'`, because the scan probes that relation.
+          if (isFederatedUnprovisionedInjectedColumn(child, fieldName)) continue;
           out.push(childName);
           break;
         }
@@ -16283,6 +16331,31 @@ export class ObjectQL implements IObjectQLEngine {
         let resolvedRef: string | undefined;
         try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
         if (ref !== object && resolvedRef !== object) continue;
+
+        // [#21910, #21918] A lookup the registry INJECTED into a federated
+        // object, and the object does not provision, is not a reference to
+        // anything, so it is not a relation to probe. That is the tenant
+        // anchor `organization_id`, the ADR-0117 D1 anchor
+        // `owning_business_unit_id`, and the owner and audit lookups
+        // `owner_id` / `created_by` / `updated_by`. On a federated object each
+        // exists in the registered schema and nowhere else: the probe below
+        // was refused by the driver (`INVALID_FILTER`, no such column), its
+        // catch propagated the refusal as #8895 rules for a missing column,
+        // and deleting the organization, business unit or user it names was
+        // refused on a deployment with a federated object bound.
+        // `buildDriverOptions` and the related-record read already refuse this
+        // reading of the tenant column.
+        // {@link isFederatedUnprovisionedInjectedColumn} reads which columns
+        // those are from the registry's own provenance, never from a list of
+        // names, and {@link ObjectQL.planCascadeAtomicity} asks it too.
+        //
+        // ⛔ The catch below is deliberately NOT widened to pass a missing
+        // column as benign. That would invert #8895's discriminate or
+        // propagate for every object, not just these injected columns: a
+        // lookup the author declared on a federated object, including an
+        // author's own `organization_id` or `owner_id`, stays in the scan, and
+        // its probe failure still propagates.
+        if (isFederatedUnprovisionedInjectedColumn(child, fieldName)) continue;
 
         // A master-detail parent owns its children: cascade by default (the
         // child FK is typically required, so set_null would be invalid). Only
@@ -18304,12 +18377,47 @@ export class ObjectQL implements IObjectQLEngine {
    * Call this after dynamically registering new objects at runtime
    * (e.g. after template seeding) to ensure tables/collections exist
    * before inserting seed data.
+   *
+   * A federated object (ADR-0015 `external`) is not a DDL target. It is bound
+   * to its remote table without DDL, the way the boot sync
+   * (`ObjectQLPlugin.syncRegisteredSchemas`) binds it.
    */
   async syncSchemas(): Promise<void> {
     const allObjects = this._registry.getAllObjects();
     for (const obj of allObjects) {
       const driver = this.getDriverForObject(obj.name);
       if (!driver) continue;
+      // [#21777] Same predicate and same treatment as the boot sync. The remote
+      // owns this object's schema, so `syncSchema` would be refused
+      // (`ExternalSchemaModeViolationError` on an external-schema datasource).
+      // Logging that refusal at the #4632 ERROR below was a false durability
+      // alarm, because nothing was meant to be created. The DDL-free binding
+      // still runs, because an object registered at runtime has no other way
+      // to its remote table: without it every read resolves to a table named
+      // after the object.
+      if (isFederatedObject(obj)) {
+        if (typeof (driver as any).registerExternalObject !== 'function') {
+          this.logger.debug('Driver does not support registerExternalObject, skipping external object', {
+            object: obj.name,
+            driver: (driver as any).name,
+          });
+          continue;
+        }
+        try {
+          await (driver as any).registerExternalObject(obj);
+          this.logger.debug('Federated object is not a DDL target — bound to its remote table without DDL', {
+            object: obj.name,
+            driver: (driver as any).name,
+          });
+        } catch (e: unknown) {
+          this.logger.warn('Failed to register external object metadata', {
+            object: obj.name,
+            driver: (driver as any).name,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+        continue;
+      }
       const tableName = StorageNameMapping.resolveTableName(obj);
       if (typeof (driver as any).syncSchemasBatch === 'function' && (driver as any).supports?.batchSchemaSync) {
         // Already handled per-driver below; skip individual call
@@ -18358,7 +18466,7 @@ export class ObjectQL implements IObjectQLEngine {
     // (its remote schema is owned externally). This is what an app's onEnable
     // calls after registering a late external driver so coercion maps + the
     // physical-table mapping exist for queries. See SqlDriver.registerExternalObject.
-    if (obj.external != null) {
+    if (isFederatedObject(obj)) {
       if (typeof (driver as any).registerExternalObject === 'function') {
         await (driver as any).registerExternalObject(obj);
       }

@@ -48,7 +48,7 @@ const SOURCE: KnowledgeSource = {
 
 const CRON_5_FIELD = '0 3 * * *';
 
-describe('KnowledgeRefreshPolicySchema.cron — the typed cron slot (#14825)', () => {
+describe('KnowledgeRefreshPolicySchema.cron — the typed cron slot', () => {
   it('positive control: a 5-field cron on a full knowledge source parses and normalizes to the cron envelope', () => {
     const r = KnowledgeSourceSchema.safeParse({ ...SOURCE, refresh: { cron: CRON_5_FIELD } });
     expect(r.success, r.success ? '' : JSON.stringify(r.error.issues)).toBe(true);
@@ -94,8 +94,8 @@ describe('KnowledgeRefreshPolicySchema.cron — the typed cron slot (#14825)', (
   });
 
   it.each([
-    ['a dialect the protocol does not declare (`js`, retired at #3278, ADR-0058 addendum)', 'js'],
-    ['a declared dialect that is not this slot\'s (`cel`, #15028)', 'cel'],
+    ['a dialect the protocol does not declare (`js`, a retired expression dialect, ADR-0058 addendum)', 'js'],
+    ['a declared dialect that is not this slot\'s (`cel`)', 'cel'],
   ])('refuses an envelope naming %s with ONE `invalid_union` at `cron` whose message is the cron dialect-only sentence', (_label, dialect) => {
     const r = KnowledgeRefreshPolicySchema.safeParse({ cron: { dialect, source: 'x' } });
     expect(r.success).toBe(false);

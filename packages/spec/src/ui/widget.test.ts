@@ -364,7 +364,7 @@ describe('FieldWidgetPropsSchema', () => {
 // but `unreachable` is NOT the retirement trigger for this one. Re-measure the
 // objectui consumer before touching it.
 // ============================================================================
-describe('#5055 — the one surviving shape, and the eight that left', () => {
+describe('the widget retirement — the one surviving shape, and the eight that left', () => {
   it('FieldWidgetPropsSchema is still unreachable — and that is not a reason to retire it', () => {
     const { verdict, nodeCount, rootCount } = measureDoors();
 

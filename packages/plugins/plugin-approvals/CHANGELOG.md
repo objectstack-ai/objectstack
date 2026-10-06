@@ -1,5 +1,317 @@
 # @objectstack/plugin-approvals
 
+## 17.7.0
+
+### Minor Changes
+
+- 50e1c65: fix(plugin-audit,platform-objects,plugin-auth,plugin-sharing,plugin-approvals)!: the audit ledger no longer records fields declared `internal`, and the platform's credential-class fields are declared `internal`
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or config field is removed or renamed: the change narrows what the generic data path and the audit ledger return for platform-owned columns, and nothing an author wrote needs rewriting. The objectql half adds exports only. -->
+  
+  **BREAKING for readers of credential-class columns on the generic data path and in the audit ledger.**
+  
+  **What changed.**
+  
+  - The audit plugin's CRUD mirror now omits every field declared `internal: true` from the
+    rows it writes to `sys_audit_log` and `sys_activity`: create `new_value`, both sides of an
+    update, delete `old_value`, and the activity row. It already masked `secret` and `password`
+    fields; `internal` is the same contract the generic data path already enforces ("never
+    returned on the generic data path"). An update that changes only an `internal` field still
+    writes its row, with neither value.
+  - These platform fields are now declared `internal: true`, so neither the generic data path
+    nor the ledger returns them: the JWT signing key's private key (`sys_jwks`), both credential
+    columns of the one-time verification object (`sys_verification`), the two-factor secret and
+    backup codes, the SSO provider's OIDC and SAML protocol blobs, the OAuth access and refresh
+    token columns, the OAuth client secret digest, the SCIM credential digest, the share link's
+    token and password hash, and the approval action-token digest. API key digests and email
+    headers were already `internal`; the ledger now honours that too.
+  - Every built-in consumer that needs one of these values reads it back through the engine's
+    privileged accessor rather than the generic path: JWT signing, password reset and the other
+    one-time verification flows, two-factor verification, SSO sign-in and the legacy SSO secret
+    migration, OAuth client authentication, share-link redemption (the password gate is held)
+    and the creator's share-link list, which keeps returning each link's token. The runtime's
+    share-link resolve route (the dispatcher twin of the plugin's) still answers "password
+    required" for a protected link rather than the unknown-link shape.
+  - The one-time verification object's record title is now the fixed label `Verification`; it no
+    longer shows the identifier column.
+  - `@objectstack/objectql` exports two helpers from its main and `/core` entries:
+    `collectInternalReadFields` (the names of an object's `internal` fields) and
+    `readInternalColumn` (recovers one `internal` column for rows already read, through the
+    engine's privileged accessor, and fails closed when the value cannot be recovered).
+  
+  **What to do after upgrading.**
+  
+  - **Rotate the JWT signing keys.** Ledger rows written before this release are not rewritten
+    (the ledger is append-only), so a signing key that existed before the upgrade may have a copy
+    in the ledger. Rotate the keys so that copy signs nothing.
+  - **Revoke and re-mint share links that must stay private.** A share link's token is a
+    capability that stays valid until the link expires or is revoked, and links minted before this
+    release may have a copy in the ledger.
+  - A copy of a one-time verification credential is usable only while that credential is still
+    outstanding: once it is consumed or expires, its copy names nothing that will be accepted.
+  - An integration that read any of these columns through `GET /api/v1/data/...` no longer
+    receives them. Read share links through `/api/v1/share-links`, and OAuth clients and SSO
+    providers through their auth routes.
+- c9c555a: fix(plugin-approvals)!: `role:<name>` is no longer a position address, and the deprecated `role` approver type stops writing `role:` slots (ADR-0090 D3)
+  
+  Clause-②: no (narrowing)
+  
+  `position:<name>` is now the one spelling of a position address. ADR-0090 D3 retired the word `role` with no alias window; the approvals service still read `role:<name>` as a second spelling of the same position everywhere it compares a slot with the caller ("My Pending", the participant gate, `viewer.can_act`, and the slot test of every decision). The stock console now sends `position:<name>`, so that arm is gone.
+  
+  **FROM → TO.** FROM `role:<name>` → TO `position:<name>`, wherever a caller names a position: the `approverId` filter of `GET /api/v1/approvals/requests`, and the `actorId` of approve, reject, send back, reassign, request info and comment. A `role:<name>` ask now matches only a slot stored under that exact spelling, and a `role:<name>` actor is refused with 403 `FORBIDDEN` ("cannot act as …").
+  
+  **The writer.** An approver authored with the deprecated type `{ type: 'role', value: … }` already resolved as `org_membership_level` (the org-membership tier: owner, admin, member). When that lookup found no one, the request's fallback slot kept the authored spelling, `role:<value>`, and a holder of a position with the same name decided it through the `role:` arm. That fallback now writes the canonical `org_membership_level:<value>`, so no path writes a `role:` slot. A stored slot is never rewritten.
+  
+  Two classes of pending request are now decided only by an admin override:
+  
+  - a request a 15.x-era release opened, whose slot is stored as `role:<name>`;
+  - a new request opened from a flow that still authors `{ type: 'role', value: '<a position name>' }` and whose membership-tier lookup finds no one (its slot is `org_membership_level:<name>`).
+  
+  **Author's one-line fix:** write `{ type: 'position', value: '<the position>' }`. `os lint` already reports the old form as `approval-approver-not-membership-tier` or `approval-approver-type-deprecated`.
+  
+  **Admin's one-line handling, both classes:** a platform admin (`admin_full_access`) or a tenant admin of the request's organization approves or rejects it (`POST /api/v1/approvals/requests/:id/approve` or `/reject`; recorded with `via_override: true`, and the flow run resumes), or reassigns it to the position's holder (`POST /api/v1/approvals/requests/:id/reassign` with `{ "to": "<user id>" }`), who then decides it normally.
+  
+  <!-- adr-0087: registered approval-position-address-role-retired -->
+
+### Patch Changes
+
+- f9bcd08: Datasource and approval refusals, warnings, field help and generated-draft comments no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  Some strings these two packages show to operators, administrators and flow authors pointed at an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - `@objectstack/service-datasource`: the credential-migration refusal says an unbindable key is either an alias spelling from before inline credentials were refused at publish, which no connection builder reads, or turso's `encryptionKey`, which has no secret slot of its own because the one slot carries the `authToken`; the remote-primary-key comment in a generated object draft says a driver's introspection can report only the first column of a composite key, so the list is a lower bound.
+  - `@objectstack/plugin-approvals`: the `queue` approver warning says the platform has no ownership queue to expand the type from, that the type is no longer offered for authoring, and to route the step to a team, department or position instead; the live-record warnings say approvers are being resolved against the trigger snapshot instead of the live record they are normally resolved from; the recall refusal's log line names the admin override; the `sys_approval_action` `via_override` help (in every shipped locale) says a platform or organization admin may act on any pending request, so that one nobody in its slate can decide never stays stuck; the cross-organization team, team-member and manager warnings, the expanded-to-nobody warning, the revise-window refusal, the `attachments` help and the `sys_approval_delegation` description drop their citations.
+  
+  Text only: no status, error code, field, route or control flow moves. A client or log filter that matches the old text (for example a tracker-number suffix) needs the new spelling.
+- 6d487d2: The approvals inbox's "My Pending" now lists a request routed to a position for the users who hold that position, whichever spelling of the position address the client asks for
+  
+  Clause-②: no
+  
+  A request whose approver position nobody held when it opened keeps the literal `position:<name>` slot. A user staffed into that position afterwards could already decide it, by naming `position:<name>` as the actor. `resolveActor` admits a holder under `position:<name>` and under `role:<name>` (the deprecated pre-rename spelling) as the caller's own identity, but the decision's slot test is literal: on that slot, `role:<name>` or no actor at all answers 403. The list read did not agree with either half.
+  
+  - `GET /api/v1/approvals/requests?approverId=…` matched each value literally. The stock console sends `role:<name>` for every position the session carries, so the request never appeared in "My Pending". A position address now matches under both spellings `resolveActor` admits a holder under, and no others. A `team:`, `org_membership_level:` or bare-name value still matches only itself.
+  - The participant gate behind every approvals read counted a "current approver" by user id alone. A holder of the position who neither submitted the request nor holds admin standing got an empty list under both spellings and a `404` on `GET /api/v1/approvals/requests/:id`, though their approve call naming `position:<name>` succeeded. The gate now also counts the slot addresses of every position on the caller's server-resolved context. A request becomes visible only to someone who can decide it.
+  - The decision routes are unchanged. They admit exactly the identities they admitted before, and a pin compares them against the previous predicate.
+  
+  A caller who sent the stored `position:<name>` spelling and was already the submitter or an admin sees no change.
+- 5e58193: A holder of a position whose approval slot reads `position:<name>` now decides it from the stock console, sees `can_act` on it, and keeps sight of it after deciding; a reviewer named by a `user` approver authored as an email does too
+  
+  Clause-②: no
+  
+  A request whose approver position nobody held when it opened keeps the literal `position:<name>` slot. After the position is staffed, its holder found the request in "My Pending", but `viewer.can_act` was `false`, an approve with no `actorId` (what the console's approve action sends) or with `role:<name>` (the deprecated pre-rename spelling the console uses) answered 403, only naming `position:<name>` decided it, and `GET /api/v1/approvals/requests/:id` then answered 404 to the holder who had just decided it. A `user` approver authored as an email had the same shape: its reviewer saw neither the request nor `can_act`, and only naming the email decided it.
+  
+  Every place the approvals service compares a slot with the caller now reads the caller's acting addresses, the set its decision routes already admitted: the user id, the email the caller's own account carries, and both spellings of each position on the caller's server-resolved context.
+  
+  - **Decisions** (approve, reject, send back, reassign, request info, comment): with no `actorId`, the caller takes the first pending slot keyed by one of those addresses, their user id first. A named `role:<name>` or `position:<name>` takes that position's slot under either spelling. Nobody new may decide: a user who holds another position is still refused with 403.
+  - **What is recorded:** `sys_approval_action.actor_id` holds the slot the action took, in that slot's stored spelling. That is what naming the slot always recorded, and the multi-approver tally counts approvals by matching it against the slate.
+  - **`viewer.can_act`** is computed by the same slot test the decision routes run with no `actorId`, so it is `true` exactly when such an approve would be admitted as a slot holder.
+  - **Visibility:** the participant gate counts a current approver by the email half too. "Already acted" is counted by the same addresses, so a request decided under `position:<name>` stays visible to whoever holds that position.
+  
+  An admin who holds the routed position now decides it as a slot holder (`via_override: false`, one vote in a multi-approver tally), exactly as when they named the slot; an admin who holds no slot is unchanged.
+- 6f17d1d: An approval action now records the user who took it in `sys_approval_action.actor_id`, and the pending-approver slot it was taken as in a new `acted_as` column; rows stored before this move their slot out of `actor_id` at the next boot
+  
+  Clause-②: no
+  
+  `actor_id` is a lookup to `sys_user`, so under ADR-0118 D1 it holds a user id or nothing. A slot-gated action used to record the slot it took there instead: a `position:<name>` literal for a position staffed after the request opened, or an email for a `user` approver authored as one. On those decisions no record named the person who decided. The audit ledger and activity rows the write produces carry no user, so the attribution was lost, and every join or report on the lookup silently dropped the row.
+  
+  **This supersedes the "What is recorded" sentence of the unreleased `21379-position-address-readers` changeset**, which says `actor_id` holds the slot. From this release it holds the person.
+  
+  - **What is recorded.**
+    - `actor_id` is the user the request's context vouches for: the signed-in caller, whatever address they named.
+    - `acted_as` is the slot the action took, in the slot's stored spelling (a user id, an email, or `position:<name>`). It is empty on actions no slot admitted: the submitter's own actions, system actions, and an admin override, which `via_override` still marks.
+    - An emailed action link records the one account that carries the token's email. If no account carries it, the link records no person.
+    - The SLA sweep keeps its reserved `system:sla` actor for now.
+  - **What reads it.**
+    - The multi-approver tally and `decision_progress` count `acted_as`.
+    - A participant who already acted keeps sight of a request by either of two facts: `actor_id` is their user id, or `acted_as` is a slot they act under (so a decision taken as `position:<name>` stays visible to that position's holders).
+    - Nothing compares a slot with `actor_id` any more.
+    - The action log (`GET /api/v1/approvals/requests/:id/actions`, `listActions`) returns `acted_as` beside `actor_id` and `actor_name`, filling the `ApprovalActionRow.acted_as` member `@objectstack/spec` declares. It is omitted when the action took no slot, or when no stored record kept the slot.
+  - **Stored rows.** A repair runs on every boot and is idempotent.
+    - Pass 1: a row whose `actor_id` still holds a slot address gets `acted_as` set to it and `actor_id` cleared. No stored record names who decided it, so it shows the slot and no person.
+    - Pass 2: the approve votes a still-pending request's tally counts get their `acted_as`, so in-flight `unanimous`, `quorum` and `per_group` requests keep the approvals they already collected.
+    - A failure is logged at error level and retried at the next boot.
+  - **For a report or integration that read `actor_id` as the slot:** read `acted_as` instead. `actor_id` now always joins to `sys_user`.
+- 88fb5e8: Every `sys_user` lookup the approvals plugin writes now holds a user id or nothing: the SLA and dead-run sweeps record no actor instead of a `system:` placeholder, notifications name only the person who acted, and `reassign_from` / `reassign_to` become slot-address text columns; stored placeholders are cleared at the next boot
+  
+  Clause-②: no
+  
+  Under ADR-0118 D1 a lookup to `sys_user` holds a user id or null, never a placeholder value. Four writers broke that, and a lookup holding a non-id drops the row from every join and report on it, silently.
+  
+  **This supersedes the "The SLA sweep keeps its reserved `system:sla` actor for now" sentence of the unreleased `21411-approval-actor-person` changeset.** Both ship in one release; from it, the sweep records no actor.
+  
+  - **Machine actors record no actor.**
+    - The SLA sweep's `escalate` row, and the `approve` / `reject` an `auto_approve` / `auto_reject` escalation then records, have `actor_id` empty. Before, both held `system:sla`. The `escalate` row's comment still names the configured action.
+    - The dead-run sweep's `recall` row has `actor_id` empty. Before, it held `system:dead-run`. Its comment still names the dead run and its status, and a submitter's own recall still records the submitter.
+  - **Notifications name only a person.** The actor the plugin hands to `sys_notification.actor_id` (and so to each `sys_inbox_message.actor_id`) is the user the action's context vouches for, or nothing.
+    - Before, a reassign, reminder, request for information, comment or send-back taken under a named position or email forwarded that address as the actor.
+    - Before, every SLA notification forwarded `system:sla`. It now forwards no actor, as the out-of-office notifications already did.
+  - **`reassign_from` / `reassign_to` are slot addresses.** A reassignment moves a pending-approver slot, so both columns hold the slot's address in its stored spelling: a user id, an email, or `position:<name>`. They are now text columns (max 255 characters, like `acted_as`) instead of `sys_user` lookups, which matches what they already stored.
+    - Existing values need no rewrite, and an existing database keeps its columns as they are. On SQLite and PostgreSQL 16, booting the new declaration over a table created by the old one issues no DDL, keeps every stored value, and reports no schema drift for either column. A new database creates them as `text`, as it does `acted_as`.
+    - The action log still resolves `reassign_from_name` / `reassign_to_name` where an address names an account: a user id, or an email an account carries. A position address has no name.
+  - **Stored rows.** The boot-time repair that moves slot literals out of `actor_id` now also clears `system:sla` and `system:dead-run` from it, in the same pass and in the same idempotent way. A cleared sentinel gets no `acted_as`, because a sweep takes no slot. The boot log line reports the count as `sentinelsCleared`.
+  - **For a report or integration that read these values:**
+    - To find the SLA sweep's actions, read the `escalate` rows, and the decision that directly follows an `escalate` row whose comment names `auto_approve` or `auto_reject`. Do not test `actor_id` for `system:sla`.
+    - To find a dead-run release, read the `recall` row whose comment names the run. Do not test `actor_id` for `system:dead-run`.
+    - Read `reassign_from` / `reassign_to` as slot addresses. Do not expand them as `sys_user` references.
+- 255a777: Approval notifications reach their recipient with their text (#21847). The approvals service put each notification's text in `payload.message`. The messaging service builds the delivered notification from `payload.title` and `payload.body`, the fields its `EmitInput` documents, and no channel reads `message`. So `GET /api/v1/notifications` served every approval notification as a title over an empty `body`, and the inbox row's `body_md` was empty too. The lost texts were comments, request-info questions, send-back notes, reassignments, reminders, escalations, SLA breaches and out-of-office substitutions. Every one of them now travels in `payload.body`.
+  
+  Clause-②: no
+  
+  - The texts are unchanged. Only the field they travel in moved. Who is notified, and when, is unchanged.
+  - Approval notifications no longer carry `payload.message`. Nothing in the platform or the console read it. A tenant-authored `sys_notification_template` for an `approval.*` topic that wrote `{{ message }}` should write `{{ body }}`.
+  - The service's notify helper now declares its payload: `title`, `body`, `actionUrl`, and a reminder's `actions`. A call site that spells the text any other way no longer compiles.
+  - `@objectstack/service-messaging` is unchanged. There is one field, as documented, and no alias for the old one.
+- 568dc0b: Record-change payloads apply the same credential mask and internal-field omission as write responses.
+  
+  Clause-②: yes (widening)
+  
+  - **`data.record.created` / `data.record.updated` events.** The engine projects the event's `after` and `changes` bodies through `omitInternalFieldsFromWriteResponse` (`@objectstack/core`), the helper every external write response already uses: credential-class fields (`secret`, and `password` outside the exempt `managedBy` buckets) carry `SECRET_MASK` (or `null` when unset), and `internal: true` fields are omitted. The engine's own write result is unchanged, so a privileged in-process caller that reads the stored value back off `insert` / `update` still sees it.
+  - **Approval request snapshot.** The record snapshot an approval request stores (`payload_json`) applies the same rule when the request is opened.
+  - **Outbound webhook body.** The delivered body, and the delivery row that stores it, apply the same rule to `before`, `after` and `changes`.
+  - **Knowledge index documents.** `recordToDocument` takes the object definition as an optional fourth argument and skips credential-class and `internal` fields, under `'*'` and when a source names one explicitly. `KnowledgeService` passes the definition from the bound engine.
+  - **New public surface of `@objectstack/service-knowledge` (additive):** `recordToDocument` accepts the object definition as an optional fourth argument; existing three-argument calls behave as before.
+  - **Receivers see masked values.** Webhook receivers and realtime clients now get `SECRET_MASK` (or `null` when unset) for credential-class fields and no key for `internal` fields.
+  - **Existing rows are not rewritten.** Approval snapshots, webhook delivery rows and knowledge documents written before this change keep their stored bodies; reindexing a knowledge source refreshes its documents.
+  - The audit trail already masked these fields and is unchanged. No other accept set or public schema changes.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [0a0debb]
+- Updated dependencies [c98a72d]
+- Updated dependencies [48fa7a3]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1878ef9]
+- Updated dependencies [7aab759]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [83b3d32]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [a2aadab]
+- Updated dependencies [fe10172]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [a6a7547]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [045f764]
+- Updated dependencies [75ddcd1]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [a0176ef]
+- Updated dependencies [e1790fd]
+- Updated dependencies [149153c]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [607463d]
+- Updated dependencies [cab6396]
+- Updated dependencies [e864db5]
+- Updated dependencies [7665c54]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [e6dc7a2]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [f76c622]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [3c7785d]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/platform-objects@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/formula@17.7.0
+  - @objectstack/metadata-core@17.7.0
+  - @objectstack/types@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

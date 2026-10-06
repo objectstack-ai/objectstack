@@ -75,7 +75,7 @@ describe('BatchOptionsSchema', () => {
     expect(options.continueOnError).toBe(true);
   });
 
-  it('rejects the retired `validateOnly` key with its prescription (#3963 follow-up)', () => {
+  it('rejects the retired `validateOnly` key with its prescription', () => {
     // Never implemented — a "dry-run" that silently persisted. Tombstoned so
     // writing it is audible rather than silently stripped (ADR-0104 / PD #10).
     const result = BatchOptionsSchema.safeParse({ validateOnly: true });
@@ -197,7 +197,7 @@ describe('UpdateManyRequestSchema', () => {
 // had already drifted: batch.zod's accepted `{}` rows, protocol.zod's required
 // id+data, and only the latter was ever enforced. Pin the relationship so a
 // future edit to one cannot silently fork them again.
-describe('protocol request schemas derive from the wire-body schemas (#3939)', () => {
+describe('protocol request schemas derive from the wire-body schemas', () => {
   it('updateMany: same record shape, plus object', async () => {
     const { UpdateManyDataRequestSchema } = await import('./protocol.zod');
     const records = [{ id: '1', data: { name: 'x' } }];

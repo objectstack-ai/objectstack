@@ -511,7 +511,7 @@ describe('LoggingConfigSchema', () => {
 // `flushInterval` was declared TWICE on this file, in two different defs with
 // two different defaults, so each def is pinned separately below: they are
 // different keys and each carries its own prescription.
-describe('logging duration keys → *Ms (#17782, #15939, #14478)', () => {
+describe('logging duration keys → *Ms', () => {
   describe('HttpDestinationConfig.batch.flushInterval → flushIntervalMs', () => {
     it('REFUSES the retired spelling with a rename naming `flushIntervalMs`', () => {
       const result = HttpDestinationConfigSchema.safeParse({

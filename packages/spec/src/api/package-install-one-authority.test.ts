@@ -104,7 +104,7 @@ const MATRIX: ReadonlyArray<{ name: string; enableOnInstall?: unknown }> = [
   { name: 'null — refused by the declaration', enableOnInstall: null },
 ];
 
-describe('#18605 — `enableOnInstall` has ONE authority', () => {
+describe('`enableOnInstall` has ONE authority', () => {
   describe('the authority: `PackageInstallRequestSchema`', () => {
     it(`leaves an absent key \`undefined\` — 「${FLIP_TRIGGER}」, so the door still sees the absence`, () => {
       const parsed = PackageInstallRequestSchema.parse({ manifest: MANIFEST });

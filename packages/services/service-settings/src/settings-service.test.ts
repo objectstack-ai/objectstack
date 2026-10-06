@@ -184,7 +184,7 @@ describe('SettingsService — global scope', () => {
 });
 
 describe('SettingsService — audit sink', () => {
-  it('records masked digest for encrypted values', async () => {
+  it('records an encrypted value without the adapter digest when no keyed digest is available', async () => {
     const events: any[] = [];
     const svc = new SettingsService({
       env: {},
@@ -203,7 +203,9 @@ describe('SettingsService — audit sink', () => {
     const apiKeyEvent = events.find((e) => e.key === 'api_key');
     expect(apiKeyEvent).toBeTruthy();
     expect(apiKeyEvent.encrypted).toBe(true);
-    expect(apiKeyEvent.valueDigest).toMatch(/^<encrypted:fnv32:/);
+    // No crypto provider is wired, so there is no keyed digest; the adapter's
+    // unkeyed digest is never recorded for a secret (crypto-provider contract).
+    expect(apiKeyEvent.valueDigest).toBe('<encrypted>');
   });
 });
 
@@ -2005,7 +2007,7 @@ describe('SettingsService — Phase 3 sys_secret + crypto provider + audit', () 
       action: 'set',
       encrypted: true,
     });
-    expect(auditRows[0].newHash).toMatch(/^sha256:/);
+    expect(auditRows[0].newHash).toMatch(/^hmac-sha256:[0-9a-f]{64}$/);
     expect(auditRows[0].newHash).not.toContain('super-secret-key');
   });
 
@@ -2198,7 +2200,8 @@ describe('SettingsService — a declared valueDomain is the save-time boundary (
     // The registry-backed shape (`mail.provider`, `sms.provider`): its table
     // IS the supported set, and declaring no domain must keep it that way,
     // byte-for-byte. Pinned on the mail manifest itself plus a localization
-    // key that deliberately declares no domain.
+    // key that deliberately declares no domain (`fiscal_year_start`, a closed
+    // table of twelve months).
     const svc = new SettingsService({ env: {} });
     svc.registerManifest(mailSettingsManifest);
     await expect(svc.setMany('mail', { provider: 'sendgrid' })).rejects.toMatchObject({
@@ -2207,9 +2210,9 @@ describe('SettingsService — a declared valueDomain is the save-time boundary (
     });
 
     const loc = localizationService();
-    await expect(loc.setMany('localization', { first_day_of_week: 'thursday' })).rejects.toMatchObject({
+    await expect(loc.setMany('localization', { fiscal_year_start: 'smarch' })).rejects.toMatchObject({
       code: 'SETTINGS_VALIDATION',
-      fields: [{ field: 'first_day_of_week', code: 'invalid_option' }],
+      fields: [{ field: 'fiscal_year_start', code: 'invalid_option' }],
     });
   });
 
@@ -2385,11 +2388,11 @@ describe('SettingsService — env overrides are judged against the declared valu
 
   it('env door for a domain-less select keeps exhaustive options — the #5131/#5204 regression pin', async () => {
     const { errors, logger } = spyLogger();
-    const svc = new SettingsService({ env: { OS_LOCALIZATION_DATE_FORMAT: 'DD>MM>YYYY' }, logger });
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_FISCAL_YEAR_START: 'smarch' }, logger });
     svc.registerManifest(localizationSettingsManifest);
 
-    const r = await svc.get('localization', 'date_format');
-    expect(r.value).toBe('YYYY-MM-DD'); // the default — the override is not in force
+    const r = await svc.get('localization', 'fiscal_year_start');
+    expect(r.value).toBe('january'); // the default — the override is not in force
     expect(r.source).toBe('default');
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain('is not a declared option for');

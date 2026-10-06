@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-sharing",
-  "version": "17.6.0",
+  "version": "17.7.0",
   "license": "Apache-2.0",
   "description": "Record-level sharing for ObjectStack — sys_record_share + middleware that enforces sharingModel + ISharingService.",
   "main": "dist/index.js",
@@ -20,6 +20,7 @@
     "gen:test-typecheck-debt": "tsx ../../../scripts/check-test-typecheck.mts --update --package packages/plugins/plugin-sharing --project tsconfig.test.json"
   },
   "dependencies": {
+    "@noble/hashes": "^2.4.0",
     "@objectstack/core": "workspace:*",
     "@objectstack/formula": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",

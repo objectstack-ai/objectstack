@@ -21,7 +21,7 @@
  * Three principal shapes driven through the composed plugin to the point the
  * state actually changes — `manifest.register()` (shared registry),
  * `objectql.syncSchemas()` (DDL against the shared database), the ledger file on
- * disk, `SeedLoaderService.load()` (rows written), `driver.delete()` (rows
+ * disk, `SeedLoaderService.load()` (rows written), the row delete (rows
  * removed). All three were INDISTINGUISHABLE:
  *
  *   principal                              install  reseed  purge  uninstall
@@ -73,10 +73,19 @@ vi.mock('@objectstack/runtime', () => ({
             seedCalls.push(request);
             return { summary: { totalInserted: 2, totalUpdated: 0, totalSkipped: 0 }, errors: [] };
         }
+        // The purge's dependency order — one object, nothing referenced.
+        async buildDependencyGraph(objectNames: string[]) {
+            return {
+                nodes: objectNames.map((object) => ({ object, dependsOn: [], references: [] })),
+                insertOrder: objectNames,
+                circularDependencies: [],
+            };
+        }
     },
     recordSeedOutcome: vi.fn(),
 }));
 
+import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
@@ -138,7 +147,7 @@ const APP = {
     namespace: 'gated',
     version: '1.0.0',
     objects: [{ name: 'widget', fields: { code: { type: 'text' } } }],
-    data: [{ object: 'widget', records: [{ id: 'w1', code: 'a' }, { id: 'w2', code: 'b' }] }],
+    data: [{ object: 'widget', externalId: 'code', records: [{ code: 'a' }, { code: 'b' }] }],
 };
 
 const LEDGER_FILE = 'com.acme.gated.json';
@@ -155,7 +164,19 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); vi.restoreAllMo
 async function mount(shape: Shape, storageDir: string) {
     const register = vi.fn(async () => undefined);
     const syncSchemas = vi.fn(async () => undefined);
-    const driverDelete = vi.fn(async () => true);
+    // The rows the install seeded. The purge deletes them through the ENGINE
+    // (a bare `driver` service stood here once — no kernel registers one, and
+    // mocking it is how a purge that always answered 500 stayed green), so the
+    // engine's `delete` is the observer, opened with the real dispatch contract.
+    const widgets = [{ id: 'w1', code: 'a' }, { id: 'w2', code: 'b' }];
+    const engineDelete = vi.fn(async (object: string, options?: any) => {
+        const dispatch = assertEngineDeleteDispatch(options);
+        if (object !== 'widget' || dispatch.kind !== 'by-id') return false;
+        const at = widgets.findIndex((w) => w.id === dispatch.id);
+        if (at < 0) return false;
+        widgets.splice(at, 1);
+        return true;
+    });
     const rawApp = makeRawApp();
     const hooks = new Map<string, any>();
 
@@ -167,9 +188,12 @@ async function mount(shape: Shape, storageDir: string) {
     const services: Record<string, any> = {
         manifest: { register },
         auth: { api: { getSession: async () => (sessionUser ? { user: sessionUser, session: {} } : null) } },
-        objectql: { syncSchemas, find: async (object: string) => rows[object] ?? [] },
+        objectql: {
+            syncSchemas,
+            find: async (object: string) => (object === 'widget' ? widgets.map((w) => ({ ...w })) : rows[object] ?? []),
+            delete: engineDelete,
+        },
         metadata: { getObject: async () => ({ name: 'widget', fields: {} }) },
-        driver: { delete: driverDelete },
     };
     const ctx: any = {
         hook: (e: string, h: any) => hooks.set(e, h),
@@ -189,7 +213,7 @@ async function mount(shape: Shape, storageDir: string) {
     // counters must start from AFTER that so a refusal case cannot be fooled by
     // boot-time activity it never caused.
     register.mockClear();
-    return { rawApp, register, syncSchemas, driverDelete };
+    return { rawApp, register, syncSchemas, engineDelete };
 }
 
 function makeC(body: unknown, headers: Record<string, string>, manifestId?: string) {
@@ -254,7 +278,7 @@ const DOORS: readonly Door[] = [
         route: `POST ${ROUTE_BASE}/:manifestId/purge-sample-data`,
         body: {},
         needsInstalled: true,
-        effectsFired: (o) => o.driverDelete.mock.calls.length,
+        effectsFired: (o) => o.engineDelete.mock.calls.length,
     },
 ];
 

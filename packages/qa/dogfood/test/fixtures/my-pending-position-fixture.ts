@@ -7,7 +7,8 @@
 // is the literal `position:<p>` slot, exactly what a HotCRM approval carries
 // when its approver position is staffed only after submission. The pin then
 // staffs a user into that position and asks the approvals inbox's "My
-// Pending" door for the request under both approver-address spellings.
+// Pending" door for the request: `position:<p>` lists it, and the retired
+// `role:<p>` spelling (ADR-0090 D3) does not.
 //
 // Purpose-built rather than borrowed from an example app for the reason
 // `override-composite-fixture.ts` gives: showcase's `onEnable` staffs its own

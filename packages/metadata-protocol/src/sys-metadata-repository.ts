@@ -22,9 +22,9 @@
  *     entry has `allowOrgOverride: false` (Prime Directive #8)
  *   - **M1**: every successful put/delete appends a durable row to
  *     `sys_metadata_history` inside the same engine.transaction() as the
- *     parent `sys_metadata` write. No-op puts (identical hash) skip the
- *     history write. Failed optimistic-lock checks abort before any
- *     write reaches the database.
+ *     parent `sys_metadata` write. No-op puts (identical content — see
+ *     `storedBodyUnchanged`) skip the history write. Failed optimistic-lock
+ *     checks abort before any write reaches the database.
  *   - **M1**: history() yields events from the durable log, ordered by
  *     per-(org,type,name) `version` ASC.
  *
@@ -52,7 +52,7 @@
  * switch.
  */
 
-import { hashSpec, ConflictError } from '@objectstack/metadata-core';
+import { hashSpec, orderedMapKeys, ConflictError } from '@objectstack/metadata-core';
 // #4867 — the SAME discriminator `DatabaseLoader` uses (#4825), imported, not
 // re-implemented. A second hand-rolled "which driver errors are benign?" here
 // would be two vocabularies for one question, which is the dual-source debt
@@ -83,7 +83,7 @@ import type { IObjectQLEngine } from '@objectstack/core';
 // lifecycle gate read, so a third read-only signal added there reaches this
 // door too (that shared-rule argument is the module's whole reason to exist).
 import { isWritablePackage } from './package-writability.js';
-import { packagedBaseRegimePrescription, packagedBaseRegimeSentence } from './packaged-base-regime.js';
+import { isOriginGatedType, packagedBaseRegimePrescription, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 
 /**
  * Canonicalise a driver-materialised timestamp into the ISO-8601 string the
@@ -231,6 +231,17 @@ export interface DraftDrainFailure {
   /** The original failure, unchanged, so callers can classify it themselves. */
   cause: unknown;
 }
+
+/**
+ * [#21934] {@link SysMetadataRepository.promoteDraft}'s refusal when the draft
+ * row it reads is not the draft its caller judged
+ * (`opts.expectedDraftHash`): `expectedParent` is the judged draft's hash
+ * (`null` when the caller judged that no draft exists), `actualHead` the hash
+ * of the draft row now stored. Raised before anything is written. A
+ * {@link ConflictError}, so every caller that already answers a conflict
+ * answers this one; the protocol tells the two apart to word its refusal.
+ */
+export class DraftConflictError extends ConflictError {}
 
 /**
  * Sub-set of the ObjectQL engine shape we depend on. Kept narrow so
@@ -467,8 +478,17 @@ export class SysMetadataRepository implements MetadataRepository {
     // ADR-0048 — when a package scope is supplied, resolve the row owned by
     // that package (used by saveMetaItem to read the correct parent-version
     // lineage before an upsert). Omitted → legacy "any package" match.
+    //
+    // [#21911, ADR-0096] This read, and every store call of `put`, `delete`,
+    // `promoteDraft`, `restoreVersion`, `listDrafts` and the two lineage
+    // counters, carries the explicit system opt-in (`{ ...ctx, isSystem: true }`
+    // inside a transaction, so the handle rides along): the repository is
+    // platform plumbing under a door that already authorized the caller, and
+    // it scopes its own rows by organization. None of them reaches the data
+    // engine as a principal-less context.
     const row = await this.engine.findOne('sys_metadata', {
       where: this.whereFor(ref, state, opts && 'packageId' in opts ? (opts.packageId ?? null) : undefined),
+      context: { isSystem: true },
     });
     if (!row) return null;
     return this.rowToItem(ref, row);
@@ -534,7 +554,9 @@ export class SysMetadataRepository implements MetadataRepository {
 
     const state: OverlayState = opts.state ?? 'active';
     const body = (spec ?? {}) as Record<string, unknown>;
-    const hash = hashSpec(body);
+    // [#21790] Hashed AS ITS TYPE: a map the spec declares ordered (an
+    // object's `fields`) keeps its key order, so a pure reorder is a change.
+    const hash = hashSpec(body, ref.type);
 
     // ADR-0048 — the ONE row this write targets. A write is not a search: it
     // upserts exactly one `(org, type, name, package_id)` row, so its scope is
@@ -582,7 +604,7 @@ export class SysMetadataRepository implements MetadataRepository {
       } else {
         activeWhere.organization_id = null;
       }
-      const activeRow = await this.engine.findOne('sys_metadata', { where: activeWhere });
+      const activeRow = await this.engine.findOne('sys_metadata', { where: activeWhere, context: { isSystem: true } });
       const activePkg = (activeRow as { package_id?: string | null } | null)?.package_id ?? null;
       if (activePkg) targetPackageId = activePkg;
     }
@@ -595,7 +617,7 @@ export class SysMetadataRepository implements MetadataRepository {
       // overlay. A package-less save (packageId null) targets the global row.
       let existing = await this.engine.findOne('sys_metadata', {
         where: this.whereFor(ref, state, targetPackageId),
-        context: ctx,
+        context: { ...ctx, isSystem: true },
       });
       // [#11087] Orphan-draft adoption: when the package binding above was
       // INHERITED (caller named none), a pre-fix draft for the same
@@ -606,7 +628,7 @@ export class SysMetadataRepository implements MetadataRepository {
       if (!existing && state === 'draft' && opts.packageId == null && targetPackageId !== null) {
         existing = await this.engine.findOne('sys_metadata', {
           where: this.whereFor(ref, state, null),
-          context: ctx,
+          context: { ...ctx, isSystem: true },
         });
       }
       const existingHash: string | null = existing?.checksum ?? null;
@@ -617,9 +639,17 @@ export class SysMetadataRepository implements MetadataRepository {
       // No-op short-circuit: identical body → no write, no history row,
       // no event. We re-yield the existing item so callers see the
       // canonical hash but the seqCounter is unchanged.
-      if (existing && existingHash === hash) {
+      //
+      // [#21790] The version handed back is the row's STORED stamp, not this
+      // write's hash. The two are one value except on a row stamped before
+      // its type's canonical form changed (see `storedBodyUnchanged`), where
+      // the stored stamp is the version every reader was given and the one
+      // the next write's optimistic lock compares against — answering with
+      // the re-derived hash instead would turn the caller's next save into a
+      // conflict with a row nobody touched.
+      if (existing && this.storedBodyUnchanged(ref, existing, existingHash, hash)) {
         const item = this.rowToItem(ref, existing);
-        return { skipped: true as const, version: hash, seq: item.seq, item };
+        return { skipped: true as const, version: item.hash, seq: item.seq, item };
       }
 
       const now = new Date().toISOString();
@@ -662,11 +692,11 @@ export class SysMetadataRepository implements MetadataRepository {
         }
         await this.engine.update('sys_metadata', parentRowData, {
           where: { id: existingId },
-          context: ctx,
+          context: { ...ctx, isSystem: true },
         });
       } else {
         parentRowData.created_at = now;
-        await this.engine.insert('sys_metadata', parentRowData, { context: ctx });
+        await this.engine.insert('sys_metadata', parentRowData, { context: { ...ctx, isSystem: true } });
       }
 
       // Durable history append — same transaction, so the parent write
@@ -692,7 +722,7 @@ export class SysMetadataRepository implements MetadataRepository {
           recorded_by: opts.actor ?? null,
           recorded_at: now,
         },
-        { context: ctx },
+        { context: { ...ctx, isSystem: true } },
       );
 
       const item: MetadataItem = {
@@ -777,7 +807,7 @@ export class SysMetadataRepository implements MetadataRepository {
           state,
           'packageId' in opts ? (opts.packageId ?? null) : undefined,
         ),
-        context: ctx,
+        context: { ...ctx, isSystem: true },
       });
       if (!existing) {
         throw new ConflictError(this.fullRef(ref), opts.parentVersion, null);
@@ -807,7 +837,7 @@ export class SysMetadataRepository implements MetadataRepository {
 
       await this.engine.delete('sys_metadata', {
         where: { id: existingId },
-        context: ctx,
+        context: { ...ctx, isSystem: true },
       });
 
       if (state === 'active') {
@@ -833,7 +863,7 @@ export class SysMetadataRepository implements MetadataRepository {
             recorded_by: opts.actor ?? null,
             recorded_at: now,
           },
-          { context: ctx },
+          { context: { ...ctx, isSystem: true } },
         );
       }
 
@@ -923,6 +953,19 @@ export class SysMetadataRepository implements MetadataRepository {
        * what lands in `active`, never which draft is consumed.
        */
       deriveActiveBody?: (draftBody: unknown) => unknown;
+      /**
+       * [#21934] The hash of the draft the caller judged before this
+       * promotion, or `null` when it judged that no draft exists. Stated → the
+       * draft row this promotion reads must be that draft: a row with another
+       * hash (a draft saved after the caller's read), or any draft row where
+       * the caller judged none, is refused with a {@link DraftConflictError}
+       * before anything is written, so the promotion writes only the body its
+       * caller judged. A missing draft row still answers `NO_DRAFT`.
+       *
+       * Omitted → no expectation: the draft row read here is promoted, as
+       * before.
+       */
+      expectedDraftHash?: string | null;
     },
   ): Promise<{
     version: string;
@@ -953,6 +996,7 @@ export class SysMetadataRepository implements MetadataRepository {
         'draft',
         'packageId' in opts ? (opts.packageId ?? null) : undefined,
       ),
+      context: { isSystem: true },
     });
     if (!draftRow) {
       const err: any = new Error(
@@ -964,6 +1008,12 @@ export class SysMetadataRepository implements MetadataRepository {
     }
     const draftPackageId = (draftRow as { package_id?: string | null }).package_id ?? null;
     const draft = this.rowToItem(ref, draftRow);
+    // [#21934] The draft the caller judged, and no other: a caller that read
+    // the draft to judge it states that draft's hash, and the row read here
+    // must still be it.
+    if (opts.expectedDraftHash !== undefined && draft.hash !== opts.expectedDraftHash) {
+      throw new DraftConflictError(this.fullRef(ref), opts.expectedDraftHash, draft.hash);
+    }
     // Read the active row through the SAME package scope we will write, so the
     // optimistic-lock `parentVersion` matches the exact row `put` upserts.
     // (Package-less drafts → packageId null → identical to the prior behaviour.)
@@ -1052,6 +1102,7 @@ export class SysMetadataRepository implements MetadataRepository {
         name: full.name,
         version: targetVersion,
       },
+      context: { isSystem: true },
     });
     if (!row) {
       const err: any = new Error(
@@ -1092,6 +1143,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // carries no `package_id` column, so a vanished binding is not recoverable.
     const activeRow = await this.engine.findOne('sys_metadata', {
       where: this.whereFor(ref, 'active'),
+      context: { isSystem: true },
     });
     const activePackageId =
       (activeRow as { package_id?: string | null } | null)?.package_id ?? null;
@@ -1178,7 +1230,7 @@ export class SysMetadataRepository implements MetadataRepository {
     }
     if (filter?.type) where.type = filter.type;
     if (filter?.packageId) where.package_id = filter.packageId;
-    const rows = await this.engine.find('sys_metadata', { where });
+    const rows = await this.engine.find('sys_metadata', { where, context: { isSystem: true } });
     return (rows as any[]).map((row) => ({
       type: row.type,
       name: row.name,
@@ -1881,6 +1933,21 @@ export class SysMetadataRepository implements MetadataRepository {
    *    this name", which the `allowRuntimeCreate` tier already governs — so
    *    the carve-out is scoped to the `override-artifact` intent, which is
    *    precisely the artifact-backed case the ruling names.
+   *
+   * ## [#21899] The origin-gated type, the same lift for a different reason
+   *
+   * An ORIGIN-GATED type (`isOriginGatedType`, `./packaged-base-regime.ts` —
+   * `datasource`: ADR-0126 §3, code-defined read-only, runtime-created free)
+   * does not declare `supportsOverlay`, so the carve-out above never reached
+   * it. It is lifted here on its own ground: the runtime never persists a
+   * code-defined item of the type, so a stored row under its name is never a
+   * layer of it — only residue a runtime write left — and removing it restores
+   * the code definition, the narrowing direction #6960's ruling names. This
+   * gate is reached only with a row (`delete` refuses a missing one with a
+   * conflict); the protocol's delete door answers the row-less removal with
+   * its own refusal before asking here (`originGatedRemovalRefusal`).
+   * `object`, with the same registry flags, is not origin-gated and keeps the
+   * refusal.
    */
   private assertDeleteAllowed(
     ref: { type: string; name: string },
@@ -1890,6 +1957,7 @@ export class SysMetadataRepository implements MetadataRepository {
     if (intent !== 'runtime-only') {
       const singular = PLURAL_TO_SINGULAR[type] ?? type;
       if (OVERLAY_CAPABLE_TYPES.has(singular) || OVERLAY_CAPABLE_TYPES.has(type)) return;
+      if (isOriginGatedType(singular)) return;
     }
     this.assertAllowed(ref, 'delete', intent);
   }
@@ -1942,7 +2010,7 @@ export class SysMetadataRepository implements MetadataRepository {
   private rowToItem(ref: Pick<MetaRef, 'type' | 'name'>, row: any): MetadataItem {
     const body: Record<string, unknown> =
       typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata ?? {});
-    const hash: string = row.checksum ?? hashSpec(body);
+    const hash: string = row.checksum ?? hashSpec(body, ref.type);
     return {
       ref: this.fullRef(ref),
       body,
@@ -1957,6 +2025,49 @@ export class SysMetadataRepository implements MetadataRepository {
       message: undefined,
       seq: this.seqCounter,
     };
+  }
+
+  /**
+   * [#21790] Does `row` already store the body this write hashes to `hash`?
+   * The question `put`'s no-op short-circuit asks — about CONTENT.
+   *
+   * For a type with no declared ordered map the stored stamp answers it, as it
+   * always has: those types' canonical form never changed, so a stamp equals
+   * the hash of the bytes beside it.
+   *
+   * A type WITH one (`orderedMapKeys`) is answered by re-hashing the stored
+   * body under the current rule, because its stored stamp may predate that
+   * rule — every row written before the canonical form started keeping the
+   * map's order carries the order-blind stamp. Trusting that stamp misfires
+   * BOTH ways:
+   *   - an identical re-save looks changed (current hash ≠ old stamp) and
+   *     writes a history row recording no change — so the stamp is not the
+   *     arbiter of "unchanged";
+   *   - a reorder INTO sorted key order looks unchanged, because the old
+   *     stamp IS the sorted form's hash — the very drop #21790 fixed,
+   *     surviving on exactly the rows stored before the fix.
+   * Re-hashing the stored bytes is exact in both directions. The stamp itself
+   * is left as written: it is the row's version token (see `put`).
+   *
+   * Stored bytes that do not parse are not the incoming body, so the answer is
+   * "changed" and the write goes ahead — which is also what lets a save repair
+   * such a row, exactly as it could before this comparison read the bytes.
+   */
+  private storedBodyUnchanged(
+    ref: Pick<MetaRef, 'type'>,
+    row: any,
+    storedHash: string | null,
+    hash: string,
+  ): boolean {
+    if (orderedMapKeys(ref.type).length === 0) return storedHash === hash;
+    let storedBody: unknown;
+    try {
+      storedBody =
+        typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata ?? {});
+    } catch {
+      return false;
+    }
+    return hashSpec(storedBody, ref.type) === hash;
   }
 
   private broadcast(evt: MetadataEvent): void {
@@ -2004,7 +2115,7 @@ export class SysMetadataRepository implements MetadataRepository {
     try {
       const rows = await this.engine.find(this.historyTable, {
         where: { organization_id: this.organizationId },
-        context: ctx,
+        context: { ...ctx, isSystem: true },
       });
       let max = 0;
       for (const row of rows as Array<{ event_seq?: number | null }>) {
@@ -2048,7 +2159,7 @@ export class SysMetadataRepository implements MetadataRepository {
           type: ref.type,
           name: ref.name,
         },
-        context: ctx,
+        context: { ...ctx, isSystem: true },
       });
       let max = 0;
       for (const row of rows as Array<{ version?: number | null }>) {

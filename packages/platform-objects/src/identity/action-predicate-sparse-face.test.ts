@@ -57,7 +57,16 @@ import { SysUserPreference } from './sys-user-preference.object.js';
 import { SysBusinessUnit } from './sys-business-unit.object.js';
 import { SysBusinessUnitMember } from './sys-business-unit-member.object.js';
 
-const USER = { id: 'u1', email: 'me@example.com' };
+/**
+ * The principal binding. `positions` is always present on the user an action
+ * predicate sees (`EvalUserSchema` defaults it, and the console forwards
+ * `user.positions ?? []`), and the org-admin actions AND-compose a
+ * membership-grade term over it. An owner is admitted by every such term — the
+ * same reasoning as the all-on {@link FEATURES} below: a grade term that
+ * answered false would short-circuit the composed `&&` and hide the record half
+ * this sweep exists to test.
+ */
+const USER = { id: 'u1', email: 'me@example.com', positions: ['org_owner'] };
 
 /**
  * `defineObject` normalizes a CEL shorthand string into a `{dialect, source}`

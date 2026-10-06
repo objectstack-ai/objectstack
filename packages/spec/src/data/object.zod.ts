@@ -2253,12 +2253,14 @@ const ObjectSchemaBase = strictObject(
    * - A record whose field is empty shows no picture. The reader draws nothing
    *   in its place — no initials, no placeholder avatar.
    *
-   * The reader is objectui's record chrome, and it does not read the key yet:
-   * the liveness ledger holds this row `planned` until it does, so an authored
-   * value is accepted, stored and served, and takes effect when the renderer
-   * lands with no re-authoring.
+   * The reader is objectui's record chrome (`PageHeaderRenderer` in
+   * `packages/components/src/renderers/layout/containers.tsx`): it resolves the
+   * record's value of the named field and draws it in the record chip's icon
+   * slot beside the title, an `avatar` round and cropped, an `image` whole. The
+   * liveness ledger row `object.imageField` cites that reader at the objectui
+   * pin it was read at.
    */
-  imageField: z.string().optional().describe('The record\'s picture: names the field the record page header (record chrome) is to draw beside the title — one object-level declaration every record detail page reads, not a per-page header prop. Must name a field of this object whose type is `image` or `avatar`; any other name is refused. A record whose field is empty shows no picture (no initials or placeholder). Pending renderer: the record chrome does not draw it yet.'),
+  imageField: z.string().optional().describe('The record\'s picture: names the field the record page header (record chrome) draws beside the title — one object-level declaration every record detail page reads, not a per-page header prop. Must name a field of this object whose type is `image` or `avatar`; any other name is refused. A record whose field is empty shows no picture (no initials or placeholder).'),
   /**
    * [ADR-0085] Semantic role: the object's most important fields, in priority
    * order (the first entry wins wherever only one field fits, e.g. child-record

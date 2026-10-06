@@ -39,6 +39,7 @@ import {
 // hand-written sentence, unchanged.
 import { renderValidationMessage } from '@objectstack/spec/system';
 import { SETTINGS_SECRET_MASK } from './settings-secret-redaction.js';
+import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
 import {
   firstRejectedDomainMember,
   knownValueDomain,
@@ -54,7 +55,8 @@ import {
 const DEFAULT_OBJECT = 'sys_setting';
 
 /**
- * The execution context `SettingsService`'s own row writes run under (#8030).
+ * The execution context `SettingsService`'s own `sys_setting` reads and writes
+ * run under (#8030, #21913).
  *
  * `sys_setting` is a platform-owned table with platform-owned columns
  * (`value_enc`, `updated_by` are declared `readonly: true`), and this service
@@ -62,10 +64,18 @@ const DEFAULT_OBJECT = 'sys_setting';
  * gates. See {@link SettingsService.upsertRow} for the full argument and for
  * why the field stays `readonly` for everybody else.
  *
+ * The reads ({@link SettingsService.loadRows}, `upsertRow`'s existence probe)
+ * and `upsertRow`'s insert carry it too. They are plumbing: the door in front
+ * of them, when there is one, has already authorized the caller, and
+ * `loadRows` runs on every request's execution-context build. Without it they
+ * reach the data engine with no principal and no system opt-in — the
+ * principal-less hand-off ADR-0096 D5 closes — so the explicit opt-in is what
+ * keeps them working once that hand-off denies.
+ *
  * Frozen so a downstream engine adapter cannot mutate the service's posture by
  * writing into the bag it was handed.
  */
-const SETTINGS_SYSTEM_WRITE_CONTEXT = Object.freeze({ isSystem: true as const });
+const SETTINGS_SYSTEM_CONTEXT = Object.freeze({ isSystem: true as const });
 
 /**
  * Value-bearing specifier types — drives which entries we expect to
@@ -554,6 +564,11 @@ export class SettingsService {
    * otherwise repeat one operator-actionable line per attempt.
    */
   private readonly reportedCryptoRefusals = new Set<string>();
+  /**
+   * `<namespace>.<key>` pairs whose missing secret audit fingerprint has
+   * already been reported. See {@link secretAuditDigest}.
+   */
+  private readonly reportedUnkeyedAuditDigests = new Set<string>();
   /**
    * Namespaces whose pre-bind READ has already been reported (#10250). Deduped
    * for the same reason the two sets above are, and keyed by NAMESPACE rather
@@ -1575,6 +1590,55 @@ export class SettingsService {
     throw err;
   }
 
+  /**
+   * The audit fingerprint of a secret-valued setting: the crypto provider's
+   * KEYED digest (`ICryptoProvider.keyedDigest`), never an unkeyed one.
+   *
+   * Both ledgers (`sys_audit_log` via {@link SettingsAuditSink} and
+   * `sys_setting_audit` via {@link SettingsAuditWriter}) are readable by
+   * people who must not be able to learn a secret. An unkeyed content hash
+   * lets any such reader confirm a guessed value offline — and for the short,
+   * low-entropy secrets settings carry (passwords, tokens of a known format),
+   * guessing is the attack. Under the provider's server-held key the
+   * fingerprint still answers "did this value change, and back to what it was
+   * before?" (stable per key for equal input) without answering "is it X?".
+   *
+   * When no keyed digest can be had — no provider is wired (the legacy
+   * inline-adapter path on a host that supplies none), or the provider
+   * rejects — the ledgers record NO fingerprint (`null`), reported once per
+   * key. Falling back to an unkeyed digest would be the exposure this method
+   * exists to close; failing the write would let a ledger veto a settings
+   * save, which neither audit seam is allowed to do.
+   */
+  private async secretAuditDigest(
+    namespace: string,
+    key: string,
+    plain: string,
+  ): Promise<string | null> {
+    const provider = this.cryptoProvider;
+    let reason: string;
+    if (provider && typeof provider.keyedDigest === 'function') {
+      try {
+        return await provider.keyedDigest(plain);
+      } catch (err: any) {
+        reason = `the crypto provider refused a keyed digest (${err?.message ?? err})`;
+      }
+    } else {
+      reason = 'no crypto provider with a keyed digest is wired';
+    }
+    const dedupeAt = `${namespace}.${key}`;
+    if (!this.reportedUnkeyedAuditDigests.has(dedupeAt)) {
+      this.reportedUnkeyedAuditDigests.add(dedupeAt);
+      const message =
+        `[SettingsService] ${namespace}.${key}: the audit trail records this secret-valued ` +
+        `setting's write without a value fingerprint because ${reason}. Wire an ICryptoProvider ` +
+        `(SettingsServiceOptions.cryptoProvider) to record its keyed digest.`;
+      if (this.logger?.warn) this.logger.warn(message);
+      else console.warn(message);
+    }
+    return null;
+  }
+
   /** Persist a single key. Throws SettingsLockedError when env-locked. */
   async set(
     namespace: string,
@@ -1669,7 +1733,9 @@ export class SettingsService {
 
       let storedValue: unknown | null = null;
       let storedEnc: string | null = null;
-      let digest = '';
+      // The fingerprint both ledgers record. `null` only for a secret no
+      // keyed digest could be computed for — see `secretAuditDigest`.
+      let digest: string | null = null;
 
       if (!isNull) {
         if (isEncrypted) {
@@ -1696,7 +1762,7 @@ export class SettingsService {
               ciphertext: handle.ciphertext,
             });
             storedEnc = handle.id;
-            digest = this.cryptoProvider.digest(plain);
+            digest = await this.secretAuditDigest(namespace, key, plain);
           } else {
             // #8026 — the legacy inline-adapter path persists only through an
             // adapter that declares real confidentiality. The base64 default
@@ -1706,7 +1772,9 @@ export class SettingsService {
             // branch and fall open.
             this.assertEncryptionAvailable(namespace, key);
             storedEnc = await this.crypto.encrypt(plain, { namespace, key });
-            digest = this.crypto.digest(plain);
+            // Not `this.crypto.digest` — an adapter's digest is not keyed by
+            // contract, and a secret is never fingerprinted with an unkeyed one.
+            digest = await this.secretAuditDigest(namespace, key, plain);
           }
         } else {
           storedValue = rawValue;
@@ -1750,7 +1818,9 @@ export class SettingsService {
             // an audit row invisible to RLS readers — see `SettingsAuditSink`.
             tenantId: ctx.tenantId,
             action: isNull ? 'reset' : 'set',
-            valueDigest: isEncrypted ? '<encrypted:' + digest + '>' : digest,
+            valueDigest: isEncrypted
+              ? digest === null ? '<encrypted>' : '<encrypted:' + digest + '>'
+              : digest ?? '',
             encrypted: isEncrypted,
             requestId: ctx.requestId,
           });
@@ -2261,9 +2331,11 @@ export class SettingsService {
       // uniformly across global/tenant/user without log noise. Per-tenant
       // isolation for `tenant`-scope rows is still enforced by the engine
       // once an ExecutionContext.tenantId is plumbed through (Phase 2+).
+      // The explicit system opt-in: see SETTINGS_SYSTEM_CONTEXT.
       const rows = await this.engine.find(this.objectName, {
         where,
         bypassTenantAudit: true,
+        context: SETTINGS_SYSTEM_CONTEXT,
       } as any);
       return rows.map((r) => ({
         namespace: r.namespace,
@@ -2389,22 +2461,41 @@ export class SettingsService {
   private async upsertRow(row: SettingsRow): Promise<string | null> {
     if (this.engine) {
       const { where, bypass } = this.rowIdentity(row);
+      // All three engine calls carry the explicit system opt-in
+      // (SETTINGS_SYSTEM_CONTEXT): the probe and the insert for the same
+      // reason as the update below, and none of them relies on a missing
+      // principal to pass the security middleware.
       const existing = await this.engine.find(this.objectName, {
         where,
         limit: 1,
         ...bypass,
+        context: SETTINGS_SYSTEM_CONTEXT,
       } as any);
       if (existing[0]) {
         const previousEnc = (existing[0] as { value_enc?: unknown }).value_enc;
         await this.engine.update(this.objectName, {
           where,
           data: { ...row },
-          context: SETTINGS_SYSTEM_WRITE_CONTEXT,
+          context: SETTINGS_SYSTEM_CONTEXT,
           ...bypass,
         } as any);
         return SettingsService.handleOf(previousEnc);
       }
-      await this.engine.insert(this.objectName, { ...row }, bypass as any);
+      // Under the opt-in the engine no longer checks that a user-scope row's
+      // `user_id` names a user, so the service keeps that refusal before the
+      // insert (see assertUserReferenceResolves). The update branch above was
+      // already a system write and is unchanged.
+      const engine = this.engine;
+      await assertUserReferenceResolves(
+        async (id) => (await engine.find(USER_OBJECT, { where: { id }, limit: 1, context: SETTINGS_SYSTEM_CONTEXT }))[0],
+        {
+          object: this.objectName,
+          field: 'user_id',
+          label: registeredLabel(engine, { object: this.objectName, field: 'user_id' }, 'User'),
+        },
+        row.user_id,
+      );
+      await this.engine.insert(this.objectName, { ...row }, { ...bypass, context: SETTINGS_SYSTEM_CONTEXT } as any);
       return null;
     }
     const idx = this.memoryIndexOf(row);
@@ -2431,7 +2522,7 @@ export class SettingsService {
    *
    * Nothing else can reference the handle: ids are minted per `encrypt()` call,
    * `sys_setting.value_enc` is the only column that holds one, and the audit
-   * trail records digests (`sha256:…`) rather than handles — so it stays
+   * trail records digests (`hmac-sha256:…`) rather than handles — so it stays
    * readable after the ciphertext is gone.
    *
    * **Best-effort, and deliberately after the repoint.** The write has already

@@ -51,7 +51,7 @@ const legacyTo: InlineAction = { type: 'url', to: '/pricing' };
 const scalar: InlineAction = 42;
 void [fromUnknown, scalar];
 
-describe('[#19920] InlineAction is an inline action body, not unknown', () => {
+describe('InlineAction is an inline action body, not unknown', () => {
   it.each([
     ['a url action', urlAction],
     ['an api action with a static payload', apiAction],

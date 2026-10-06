@@ -48,6 +48,7 @@ type FormEntry = {
   field?: string;
   widget?: string;
   type?: string;
+  colSpan?: number;
   language?: string;
   helpText?: string;
   visibleWhen?: string | { dialect?: string; source?: string };
@@ -94,7 +95,7 @@ function topLevelRows(form: unknown): FormEntry[] {
 const rowsFor = (type: string) => topLevelRows(METADATA_FORM_REGISTRY[type]);
 const rowFor = (type: string, key: string) => rowsFor(type).filter((r) => r.field === key);
 
-describe('declared keys that now have a form row (#19085)', () => {
+describe('declared keys that now have a form row', () => {
   // The probe is only a reading if it can also report a zero. Both controls
   // run against the SAME helper the assertions use, so a helper that stopped
   // finding rows would fail here rather than passing everything vacuously.
@@ -171,6 +172,55 @@ describe('declared keys that now have a form row (#19085)', () => {
 });
 
 /**
+ * **`object.imageField` is offered with `nameField`'s face, beside it** (#21765,
+ * director ruling 5989738766, letter A).
+ *
+ * The record's picture pointer is `nameField`'s sibling: both name one of the
+ * object's own fields, and the registry has no own-field picker. So the ruling
+ * gives it the same plain `text` row, with no widget and no validator of its
+ * own — the parse (`refuseNonPictureImageField`) stays the one judge of the
+ * value. The reconciliation gate only proves the key is offered somewhere on
+ * the form; it does not read the row's control or where it sits, so this pin
+ * keeps both.
+ */
+describe('object.imageField is offered as a plain text row beside nameField, with the parse as the one judge of its value', () => {
+  /** The section holding `key` on the object form, and the key's index in it. */
+  const locate = (key: string) => {
+    const sections = ((METADATA_FORM_REGISTRY.object as any)?.sections ?? []) as Array<{
+      name?: string;
+      fields?: FormEntry[];
+    }>;
+    for (const section of sections) {
+      const index = (section.fields ?? []).findIndex((r) => r?.field === key);
+      if (index >= 0) return { section: section.name, index, rows: section.fields! };
+    }
+    return undefined;
+  };
+
+  it('CONTROL: the locator finds nameField and reports a known absence', () => {
+    expect(locate('nameField'), 'lit control: the ADR-0079 title pointer row').toBeDefined();
+    expect(locate('noSuchKeyAtAll'), 'dark control: a key the object form does not offer').toBeUndefined();
+  });
+
+  it('is offered once, as a `text` row with no widget', () => {
+    const [row, ...extra] = rowFor('object', 'imageField');
+    expect(row, '`imageField` is declared by ObjectSchema and live; the object form must offer it').toBeDefined();
+    expect(extra, 'one row only').toEqual([]);
+    expect(row.type).toBe('text');
+    expect(row.widget, 'no picker: the parse is the one judge of the value').toBeUndefined();
+    expect(row.helpText?.length ?? 0).toBeGreaterThan(20);
+  });
+
+  it('sits directly after nameField, in the same section and at the same width', () => {
+    const name = locate('nameField')!;
+    const image = locate('imageField');
+    expect(image?.section).toBe(name.section);
+    expect(image?.index).toBe(name.index + 1);
+    expect(image!.rows[image!.index].colSpan).toBe(name.rows[name.index].colSpan);
+  });
+});
+
+/**
  * **A `type: 'code'` row's `language` must name the slot it actually edits**
  * (#20439).
  *
@@ -183,7 +233,7 @@ describe('declared keys that now have a form row (#19085)', () => {
  * fix) cannot otherwise tell this row apart from a real script row
  * (`body.source`, `action.source`, both genuinely `'javascript'`).
  */
-describe('hook.condition declares the CEL predicate language it edits (#20439)', () => {
+describe('hook.condition declares the CEL predicate language it edits', () => {
   it('hook.condition is a `code` row declaring language: expression, not javascript', () => {
     const [row, ...extra] = rowFor('hook', 'condition');
     expect(row, '`condition` is declared by HookSchema; the hook form must offer it').toBeDefined();

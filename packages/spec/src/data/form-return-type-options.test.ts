@@ -144,7 +144,7 @@ function formulaFieldWith(returnType: string): Record<string, unknown> {
 
 // ────────────────────────────────────────────────────────────────────────────
 
-describe('#19677 — `returnType` is never offered a value the schema refuses', () => {
+describe('`returnType` is never offered a value the schema refuses', () => {
   it('derives a non-empty closed member set from FieldSchema', () => {
     // The floor for every assertion below: an empty or unreadable derivation
     // would make the set-equality checks vacuously true.

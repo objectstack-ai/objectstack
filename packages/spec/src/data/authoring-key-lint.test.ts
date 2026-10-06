@@ -34,7 +34,7 @@ function runComparator(
   return out;
 }
 
-describe('lintAuthoredRecordKeys (#3786)', () => {
+describe('lintAuthoredRecordKeys — an unknown authoring key is reported, not swallowed', () => {
   it('is silent when every key is declared', () => {
     expect(runComparator({ a: 1, b: 2 }, ['a', 'b', 'c'])).toEqual([]);
   });
@@ -128,7 +128,7 @@ describe('the guidance tables do not rot', () => {
  * (`kernel/metadata-authoring-lint.ts`: `strict` → silent). Reaching for the
  * lint to prove reachability here would prove nothing — it never fires.
  */
-describe('the `id_field` retirement is reached, not merely declared (#16632)', () => {
+describe('the `id_field` retirement is reached, not merely declared', () => {
   const authored = { name: 'account_id', type: 'lookup', reference: 'crm_account' } as const;
   const unrecognizedKeyMessage = (value: unknown): string => {
     const r = FieldSchema.safeParse(value);

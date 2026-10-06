@@ -109,7 +109,7 @@ describe('AuthEndpointSchema', () => {
 // leave nothing to grep (#3733, ADR-0104) — the tombstone is what makes the
 // withdrawal audible, so it is pinned on both legs: the prescription a writer
 // hits, and the absence a reader gets.
-describe('AuthFeaturesConfig retired flags (#7481)', () => {
+describe('AuthFeaturesConfig retired flags (ruled: stop advertising them)', () => {
   const valid = { twoFactor: false, organization: true };
 
   it('rejects `passkeys` with its own prescription, naming the missing consumer', () => {
@@ -181,7 +181,7 @@ describe('getAuthEndpointUrl', () => {
 // than a bare unrecognized-key error, and the value survives at the same
 // magnitude. Asserting the message, not just `.toThrow()`: a bare throw stays
 // green when the schema throws for some unrelated reason.
-describe('DeviceRequestResponse.interval \u2192 intervalSeconds (#15677)', () => {
+describe('DeviceRequestResponse.interval \u2192 intervalSeconds', () => {
   const base = {
     code: 'ABCD-1234',
     verificationUrl: 'https://example.com/device',

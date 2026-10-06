@@ -68,7 +68,7 @@ function refusalAt(result: z.ZodSafeParseResult<unknown>): Array<{ code: string;
   return (result.error?.issues ?? []).map((issue) => ({ code: issue.code, path: issue.path }));
 }
 
-describe('[#19920] ApiError.code is typed as the vocabulary its schema parses against', () => {
+describe('ApiError.code is typed as the vocabulary its schema parses against', () => {
   it('every body the type refuses is refused by the schema at `code`', () => {
     expect(refusalAt(ApiErrorSchema.safeParse({ code: 42, message: 'x' }))).toEqual([
       { code: 'invalid_value', path: ['code'] },

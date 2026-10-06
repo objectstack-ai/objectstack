@@ -13,7 +13,7 @@ import {
 } from './api-derivation';
 import { ApiMethod, API_OPERATION_ORDER, LEGACY_API_METHODS } from './object.zod';
 
-describe('api-derivation (#3391)', () => {
+describe('api-derivation — one table resolves the effective operations from six primitives', () => {
   describe('three-state mode', () => {
     it('undefined apiMethods → unrestricted', () => {
       const eff = resolveEffectiveApiMethods({});
@@ -29,7 +29,7 @@ describe('api-derivation (#3391)', () => {
       expect(isApiOperationAllowed(eff, 'bulk')).toBe(true);
     });
 
-    it('empty array → deny-all (flipped semantics, #3391)', () => {
+    it('empty array → deny-all (flipped semantics)', () => {
       const eff = resolveEffectiveApiMethods({ apiMethods: [] });
       expect(eff.mode).toBe('deny-all');
       for (const p of API_PRIMITIVES) expect(isApiOperationAllowed(eff, p)).toBe(false);
@@ -95,7 +95,7 @@ describe('api-derivation (#3391)', () => {
       expect(isApiOperationAllowed(resolveEffectiveApiMethods({ apiMethods: ['get'], trackHistory: false }), 'history')).toBe(false);
     });
 
-    it('restore/purge never derive (trash flag retired, #2377)', () => {
+    it('restore/purge never derive (trash flag retired)', () => {
       const eff = resolveEffectiveApiMethods({ apiMethods: ['get', 'list', 'create', 'update', 'delete'] });
       expect(isApiOperationAllowed(eff, 'restore')).toBe(false);
       expect(isApiOperationAllowed(eff, 'purge')).toBe(false);
@@ -133,7 +133,7 @@ describe('api-derivation (#3391)', () => {
     });
   });
 
-  describe('legacy values are ignored — strip semantics (#3543)', () => {
+  describe('legacy values are ignored — strip semantics', () => {
     it('a whitelist of ONLY legacy values resolves to deny-all', () => {
       const eff = resolveEffectiveApiMethods({ apiMethods: ['import'] });
       expect(eff.mode).toBe('deny-all');
@@ -159,7 +159,7 @@ describe('api-derivation (#3391)', () => {
     });
   });
 
-  describe('present-but-unreadable policy fails CLOSED (#3545)', () => {
+  describe('present-but-unreadable policy fails CLOSED', () => {
     it('a non-array apiMethods resolves to deny-all, not unrestricted', () => {
       const eff = resolveEffectiveApiMethods({ apiMethods: 'get,list' as unknown as string[] });
       expect(eff.mode).toBe('deny-all');
@@ -283,7 +283,7 @@ describe('api-derivation (#3391)', () => {
     expect(overlap).toEqual([]);
   });
 
-  describe('vocabulary split (#3543)', () => {
+  describe('vocabulary split — authors write six primitives, the wire speaks operations', () => {
     it('the authored enum is exactly the six primitives', () => {
       expect(ApiMethod.options).toEqual([...API_PRIMITIVES]);
     });

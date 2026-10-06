@@ -97,6 +97,7 @@ import type { PermissionSetNameCollisionDiagnostic } from './permission-set-name
 import {
   ENV_PROJECTION_MARKER,
   assertPermissionSetNotPackageDeclared,
+  classifyPackagedPermissionSet,
   type LayeredProbe,
 } from './packaged-permission-set-lock.js';
 import { PermissionSetNameConflictError } from './errors.js';
@@ -723,6 +724,21 @@ export async function upsertEnvPermissionSet(
  * artifact after the overlay is gone. When the overlay disappears, a stale
  * echo is healed back to `restoreTo` (the declared body) or dropped.
  *
+ * [#21789] ⭐ The echo also states its PROVENANCE, and it states the lock's
+ * verdict. The metadata manager's get is registry-first, so the protocol's
+ * layered read serves this echo as the item's `code` layer, and the envelope's
+ * `provenance` is read off that layer. Unstamped, every set with an overlay row
+ * (an org's own set, a clone, a set in a writable runtime package) reported a
+ * code layer with no provenance, which is how a client reads "a code package
+ * ships this" (objectui's permission-matrix editor rendered such a set locked
+ * while every write door accepted the save). So the echo carries
+ * `_provenance: 'org'` exactly when {@link classifyPackagedPermissionSet}, the
+ * classifier both write doors ask, answers `org` for the name: the reported
+ * state and the enforced state are one judgment. A `packaged` verdict (a
+ * legacy overlay of a code-shipped set) or an `unknown` one leaves the echo
+ * unstamped, as before, so the read keeps reporting the lock the doors keep
+ * enforcing.
+ *
  * Best-effort: when the facade lacks `registerInMemory`, overlay-only names
  * still resolve via the DatabaseLoader / record dbLoader.
  */
@@ -731,12 +747,14 @@ async function syncEvaluatorRegistry(
   name: string,
   body: any,
   overlayBacked: boolean,
+  tenantAuthored = false,
 ): Promise<void> {
   try {
     if (!metadata || typeof metadata.registerInMemory !== 'function' || !name) return;
     if (overlayBacked && body?.name) {
       metadata.registerInMemory('permission', name, {
         ...stripDecorations(body),
+        ...(tenantAuthored ? { _provenance: 'org' } : {}),
         [ENV_PROJECTION_MARKER]: true,
       });
       return;
@@ -829,6 +847,9 @@ export async function projectPermissionMutation(
   const { ql, metadata, logger } = deps;
   let body: any = null;
   let overlayBacked = false;
+  // [#21789] The layered read, handed to the lock's classifier below as its
+  // second source, exactly as the write doors hand it theirs.
+  let layeredProbe: LayeredProbe | undefined;
   if (protocol && typeof protocol.getMetaItemLayered === 'function') {
     const layered = await protocol.getMetaItemLayered({
       type: 'permission',
@@ -846,6 +867,7 @@ export async function projectPermissionMutation(
     const isEnvelope = layered && typeof layered === 'object'
       && ('effective' in layered || 'overlay' in layered || 'code' in layered);
     if (isEnvelope) {
+      layeredProbe = { status: 'read', envelope: layered };
       const overlay = layered.overlay ?? null;
       overlayBacked = !!overlay;
       const declared = readDeclaredBody(ql, evt.name);
@@ -885,7 +907,11 @@ export async function projectPermissionMutation(
   // unchanged` — never "a write happened". A FAILED write still leaves all
   // three at zero and still skips the sync, exactly as before.
   if (out.seeded + out.updated + out.unchanged > 0) {
-    await syncEvaluatorRegistry(metadata, evt.name, body, overlayBacked);
+    // [#21789] The echo's provenance is the lock's verdict for the name — see
+    // {@link syncEvaluatorRegistry}.
+    const tenantAuthored = overlayBacked
+      && classifyPackagedPermissionSet(evt.name, ql, layeredProbe).status === 'org';
+    await syncEvaluatorRegistry(metadata, evt.name, body, overlayBacked, tenantAuthored);
   }
   return out;
 }
@@ -1063,6 +1089,47 @@ export function createPermissionSetWriteThrough(
         envelope: undefined,
       };
     }
+  };
+
+  /**
+   * [#21861] The `saveMetaItem` argument that writes an update back into the
+   * stored row it edits: `{ packageId }` when that row is bound to a package,
+   * nothing when it is not.
+   *
+   * A `sys_metadata` row is keyed `(org, type, name, package_id)`, and a save
+   * that names no package targets the package-less row. So an update leg that
+   * named none, for a set whose only row is bound to a writable runtime
+   * package (`PUT /meta/permission/:name?package=`), minted a second,
+   * package-less row carrying the edit beside the untouched package-bound one:
+   * two active rows for one name.
+   *
+   * The row is the one the update merges its patch into — the `overlay` layer
+   * of `envelope`, which {@link effectiveBodyForRow} takes as the base — and its
+   * binding is read from the metadata door's own single-item read, which serves
+   * that row by the same served-row resolution the layered read uses and states
+   * the row's `package_id` on it as `_packageId`. ⛔ Never from the patch, the
+   * projected record (the projector writes no binding onto an admin row), or a
+   * registry item: those are copies, and the row is the fact.
+   *
+   * No `overlay` layer means no stored row, so there is nothing to fork and the
+   * save stays package-less, exactly as before. Every target reaching this read
+   * has already passed the lock (verdict `org`), so a code-shipped set never
+   * gets here. A read that fails is not caught: guessing the binding would
+   * choose which row the save lands in.
+   */
+  const storedRowPackageArg = async (
+    protocol: any,
+    name: string,
+    envelope: unknown,
+  ): Promise<{ packageId?: string }> => {
+    const overlay = (envelope as { overlay?: unknown } | null | undefined)?.overlay;
+    if (overlay === null || overlay === undefined) return {};
+    // A protocol with no single-item read (minimal embeddings, unit-test stubs)
+    // keys no row by package either.
+    if (typeof protocol.getMetaItem !== 'function') return {};
+    const served = await protocol.getMetaItem({ type: 'permission', name });
+    const packageId = served?.item?._packageId;
+    return typeof packageId === 'string' && packageId !== '' ? { packageId } : {};
   };
 
   const projectAndFetch = async (protocol: any, name: string): Promise<any> => {
@@ -1342,10 +1409,13 @@ export function createPermissionSetWriteThrough(
       const rowState = pickRowStateColumns(patch);
       const results: any[] = [];
       for (const row of targets) {
-        const base = await effectiveBodyForRow(protocol, ql, row, layeredByName.get(String(row.name)));
+        const envelope = layeredByName.get(String(row.name));
+        const base = await effectiveBodyForRow(protocol, ql, row, envelope);
         const body = mergeRowPatchIntoBody(base, patch);
         body.name = row.name;
-        await protocol.saveMetaItem({ type: 'permission', name: row.name, item: body, ...actorArg });
+        // [#21861] Into the row the base came from — see `storedRowPackageArg`.
+        const packageArg = await storedRowPackageArg(protocol, String(row.name), envelope);
+        await protocol.saveMetaItem({ type: 'permission', name: row.name, item: body, ...packageArg, ...actorArg });
         // Row state rides along on the same patch but lands on the record, not
         // in the definition (the projector above never touches these columns).
         if (rowState) await tryUpdate(ql, 'sys_permission_set', { id: row.id, ...rowState });

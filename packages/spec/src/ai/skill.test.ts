@@ -192,7 +192,7 @@ describe('defineSkill', () => {
   });
 });
 
-describe('#3896 close-out — retired `triggerPhrases`', () => {
+describe('retired `triggerPhrases` — phrases never routed a skill; triggerConditions do', () => {
   it('REJECTS the retired key with the routing prescription', () => {
     let message = '';
     try {

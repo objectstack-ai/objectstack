@@ -89,7 +89,7 @@ describe('CronScheduleSchema', () => {
  * default, which ECMA-402 requires every runtime to carry, so the narrowing can
  * never refuse an omitted key — and `'UTC+8'`, an offset that names no zone.
  */
-describe('CronScheduleSchema.timezone — iana_time_zone membership (#16292)', () => {
+describe('CronScheduleSchema.timezone — iana_time_zone membership', () => {
   const parseTz = (timezone: string) =>
     CronScheduleSchema.safeParse({ type: 'cron', expression: '0 0 * * *', timezone });
 
@@ -468,7 +468,7 @@ describe('JobSchema', () => {
   // rejection must carry the RENAME (the prescription is the payload), not a
   // bare unrecognized-key error, and the value must survive the rename at the
   // same magnitude.
-  describe('job.timeout → job.timeoutMs (#14478, ADR-0087 `job-timeout-to-timeout-ms`)', () => {
+  describe('job.timeout → job.timeoutMs (ADR-0087 `job-timeout-to-timeout-ms`)', () => {
     const base = {
       name: 'long_running_job',
       schedule: { type: 'cron' as const, expression: '0 0 * * *' },
@@ -833,7 +833,7 @@ describe('Job Scheduling Integration', () => {
 });
 
 // ── `job.id` retired in 17.0.0 (#4667, ADR-0049) ────────────────────────────
-describe('retired job.id (#4667)', () => {
+describe('retired job.id', () => {
   const base = {
     name: 'nightly_sync',
     schedule: { type: 'cron' as const, expression: '0 0 * * *' },
@@ -878,7 +878,7 @@ describe('retired job.id (#4667)', () => {
  * package-wide `@example` question is its own card — ⛔ do not grow this into a
  * family sweep here.
  */
-describe("JobSchema's own @example (#19184)", () => {
+describe("JobSchema's own @example — copied verbatim, it parses", () => {
   const HERE = dirname(fileURLToPath(import.meta.url));
   const SOURCE = readFileSync(resolve(HERE, './job.zod.ts'), 'utf8');
   const ANCHOR = '@example Metadata Sync Job (Cron)';

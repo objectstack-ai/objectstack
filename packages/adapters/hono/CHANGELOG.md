@@ -1,5 +1,54 @@
 # @objectstack/hono
 
+## 17.7.0
+
+### Patch Changes
+
+- f5b8e29: Share-link passwords follow the platform's credential rules (#21839).
+  
+  - **The stored hash never leaves the server.** The share-link mint response (`POST /api/v1/share-links`, and `ShareLinkService.createLink`'s return value) no longer carries `password_hash`. The list and the redemption result are projected the same way. A client that reads a link's password state keeps reading it from the redemption route's `NEEDS_PASSWORD` answer, as before.
+  - **The stored form is the platform's slow password hash.** New passwords are hashed with scrypt at the parameters account passwords use, instead of one salted SHA-256. Links minted before this release keep working: a stored password in a legacy form still verifies, and it is re-hashed into the new form on its first successful redemption. Every comparison is constant-time. A deployment that injects its own `hashPassword` / `verifyPassword` pair is unaffected, and its stored forms are left alone.
+  - **The password travels in a header.** Both public share-link routes (`GET /api/v1/share-links/:token/resolve` and `/:token/messages`) accept the `x-share-password` request header, the preferred form, because a header is not part of the request URL. The `?password=` query parameter is still accepted for compatibility, so current consoles keep working until they move to the header. `/messages` accepted only the query parameter on this mount before.
+  - **Cross-origin clients can send the header.** `X-Share-Password` is in the default CORS preflight allow-list (`DEFAULT_CORS_ALLOW_HEADERS` in `@objectstack/plugin-hono-server`, which the `@objectstack/hono` adapter also applies). A deployment that passes its own `allowHeaders` is unchanged; add the header to that list to let a cross-origin client use it.
+  - **Public share-link answers are not cached.** Both public routes answer with `Cache-Control: no-store` and `Vary: X-Share-Password` on every outcome, on both mounts (the sharing plugin's routes and the runtime dispatcher's `/share-links` domain). The authenticated create, list and revoke routes are unchanged.
+  - **Hashing works in WebContainer.** On StackBlitz WebContainer, where `node:crypto.scrypt` is incomplete, the password is hashed with the pure-JS scrypt from `@noble/hashes` (now a dependency of `@objectstack/plugin-sharing`, as it already is of `@objectstack/plugin-auth`), at the same parameters and in the same stored form. A hash made on either runtime verifies on the other.
+- Updated dependencies [909229e]
+- Updated dependencies [96a9719]
+- Updated dependencies [748b240]
+- Updated dependencies [50e1c65]
+- Updated dependencies [1fd5664]
+- Updated dependencies [1d0600b]
+- Updated dependencies [6d728b8]
+- Updated dependencies [b206403]
+- Updated dependencies [85e29b8]
+- Updated dependencies [2f837a5]
+- Updated dependencies [abe8f28]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [bd70706]
+- Updated dependencies [aa0d4b9]
+- Updated dependencies [5d0e4e2]
+- Updated dependencies [045b946]
+- Updated dependencies [316be32]
+- Updated dependencies [6946f2f]
+- Updated dependencies [83e2fee]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [025008a]
+- Updated dependencies [75ddcd1]
+- Updated dependencies [a0176ef]
+- Updated dependencies [149153c]
+- Updated dependencies [088428f]
+- Updated dependencies [f5b8e29]
+- Updated dependencies [e6dc7a2]
+- Updated dependencies [faf8dce]
+- Updated dependencies [131b937]
+- Updated dependencies [753e7a1]
+- Updated dependencies [80f9f7e]
+  - @objectstack/runtime@17.7.0
+  - @objectstack/types@17.7.0
+  - @objectstack/plugin-hono-server@17.7.0
+
 ## 17.6.0
 
 ### Patch Changes

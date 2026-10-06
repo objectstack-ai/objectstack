@@ -399,7 +399,9 @@ describe('MessagingService', () => {
 
     describe('emit() L2 event persistence', () => {
         it('writes one sys_notification event row carrying topic/payload/severity/source/actor', async () => {
-            const data = fakeData();
+            // [#21913] The actor must name a user — the producer refuses one that
+            // does not, as the engine did — so the double answers its sys_user row.
+            const data = fakeData((obj, q) => (obj === 'sys_user' ? { id: q?.where?.id } : null));
             service = new MessagingService({ logger: silentLogger(), getData: data.getData, now: () => '2026-06-01T00:00:00.000Z' });
             service.registerChannel(recordingChannel('inbox').channel);
 

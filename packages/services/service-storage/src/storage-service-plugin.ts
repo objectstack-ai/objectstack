@@ -16,6 +16,7 @@ import {
 import type {
   IHttpServer,
   IDataEngine,
+  II18nService,
   IStorageService,
   IFileAccessDelegate,
 } from '@objectstack/spec/contracts';
@@ -36,6 +37,7 @@ import type { FileReadVerdict, StorageUploadSession } from './storage-routes.js'
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder, findHeldFiles } from './attachment-lifecycle.js';
 import { installFileReferenceHooks } from './file-reference-lifecycle.js';
 import { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
+import { contributeAttachmentDeleteFloorAlternate } from './attachment-delete-floor-alternate.js';
 import { SystemFile, SystemUploadSession } from './objects/index.js';
 // ADR-0052 §3 ownership: `sys_attachment` (a file↔record link) belongs with the
 // storage domain, not the audit/compliance ledger. Definition stays in
@@ -372,7 +374,25 @@ export class StorageServicePlugin implements Plugin {
             }
           },
           ctx.logger,
+          // [#21755] The deployment's i18n lookup for the not-visible refusal's
+          // sentence — resolved per refusal (ADR-0029 D8: i18n may register
+          // after this plugin), the override address plugin-security's own
+          // not-visible refusal renders through.
+          () => {
+            const i18n = ctx.getService<II18nService>('i18n');
+            const t = i18n?.t;
+            if (typeof t !== 'function') return undefined;
+            return (key: string, loc: string, params?: Record<string, unknown>) => t.call(i18n, key, loc, params);
+          },
         );
+        // [#21729] The gate's parent-editor DELETE limb, made reachable: the
+        // alternate match that stops the platform's `created_by` delete floor
+        // answering for `sys_attachment` before the gate above runs. Contributed
+        // HERE and nowhere else — beside the gate that judges it, so a
+        // composition without this gate never carries the relief and the floor
+        // stays the last word there (maintainer ruling; the reasoning is in
+        // `attachment-delete-floor-alternate.ts`). Delete limb only.
+        contributeAttachmentDeleteFloorAlternate(() => ctx.getService<unknown>('security'), ctx.logger);
         // Parent-derived READ visibility (#2970 item 1) — list/find/count of
         // sys_attachment only returns rows whose parent record the caller can
         // read. Middleware (not a hook) so list `total` is filtered too.
@@ -972,10 +992,10 @@ export function composeStorageRoutes(
  * flattened shape as a fallback for hosts that hand back the session record
  * directly.
  *
- * ⛔ No membership fallback. `marketplace-install-local-plugin`'s
- * `resolveActiveOrgId` falls back to the user's first `sys_organization_member`
- * row; that is a SCOPING read for a seed, and its own doc warns it answers for
- * "which org do these rows land in" only. Here the answer becomes a WALL: a
+ * ⛔ No membership fallback. A session with no active organization is a
+ * declared state (ADR-0123 D1), never a gap to fill from the user's `sys_member`
+ * rows; `marketplace-install-local-plugin`'s `resolveActiveOrgId` keeps the same
+ * rule for the rows a seed lands in. Here the answer becomes a WALL: a
  * file stamped from a guessed membership is a file its uploader can no longer
  * see from the organization they were actually acting in. No active
  * organization therefore means no stamp — the pre-#12745 behaviour, reported

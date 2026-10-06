@@ -144,10 +144,9 @@ export const zhCN: PlatformTranslationData = {
 
     localization: {
       title: '本地化',
-      description: '默认时区、语言、货币及日期/数字格式。',
+      description: '默认时区、语言、国家/地区、货币及财年。',
       groups: {
         region: { title: '区域' },
-        formats: { title: '格式' },
         finance: { title: '财务' },
       },
       keys: {
@@ -185,28 +184,6 @@ export const zhCN: PlatformTranslationData = {
           },
         },
         default_country: { label: '默认国家/地区', help: 'ISO 3166-1 二位代码(如 US、GB、CN)。' },
-        date_format: {
-          label: '日期格式',
-          options: {
-            'YYYY-MM-DD': '2026-06-17(ISO)',
-            'MM/DD/YYYY': '06/17/2026(美国)',
-            'DD/MM/YYYY': '17/06/2026(欧洲)',
-            'DD.MM.YYYY': '17.06.2026',
-            'DD-MMM-YYYY': '17-Jun-2026',
-          },
-        },
-        time_format: { label: '时间格式', options: { '24h': '24 小时制(14:30)', '12h': '12 小时制(2:30 PM)' } },
-        number_format: {
-          label: '数字格式',
-          help: '用于显示数字的千分位与小数分隔符。',
-          options: {
-            '1,234.56': '1,234.56(逗号 / 句点)',
-            '1.234,56': '1.234,56(句点 / 逗号)',
-            '1 234,56': '1 234,56(空格 / 逗号)',
-            '1,23,456.78': '1,23,456.78(印度)',
-          },
-        },
-        first_day_of_week: { label: '每周起始日', help: '用作周度分析分桶与日历网格的起始基准。', options: { monday: '周一(ISO)', sunday: '周日', saturday: '周六' } },
         currency: {
           label: '默认货币',
           help: '当货币字段未指定币种时套用的 ISO 4217 代码。',

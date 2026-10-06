@@ -1,5 +1,309 @@
 # @objectstack/plugin-audit
 
+## 17.7.0
+
+### Minor Changes
+
+- 50e1c65: fix(plugin-audit,platform-objects,plugin-auth,plugin-sharing,plugin-approvals)!: the audit ledger no longer records fields declared `internal`, and the platform's credential-class fields are declared `internal`
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or config field is removed or renamed: the change narrows what the generic data path and the audit ledger return for platform-owned columns, and nothing an author wrote needs rewriting. The objectql half adds exports only. -->
+  
+  **BREAKING for readers of credential-class columns on the generic data path and in the audit ledger.**
+  
+  **What changed.**
+  
+  - The audit plugin's CRUD mirror now omits every field declared `internal: true` from the
+    rows it writes to `sys_audit_log` and `sys_activity`: create `new_value`, both sides of an
+    update, delete `old_value`, and the activity row. It already masked `secret` and `password`
+    fields; `internal` is the same contract the generic data path already enforces ("never
+    returned on the generic data path"). An update that changes only an `internal` field still
+    writes its row, with neither value.
+  - These platform fields are now declared `internal: true`, so neither the generic data path
+    nor the ledger returns them: the JWT signing key's private key (`sys_jwks`), both credential
+    columns of the one-time verification object (`sys_verification`), the two-factor secret and
+    backup codes, the SSO provider's OIDC and SAML protocol blobs, the OAuth access and refresh
+    token columns, the OAuth client secret digest, the SCIM credential digest, the share link's
+    token and password hash, and the approval action-token digest. API key digests and email
+    headers were already `internal`; the ledger now honours that too.
+  - Every built-in consumer that needs one of these values reads it back through the engine's
+    privileged accessor rather than the generic path: JWT signing, password reset and the other
+    one-time verification flows, two-factor verification, SSO sign-in and the legacy SSO secret
+    migration, OAuth client authentication, share-link redemption (the password gate is held)
+    and the creator's share-link list, which keeps returning each link's token. The runtime's
+    share-link resolve route (the dispatcher twin of the plugin's) still answers "password
+    required" for a protected link rather than the unknown-link shape.
+  - The one-time verification object's record title is now the fixed label `Verification`; it no
+    longer shows the identifier column.
+  - `@objectstack/objectql` exports two helpers from its main and `/core` entries:
+    `collectInternalReadFields` (the names of an object's `internal` fields) and
+    `readInternalColumn` (recovers one `internal` column for rows already read, through the
+    engine's privileged accessor, and fails closed when the value cannot be recovered).
+  
+  **What to do after upgrading.**
+  
+  - **Rotate the JWT signing keys.** Ledger rows written before this release are not rewritten
+    (the ledger is append-only), so a signing key that existed before the upgrade may have a copy
+    in the ledger. Rotate the keys so that copy signs nothing.
+  - **Revoke and re-mint share links that must stay private.** A share link's token is a
+    capability that stays valid until the link expires or is revoked, and links minted before this
+    release may have a copy in the ledger.
+  - A copy of a one-time verification credential is usable only while that credential is still
+    outstanding: once it is consumed or expires, its copy names nothing that will be accepted.
+  - An integration that read any of these columns through `GET /api/v1/data/...` no longer
+    receives them. Read share links through `/api/v1/share-links`, and OAuth clients and SSO
+    providers through their auth routes.
+- 713b0fa: fix(metadata-protocol)!: a metadata body's stored content hash is served and compared only in keyed form, never copied, and never evaluated (#21207)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the stored content hash of a metadata body stays the canonical hash at rest and no metadata body, authorable key, spelling or export moves; what changes is the form a door serves the hash in (a keyed digest: the crypto provider's, or a process-scoped ephemeral key's when none is registered), the form an inbound version token is compared in, and which query shapes the doors accept over the two hash columns, so `objectstack migrate meta` has nothing to rewrite. The operator-run rewrite this release asks for is of audit, activity and decision-audit copies, not of metadata. The other categories are closed on facts: every package here publishes (not `unpublished`); no ADR-0087 id covers a served version token or a refused query shape (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what the metadata doors serve and accept for the stored content hash of a metadata body — a hash over the whole stored body, withheld credential material included. Served beside the projected body it let a reader confirm a guess at that material offline; filtered on, it confirmed one online. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **Three things change for callers and operators.**
+  
+  1. **A held version token gets one `409 METADATA_CONFLICT`.** Every door that hands out a metadata version token — the save, publish, package-publish and rollback receipts and the history read — now hands out a keyed digest of the stored hash instead of the hash itself, and the save and reset doors compare a token they are sent in that same form. The key is the crypto provider's; a host that registers none keys under a process-scoped ephemeral key instead, so a token is always issued and never empty. A token a client held from before the upgrade is refused once; take the token from the next read or receipt and retry. On a host with no provider the same happens after a restart, and on any host when a provider is first registered. An empty, withheld, raw or stale token is refused with the same `409`; it is never read as "no pin".
+  2. **Filter, sort and group on the two stored content-hash columns, and on the version history's change note, now answer `400 INVALID_FIELD`** — on the generic data door, the MCP stdio reader and the analytics door, before the engine runs. The change note is included because a draft promotion that stated no message of its own recorded the draft's stored hash in it; the publish door now always states a hash-free message, and a note written before this release is served with the quoted hash in keyed form. A data-door search over the two stored-metadata tables no longer scans those columns or the stored body column, and an explicit search-field list naming one answers the same `400`. Every other column of the two tables is served, filtered, sorted and grouped as before, and every other object is unchanged.
+  3. **Operators run `os migrate audit-metadata-bodies` once after upgrading, dry run first.** The audit ledger, the activity feed and the metadata decision-audit trail no longer copy the stored hash. The extended command drops it from the copies already written and withholds it in the decision-audit notes and their copies: a dry run by default, `--apply` to rewrite, idempotent. The version history stays the lineage.
+  
+  **What else changes.** The data door serves the two hash columns of the stored-metadata tables in keyed form, under the same key as the version tokens. The MCP stdio reader serves them keyed under the crypto provider's key, and omits them on a host with no provider. A `409` conflict refusal carries keyed values or none. The ObjectQL engine gains a read accessor for the registered provider's keyed digest; it is additive. A member's read of these tables is refused as before.
+- 7ebb543: feat(spec,plugin-audit): the compliance ledger's audit capability, `view_all_audit_log`, exempts its holder from the ledger's parent-record read gate; platform administrators hold it by default (#21260)
+  
+  Clause-②: yes (widening)
+  
+  - **The capability.** `PLATFORM_CAPABILITIES` (`@objectstack/spec/security`) gains `view_all_audit_log` ("View All Audit Log", `scope: 'org'`). It is seeded into `sys_capability` like every other curated capability, and a permission set grants it through `systemPermissions`. It is a platform capability, so an app that declares a capability of the same name cannot bind a set carrying it to the `everyone` or `guest` anchor.
+  - **Who holds it.** `ADMIN_FULL_ACCESS_CAPABILITIES` (`@objectstack/spec`) now lists it, so platform administrators hold it by default: through the `admin_full_access` grant, and through the envelope a configured platform owner resolves to. No other shipped permission set carries it. Any other position holds it only through a permission set that grants it.
+  - **What it does.** A read of `sys_audit_log` keeps only the rows whose parent record the caller can read. The holder skips that gate and is served every ledger row its grant on `sys_audit_log` reaches: rows about deleted records, sign-out rows, sign-in rows whose session has ended, and rows about records it cannot open. A broad read is served whole. The gate's 2,000-row pre-scan does not run for a holder, so the read is not cut off at that bound.
+  - **What still applies to the holder.** The holder still needs object-level read on `sys_audit_log`. The field-level redaction still narrows every before/after snapshot it is served. Under a walled tenancy posture, the tenant wall still keeps the holder to its own organization's rows, which is why the capability is declared `org`.
+  - **What it does not touch.** The activity stream (`sys_activity`) keeps its own parent-record gate for every caller, holders included. A non-holder's ledger reads are unchanged.
+  
+  **Migration.** None: no metadata, code or configuration change is needed. Platform administrators get the deletion and sign-out trail back with no action. To give an auditor the trail, grant `view_all_audit_log` through `systemPermissions` in a permission set that also grants read on `sys_audit_log`.
+
+### Patch Changes
+
+- cc07862: Automation refusals, prescriptions, log lines and run-object field help, and the activity type help, no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  Some strings these two packages show to flow authors, operators and administrators pointed at an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - `@objectstack/service-automation`: the refusal for a `fieldValues` write map says a runtime alias for it was rejected by design, so the node keeps one strict `fields` key; the refusal for a screen field's `visibleIf` says a predicate under any other key is never read, so the field always shows, and a `required` field meant to stay hidden then blocks the screen from ever being submitted; the undeclared-config-key refusal says the built-in node types were reconciled so that every key their executors read is declared; the unknown-function error in a flow value expression says such a name is refused rather than evaluated to null, which would write the field as undefined; the inert-connector warning says entries without a `provider` are catalog descriptors, while an entry that names a `provider` is a connector instance that provider's installed executor materializes; the `sys_automation_run` field help says the paused node's type decides who may continue a run (an approval pause only through its owning service), that rows written before run history recorded its trigger were not backfilled, and that a finished run's bounded step log keeps its per-node detail across a restart; three bridge debug lines say what each bridge provides. The bulk-intent guidance, the degraded-connector dispatch error and retry lines, the user-less `runAs` warning and refusal, the unclaimed-branch warning, the script-function and node-config refusals and the `sys_flow_dispatch` description drop their citations.
+  - `@objectstack/plugin-audit`: the `sys_activity` `type` help, whose English text all four shipped locale bundles carry, says the vocabulary is open by decision, not a gap awaiting enforcement.
+  
+  Text only: no status, error code, field, route or control flow moves. A client or log filter that matches the old text (for example a tracker-number suffix) needs the new spelling.
+- 4916168: Sharing refusals and log lines, and the audit write-failure line, no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  Some strings these two packages show to administrators and operators pointed at an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - `@objectstack/plugin-sharing`: the orphan-sweep line for record shares says every share on a deleted record goes, whatever its source, so a reused record id cannot inherit it; the same line for share links says a share link is a bearer token, so a reused record id must not inherit it; the write-gate failure line says a failed lookup is a refusal, never an abstention, because an abstention would hand the row to the other write authorities, which may admit it; the authored-row-write probe line says only an app-authored row-level policy that positively admits the row may lift the sharing refusal; the hierarchy-scope line says the resolver contract makes a resolver fail closed on a missing organization. The two sharing-rule refusals (no active organization; deleting a platform-global rule) drop their citations, since each sentence already says why. The `OrphanSweepSubject.issue` member's doc comment now says the member carries that reason in words.
+  - `@objectstack/plugin-audit`: the missing-table fix in the audit write-failure line says that on a fresh `os dev` boot the table exists in the sibling telemetry file and not in the primary one, so look there before concluding it was never created.
+  
+  Text only: no status, error code, field, route or control flow moves. A client or log filter that matches the old text (for example a tracker-number suffix) needs the new spelling.
+- 69a12a0: The `Audit write FAILED` line names the table whose insert was refused and the row that is lost, gives a missing table the two causes the evidence cannot tell apart, and says it is printed once per audited object, refused table and error code
+  
+  Clause-②: no
+  
+  The record writer stores the `sys_audit_log` row that records who did it, then, when activities are enabled and the write has one, its `sys_activity` timeline row. When either insert was refused, the line always said the `sys_audit_log` row never landed. When the refused insert was `sys_activity`, every ledger row had in fact landed.
+  
+  - The line now opens `Audit write FAILED on TABLE` and names the table the writer had in flight when it threw. A refused `sys_activity` insert says the ledger row landed and only the activity row is lost. A refused `sys_audit_log` insert says the ledger row is lost, and so is the activity row due after it when the object writes one.
+  - A missing table no longer gets only the telemetry-datasource split as its remedy. The table may never have been created because schema sync's DDL for it was refused at boot. The line cannot tell the two causes apart, so it names both, in order: look for `Schema sync FAILED for object 'TABLE'` in the boot log first, then the split and `OS_TELEMETRY_DB=0`. Any other cause keeps the driver-fault remedy.
+  - Whether the table is missing is asked about the refused table first. An error code that means "missing" without a phrase naming a relation is now attributed to that table, not to `sys_audit_log` by list order.
+  - The line is printed once per audited object, refused table and error code, and it now says so in place of "reported ONCE". The refused table joins the key, so the other table refusing with the same code on the same object gets its own line. The same missing table still prints one line per audited object that writes through it. Repeats stay at `debug`, which now also carries the `table`.
+  
+  Log text and log metadata only: no status, error code, route, row or control flow changes. A log filter that matches the old text (`Audit write FAILED (`, `reported ONCE`) needs the new spelling.
+- 3bddd4a: fix(plugin-audit): an activity row recording an update whose every changed field the reader is withheld is no longer served to that reader, on any listing face
+  
+  Clause-②: no
+  
+  A `sys_activity` row's recorded change (`metadata.old` / `metadata.new`) is narrowed key by key for each reader, through the security service's served-fields answer. An update whose every changed field the reader is withheld still reached that reader as a row with an empty change, and its summary, actor and timestamp said that the record changed, and when. An org member holding object-level `sys_activity` read was served that row for each sign-in stamp on a colleague's identity record (`last_login_at`), and for each failed-sign-in counter bump, lockout, password-change stamp and MFA-required stamp.
+  
+  Such a row is now withheld from that reader as a row:
+  
+  - **What counts as one.** An update row (its stored change has both an `old` and a `new` side) whose stored change had at least one key, where the reader is served none of those keys. The keys are read from the STORED change, not the redacted one.
+  - **What is unaffected.** A create or a delete keeps its row. A row whose stored change is empty on both sides (an update that touched only `internal` fields) is unaffected. A mixed update keeps its row, with the served keys only. A reader served every field (an administrator) still reads every row with its change, within the pre-scan's bound. A system-context read is not narrowed.
+  - **Every face agrees.** The rule is a WHERE built from a system-context pre-scan on `find`, `findOne`, `count` and `aggregate`. So a list's `total`, its pages, a by-id read (`404`) and a grouped count agree with the rows served. A pre-scan that reaches its 2,000-row bound answers a broad read from the rows it judged, for every reader, administrators included, and logs a warning. The remedy is to scope the query by `object_name` and `record_id`.
+  
+  No migration: no key, export or config changes. A reader the security service gives no answer for (no security plugin wired) is not narrowed, as before.
+- 50b5e03: A write refusal on an attachment or a comment no longer names a parent record the caller cannot read (#21755).
+  
+  Clause-②: no
+  
+  - **What changed.** The attachment gate (`sys_attachment`, `@objectstack/service-storage`) and the comment gate (`sys_comment`, `@objectstack/plugin-audit`) refuse an update or a delete by a caller who neither wrote the row nor can edit its parent record. That refusal names the parent record. A caller who cannot read the parent now gets the platform's not-visible refusal instead. This is the answer the row-level write check gives the principals it covers: `PERMISSION_DENIED` (403), with the same localized `record_access_denied` sentence. It names neither the parent nor the row's link to it, in the message or in the envelope.
+  - **What did not change.** A caller who can read the parent but may not edit it keeps the named refusal: `ATTACHMENT_DELETE_DENIED` for an attachment delete, and `RECORD_NOT_ACCESSIBLE` for an attachment update and for a comment update or delete. Who may update or delete is unchanged.
+  - **A comment whose thread names no record** is read by nobody, so a non-author's write on it now gets the not-visible refusal too, and the thread value is not echoed back.
+  - **Localization.** `installAttachmentAccessHooks` and `installCommentAccessHooks` accept an optional fourth argument: a lazily resolved i18n lookup. With it, the sentence honours a deployment's `errors.record_access_denied` override, as the row-level write check's sentence does. Without it, the built-in catalog still renders the caller's locale.
+- b238856: An activity row names its record by the record's title as every renderer resolves it, not by a guess from a fixed list of field names
+  
+  Clause-②: no
+  
+  The record-change mirror writes a label for the record into each `sys_activity` row (`record_label`, and inside the created, deleted and generic updated summary). It used to pick that label from a fixed list of field names (`name`, `subject`, `title`, `full_name`, `label`, `first_name`, `company`, `email`) and fall back to the record id. An object titled by any other field showed its record id on every activity row: an object titled by `company_name` read `Created Customer "RECORD_ID"`, with the raw record id, while its record page showed the company name.
+  
+  The label is now the value of the object's title field as ADR-0079 resolves it (`nameField`, then the deprecated `displayNameField`, then the same derivation the record page, the picker and the approvals inbox use). The record id stays the floor: when nothing resolves, when the title field is the primary key, a credential or a field declared `internal`, or when the record's title value is empty. An empty title no longer borrows another populated field.
+  
+  - Objects titled by `name`, `title` or `subject` are labelled as before.
+  - An object whose `nameField` names another field is now labelled by that field. An object whose only list match was not its resolved title is labelled by its title now; in the bundled examples that moves the CRM contact from `full_name` (a formula that declares no `returnType: 'text'`, so it is not derived as the title) to `first_name`, its registered title.
+  - The activity row records the resolved field as the label's source, so the read-side redaction keeps serving the label only to a reader served that field.
+  
+  Rows written before this change keep the label they were written with; nothing is backfilled.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [c98a72d]
+- Updated dependencies [48fa7a3]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [713b0fa]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1878ef9]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [c2cd651]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [04f0cc4]
+- Updated dependencies [1fd5664]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [ceb4a93]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [9f13c94]
+- Updated dependencies [d956910]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [83b3d32]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [5c9138b]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [a1ca156]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [5b5e83f]
+- Updated dependencies [be55fd2]
+- Updated dependencies [a2aadab]
+- Updated dependencies [8843505]
+- Updated dependencies [fe10172]
+- Updated dependencies [5259a35]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [a6a7547]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [045f764]
+- Updated dependencies [75ddcd1]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [26d710e]
+- Updated dependencies [a0176ef]
+- Updated dependencies [e1790fd]
+- Updated dependencies [149153c]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [607463d]
+- Updated dependencies [cab6396]
+- Updated dependencies [e864db5]
+- Updated dependencies [7665c54]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [0728cbf]
+- Updated dependencies [e6dc7a2]
+- Updated dependencies [f243a29]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [13a22d0]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [f76c622]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [3c7785d]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [568dc0b]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/platform-objects@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/metadata-core@17.7.0
+  - @objectstack/objectql@17.7.0
+  - @objectstack/types@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

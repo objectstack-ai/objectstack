@@ -60,6 +60,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "记录标题字段",
         helpText: "用作每条记录标题的字段（例如 \"name\"、\"subject\"）。ADR-0079 规定的规范指针——记录展示、ObjectQL 搜索和关联记录预览都读它。"
       },
+      imageField: {
+        label: "记录图片字段",
+        helpText: "用作每条记录图片的字段，显示在记录页头的标题旁。必须是本对象中类型为 image 或 avatar 的字段，其他名称会在保存对象时被拒绝。留空则不显示记录图片，也不画占位图。"
+      },
       isSystem: {
         label: "系统内置",
         helpText: "系统对象（受保护，不可删除；共享默认为公开）"
@@ -1732,6 +1736,22 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "错误消息",
         helpText: "动作失败时显示的错误消息，替代原始错误信息。"
       },
+      outcomeMessages: {
+        label: "按结果的成功消息",
+        helpText: "按处理程序结果显示的成功消息，以 JSON 填写：每个键是处理程序在成功返回中给出的 snake_case `outcome` 值，每个值是该结果显示的文字，例如 {\"archived\": \"已归档\", \"already_archived\": \"此前已归档\"}。文字中可插入 ${result.*}。没有对应条目的结果显示成功消息；处理程序从不返回的键永远不会显示。不能与结果对话框或 `operation: 'update'` 同时使用。"
+      },
+      onSuccess: {
+        label: "成功后跳转",
+        helpText: "动作成功后的跳转：要打开的路由，以及在哪里打开。"
+      },
+      "onSuccess.navigate": {
+        label: "跳转目标",
+        helpText: "动作成功后打开的路由或 URL 模板。可插入 ${param.*}（参数对话框收集的值）、${ctx.*}（origin、apiBase、user、org、recordId、selection）和 ${result.*}（服务器响应，例如 ${result.id}）。相对值是应用内路由。"
+      },
+      "onSuccess.openIn": {
+        label: "跳转打开位置",
+        helpText: "跳转在哪里打开——'self'（默认）在当前页跳转，'newTab' 打开新的浏览器标签页。"
+      },
       refreshAfter: {
         label: "完成后刷新",
         helpText: "执行完成后刷新当前列表/页面"
@@ -1767,6 +1787,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       requiresFeature: {
         label: "所需认证特性",
         helpText: "用于控制该动作是否出现的公共认证特性开关。它在解析时被降解进 `visible` 断言并从输出中移除，因此下游消费方永远看不到这个键。"
+      },
+      requiresMembershipReach: {
+        label: "所需成员等级可达端点",
+        helpText: "该动作调用的组织端点：只有成员等级可达该端点的成员才会看到它。它在解析时被降解进 `visible` 断言并从输出中移除，因此下游消费方永远看不到这个键。"
       },
       requiredPermissions: {
         label: "所需权限",

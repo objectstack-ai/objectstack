@@ -38,7 +38,7 @@ type Equals<A, B> = (<G>() => G extends A ? 1 : 2) extends (<G>() => G extends B
 
 type RegisterHookOptions = NonNullable<Parameters<IObjectQLEngine['registerHook']>[2]>;
 
-describe('[#5928] IObjectQLEngine.registerHook scope faces', () => {
+describe('IObjectQLEngine.registerHook scope faces — global minus excluded objects', () => {
   it('declares `excludeObjects` in both accepted spellings', () => {
     // Fails to COMPILE if the declared type is anything else — `true` is not
     // assignable to `false`.

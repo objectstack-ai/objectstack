@@ -60,7 +60,7 @@ const OWNER = '@objectstack/runtime';
 const asDetails = (d: ActionConfirmationRequiredDetails) => d;
 const asConfirmation = (c: AIActionConfirmation) => c;
 
-describe('action-confirmation contract (#16293)', () => {
+describe('action-confirmation contract — an unconfirmed gated action is refused', () => {
   it('the refusal code is ADMITTED by the closed `ErrorCode` union', () => {
     expect(ErrorCode.parse(CODE)).toBe(CODE);
     // Control: the union is closed, so a one-character near-miss is refused.

@@ -22,7 +22,7 @@ import {
 import { BatchOptionsSchema } from './batch.zod';
 import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
 
-describe('ValidateDataRequest (#6037)', () => {
+describe('ValidateDataRequest — asks the write path for its verdict instead of predicting it', () => {
   it('accepts a single candidate row', () => {
     const r = ValidateDataRequestSchema.safeParse({ object: 'lead', data: { company: 'Acme' } });
     expect(r.success).toBe(true);
@@ -54,7 +54,7 @@ describe('ValidateDataRequest (#6037)', () => {
   });
 });
 
-describe('ValidateDataResponse (#6037)', () => {
+describe('ValidateDataResponse — the verdict the write path would reach, persisting nothing', () => {
   const ok = {
     object: 'lead',
     mode: 'insert' as const,
@@ -163,7 +163,7 @@ describe('ValidateDataResponse — per-row droppedFields', () => {
   });
 });
 
-describe('the #4052 non-repeat', () => {
+describe('the non-repeat of the retired `validateOnly` dry-run flag', () => {
   it('does not reuse the retired `validateOnly` spelling', () => {
     // `BatchOptions.validateOnly` is tombstoned: it promised a dry run that
     // never existed. The new operation had to avoid that vocabulary so the

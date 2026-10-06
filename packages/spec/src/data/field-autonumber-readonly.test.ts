@@ -28,7 +28,7 @@
 import { describe, it, expect } from 'vitest';
 import { Field, FieldSchema, RUNTIME_OWNED_FIELD_TYPES } from './field.zod';
 
-describe('#5628 — Field.autonumber injects readonly: true', () => {
+describe('Field.autonumber injects readonly: true', () => {
   it('declares the field read-only', () => {
     const f = Field.autonumber({ label: 'Auto Number' });
     expect(f.type).toBe('autonumber');
@@ -79,7 +79,7 @@ describe('#5628 — Field.autonumber injects readonly: true', () => {
   });
 });
 
-describe('#5628 / #5503 — RUNTIME_OWNED_FIELD_TYPES is the protocol vocabulary', () => {
+describe('RUNTIME_OWNED_FIELD_TYPES is the protocol vocabulary — the types whose value the runtime owns', () => {
   it('names `autonumber`', () => {
     expect(RUNTIME_OWNED_FIELD_TYPES.has('autonumber')).toBe(true);
   });

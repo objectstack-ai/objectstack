@@ -445,9 +445,10 @@ describe('#8103 reachability fact 3 — the audit trail records digests, not han
     expect(serialised).not.toContain('tok-1');
     expect(serialised).not.toContain('tok-2');
 
-    // What IS recorded is a content digest.
+    // What IS recorded is a digest of the content — the provider's keyed one,
+    // since the value is a secret.
     const encryptedEntry = auditEntries.find((e) => e.encrypted === true)!;
-    expect(String(encryptedEntry.newHash)).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(String(encryptedEntry.newHash)).toMatch(/^hmac-sha256:[0-9a-f]{64}$/);
 
     // The other edge of the same fact: because no handle is ever recorded, the
     // audit trail cannot tell an operator which handles once existed — a row
