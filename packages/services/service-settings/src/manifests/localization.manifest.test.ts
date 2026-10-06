@@ -9,11 +9,13 @@ describe('localizationSettingsManifest', () => {
     expect(() => SettingsManifestSchema.parse(localizationSettingsManifest)).not.toThrow();
   });
 
-  it('declares namespace=localization, scope=tenant, version=1', () => {
+  it('declares namespace=localization, scope=tenant, version=2', () => {
     const parsed = SettingsManifestSchema.parse(localizationSettingsManifest);
     expect(parsed.namespace).toBe('localization');
     expect(parsed.scope).toBe('tenant'); // 组织级 (per-user overrides out of scope for v1)
-    expect(parsed.version).toBe(1);
+    // 2 since four keys left (#21958): the spec's `version` contract is
+    // "increment when keys are renamed/removed".
+    expect(parsed.version).toBe(2);
   });
 
   it('defaults to UTC / en-US — preserving pre-Phase-2 behavior when nothing is set', () => {
@@ -25,8 +27,6 @@ describe('localizationSettingsManifest', () => {
     // plain number unless the workspace explicitly sets one (avoids surfacing
     // an unwanted "$"/"US$" on every amount that omits its own code).
     expect(byKey('currency').default).toBeUndefined();
-    expect(byKey('date_format').default).toBe('YYYY-MM-DD');
-    expect(byKey('first_day_of_week').default).toBe('monday');
     expect(byKey('fiscal_year_start').default).toBe('january');
   });
 
@@ -43,8 +43,7 @@ describe('localizationSettingsManifest', () => {
     expect(byKey('default_country').valueDomain).toBe('iso_3166_alpha2');
     // The registry-backed selects stay UNDECLARED on purpose: their tables ARE
     // the supported sets (#5131 exhaustive semantics), not standards.
-    for (const key of ['locale', 'date_format', 'time_format', 'number_format',
-      'first_day_of_week', 'fiscal_year_start']) {
+    for (const key of ['locale', 'fiscal_year_start']) {
       expect(byKey(key).valueDomain, `${key} must not declare a domain`).toBeUndefined();
     }
     // And the declaration round-trips the spec parse (the enum is closed —
@@ -63,15 +62,28 @@ describe('localizationSettingsManifest', () => {
     }
   });
 
-  it('exposes the nine regional keys grouped into region/formats/finance', () => {
+  it('exposes the five regional keys grouped into region/finance', () => {
     const specs = localizationSettingsManifest.specifiers as any[];
     const keys = specs.filter((s) => s.key).map((s) => s.key);
     expect(keys).toEqual([
       'timezone', 'locale', 'default_country',
-      'date_format', 'time_format', 'number_format', 'first_day_of_week',
       'currency', 'fiscal_year_start',
     ]);
     const groups = specs.filter((s) => s.type === 'group').map((s) => s.id);
-    expect(groups).toEqual(['region', 'formats', 'finance']);
+    expect(groups).toEqual(['region', 'finance']);
+  });
+
+  it('offers none of the four retired format keys, nor their empty group (#21958)', () => {
+    // Ruled on objectui#11675 (B): dates, times, numbers and the first day of
+    // the week follow `locale`; the four separate settings are retired, not
+    // implemented. Nothing ever read them, so offering them was a form that
+    // saved values with no effect. The Setup page renders exactly these
+    // specifiers (`GET /api/settings/localization` serves this manifest).
+    const specs = localizationSettingsManifest.specifiers as any[];
+    const offered = specs.filter((s) => s.key).map((s) => s.key);
+    for (const key of ['date_format', 'time_format', 'number_format', 'first_day_of_week']) {
+      expect(offered, `${key} must not be offered`).not.toContain(key);
+    }
+    expect(specs.filter((s) => s.type === 'group').map((s) => s.id)).not.toContain('formats');
   });
 });

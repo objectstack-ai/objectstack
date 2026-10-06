@@ -666,3 +666,98 @@ describe('settings-routes — #7522 encrypted values are redacted at the REST bo
     );
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #21958 — `date_format`, `time_format`, `number_format` and `first_day_of_week`
+// left the Localization manifest (ruled on objectui#11675: formats follow the
+// locale). These pin what the REST surface does with a value a workspace
+// stored for one of them before the upgrade:
+//
+//   - read: not offered and not resolved — absent from the served manifest
+//     (which is what the Setup page renders) and from `values`;
+//   - write: refused `400 UNKNOWN_KEY`, naming the key, like any undeclared key;
+//   - the stored row is KEPT: no read, write or reset path rewrites or deletes it,
+//     and it never blocks a save of the keys that remain.
+//
+// The rows are seeded store-level, the way `seedGlobalSecret` above seeds one:
+// after the upgrade no public write path can produce them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const RETIRED_FORMAT_ROWS: Record<string, string> = {
+  date_format: 'DD.MM.YYYY',
+  time_format: '12h',
+  number_format: '1.234,56',
+  first_day_of_week: 'sunday',
+};
+
+async function makeRetiredFormatStack() {
+  const svc = new SettingsService({ env: {} });
+  svc.registerManifest(localizationSettingsManifest);
+  for (const [key, value] of Object.entries(RETIRED_FORMAT_ROWS)) {
+    await (svc as any).upsertRow({
+      namespace: 'localization', key, scope: 'tenant', user_id: null,
+      value, value_enc: null, encrypted: false,
+    });
+  }
+  const http = new MockHttp();
+  registerSettingsRoutes(http, svc, { contextFromRequest: adminProvider });
+  /** The store's own rows for the four keys, read the way every resolve reads them. */
+  const storedFormatRows = async () => {
+    const rows = (await (svc as any).loadRows('localization', null)) as Array<{ key: string; value: unknown }>;
+    return Object.fromEntries(rows.filter((r) => r.key in RETIRED_FORMAT_ROWS).map((r) => [r.key, r.value]));
+  };
+  return { svc, http, storedFormatRows };
+}
+
+describe('settings-routes — the four retired Localization format keys (#21958)', () => {
+  it('GET /api/settings/localization offers none of them, even with a stored value', async () => {
+    const { http, storedFormatRows } = await makeRetiredFormatStack();
+    const { req, res, state } = makeReqRes({ params: { namespace: 'localization' } });
+    await http.routes.get('GET /api/settings/:namespace')!(req, res);
+
+    expect(state.status).toBe(200);
+    const specifiers = state.body.data.manifest.specifiers as Array<{ key?: string; id?: string }>;
+    const offered = specifiers.map((s) => s.key).filter(Boolean);
+    for (const key of Object.keys(RETIRED_FORMAT_ROWS)) {
+      expect(offered, `${key} must not be offered`).not.toContain(key);
+      expect(Object.keys(state.body.data.values), `${key} must not be resolved`).not.toContain(key);
+    }
+    expect(specifiers.map((s) => s.id)).not.toContain('formats');
+    // The five live keys still answer.
+    expect(Object.keys(state.body.data.values).sort()).toEqual(
+      ['currency', 'default_country', 'fiscal_year_start', 'locale', 'timezone'],
+    );
+    expect(await storedFormatRows()).toEqual(RETIRED_FORMAT_ROWS);
+  });
+
+  it('PUT naming one of them is refused 400 UNKNOWN_KEY, and the stored row is untouched', async () => {
+    const { http, storedFormatRows } = await makeRetiredFormatStack();
+    for (const key of Object.keys(RETIRED_FORMAT_ROWS)) {
+      const { req, res, state } = makeReqRes({
+        params: { namespace: 'localization' },
+        // A live key in the same batch: the refusal is whole-batch, nothing lands.
+        body: { [key]: 'anything', timezone: 'Europe/Paris' },
+      });
+      await http.routes.get('PUT /api/settings/:namespace')!(req, res);
+      expect(state.status).toBe(400);
+      expect(state.body.error.code).toBe('UNKNOWN_KEY');
+      expect(state.body.error.details).toEqual({ namespace: 'localization', key });
+    }
+    expect(await storedFormatRows()).toEqual(RETIRED_FORMAT_ROWS);
+  });
+
+  it('a stored retired row never blocks saving the live keys, and reset leaves it in place', async () => {
+    const { svc, http, storedFormatRows } = await makeRetiredFormatStack();
+    const put = makeReqRes({ params: { namespace: 'localization' }, body: { timezone: 'Europe/Paris' } });
+    await http.routes.get('PUT /api/settings/:namespace')!(put.req, put.res);
+    expect(put.state.status).toBe(200);
+    expect(put.state.body.data.values.timezone.value).toBe('Europe/Paris');
+
+    const reset = makeReqRes({ params: { namespace: 'localization', actionId: 'reset' }, body: {} });
+    await http.routes.get('POST /api/settings/:namespace/:actionId')!(reset.req, reset.res);
+    expect(reset.state.status).toBe(200);
+    expect((await svc.get('localization', 'timezone')).source).toBe('default');
+
+    expect(await storedFormatRows()).toEqual(RETIRED_FORMAT_ROWS);
+  });
+});
