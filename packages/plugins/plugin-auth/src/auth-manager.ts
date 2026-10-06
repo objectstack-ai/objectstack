@@ -1275,6 +1275,28 @@ async function smsQuotaExceededApiError(message: string): Promise<Error> {
   return new APIError(SMS_QUOTA_EXCEEDED_CODE, { message });
 }
 
+/**
+ * [#21941] The organization slug guard's answer when one of its own reads
+ * cannot answer: `503 SERVICE_UNAVAILABLE`, the existing ADR-0112 code for a
+ * store that is temporarily down.
+ *
+ * Not the guard's `403 FORBIDDEN`: a read that could not answer is not a
+ * verdict about the slug change, so it must not wear the refusal's words — and
+ * never "allowed", which is what swallowing the fault used to answer. The
+ * driver's own failure rides `cause`, so its diagnostic is not lost.
+ */
+async function slugGuardReadFaultApiError(object: string, cause: unknown): Promise<Error> {
+  const { APIError } = await import('better-auth/api');
+  const err = new APIError('SERVICE_UNAVAILABLE', {
+    message:
+      `The organization slug guard could not read \`${object}\`, so whether an active environment ` +
+      `still references this organization was never determined, and the slug was not changed. ` +
+      `This is a server-side outage, not a refusal of the new slug: retry once the data store is reachable.`,
+  });
+  (err as { cause?: unknown }).cause = cause;
+  return err;
+}
+
 export class AuthManager {
   private auth: Auth<any> | null = null;
   /**
@@ -3334,13 +3356,35 @@ export class AuthManager {
             const orgId = member?.organizationId;
             if (!newSlug || !orgId) return;
 
+            // [#21941] The guard reads only what this composition registers,
+            // and FAILS CLOSED when a registered read cannot answer.
+            //
+            //  - NO DATA ENGINE ⇒ the guard does not apply. Only a standalone
+            //    `AuthManager` lacks one (`AuthPlugin` declares ObjectQL a hard
+            //    dependency), and it then runs on better-auth's in-memory store:
+            //    no engine registers `sys_environment`, so no environment can
+            //    reference the organization.
+            //  - `sys_environment` NOT REGISTERED ⇒ the guard does not apply,
+            //    for the same reason, and nothing is read. It is a cloud-provided
+            //    object (`CLOUD_PROVIDED_OBJECT_NAMES`), so this is the
+            //    open-source composition's answer. The question is the
+            //    registry's own (`getSchema`), never a caught throw; an engine
+            //    that cannot be asked reads as before — it is asked, and a fault
+            //    refuses.
+            //  - A REGISTERED READ THAT THROWS ⇒ refused, `503
+            //    SERVICE_UNAVAILABLE` (`slugGuardReadFaultApiError`). It used to
+            //    end the hook without refusing, which let the slug change through
+            //    whenever either read faulted.
+            const rawEngine = this.config.dataEngine;
+            if (!rawEngine) return;
+            const schemaOf = (rawEngine as { getSchema?: (object: string) => unknown }).getSchema;
+            if (typeof schemaOf === 'function' && !schemaOf.call(rawEngine, 'sys_environment')) return;
+
             // Both reads run as the platform (`withSystemContext`): this hook
             // IS the slug guard — the organization id is the `where`, not the
             // reader — so neither read reaches the engine with no principal
             // and no opt-in (the security middleware's principal-less
-            // hand-off, ADR-0096). The catches below are unchanged.
-            const rawEngine = this.config.dataEngine;
-            if (!rawEngine) return;
+            // hand-off, ADR-0096).
             const dataEngine = withSystemContext(rawEngine) as any;
 
             let currentSlug: string | undefined;
@@ -3349,8 +3393,8 @@ export class AuthManager {
                 where: { id: orgId },
               });
               currentSlug = current?.slug;
-            } catch {
-              return;
+            } catch (err) {
+              throw await slugGuardReadFaultApiError('sys_organization', err);
             }
             if (!currentSlug || currentSlug === newSlug) return;
 
@@ -3362,8 +3406,8 @@ export class AuthManager {
               activeEnvs = (envs ?? []).filter(
                 (e: any) => e?.status !== 'archived' && e?.status !== 'failed',
               ).length;
-            } catch {
-              return;
+            } catch (err) {
+              throw await slugGuardReadFaultApiError('sys_environment', err);
             }
 
             if (activeEnvs > 0) {
