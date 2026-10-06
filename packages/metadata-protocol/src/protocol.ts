@@ -2004,6 +2004,17 @@ function servedOverlayRowCandidates(address: {
 }
 
 /**
+ * [#21967, ADR-0048] The package dimension of
+ * {@link servedOverlayRowCandidates}, in its order: with a package, that
+ * package (`packageId`) and then the package-less rows (`null`); with none,
+ * `undefined`, which matches a row of any package.
+ */
+function addressPackages(packageId: string | undefined): ReadonlyArray<string | null | undefined> {
+    return [...new Set(servedOverlayRowCandidates({ organizationId: undefined, packageId })
+        .map((candidate) => candidate.packageId))];
+}
+
+/**
  * [#21967, ADR-0048] The stored view container expansion that serves `name`
  * at the address of `packageId`, among `expansions`
  * ({@link ObjectStackProtocolImplementation.expandStoredViewContainers}, each
@@ -2033,9 +2044,7 @@ function servedViewExpansion<E extends { packageId: string | undefined }>(
     name: string,
     packageId: string | undefined,
 ): { item: Record<string, unknown>; container: E } | undefined {
-    const packages = [...new Set(servedOverlayRowCandidates({ organizationId: undefined, packageId })
-        .map((candidate) => candidate.packageId))];
-    for (const pkg of packages) {
+    for (const pkg of addressPackages(packageId)) {
         let served: { item: Record<string, unknown>; container: E } | undefined;
         for (const expanded of expansions) {
             if (expanded.item.name !== name) continue;
@@ -9094,9 +9103,10 @@ export class ObjectStackProtocolImplementation implements
                 // override for it (ADR-0005 keys an overlay by its own name);
                 // an expansion fills only a name with no row of its own. The
                 // test is {@link namesWithOwnStoredRow} over this caller's
-                // `records`, the one the by-name read asks, so the two doors
-                // answer the same row for the name. An item the registry or a
-                // package supplies under the name is still replaced, as before.
+                // `records` at the slot's package ([#21967]), the one the
+                // by-name read asks, so the two doors answer the same row for
+                // the name. An item the registry or a package supplies under the
+                // name is still replaced, as before.
                 //
                 // [#21817] In a list scoped to a package, a package-less row
                 // of the name stands in ahead of the expansion too: the by-name
@@ -9129,12 +9139,22 @@ export class ObjectStackProtocolImplementation implements
                 // slots the package seats only: a stand-in never seats a slot
                 // ([#21817]).
                 if (isView && (records.length > 0 || standInRows.length > 0)) {
-                    const ownRowNames = this.namesWithOwnStoredRow(records);
+                    // [#21510, #21967] The names a stored row of its own holds
+                    // at a slot's package ({@link namesWithOwnStoredRow}, the
+                    // predicate the by-name read asks for the package it
+                    // names): an expansion never displaces such a row, and a
+                    // row of one package keeps no other package's slot.
+                    const ownRowNamesAt = new Map<string | undefined, ReadonlySet<string>>();
+                    const ownRowNames = (pkg: string | undefined): ReadonlySet<string> => {
+                        let names = ownRowNamesAt.get(pkg);
+                        if (names === undefined) ownRowNamesAt.set(pkg, (names = this.namesWithOwnStoredRow(records, pkg)));
+                        return names;
+                    };
                     const standInNames = this.namesWithOwnStoredRow(standInRows);
                     const expansions = this.expandStoredViewContainers(
                         request.type,
                         packageId ? [...overlays, ...this.storedOverlayEntries(request, standInRows)] : overlays,
-                    ).filter(({ item: vi }) => !ownRowNames.has(vi.name as string));
+                    );
                     const written = new Set(expansions.map(({ item: vi }) => vi.name as string));
                     const boundNames = new Set(expansions
                         .filter(({ container }) => container.packageId !== undefined)
@@ -9169,7 +9189,7 @@ export class ObjectStackProtocolImplementation implements
                             }
                             return held;
                         }
-                        if (served === undefined) return held;
+                        if (served === undefined || ownRowNames(pkg).has(name)) return held;
                         const own = served.container.packageId;
                         if (own !== undefined) filled.add(slotKey(name, own));
                         // A package-less container's expansion standing in for a
@@ -9752,11 +9772,23 @@ export class ObjectStackProtocolImplementation implements
      * so a name that has a row in one organization only is row-less for every
      * other caller. ⛔ Never a second test of "this name has its own row":
      * two tests are two rules, and the doors would disagree again.
+     *
+     * [#21967] …and both pass the package whose slot they fill, so a name that
+     * has a row in one package only is row-less for every other package's
+     * slot. With `packageId`, a row counts when it is bound to that package or
+     * package-less, the package dimension of {@link servedOverlayRowCandidates}
+     * (a package-less row stands in for every package, ADR-0048); with none,
+     * every row counts. Before, the list asked with no package for every slot,
+     * so one package's row of a name kept every other package's container
+     * expansion of it out of the list, while the by-name read naming that
+     * other package served the expansion.
      */
-    private namesWithOwnStoredRow(records: readonly any[]): ReadonlySet<string> {
+    private namesWithOwnStoredRow(records: readonly any[], packageId?: string): ReadonlySet<string> {
+        const packages = addressPackages(packageId);
         const names = new Set<string>();
         for (const record of records) {
-            if (typeof record?.name === 'string') names.add(record.name);
+            if (typeof record?.name !== 'string') continue;
+            if (packages.some((pkg) => pkg === undefined || (record?.package_id ?? null) === pkg)) names.add(record.name);
         }
         return names;
     }
@@ -9825,7 +9857,7 @@ export class ObjectStackProtocolImplementation implements
             this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
         const rows = [...records, ...standInRows];
-        if (this.namesWithOwnStoredRow(rows).has(request.name)) return undefined;
+        if (this.namesWithOwnStoredRow(rows, request.packageId).has(request.name)) return undefined;
         return servedViewExpansion(
             this.expandStoredViewContainers(request.type, this.storedOverlayEntries(request, rows)),
             request.name,
