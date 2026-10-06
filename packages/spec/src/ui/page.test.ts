@@ -491,7 +491,7 @@ describe('Page ARIA Integration', () => {
 // implementation had a single caller, so the whole `ResponsiveConfig` layout
 // vocabulary left with its last carrier.
 // ---------------------------------------------------------------------------
-describe('[#11027] PageComponentSchema — retired `responsive`', () => {
+describe('PageComponentSchema — retired `responsive`, which no renderer read', () => {
   it('REJECTS an authored `responsive` with the prescription (not "unrecognized key")', () => {
     let message = '';
     try {
@@ -693,7 +693,7 @@ describe('ElementDataSourceSchema', () => {
 // ElementDataSourceSchema `filter` — the ViewFilterRule ARRAY orthography
 // (ui#6206-B reaching the binding: #15442, decision batch #55, option A)
 // ---------------------------------------------------------------------------
-describe('ElementDataSourceSchema `filter` — one filter orthography platform-wide (ui#6206-B, #15442)', () => {
+describe('ElementDataSourceSchema `filter` — one filter orthography platform-wide, the ViewFilterRule array', () => {
   const RULES = [{ field: 'status', operator: 'equals', value: 'active' }];
   const RECORD_FORM = { status: 'active' };
   /** The objectui pin's own test authors write THIS at `dataSource.filter` — an AST tuple array. */

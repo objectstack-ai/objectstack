@@ -93,7 +93,7 @@ const CONSOLE_PUT_BODY = { ...OVERLAY_BASE, filter: [CONSOLE_FILTER_ROW] } as co
 // ===========================================================================
 // 1. The door — a parse must exist, or none of the rest means anything
 // ===========================================================================
-describe('#5114 — the door this shape is reached through', () => {
+describe('the door this shape is reached through', () => {
   it('the `view` metadata type resolves to a registered schema (the save-time 422 door)', () => {
     // `saveMetaItem` validates the PUT body against this schema and answers 422
     // on failure. Without this door the rest of the file would be theory.
@@ -104,7 +104,7 @@ describe('#5114 — the door this shape is reached through', () => {
 // ===========================================================================
 // 2. The regression itself — all three paths the console body travels
 // ===========================================================================
-describe('#5114 — a console-written filter row, judged per door (#5074)', () => {
+describe('a console-written filter row, judged per door: refused by name when authored, stripped on the wire', () => {
   it('1/3 `ViewFilterRuleSchema` — the AUTHORING shape — now REJECTS the row, by name', () => {
     // Inverted vs #5114: this was green while the hotfix stood. The rejection
     // has to carry its reason, or an author fixes it by inventing a key.
@@ -148,7 +148,7 @@ describe('#5114 — a console-written filter row, judged per door (#5074)', () =
 // ===========================================================================
 // 3. Open is not undefended — what reopening did NOT give away
 // ===========================================================================
-describe('#5114 — the close gave away no validation, and declared no UI key', () => {
+describe('the close gave away no validation, and declared no UI key', () => {
   it('`id` is DROPPED on the wire path, not declared onto the surface', () => {
     // The distinction the whole fix turns on, re-measured at the door that now
     // owns the tolerance. Declaring `id` would make it authorable (and teach an
@@ -193,7 +193,7 @@ describe('#5114 — the close gave away no validation, and declared no UI key', 
 // ===========================================================================
 // 4. The mechanism, pinned where it bit — `.strip()` does not recurse
 // ===========================================================================
-describe('#5114 — why the flattened member could not rescue this block', () => {
+describe('why the flattened member could not rescue this block', () => {
   // Both assertions here run on the FILTER-FREE overlay on purpose: they are
   // controls for the member's own posture, so they must hold whichever way
   // `ViewFilterRuleSchema` is written — and they did, across the #5114 reopen
