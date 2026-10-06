@@ -11,7 +11,7 @@ import {
 import { registerDatasourceAdminRoutes } from '../admin-routes.js';
 import { ENTITLED_CREDENTIAL, createSessionAuthService, createGrantsEngine } from './entitled-caller.fixture.js';
 
-import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate, hashSpec } from '@objectstack/metadata-core';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at MODULE
 // LOAD. Each is reached below through a dynamic `import()` inside an `it()` body or a
@@ -86,6 +86,23 @@ function fakeFactory(over?: Partial<IDatasourceDriverFactory> & { onProbe?: () =
     }),
     ...over,
   };
+}
+
+/** The admin door, mounted the way `os serve` mounts it, over a booted service. */
+function adminDoor(service: unknown) {
+  const server = new HonoHttpServer(0);
+  const authService = createSessionAuthService();
+  const grantsEngine = createGrantsEngine();
+  registerDatasourceAdminRoutes(server, {
+    getService: (name: string) =>
+      name === 'auth' ? authService : name === 'objectql' || name === 'data' ? grantsEngine : service,
+  } as any, '/api/v1');
+  return (method: string, path: string, body?: unknown) =>
+    server.getRawApp().fetch(new Request(`http://local/api/v1${path}`, {
+      method,
+      headers: { 'content-type': 'application/json', authorization: ENTITLED_CREDENTIAL },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }));
 }
 
 describe('DatasourceAdminServicePlugin: probe', () => {
@@ -308,8 +325,14 @@ describe('DatasourceAdminServicePlugin: boot rehydration', () => {
 
 describe('DatasourceAdminServicePlugin: persistence + bound count', () => {
   it('lists code (artefact) + runtime records with origin, blocks remove while bound', async () => {
-    const { service, registry } = await boot({ driverFactory: fakeFactory() });
-    // seed an artefact (code) datasource lacking explicit origin
+    // [#21923] An artefact (code) datasource is code because the host registers
+    // its name from code — the code-datasource set the runtime fills, as it
+    // does for every datasource an artifact declares — never because its
+    // record lacks an explicit `origin`.
+    const { service, registry } = await boot({
+      driverFactory: fakeFactory(),
+      services: { 'code-datasource-names': new Set(['crm_primary']) },
+    });
     registry.set('datasource', new Map([['crm_primary', { name: 'crm_primary', driver: 'sqlite' }]]));
     // seed an object bound to a runtime datasource
     registry.set('object', new Map([['lead', { name: 'lead', datasource: 'reporting' }]]));
@@ -485,23 +508,6 @@ describe('DatasourceAdminServicePlugin: runtime datasource durability', () => {
       return { ...b, data, built, optionsWarn, ctxWarn };
     };
 
-    /** The admin door, mounted the way `os serve` mounts it, over this boot's service. */
-    const adminDoor = (service: unknown) => {
-      const server = new HonoHttpServer(0);
-      const authService = createSessionAuthService();
-      const grantsEngine = createGrantsEngine();
-      registerDatasourceAdminRoutes(server, {
-        getService: (name: string) =>
-          name === 'auth' ? authService : name === 'objectql' || name === 'data' ? grantsEngine : service,
-      } as any, '/api/v1');
-      return (method: string, path: string, body?: unknown) =>
-        server.getRawApp().fetch(new Request(`http://local/api/v1${path}`, {
-          method,
-          headers: { 'content-type': 'application/json', authorization: ENTITLED_CREDENTIAL },
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        }));
-    };
-
     it('keeps the code definition served, refuses the admin edit, keeps the row, names it, and opens no pool from it', async () => {
       const b = await harness({ codeNames: new Set(['crm_wh']), codeSlotFirst: true });
 
@@ -553,6 +559,177 @@ describe('DatasourceAdminServicePlugin: runtime datasource durability', () => {
 
       expect(await b.metadata.get('datasource', 'crm_wh')).toMatchObject({ origin: 'runtime', label: 'Shadow' });
       expect(b.ctxWarn).not.toHaveBeenCalled();
+    });
+  });
+
+  // [#21923] The admin door's origin comes from PROVENANCE — the host's
+  // code-datasource set — never from the record, and a datasource the `/meta`
+  // door writes reaches this door in the same boot. The `/meta` door's write
+  // is simulated the way it lands: a row in `sys_metadata`, then the protocol's
+  // awaited `datasource` mutation projector, which is exactly what the plugin
+  // registers (the real door and repository are pinned over the showcase in
+  // `packages/qa/dogfood/test/datasource-meta-door-reaches-admin-door.dogfood.test.ts`).
+  describe('[#21923] origin from provenance; the /meta door reaches the admin door in the same boot', () => {
+    const CODE_NAMES = 'code-datasource-names';
+    const now = new Date().toISOString();
+    /** A row the `/meta` door's repository writes: the author's body as given, with its checksum. */
+    const metaRow = (name: string, body: Record<string, unknown>) => ({
+      id: `meta_${name}`,
+      name,
+      type: 'datasource',
+      metadata: JSON.stringify({ name, ...body }),
+      checksum: hashSpec({ name, ...body }, 'datasource'),
+      state: 'active',
+      version: 1,
+      created_at: now,
+      updated_at: now,
+    });
+    const pg = (host: string) => ({ driver: 'postgres', config: { host, database: 'db' } });
+    /** What `AppPlugin.start()` registers for a code datasource. */
+    const CODE = { name: 'crm_wh', label: 'Code warehouse', driver: 'postgres', origin: 'code', config: { host: 'code-host', database: 'wh' } };
+
+    /** One host: `sys_metadata` + a driver registry, a recording factory, the protocol's projector slot. */
+    const host = async (opts: { codeNames?: Set<string> } = {}) => {
+      const data = Object.assign(fakeSysMetadataEngine(), { drivers: [] as any[], evicted: [] as string[] });
+      (data as any).registerDriver = (d: any) => data.drivers.push(d);
+      (data as any).getDriverByName = (n: string) => data.drivers.find((d) => d.name === n);
+      (data as any).unregisterDriver = (n: string) => {
+        data.evicted.push(n);
+        const i = data.drivers.findIndex((d) => d.name === n);
+        if (i >= 0) data.drivers.splice(i, 1);
+        return i >= 0;
+      };
+      const built: any[] = [];
+      const factory: IDatasourceDriverFactory = {
+        supports: (id: string) => id === 'postgres',
+        create: async (spec) => {
+          built.push(spec);
+          return { connect: async () => {}, disconnect: async () => {} };
+        },
+      };
+      const projectors = new Map<string, (evt: unknown) => Promise<void>>();
+      const protocol = {
+        registerMutationProjector: (type: string, projector: (evt: unknown) => Promise<void>) => {
+          projectors.set(type, projector);
+        },
+      };
+      const b = await boot({
+        driverFactory: factory,
+        services: { data, protocol, ...(opts.codeNames ? { [CODE_NAMES]: opts.codeNames } : {}) },
+      });
+      await b.metadata.register('datasource', CODE.name, CODE);
+      await b.plugin.start(b.ctx);
+      /** The `/meta` door's post-persistence step: the awaited projection, with the event it sends. */
+      const metaDoorWrote = (name: string, state: 'active' | 'draft' | 'deleted') =>
+        projectors.get('datasource')!({ type: 'datasource', name, state, organizationId: null });
+      const listed = async (name: string) => (await b.service.listDatasources()).find((d) => d.name === name);
+      const builtFor = (name: string) => built.filter((s) => s.name === name);
+      return { ...b, data, built, builtFor, projectors, metaDoorWrote, listed };
+    };
+
+    it('serves code only for a name in the code-datasource set, and runtime for every other, whatever the record says', async () => {
+      const b = await host({ codeNames: new Set(['crm_wh']) });
+      await b.metadata.register('datasource', 'crm_wh', { ...CODE, origin: 'runtime' });
+      await b.metadata.register('datasource', 'rt_none', { name: 'rt_none', label: 'No origin', ...pg('a') });
+      await b.metadata.register('datasource', 'rt_code', { name: 'rt_code', label: 'Asserts code', origin: 'code', ...pg('b') });
+
+      expect((await b.listed('crm_wh'))?.origin).toBe('code');
+      expect((await b.listed('rt_none'))?.origin).toBe('runtime');
+      expect((await b.listed('rt_code'))?.origin).toBe('runtime');
+      const svc = b.service as unknown as DatasourceAdminService;
+      expect((await svc.getDatasource('crm_wh'))?.origin).toBe('code');
+      expect((await svc.getDatasource('rt_none'))?.origin).toBe('runtime');
+      expect((await svc.getDatasource('rt_code'))?.origin).toBe('runtime');
+
+      // Editable as runtime, both of them; the code name stays refused.
+      await expect(b.service.updateDatasource('rt_none', { label: 'Edited' })).resolves.toMatchObject({ origin: 'runtime' });
+      await expect(b.service.updateDatasource('rt_code', { label: 'Edited' })).resolves.toMatchObject({ origin: 'runtime' });
+      const patch = await adminDoor(b.service)('PATCH', '/datasources/crm_wh', { label: 'Edited at runtime' });
+      const answer = (await patch.json()) as { error?: { code?: string; message?: string } };
+      expect({ status: patch.status, code: answer.error?.code }).toEqual({ status: 400, code: 'DATASOURCE_ADMIN_ERROR' });
+      expect(String(answer.error?.message).startsWith("Datasource 'crm_wh' is code-defined"), answer.error?.message).toBe(true);
+    });
+
+    it('registers the datasource projector on the protocol at start()', async () => {
+      const b = await host();
+      expect([...b.projectors.keys()]).toEqual(['datasource']);
+    });
+
+    it('a /meta save is listed and editable here in the same boot, with a live pool, whatever origin its body asserts', async () => {
+      const b = await host({ codeNames: new Set(['crm_wh']) });
+      b.data.rows.push(metaRow('meta_none', { label: 'Meta none', ...pg('h1') }));
+      b.data.rows.push(metaRow('meta_code', { label: 'Meta code', origin: 'code', ...pg('h2') }));
+      await b.metaDoorWrote('meta_none', 'active');
+      await b.metaDoorWrote('meta_code', 'active');
+
+      expect(await b.listed('meta_none')).toMatchObject({ origin: 'runtime', label: 'Meta none' });
+      expect(await b.listed('meta_code')).toMatchObject({ origin: 'runtime', label: 'Meta code' });
+      expect(b.builtFor('meta_none').map((s) => s.config)).toEqual([{ host: 'h1', database: 'db' }]);
+      expect(b.builtFor('meta_code').map((s) => s.config)).toEqual([{ host: 'h2', database: 'db' }]);
+      await expect(b.service.updateDatasource('meta_code', { label: 'Edited here' })).resolves.toMatchObject({ origin: 'runtime' });
+    });
+
+    it('a /meta edit rebuilds the pool from the new row; a /meta delete leaves this door and evicts the pool', async () => {
+      const b = await host();
+      b.data.rows.push(metaRow('meta_ds', { label: 'v1', ...pg('h1') }));
+      await b.metaDoorWrote('meta_ds', 'active');
+
+      const i = b.data.rows.findIndex((r) => r.name === 'meta_ds');
+      b.data.rows[i] = metaRow('meta_ds', { label: 'v2', ...pg('h2') });
+      await b.metaDoorWrote('meta_ds', 'active');
+      expect(await b.listed('meta_ds')).toMatchObject({ origin: 'runtime', label: 'v2' });
+      expect(b.builtFor('meta_ds').map((s) => s.config.host)).toEqual(['h1', 'h2']);
+
+      b.data.rows.splice(b.data.rows.findIndex((r) => r.name === 'meta_ds'), 1);
+      await b.metaDoorWrote('meta_ds', 'deleted');
+      expect(await b.listed('meta_ds')).toBeUndefined();
+      expect(b.data.evicted).toContain('meta_ds');
+    });
+
+    it('a /meta write under a code name — the repair DELETE of a stored shadow included — leaves the code definition served and opens no pool', async () => {
+      const b = await host({ codeNames: new Set(['crm_wh']) });
+      b.data.rows.push(metaRow('crm_wh', { label: 'Shadow', origin: 'runtime', ...pg('shadow-host') }));
+      await b.metaDoorWrote('crm_wh', 'active');
+      expect(await b.metadata.get('datasource', 'crm_wh')).toEqual(CODE);
+
+      b.data.rows.splice(b.data.rows.findIndex((r) => r.name === 'crm_wh'), 1);
+      await b.metaDoorWrote('crm_wh', 'deleted');
+      expect(await b.metadata.get('datasource', 'crm_wh')).toEqual(CODE);
+      expect((await b.listed('crm_wh'))?.origin).toBe('code');
+      expect(b.builtFor('crm_wh')).toEqual([]);
+      expect(b.data.evicted).toEqual([]);
+    });
+
+    it('a peer signal pools a stored row by provenance: never one under a code name, and a /meta row with no origin as runtime', async () => {
+      const b = await host({ codeNames: new Set(['crm_wh']) });
+      const handlers: Array<(msg: { payload: unknown }) => void> = [];
+      const bus = {
+        publish: async () => {},
+        subscribe: (_channel: string, handler: (msg: { payload: unknown }) => void) => {
+          handlers.push(handler);
+          return () => {};
+        },
+      };
+      (b.service as unknown as DatasourceAdminService).attachDatasourceMutationPubSub(bus as never, 'node-b');
+      b.data.rows.push(metaRow('crm_wh', { label: 'Shadow', origin: 'runtime', ...pg('shadow-host') }));
+      b.data.rows.push(metaRow('peer_meta', { label: 'Peer meta', ...pg('peer-host') }));
+
+      for (const name of ['crm_wh', 'peer_meta']) for (const h of handlers) h({ payload: { originNode: 'node-a', name } });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(b.builtFor('crm_wh')).toEqual([]);
+      expect(b.builtFor('peer_meta').map((s) => s.config.host)).toEqual(['peer-host']);
+    });
+
+    it('an admin-written row carries the checksum the /meta door\'s repository stamps on the body it stores', async () => {
+      const b = await host();
+      await b.service.createDatasource({ name: 'ck_ds', label: 'v1', driver: 'postgres', config: { host: 'h', database: 'db' } });
+      const row = () => b.data.rows.find((r) => r.name === 'ck_ds')!;
+      expect(row().checksum).toBe(hashSpec(JSON.parse(row().metadata as string), 'datasource'));
+
+      await b.service.updateDatasource('ck_ds', { label: 'v2' });
+      expect(JSON.parse(row().metadata as string).label).toBe('v2');
+      expect(row().checksum).toBe(hashSpec(JSON.parse(row().metadata as string), 'datasource'));
     });
   });
 });
