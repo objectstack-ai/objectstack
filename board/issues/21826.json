@@ -2,7 +2,7 @@
   "number": 21826,
   "kind": "pull_request",
   "title": "chore(ci): refresh the Test Core shard-timings dataset",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -18,10 +18,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-05T05:53:40Z",
-  "updated_at": "2026-10-06T00:54:57Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-06T04:22:19Z",
+  "closed_at": "2026-10-06T04:22:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-06T04:22:17Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/21826",

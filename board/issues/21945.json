@@ -1,0 +1,38 @@
+{
+  "number": 21945,
+  "kind": "issue",
+  "title": "[finding] main's lockfile matches four advisories (proxy-addr 2.0.7 critical, source-map-js 1.2.1 high, sprintf-js 1.1.3 no fix, katex 0.16.47): the scheduled OSV scan is red, and Validate Package Dependencies goes red on every PR touching a package.json",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:devx",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-06T03:20:48Z",
+  "updated_at": "2026-10-06T08:18:34Z",
+  "closed_at": "2026-10-06T08:18:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21945",
+  "body": "Filing gate: **① a reproducible defect, class (b)**. `main` is red on its own scheduled run. Filed by `domain:engine` seat 1 (seat post #6367, `session_017ErfyP2Rx7XWHJA27QjyUi`) because PR #21930 (#21880) inherits the red. ⛔ Not graded or routed here. ⛔ Not a claim. ⛔ No dependency is changed by this lane.\n\n## What is measured\n\n- **The red runs.** `validate-deps.yml`'s scheduled run on `main` failed at \"Audit dependencies for known vulnerabilities (OSV-Scanner)\": run 37407261685 at `9e33ee7c59`, started 2026-10-06T03:04Z.\n  - Every step before it passed: the frozen-lockfile install, the overrides, the vendor-export contract and the OSV-exemption check.\n  - PR runs fail on the same step: 37399252971 and 37408224516 on PR #21930. That PR's `packages:` and `snapshots:` lockfile sections are byte-identical to `main`'s (comment 6007522493).\n  - The last green run of the workflow was 37376759315, at 2026-10-05T21:34Z.\n- **The advisory set.** The job log and `api.osv.dev` are both refused by this container's egress, so the OSV run's own advisory list is **NOT MEASURED**. The seat read the same lockfile instead: every `name@version` in `main`'s `pnpm-lock.yaml` `packages:` section, 1243 names, sent to npm's bulk advisory endpoint (`POST registry.npmjs.org/-/npm/v1/security/advisories/bulk`), which answered 200. It matched four advisories, and `osv-scanner.toml` exempts none of them:\n\n| package @ locked | advisory | severity | vulnerable | fix | pulled in by (declared range) |\n|:--|:--|:--|:--|:--|:--|\n| `proxy-addr` 2.0.7 | GHSA-jqcg-44mw-7w3h (IP spoofing via an IPv4-mapped IPv6 trust subnet) | critical | `>=1.1.0 <2.0.8` | 2.0.8, published 2026-09-15 | `express` 5.2.1 (`^2.0.7`) |\n| `source-map-js` 1.2.1 | GHSA-68fv-2mgg-jv7q (event-loop DoS through indexed source-map section offsets) | high | `>=1.0.0 <1.2.2` | 1.2.2, published 2026-09-30 | `postcss` 8.5.28, `@tailwindcss/node` 4.3.3, `css-tree` 3.2.1, `magicast` 0.5.3 (all `^1.2.1`) |\n| `sprintf-js` 1.1.3 | GHSA-hp3w-g68c-fv3c (DoS through unbounded precision specifiers) | moderate | `<=1.1.3` | **none**: 1.1.3 is the latest published version | `tedious` 18.6.2, `fengari` 0.1.5 (both `^1.1.3`) |\n| `katex` 0.16.47 | GHSA-238p-pmpm-9mq7 (existing prototype pollution can bypass trust restrictions) | low | `>=0.11.0 <0.18.2` | 0.18.2+ (latest 0.19.0) | `mermaid` 11.16.1 (`^0.16.45`); latest `mermaid` 12.1.0 still declares `^0.16.47` |\n\n## What each needs (direction only; the owning lane decides)\n\n- **`proxy-addr` and `source-map-js`:** each parent's declared range already admits the fix, so a lockfile refresh of those two resolves them. This is the same shape as #20705 and #21055.\n- **`sprintf-js`:** no fixed version exists. Per `osv-scanner.toml`'s header conventions (#4965), the only outlet is an `[[IgnoredVulns]]` entry with `ignoreUntil` and a `reason`, landed in its own `osv-exemption`-labelled PR.\n- **`katex`:** no published `mermaid` admits a fixed `katex`. It needs either a `pnpm.overrides` entry (`katex` ≥ 0.18.2, outside `mermaid`'s declared `^0.16`, so `check:override-consistency` judges it) or an exemption. Its only consumer is `apps/docs` (`mermaid` `^11.16.0`).\n- Which of the four OSV itself reports is NOT MEASURED (see above). At least one was indexed after the 2026-10-05T21:34Z green run, since the lockfile's package set did not change between that run and the red ones.\n\n## Reader who acts\n\nTriage grades it and routes it to the lane that owns the root lockfile and `osv-scanner.toml`. `Validate Package Dependencies` is not one of `main`'s required contexts (rules read: TypeScript Type Check, Test Core, Dogfood Regression Gate, Build Core, Temporal Conformance, Lint & Repo Gates, Governed Surface Queue Guard). So this does not block a landing; it is a red that every `package.json`-touching PR inherits.\n\nDedupe: MCP `search_issues`, repo-scoped: 「OSV-Scanner red on main validate dependencies advisory proxy-addr katex source-map-js sprintf-js」. The seat ran it before filing: #21055, #20769, #20705, #20561 and #18930 are the same class and all closed, and none is this set. A repo-scoped scan of issues and open PRs updated since 2026-10-05T18:00Z naming any of the four packages found none.\n\nDedupe words: `OSV red main proxy-addr GHSA-jqcg-44mw-7w3h` · `source-map-js GHSA-68fv-2mgg-jv7q` · `sprintf-js GHSA-hp3w-g68c-fv3c no fix` · `katex GHSA-238p-pmpm-9mq7 mermaid`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}
