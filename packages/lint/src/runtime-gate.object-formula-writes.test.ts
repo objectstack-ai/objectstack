@@ -51,7 +51,8 @@ const WHERE = "object 'fx_sqrt' · field 'score' expression";
 const gateObject = (item: unknown) =>
   runRuntimeAuthoringRules({ type: 'object', item, context: { objects: [] } });
 
-const expressionFindings = (fs: readonly { rule: string }[]) => fs.filter((f) => f.rule === EXPRESSION_INVALID);
+const expressionFindings = <T extends { rule: string }>(fs: readonly T[]): T[] =>
+  fs.filter((f) => f.rule === EXPRESSION_INVALID);
 
 const dump = (r: unknown) => JSON.stringify(r, null, 2);
 
@@ -67,7 +68,7 @@ describe('#22019 — the object door dispatches the build\'s expression rule', (
     const errs = expressionFindings(result.errors);
     expect(errs, dump(result)).toHaveLength(1);
     expect(errs[0]).toMatchObject({ severity: 'error', where: WHERE, path: WHERE });
-    expect((errs[0] as { message: string }).message).toContain('`sqrt` is not a callable name here');
+    expect(errs[0]!.message).toContain('`sqrt` is not a callable name here');
   });
 
   it('⭐ LIT — a formula reading a field the object has not got is REFUSED (the same pass, its field-existence half)', () => {
@@ -76,7 +77,7 @@ describe('#22019 — the object door dispatches the build\'s expression rule', (
     const errs = expressionFindings(result.errors);
     expect(errs, dump(result)).toHaveLength(1);
     expect(errs[0]).toMatchObject({ where: WHERE });
-    expect((errs[0] as { message: string }).message).toContain('amont');
+    expect(errs[0]!.message).toContain('amont');
   });
 
   it('⭐ CONTROL — a registered call (`floor(record.amount)`) publishes clean', () => {
