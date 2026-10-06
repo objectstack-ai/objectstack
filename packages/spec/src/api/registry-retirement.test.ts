@@ -58,7 +58,7 @@ const RETIRED_NAMES = [
   'ApiDiscoveryResponseSchema',
 ] as const;
 
-describe('[#4939] ApiRegistry family retired from `@objectstack/spec/api`', () => {
+describe('ApiRegistry family retired from `@objectstack/spec/api`', () => {
   it('exports none of the retired names', async () => {
     const api = await import('./index');
 
@@ -86,7 +86,7 @@ describe('[#4939] ApiRegistry family retired from `@objectstack/spec/api`', () =
     expect(
       'ConflictResolutionStrategy' in api,
       'two independent ratchets pin this as a ./api export: spec/src/automation/' +
-        'sync-retirement.test.ts (#4738, the fourth ConflictResolution relative) and, ' +
+        'sync-retirement.test.ts (the fourth ConflictResolution relative) and, ' +
         'cross-repo, objectui offline-nav-performance-spec-parity.test.ts',
     ).toBe(true);
 

@@ -48,7 +48,7 @@ const WELL_FORMED_FLOW = {
     edges: [],
 };
 
-describe('zodIssuesToFields — the D3 table against the real FlowSchema (#8124/#8055)', () => {
+describe('zodIssuesToFields — the D3 table against the real FlowSchema', () => {
     it('the well-formed control parses clean, so every failure below is the planted edit', () => {
         expect(FlowSchema.safeParse(WELL_FORMED_FLOW).success).toBe(true);
     });
@@ -78,7 +78,7 @@ describe('zodIssuesToFields — the D3 table against the real FlowSchema (#8124/
         expect(blindLabel!.code).toBe('invalid_type');
     });
 
-    it('every code emitted for every #8055-shaped fixture is a catalog member', () => {
+    it('every code emitted for every malformed-flow-body fixture is a catalog member', () => {
         const fixtures: unknown[] = [
             { ...WELL_FORMED_FLOW, nodes: [{ id: 'n', type: 'notify', config: { message: 'hi' } }] },
             { ...WELL_FORMED_FLOW, nodes: [{ id: 'n', type: 'notify', label: 'Notify', next: 'other' }] },
