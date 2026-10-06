@@ -815,13 +815,16 @@ export function verifyAssertion(
  * `forwarded: ActionDef` literal of `action:button` and of `action:icon`, where
  * the keys each row forwards to the runner are enumerated, and the `readProps`
  * call of `element:definition-list`, whose type literal is that row's key set.
- * The section's other three rows (`action:group`, `action:menu`,
- * `element:repeater`) carry none yet: their cited lines do not hold at that
- * pin, and a quote goes only beside a line that does. 418 objectui anchors in
- * `packages/spec/src` still carry none, read against objectui `a58626c88` —
- * `--verify-anchors` prints that worklist.
+ *
+ * The next three are the same section's other three rows, quoted once their
+ * records were re-measured at pin `a58626c88` (their cited lines had moved
+ * under hop notes that recorded them as held): the member forward of
+ * `action:group` and of `action:menu`, where the keys a member forwards to the
+ * runner are enumerated, and the `readProps` call of `element:repeater`. 419
+ * objectui anchors in `packages/spec/src` still carry none, read against
+ * objectui `a58626c88` — `--verify-anchors` prints that worklist.
  */
-const ASSERTED_ANCHOR_FLOOR = 10;
+const ASSERTED_ANCHOR_FLOOR = 13;
 
 // ---------------------------------------------------------------------------
 // self-test — the shapes, not the corpus

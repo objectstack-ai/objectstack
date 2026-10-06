@@ -3212,9 +3212,22 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * (+11/-18) changed for objectui#11638, which retires the two containers' read
  * of a member's `properties.params` (`readMemberStaticParamValues`, deleted
  * from `static-params.ts` with both calls) and the `useConfigBagEvaluator()`
- * call that served it, so the `objectName` forward each makes MOVED with its
- * line byte-identical, `381` -> `373` and `327` -> `320`, and is cited below at
- * this pin.
+ * call that served it, so every container anchor below that call MOVED with
+ * its cited text byte-identical: by 3 down to the member forward, and from the
+ * forward on by 8 in `action-group.tsx` and by 7 in `action-menu.tsx` (the
+ * `objectName` forward `381` -> `373` and `327` -> `320`). `static-params.ts`
+ * gained 7 lines above `readStaticParamValues`, and
+ * `data-objectstack/src/index.ts` changed only below both of its cited lines.
+ * Each moved anchor is cited below at this pin.
+ * A correction, measured at this pin: anchors in three cited files had moved
+ * under the hop notes below, which recorded them as held or re-read.
+ * `basic/data-list.tsx` changed at `31971ff1e` (objectui#11168 slice 2 rewrote
+ * both list registrations), which that hop's note omits, so every
+ * `element:repeater` anchor has cited a line 28 above its read point since.
+ * `previews/block-config.ts` changed at the same hop (+13 above the cited
+ * `columns` control). In `data-objectstack/src/index.ts` the
+ * `translateFilterArray` arm has moved since `db11afd49` and `serializeOrderBy`
+ * since `e420df310`. Each is cited below at this pin.
  * At `0abd4f9f8`, re-read there 2026-10-05:
  * every objectui file this record cites is byte-identical across the hop from
  * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
@@ -3413,7 +3426,7 @@ const ACTION_NODE_GUIDANCE = {
  *   against the row the host binds (`usePredicateRecordContext`).
  * - `params` — `:180-183`. An array is the input list, forwarded as
  *   `actionParams`; the static values are read off `properties.params`
- *   itself (`readStaticParamValues`, `static-params.ts:91-101`). On a page
+ *   itself (`readStaticParamValues`, `static-params.ts:98-108`). On a page
  *   node the two are one key: this row IS `properties`, and `SchemaRenderer`'s
  *   hoist makes `schema.params` the same object, so an array here is the input
  *   list and an object is the static values. (A node-level object `params`
@@ -3865,26 +3878,29 @@ const actionMenuMember = () => (actionMenuMemberOnce ??= buildActionMenuMember()
  * (`components/src/renderers/action/action-group.tsx` at the pin). Read
  * points, per key:
  *
- * - `actions` — `:303`, then filtered by `location` through `actionRendersAt`
- *   (`:304`); members are read at `:114-171` (inline), `:205-243` (dropdown),
+ * - `actions` — `:300`, then filtered by `location` through `actionRendersAt`
+ *   (`:301`); members are read at `:114-171` (inline), `:205-243` (dropdown),
  *   both through the shared `useMemberVisible` for `visible` (`:81-86`), and
- *   forwarded at `:329-382` (static values `:329-335`, `objectName`
- *   `:381`; the member's `outcomeMessages` too since objectui#11344).
- * - `display` — `:404`, `inline` unless it is `dropdown`.
- * - `label` / `icon` — `:424` / `:408`: the DROPDOWN trigger's text (default
+ *   forwarded at `action-group.tsx:325-374` first line
+ *   `const paramsPayload: ActionDef = Array.isArray(action.params)` (`params`
+ *   `:325-327`, no longer joined by the member's own `properties.params`
+ *   since objectui#11638; `objectName` `:373`; the member's
+ *   `outcomeMessages` too since objectui#11344).
+ * - `display` — `:396`, `inline` unless it is `dropdown`.
+ * - `label` / `icon` — `:416` / `:400`: the DROPDOWN trigger's text (default
  *   `Actions`) and icon. Inline mode renders neither.
- * - `variant` — `:414` (dropdown trigger) and `:456` (each inline member's
+ * - `variant` — `:406` (dropdown trigger) and `:448` (each inline member's
  *   fallback); no `primary` mapping at group level, so the primitive's six.
- * - `size` — `:415` maps `md` → `default` for the dropdown trigger, but `:457`
+ * - `size` — `:407` maps `md` → `default` for the dropdown trigger, but `:449`
  *   hands the group size to each inline member raw, and `:124` maps only a
  *   member's OWN `md`. So `md` renders only in dropdown mode, and in the
  *   default inline mode reaches the Button primitive, which has no `md`.
  *   Declared: the primitive's four sizes. (Since objectui#11168 the
- *   registration publishes those same four, `:487-528`; through `db11afd49`
+ *   registration publishes those same four, `:479-520`; through `db11afd49`
  *   it published `sm` / `md` / `lg`. A stored `md` is still mapped in
  *   dropdown mode only, which objectui records as a back-compat read.)
- * - `visible` — `:290` + `:401`; `:290` fails CLOSED on a faulting predicate
- *   since objectui#11212. `:401` tests the raw value's truthiness, so a
+ * - `visible` — `:287` + `:393`; `:287` fails CLOSED on a faulting predicate
+ *   since objectui#11212. `:393` tests the raw value's truthiness, so a
  *   literal `false` is honoured by `SchemaRenderer`'s node gate, which also
  *   evaluates the hoisted value, rather than by this check.
  *
@@ -3892,7 +3908,7 @@ const actionMenuMember = () => (actionMenuMemberOnce ??= buildActionMenuMember()
  * consume the host's EVALUATED `disabled` verdict by name (`:274`), the one
  * `SchemaRenderer`'s generic enablement gate computes from a hoisted
  * `disabled` on any node, and apply it to every inline member (`:159`) or to
- * the dropdown trigger (`:418`). So a `properties.disabled` on this block now
+ * the dropdown trigger (`:410`). So a `properties.disabled` on this block now
  * greys it out at render while this strict row refuses the key at save. The
  * row stays as measured from the block's own reads: declaring the key is a
  * contract decision, not a pin re-measure.
@@ -3947,24 +3963,27 @@ export type ActionGroupPropsParsed = z.infer<typeof ActionGroupPropsSchema>;
  * (`components/src/renderers/action/action-menu.tsx` at the pin). Read
  * points, per key:
  *
- * - `actions` — `:342`; members are read at `:80`, `:108-147` and `:408`, run
- *   through `ActionAutoTrigger` (`:363-370`), and forwarded at `:264-328`
- *   (static values `:264-270`, `objectName` `:327`; the member's
+ * - `actions` — `:335`; members are read at `:80`, `:108-147` and `:401`, run
+ *   through `ActionAutoTrigger` (`:356-363`), and forwarded at
+ *   `action-menu.tsx:261-321` first line
+ *   `const paramsPayload: ActionDef = Array.isArray(action.params)` (`params`
+ *   `:261-263`, no longer joined by the member's own `properties.params`
+ *   since objectui#11638; `objectName` `:320`; the member's
  *   `outcomeMessages` too since objectui#11344).
- * - `label` — `:389` (`aria-label`, default: the translated "More actions")
- *   and `:398-399` (trigger text; icon-only when omitted).
- * - `icon` — `:240`, default the `MoreHorizontal` glyph.
- * - `variant` / `size` — `:241` / `:242`, handed to the Button primitive
+ * - `label` — `:382` (`aria-label`, default: the translated "More actions")
+ *   and `:391-392` (trigger text; icon-only when omitted).
+ * - `icon` — `:237`, default the `MoreHorizontal` glyph.
+ * - `variant` / `size` — `:238` / `:239`, handed to the Button primitive
  *   unmapped (defaults `ghost` / `icon`): no `primary`, no `md` here.
- * - `visible` — `:235` + `:336`, fail-closed; the same truthiness note as
+ * - `visible` — `:232` + `:329`, fail-closed; the same truthiness note as
  *   `action:group`'s applies to a literal `false`.
  *
- * The registration's `inputs` (`:435-463`) publish `label`, `icon`,
+ * The registration's `inputs` (`:428-456`) publish `label`, `icon`,
  * `actions`, `variant`, `size`, `visible` and `className` since objectui#11168
  * slice 1, every key this row declares; through `db11afd49` (`:410-419`
  * there) `size` and `visible` were read and unpublished. ⚠️ As on
  * `action:group`, objectui#11182 has the trigger consume the host's evaluated
- * `disabled` verdict (`:219`, `:388`) — at `db11afd49` it already reached the
+ * `disabled` verdict (`:219`, `:381`) — at `db11afd49` it already reached the
  * trigger through the `...rest` spread — so a `properties.disabled` here greys
  * the trigger out while this row refuses it; recorded, not declared.
  */
@@ -4007,12 +4026,13 @@ export type ActionMenuPropsParsed = z.infer<typeof ActionMenuPropsSchema>;
  * - `columns` is compared as the NUMBER `2` (`props.columns === 2`); any other
  *   value renders one column. Declared as the literal pair `1 | 2`, which is
  *   what the Studio designer writes (a `number` control,
- *   `previews/block-config.ts:307`). The registration's enum publishes the
- *   STRINGS `'1'` / `'2'` (`:82`), and the string `'2'` renders one column —
- *   the read wins.
+ *   `previews/block-config.ts:320`). The registration's enum published the
+ *   STRINGS `'1'` / `'2'` until objectui#11168 slice 2, and the string `'2'`
+ *   renders one column; it now publishes the numbers `1` and `2`
+ *   (`data-list.tsx:99-105`), as this row declares.
  * - `items` is optional, as it is read: absent and empty both render the
- *   renderer's own "No details" state (`:51-53`). The registration marks it
- *   required.
+ *   renderer's own "No details" state (`:51-53`). The registration marked it
+ *   required until objectui#11168 slice 2, and no longer does (`:91-97`).
  * - An item is strict. `term` is required — it is the row's only label, placed
  *   as a React child, so a literal string — and `description` takes any value
  *   (`toText` prints objects as JSON and an absent one as an em dash). The
@@ -4038,9 +4058,9 @@ export const ElementDefinitionListPropsSchema = lazySchema(() => strictObject({
   })).optional()
     .describe('Term/description pairs, in order. Omitted or empty renders the "No details" empty state'),
   columns: z.literal([1, 2], {
-    // The registration's own enum spells these as strings, so the string is
-    // the likeliest wrong value — and the one the renderer silently collapses
-    // to a single column.
+    // The registration's own enum spelled these as strings until objectui#11168
+    // slice 2, so the string is the likeliest wrong value — and the one the
+    // renderer silently collapses to a single column.
     error: (issue) => (issue.input === '1' || issue.input === '2'
       ? `\`columns\` on this \`element:definition-list\` takes the NUMBER \`${String(issue.input)}\`, not `
         + `the string '${String(issue.input)}' — the renderer compares it to the number 2, so the string `
@@ -4061,32 +4081,35 @@ export type ElementDefinitionListProps = z.input<typeof ElementDefinitionListPro
 /**
  * `element:repeater` — a data-bound, chrome-free list: one line per record
  * (`components/src/renderers/basic/data-list.tsx` at the pin, props through
- * `readProps`, `:97-107`). Read points: `object` (`:143`, `:155`), `filter`
- * (`:120`, `:152` → `$filter`), `sort` (`:153` → `$orderby`), `limit` (`:154` →
- * `$top`), `emptyText` (`:181`), `divided` (`:186`), `titleField`
- * (`:191-192`) and `fields` (`:128`, `:194-196`).
+ * `readProps`, `data-list.tsx:125-135` first line `const props = readProps<{`).
+ * Read points: `object` (`:171`, `:183`), `filter`
+ * (`:148`, `:180` → `$filter`), `sort` (`:181` → `$orderby`), `limit` (`:182` →
+ * `$top`), `emptyText` (`:209`), `divided` (`:214`), `titleField`
+ * (`:219-220`) and `fields` (`:156`, `:222-224`).
  *
  * - `object` is REQUIRED, as `element:number`'s is: without it the renderer
- *   never queries and shows its "No records" state (`:143-146`, `:181`) —
+ *   never queries and shows its "No records" state (`:171-174`, `:209`) —
  *   indistinguishable from an object that really has no rows. The
  *   registration marks it required too.
  * - `filter` / `sort` are the family's one orthography from birth —
  *   `ViewFilterRule[]` and `SortItem[]` — and both are delivered:
  *   `ObjectStackAdapter.find` lowers a `{ field, operator, value }` array
  *   through `translateFilterArray` and serializes `{ field, order }` items
- *   through `serializeOrderBy` (`data-objectstack/src/index.ts:4782-4793`,
- *   `:760-786`). Before the query the renderer resolves the rules' context
+ *   through `serializeOrderBy` (`data-objectstack/src/index.ts:5000-5011`,
+ *   `:868-894`). Before the query the renderer resolves the rules' context
  *   tokens (`{current_user_id}`, the date macros) through `useResolvedFilter`
- *   (`data-list.tsx:119-120`), so a rule's string `value` may be one. The
+ *   (`data-list.tsx:147-148`), so a rule's string `value` may be one. The
  *   rule-array door here is the bare one `record:related_list` declares, not a
  *   `ruleArrayFilterError` door: that prescription speaks to a door that used
  *   to take the record form, and a door wired to it joins the stored-row
  *   conversion's reach (`conversions/registry.ts`), which is not this row's to
  *   change.
  * - `fields` takes a bare field name or `{ field }`. The renderer reads only
- *   `field` off the object form (`:196`) — the `label` its TS type and its
- *   registration's description both advertise is never rendered (the list has
- *   no header row), so it is refused with that reason.
+ *   `field` off the object form (`:224`) — a `label` is never rendered (the
+ *   list has no header row), so it is refused with that reason. Its TS type
+ *   and its registration's description advertised that `label` until
+ *   objectui#11168 slice 2; both now name `field` alone (`:115-122`,
+ *   `:245-249`).
  *
  * NOT read at the pin, whatever a sibling might suggest: the node-level
  * `dataSource` binding. This renderer is not wrapped in objectui's
