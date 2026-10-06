@@ -43,8 +43,8 @@ import {
 // which is the whole reason `MetaDomainProtocol` below is `Pick`ed rather than
 // written out. Same move `domains/packages.ts` and `domains/mcp.ts` make.
 import type { MetadataProtocol } from '@objectstack/spec/api';
-// [#21002] The implementation class, for the ONE member it declares that this
-// domain asks (`isShippedFlowName`) — `Pick`ed below, never restated.
+// [#21002, #21986] The implementation class, for the ONE member it declares
+// that this domain asks (`declinesStoredRow`) — `Pick`ed below, never restated.
 import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 // [#20193] THE per-caller read gate of a `/meta/:type/:name` document — the one
 // `RestServer` asks, published by `@objectstack/rest` so this transport asks it
@@ -152,8 +152,9 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * `any` requests — nothing declares its type, and the only thing that branch
  * asks of it is whether it is `undefined`.
  *
- * [#21002] A third group: `isShippedFlowName`, the predicate the layered read
- * decides its effective layer with, which `/published` asks so it follows that
+ * [#21002, #21986] A third group: `declinesStoredRow`, the one predicate the
+ * layered read decides its effective layer with (a shipped flow name, or a
+ * code-defined datasource name), which `/published` asks so it follows that
  * decision. Its signature is DECLARED — on `ObjectStackProtocolImplementation`
  * itself — so it is `Pick`ed from that class, never restated: a rename at the
  * producer is a compile error here, the same move `domains/automation.ts`
@@ -162,7 +163,7 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
 export type MetaDomainProtocol =
     Partial<Pick<MetadataProtocol,
         'getMetaTypes' | 'getMetaItems' | 'getMetaItem' | 'saveMetaItem' | 'getMetaItemLayered'>>
-    & Partial<Pick<ObjectStackProtocolImplementation, 'isShippedFlowName'>>
+    & Partial<Pick<ObjectStackProtocolImplementation, 'declinesStoredRow'>>
     & {
         /** ⚠️ Undeclared request shapes — see "Where the ledger honestly ends". */
         listDrafts?(request: any): Promise<any>;
@@ -1179,17 +1180,20 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     ...(organizationId ? { organizationId } : {}),
                 });
                 if (layered?.overlay !== undefined && layered?.overlay !== null) {
-                    // [#21002, ADR-0126 §2] As `RestServer`'s `/published`: when
-                    // the layered read put the LOADER's body over this stored
-                    // row — a shipped flow name, decided by the protocol's
-                    // `isShippedFlowName`, asked with the answer's own `type` /
-                    // `name` and never re-derived here — serve that effective
-                    // layer, not the row (`flow` is Regime C, "never an overlay
-                    // read path"). Every other stored row, an `object`'s
-                    // included, and every row of a protocol without the
-                    // predicate, is served exactly as before.
-                    publishedOverlay = typeof protocol.isShippedFlowName === 'function'
-                        && protocol.isShippedFlowName(layered.type, layered.name)
+                    // [#21002, #21986, ADR-0126 §2, ADR-0062 D4] As
+                    // `RestServer`'s `/published`: when the layered read put a
+                    // code layer over this stored row — a shipped flow name (the
+                    // loader's body; `flow` is Regime C, "never an overlay read
+                    // path") or a code-defined datasource name (the code
+                    // definition; "code wins on collision"), decided by the
+                    // protocol's one predicate, `declinesStoredRow`, asked with
+                    // the answer's own `type` / `name` and never re-derived
+                    // here — serve that effective layer, not the row. Every
+                    // other stored row, an `object`'s included, and every row of
+                    // a protocol without the predicate, is served exactly as
+                    // before.
+                    publishedOverlay = typeof protocol.declinesStoredRow === 'function'
+                        && protocol.declinesStoredRow(layered.type, layered.name)
                         ? layered.effective
                         : layered.overlay;
                 }
