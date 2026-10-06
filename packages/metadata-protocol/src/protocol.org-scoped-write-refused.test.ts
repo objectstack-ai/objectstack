@@ -73,12 +73,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 // #5480 update). Imported from `@objectstack/metadata-core`, never from
 // `@objectstack/objectql`: objectql DEPENDS ON this package, so that import
 // would close a dependency cycle turbo rejects outright.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
 // The anonymous form doors' own verdict (`registerFormEndpoints` in
 // `@objectstack/rest`), applied here to the protocol's real list reads.
 import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
-import { SharingConfigSchema } from '@objectstack/spec/ui';
+import { expandViewContainer, SharingConfigSchema } from '@objectstack/spec/ui';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 interface Row {
@@ -1292,5 +1292,273 @@ describe('a publish that states no package, over a store that cannot be read', (
         await expect(protocol.publishMetaItem({ type: 'view', name: VIEW.name }))
             .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
         expect(Array.from(rows.values()).filter((r) => r.state === 'active')).toEqual([]);
+    });
+});
+
+// Each package's copy of a view container expands into that package's own
+// slot. Two packages ship the container `task`, and the source registrars
+// register its form `task.intake_form` once per package. An env-wide copy of
+// the container stored for one package writes that package's item of each
+// name it expands, and a package-less copy stands in for every package with
+// no copy of its own (ADR-0048). So the env-wide view list the anonymous doors
+// judge against holds every package's body of the form, and any package's
+// withdrawal of it, shipped or saved, closes it. The by-name read naming a
+// package serves the item that package's slot in the list serves.
+describe('each package\'s copy of a view container expands into its own package\'s slot', () => {
+    const NAME = 'task.intake_form';
+    const SLUG = 'shared-intake';
+    const sharing = (allowAnonymous: boolean) => ({ enabled: true, allowAnonymous, publicLink: `/forms/${SLUG}` });
+    // Each body of the form is told apart by its title.
+    const container = (allowAnonymous: boolean, title = 'Intake') => ({
+        name: 'task', object: 'task', formViews: { intake_form: { title, sharing: sharing(allowAnonymous) } },
+    });
+    const formView = (allowAnonymous: boolean, title: string) => ({
+        name: NAME, label: title, object: 'task', viewKind: 'form', config: { title, sharing: sharing(allowAnonymous) },
+    });
+
+    /**
+     * The registry where these pins turn on it, held as the real
+     * `SchemaRegistry` holds it: each package's entries under
+     * `<package>:<name>` (the container and the views the source registrars
+     * expand from it), a row an unscoped kernel hydrates under the bare name,
+     * `getItem` bare slot first, and `getArtifactItem`'s package-scoped
+     * code-artifact lookup. `owner` is the code package that owns the object.
+     */
+    function packagesRegistry(shipped: Array<[string, Record<string, unknown>]>, owner?: string) {
+        const entries = new Map<string, Record<string, any>>();
+        const register = (item: Record<string, any>, packageId?: string) => {
+            if (packageId) {
+                if (item._packageId === undefined) item._packageId = packageId;
+                if (item._provenance === undefined) item._provenance = 'package';
+            }
+            entries.set(packageId ? `${packageId}:${String(item.name)}` : String(item.name), item);
+        };
+        for (const [packageId, body] of shipped) {
+            register({ ...body, name: 'task' }, packageId);
+            for (const vi of expandViewContainer('task', body)) register({ ...(vi as any) }, packageId);
+        }
+        const composite = (name: string) => [...entries].filter(([key]) => key.endsWith(`:${name}`)).map(([, it]) => it);
+        return {
+            registerItem: (type: string, item: Record<string, any>, _keyField?: string, packageId?: string) => {
+                if (type === 'view') register(item, packageId);
+            },
+            listItems: (type: string, packageId?: string) => (type === 'view'
+                ? [...entries.values()].filter((it) => !packageId || it._packageId === packageId)
+                : []),
+            getItem: (type: string, name: string, packageId?: string) => (type !== 'view'
+                ? undefined
+                : entries.get(name) ?? (packageId ? entries.get(`${packageId}:${name}`) : undefined) ?? composite(name)[0]),
+            getArtifactItem: (type: string, name: string, packageId?: string) => {
+                if (type !== 'view') return undefined;
+                const shippedAs = composite(name).filter((it) => isCodeArtifactBody(it));
+                return (packageId ? shippedAs.find((it) => it._packageId === packageId) : undefined) ?? shippedAs[0];
+            },
+            getPackagedObjectOwner: (name: string) => (owner && name === 'task' ? { packageId: owner, ownership: 'own' } : undefined),
+            getObject: () => undefined,
+            registerObject: () => {},
+            getPackage: () => undefined,
+            isPackageDisabled: () => false,
+            isObjectPackageDisabled: () => false,
+            applyNavContributions: (app: unknown) => app,
+        };
+    }
+
+    const KERNELS = [
+        ['an environment-scoped kernel', 'env_prod'],
+        ['an unscoped kernel (write-through hydrates the registry)', undefined],
+    ] as const;
+
+    function harness(shipped: Array<[string, Record<string, unknown>]>, environmentId: string | undefined, owner?: string) {
+        const { engine, rows } = makeStubEngine();
+        engine.registry = packagesRegistry(shipped, owner);
+        const services = new Map<string, unknown>([['tenancy', { defaultOrgId: async () => 'org_a' }]]);
+        const protocol = new ObjectStackProtocolImplementation(engine, () => services, environmentId) as any;
+        return { protocol, rows };
+    }
+
+    /** An organization overlay of the form, open, as a rollback restores it: the save check never judged it. */
+    async function restoreOpenOverlay(protocol: any) {
+        await protocol.ensureOverlayIndex();
+        await protocol.getOverlayRepo('org_a').put(
+            { type: 'view', name: NAME, org: 'org_a' },
+            formView(true, 'Intake (org)'),
+            { parentVersion: null, actor: null, source: 'test.restored', intent: 'runtime-only', state: 'active', packageId: null },
+        );
+    }
+
+    /** An env-wide copy of the container, stored for `packageId` (package-less when undefined). */
+    async function saveCopy(protocol: any, packageId: string | undefined, allowAnonymous: boolean, title: string) {
+        expect((await protocol.saveMetaItem({
+            type: 'view', name: 'task', item: container(allowAnonymous, title), ...(packageId ? { packageId } : {}),
+        })).success).toBe(true);
+    }
+
+    /** Each body of the form in the env-wide view list: [package, allowAnonymous, title]. */
+    async function envWideBodies(protocol: any): Promise<Array<[unknown, unknown, unknown]>> {
+        const envWide: any = await protocol.getMetaItems({ type: 'view' });
+        return (envWide.items as any[]).filter((v) => v?.name === NAME)
+            .map((v): [unknown, unknown, unknown] => [v._packageId ?? null, v.config?.sharing?.allowAnonymous, v.config?.title])
+            .sort((x, y) => String(x[0]).localeCompare(String(y[0])));
+    }
+
+    /**
+     * What the anonymous doors serve for the slug, by their own composition
+     * (`registerFormEndpoints`): the organization's read, each open candidate
+     * judged over the env-wide view list beneath it.
+     */
+    async function doorsServe(protocol: any): Promise<unknown[]> {
+        const org: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_a' });
+        const envWide: any = await protocol.getMetaItems({ type: 'view' });
+        return (org.items as any[]).filter((view) => anonymousFormIntakeCandidates(view)
+            .some((c) => c.slug === SLUG && !anonymousFormIntakeWithdrawnIn(envWide.items, view, c)));
+    }
+
+    describe('(a) one package\'s env-wide copy is saved with the form open, and another package ships it withdrawn', () => {
+        for (const [kernel, environmentId] of KERNELS) {
+            for (const owner of [undefined, 'pkg_a'] as const) {
+                const where = `${kernel}, ${owner ? 'the copy\'s package owns the object' : 'no code package owns the object'}`;
+                it(`${where}: the env-wide list holds the shipped withdrawal beside the copy, and the doors serve no copy of the overlay`, async () => {
+                    const { protocol } = harness([['pkg_a', container(true)], ['pkg_b', container(false)]], environmentId, owner);
+                    await restoreOpenOverlay(protocol);
+                    await saveCopy(protocol, 'pkg_a', true, 'Intake (pkg_a copy)');
+
+                    expect(await envWideBodies(protocol)).toEqual([
+                        ['pkg_a', true, 'Intake (pkg_a copy)'],
+                        ['pkg_b', false, 'Intake'],
+                    ]);
+                    expect(await doorsServe(protocol)).toEqual([]);
+                });
+            }
+        }
+
+        it('control: with no package withdrawing the form, the doors serve the overlay', async () => {
+            const { protocol } = harness([['pkg_a', container(true)], ['pkg_b', container(true)]], 'env_prod');
+            await restoreOpenOverlay(protocol);
+            await saveCopy(protocol, 'pkg_a', true, 'Intake (pkg_a copy)');
+            expect((await doorsServe(protocol)).length).toBeGreaterThan(0);
+        });
+    });
+
+    describe('(b) the same, with the withdrawal saved in the other package\'s own env-wide copy', () => {
+        for (const [kernel, environmentId] of KERNELS) {
+            for (const order of [['pkg_a', 'pkg_b'], ['pkg_b', 'pkg_a']] as const) {
+                it(`${kernel}, ${order[0]}'s copy saved first: each copy serves its own package's slot, and the doors serve no copy of the overlay`, async () => {
+                    const { protocol } = harness([['pkg_a', container(true)], ['pkg_b', container(true)]], environmentId);
+                    await restoreOpenOverlay(protocol);
+                    for (const pkg of order) await saveCopy(protocol, pkg, pkg === 'pkg_a', `Intake (${pkg} copy)`);
+
+                    expect(await envWideBodies(protocol)).toEqual([
+                        ['pkg_a', true, 'Intake (pkg_a copy)'],
+                        ['pkg_b', false, 'Intake (pkg_b copy)'],
+                    ]);
+                    expect(await doorsServe(protocol)).toEqual([]);
+                });
+            }
+        }
+    });
+
+    describe('(c) a package-less env-wide copy stands in for every package with no copy of its own', () => {
+        for (const [kernel, environmentId] of KERNELS) {
+            it(`${kernel}: the package-less copy serves each package's slot, so the administrator's switch opens the form for every package`, async () => {
+                const { protocol } = harness([['pkg_a', container(true)], ['pkg_b', container(false)]], environmentId);
+                await restoreOpenOverlay(protocol);
+                await saveCopy(protocol, undefined, true, 'Intake (env-wide copy)');
+
+                expect(await envWideBodies(protocol)).toEqual([
+                    ['pkg_a', true, 'Intake (env-wide copy)'],
+                    ['pkg_b', true, 'Intake (env-wide copy)'],
+                ]);
+                expect((await doorsServe(protocol)).length).toBeGreaterThan(0);
+            });
+
+            for (const order of [[undefined, 'pkg_b'], ['pkg_b', undefined]] as const) {
+                it(`${kernel}, ${order[0] ?? 'the package-less'} copy saved first: a package's own copy serves that package's slot ahead of the package-less copy`, async () => {
+                    const { protocol } = harness([['pkg_a', container(true)], ['pkg_b', container(true)]], environmentId);
+                    await restoreOpenOverlay(protocol);
+                    for (const pkg of order) {
+                        await saveCopy(protocol, pkg, pkg === undefined, pkg ? `Intake (${pkg} copy)` : 'Intake (env-wide copy)');
+                    }
+
+                    expect(await envWideBodies(protocol)).toEqual([
+                        ['pkg_a', true, 'Intake (env-wide copy)'],
+                        ['pkg_b', false, 'Intake (pkg_b copy)'],
+                    ]);
+                    expect(await doorsServe(protocol)).toEqual([]);
+                });
+            }
+        }
+    });
+
+    describe('(d) the list\'s slot for a package and the by-name read naming that package serve the same item', () => {
+        const projection = (v: any) => (v ? { name: v.name, viewKind: v.viewKind, config: v.config, _packageId: v._packageId } : v);
+
+        /** For each package: one item in the env-wide list, and the by-name read and the list scoped to the package serve it. */
+        async function expectAgreement(protocol: any, titles: Record<string, string>) {
+            const envWide: any = await protocol.getMetaItems({ type: 'view' });
+            for (const [pkg, title] of Object.entries(titles)) {
+                const slot = (envWide.items as any[]).filter((v) => v?.name === NAME && v._packageId === pkg);
+                expect(slot.map((v) => v.config?.title), `${pkg}: its one item in the env-wide list`).toEqual([title]);
+                const byName = (await protocol.getMetaItem({ type: 'view', name: NAME, packageId: pkg })).item;
+                expect(projection(byName), `${pkg}: the by-name read naming the package`).toEqual(projection(slot[0]));
+                const scoped: any = await protocol.getMetaItems({ type: 'view', packageId: pkg });
+                expect((scoped.items as any[]).filter((v) => v?.name === NAME).map(projection), `${pkg}: the list scoped to the package`)
+                    .toEqual([projection(slot[0])]);
+            }
+        }
+
+        for (const [kernel, environmentId] of KERNELS) {
+            it(`${kernel}: a name two packages' own copies expand`, async () => {
+                const { protocol } = harness([['pkg_a', container(true)], ['pkg_b', container(true)]], environmentId);
+                await saveCopy(protocol, 'pkg_a', true, 'Intake (pkg_a copy)');
+                await saveCopy(protocol, 'pkg_b', false, 'Intake (pkg_b copy)');
+                await expectAgreement(protocol, { pkg_a: 'Intake (pkg_a copy)', pkg_b: 'Intake (pkg_b copy)' });
+            });
+
+            it(`${kernel}: a name a package-less copy expands, standing in for each package`, async () => {
+                const { protocol } = harness([['pkg_a', container(true)], ['pkg_b', container(true)]], environmentId);
+                await saveCopy(protocol, undefined, true, 'Intake (env-wide copy)');
+                await expectAgreement(protocol, { pkg_a: 'Intake (env-wide copy)', pkg_b: 'Intake (env-wide copy)' });
+            });
+        }
+    });
+
+    // A stored row under exactly the form's name is that name's own row
+    // (ADR-0005), and it is the row of its own package's slot (ADR-0048): it
+    // keeps another package's copy out of that package's slot only when it is
+    // package-less, as the by-name read naming that package decides.
+    describe('(e) a stored row of the form\'s own name serves its own package\'s slot, and hides no other package\'s copy', () => {
+        for (const [kernel, environmentId] of KERNELS) {
+            it(`${kernel}: one package's row of the name and another package's withdrawing copy are both in the env-wide list, and the doors serve no copy of the overlay`, async () => {
+                const { protocol } = harness([['pkg_a', container(true)], ['pkg_b', container(true)]], environmentId);
+                await restoreOpenOverlay(protocol);
+                expect((await protocol.saveMetaItem({
+                    type: 'view', name: NAME, item: formView(true, 'Intake (pkg_a row)'), packageId: 'pkg_a',
+                })).success).toBe(true);
+                await saveCopy(protocol, 'pkg_b', false, 'Intake (pkg_b copy)');
+
+                expect(await envWideBodies(protocol)).toEqual([
+                    ['pkg_a', true, 'Intake (pkg_a row)'],
+                    ['pkg_b', false, 'Intake (pkg_b copy)'],
+                ]);
+                expect(await doorsServe(protocol)).toEqual([]);
+                const byName = (await protocol.getMetaItem({ type: 'view', name: NAME, packageId: 'pkg_b' })).item;
+                expect([byName?.config?.title, byName?.config?.sharing?.allowAnonymous]).toEqual(['Intake (pkg_b copy)', false]);
+            });
+
+            it(`${kernel}, control: a package-less row of the name serves every package's slot, ahead of any copy`, async () => {
+                const { protocol } = harness([['pkg_a', container(true)], ['pkg_b', container(true)]], environmentId);
+                expect((await protocol.saveMetaItem({
+                    type: 'view', name: NAME, item: formView(true, 'Intake (env-wide row)'),
+                })).success).toBe(true);
+                await saveCopy(protocol, 'pkg_b', false, 'Intake (pkg_b copy)');
+
+                expect(await envWideBodies(protocol)).toEqual([
+                    ['pkg_a', true, 'Intake (env-wide row)'],
+                    ['pkg_b', true, 'Intake (env-wide row)'],
+                ]);
+                const byName = (await protocol.getMetaItem({ type: 'view', name: NAME, packageId: 'pkg_b' })).item;
+                expect(byName?.config?.title).toBe('Intake (env-wide row)');
+            });
+        }
     });
 });
