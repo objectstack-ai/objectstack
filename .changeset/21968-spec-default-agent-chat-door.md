@@ -10,4 +10,4 @@ Clause-②: no
 - It now says who does read it. The console's chat dock hands the active app's `defaultAgent` to its one surface-to-agent resolver, which honours only `ask` or `build` (legacy aliases included) and otherwise falls back to the surface default. The resolved agent is then called by name on `POST /api/v1/ai/agents/:agentName/chat`, where the path segment, not this key, selects the agent.
 - The ADR-0063 surface-binding paragraph and the rule that only the two platform agents resolve are unchanged, as is the note that the bare `POST /api/v1/ai/chat` resolves no agent.
 - The docs page `ai/actions-as-tools` lists the agent route as the only in-product chat route.
-- ⛔ No schema, parse, `.describe()`, export, type or accept-set change. The docblock ships in the published `dist` type declarations, which is why this is a patch.
+- ⛔ No schema, parse, `.describe()`, export, type or accept-set change. The docblock ships in the published package, in the `dist/ui` and `dist/browser` JavaScript bundles and in the shipped `src/ui/app.zod.ts`, which is why this is a patch.
