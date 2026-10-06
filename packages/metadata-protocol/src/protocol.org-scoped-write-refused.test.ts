@@ -1205,3 +1205,72 @@ describe('a publish consults the lock of the package key it resolved', () => {
         expect(draftsOf()).toEqual(['pkg_a']);
     });
 });
+
+// The organization-scoped save check anchors the overlay on the env-wide
+// definition of its row, one per package that holds the name: each package's
+// own env-wide row, else the package-less env-wide row (which stands in for
+// every package), else that package's artifact. So a package that withdraws
+// the form is judged whatever its place in registry order, and another
+// package's stored row anchors that package only.
+describe('the save check anchors each package\'s row on that package\'s env-wide definition', () => {
+    const LINK = '/forms/walled-intake';
+    const open = { enabled: true, allowAnonymous: true, publicLink: LINK };
+    const container = (sharing: Record<string, unknown>, key = 'intake_form') => ({
+        name: 'task', object: 'task', formViews: { [key]: { sharing } },
+    });
+    // Registry order: package A (open) first, so a lookup that names no
+    // package answers A's artifact. Package B, which withdraws, is second.
+    const shippedA = { ...container(open), _packageId: 'pkg_a' };
+    const shippedB = { ...container({ ...open, allowAnonymous: false }), _packageId: 'pkg_b' };
+    // The overlay moves the form to another key, so only the row anchor matches it.
+    const renamedOpen = container(open, 'intake_v2');
+
+    function makeTwoPackageProtocol() {
+        const { engine, rows } = makeStubEngine();
+        engine.registry.listItems = (type: string) => (type === 'view' ? [shippedA, shippedB] : []);
+        engine.registry.getArtifactItem = (type: string, name: string, pkg?: string) => {
+            if (type !== 'view' || name !== 'task') return undefined;
+            return pkg === 'pkg_b' ? shippedB : shippedA;
+        };
+        const services = new Map<string, unknown>([['tenancy', { defaultOrgId: async () => 'org_a' }]]);
+        const protocol = new ObjectStackProtocolImplementation(engine, () => services, 'env_prod') as any;
+        return { protocol, rows };
+    }
+
+    for (const [label, packageId] of [['a package-less', undefined], ['a package A-bound', 'pkg_a']] as const) {
+        it(`the withdrawing package is not first in registry order: ${label} org save that renames the form is refused`, async () => {
+            const { protocol, rows } = makeTwoPackageProtocol();
+            await expect(protocol.saveMetaItem({
+                type: 'view', name: 'task', item: renamedOpen, organizationId: 'org_a',
+                ...(packageId ? { packageId } : {}),
+            })).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403, organizationId: 'org_a' });
+            expect(orgRows(rows).filter((r) => r.org === 'org_a')).toEqual([]);
+        });
+    }
+
+    it('another package\'s env-wide row anchors that package only: the org save is still judged against the withdrawing package', async () => {
+        const { protocol, rows } = makeTwoPackageProtocol();
+        expect((await protocol.saveMetaItem({
+            type: 'view', name: 'task', item: { ...container(open), label: 'Task (A, env-wide)' }, packageId: 'pkg_a',
+        })).success).toBe(true);
+        await expect(protocol.saveMetaItem({
+            type: 'view', name: 'task', item: renamedOpen, organizationId: 'org_a',
+        })).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403, organizationId: 'org_a' });
+        expect(orgRows(rows).filter((r) => r.org === 'org_a')).toEqual([]);
+    });
+
+    it('control: the same org save that keeps the form withdrawn saves', async () => {
+        const { protocol } = makeTwoPackageProtocol();
+        expect((await protocol.saveMetaItem({
+            type: 'view', name: 'task', item: container({ ...open, allowAnonymous: false }, 'intake_v2'), organizationId: 'org_a',
+        })).success).toBe(true);
+    });
+
+    it('control: a package-less env-wide row stands in for every package, so the org save it leaves open saves', async () => {
+        const { protocol } = makeTwoPackageProtocol();
+        expect((await protocol.saveMetaItem({ type: 'view', name: 'task', item: container(open) })).success).toBe(true);
+        expect((await protocol.saveMetaItem({
+            type: 'view', name: 'task', item: renamedOpen, organizationId: 'org_a',
+        })).success).toBe(true);
+    });
+});

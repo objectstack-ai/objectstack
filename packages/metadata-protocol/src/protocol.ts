@@ -16070,7 +16070,9 @@ export class ObjectStackProtocolImplementation implements
         // by: the env-wide body of row `name`, as stored (a container is not
         // expanded, so a form moved to another key or slot, renamed through
         // `form.name`, or renamed by an expansion collision is still matched
-        // against the form it was, by slot or by slug).
+        // against the form it was, by slot or by slug). [#21934] One body per
+        // package that holds the name ({@link envWideRawViewRows}), so every
+        // package's withdrawal of it is judged, whatever the registry order.
         const envRows = (await this.envWideRawViewRows(args.type, args.name)).map((r) => ({ ...r, name: args.name }));
         if (envRows.length > 0) {
             const own = { ...raw, name: args.name };
@@ -16101,10 +16103,15 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * The env-wide body of the `view` row `name`, as stored: the active
-     * env-wide `sys_metadata` row when there is one (the env-wide overlay is
-     * keyed by its own name, ADR-0005), else the code package's artifact of
-     * that name. Empty when neither exists.
+     * The env-wide bodies of the `view` row `name`, as stored, for every
+     * package that holds the name. [#21934] Resolved per package, the way the
+     * list read resolves each package's item (ADR-0048): the package's own
+     * active env-wide `sys_metadata` row (the env-wide overlay is keyed by its
+     * own name, ADR-0005), else the package-less env-wide row, which stands in
+     * for every package's row of the name, else that package's artifact of
+     * the name. So a stored row of one package anchors that package only, and
+     * every package that ships the name is judged on its own definition,
+     * whatever the registry order. Empty when no package holds the name.
      *
      * Read raw, never through the list read: that serves a container only as
      * its expansion, whose item names and slots the overlay author chooses,
@@ -16120,11 +16127,18 @@ export class ObjectStackProtocolImplementation implements
         }
         const stored = this.storedOverlayEntries({ type }, records)
             .filter((e) => e.name === name && e.organizationId === null)
-            .map((e) => e.data)
-            .filter((d): d is Record<string, unknown> => !!d && typeof d === 'object' && !Array.isArray(d));
-        if (stored.length > 0) return stored;
-        const artifact = this.lookupArtifactItem(type, name);
-        return artifact && typeof artifact === 'object' ? [artifact as Record<string, unknown>] : [];
+            .filter((e) => !!e.data && typeof e.data === 'object' && !Array.isArray(e.data));
+        const bodies = stored.map((e) => e.data as Record<string, unknown>);
+        const withOwnRow = new Set(stored.map((e) => e.packageId));
+        // The package-less row stands in for every package without a row of its own.
+        if (withOwnRow.has(undefined)) return bodies;
+        for (const artifact of this.shippedArtifactsOf(type, name)) {
+            if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) continue;
+            const pkg = (artifact as { _packageId?: unknown })._packageId;
+            if (typeof pkg === 'string' && withOwnRow.has(pkg)) continue;
+            bodies.push(artifact as Record<string, unknown>);
+        }
+        return bodies;
     }
 
     /**

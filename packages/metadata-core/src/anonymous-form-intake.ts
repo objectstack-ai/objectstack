@@ -322,9 +322,14 @@ function anonymousFormExplicitWithdrawals(view: unknown): Array<{ slot: string; 
  * and closes nothing. The package a body is bound to is NOT compared: a
  * withdrawal of a name closes that name's form in every package (a known
  * limit that fails closed: it may over-close another package's form of the
- * same name, never under-close). A layer with no body of the row, or whose body has no
- * explicit withdrawal, withdraws nothing, so a form published only in an
- * organization stays open there.
+ * same name). It judges only the bodies the layer holds, so a caller closes a
+ * name in every package only when its layer holds every package's body of the
+ * name: the organization-scoped write door anchors one body per package, and
+ * the env-wide view list the anonymous doors read holds one item per package
+ * of a name, except that it holds one package's expansion of each name that
+ * stored view containers of several packages expand. A layer with no body of
+ * the row, or whose body has no explicit withdrawal, withdraws nothing, so a
+ * form published only in an organization stays open there.
  */
 export function anonymousFormIntakeWithdrawnIn(
     layer: ReadonlyArray<unknown>,
