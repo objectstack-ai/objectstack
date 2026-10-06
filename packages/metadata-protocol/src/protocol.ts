@@ -9060,15 +9060,26 @@ export class ObjectStackProtocolImplementation implements
                 // read naming the package serves that row before it asks any
                 // expansion. The expansion still seats the slot, so a stand-in
                 // held back by the merge is served there, as the package's.
+                //
+                // [#21934] Only a name an expansion writes is upserted by name.
+                // Every other name keeps what the package-aware merge seated for
+                // it: one item per package that ships the name (ADR-0048), as the
+                // list serves it when no row is stored. The env-wide list is the
+                // layer the anonymous form doors judge a withdrawal against, so
+                // it holds every package's body of a name.
                 if (isView && records.length > 0) {
-                    const byName = new Map<string, unknown>();
-                    for (const it of items as any[]) {
-                        if (it && typeof it === 'object' && typeof it.name === 'string') byName.set(it.name, it);
-                    }
                     const ownRowNames = this.namesWithOwnStoredRow(records);
                     const standInNames = this.namesWithOwnStoredRow(standInRows);
-                    for (const { item: vi } of this.expandStoredViewContainers(request.type, overlays)) {
-                        if (ownRowNames.has(vi.name as string)) continue;
+                    const expansions = this.expandStoredViewContainers(request.type, overlays)
+                        .filter(({ item: vi }) => !ownRowNames.has(vi.name as string));
+                    const written = new Set(expansions.map(({ item: vi }) => vi.name as string));
+                    const byName = new Map<string, unknown>();
+                    for (const it of items as any[]) {
+                        if (it && typeof it === 'object' && typeof it.name === 'string' && written.has(it.name)) {
+                            byName.set(it.name, it);
+                        }
+                    }
+                    for (const { item: vi } of expansions) {
                         const held = byName.get(vi.name as string) as Record<string, unknown> | undefined;
                         if (held !== undefined && standInNames.has(vi.name as string)) {
                             // Seated: a copy the `unseated` record does not hold,
@@ -9080,7 +9091,17 @@ export class ObjectStackProtocolImplementation implements
                         }
                         byName.set(vi.name as string, vi);
                     }
-                    items = Array.from(byName.values());
+                    const merged: unknown[] = [];
+                    for (const it of items as any[]) {
+                        if (!it || typeof it !== 'object' || typeof it.name !== 'string') continue;
+                        if (!written.has(it.name)) {
+                            merged.push(it);
+                        } else if (byName.has(it.name)) {
+                            merged.push(byName.get(it.name));
+                            byName.delete(it.name);
+                        }
+                    }
+                    items = [...merged, ...byName.values()];
                 }
 
                 // Only hydrate the global registry for unscoped (control-plane)
