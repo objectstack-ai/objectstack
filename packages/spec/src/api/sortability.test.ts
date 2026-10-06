@@ -42,7 +42,7 @@ const OPPORTUNITY_LIKE = {
   },
 };
 
-describe('#10235 resolveObjectSortability — the closed category set', () => {
+describe('resolveObjectSortability — the closed category set', () => {
   it('marks a formula column unsortable with the refusal-backed reason', () => {
     const { fields } = resolveObjectSortability(OPPORTUNITY_LIKE);
     expect(fields.expected_revenue).toEqual({
@@ -111,7 +111,7 @@ describe('#10235 resolveObjectSortability — the closed category set', () => {
   });
 });
 
-describe('#10235 the #7865 anchor category — accepted, caveated, never refused', () => {
+describe('the unprovisioned injected-anchor category — accepted, caveated, never refused', () => {
   /** An ADR-0015 external object as the registry serves it: injected anchors present. */
   const EXTERNAL = {
     name: 'ext_customer',
@@ -167,7 +167,7 @@ describe('#10235 the #7865 anchor category — accepted, caveated, never refused
   });
 });
 
-describe('#10235 wire validity — the projection parses under its own schema', () => {
+describe('wire validity — the projection parses under its own schema', () => {
   it.each([
     ['oracle-shaped object', OPPORTUNITY_LIKE],
     ['external object', {

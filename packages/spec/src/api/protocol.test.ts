@@ -169,7 +169,7 @@ describe('ObjectStack Protocol', () => {
     expect(DeleteManyDataRequestSchema.safeParse(deleteManyReq).success).toBe(true);
   });
 
-  it('no longer publishes a viewId-addressed view CRUD surface (#6239)', async () => {
+  it('no longer publishes a viewId-addressed view CRUD surface', async () => {
     // Retired at protocol 17: five methods, ten schemas, zero implementations
     // and zero routes — and already mis-read once as the contract of
     // `GET /ui/view/:object/:type` (#5948). The unit test that stood here
@@ -296,7 +296,7 @@ describe('ObjectStack Protocol', () => {
    * test cannot see this class of defect at all — which is exactly why the
    * family's double-assertion ratchet (#3877 Stage D) was blind to it.
    */
-  it('[#6361] tombstones `cursor` on BOTH halves, with the prescription', () => {
+  it('tombstones `cursor` on BOTH halves, with the prescription', () => {
     // BOTH halves or neither — the ruling's "one capability, two halves" clause,
     // asserted rather than trusted. A half-deletion is the specific outcome the
     // maintainer ruled out, so it gets a test rather than a comment.
@@ -505,7 +505,7 @@ describe('GetDiscoveryResponseSchema (capabilities)', () => {
   // no producer emits and no consumer reads looked exactly like a real one.
   // That is the phantom the closed vocabulary removes, and it is worth a test
   // of its own rather than a silent deletion.
-  it('[#5672] rejects a capability key outside the vocabulary', () => {
+  it('strips a capability key outside the closed vocabulary', () => {
     const result = GetDiscoveryResponseSchema.safeParse({
       version: 'v1',
       name: 'ObjectStack API',
@@ -523,7 +523,7 @@ describe('GetDiscoveryResponseSchema (capabilities)', () => {
     }
   });
 
-  it('[#5672] rejects a capability map that is missing part of the vocabulary', () => {
+  it('rejects a capability map that is missing part of the vocabulary (ruled: an absent capability is `enabled: false`, not a missing key)', () => {
     const { comments: _dropped, ...partial } = allCapabilitiesOff();
     const result = GetDiscoveryResponseSchema.safeParse({
       version: 'v1',
@@ -674,7 +674,7 @@ describe('HttpFindQueryParamsSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('rejects ?distinct — the querystring spelling of the removed query.distinct (#4286)', () => {
+  it('rejects ?distinct — the querystring spelling of the removed query.distinct', () => {
     const result = HttpFindQueryParamsSchema.safeParse({ distinct: true });
     expect(result.success).toBe(false);
     expect(JSON.stringify(result.error?.issues)).toMatch(/query\.distinct.*removed/s);
@@ -702,7 +702,7 @@ import { SaveMetaItemResponseSchema } from './protocol.zod';
  * return, and emits `projectionApplied` only when an ADR-0094 mutation
  * projector is registered for the type.
  */
-describe('SaveMetaItemResponseSchema (#5745 — declares the full save response)', () => {
+describe('SaveMetaItemResponseSchema (declares the full save response)', () => {
   /** A verbatim capture of a real `saveMetaItem` return (repo write path). */
   const realResponse = {
     success: true,
@@ -776,7 +776,7 @@ import { PublishMetaItemResponseSchema } from './protocol.zod';
  * literal always sets `success` / `version` / `seq`, and attaches each of the
  * three `*Applied` receipts only when the matching side effect ran.
  */
-describe('PublishMetaItemResponseSchema (#7294 — declares the full publish response)', () => {
+describe('PublishMetaItemResponseSchema (declares the full publish response)', () => {
   /** A verbatim capture of a real `publishMetaItem` return (promotion path). */
   const realResponse = {
     success: true,
@@ -913,7 +913,7 @@ export type DeleteProjectionIsReachable = AssertD<
  * the producer's own returns fail their own contract, which is the #5563
  * defect in mirror image.
  */
-describe('DeleteMetaItemResponseSchema (#13155 — carries #5745 to the third verb)', () => {
+describe('DeleteMetaItemResponseSchema (carries the declared = returned discipline to the third verb)', () => {
   /**
    * A verbatim capture of a real `deleteMetaItem` return — the repository
    * path's delete-ful branch, the only one of the four that carries `seq`.
@@ -1025,7 +1025,7 @@ import { RuntimeAuthoringIssueSchema } from './protocol.zod';
  * assumed (the PR's R1/R3 rows). The declaration is deliberate rather than
  * test-driven, and these cases are what make it checkable at all.
  */
-describe('SaveMetaItemResponseSchema.advisories (#4717 — #4463 D3 on the response)', () => {
+describe('SaveMetaItemResponseSchema.advisories (advisory findings ride the 2xx response)', () => {
   const realResponse = {
     success: true,
     version: 'sha256:7aad99c8d969efb5067fff275fb3e5be7ec90f9cd610d41709fcddbf8c34b1f0',
@@ -1082,7 +1082,7 @@ describe('SaveMetaItemResponseSchema.advisories (#4717 — #4463 D3 on the respo
  * asserts nothing is stripped, and an absent key strips nothing — so these
  * declaration pins are what make the key checkable at all, in both directions.
  */
-describe('PublishMetaItemResponseSchema.advisories (#9176 — #4463 D3 on the publish door)', () => {
+describe('PublishMetaItemResponseSchema.advisories (advisory findings ride the 2xx on the publish door too)', () => {
   const realPublishResponse = {
     success: true,
     version: 'sha256:7aad99c8d969efb5067fff275fb3e5be7ec90f9cd610d41709fcddbf8c34b1f0',
@@ -1142,7 +1142,7 @@ describe('PublishMetaItemResponseSchema.advisories (#9176 — #4463 D3 on the pu
  * `@objectstack/metadata-protocol` as its `RuntimeAuthoringIssue`, so the 422's
  * `issues[]` and the 2xx's `advisories[]` cannot drift into two dialects.
  */
-describe('RuntimeAuthoringIssueSchema (#4717 — the ONE finding shape)', () => {
+describe('RuntimeAuthoringIssueSchema (the ONE finding shape)', () => {
   const issue = {
     rule: 'flow-multi-write-unfiltered',
     path: 'flows[0].nodes[1].config.multi',
@@ -1198,7 +1198,7 @@ import { PublishPackageDraftsResponseSchema } from './protocol.zod';
  * and the route mutations in
  * `packages/runtime/src/domains/packages-publish-drafts-response-conformance.test.ts`.
  */
-describe('PublishPackageDraftsResponseSchema (#9406 — declares the batch publish response)', () => {
+describe('PublishPackageDraftsResponseSchema (declares the batch publish response)', () => {
   /** A verbatim-shaped capture of a real `publishPackageDrafts` return (happy path). */
   const realResponse = {
     success: true,
@@ -1310,7 +1310,7 @@ describe('PublishPackageDraftsResponseSchema (#9406 — declares the batch publi
     ).toBe(false);
   });
 
-  it('probes is opaque BY DECLARATION (#9406 ruling): any shape passes through unmodified, unstripped', () => {
+  it('probes is opaque BY DECLARATION (ruled: modeled only once a consumer needs a field): any shape passes through unmodified, unstripped', () => {
     // The real `BuildProbeReport` shape of today…
     const report = { issues: [], checked: { seeds: 1, views: 2, widgets: 0, objects: 3 } };
     const parsed = PublishPackageDraftsResponseSchema.parse({ ...realResponse, probes: report });
@@ -1380,7 +1380,7 @@ describe('PublishPackageDraftsResponseSchema (#9406 — declares the batch publi
  * cannot go red for an absent key, so these declaration pins are what make the
  * key checkable in both directions.
  */
-describe('PublishPackageDraftsResponseSchema published[].advisories (#9343 — #4463 D3 per element)', () => {
+describe('PublishPackageDraftsResponseSchema published[].advisories (ruled: advisory findings ride each published element)', () => {
   const base = {
     success: true,
     // #10462 — `outcome` is required on every producer return; this fixture is
@@ -1456,7 +1456,7 @@ describe('PublishPackageDraftsResponseSchema published[].advisories (#9343 — #
  * shrink to a headline without the per-path detail becoming unreadable to
  * typed consumers.
  */
-describe('PublishPackageDraftsResponseSchema failed[].issues (#10524 — the causal refusal\'s findings)', () => {
+describe('PublishPackageDraftsResponseSchema failed[].issues (the causal refusal\'s findings)', () => {
   const base = {
     success: false,
     outcome: 'refused',
@@ -1535,7 +1535,7 @@ describe('PublishPackageDraftsResponseSchema failed[].issues (#10524 — the cau
  * registry, and declaring the six-key shape here would refuse every real
  * emission.
  */
-describe('PublishPackageDraftsResponseSchema seedApplied.issues (#10524 — the seed refusal\'s findings)', () => {
+describe('PublishPackageDraftsResponseSchema seedApplied.issues (the seed refusal\'s findings)', () => {
   const base = {
     success: true,
     outcome: 'published',
@@ -1597,7 +1597,7 @@ import {
   GetMetaItemLayeredRequestSchema,
 } from './protocol.zod';
 
-describe('meta-read request schemas declare organizationId (#9726 — declared = enforced)', () => {
+describe('meta-read request schemas declare organizationId (declared = enforced)', () => {
   // The implementation (`@objectstack/metadata-protocol`) accepts and HONOURS
   // `organizationId` on all four read verbs: it selects the org partition in
   // the ADR-0005 overlay read order, i.e. it decides which tenant's row is
@@ -1652,7 +1652,7 @@ describe('meta-read request schemas declare organizationId (#9726 — declared =
   });
 });
 
-describe('meta-read request schemas declare the draft-visibility switches (#9741 — declared = enforced)', () => {
+describe('meta-read request schemas declare the draft-visibility switches (declared = enforced)', () => {
   // Maintainer ruling 2026-08-18 (commit 2a29caa53): declare `previewDrafts` / `state`
   // exactly where the implementation enforces them, and record `environmentId`
   // as transport-level — OUT of the request shape by decision. The
@@ -1736,7 +1736,7 @@ describe('meta-read request schemas declare the draft-visibility switches (#9741
   });
 });
 
-describe('environmentId stays OUT of the meta-read request shape — by decision, not omission (#9741)', () => {
+describe('environmentId stays OUT of the meta-read request shape — transport-level by decision, not omission', () => {
   // Maintainer ruling 2026-08-18 (commit 2a29caa53): `environmentId` is the
   // TRANSPORT-level multi-kernel routing key. The REST layer resolves the
   // target kernel from it BEFORE the protocol call, the implementation's
@@ -1767,7 +1767,7 @@ describe('environmentId stays OUT of the meta-read request shape — by decision
   });
 });
 
-describe('MetadataProtocol declares getMetaItemLayered (#9740)', () => {
+describe('MetadataProtocol declares getMetaItemLayered', () => {
   // Type-level pins (compiled by the spec test typecheck, the
   // translation-typegen.test.ts pattern). The member is an interface
   // declaration with no runtime shadow, so its presence and shape are only
@@ -1797,7 +1797,7 @@ describe('MetadataProtocol declares getMetaItemLayered (#9740)', () => {
 
 import { PublishMetaItemRequestSchema } from './protocol.zod';
 
-describe('PublishMetaItemRequestSchema mirrors the implementation parameter type (#11006)', () => {
+describe('PublishMetaItemRequestSchema mirrors the implementation parameter type', () => {
   // #7294 declared the RESPONSE side of `POST /meta/:type/:name/publish`; the
   // request shape stayed undeclared — the half-declared door. Maintainer
   // ruling 2026-08-22 (option B): declare the request and the interface
@@ -1862,7 +1862,7 @@ describe('PublishMetaItemRequestSchema mirrors the implementation parameter type
     }
   });
 
-  it('does not declare environmentId — transport-level by the #9741 ruling, stripped and shape-absent', () => {
+  it('does not declare environmentId — transport-level by ruling, stripped and shape-absent', () => {
     // Same regression guard as the meta-read block above: if someone declares
     // the member, the parse stops stripping it and this test names the ruling
     // they are overturning (2026-08-18, commit 2a29caa53: `environmentId` is the
@@ -1888,7 +1888,7 @@ describe('PublishMetaItemRequestSchema mirrors the implementation parameter type
   });
 });
 
-describe('MetadataProtocol declares publishMetaItem (#11006)', () => {
+describe('MetadataProtocol declares publishMetaItem', () => {
   // Type-level pins (compiled by the spec test typecheck, the
   // translation-typegen.test.ts pattern — same as the getMetaItemLayered block above, commit 11b779e0f).
   // Before this declaration the cast at the REST call site carried
@@ -1910,7 +1910,7 @@ describe('MetadataProtocol declares publishMetaItem (#11006)', () => {
     expect('publishMetaItem' in absent).toBe(false);
   });
 
-  it('refuses an undeclared key at the member call shape — the #9612-gate class this card exists for', () => {
+  it('refuses an undeclared key at the member call shape — the package-closure publish-gate class this card exists for', () => {
     // Excess-property check on a fresh literal at the declared parameter
     // type: the compile-time teeth the ruling asked for. Before the
     // declaration any key sailed through the `(p as any)` cast.
@@ -1928,7 +1928,7 @@ describe('MetadataProtocol declares publishMetaItem (#11006)', () => {
 import { AuditMetaItemRequestSchema, AuditMetaItemResponseSchema } from './protocol.zod';
 import type { AuditMetaItemRequest, AuditMetaItemResponse } from './protocol.zod';
 
-describe('AuditMetaItemRequestSchema mirrors the implementation parameter type (#11678)', () => {
+describe('AuditMetaItemRequestSchema mirrors the implementation parameter type', () => {
   // The audit door was a step BEHIND the half-declared publish door (closed by
   // commit cccbe51bf): NEITHER side was declared, and the REST call site reached the
   // verb through `(p as any)` twice (guard + call). The measure is the
@@ -1981,7 +1981,7 @@ describe('AuditMetaItemRequestSchema mirrors the implementation parameter type (
     expect(clampedNotRefused.success).toBe(true);
   });
 
-  it('does not declare environmentId — transport-level by the #9741 ruling, stripped and shape-absent', () => {
+  it('does not declare environmentId — transport-level by ruling, stripped and shape-absent', () => {
     // Same regression guard as the meta-read and publish blocks above. On THIS
     // door the exclusion is even stronger than the ruling: #8747 removed
     // `environmentId` from the door's payload entirely (the implementation
@@ -1996,7 +1996,7 @@ describe('AuditMetaItemRequestSchema mirrors the implementation parameter type (
   });
 });
 
-describe('AuditMetaItemResponseSchema declares the compliance-trail body (#11678)', () => {
+describe('AuditMetaItemResponseSchema declares the compliance-trail body', () => {
   /** A verbatim-shaped capture of a real `auditMetaItem` return (one denied save). */
   const realResponse = {
     events: [
@@ -2025,7 +2025,7 @@ describe('AuditMetaItemResponseSchema declares the compliance-trail body (#11678
     }
   });
 
-  it('the honest-empty answer parses — {events: []} is a declared, legal body (#9426)', () => {
+  it('the honest-empty answer parses — {events: []} is a declared, legal body', () => {
     // `[]` is the honest MISS shape (clean trail / no `find` on the host
     // engine / unprovisioned table). The capability gap is NOT in this body:
     // a protocol without the verb is refused 501 before the call.
@@ -2044,7 +2044,7 @@ describe('AuditMetaItemResponseSchema declares the compliance-trail body (#11678
   });
 });
 
-describe('MetadataProtocol declares auditMetaItem (#11678)', () => {
+describe('MetadataProtocol declares auditMetaItem', () => {
   // Type-level pins (compiled by the spec test typecheck, the
   // translation-typegen.test.ts pattern — same as the getMetaItemLayered (commit 11b779e0f) and publishMetaItem (commit cccbe51bf) blocks
   // above). Before this declaration the casts at the REST call site carried
@@ -2079,7 +2079,7 @@ describe('MetadataProtocol declares auditMetaItem (#11678)', () => {
 import { HistoryMetaItemRequestSchema, HistoryMetaItemResponseSchema } from './protocol.zod';
 import type { HistoryMetaItemRequest, HistoryMetaItemResponse } from './protocol.zod';
 
-describe('HistoryMetaItemRequestSchema mirrors the implementation parameter type (#12005)', () => {
+describe('HistoryMetaItemRequestSchema mirrors the implementation parameter type', () => {
   // The history door is the audit door's explicitly named twin
   // (`rest-server.ts` says so at the `Number(...)`-shape comment) and was in
   // exactly the state the audit door left via #11678/PR #12003: NEITHER side
@@ -2138,7 +2138,7 @@ describe('HistoryMetaItemRequestSchema mirrors the implementation parameter type
     expect(unclamped.success).toBe(true);
   });
 
-  it('does not declare environmentId — transport-level by the #9741 ruling, stripped and shape-absent', () => {
+  it('does not declare environmentId — transport-level by ruling, stripped and shape-absent', () => {
     // Same regression guard as the audit block above, with one twist the
     // audit twin no longer has: this door STILL spreads `environmentId` into
     // its outgoing payload (dead weight — the implementation never declares
@@ -2155,7 +2155,7 @@ describe('HistoryMetaItemRequestSchema mirrors the implementation parameter type
   });
 });
 
-describe('HistoryMetaItemResponseSchema declares the change-log body (#12005)', () => {
+describe('HistoryMetaItemResponseSchema declares the change-log body', () => {
   /**
    * A verbatim-shaped capture of a real `historyMetaItem` return: one update
    * (all optional members present) followed by the delete tombstone
@@ -2224,7 +2224,7 @@ describe('HistoryMetaItemResponseSchema declares the change-log body (#12005)', 
   });
 });
 
-describe('MetadataProtocol declares historyMetaItem (#12005)', () => {
+describe('MetadataProtocol declares historyMetaItem', () => {
   // Type-level pins, same pattern as the #11678 audit block above: before
   // this declaration the casts at the REST call site carried MEMBER-EXISTENCE
   // weight (TS2339, not TS2353), so the request literal there was typed by
@@ -2259,7 +2259,7 @@ import { DeleteMetaItemRequestSchema } from './protocol.zod';
 // there rather than re-importing the same binding.
 import type { DeleteMetaItemRequest } from './protocol.zod';
 
-describe('DeleteMetaItemRequestSchema declares the contract members the reset door sends (#11679)', () => {
+describe('DeleteMetaItemRequestSchema declares the contract members the reset door sends', () => {
   // The sharper sibling of the audit door: the MEMBER was declared all along
   // (so a scan for undeclared members walked past it), while the request
   // schema declared 2 of the 8 members `DELETE /meta/:type/:name` sends —
@@ -2317,7 +2317,7 @@ describe('DeleteMetaItemRequestSchema declares the contract members the reset do
     expect(DeleteMetaItemRequestSchema.safeParse({ ...base, dropStorage: 'true' }).success).toBe(false);
   });
 
-  it('does not declare environmentId — transport-level by the #9741 ruling, stripped and shape-absent', () => {
+  it('does not declare environmentId — transport-level by ruling, stripped and shape-absent', () => {
     // Same regression guard as the meta-read, publish and audit blocks above:
     // the reset door DOES spread `environmentId` into its outgoing payload,
     // and that member rides `packages/rest`'s `TransportScopedMetaRequest`
@@ -2333,7 +2333,7 @@ describe('DeleteMetaItemRequestSchema declares the contract members the reset do
   });
 });
 
-describe('MetadataProtocol.deleteMetaItem types against the caught-up request schema (#11679)', () => {
+describe('MetadataProtocol.deleteMetaItem types against the caught-up request schema', () => {
   // The member declaration itself predates this card; these pins are the
   // request-shape half — what turns red if the schema drops back to
   // `{ type, name }` (the member would still exist; the door literal would
@@ -2370,7 +2370,7 @@ describe('MetadataProtocol.deleteMetaItem types against the caught-up request sc
 import { SaveMetaItemRequestSchema } from './protocol.zod';
 import type { SaveMetaItemRequest, SaveMetaItemResponse } from './protocol.zod';
 
-describe('SaveMetaItemRequestSchema declares the contract members the save door sends (#12004)', () => {
+describe('SaveMetaItemRequestSchema declares the contract members the save door sends', () => {
   // The biggest remaining member of the request-shape family the reset twin
   // above belongs to: `saveMetaItem` is a REQUIRED protocol member (so a scan
   // for undeclared members walked past it), while the request schema declared
@@ -2479,7 +2479,7 @@ describe('SaveMetaItemRequestSchema declares the contract members the save door 
     expect(SaveMetaItemRequestSchema.safeParse({ ...base, packageId: 42 }).success).toBe(false);
   });
 
-  it('does not declare environmentId — transport-level by the #9741 ruling, stripped and shape-absent', () => {
+  it('does not declare environmentId — transport-level by ruling, stripped and shape-absent', () => {
     // Same regression guard as the meta-read, publish, audit, history and
     // reset blocks above: the save door DOES spread `environmentId` into its
     // outgoing payload, and that member rides `packages/rest`'s
@@ -2513,7 +2513,7 @@ describe('SaveMetaItemRequestSchema declares the contract members the save door 
   });
 });
 
-describe('MetadataProtocol.saveMetaItem types against the caught-up request schema (#12004)', () => {
+describe('MetadataProtocol.saveMetaItem types against the caught-up request schema', () => {
   // The member declaration itself long predates this card — `saveMetaItem`
   // is REQUIRED on `MetadataProtocol` — so these pins are the request-shape
   // half: what turns red if the schema drops back to `{ type, name, item }`
@@ -2572,7 +2572,7 @@ import {
   DiffMetaItemResponseSchema,
 } from './protocol.zod';
 
-describe('ListDraftsResponseSchema declares the pending-drafts body (#12038)', () => {
+describe('ListDraftsResponseSchema declares the pending-drafts body', () => {
   /** A verbatim-shaped capture of a real `listDrafts` return (one org draft). */
   const realResponse = {
     drafts: [
@@ -2606,7 +2606,7 @@ describe('ListDraftsResponseSchema declares the pending-drafts body (#12038)', (
   });
 });
 
-describe('GetMetaDiagnosticsResponseSchema declares the validation-sweep body (#12038)', () => {
+describe('GetMetaDiagnosticsResponseSchema declares the validation-sweep body', () => {
   /** A verbatim-shaped capture of a real `getMetaDiagnostics` return (one failing view). */
   const realResponse = {
     entries: [
@@ -2641,7 +2641,7 @@ describe('GetMetaDiagnosticsResponseSchema declares the validation-sweep body (#
   });
 });
 
-describe('FindReferencesToMetaResponseSchema declares the reverse-references body (#12038)', () => {
+describe('FindReferencesToMetaResponseSchema declares the reverse-references body', () => {
   /** A verbatim-shaped capture of a real `findReferencesToMeta` return. */
   const realResponse = {
     references: [
@@ -2661,7 +2661,7 @@ describe('FindReferencesToMetaResponseSchema declares the reverse-references bod
   });
 });
 
-describe('RollbackMetaItemResponseSchema declares the item-rollback body (#12038)', () => {
+describe('RollbackMetaItemResponseSchema declares the item-rollback body', () => {
   /** A verbatim-shaped capture of a real `rollbackMetaItem` return. */
   const realResponse = {
     success: true,
@@ -2683,7 +2683,7 @@ describe('RollbackMetaItemResponseSchema declares the item-rollback body (#12038
   });
 });
 
-describe('DiffMetaItemResponseSchema declares the structural-diff body (#12038)', () => {
+describe('DiffMetaItemResponseSchema declares the structural-diff body', () => {
   /** A verbatim-shaped capture of a real `diffMetaItem` return. */
   const realResponse = {
     type: 'object',
@@ -2707,7 +2707,7 @@ describe('DiffMetaItemResponseSchema declares the structural-diff body (#12038)'
   });
 });
 
-describe('GetPublishedMetaItemResponseSchema stays opaque by ruling (#12038 1C)', () => {
+describe('GetPublishedMetaItemResponseSchema stays opaque (ruled: no shape frozen against the current type registry)', () => {
   it('accepts an arbitrary metadata item body and PRESERVES it — no shape is imposed', () => {
     const itemBody = { name: 'all_leads', type: 'grid', object: 'lead', columns: [{ field: 'name' }] };
     const result = GetPublishedMetaItemResponseSchema.safeParse(itemBody);
@@ -2723,7 +2723,7 @@ describe('GetPublishedMetaItemResponseSchema stays opaque by ruling (#12038 1C)'
   });
 });
 
-describe('ListAiConversationsResponseSchema declares the next-page signal (#19543, door ③)', () => {
+describe('ListAiConversationsResponseSchema declares the next-page signal', () => {
   // Ruled on #19543: the list is newest first and pages by keyset, `cursor`
   // being the id of the last conversation the caller holds. The response used
   // to be `{ conversations }` alone, so a caller asking for `limit` rows could
