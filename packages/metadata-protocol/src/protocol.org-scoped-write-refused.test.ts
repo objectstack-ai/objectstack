@@ -75,6 +75,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 // would close a dependency cycle turbo rejects outright.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
+import { SharingConfigSchema } from '@objectstack/spec/ui';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 interface Row {
@@ -846,5 +847,57 @@ describe('org-scoped anonymous form intake changes the anonymous doors cannot se
             type: 'view', name: 'task.intake_form', item: FORM_VIEW(true), organizationId: 'org_a',
         });
         expect(on.success).toBe(true);
+    });
+
+    // A package's shipped form is part of the env-wide definition, not a layer
+    // of its own beneath it. A schema-parsed `false` on the artifact (the schema
+    // defaults `enabled` to false) is an explicit withdrawal, so it fails closed;
+    // and the env-wide definition is the administrator's switch, so an env-wide
+    // save may open a form the package ships closed.
+    describe('single: a package-shipped form', () => {
+        const LINK = '/forms/walled-intake';
+        // As the loader serves it: parsed, `enabled` never switched on.
+        const shipped = {
+            name: 'task.intake_form', label: 'Intake', object: 'task', viewKind: 'form',
+            config: { sharing: SharingConfigSchema.parse({ allowAnonymous: true, publicLink: LINK }) },
+            _packageId: 'showcase',
+        };
+
+        function makePackageProtocol() {
+            const { engine, rows } = makeStubEngine();
+            engine.registry.listItems = (type: string) => (type === 'view' ? [shipped] : []);
+            engine.registry.getArtifactItem = (type: string, name: string) =>
+                (type === 'view' && name === shipped.name ? shipped : undefined);
+            const services = new Map<string, unknown>([['tenancy', { defaultOrgId: async () => 'org_a' }]]);
+            const protocol = new ObjectStackProtocolImplementation(engine, () => services, 'env_prod') as any;
+            return { protocol, rows };
+        }
+
+        it('the parsed artifact carries an explicit `false` that keeps the link', () => {
+            expect(shipped.config.sharing).toMatchObject({ enabled: false, allowAnonymous: true, publicLink: LINK });
+        });
+
+        it('a schema-parsed `false` is a withdrawal: an org-scoped save that opens it is refused', async () => {
+            const { protocol, rows } = makePackageProtocol();
+            await expect(protocol.saveMetaItem({
+                type: 'view', name: 'task.intake_form', item: FORM_VIEW(true), organizationId: 'org_a',
+            })).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403, organizationId: 'org_a' });
+            expect(orgRows(rows).filter((r) => r.org === 'org_a')).toEqual([]);
+        });
+
+        it('the env-wide definition is the switch: an env-wide save opens it, and the env-wide list serves that body', async () => {
+            const { protocol } = makePackageProtocol();
+            expect((await protocol.saveMetaItem({ type: 'view', name: 'task.intake_form', item: FORM_VIEW(true) })).success)
+                .toBe(true);
+            // The env-wide layer the anonymous doors read beneath an organization.
+            const envWide: any = await protocol.getMetaItems({ type: 'view' });
+            const named = (envWide.items as any[]).filter((v) => v?.name === 'task.intake_form');
+            expect(named).toHaveLength(1);
+            expect(named[0].config.sharing).toMatchObject({ enabled: true, allowAnonymous: true, publicLink: LINK });
+            // So an organization overlay that keeps it open is no longer refused.
+            expect((await protocol.saveMetaItem({
+                type: 'view', name: 'task.intake_form', item: FORM_VIEW(true), organizationId: 'org_a',
+            })).success).toBe(true);
+        });
     });
 });

@@ -234,6 +234,18 @@ describe('anonymousFormIntakeWithdrawnIn — an explicit withdrawal of the same 
         }
     });
 
+    it('a schema-parsed `false` that keeps the link IS a withdrawal (a package artifact fails closed)', () => {
+        // A package artifact is served as parsed, and the schema defaults
+        // `enabled` to false: a shipped sharing that keeps its link and never
+        // switches `enabled` on carries an explicit `false` once parsed. That is
+        // a withdrawal. Its raw body, with the switch absent, is not one.
+        const raw = { allowAnonymous: true, publicLink: '/forms/contact-us' };
+        const parsed = SharingConfigSchema.parse(raw);
+        expect(parsed.enabled).toBe(false);
+        expect(anonymousFormIntakeWithdrawnIn([view(parsed)], openView, candidate)).toBe(true);
+        expect(anonymousFormIntakeWithdrawnIn([view(raw)], openView, candidate)).toBe(false);
+    });
+
     it('the same slot with a new slug (case-only included) is the same form: closed', () => {
         const withdrawn = [view({ ...OPEN, enabled: false })];
         for (const link of ['/forms/contact-us-2', '/forms/Contact-Us']) {
