@@ -122,11 +122,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
-      me: {
-        label: "My Profile"
-      },
       all_users: {
         label: "All Users"
+      },
+      me: {
+        label: "My Profile"
       },
       unverified: {
         label: "Unverified"
@@ -376,11 +376,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
-      mine: {
-        label: "My Sessions"
-      },
       all_sessions: {
         label: "All"
+      },
+      mine: {
+        label: "My Sessions"
       },
       revoked: {
         label: "Revoked"
@@ -460,14 +460,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_links: {
+        label: "All"
+      },
       mine: {
         label: "My Links"
       },
       by_provider: {
         label: "By Provider"
-      },
-      all_links: {
-        label: "All"
       }
     },
     _actions: {
@@ -1022,6 +1022,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_keys: {
+        label: "All"
+      },
       mine: {
         label: "My Keys"
       },
@@ -1030,9 +1033,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked: {
         label: "Revoked"
-      },
-      all_keys: {
-        label: "All"
       }
     },
     _actions: {
@@ -1225,14 +1225,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_preferences: {
+        label: "All"
+      },
       mine: {
         label: "My Preferences"
       },
       by_user: {
         label: "By User"
-      },
-      all_preferences: {
-        label: "All"
       }
     }
   },
@@ -1386,6 +1386,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_apps: {
+        label: "All"
+      },
       mine: {
         label: "My Applications"
       },
@@ -1394,9 +1397,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       disabled_apps: {
         label: "Disabled"
-      },
-      all_apps: {
-        label: "All"
       }
     },
     _actions: {

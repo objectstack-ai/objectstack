@@ -84,6 +84,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_shares: {
+        label: "全部"
+      },
       granted_to_me: {
         label: "授予我的"
       },
@@ -98,9 +101,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       rule_grants: {
         label: "规则授权"
-      },
-      all_shares: {
-        label: "全部"
       }
     }
   },
