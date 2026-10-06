@@ -96,6 +96,8 @@ describe('SysMetadataRepository.listDrafts (ADR-0033)', () => {
     await repo.listDrafts({ type: 'object', packageId: 'app.edu' });
     expect(find).toHaveBeenCalledWith('sys_metadata', {
       where: { organization_id: null, state: 'draft', type: 'object', package_id: 'app.edu' },
+      // [#21911] The platform store read carries the explicit system opt-in.
+      context: { isSystem: true },
     });
   });
 

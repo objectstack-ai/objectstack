@@ -200,7 +200,8 @@ describe('protocol.reassignOrphanedMetadata (ADR-0070 D5)', () => {
         expect(res).toMatchObject({ success: true, reassignedCount: 3, targetPackageId: 'app.home' });
         const movedIds = update.mock.calls.map((c: any) => c[2].where.id);
         expect(movedIds).toEqual(['r1', 'r2', 'r3']); // the 3 orphans, not the owned r4
-        expect(update).toHaveBeenCalledWith('sys_metadata', { package_id: 'app.home' }, { where: { id: 'r1' } });
+        // [#21911] The rebind carries the explicit system opt-in.
+        expect(update).toHaveBeenCalledWith('sys_metadata', { package_id: 'app.home' }, { where: { id: 'r1' }, context: { isSystem: true } });
         expect(res.reassigned.some((x) => x.name === 'owned')).toBe(false);
     });
 
