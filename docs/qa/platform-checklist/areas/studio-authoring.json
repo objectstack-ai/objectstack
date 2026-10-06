@@ -1451,6 +1451,103 @@
       "history": [
         { "revision": 1, "date": "2026-09-30", "change": "new — the 清单项待写 row of docs/NORTH-STAR.md beside platform-core.docs-audience-gate and platform-core.docs-portal-render; drafted with objectui#10188 and corrected by the at-tier review of objectui PR 11258 (the UI-mirror clause scoped to entries naming an installed doc or book; no signed-out persona — /docs sits behind ProtectedRoute)", "ref": "#20939" }
       ]
+    },
+    {
+      "id": "studio-authoring.picklist-bound-select",
+      "title": "A picklist authored in a package is used by two objects' select fields from the designer: both forms offer its options, the bound field refuses inline options, and a GET → edit → PUT of an object with a bound field saves",
+      "since": "v17.7",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (authors the objects in Studio; the picklist is authored in a package)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a package that declares a picklist and one picklistExtensions entry adding one option to it; the stock showcase declares none, and the kind is package-owned (allowRuntimeCreate false), so add both in the run's own checkout, uncommitted: inside the defineStack call of examples/app-showcase/objectstack.config.ts add `picklists: [definePicklist({ name: NAME, label: LABEL, options: [two or more { label, value }] })]` (definePicklist is exported from '@objectstack/spec') and `picklistExtensions: [{ extend: NAME, options: [{ label, value }] }]`, whose one value the list does not already carry (a repeated value is refused at load with INVALID_METADATA). The extension may sit in the same defineStack as the list; it merges the same way as one from another package. Boot with `--compile` so the artifact carries the edit (os dev otherwise serves an existing dist/objectstack.json), and revert the file after the run",
+          "a writable project package with two runtime objects, each with a sharingModel and one select field carrying inline options; one of them published with a field already bound (picklist: NAME, no options)",
+          "the console under test carries objectui#10202's build (objectui PR 11669, merged as objectui c3623eb1). While .objectui-sha predates that merge (it does at objectstack 80f9f7e6, pin 0abd4f9f), flow it back with `pnpm objectui:refresh` from a ../objectui at or after the merge, per the multi-repo rule, and name the console revision in the run record"
+        ]
+      },
+      "steps": [
+        "boot the showcase isolated with the console under test; sign in as the seeded admin",
+        "GET /api/v1/meta/picklist and GET /api/v1/meta/picklist/NAME — the list is served with name, label, its own options and _packageId",
+        "GET /api/v1/meta/object/OBJ_A/layers for the object whose field is already bound — record the bound field as served (picklist + resolved options, the extension's option included)",
+        "metadata admin (Setup → Metadata → Object → OBJ_A): select an UNRELATED field, rename its label, let the autosave run; record the PUT body and status",
+        "select the bound field: record what the select-field editor shows (Options from = the picklist; the values read-only; no inline options editor)",
+        "open OBJ_B, select its inline select field, open 'Options from', choose the picklist; record the PUT body and status",
+        "Studio → the package → Data → OBJ_A: add a field and let the autosave run; record the PUT body and status",
+        "publish both objects; open the new-record form of each and open the bound select",
+        "Setup → Metadata → Picklist → NAME: record what the page shows and offers"
+      ],
+      "acceptance": [
+        {
+          "clause": "the metadata-admin edit of an unrelated field saves: PUT 200, and no picklist-bound field in the body carries options; every other field (an inline select included) is sent byte-identical",
+          "oracle": "api",
+          "verify": "the captured PUT body and status",
+          "evidence": "the PUT body"
+        },
+        {
+          "clause": "the designer shows no live 'picklist and options cannot both be declared' issue on an object loaded with a served bound field",
+          "oracle": "dom",
+          "verify": "page text after load",
+          "evidence": "screenshot"
+        },
+        {
+          "clause": "the select-field editor offers the served picklists by name",
+          "oracle": "dom",
+          "verify": "picker options vs GET /meta/picklist",
+          "evidence": "picker screenshot"
+        },
+        {
+          "clause": "choosing a picklist PUTs the field with picklist and WITHOUT options (200)",
+          "oracle": "api",
+          "verify": "the captured PUT body and status",
+          "evidence": "the PUT body"
+        },
+        {
+          "clause": "a bound field refuses inline options: no inline options editor (no 'Add value'), the list's values shown read-only with the reason",
+          "oracle": "dom",
+          "verify": "the field inspector",
+          "evidence": "screenshot"
+        },
+        {
+          "clause": "the Studio data page's autosave of an object with a bound field is accepted (200), the bound field sent without options",
+          "oracle": "api",
+          "verify": "the captured PUT",
+          "evidence": "the PUT body"
+        },
+        {
+          "clause": "after publish, both objects' new-record forms offer the picklist's options, the extension's option included",
+          "oracle": "dom",
+          "verify": "open each bound select",
+          "evidence": "the two option lists"
+        },
+        {
+          "clause": "the picklist page shows label, name, owning package, each option with its label and value, and each extension under its declaring package — and offers no create, edit or delete (no New on the list; every control on the detail page disabled or read-only; no write request)",
+          "oracle": "dom",
+          "verify": "list + detail page, network log",
+          "evidence": "screenshots + the empty write log"
+        }
+      ],
+      "negative": [
+        "any PUT of an object with a bound field answered 422 INVALID_METADATA at fields.FIELD.options — FAIL (the served-options producer obligation)",
+        "an inline options editor, or a free-text name box, offered on a bound field — FAIL",
+        "a New / Save / Delete on the picklist list or detail page — FAIL (the kind is package-owned, allowRuntimeCreate false)",
+        "the picklist page saying 'no package extends this picklist' when the package read failed — FAIL"
+      ],
+      "traps": ["stale-console-bundle", "cache-staleness"],
+      "source": [
+        "objectui#10202 ruling 6006062645 (A′): (a) use picklist, (b) served options dropped before the PUT, (c) read-only page, (d) this item",
+        "objectstack#18164; producer obligation 5925784898 on objectui#10202; server pin packages/objectql/src/protocol-picklist-served-roundtrip.test.ts",
+        "packages/spec/src/data/picklist.zod.ts#PicklistSchema, packages/spec/src/data/picklist.zod.ts#PicklistExtensionSchema, packages/spec/src/data/picklist.zod.ts#PicklistServedFieldSchema; packages/spec/src/data/field.zod.ts#FieldSchema.picklist refinement",
+        "the fixture's spelling: packages/spec/src/data/picklist.zod.ts#definePicklist, the defineStack keys packages/spec/src/stack.zod.ts#picklists and packages/spec/src/stack.zod.ts#picklistExtensions; an extension in the list's own package merges (packages/objectql/src/engine-picklist.test.ts, the nested-plugin case)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-10-06", "change": "new — drafted with objectui#10202 against the measured run of its PR; filed by the seat. Authored from that draft with these changes: since v17.7, because 17.6.0 shipped before objectui PR 11669 merged; the picker clause split in two, one oracle each; the picklist fixture spelled with its export, its stack keys and the reload it needs; the console fixture naming the merge it must carry; the spec citations written as anchors the gate resolves", "ref": "#21957" }
+      ]
     }
   ]
 }

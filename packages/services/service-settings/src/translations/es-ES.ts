@@ -290,20 +290,15 @@ export const esES: PlatformTranslationData = {
 
     localization: {
       title: 'Localización',
-      description: 'Zona horaria, idioma, moneda y formatos de fecha/número predeterminados.',
+      description: 'Zona horaria, idioma, país, moneda y año fiscal predeterminados.',
       groups: {
         region: { title: 'Región' },
-        formats: { title: 'Formatos' },
         finance: { title: 'Finanzas' },
       },
       keys: {
         timezone: { label: 'Zona horaria predeterminada', help: 'Zona IANA usada para resolver today()/daysFromNow, los buckets de fecha de analítica y las fechas/horas renderizadas.' },
         locale: { label: 'Idioma predeterminado', help: 'Configuración regional BCP-47 para los catálogos de mensajes y el formato de números/fechas.' },
         default_country: { label: 'País predeterminado', help: 'Código ISO 3166-1 alfa-2 (p. ej. US, GB, CN). Se usa para los valores por defecto de dirección y teléfono.' },
-        date_format: { label: 'Formato de fecha' },
-        time_format: { label: 'Formato de hora' },
-        number_format: { label: 'Formato de número', help: 'Separadores de miles y decimales para los números mostrados.' },
-        first_day_of_week: { label: 'Primer día de la semana', help: 'Ancla los buckets de analítica semanal y las cuadrículas de calendario.' },
         currency: { label: 'Moneda predeterminada', help: 'Código ISO 4217 aplicado cuando un campo de moneda no indica la suya.' },
         fiscal_year_start: { label: 'Inicio del año fiscal', help: 'Primer mes del año fiscal: determina «este trimestre / año fiscal» en los informes.' },
       },

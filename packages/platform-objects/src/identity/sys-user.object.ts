@@ -601,11 +601,14 @@ export const SysUser = ObjectSchema.create({
   ],
 
   listViews: {
-    // Self-service profile entry — surfaced by the Account App so every
-    // authenticated user can view / edit their own basic profile (name,
-    // email, avatar). Filtered to a single row (the caller) via the
-    // `{current_user_id}` template variable; RLS additionally enforces
-    // that non-admins cannot read other users' rows.
+    // The caller's own row, as a tab of this object's view switcher.
+    // Filtered to a single row via the `{current_user_id}` template
+    // variable; RLS additionally enforces that non-admins cannot read other
+    // users' rows. No navigation entry names this view: the Account App's
+    // profile entry is the `account:profile_card` component (`account.app.ts`),
+    // which reads the signed-in user from the session, not from this list.
+    // Declared first, it is the tab the console opens when a route names no
+    // view — so Setup's Users entry names `all_users` explicitly (#21960).
     me: {
       type: 'grid',
       name: 'me',

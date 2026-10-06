@@ -68,7 +68,13 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
     group: 'group_people_org',
     priority: BASE_PRIORITY,
     items: [
-      { id: 'nav_users', type: 'object', label: 'Users', objectName: 'sys_user', icon: 'user' },
+      // `viewName` names the tenant-wide list (#21960). With no view named,
+      // the console opens the object's FIRST declared list view, and
+      // `sys_user` declares `me` first — a one-row view of the caller — so an
+      // administrator landed on themselves and read "this organization has
+      // one user". `me` stays a tab in the view switcher; the Account app's
+      // profile entry is the `account:profile_card` component, not that view.
+      { id: 'nav_users', type: 'object', label: 'Users', objectName: 'sys_user', viewName: 'all_users', icon: 'user' },
       // The ACTIVE organization's record page (Members / Invitations / Teams
       // tabs with the better-auth row actions), rendered inside the app shell
       // (cloud ADR-0081 D3). `{current_org_id}` resolves from the session's active

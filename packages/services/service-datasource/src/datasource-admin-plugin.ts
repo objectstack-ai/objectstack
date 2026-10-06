@@ -558,14 +558,37 @@ export class DatasourceAdminServicePlugin implements Plugin {
     // store back into the in-memory registry, THEN rebuild their live pools.
     // `register()` is in-memory only in standalone serve (no writable
     // `datasource:` loader), so without this a node restart drops every
-    // UI-created datasource. Code-defined datasources come from the artifact and
-    // are unaffected.
+    // UI-created datasource. Code-defined datasources come from the artifact,
+    // and a stored row under one of their names is skipped, never registered
+    // over it (#21922, see restoreRuntimeDatasources).
     await this.restoreRuntimeDatasources(ctx);
     await this.rehydratePools();
     if (this.service) await ctx.trigger('datasource-admin:ready', this.service);
   }
 
-  /** Reload persisted runtime datasource rows (sys_metadata) into the registry. */
+  /**
+   * Reload persisted runtime datasource rows (sys_metadata) into the registry.
+   *
+   * [#21922] **Code wins on collision** — the invariant this service states in
+   * its own header ("A runtime datasource never shadows a code one"). A stored
+   * row whose name the host registers from code is NOT registered over the
+   * code definition: `register` is last-write-wins on the MetadataService
+   * slot, so registering it would make both doors serve the row, let the admin
+   * door edit a code-defined datasource (the row's `origin` is whatever its
+   * writer said), and hand {@link rehydratePools} a "runtime" record to open a
+   * live pool from under the code datasource's name.
+   *
+   * "Code" is read from the host's code-datasource set — the kernel service
+   * {@link CODE_DATASOURCE_NAMES_SERVICE}, which the runtime fills from code in
+   * Phase 1, before this `start()` runs. ⛔ Never from the stored row's own
+   * `origin` (its writer set it freely) nor from the MetadataService slot
+   * (whether a code registration reached it yet depends on composition order).
+   *
+   * The skipped row is KEPT, and named in a warning: it is the residue an
+   * earlier runtime write left, and the `/meta` door's `DELETE` removes it as
+   * repair. A host that composes no code-datasource producer registers no set,
+   * and then nothing is code — every stored row restores as it always has.
+   */
   private async restoreRuntimeDatasources(ctx: PluginContext): Promise<void> {
     const engine = safeGetService<DataEngineLike>(ctx, 'data');
     const metadata = safeGetService<MetadataServiceLike>(ctx, 'metadata');
@@ -577,10 +600,22 @@ export class DatasourceAdminServicePlugin implements Plugin {
       this.options.logger?.warn?.('datasource restore: reading sys_metadata failed', err);
       return;
     }
+    const codeNames = codeDatasourceNamesOf(ctx);
     let restored = 0;
     for (const rec of rows) {
       const name = (rec as { name?: string }).name;
       if (!name) continue;
+      if (codeNames?.has(name)) {
+        // Loud whatever the host passed as `options.logger` — `os serve`
+        // passes none, and a collision nobody sees is a shadow nobody repairs.
+        (this.options.logger ?? ctx.logger).warn(
+          `datasource restore: sys_metadata holds a stored row for '${name}', a datasource this host ` +
+            `defines in code. The row was NOT restored over the code definition (code wins on a name ` +
+            `collision) and is kept. Remove it with DELETE /api/v1/meta/datasource/${name} once nothing ` +
+            `needs it; edit the code definition to change the datasource.`,
+        );
+        continue;
+      }
       try {
         await metadata.register('datasource', name, rec);
         restored += 1;
@@ -762,6 +797,21 @@ function safeGetService<T>(ctx: PluginContext, name: string): T | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * [#21922] The kernel service the host's code-datasource set is registered
+ * under. Its producer is `@objectstack/runtime` (`code-datasource-names.ts`),
+ * which this package does not depend on, so the name is spelled here and the
+ * value read structurally — the way `'datasource-connection'` is read in the
+ * other direction. Keep the two spellings equal.
+ */
+const CODE_DATASOURCE_NAMES_SERVICE = 'code-datasource-names';
+
+/** The host's code-datasource set, or `undefined` when no producer registered one. */
+function codeDatasourceNamesOf(ctx: PluginContext): { has(name: string): boolean } | undefined {
+  const names = safeGetService<{ has?: unknown }>(ctx, CODE_DATASOURCE_NAMES_SERVICE);
+  return typeof names?.has === 'function' ? (names as { has(name: string): boolean }) : undefined;
 }
 
 function errMsg(err: unknown): string {

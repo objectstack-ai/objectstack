@@ -19,6 +19,7 @@ import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { SeedLoaderService } from './seed-loader.js';
 import { recordSeedOutcome } from './seed-summary.js';
+import { contributeCodeDatasourceNames } from './code-datasource-names.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
 import { declareSeedSource } from './seed-settlement.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
@@ -157,6 +158,14 @@ export class AppPlugin implements Plugin {
     private grantEnforcer?: PluginPermissionEnforcer;
     /** What `grantedPermissions` bound to on this artifact — see {@link ArtifactGrantBinding}. */
     private grantBindingResult?: ArtifactGrantBinding;
+    /**
+     * [#21922] {@link codeDefinedDatasourceOwners}, computed once: the host's
+     * code-datasource set reads the names through the contribution `init()`
+     * registers, and `start()` registers the same list, so the two can never
+     * disagree about which datasources this artifact registers from code — and
+     * the residual-owner warning prints once, at whichever read comes first.
+     */
+    private codeDatasourceOwners?: Array<{ datasource: any; owner: { packageId?: string; packageVersion?: string } }>;
     /** When true, init/start become no-ops — env has no app payload. */
     private readonly empty: boolean = false;
     /**
@@ -424,6 +433,21 @@ export class AppPlugin implements Plugin {
             : this.bundle;
 
         ctx.getService<{ register(m: any): void }>('manifest').register(servicePayload);
+
+        // [#21922] The datasources this artifact registers from code join the
+        // host's code-datasource set HERE, in Phase 1, so the datasource-admin
+        // plugin's boot restore — a `start()` — never registers a stored row
+        // over one of them, whatever order the plugins were composed in. The
+        // in-memory registration itself stays in `start()` (see there).
+        //
+        // Contributed as a FUNCTION the set resolves at its first read, never
+        // resolved here: the names come from `collections`, which walks
+        // `packages[]`, and the manifest registration above is the one thing
+        // in `init()` allowed to touch `packages[]` (#15292's falsifier in
+        // `plugin-dev` pins it). `CodeDatasourceNames` says the rest.
+        contributeCodeDatasourceNames(ctx, () => this.codeDefinedDatasourceOwners(ctx)
+            .map(({ datasource }) => datasource?.name)
+            .filter((name): name is string => typeof name === 'string' && name.length > 0));
     }
 
     /**
@@ -699,6 +723,15 @@ export class AppPlugin implements Plugin {
      *    logged, because the artifact's two halves disagree.
      */
     private codeDefinedDatasourceOwners(ctx: PluginContext): Array<{
+        datasource: any;
+        owner: { packageId?: string; packageVersion?: string };
+    }> {
+        this.codeDatasourceOwners ??= this.resolveCodeDefinedDatasourceOwners(ctx);
+        return this.codeDatasourceOwners;
+    }
+
+    /** The resolution {@link codeDefinedDatasourceOwners} memoizes. */
+    private resolveCodeDefinedDatasourceOwners(ctx: PluginContext): Array<{
         datasource: any;
         owner: { packageId?: string; packageVersion?: string };
     }> {
