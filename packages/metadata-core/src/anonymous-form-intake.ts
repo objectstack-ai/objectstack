@@ -264,10 +264,12 @@ function anonymousFormSlot(view: Record<string, any>, candidate: AnonymousFormIn
  * false` or `allowAnonymous === false`. Judged on the body as stored: a switch
  * that is absent is not a withdrawal (only an explicit `false` is), and a
  * sharing with no public link withdraws nothing — removing the sharing block or
- * clearing the link is not a withdrawal. A body served as parsed (a package
- * artifact) carries the schema's default `enabled: false`, which is an
- * explicit `false`: a shipped form that keeps its link without switching
- * `enabled` on is withdrawn (fail closed). The env-wide definition is the
+ * clearing the link is not a withdrawal. A package artifact parsed by the
+ * stack schema (strict `defineStack`) carries the schema's default
+ * `enabled: false`, which is an explicit `false`: a shipped form that keeps its
+ * link without switching `enabled` on is withdrawn (fail closed). An artifact
+ * that reached the runtime unparsed (`strict: false`, a hand-built manifest)
+ * is judged as written, so a switch it omits is absent. The env-wide definition is the
  * switch above it, so an env-wide save may still open it.
  */
 function anonymousFormExplicitWithdrawals(view: unknown): Array<{ slot: string; slug: string }> {
