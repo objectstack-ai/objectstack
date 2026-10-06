@@ -432,6 +432,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.code-defined-datasource-door.test.ts",
+      "verb": "delete",
+      "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.code-defined-datasource-door.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.code-defined-datasource-door.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.code-only-types.test.ts",
       "verb": "delete",
       "pinned": 1
