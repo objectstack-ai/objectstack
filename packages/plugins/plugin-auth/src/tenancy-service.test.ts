@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { createTenancyService, resolveDefaultOrgId } from './tenancy-service.js';
-import { backfillMemberships } from './reconcile-membership.js';
+import { backfillMemberships, reconcileMembership } from './reconcile-membership.js';
 
 function makeEngine(orgs: Array<{ id: string; slug?: string }>) {
   return {
@@ -202,8 +202,15 @@ describe('createTenancyService', () => {
       orgs.push({ id: 'org_default', slug: 'default' }); // bootstrap runs
       expect(await t.defaultOrgId()).toBe('org_default'); // re-resolved
       const callsAfterResolve = engine.find.mock.calls.length;
-      await t.defaultOrgId(); // memoized — no new query
-      expect(engine.find.mock.calls.length).toBe(callsAfterResolve);
+      // Memoized: the next call checks the memo with ONE read by primary key
+      // and does not re-run the resolution.
+      expect(await t.defaultOrgId()).toBe('org_default');
+      expect(engine.find.mock.calls.length).toBe(callsAfterResolve + 1);
+      expect(engine.find.mock.calls.at(-1)).toEqual([
+        'sys_organization',
+        { where: { id: 'org_default' }, limit: 1 },
+        { context: { isSystem: true } },
+      ]);
     });
   });
 });
@@ -542,5 +549,134 @@ describe('single-posture organization census (#17010)', () => {
     // … and THAT is the boot moment the census is taken in.
     expect(logger.error).toHaveBeenCalledTimes(1);
     expect(logger.error.mock.calls[0]![0]).toContain(SINGLE_POSTURE_MANY_ORGANIZATIONS);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The default organization id is checked when a user is BOUND, not trusted from
+// a process-long cache. Under the `auto` membership policy membership is decided
+// once, at creation (ADR-0093 D7), so a user bound to an organization that no
+// longer exists is never repaired. The default organization can be deleted and
+// recreated under a new id inside one process: the single-org bootstrap
+// recreates a missing `slug='default'` organization on the next `sys_user`
+// write, which is the very sign-up that then binds.
+// ---------------------------------------------------------------------------
+describe('defaultOrgId is revalidated when a user is bound', () => {
+  /**
+   * `sys_organization` + `sys_member` over arrays. `find` honours every `where`
+   * key as an equality, so an existence read by `id` answers for that id and
+   * nothing else, and refuses a combinator it does not implement.
+   */
+  function makeStore(orgs: Array<{ id: string; slug?: string }>) {
+    const members: Array<{ id: string; organization_id: string; user_id: string }> = [];
+    const tables: Record<string, Array<Record<string, unknown>>> = {
+      sys_organization: orgs,
+      sys_member: members,
+    };
+    const engine = {
+      find: vi.fn(async (object: string, query: any) => {
+        const where: Record<string, unknown> = query?.where ?? {};
+        const rows = (tables[object] ?? []).filter((row) =>
+          Object.entries(where).every(([k, v]) => {
+            // Plain equality only: a combinator is refused, never read as a field name.
+            if (k.startsWith('$')) throw new Error(`WHERE combinator ${k} is not implemented by this double`);
+            return row[k] === v;
+          }),
+        );
+        return rows.slice(0, query?.limit ?? rows.length);
+      }),
+      insert: vi.fn(async (object: string, row: any) => {
+        (tables[object] ??= []).push(row);
+        return row;
+      }),
+    };
+    return { engine, orgs, members };
+  }
+
+  const singleOrg = (engine: unknown) =>
+    createTenancyService({ requested: 'single', probeIsolation: () => false, getEngine: () => engine });
+
+  it('a user created after the default organization is deleted and recreated binds to the NEW id', async () => {
+    const store = makeStore([{ id: 'org_old', slug: 'default' }]);
+    const tenancy = singleOrg(store.engine);
+    const bind = (userId: string) =>
+      reconcileMembership(store.engine, userId, {
+        policy: 'auto',
+        resolveTargetOrg: () => tenancy.defaultOrgId(),
+      });
+
+    // The first user resolves (and memoizes) the default organization.
+    expect(await bind('usr_first')).toEqual({ outcome: 'bound', organizationId: 'org_old' });
+
+    // Same process: the default organization is deleted, then recreated by the
+    // bootstrap under a new id.
+    store.orgs.splice(0, store.orgs.length);
+    store.orgs.push({ id: 'org_new', slug: 'default' });
+
+    expect(await bind('usr_second')).toEqual({ outcome: 'bound', organizationId: 'org_new' });
+    expect(store.members.find((m) => m.user_id === 'usr_second')?.organization_id).toBe('org_new');
+    // The memo now names the organization that exists.
+    expect(await tenancy.defaultOrgId()).toBe('org_new');
+  });
+
+  it('COST: a memoized id that still exists costs ONE read per call and is not re-resolved', async () => {
+    const store = makeStore([{ id: 'org_default', slug: 'default' }]);
+    const tenancy = singleOrg(store.engine);
+    expect(await tenancy.defaultOrgId()).toBe('org_default'); // resolves and memoizes
+
+    for (let i = 0; i < 3; i++) {
+      store.engine.find.mockClear();
+      expect(await tenancy.defaultOrgId()).toBe('org_default');
+      expect(store.engine.find).toHaveBeenCalledTimes(1);
+      expect(store.engine.find).toHaveBeenCalledWith(
+        'sys_organization',
+        { where: { id: 'org_default' }, limit: 1 },
+        { context: { isSystem: true } },
+      );
+    }
+  });
+
+  it('a deleted default organization not yet recreated resolves to null, then to its replacement', async () => {
+    const store = makeStore([{ id: 'org_old', slug: 'default' }]);
+    const tenancy = singleOrg(store.engine);
+    expect(await tenancy.defaultOrgId()).toBe('org_old');
+
+    store.orgs.splice(0, store.orgs.length);
+    // Nothing to bind to: the deleted id is not handed out.
+    expect(await tenancy.defaultOrgId()).toBeNull();
+
+    store.orgs.push({ id: 'org_new', slug: 'default' });
+    expect(await tenancy.defaultOrgId()).toBe('org_new');
+  });
+
+  it('the replacement is picked by the same rule as the first resolution (slug default first)', async () => {
+    const store = makeStore([{ id: 'org_old', slug: 'default' }]);
+    const tenancy = singleOrg(store.engine);
+    expect(await tenancy.defaultOrgId()).toBe('org_old');
+
+    // Deleted, then two organizations exist, one of them the recreated
+    // `slug='default'` bootstrap organization: that one wins, as it would at boot.
+    store.orgs.splice(0, store.orgs.length);
+    store.orgs.push({ id: 'org_other' }, { id: 'org_new', slug: 'default' });
+    expect(await tenancy.defaultOrgId()).toBe('org_new');
+  });
+
+  it('an existence read that the store cannot answer keeps the memoized id', async () => {
+    const store = makeStore([{ id: 'org_default', slug: 'default' }]);
+    const tenancy = singleOrg(store.engine);
+    expect(await tenancy.defaultOrgId()).toBe('org_default');
+
+    // A failed read is not evidence that the organization is gone; dropping
+    // the memo on it would bind the next user to no organization at all.
+    store.engine.find.mockRejectedValueOnce(new Error('store unreachable'));
+    expect(await tenancy.defaultOrgId()).toBe('org_default');
+
+    // A reply that is not a row list is not an answer either.
+    store.engine.find.mockResolvedValueOnce({ records: [] } as any);
+    expect(await tenancy.defaultOrgId()).toBe('org_default');
+
+    // The next ANSWERED read still revalidates.
+    store.orgs.splice(0, store.orgs.length);
+    expect(await tenancy.defaultOrgId()).toBeNull();
   });
 });

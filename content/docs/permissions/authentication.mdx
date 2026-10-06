@@ -527,6 +527,12 @@ window.location.href = data.url ?? data.data.url;
 
 Better-Auth automatically handles the OAuth callback at `/api/v1/auth/callback/google` and redirects the user back to your application with a session.
 
+When the provider's email matches an existing local account that is not linked to this
+provider yet, the sign-in links to that account only if its email is verified. Otherwise
+the callback redirects with `error=account_not_linked`. The platform identity provider
+(`objectstack-cloud`) is the one exception, and an unlinked provider never re-links
+itself. See [Linking to an existing account](/docs/permissions/sso#linking-to-an-existing-account).
+
 ---
 
 ## Enterprise Authentication Hardening (ADR-0069)

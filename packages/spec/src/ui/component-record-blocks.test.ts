@@ -33,7 +33,7 @@ const messagesOf = (result: { success: boolean; error?: { issues: { message: str
   return result.error!.issues.map((i) => i.message).join('\n');
 };
 
-describe('ComponentPropsMap rows exist and are the exported schemas (#8744)', () => {
+describe('ComponentPropsMap rows exist and are the exported schemas', () => {
   it('dispatches all four previously-skipped types', () => {
     expect(ComponentPropsMap['record:alert']).toBe(RecordAlertProps);
     expect(ComponentPropsMap['record:quick_actions']).toBe(RecordQuickActionsProps);
@@ -56,7 +56,7 @@ describe('ComponentPropsMap rows exist and are the exported schemas (#8744)', ()
   });
 });
 
-describe('ComponentPropsMap["record:alert"] (#8744)', () => {
+describe('ComponentPropsMap["record:alert"]', () => {
   // The card's own headline defect: a typo'd `severty` shipped as a silent
   // no-op. With the row it is a prescriptive refusal that names the rename.
   it('refuses the card\'s planted `severty` with the rename suggestion', () => {
@@ -164,7 +164,7 @@ describe('ComponentPropsMap["record:alert"] (#8744)', () => {
   });
 });
 
-describe('ComponentPropsMap["record:quick_actions"] (#8744)', () => {
+describe('ComponentPropsMap["record:quick_actions"]', () => {
   it('accepts the showcase and sys_user bars byte-identically', () => {
     for (const authored of [
       // examples/app-showcase/src/ui/pages/task-detail.page.ts
@@ -247,7 +247,7 @@ describe('ComponentPropsMap["record:quick_actions"] (#8744)', () => {
   });
 });
 
-describe('ComponentPropsMap["record:history"] (#8744)', () => {
+describe('ComponentPropsMap["record:history"]', () => {
   it('accepts the registration\'s three presentation keys byte-identically', () => {
     const authored = { limit: 20, emptyText: 'No changes yet', unknownUserText: 'System' };
     expect(RecordHistoryProps.parse(authored)).toEqual(authored);
@@ -352,7 +352,7 @@ describe('ComponentPropsMap["record:activity"] — the host feed slot is named, 
   });
 });
 
-describe('the `record:discussion` / `record:chatter` pair (#8744)', () => {
+describe('the `record:discussion` / `record:chatter` pair — one shared row', () => {
   it('judges both names with one accept face', () => {
     const authored = { position: 'bottom', collapsible: false } as const;
     const viaChatter = ComponentPropsMap['record:chatter'].safeParse(authored);
@@ -367,7 +367,7 @@ describe('the `record:discussion` / `record:chatter` pair (#8744)', () => {
     expect(message).toContain('`dock`');
   });
 
-  it("both names accept the renderer's position vocabulary and refuse a retired spelling with ONE prescription (#8762)", () => {
+  it("both names accept the renderer's position vocabulary and refuse a retired spelling with ONE prescription", () => {
     for (const type of ['record:chatter', 'record:discussion'] as const) {
       for (const position of ['bottom', 'right', 'left'] as const) {
         expect(ComponentPropsMap[type].safeParse({ position }).success).toBe(true);
