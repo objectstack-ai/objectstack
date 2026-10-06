@@ -138,11 +138,15 @@ describe('showcase_task record action locations have a stock host (#22030)', () 
     });
 
     it('authors no `actions`, so its rows carry the host\'s list_item + record_related actions', () => {
+      expect(relatedLists).toHaveLength(1);
       expect(props).not.toHaveProperty('actions');
       expect(taskActions.filter(declares('record_related')).length).toBeGreaterThan(0);
     });
 
     it('repeats the FK\'s relatedListTitle / relatedListColumns verbatim', () => {
+      // Both sides must exist: two absent values would compare equal.
+      expect(typeof fk?.relatedListTitle).toBe('string');
+      expect(Array.isArray(fk?.relatedListColumns)).toBe(true);
       expect(props.title).toBe(fk?.relatedListTitle);
       expect(props.columns).toEqual(fk?.relatedListColumns);
     });
