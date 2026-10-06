@@ -923,10 +923,12 @@ concludes the platform cannot attach an existing user to an organization at all.
 With `plugins: { admin: true }` (forced on when SCIM is enabled), platform
 admins get email-independent account management on the Users list — the
 `create_user` / `set_user_password` actions there drive these endpoints. All
-three routes are gated server-side on the platform-admin signals
-(`isPlatformAdmin`, the `platform_admin` position, or the legacy `role`
-scalar) and drive the better-auth pipeline, so created accounts get a real
-scrypt-hashed credential and can sign in immediately.
+three routes are gated server-side on the session's `isPlatformAdmin` — the
+`PLATFORM_ADMIN` standing of ADR-0095 D3 — with the legacy better-auth `role`
+scalar of `admin` still accepted as a back-compat fallback; the
+`platform_admin` name in `positions` is not read. They drive the better-auth
+pipeline, so created accounts get a real scrypt-hashed credential and can sign
+in immediately.
 
 #### Create a User Directly
 
