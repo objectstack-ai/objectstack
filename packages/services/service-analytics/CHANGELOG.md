@@ -1,5 +1,448 @@
 # Changelog — @objectstack/service-analytics
 
+## 17.7.0
+
+### Minor Changes
+
+- 99589f9: fix(service-analytics)!: both analytics strategies refuse a cube measure whose `type` names no aggregate, in the spec's words — the custom-SQL `EXPRESSION_METRIC_TYPES` partition is gone with the three types it named (#21000)
+  
+  **BREAKING** — `@objectstack/spec` retired the cube metric types `number`, `string`
+  and `boolean` from `AggregationMetricType` (a measure's `sql` is a column reference,
+  so they had nothing left to compute). Every door that parses a cube refuses them;
+  this release removes the runtime branches that still served them for a cube that
+  reached the analytics service WITHOUT meeting that parse — one a host registers
+  in-process from a literal, through `AnalyticsServicePlugin({ cubes })` or
+  `AnalyticsService({ cubes })` (the registry never parses).
+  
+  | | before | now |
+  | --- | --- | --- |
+  | `NativeSQLStrategy`, a measure typed `number` / `string` / `boolean` | served: the column emitted UNAGGREGATED in the statement (`amount AS "m"` beside `GROUP BY`) | refused, nothing executed |
+  | `ObjectQLStrategy`, the same measure | refused `INVALID_FIELD` / 400 | refused, nothing executed |
+  | either strategy, a type the spec never declared (`median`) | native: refused; ObjectQL: forwarded to `executeAggregate` as the method (the auto-bridge refused it; a host's own executor received it), and `/analytics/sql` echoed `MEDIAN(amount)` | refused, nothing executed |
+  
+  **The one refusal** is `aggregateOfMeasure`'s, shared by both strategies and both
+  doors (`POST /analytics/query` and `POST /analytics/sql`): it names the measure and
+  the cube, then quotes the spec's own verdict on the type — for a retired type the
+  retirement prescription (the six aggregates to choose from, and where a per-row or
+  derived value goes instead), for anything else zod's message listing the six. It is
+  a bare `Error`, the undeclared-500 tier this package assigns to a cube that never
+  met the parse, so the HTTP answer is `500` with the message readable in the body
+  (measured through the dispatcher's analytics route), never a caller-blaming `400`.
+  The ObjectQL envelope for the three retired types therefore moves from
+  `INVALID_FIELD` / 400 to that tier.
+  
+  **The fix:** give the measure one of the six aggregate types — `count`, `sum`,
+  `avg`, `min`, `max`, `count_distinct` — or parse the cube through `CubeSchema`
+  before registering it, which refuses the same types with the same prescription.
+  
+  **Removed export:** `EXPRESSION_METRIC_TYPES` from
+  `strategies/native-sql-strategy.ts` (internal to the package; not re-exported from
+  its entry point). **Unchanged:** every aggregate measure on both strategies, the
+  auto-bridge's own parse of an engine method (still pinned, driven directly), and
+  `GET /analytics/meta`, which keeps publishing each registered measure's `type` as
+  registered.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered cube-metric-expression-types-retired -->
+- 713b0fa: fix(metadata-protocol)!: a metadata body's stored content hash is served and compared only in keyed form, never copied, and never evaluated (#21207)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the stored content hash of a metadata body stays the canonical hash at rest and no metadata body, authorable key, spelling or export moves; what changes is the form a door serves the hash in (a keyed digest: the crypto provider's, or a process-scoped ephemeral key's when none is registered), the form an inbound version token is compared in, and which query shapes the doors accept over the two hash columns, so `objectstack migrate meta` has nothing to rewrite. The operator-run rewrite this release asks for is of audit, activity and decision-audit copies, not of metadata. The other categories are closed on facts: every package here publishes (not `unpublished`); no ADR-0087 id covers a served version token or a refused query shape (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what the metadata doors serve and accept for the stored content hash of a metadata body — a hash over the whole stored body, withheld credential material included. Served beside the projected body it let a reader confirm a guess at that material offline; filtered on, it confirmed one online. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **Three things change for callers and operators.**
+  
+  1. **A held version token gets one `409 METADATA_CONFLICT`.** Every door that hands out a metadata version token — the save, publish, package-publish and rollback receipts and the history read — now hands out a keyed digest of the stored hash instead of the hash itself, and the save and reset doors compare a token they are sent in that same form. The key is the crypto provider's; a host that registers none keys under a process-scoped ephemeral key instead, so a token is always issued and never empty. A token a client held from before the upgrade is refused once; take the token from the next read or receipt and retry. On a host with no provider the same happens after a restart, and on any host when a provider is first registered. An empty, withheld, raw or stale token is refused with the same `409`; it is never read as "no pin".
+  2. **Filter, sort and group on the two stored content-hash columns, and on the version history's change note, now answer `400 INVALID_FIELD`** — on the generic data door, the MCP stdio reader and the analytics door, before the engine runs. The change note is included because a draft promotion that stated no message of its own recorded the draft's stored hash in it; the publish door now always states a hash-free message, and a note written before this release is served with the quoted hash in keyed form. A data-door search over the two stored-metadata tables no longer scans those columns or the stored body column, and an explicit search-field list naming one answers the same `400`. Every other column of the two tables is served, filtered, sorted and grouped as before, and every other object is unchanged.
+  3. **Operators run `os migrate audit-metadata-bodies` once after upgrading, dry run first.** The audit ledger, the activity feed and the metadata decision-audit trail no longer copy the stored hash. The extended command drops it from the copies already written and withholds it in the decision-audit notes and their copies: a dry run by default, `--apply` to rewrite, idempotent. The version history stays the lineage.
+  
+  **What else changes.** The data door serves the two hash columns of the stored-metadata tables in keyed form, under the same key as the version tokens. The MCP stdio reader serves them keyed under the crypto provider's key, and omits them on a host with no provider. A `409` conflict refusal carries keyed values or none. The ObjectQL engine gains a read accessor for the registered provider's keyed digest; it is additive. A member's read of these tables is refused as before.
+- 1caa603: fix(service-analytics)!: an analytics `order` key that names no member the query selects is refused with `INVALID_FIELD` / 400 at the analytics door, on both strategies, before either runs
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal at the analytics door of an `order` key the query does not select. No authorable key, spelling, export or stored shape moves: `AnalyticsQuerySchema` still parses every `order` it parsed (the refusal is a runtime rule on the request, not a schema change), `CubeSchema`, `DatasetSchema` and the dashboard and report schemas are untouched, the new module is internal to the package (not exported from `index.ts`), and no stored row is read or rewritten. An unselected key had no defined meaning to preserve: the native-SQL strategy answered 500 for it, or on SQLite ordered the groups by an arbitrary row, and the ObjectQL strategy never applied `order` at all; which member a caller meant is not something a ledger entry can rewrite. The other categories are closed on facts: the package publishes (not `unpublished`); no ADR-0087 id covers an analytics order key, and this diff adds none (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what `POST /api/v1/analytics/query` and its dry run `POST /api/v1/analytics/sql` accept, on both strategies and every driver. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **The rule.** Each `order` key must be a column the answer carries: one of the query's own `dimensions` entries, one of its `measures` entries, or a `timeDimensions` entry that carries a `granularity`, spelled exactly as it is selected (a `<cube>.`-qualified measure keeps its qualifier in the answer, so the bare spelling names no column beside it, and the other way round). A `timeDimensions` entry with only a `dateRange` bounds the rows and is not a column. Any other key is refused with `400 INVALID_FIELD`, naming every such key and the members the query does select, and nothing is executed. The thrown error carries `param: 'order'` and `field` (the first such key).
+  
+  **Before**, measured through `POST /api/v1/analytics/query` on SQLite and PostgreSQL 16.14, for a cube that declares no join over an object whose lookup target also declares `note`:
+  
+  - `dimensions: ['owner.email']` with `order: { note: 'asc' }`: native-SQL strategy `500` on both drivers (PostgreSQL 42702, `note` is ambiguous); ObjectQL strategy `200`.
+  - `dimensions: ['note']` with `order: { amount: 'asc' }`: native-SQL strategy `200` on SQLite, ordered by an arbitrary row's `amount`, and `500` on PostgreSQL (42803, must appear in GROUP BY); ObjectQL strategy `200`.
+  - `dimensions: ['note']` with `order: { 'owner.email': 'asc' }`: native-SQL strategy `500` on both drivers (PostgreSQL 42703, no such column); ObjectQL strategy `200`.
+  
+  **Now** each of those answers `400 INVALID_FIELD` on both strategies and both drivers, and `POST /api/v1/analytics/sql` refuses them the same way instead of returning a statement whose `ORDER BY` cannot run.
+  
+  **What to write instead.** Add the key to the query's `dimensions` (or `measures`), so the answer carries it, or drop it from `order`.
+  
+  **Who is affected.** A caller that posted an `order` key it did not select. On the native-SQL strategy those queries were already a 500 everywhere but the one SQLite shape, whose order was arbitrary. No example app, shipped dashboard, report, dataset or cube authors such a key, and the console's analytics adapter sends no `order` to this route.
+  
+  **Unchanged.** Ordering by a selected dimension, a selected measure or a bucketed time dimension; the dataset door (`POST /api/v1/analytics/dataset/query`), which already refused an unselected `selection.order` key with `400 DATASET_INVALID` and pushes an `order` down only when the selection selects every key; and a key naming a field the caller may not read, which keeps the `403 PERMISSION_DENIED` the field-level read gate answers for every position.
+- 8b123c0: Row-level security policies and the analytics native-SQL path judge a comparand against a declared boolean field by the platform's boolean-comparand rule, the one the data engine's `where` already applies
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal or narrowing of a filter comparand against a declared boolean column at two compilers outside the engine's where door, the same comparand that door already judges: no authorable key, spelling, export or stored shape moves. RowLevelSecurityPolicySchema, every permission set, every dataset, cube and analytics query parse and save as before, the predicate's and the filter's text are untouched, @objectstack/plugin-security and @objectstack/service-analytics export the same names with the same types, and no stored row is read or rewritten. Which boolean the author meant by a refused comparand is not something a ledger entry can decide, so there is nothing for objectstack migrate meta to rewrite. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers a filter comparand's type and this diff adds none (not registered / already-registered); and the change is runtime behaviour with no published interface or type changed (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what two compilers outside the engine's `where` door accept. The RLS compile seam now drops a row-level policy, and the analytics native-SQL face now refuses a query, when either compares a declared boolean field with a comparand outside the accepted set. It ships as `minor` under the launch-window convention for accept-set narrowings. No export, type or error code changes.
+  
+  - **Row-level security (`@objectstack/plugin-security`).** A compiled `using` / `check` predicate on a `boolean` or `toggle` column (or a `formula` returning `boolean`) is judged by `booleanComparandDoorVerdict` from `@objectstack/spec/data`, in the same pass as the number rule. `'true'` / `'false'`, `'1'` / `'0'` and `1` / `0` are read as the boolean each names. Anything else the rule refuses (a string such as `'yes'`, `'TRUE'` or `''`, a number other than `1` / `0`) drops the policy as a refused comparand: the read is filtered by the deny sentinel, the write is refused 403, and the WARN line names the clause, the field and the position. Before, `record.flag != 'true'` kept every row on SQLite and the write check admitted every row, so the exclusion the author wrote was not applied.
+  - **Analytics native SQL (`@objectstack/service-analytics`).** The query's `where` (and the dataset query's `runtimeFilter`, which is merged into it), each measure's own `filter` and a dataset's own `filter` are judged by the same rule before the statement compiles. An accepted spelling is read as its boolean, and anything else the rule refuses is refused `INVALID_FILTER` / 400 with the rule's own message, before any statement runs. The native strategy now answers what the engine-aggregate strategy answers. Before, `{ flag: 'true' }` counted no rows on SQLite, `{ flag: { $ne: 'true' } }` counted every row, and `{ flag: 'yes' }` answered 200.
+  - **What you may notice.** A policy or analytics filter that compared a boolean field with a value outside the accepted set now refuses instead of answering. Write `true` / `false`. A policy `record.flag == 1` now admits writing a `true` row, which its read already showed.
+  - **Unchanged.** A boolean literal, a column that is not boolean, a `{ $field }` reference, and an object whose declaration cannot be read (nothing is judged without one).
+- 81e69ca: fix(service-analytics)!: the analytics read scope, the `where` tree and the draft preview take the shared lowering's bound and NULL guards; their own whole-day and NULL-polarity copies are deleted (ADR-0053 D-D1 items 7 to 9)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a change of how the native analytics strategy and the draft preview answer an ordering comparison on a column its host declares neither datetime nor date, and of how the draft preview reads a window end, not of anything an author writes: no spec key, spelling, export or stored shape moves. AnalyticsQuerySchema, CubeSchema, DatasetSchema and every RLS policy parse and save as before, the package index exports the same names with the same types, and no stored row is read or rewritten. What moves is the row set a bare-day upper bound selects on such a column, which now equals the engine's own answer for the same filter, and the row set the draft preview selects for a window, which now equals what it selects for the same bounds written as a where; so there is nothing for objectstack migrate meta to rewrite. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a filter's bound semantics and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows the rows the native analytics strategy and the draft preview (`queryDataset` with `previewDrafts`) select for a bare-day upper bound on a column the host declares as neither `datetime` nor `date` — a `text` column, for example. It ships as `minor` under the launch-window convention for answer narrowings. No export, published type, accepted input or error code changes.
+  
+  **What is deleted.** The native SQL strategy no longer reads a bare `YYYY-MM-DD` `$lte`, a `$between` maximum or an explicit `dateRange` end as "through that whole day" on every column, and no longer drops such a bound on `9999-12-31` whatever the column holds. The whole-day rule is applied once, by the shared `lowerFilterCondition` (`@objectstack/spec/data`), with the column's declared type, the reader the plugin already wires from the engine's registry (`sourceFieldMeta`): a declared `datetime` column keeps the whole day, and every other declared column is compared as written, as the engine compares it. The `/analytics/sql` echo renders the same lowering.
+  
+  **The native face now agrees with the engine.** Measured through `AnalyticsService.query` (what `POST /api/v1/analytics/query` relays) in the plugin's own composition, on SQLite and on PostgreSQL 16, over a `text` column `note` holding `'2026-07-27'`, `'2026-07-28'`, `'2026-07-28 late'`, `'n'` and no value:
+  
+  - `{ note: { $lte: '9999-12-31' } }` counted every row with a value (4). It now counts 3, the rows the engine's `find` returns: `'n'` sorts above `'9999-12-31'`.
+  - `{ note: { $lte: '2026-07-28' } }` counted 3, the `'2026-07-28 late'` row included. It now counts 2.
+  - `$between ['2026-07-28', '2026-07-28']` and a `dateRange` window of the same day counted 2; they now count 1. Their negation through `$not` gains the row the bound lost.
+  
+  On a declared `datetime` or `date` column every answer is unchanged, on both strategies.
+  
+  **A host with no typed reader** (a strategy context with no `declaredFieldType` hook, or an `AnalyticsService` built without `sourceFieldMeta`) reads every column type-blind, as ADR-0053 D-D1 item 7 prescribes for a seam that cannot read declarations: its native answers do not move. Pass `sourceFieldMeta` (the README shows how) to get the engine's answer on a non-temporal column.
+  
+  **The `/analytics/sql` echo.** A `dateRange` window on a declared `date` column now prints the inclusive `<=` the engine runs, where it printed `<` the next day; on a column the host names no type for, it prints the bound the ObjectQL strategy hands the engine, as written. A preset window that stops before its end (`today`, `this_month`, …) now prints `<` its end instant with that instant bound, where it printed `<=` with no value bound. The NULL guards print once where they printed two or three nested copies of the same guard; every row set is unchanged.
+  
+  **The draft preview now agrees with the engine too.** `queryDataset` with `previewDrafts` evaluates drafted seed rows in memory; it kept its own whole-day copy, read on every column. It now hands the evaluator the drafted object's declared types (`sourceFieldMeta`), and the shared lowering applies the rule with them: a declared `datetime` column keeps the whole day, any other declared column is compared as written, and a column the host names no type for is read type-blind (ADR-0053 D-D1 item 7). Measured through the plugin's own composition over the same rows, five of the preview's `note` cells moved, each onto the engine's answer: `$lte` a day 3 to 2, `$between` and a window of one day 2 to 1, a window to `9999-12-31` 3 to 2, and the `$not` gains the row. Its `$lte` and `$between` to `9999-12-31` already gave the engine's answer and are unchanged. Every `datetime` and `date` cell is unchanged.
+  
+  - A preview window is now the `{ $gte, $lte }` pair the ObjectQL strategy hands the engine, matched like the same bounds in a `where`. Its end used to be read with a `'~'` suffix ("that instant and its own sub-values"), a reading no other face gives. Measured on a `datetime` column over SQLite, a canonical end (`…T10:00:00.000Z`) answers as before and as the engine. An end spelled shorter than the stored value is compared as text, as the preview's `where` already compared it: an end of `…T10:00` or `…T10:00:00` now leaves out the row stored at exactly that instant (the engine keeps it), and leaves out the rows inside that minute or second (the engine leaves them out too; the old reading kept them). Write a window end in full (`2026-07-28T10:00:00.000Z`) to get the engine's rows on the preview.
+  - A window over rows that hold a `Date` (the BSON storage form a MongoDB-backed draft reads back) is compared as instants, like the preview's `where`; it was compared as the `Date`'s display text.
+  - A host that wires no `sourceFieldMeta` (or an object the registry does not hold yet) reads every column type-blind. On a `text` column holding a value that sorts above `'9999-12-31'` (`'n'`), a `$lte` or `$between` maximum of `9999-12-31` now keeps that row, as every other type-blind seam does; the deleted copy left it out.
+  
+  **Unchanged.** Every answer on a declared `datetime` or `date` column, on the native strategy, the ObjectQL strategy and the draft preview; every answer of the ObjectQL strategy; every answer of the read scope.
+- 086ad0a: The analytics native-SQL path judges a comparand against a declared number field by the platform's number-comparand rule, the one the data engine's `where` already applies
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal or narrowing of a filter comparand against a declared number column at the analytics native-SQL face alone, the same comparand the engine's where door already judges: no authorable key, spelling, export, type or stored shape moves. Every dataset, cube and analytics query parses and saves as before, the filter's text is untouched, @objectstack/service-analytics exports the same names with the same types, and no stored row is read or rewritten. Which number the author meant by a refused comparand is not something a ledger entry can decide, so there is nothing for objectstack migrate meta to rewrite. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a filter comparand's type and this diff adds none (not registered / already-registered); and the change is runtime behaviour with no published interface or type changed (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what the analytics native-SQL face accepts. A query or dataset that compares a declared number field with a comparand the number-comparand rule refuses used to answer 200 with a count on the native face (a 500 on PostgreSQL for a non-numeric string). It now refuses `INVALID_FILTER` / 400 before any statement runs, which is what the engine-aggregate face already answered. It ships as `minor` under the launch-window convention for accept-set narrowings. No export, type or error code changes.
+  
+  - **What changed.** A comparand against a `number`, `currency`, `percent`, `rating`, `slider`, `progress` or `summary` column is judged by `numberComparandDoorVerdict` from `@objectstack/spec/data` before the native statement compiles. This covers the query's `where` (including the dataset query's `runtimeFilter`, which is merged into it), each measure's own `filter` and a dataset's own `filter`. The rule runs in the same pass as the boolean rule.
+    - A numeric string (`'12'`, `'1e3'`) is bound as the number it names, which is what the engine binds.
+    - Anything else the rule refuses (a string with no numeric reading such as `'abc'`, `''` or `'+5'`, a boolean, or a list where one number belongs) is refused `INVALID_FILTER` / 400 with the rule's own message, before any statement runs.
+    - A relationship-path member is judged at the related object's declared column.
+  - **Before.** The native strategy bound the comparand as written. So `{ amount: 'abc' }` counted no rows on SQLite and answered a 500 on PostgreSQL, `{ amount: true }` bound `1` and answered 200, and `{ amount: { $lte: '9999-12-31' } }` counted every row. The engine-aggregate strategy refused all three with 400.
+  - **What you may notice.** An analytics query or dataset that compared a number field with a value outside the rule's accepted set now refuses instead of answering. Write a number, or a string of exactly that number's JSON spelling (`'12'`).
+  - **Unchanged.** A number, `null` (the null test), a `{ $field }` reference, a column that is not a number or a boolean, and a host that relays no declared field types (nothing is judged without one).
+- 0b82391: fix(service-analytics)!: a caller-named analytics measure whose inferred source names no field (`_sum`, `*`, `*_sum`, an empty spelling) is refused with `INVALID_FIELD` / 400 at the analytics door, naming the spelling sent, on both strategies, before any statement is built (#21437)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal at the analytics door of a caller-named measure spelling whose inferred source names no field. No authorable key, spelling, export type or stored shape moves: AnalyticsQuerySchema still parses every measures list it parsed (the refusal is a runtime rule on the request, not a schema change), CubeSchema and DatasetSchema are untouched, a member a cube declares is never minted and is served as before, the package index exports the same names with the same types, and no stored row is read or rewritten. A refused spelling had no answer to preserve: both strategies answered 500 for it, and which column a caller meant by an empty prefix is not something a ledger entry can rewrite. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a caller-named measure spelling, and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what `POST /api/v1/analytics/query` and its dry run `POST /api/v1/analytics/sql` accept in `measures`, on both strategies and every driver. It ships as `minor` under the launch-window convention for accept-set narrowings. No export, published type or error code changes.
+  
+  **The rule.** A `measures` entry the cube does not declare is inferred: the bare `count` counts rows (`COUNT(*)`), and any other spelling aggregates one of the object's own fields, named before an aggregation suffix (`_sum`, `_avg`, `_average`, `_min`, `_max`, `_count_distinct`) or, with no suffix, by the whole spelling. The bare `count` is now the only spelling that reads the row wildcard `'*'`. A spelling whose source is empty or is `'*'` names no field, and it is refused with `400 INVALID_FIELD` before anything is executed. The error names the spelling as it was sent (`member`, with `param: 'measures'` and `cube`); a `<cube>.` qualifier is kept in the name.
+  
+  **Before**, measured through `POST /api/v1/analytics/query` on SQLite, on the native-SQL and the ObjectQL strategy, on an ad-hoc cube and on an authored cube that does not declare the member:
+  
+  - `_sum`, `_avg`, `_average`, `_min`, `_max`, their `<cube>.`-qualified forms, `*`, `*_sum`, `*_avg` and the empty spelling `''` answered `500 DATABASE_ERROR`, after a statement reached the database (`SUM(*)`, `AVG(*)`, `SUM()`).
+  - `_count_distinct` and `*_count_distinct` answered `500 DATABASE_ERROR` on the native-SQL strategy (`COUNT(DISTINCT *)`). On the ObjectQL strategy the engine answered `400 INVALID_QUERY` after the aggregate was called.
+  - The qualifier alone (`<cube>.`) answered `403 PERMISSION_DENIED` from the member-shape gate. It now answers the same `400 INVALID_FIELD`, because it names no field either.
+  
+  **Now** each of those answers `400 INVALID_FIELD`, and no statement and no engine aggregate runs. `POST /api/v1/analytics/sql` refuses the same spellings instead of returning a statement that cannot run.
+  
+  **What to write instead.** Ask for `count` to count rows, or put the field's name before the suffix: the sum of `amount` is `amount_sum`.
+  
+  **Who is affected.** A caller that sent a measure spelling with nothing before the suffix, or the row wildcard itself. Every such request was already a 500. No example app, shipped dashboard, report, dataset, cube, doc or skill in this repository sends one. The console's analytics adapter composes a measure as the value field, an underscore and the aggregate function, so a widget whose value field is empty posts `_sum`. At the pinned `.objectui-sha` that adapter reads a 500 as an unknown failure and answers with its own client-side aggregation; it reads the 400 as a rejected request and surfaces it as an error.
+  
+  **Unchanged.** The bare `count`; a field-prefixed spelling such as `amount_sum`; the no-suffix spelling of a field (`amount`); a measure a cube declares, including one declared under a key such as `_sum`, which is the cube's own vocabulary and is never inferred; and the authored-position twin of this rule, the `@objectstack/spec` parse refusal of `'*'` outside a `count` on a cube or dataset measure (#21409).
+- 35dfb81: fix(service-analytics): the ObjectQL face echoes a date-bucketed dimension in the bucket expression the driver itself groups by, so SQLite runs the statement it prints
+  
+  Clause-②: yes (widening)
+  
+  **Before**, the ObjectQL strategy printed every date-bucketed dimension as `date_trunc('<granularity>', col)` in the `sql` it echoes and in the `POST /analytics/sql` body, on every dialect. The native strategy declines a granularity, so every bucketed query lands on this face. Measured through `POST /api/v1/analytics/query` and `POST /api/v1/analytics/sql` in the default composition: the rows were right. On SQLite the echo failed with `no such function: date_trunc` (month, quarter and week). On PostgreSQL 16.14 it ran but answered `2026-01-01T00:00:00.000Z` where the face answers `2026-01`. The driver groups by `strftime('%Y-%m', …)` on SQLite and `to_char((…)::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM')` on PostgreSQL.
+  
+  **Now** the echo prints the driver's own expression, so it runs on that dialect and answers the face's bucket keys.
+  
+  - **`@objectstack/driver-sql`**: `SqlDriver.dateBucketSql(objectName, field, granularity)` returns the expression `aggregate` groups by, rendered as SQL text: the existing `buildDateBucketExpr`, unchanged, with each identifier quoted by the dialect. It returns `null` for a granularity the dialect buckets in memory (`week` on SQLite). The MySQL arm (`date_format(convert_tz(…))`) is checked by code read only, because no MySQL server was available.
+  - **`@objectstack/service-analytics`**: the new optional `AnalyticsServiceConfig.dateBucketSql` hook carries the expression to the ObjectQL strategy. `AnalyticsServicePlugin` wires it from the driver that serves the object, as it wires `sqlDialect`.
+  - **`@objectstack/driver-turso`**: a comment that said `SqlDriver` buckets with `date_trunc` now names the SQLite `strftime` expression it emits. The inherited `dateBucketSql` answers on the remote face too: it renders the same SQLite expression with no connection, and libSQL runs it.
+  
+  **Unchanged.** The rows every face answers. The echo keeps `date_trunc(…)` where nothing answers: a host that wires no hook, a driver with no bucket expression (memory, MongoDB), a granularity the driver buckets in memory, and a query with a non-UTC `timezone`, which the engine buckets in memory on that zone's calendar.
+- 1ca1eb0: fix(service-analytics)!: the analytics read scope and the draft preview compare a temporal comparand in the column's storage form, as the engine does (ADR-0053 D-A1 / D-A2) (#21505)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a change of which rows the analytics read scope and the draft preview select for a value comparison on a declared datetime, date or time column, not of anything an author writes: no spec key, spelling or stored shape moves. AnalyticsQuerySchema, CubeSchema, DatasetSchema and every RLS policy parse and save as before, the package index exports the same names, and no stored row is read or rewritten. The two new options members are optional and identity when absent, so every existing caller of compileScopedFilterToSql compiles as before. What moves is the row set such a comparison selects, which now equals the engine's own answer for the same filter, so there is nothing for objectstack migrate meta to rewrite. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a filter comparand's storage form and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a declaration alone (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this changes the rows two analytics faces select for a value comparison on a declared temporal column, in both directions, onto the rows `engine.find` selects for the same filter: on some filters fewer rows than before, on others more. The faces are the row-level read scope compiled into the native statement, and the draft preview (`queryDataset` with `previewDrafts`). It ships as `minor` under the launch-window convention for answer changes. No export is removed, no accepted input is refused and no error code changes.
+  
+  **The read scope.** `compileScopedFilterToSql` takes two new optional members in its options, `coerceTemporalFilterValue(field, value)` and `coerceTemporalFilterColumn(field, columnSql)`. Together they are the driver's `temporalFilterValue` / `temporalFilterColumnSql` pair, bound to the object the scope reads. After the shared lowering, every value comparison binds its comparand through the first and reads its column through the second: equality, `$ne`, the four orderings, `$in`, `$nin` and `$between`. Null tests, `$empty` and the text operators read the column as stored. An absent member is identity: the comparand and the column stay as written, which is what a host that passes neither got before. `NativeSQLStrategy` (the read scope merged into the native statement) and the `ObjectQLStrategy` echo (`/analytics/sql`) pass the context's pair, which `AnalyticsServicePlugin` wires to the driver. Before, the comparand was bound as written and the database read it by its own rules, on SQLite and on PostgreSQL whatever the server's time zone.
+  
+  **The draft preview.** It has no driver, so each value comparison on a column the host declares `datetime`, `date` or `time` now puts both sides in the storage form `@objectstack/core`'s `temporalStorageForm` gives: the comparand, and the drafted row's value, as `driver-memory` reads them. Before, it compared the two spellings as text. A column the host names no type for is compared as written, as before.
+  
+  A `date` column answered the engine's rows on both faces before and still does when both sides are spelled as days. No `@objectstack/spec` contract changes and no dependency edge is added. A host that calls `compileScopedFilterToSql` directly gets the coercion by passing the pair from its driver.
+
+### Patch Changes
+
+- f9f9f91: Analytics filter refusals, the no-strategy diagnostic and the cube-gate warning no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  Some strings the analytics service shows to callers, authors and operators pointed at an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - The two field-reference refusals (a `{ $field }` comparand the SQL lowering cannot render, and a `{ $field }` used as a `$between` bound) say the engine path's driver enforces the cross-field rules (declared same-table columns only, never the tenant-isolation column, one comparison class) with metadata it owns, so those rules are enforced in one place. The bound refusal also says `FieldReferenceSchema` was removed from the `$between` endpoint union rather than implemented there, since nothing asked for it.
+  - The no-strategy diagnostic for a cross-field filter on a deployment with no aggregate bridge says the same about the engine path.
+  - The `where` refusals: an undefined comparand is refused rather than read as null, on the SQL drivers and on this door alike; a field constraint with zero operators is refused on every backend, because neither "every row" nor "no row" is the author's intent; a field constraint mixing `$` operators with bare keys is refused by both doors in the package; and the two filter-array refusals say a filter array is lowered at every door or refused, never dropped, so it means the same rows whichever door it enters. Where the undefined-comparand refusal cited a tracker number for the silent widening, it now says that a dropped predicate widens the query; the mixed-wrapper refusal already said so and only drops its citation.
+  - The dotted-measure refusal drops its citation; the sentence already says measures do not traverse relationships and that the prefix used to be dropped silently.
+  - The warning logged when no object-registry hook is configured says the inactive gate is the one that answers 404 `CUBE_NOT_FOUND` for a name that is neither a registered cube nor a registered object.
+  
+  Text only: no status, error code, field, route or control flow moves. A client or log filter that matches the old text (for example a tracker-number suffix) needs the new spelling.
+- 44072fc: The read-scope comparand refusals, the native-SQL cross-field backstop and the two display-SQL echo refusals no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  Some strings the analytics service shows to operators and callers pointed at an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - The read-scope compiler's undefined-comparand refusal says an undefined comparand is refused rather than read as null, on the SQL drivers and on this door alike. Its refusal of a non-boolean `$null`, `$exists` or `$empty` comparand says a non-boolean comparand for any of the three is refused rather than coerced, on every driver and on this door alike. Both still say they fail closed, and that the producer to fix is whoever built the read scope, never the caller of the query.
+  - The native-SQL strategy's cross-field backstop and the `/analytics/sql` echo's refusal of a field-reference comparison say the engine path's driver enforces the cross-field rules (declared same-table columns only, never the tenant-isolation column, one comparison class) with metadata it owns, so those rules are enforced in one place, next to the metadata they read.
+  - That echo refusal and the echo's unmapped-operator refusal say the echo renders every predicate the query runs with, or refuses.
+  
+  Text only: no status, error code, field, route or control flow moves. A client or log filter that matches the old text (for example a tracker-number suffix) needs the new spelling.
+- 41a3c8d: Published comments that named `driver-memory`'s retired reference matcher as a live filter backend now name what replaced it
+  
+  Clause-②: no
+  
+  `driver-memory`'s reference matcher (`memory-matcher.ts`) was retired in commit `8fec76a2b`. Four published packages still described it as a live surface in text that ships:
+  
+  - `@objectstack/spec`:
+    - The backend table in the filter-logic conformance docblock, which ships in `data/index.d.ts` and `data/index.d.mts`, now lists the in-memory backend as `driver-memory`'s query path (`normalizeFilterCondition`, then mingo) where it listed `memory-matcher`, and says the matcher held that row until commit `8fec76a2b` retired it.
+    - `src/data/filter.zod.ts` ships as source. In it, the `$icontains` implementation table lists `driver-memory`'s query path and analytics face, both on `asciiCaseInsensitiveRegexSource`. The `$like` / `$ilike` and `$empty` tables keep the matcher only in a note that commit `8fec76a2b` retired it. The `foldAsciiCase` docblock counts five JS evaluation faces where it counted six. The `asciiCaseInsensitiveContains` docblock names objectql's `having` and `formula` as its callers. The string-ordering note says `driver-memory`'s query path hands the comparison to mingo. Of these, the `foldAsciiCase`, `asciiCaseInsensitiveContains` and `FILTER_OPERATORS` docblocks also ship in the filter declaration chunk (`filter.zod-*.d.ts` / `.d.mts`).
+    - `src/ui/view.zod.ts` ships as source. It now says that `driver-memory`'s query path runs `assertFilterConditionShape` through `convertToMongoQuery`, where it said `match()` did.
+    - A comment inside `FILTER_TEXT_CASES` ships in `data/index.js` / `.mjs` and `browser/data/index.js` / `.mjs`. It now says the reference matcher measured case-exact until commit `8fec76a2b` retired it.
+  - `@objectstack/service-analytics`: two comments in `ObjectQLStrategy`, which ship in the JavaScript output (the first also in `index.d.ts` / `index.d.cts`), changed. The first names `driver-memory`'s query path, not its matcher, as a face that pins `{$not: {}}` as the zero-row filter. The second says in the past tense that `memory-matcher.ts` read `$regex` as a real regex, until `$regex` was retired and commit `8fec76a2b` retired the matcher too.
+  - `@objectstack/formula`: the comment over the `$icontains` arm in `matches-filter.ts` ships in `index.js` / `index.mjs`. It now names objectql's `having` as the other caller of `asciiCaseInsensitiveContains`. It says `driver-memory`'s reference matcher called it until commit `8fec76a2b` retired it, and that `driver-memory`'s query path folds through `asciiCaseInsensitiveRegexSource`.
+  - `@objectstack/objectql`: the comment over the `having` walker's `$notContains` arm in `having-filter.ts` ships in `index.js` / `index.mjs` and `core.js` / `core.mjs`. It now says the record-at-a-time faces (`formula` and this walker) answer the predicate on a stored value that is not a string, as `driver-memory`'s reference matcher did until commit `8fec76a2b` retired it.
+  
+  Comment only: no export, type, error code, status, message text or runtime behaviour changes.
+- fbe2deb: fix(service-analytics): the ObjectQL strategy applies a query's `order`, then its `offset` and `limit`, to the aggregated answer, as its echoed `sql` says
+  
+  Clause-②: no
+  
+  **Before**, the ObjectQL strategy passed none of the three keys to `engine.aggregate`, which has no ordering or window grammar, and applied none of them itself. Every date-bucketed query lands on that strategy, because the native-SQL strategy declines `granularity`. Measured through `POST /api/v1/analytics/query` on SQLite and PostgreSQL 16.14:
+  
+  - `timeDimensions: [{ dimension: 'closed_on', granularity: 'month' }]`, `order: { closed_on: 'desc' }`, `limit: 1` answered every month, unordered (ascending on SQLite, `04, 03, 05` on PostgreSQL).
+  - A selected dimension with `order: { note: 'desc' }`, and a selected measure with `limit: 2, offset: 1`, answered every group in the engine's order.
+  
+  The echoed `sql` and `POST /api/v1/analytics/sql` rendered `ORDER BY … LIMIT … OFFSET …` for all three.
+  
+  **Now** the strategy orders the answer by `order`, in the key order given, and then applies `offset` and `limit`. This happens on the direct path and on the cross-object (FK-expand) path, after the re-bucket. A bare `limit` with no `order` slices the engine's order, as `LIMIT` without `ORDER BY` does. Where the native-SQL strategy answers the same query, the two answer the same rows for numbers and for text of single-case ASCII letters. The comparison is the dataset door's own `applyOrdering`, which sorts NULL and `''` last in both directions, while SQL places NULL by driver (lowest on SQLite, highest on PostgreSQL), so the two faces can still order NULL, `''`, numeric text and mixed-case text differently.
+  
+  **Dataset door.** `POST /api/v1/analytics/dataset/query` pushes a single query's `order`, `limit` and `offset` down to the strategy, and then windowed the answer a second time, so `offset` was applied twice. `limit: 2, offset: 1` over five groups answered one row, the third, on the native-SQL strategy. It now windows only a grid it could not push down. The ObjectQL strategy answered that page correctly before, because it dropped the window; it still does.
+  
+  **Unchanged.** A query with no `order`, `limit` or `offset` answers exactly the engine's aggregate rows. Which `order` keys are accepted is unchanged: the analytics door still refuses a key the query does not select. The dataset door's own ordering is unchanged too: label sort keys, derived measures, the implicit dimension order for a bare `limit`, and the chronological default.
+- 6d67ad5: fix(spec)!: an analytics query's `limit` and `offset` are non-negative integers, and the native face runs an `offset` with no `limit` on SQLite
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered analytics-query-window-non-negative-integer -->
+  
+  **BREAKING** — an accept-set narrowing of a published request schema, shipped as `minor` under the repo's launch-window convention for accept-set narrowings. What reads it: the `/analytics` doors, which parse every body with `AnalyticsQueryRequestSchema` (`POST /analytics/query`, `POST /analytics/sql`) or `DatasetSelectionSchema` (`POST /analytics/dataset/query`), and answer `400 VALIDATION_FAILED` before any engine runs.
+  
+  **`@objectstack/spec`**
+  
+  - **`AnalyticsQuerySchema.limit` and `.offset`** were a bare `z.number()`. They are `z.number().int().nonnegative()` now. A negative number, a fraction, and an integer above `Number.MAX_SAFE_INTEGER` are refused at the member. `limit: 0` stays legal and answers no rows.
+  - **`DatasetSelectionSchema`** reads the same two declarations off `AnalyticsQuerySchema.shape`, so the dataset door holds the same accept set with no second copy. **`AnalyticsQueryRequestSchema`** extends the query, so it holds it too.
+  - The TypeScript types are unchanged (`number`). Only the parse narrows.
+  
+  Before, no refused value had one answer. Measured at `POST /api/v1/analytics/query` on SQLite and PostgreSQL 16.14, `order { note: 'asc' }` over four groups:
+  
+  | window | native SQLite | native PostgreSQL | ObjectQL face |
+  |:--|:--|:--|:--|
+  | `limit: -1` | every row | 500 | all but the last row |
+  | `limit: 1.5` | 500 | two rows | one row |
+  | `offset: -1` | 500 | 500 | every row |
+  
+  Each one now answers `400 VALIDATION_FAILED`, with `details.fields[].field` naming `limit` or `offset` (`selection.limit` / `selection.offset` at the dataset door), on both drivers and both faces.
+  
+  **`@objectstack/service-analytics`**
+  
+  - **An `offset` with no `limit`** is a valid window: every row after the offset. The native-SQL strategy wrote `OFFSET n` with no `LIMIT` in front of it, and SQLite's grammar has no `OFFSET` without a `LIMIT`, so the query answered `500` (`near "OFFSET": syntax error`) on SQLite, while PostgreSQL and the ObjectQL face answered rows. The statement now carries the executing driver's no-limit spelling, read off the `sqlDialect` hook: `LIMIT -1 OFFSET n` on SQLite, `OFFSET n` alone on PostgreSQL (unchanged bytes), and `LIMIT 9223372036854775807 OFFSET n` when the host names no dialect. The MySQL arm is `LIMIT 18446744073709551615`, asserted as text only (no MySQL server was available to run it).
+  - The echoed `sql` and `POST /analytics/sql` show the statement that ran, byte for byte, on this face.
+  
+  ## FROM → TO
+  
+  | you wrote in an analytics query or dataset selection | write instead |
+  |:--|:--|
+  | `limit: -1` (meant: no limit) | omit `limit` |
+  | `limit: 1.5` | the integer page size you meant, for example `limit: 2` |
+  | `offset: -1` | omit `offset`, or `offset: 0` |
+  | `offset: 2.5` | the integer number of rows to skip, for example `offset: 2` |
+  
+  The one-line fix: write `limit` and `offset` as non-negative integers, or leave them out.
+  
+  ## Who is affected, measured
+  
+  At `origin/main` `ee75aae1a`: no example, package fixture, document or published skill writes a negative or fractional analytics `limit` or `offset`. The one stored producer that lowers into a dataset selection, a dashboard widget's `limit`, is already declared a positive integer (`z.number().int().positive()`). The sibling console repository and deployed metadata were not measured. The service does not parse a query passed to it in-process, so a host that builds an `AnalyticsQuery` in code parses it with `AnalyticsQuerySchema` before handing it over.
+- d7d5b4f: fix(service-analytics): the ObjectQL strategy's echoed `sql` renders an offset with no limit in the dialect's own spelling, so SQLite runs the statement it prints
+  
+  Clause-②: no
+  
+  **Before**, the ObjectQL strategy wrote its own row window into the statement it echoes: `LIMIT n` when a limit was set, then `OFFSET n` when an offset was. An `offset` with no `limit` therefore echoed a bare `OFFSET`, which SQLite's grammar does not have. Measured through `POST /api/v1/analytics/query` and `POST /api/v1/analytics/sql` on SQLite, for a composition served by the engine aggregate, with `order: { note: 'asc' }` and `offset: 1`: the rows were right (every group after the first), but the echoed `sql` and the `/analytics/sql` body both ended `ORDER BY "note" ASC OFFSET 1`, and SQLite refuses that statement with `near "OFFSET": syntax error`.
+  
+  **Now** the statement ends with the same window clause the native-SQL strategy runs, for the dialect of the driver that serves the object: `LIMIT -1 OFFSET 1` on SQLite, which runs and answers the same rows. One function renders the window for both strategies.
+  
+  **Unchanged.** The rows either strategy answers. A window with a `limit` keeps its bytes (`LIMIT 2 OFFSET 1`) on every dialect, and on PostgreSQL an offset with no limit still echoes `OFFSET 1` alone. A host that wires no `sqlDialect` hook gets the native strategy's dialect-neutral spelling, `LIMIT 9223372036854775807 OFFSET 1`. A date-bucketed dimension still echoes as `date_trunc(…)`, which SQLite does not run; this change touches only the window.
+- 5d095a0: On SQLite, a `week` date bucket is grouped in SQL, and the analytics SQL echo never prints a bucket statement that SQLite refuses (#21595).
+  
+  Clause-②: no
+  
+  - **What was wrong.** `driver-sql` grouped `day`, `month`, `quarter` and `year` in SQL on SQLite, but not `week`. Its `supports.queryDateGranularity` said `week: false`, so the engine bucketed weeks in memory, and the ObjectQL face of `POST /api/v1/analytics/query` and `POST /api/v1/analytics/sql` echoed the bucket as `date_trunc('week', col)`. SQLite has no `date_trunc`, so that echo could not run. A non-UTC `timezone` on SQLite gave the same echo for every granularity.
+  - **What it does now.**
+    - SQLite advertises all five granularities. `week` buckets as `YYYY-Www`, the ISO 8601 week that the PostgreSQL and MySQL arms answer. The expression does not use `strftime('%V')`, which needs SQLite 3.46: `@libsql/client` 0.18.0 bundles SQLite 3.45.1, where `%V` answers NULL. It runs on better-sqlite3, on libSQL (`driver-turso`) and on sql.js (`driver-sqlite-wasm`). A `Field.date` still buckets as its own calendar day.
+    - The echo prints that expression for a `week` bucket on SQLite, and the statement runs.
+    - With a non-UTC `timezone` on SQLite, `POST /api/v1/analytics/sql` refuses with `NOT_IMPLEMENTED` / 501, declared as a refusal so its message reaches the caller. `POST /api/v1/analytics/query` still answers the rows, and its answer carries no `sql`. The engine buckets on that zone's calendar in memory, and SQLite has no time-zone database, so no SQLite statement produces those keys.
+  - **Where it shows.** `aggregate()` with a `week` group on SQLite, `SqlDriver.dateBucketSql()`, and the analytics SQL echo. A query sent with `timezone: 'UTC'`, or with no `timezone`, still echoes the driver's own expression.
+- 1968d5e: With a non-UTC `timezone`, the analytics SQL echo of a date-bucketed dimension refuses on every dialect instead of printing `date_trunc` (#21630).
+  
+  Clause-②: no
+  
+  - **What was wrong.** With a non-UTC `timezone`, the engine buckets a date dimension in memory on that zone's calendar, on every driver. The ObjectQL face of `POST /api/v1/analytics/query` and `POST /api/v1/analytics/sql` still echoed the bucket as `date_trunc('month', col)` (or the asked granularity) on PostgreSQL and MySQL, a statement the engine never ran. On PostgreSQL that statement groups on the database session's calendar: measured on PostgreSQL 16.14 with the server at `Asia/Shanghai`, it answered timestamp keys such as `2025-12-31T16:00:00.000Z` where the query answered `2026-01`, and with `timezone: 'America/New_York'` it grouped the rows differently from the query. MySQL has no `date_trunc` at all. SQLite already refused this echo.
+  - **What it does now.** For a date-bucketed dimension with a non-UTC `timezone`, on every dialect:
+    - `POST /api/v1/analytics/sql` refuses with `NOT_IMPLEMENTED` / 501, declared as a refusal so its message reaches the caller. This is the answer SQLite already gave.
+    - `POST /api/v1/analytics/query` answers the same rows as before, and its answer carries no `sql`.
+  - **Unchanged.** A query sent with `timezone: 'UTC'`, or with no `timezone`, still echoes the expression the driver groups by: `to_char(…)` on PostgreSQL, `date_format(…)` on MySQL and `strftime(…)` on SQLite.
+- 31e3e00: The analytics SQL echo prints a date bucket only in the expression the driver itself groups it by, and refuses everywhere else, including on the in-memory and MongoDB drivers (#21647).
+  
+  Clause-②: no
+  
+  - **What was wrong.** At a `timezone` of `UTC`, or with none, the ObjectQL face of `POST /api/v1/analytics/query` and `POST /api/v1/analytics/sql` echoed a date-bucketed dimension as `date_trunc('month', col)` (or the asked granularity) wherever the driver renders no bucket expression of its own, and documented that as representative. On `driver-memory` the engine only fetches the rows and buckets them itself, answering keys such as `2026-01` and `2026-W02`, while both faces printed `date_trunc(...)`, a statement nothing ran. `driver-mongodb`, which groups the bucket in its own aggregation pipeline, took the same path. So did any host that wires no `dateBucketSql` hook.
+  - **What it does now.** Wherever no driver expression stands for the bucket, on every driver and dialect:
+    - `POST /api/v1/analytics/sql` refuses with `NOT_IMPLEMENTED` / 501, declared as a refusal so its message reaches the caller. Its message names the cause. A non-UTC `timezone` and SQLite already answered this way.
+    - `POST /api/v1/analytics/query` answers the same rows as before, and its answer carries no `sql`.
+  - **Unchanged.** On PostgreSQL, MySQL and SQLite at `UTC` or with no `timezone`, the echo still prints the expression the driver groups by: `to_char(...)`, `date_format(...)` and `strftime(...)`.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [a2aadab]
+- Updated dependencies [fe10172]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [045f764]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [a0176ef]
+- Updated dependencies [149153c]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [cab6396]
+- Updated dependencies [e864db5]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/types@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

@@ -1,5 +1,185 @@
 # @objectstack/service-storage
 
+## 17.7.0
+
+### Minor Changes
+
+- 3eb38ae: A user who can edit a record may delete another user's attachment on it, as the attachment gate declares (#21729).
+  
+  Clause-②: yes (widening)
+  
+  - **What was refused.** The attachment gate's delete rule is "the uploader OR a user who can edit the parent record". For every member holding `org_member`, the platform's row-level delete floor in `member_default` (`owner_only_deletes`: only the rows you created) answered first, so a parent editor's delete of someone else's attachment was refused with `PERMISSION_DENIED` before the gate ran.
+  - **`@objectstack/service-storage`** contributes a delete-only alternate match for `sys_attachment` (`sys_attachment_parent_editor_delete`, every row) when it installs the attachment gate, and only then. The gate decides: a parent editor's delete answers 200, and a caller who can read the attachment but neither uploaded it nor can edit the parent is refused with `ATTACHMENT_DELETE_DENIED`. A caller who cannot read the parent cannot see the attachment, and is still refused with `PERMISSION_DENIED` before the gate runs, so the parent is not named to them.
+  - **Without `@objectstack/service-storage`** nothing is contributed. A deployment that registers `sys_attachment` without the storage service keeps the floor, and only a row's creator may delete it.
+  - **The edit limb is unchanged.** Editing another user's attachment row is still refused by the floor for a member it binds, a parent editor included.
+  - **`@objectstack/plugin-security`** gains the seam: `contributeOwnershipFloorAlternates(plugin, alternates)` on the registered `security` service, an extension of `ISecurityService` that callers feature-detect. Each alternate names one object (never `'*'`), one floor limb (`update` or `delete`; `all` is refused) and a `using` predicate. It lands beside each enabled floor policy of that limb, in that policy's own `positions` domain, so it reaches only the principals the floor binds. A plugin's second call replaces its first, and an empty list withdraws it. A contribution that breaks these rules throws.
+  
+  Nothing that was admitted before is refused now. No principal outside the floor's domain, and no other object or operation, changes.
+
+### Patch Changes
+
+- 6091136: MCP stdio, email, knowledge, queue, SMS, storage and record-trigger refusals, warnings and template descriptions no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  Some strings these seven packages show to operators, administrators and flow authors pointed at an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - `@objectstack/connector-mcp`: the declarative stdio refusals say a stdio transport launches a local process, so stack metadata may only name a command the host's own code allows, and that an http transport is not gated by this policy.
+  - `@objectstack/plugin-email`: the built-in change-email notice template's description, in all four locales, says the notice goes to the previous address so a hijacked session cannot move the account identity unannounced; the internal-headers refusal says a missing header does not announce itself, so the send would succeed while silently deviating from what was authored; the over-limit attachments line says the storage capability holds large content outside the row while the row keeps a reference and the attachment's audit metadata.
+  - `@objectstack/service-knowledge`: the no-identity retrieval warning says a missing identity is not a grant of authority, so retrieval fails closed rather than searching the whole corpus unscoped; the predicate-write warning says the lifecycle reap guard de-indexes retention-swept rows before they are deleted.
+  - `@objectstack/service-queue`: the missing-retention refusal says the one platform reaper sweeps completed rows by that declaration, so the adapter does not sweep the table itself; the rejected-floor error says the floor is what makes the lifecycle service refuse an override below the idempotency window.
+  - `@objectstack/service-sms`: the unreadable-counter warning says a quota the platform cannot count must not refuse the one-time codes users sign in with; the counter store's lines name the daily SMS send quota without a number.
+  - `@objectstack/service-storage`: the reclamation-gate line says deleting bytes cannot be undone, so it waits for a verified migration with no deviation on record, while reversible work carries on.
+  - `@objectstack/trigger-record-change`: the array-trigger warning says multi-event arrays are deferred until two independent projects need a combination other than created-or-updated.
+  
+  Text only: no status, error code, field, route or control flow moves. A client or log filter that matches the old text (for example a tracker-number suffix) needs the new spelling.
+- 417443e: `os migrate value-shapes` and `os migrate files-to-references` record the deployment-level ADR-0104 flag only from a run over every object, and every command in the `os migrate` data-migration family refuses an `--object` name the deployment does not declare (#21644).
+  
+  Clause-②: no
+  
+  - **A narrowed `--apply` records no deployment flag.** The flag attests the stored data of every object and turns strict enforcement on, but a run narrowed by `--object` reads only the named objects. Such a run still applies its fixes: `files-to-references` converts the named objects' values. It records no flag, whether it passes or fails, and leaves a flag that an earlier full-scope run recorded exactly as it was. Its output says why and names the run that records the flag: the same command without `--object`. The `--json` document carries `filter: { objects }`, which is `null` on a full-scope run, so a narrowed run is never mistaken for a full one. Any `--object` narrows, even a list that names every object. A full-scope `--apply` records the flag as before.
+  - **`runFilesToReferencesMigration`** (`@objectstack/service-storage`) skips the flag write when it is given `objects`. That includes `[]`, which walks nothing. Its `flag` result is `null` on a narrowed run.
+  - **The column step of `files-to-references` does not run on a narrowed run.** It retypes every single-value media column in the database on the authority of the gate, and a narrowed gate vouches only for the named objects. Before this change, a narrowed `--apply` or a misspelled one moved those columns and stamped `columns_moved_at`.
+  - **An unknown `--object` is an error.** This applies to `value-shapes`, `files-to-references`, `summary-nulls` and `duplicates`. A name the booted registry does not declare exits 1 with `OBJECT_NOT_FOUND`, and the error names that name and the declared objects. The check runs before anything is read or written. Until now, such a name was filtered out of the scan without a word, so a typo scanned nothing and read as a clean run. `duplicates` reports the refusal as `{ error: 'report_failed', detail, code }`. A declared object that the command has nothing to check on is still accepted.
+- 33f9791: A file field's declared `accept` / `maxSize` refusal now answers `400 ERR_FILE_CONSTRAINT` with a sentence naming the field and the constraint, instead of `500 INTERNAL_ERROR` with the sentence withheld.
+  
+  Clause-②: no
+  
+  - **`FileConstraintError` declares `status = 400`**, as `FileFieldBulkWriteError` in the same module already did. The data API's declared-status passthrough now answers the refusal on create and on update, e.g. `400 {"error":"File exceeds the maximum size declared for 'doc' (5005 bytes > 10 bytes)","code":"ERR_FILE_CONSTRAINT","object":"…"}`. Before, the error declared a registered `code` but no status, so it fell through to the sanitised `500 INTERNAL_ERROR`, and the field and the reason reached only the server log.
+  - **It carries `field` and `constraint` (`'accept' | 'maxSize'`) as members**, for in-process callers. The constructor is now `new FileConstraintError(field, constraint, message)`. The new `FileConstraint` type is exported beside it. On the HTTP wire the message names both, and its wording is unchanged.
+  - The accept set is unchanged: the same files are refused, and a refused write still persists no row and claims no file. `ERR_FILE_CONSTRAINT` was already in the error-code ledger.
+- 50b5e03: A write refusal on an attachment or a comment no longer names a parent record the caller cannot read (#21755).
+  
+  Clause-②: no
+  
+  - **What changed.** The attachment gate (`sys_attachment`, `@objectstack/service-storage`) and the comment gate (`sys_comment`, `@objectstack/plugin-audit`) refuse an update or a delete by a caller who neither wrote the row nor can edit its parent record. That refusal names the parent record. A caller who cannot read the parent now gets the platform's not-visible refusal instead. This is the answer the row-level write check gives the principals it covers: `PERMISSION_DENIED` (403), with the same localized `record_access_denied` sentence. It names neither the parent nor the row's link to it, in the message or in the envelope.
+  - **What did not change.** A caller who can read the parent but may not edit it keeps the named refusal: `ATTACHMENT_DELETE_DENIED` for an attachment delete, and `RECORD_NOT_ACCESSIBLE` for an attachment update and for a comment update or delete. Who may update or delete is unchanged.
+  - **A comment whose thread names no record** is read by nobody, so a non-author's write on it now gets the not-visible refusal too, and the thread value is not echoed back.
+  - **Localization.** `installAttachmentAccessHooks` and `installCommentAccessHooks` accept an optional fourth argument: a lazily resolved i18n lookup. With it, the sentence honours a deployment's `errors.record_access_denied` override, as the row-level write check's sentence does. Without it, the built-in catalog still renders the caller's locale.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [48fa7a3]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1878ef9]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [a2aadab]
+- Updated dependencies [fe10172]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [045f764]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [a0176ef]
+- Updated dependencies [149153c]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [607463d]
+- Updated dependencies [cab6396]
+- Updated dependencies [e864db5]
+- Updated dependencies [7665c54]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [f76c622]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/platform-objects@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/types@17.7.0
+  - @objectstack/observability@17.7.0
+
 ## 17.6.0
 
 ### Patch Changes

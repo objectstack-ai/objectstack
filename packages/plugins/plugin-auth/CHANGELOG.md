@@ -1,5 +1,284 @@
 # Changelog
 
+## 17.7.0
+
+### Minor Changes
+
+- 50e1c65: fix(plugin-audit,platform-objects,plugin-auth,plugin-sharing,plugin-approvals)!: the audit ledger no longer records fields declared `internal`, and the platform's credential-class fields are declared `internal`
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or config field is removed or renamed: the change narrows what the generic data path and the audit ledger return for platform-owned columns, and nothing an author wrote needs rewriting. The objectql half adds exports only. -->
+  
+  **BREAKING for readers of credential-class columns on the generic data path and in the audit ledger.**
+  
+  **What changed.**
+  
+  - The audit plugin's CRUD mirror now omits every field declared `internal: true` from the
+    rows it writes to `sys_audit_log` and `sys_activity`: create `new_value`, both sides of an
+    update, delete `old_value`, and the activity row. It already masked `secret` and `password`
+    fields; `internal` is the same contract the generic data path already enforces ("never
+    returned on the generic data path"). An update that changes only an `internal` field still
+    writes its row, with neither value.
+  - These platform fields are now declared `internal: true`, so neither the generic data path
+    nor the ledger returns them: the JWT signing key's private key (`sys_jwks`), both credential
+    columns of the one-time verification object (`sys_verification`), the two-factor secret and
+    backup codes, the SSO provider's OIDC and SAML protocol blobs, the OAuth access and refresh
+    token columns, the OAuth client secret digest, the SCIM credential digest, the share link's
+    token and password hash, and the approval action-token digest. API key digests and email
+    headers were already `internal`; the ledger now honours that too.
+  - Every built-in consumer that needs one of these values reads it back through the engine's
+    privileged accessor rather than the generic path: JWT signing, password reset and the other
+    one-time verification flows, two-factor verification, SSO sign-in and the legacy SSO secret
+    migration, OAuth client authentication, share-link redemption (the password gate is held)
+    and the creator's share-link list, which keeps returning each link's token. The runtime's
+    share-link resolve route (the dispatcher twin of the plugin's) still answers "password
+    required" for a protected link rather than the unknown-link shape.
+  - The one-time verification object's record title is now the fixed label `Verification`; it no
+    longer shows the identifier column.
+  - `@objectstack/objectql` exports two helpers from its main and `/core` entries:
+    `collectInternalReadFields` (the names of an object's `internal` fields) and
+    `readInternalColumn` (recovers one `internal` column for rows already read, through the
+    engine's privileged accessor, and fails closed when the value cannot be recovered).
+  
+  **What to do after upgrading.**
+  
+  - **Rotate the JWT signing keys.** Ledger rows written before this release are not rewritten
+    (the ledger is append-only), so a signing key that existed before the upgrade may have a copy
+    in the ledger. Rotate the keys so that copy signs nothing.
+  - **Revoke and re-mint share links that must stay private.** A share link's token is a
+    capability that stays valid until the link expires or is revoked, and links minted before this
+    release may have a copy in the ledger.
+  - A copy of a one-time verification credential is usable only while that credential is still
+    outstanding: once it is consumed or expires, its copy names nothing that will be accepted.
+  - An integration that read any of these columns through `GET /api/v1/data/...` no longer
+    receives them. Read share links through `/api/v1/share-links`, and OAuth clients and SSO
+    providers through their auth routes.
+- 149153c: Membership under the `auto` policy is settled when the user is created, per ADR-0093 D7.
+  
+  Clause-②: yes (widening)
+  
+  - **At creation.** A user created under `auto` is bound to the default organization at creation, and the first session of that creating request carries it. Membership is not decided again when the user signs in later.
+  - **One-time backfill.** The ADR-0093 D6 backfill of pre-existing users runs once per deployment, and once per process even if its record cannot be written. Its verdict is recorded in the `sys_migration` ledger with id `adr-0093-membership-backfill`. A pass on a deployment with no organization at all records nothing, and the backfill runs again once the default organization is created. If the ledger is missing or cannot be read, the pass does not run and logs a warning. If the record cannot be written, that is logged as an error. `OS_SKIP_MEMBERSHIP_BACKFILL=1` still disables the pass.
+  - **Default organization owner.** The platform admin is bound as owner of the default organization once, by the bootstrap that first decides it, in both the single-org and the walled organizations wiring. The decision is recorded in the same ledger with id `adr-0093-default-org-owner-bind` and held for the rest of the process even if the record cannot be written. After that, a missing default organization is recreated without binding anyone. To recover, an administrator re-adds members, including themselves, through member management. On a kernel without the ledger, the owner is bound only when the bootstrap creates the default organization. If the ledger exists but cannot be read, that call binds nobody and the next trigger decides.
+  - **Full scan.** The backfill reads the user and membership tables page by page with no row cap. A scan that cannot read either table in full binds nobody and records nothing. With organizations present but no default target, as in multi-organization deployments, the refusal is recorded.
+  - **Upgrade.** The first boot of an upgraded deployment runs the backfill once.
+  - **Unchanged.** `invite-only` binds nobody. Multi-organization deployments get no automatic binding. Users created through sign-up, admin create-user, import or SSO are bound under `auto` as before.
+  - **Narrowed.** A `sys_user` row inserted straight through the data engine never passes through user creation. Once the backfill is recorded, a later `app:seeded` pass leaves it unbound. That includes users written by a seed that finishes after its inline budget. Code that inserts users this way must write their membership itself; the showcase approval-demo personas now do.
+  - **`keysetWalk` (`@objectstack/types`).** The walk now decides that a page did not advance only when it gets back the same cursor key or the same page again. It no longer compares keys in JavaScript string order, which disagrees with database collations and could report a healthy walk as truncated.
+  - **New public surface of `@objectstack/plugin-auth` (additive).**
+    - `createEnsureDefaultOrganizationOnce` and `EnsureDefaultOrganizationOnceOptions` are the gated bootstrap both wirings call.
+    - `ObjectQLAdapterFactoryOptions` adds `onRecordCreated`, passed as the new optional second argument of `createObjectQLAdapterFactory`.
+    - `EnsureDefaultOrganizationOptions` gains `bindOnlyOnCreate` and `bindOwner`.
+    - `EnsureDefaultOrganizationResult.reason` gains `'owner_bind_decided'`.
+    - `BackfillMembershipsResult.reason` gains `'scan-incomplete'`.
+    - Code that switches exhaustively over those reasons sees one more member.
+  - **`backfillMemberships` (exported) changed behaviour.** Its `limit` option used to cap the rows scanned (default 5000); it is now the page size of a full scan with no cap. The function now needs a reader that can page by `id`; a reader that cannot gets `scan-incomplete` and binds nobody, where it used to bind. A direct call is not gated by the one-time ledger and decides membership again on every call; call it through the one-time pass instead.
+  - **Policy switch.** Once a pass under `invite-only` is recorded, switching the policy to `auto` later does not backfill the users who existed then; they get membership through invitation or member management.
+  - **Deprecated, not removed.** The ungated `ensureDefaultOrganization`, both plugin-auth's helper and the `@objectstack/organizations` wrapper, is `@deprecated` in favour of `createEnsureDefaultOrganizationOnce`.
+- 41a1135: fix(plugin-auth)!: implicit account linking on external sign-in requires the library's standard local-ownership condition; the platform identity provider keeps its documented exception; an unlink is honoured
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or config field is removed or renamed: the change narrows when an external sign-in links implicitly to an existing local user, and nothing an author wrote needs rewriting. The one config key it reads, account.accountLinking.requireLocalEmailVerified, keeps its name and gains an explicit opt-out meaning. -->
+  
+  **BREAKING for deployments that relied on external sign-in (OAuth, OIDC, SSO) linking implicitly to a local user whose email is not verified.**
+  
+  **What changed.**
+  
+  - An external sign-in links implicitly to an existing local user only when that local user's email is verified. Otherwise the sign-in is refused with `error=account_not_linked`, the same code better-auth's own refusal produces. No link is written and the local user stays unverified. A verified local user links as before.
+  - The platform's own identity provider (`objectstack-cloud`) keeps its documented exception and still links to an unverified local user, because it seeds the environment owner's row without a mailbox round-trip.
+  - After a user unlinks a provider, an implicit sign-in through it no longer links the identity again, for any provider. An explicit, signed-in link from account settings (`/link-social`) is still allowed and ends the refusal. If the unlink cannot be recorded, the unlink itself is refused and the provider stays linked. Deleting a user removes the user's unlink records.
+  - A deployment that passes `secondaryStorage` to the auth plugin now also keeps verification values in the database (`verification.storeInDatabase: true`). The cache still fronts them. This keeps the unlink records durable when the cache evicts entries. Deployments without `secondaryStorage` are unchanged.
+  - `account.accountLinking.requireLocalEmailVerified` now reads as follows. Unset (the default) means the rules above. `true` applies the strict check to every provider, including `objectstack-cloud`. `false` turns off only the local-verification check and keeps the unlink rule.
+  
+  **What to do after upgrading.**
+  
+  - A user refused this way signs in with their existing method, then links the provider from account settings, or verifies their email first.
+  - To let unverified local users link implicitly again, set `account.accountLinking.requireLocalEmailVerified: false`. Before you do, read the library's warning about account takeover.
+  - If you pass `secondaryStorage`: verification values written to the cache alone before the upgrade (password-reset links, one-time codes, magic links and email-verification links that were in flight at deploy time) can no longer be consumed afterwards. Users who hit this request a fresh link or code once.
+- 80f9f7e: fix(runtime, plugin-auth)!: two access guards refuse, instead of admitting, when their own read cannot answer
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime refusal narrowing on two access guards, not a metadata change: no spec key, export, option or stored shape is removed, renamed or re-shaped, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which requests the two guards admit: a request admitted only because the guard's own read faulted is now refused with 503, and every answer from a healthy read is unchanged. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers either guard and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention: a request that one of these two guards let through only because the guard's own read faulted is now refused. Nothing an author or caller writes changes shape.
+  
+  - **`@objectstack/runtime` — the dispatcher's environment-membership gate.** When its `sys_environment_member` read throws, or no ObjectQL engine resolves on the request's kernel, the request is refused with `503 SERVICE_UNAVAILABLE` — the `AuthzStoreUnavailableError` answer the identity step and the domain gates already give an authorization input they could not read. Before, the gate logged at debug level and let the request through. A member is still admitted, and a non-member is still refused with `403 PROJECT_MEMBERSHIP_REQUIRED`. An engine whose registry does not register `sys_environment_member` declares the gate inapplicable, and nothing is read.
+  - **`@objectstack/plugin-auth` — the organization slug guard** (`organizationHooks.beforeUpdateOrganization`). When its `sys_organization` or `sys_environment` read throws, the organization update is refused with `503 SERVICE_UNAVAILABLE`. Before, the hook ended without refusing and the slug changed. A slug change while an active environment references the organization is still refused (`403 FORBIDDEN`), and any other change is still allowed. An engine that does not register `sys_environment` — the open-source composition, where it is a cloud-provided object — declares the guard inapplicable from its registry (`getSchema`): nothing is read and the update proceeds as before. Without a data engine the guard does not apply either.
+  
+  What changes for you: nothing in what you write. A `503 SERVICE_UNAVAILABLE` on these doors is a store outage that used to be hidden behind an admitted request; it clears when the store answers again.
+
+### Patch Changes
+
+- 1c3a4d9: A TOTP enrollment names the deployment, not the auth library. `/two-factor/enable` and `/two-factor/get-totp-uri` answered an otpauth URI whose issuer and label prefix were `Better Auth`, so every authenticator app listed the account under that name. They now carry the deployment's app name: `OS_APP_NAME`, else the configured `appName`, else `ObjectStack`. An explicitly set `branding.workspace_name` setting still outranks it.
+  
+  Clause-②: no
+  
+  - **Existing enrollments keep working.** The issuer is a display label. The stored enrollment holds only the encrypted secret, the backup codes and the confirmation flag, and the codes depend only on the secret, digits and period. An authenticator app enrolled under `Better Auth` keeps producing codes that verify. It keeps its old label until the user re-enrolls.
+  - **`@objectstack/plugin-auth`.** `AuthManager` passes its app name to better-auth as `appName`. In better-auth 1.7.3 that key names only these two otpauth URIs. No cookie name or stored value derives from it.
+  - **`@objectstack/cli`.** `objectstack serve` now passes the deployment app name to `AuthPlugin`. It is resolved by the same chain the email service's template context uses: `OS_APP_NAME` > `config.email.appName` > `config.email.defaultTemplateContext.appName` > `config.appName` > `ObjectStack`. Before, `serve` built `AuthPlugin` with no app name, so auth answered `ObjectStack` whatever `OS_APP_NAME` said. Auth emails were affected too: under `serve` they now name the deployment the way every other email already did.
+  - The issuer is read when the auth instance is built. A `branding.workspace_name` change made after that reaches new enrollments at the next restart or auth-settings change, while auth emails pick it up on their next send.
+- a43d90a: Phone-number OTP with no deliverable SMS service now answers `400 SMS_SERVICE_REQUIRED` instead of a `500` with an empty body (#21793).
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/plugin-auth`.** `POST /api/v1/auth/phone-number/send-otp` on a deployment that turned phone sign-in on but has no SMS service that can deliver a code (none wired, or only the log transport in production) used to answer `500` with a `null` body: the send callback threw a plain `Error`, and better-auth's router turns anything but its own `APIError` into a bare 500. The login page had nothing to branch on and showed a generic failure. It now answers `400` with the body `{ "code": "SMS_SERVICE_REQUIRED", "message": "…" }`, a typed `APIError`, as the daily-quota branch of the same send already was. The message names the missing SMS delivery service and where an administrator configures it, and never carries the one-time code. `request-password-reset` is unchanged: it still answers `{ "status": true }` and sends nothing, so it reveals nothing about which numbers are registered.
+  - **`@objectstack/spec`.** `SMS_SERVICE_REQUIRED` is registered for `@objectstack/plugin-auth` in the ADR-0112 error-code ledger, beside its email sibling `EMAIL_SERVICE_REQUIRED`. `ErrorCode` (and so `ApiErrorSchema.code`) accepts one more value. Nothing that parsed before is refused now.
+  
+  **Action for clients.** A client that branched on the old `500` for this case should branch on `code === 'SMS_SERVICE_REQUIRED'` instead. The public config already advertises the capability as `features.phoneNumberOtp`, which stays `false` on such a deployment.
+- dcb11c2: A user created after the default organization is deleted and recreated in the same process is now bound to the organization that exists, not to the deleted one's id.
+  
+  Clause-②: no
+  
+  - **What was wrong.** The `tenancy` service's `defaultOrgId()` memoized the default organization id for the life of the process and never checked it again. The single-org bootstrap recreates a missing `slug='default'` organization on the next `sys_user` write, under a new id. Users created under the `auto` membership policy after that were bound to the deleted id. Membership is decided once, at creation (ADR-0093 D7), so nothing repaired them later.
+  - **What changed.** Every call checks the memoized id against `sys_organization` with one read by primary key. If the organization still exists, it is returned and nothing is re-resolved. If it is gone, the id is resolved again by the same rule that set it (the `slug='default'` organization first, else the only organization), so the replacement is the one a fresh boot would pick. If none exists yet, the answer is `null`, and the next call resolves again.
+  - **A read the store cannot answer** (a failed read, or a reply that is not a row list) keeps the memoized id. It is not treated as proof that the organization is gone, because that would bind the next user to no organization at all.
+  - **Who sees it.** Every reader of `defaultOrgId()` gets the check: the membership bind at user creation and its first-session settle, the self-registration grant, the admin create-user path, the membership backfill, the anonymous public form doors and the check on organization-scoped form writes, and the email-template bootstrap. Each call with a memoized id costs one primary-key read of `sys_organization`.
+  - No public export, option or accepted input changes. Walled postures still answer `null` without reading anything.
+- 131b937: Four producers that reached the data engine with no principal and no `isSystem` now carry the explicit system opt-in. Each is already authorized by its own door, so nothing it answers changes.
+  
+  Clause-②: no
+  
+  - **`@objectstack/plugin-auth` — the platform-admin OAuth client toggle route** (`POST /api/v1/auth/admin/oauth2/toggle-disabled`). Its `sys_oauth_application` read and write go through `withSystemContext`, the wrapper better-auth's adapter already writes those rows through. The platform-admin judge still runs first. The answers (`200`, `404 RESOURCE_NOT_FOUND`, the refusals) and the stored row are unchanged. One log line goes away: the engine's read-only `updated_at` warning on every toggle. The value it warned about was discarded before and the driver still stamps the column.
+  - **`@objectstack/plugin-auth` — `verifyScimBearerToken`.** The credential probe passes `isSystem: true` in the read's trailing options. It runs before any caller is known, and the digest equality is still all it matches. An unknown, inactive or expired bearer is still `null` (`401`).
+  - **`@objectstack/plugin-auth` — the organization slug guard** (`organizationHooks.beforeUpdateOrganization`). Its `sys_organization` and `sys_environment` reads go through `withSystemContext`. The organization id stays in the `where`. A slug change while an active environment references the organization is still refused (`FORBIDDEN`), and any other change is still allowed. The catches around both reads are unchanged: a read that throws still ends the hook without refusing.
+  - **`@objectstack/runtime` — the dispatcher's environment-membership gate.** The `sys_environment_member` read carries `isSystem: true` as its query context. The caller's user id stays in the `where`. A member still passes and a non-member is still refused with `403 PROJECT_MEMBERSHIP_REQUIRED`. The catch around the read is unchanged: a read that throws still lets the request through.
+  
+  Why: the security middleware hands a context with no principal and no `isSystem` straight through (ADR-0096). That hand-through is not an authorization. A caller that is the platform acting for itself says so explicitly. ⛔ No new elevation API, no door's authorization moves, and no accept set changes.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [48fa7a3]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1878ef9]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [49524f6]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [83b3d32]
+- Updated dependencies [a7ab047]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [a2aadab]
+- Updated dependencies [fe10172]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [045f764]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [a0176ef]
+- Updated dependencies [149153c]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [607463d]
+- Updated dependencies [cab6396]
+- Updated dependencies [e864db5]
+- Updated dependencies [7665c54]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [e6dc7a2]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [76fec88]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [f76c622]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [3c7785d]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/platform-objects@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/types@17.7.0
+  - @objectstack/rest@17.7.0
+  - @objectstack/service-messaging@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

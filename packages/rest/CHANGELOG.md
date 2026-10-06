@@ -1,5 +1,192 @@
 # @objectstack/rest
 
+## 17.7.0
+
+### Patch Changes
+
+- 49524f6: Withdrawing a public form from anonymous intake now takes effect on every intake door
+  
+  Clause-②: no
+  
+  When an administrator withdraws a public form, both anonymous form routes (`GET /forms/:slug` and `POST /forms/:slug/submit`) now answer `404 FORM_NOT_FOUND` and no record is created. Republishing the form restores both routes. If a service the routes need to resolve the form is registered but cannot be reached, both routes refuse the request instead of serving the form.
+- 83b3d32: Public forms on a walled tenancy posture: saving or publishing a view whose public form cannot take anonymous intake now tells the author why, on the response.
+  
+  Clause-②: yes (widening)
+  
+  On a walled posture (`group` or `isolated` in force), an open public form whose object is walled by an organization column cannot take an anonymous submission: the submission carries no organization, and an insert without one into a walled object is refused. The two anonymous form endpoints already answer such a form as a withdrawn one (`404 FORM_NOT_FOUND`), and the administrator's read of the view (`GET /meta/view/:name`) already states why in `_diagnostics.warnings`.
+  
+  - **`@objectstack/metadata-protocol`**: saving the view (`PUT /meta/view/:name`) or publishing its draft (`POST /meta/view/:name/publish`, and a package's batch publish) now answers success with one `warning` advisory per such form, under `advisories`, with rule `public-form-intake-unavailable`. It is located at the form's `sharing` (for example `views[0].formViews.contact.sharing`), its `message` is the same text the administrator's read states, and its `hint` is the remedy: if the object's rows belong to no organization, declare `tenancy: { enabled: false }` on it. The write is never refused. The advisory reads the posture in force from the `tenancy` service, which is what the anonymous endpoints read: a single-posture deployment, a deployment whose walled posture is degraded to `single`, a deployment with no tenancy service, and a form bound to a tenancy-disabled object get no advisory, and a draft save is not judged. The publish refusal for an unstamped platform schedule flow still reads the requested posture, as before.
+  - **`@objectstack/metadata-core`**: the intake-availability rule moved here from `@objectstack/rest` and is exported, so the anonymous endpoints, the administrator's read and the publish advisory read one answer: `anonymousFormIntakeUnavailability(object, posture, readObjectSchema)` (`null` when the form can take intake, otherwise the object, the posture and the wall column; it judges the object's effective schema, with the injected `organization_id`), `anonymousFormIntakePosture(tenancy)` (the posture in force, as a tenancy service reports it), `anonymousFormIntakeUnavailableMessage` and `anonymousFormIntakeUnavailableRemedy` (the reason and its remedy), `anonymousFormSharingPath` and `anonymousFormObjectName`, and the type `AnonymousFormIntakeUnavailable`.
+  - **`@objectstack/rest`**: the anonymous form endpoints and the administrator's read import that rule instead of holding their own copy. Their answers are unchanged.
+- a7ab047: Public forms on a walled tenancy posture: a form whose object is walled by an organization column is no longer offered to anonymous visitors. An anonymous submission carries no organization, and on a walled posture an insert into such an object without one is refused, so the form used to render and then answer `500 ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` on every submit. Both anonymous form endpoints (`GET /forms/:slug` and `POST /forms/:slug/submit`) now answer it exactly as they answer a withdrawn form (`404 FORM_NOT_FOUND`), so an anonymous caller learns nothing about the deployment's tenancy. The administrator's read of the form (`GET /meta/view/:name`) states why in `_diagnostics.warnings`, located at the form's `sharing`, with the remedy: if the object's rows belong to no organization, declare `tenancy: { enabled: false }` on it. Forms bound to tenancy-disabled objects, and single-posture deployments, are unchanged.
+  
+  Clause-②: no
+- e6dc7a2: The object-schema field mask (ADR-0106 D1) judges an action param that names another object's field through `objectOverride` against that object, not the one being served.
+  
+  Clause-②: yes (widening)
+  
+  **What a user saw.** A `delegated_admin` may invite members, and the invite door admits them, but `GET /meta/object/sys_user` served that principal no `invite_user` action. The action's `role` param is `{ field: 'role', objectOverride: 'sys_member' }`: it names `sys_member.role`. The mask read every param's `field` as a field of the served object, so a caller denied `sys_user.role` lost the whole action. A plain `member` lost it the same way. The member is now served the action too, and still not offered it: the action's `requiresMembershipReach` predicate excludes the member grade.
+  
+  **The rule.** A param whose `objectOverride` names another object reads that object's field. It is judged against the caller's readable fields on that object, and it is not a reference to the served object's fields. The action is still dropped when the caller cannot read the field there, and when that object's readable fields cannot be determined (no answer from the security service, a security service that throws, or an object that does not exist). Nothing about the other object is served on a guess. The rest of the param is still read against the served object: `visible`, an option's `visibleWhen`, `defaultValue`, and an explicit `name` that differs from `field`. A `name` that only repeats `field` is read as that field. With `defaultFromRow`, the param also reads `field` from the served object's row, so `field` is judged against the served object too. An exempt caller (platform admin, `isSystem`) is served the whole schema, as before.
+  
+  **The API (`@objectstack/metadata-core`), additive.**
+  
+  - `relateObjectSchemaMaskPosture(posture, ...documents)` completes a `project` posture for the documents it is about to mask. It reads the caller's readable fields on each other object their action params name through `objectOverride`. It runs after the fetch, because only the document names those objects. It returns every other posture, and any document with no such param, unchanged, and it never throws.
+  - The `project` member of `ObjectSchemaMaskPosture` gains two optional fields. `relate` asks the posture's question (same caller, same security service) about another object. `resolveObjectSchemaMaskPosture` sets it. `related` holds the answers. A `project` posture built without `related` gets no answers, so `applyObjectSchemaMask` drops every action with such a param.
+  - `applyObjectSchemaMask` folds each related read it withholds into the fingerprint, written as `object.field`. Two callers who are denied the same fields on the served object but differ on the other object get different validators. An unrestricted caller's ETag is unchanged.
+  - The shared contract fixture `FLS_CONTRACT_OBJECT` (`@objectstack/metadata-core/testing`) gains two actions whose params read `contact` fields through `objectOverride`. The contract's projection cases now require the readable one to be served and the denied one to be dropped. An exit that never relates its posture fails the contract by name.
+  
+  **Every exit relates its posture (`@objectstack/rest`, `@objectstack/runtime`).** These exits relate the posture after the fetch, before the projection: the shared item, layered and list chains, `RestServer`'s cached read and published read, and the runtime dispatcher's mask. The `/meta` diff route masks `fields` only and needs no relate step.
+  
+  **Measured on a showcase boot.** We read every object schema (78 objects, by-name read and list read) as five principals: a platform admin, an org owner, an admin, a `delegated_admin` and a `member`. Before and after this change, the only served action that moved is `sys_user.invite_user`, which is now served to the `delegated_admin` and the `member`. This repository has two authored params with `objectOverride`: `sys_user.invite_user`'s `role` and `sys_member.invite_user`'s `email` (on `sys_invitation`). The second was served to all five principals before and after.
+- 3c7785d: A public form's explicit intake withdrawal at any metadata layer now holds: layering can only narrow anonymous intake, never re-open it
+  
+  Clause-②: yes (widening)
+  
+  - **What counts as a withdrawal.** A withdrawal keeps the form's `publicLink` and sets `sharing.enabled: false` or `sharing.allowAnonymous: false`. Only an explicit `false` counts: a switch that is absent is not a withdrawal. Removing the `sharing` block, clearing the `publicLink`, or deleting the view at one layer is not a withdrawal either. A sharing that names no public link withdraws nothing.
+  - **Organization-scoped saves and publishes.** A `view` save or draft promotion in the organization the anonymous form doors read is refused with `403 NOT_OVERRIDABLE` if it would leave open a form that the environment-wide definition withdraws. This check judges by the stored row: the organization's body is compared with the env-wide body of the row it is keyed by (the active env-wide row, else the package's artifact), and also with the env-wide view list the way the doors read it (a container-shaped body is expanded the way the list read expands it). Inside the row, a withdrawn form matches by its place (`form`, the same `formViews` entry, or `config`) or by its public slug, and either match is enough. So a renamed `formViews` key, a `form.name`, a move to another place, a listViews collision rename in the expansion, and a new or re-cased slug are all judged as the same form. A form that differs from every withdrawn form in both place and slug, such as a sibling in the same container, stays independent. The check also covers an organization copy that was already open before the withdrawal, the next time it is saved. The message names the remedies: save the overlay withdrawn, or publish the form from its environment-wide definition. An organization-scoped save that keeps the form withdrawn is still accepted.
+  - **Anonymous form doors.** `GET /forms/:slug` and `POST /forms/:slug/submit` judge by the name of the view item they serve. Beneath the organization's read they read the env-wide view list, and they serve a form only when the env-wide item of the same name does not explicitly withdraw a form in the same place or with the same slug. A withdrawn form answers `404 FORM_NOT_FOUND` on both doors and creates no record. A form that is open at every layer is served as before. A form that only an organization carries is still served there. A different view that uses the same slug is a different form, and the two never close each other.
+  - **Package-shipped forms.** A package's form is part of the env-wide definition, not a separate layer beneath it. A package artifact that was parsed by the stack schema (strict `defineStack`, the default) carries the schema's default `enabled: false`, so a shipped form that keeps its link without switching `enabled` on is an explicit withdrawal (fail closed). An artifact that reached the runtime without that parse (`defineStack(..., { strict: false })` or a hand-built manifest) is judged as written: there a switch it omits is absent, which is not a withdrawal. The env-wide definition is the administrator's switch: an env-wide save may open a form the package ships closed.
+  - **Known limit: packages and names.** A withdrawal of a view name closes that name in every package. When two packages ship a view of the same name, one package's withdrawal also closes the other package's form of that name: it may over-close, never under-close. Per-package precision is tracked in #21934. A publish judges the draft it promotes under the same package key: with two packages holding a draft of the same view in one organization, each draft is judged on its own publish.
+  - **Known limit.** The doors match by served item name, and the save check runs only on an organization-scoped save or publish. An organization overlay that was stored before the env-wide withdrawal, or that a rollback or commit-revert restores, can still be served if it keeps the form open under a different key or place than the env-wide definition. Withdraw the form in that overlay to close it. Rollback and commit-revert restores are not gated by the save check.
+  - **Behaviour change.** Between 17.6.0 and this fix, an organization overlay that published a form the environment-wide (package) definition withdrew was honoured: the doors served the organization's copy. That behaviour never shipped in a release, and it is reversed on purpose. The environment-wide withdrawal now wins.
+  - **`@objectstack/metadata-core`** exports the shared judgement `anonymousFormIntakeWithdrawnIn` (a new, additive public export). Both the doors and the save path read it.
+- 6dd99b8: Public forms: every declared means of withdrawing a form from anonymous intake is now honoured by every anonymous form door. Which forms a `view` opens to anonymous intake is now decided by one rule, `anonymousFormIntakeCandidates` (new in `@objectstack/metadata-core`, alongside `anonymousFormIntakeSlugs`, `anonymousFormIntakeSlug` and `publicFormSlug`), read by both the anonymous form endpoints in `@objectstack/rest` and the organization-scoped `view` write check in `@objectstack/metadata-protocol`, so the two can no longer disagree. A form is served anonymously only when its `sharing` config declares public sharing as `SharingConfigSchema` defines it: `sharing.enabled: true`, `sharing.allowAnonymous: true` and a `sharing.publicLink` slug. `enabled` defaults to `false`, so a form that set only `allowAnonymous` and `publicLink` is no longer served on the anonymous endpoints (`404 FORM_NOT_FOUND`). Migration: add `enabled: true` to the form's `sharing` block (and to any stored overlay of it) to keep it public; see the public forms guide.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [c98a72d]
+- Updated dependencies [48fa7a3]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1878ef9]
+- Updated dependencies [0e10be6]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [83b3d32]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [a2aadab]
+- Updated dependencies [fe10172]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [a6a7547]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [045f764]
+- Updated dependencies [75ddcd1]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [a0176ef]
+- Updated dependencies [e1790fd]
+- Updated dependencies [149153c]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [607463d]
+- Updated dependencies [cab6396]
+- Updated dependencies [e864db5]
+- Updated dependencies [7665c54]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [e6dc7a2]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [f76c622]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [3c7785d]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/platform-objects@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/metadata-core@17.7.0
+  - @objectstack/types@17.7.0
+  - @objectstack/service-package@17.7.0
+  - @objectstack/observability@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

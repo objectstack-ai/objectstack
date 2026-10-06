@@ -1,5 +1,300 @@
 # @objectstack/service-settings
 
+## 17.7.0
+
+### Minor Changes
+
+- 222ecc2: feat(spec): `ICryptoProvider` gains a required `keyedDigest(plain): Promise<string>` member, and `LocalCryptoProvider` implements it (#21263)
+  
+  Clause-②: yes
+  
+  **BREAKING** for `ICryptoProvider` implementers: the new member is required, so a
+  provider that does not declare it stops compiling (`TS2420` on a class, `TS2741`
+  on an object literal), and the compiler names the missing member. Code that only
+  calls a provider is unaffected.
+  
+  `keyedDigest` is a digest of `plain` under the provider's server-held key, for a
+  value that is handed to a caller but must not let that caller check a guess about
+  the input offline. The contract requires three things of every implementation:
+  
+  - **Keyed.** The output cannot be computed without the provider's key. A provider
+    that holds no key material rejects; it never returns an unkeyed value.
+  - **Stable per key.** Under one key, equal input gives equal output in every
+    process and on every node that holds the key. Replacing the key changes every
+    output.
+  - **Not a substitute for `digest`.** `digest` keeps its contract and the stability
+    the audit trail relies on.
+  
+  The output is `hmac-sha256:` followed by the 64 lowercase hex characters of an
+  HMAC-SHA-256: 76 characters from `[0-9a-z:-]`, which travel unchanged in an HTTP
+  header, a query string and JSON, and never collide with the `sha256:` spelling of
+  an unkeyed content hash.
+  
+  `LocalCryptoProvider` computes it from the 32-byte data key it already resolves
+  (`OS_SECRET_KEY`, `OS_DEV_CRYPTO_KEY`, the persisted key file, or the ephemeral
+  test-mode key), through a MAC key derived from that data key, so the AES-GCM key
+  is never used as a MAC key. There is no new secret or environment variable to
+  configure. An instance constructed with an explicit key that is not 32 bytes holds
+  no usable key material, and its `keyedDigest` rejects with
+  `KeyedDigestKeyUnavailableError`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) `ICryptoProvider` is a TypeScript contract with no metadata surface: no Zod schema, no authorable key, no export renamed or removed and no stored row changes shape, so `objectstack migrate meta` has nothing to rewrite. The affected party is a provider implementer, and the compiler names the missing member at their declaration. -->
+- 57cc695: feat(spec): `CryptoContext` gains a required `scope` discriminant, and `LocalCryptoProvider` binds it into a delimiter-safe, versioned AAD (ADR-0128 D1–D3, #21326 stage 1)
+  
+  Clause-②: yes
+  
+  **BREAKING** for `ICryptoProvider` implementers and for every direct caller of
+  `encrypt`, `decrypt` or `rotateKey`: `CryptoContext.scope` is required, so a
+  context literal without it stops compiling (`TS2741`), and the compiler names the
+  missing member. `LocalCryptoProvider` also refuses such a context at runtime with
+  `CryptoContextScopeError`, for a caller the compiler never saw. Code that only
+  injects a provider is unaffected.
+  
+  `scope` is a member of the new closed set `CRYPTO_CONTEXT_SCOPES` (type
+  `CryptoContextScope`), one member per producer of `CryptoContext`:
+  `settings` (`SettingsService`), `object_secret_field` (the ObjectQL engine's
+  secret-field path) and `datasource_credential` (the datasource secret binder).
+  Each producer in this release passes its own member on every call. A new producer
+  adds its own member; it never borrows an existing one.
+  
+  What the contract now requires of every provider that binds AAD:
+  
+  - **Producer-discriminated (D1).** The AAD binds `(scope, namespace, key)`, so a
+    ciphertext sealed by one producer does not authenticate under another
+    producer's context, whatever the two `(namespace, key)` pairs are.
+  - **Delimiter-safe (D2).** Distinct triples produce distinct AAD bytes. An
+    unescaped join is not permitted.
+  - **Versioned.** A ciphertext records which AAD derivation sealed it, and is
+    opened only with that derivation. An unknown derivation fails closed. No second
+    derivation or scope is ever tried after a failure (D3).
+  
+  `LocalCryptoProvider` seals every new value under derivation version 2: a lead
+  byte that never occurs in UTF-8, a versioned label, then the scope, namespace and
+  key, each prefixed with its 4-byte length. The ciphertext carries a `v2:` marker.
+  A ciphertext with no marker is version 1, the bare base64 every earlier release
+  sealed, and it still opens with the older `(namespace, key)` binding. Existing
+  secrets therefore keep working with no action, and carry the older binding until
+  they are re-wrapped. Re-wrapping existing ciphertext at rest is stage 2 of
+  #21326. `rotateKey` already re-seals a version-1 handle under version 2. Any other
+  marker is refused with `UnknownCiphertextVersionError`.
+  
+  Operational note: a secret set or rotated by this release carries the `v2:`
+  marker, and an earlier release cannot open it. A rollback past this release needs
+  those values to be set again.
+  
+  `@objectstack/objectql` and `@objectstack/service-datasource` pass their own
+  scope on every seal and open. Their public surface is unchanged.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) `CryptoContext` and `ICryptoProvider` are TypeScript contracts with no metadata surface: no Zod schema, no authorable key, no export renamed or removed, and no stored row changes shape (`sys_secret.ciphertext` is provider-defined, and every existing ciphertext still opens), so `objectstack migrate meta` has nothing to rewrite. The affected party is a provider implementer or a direct caller, and the compiler names the missing member at their call site. -->
+- 0557c2f: feat(cli): `os secret rewrap` re-wraps version-1 `sys_secret` ciphertext under the current AAD derivation, each row under its holder's producer scope (ADR-0128 §4.2, #21326 stage 2)
+  
+  Clause-②: yes (widening)
+  
+  A ciphertext sealed before ADR-0128 D1–D3 carries the older binding over
+  `(namespace, key)` alone, and still opens in this release. `os secret rewrap` moves
+  the stored values to the current binding through `rotateKey`, the seam ADR-0128 §4
+  names. It is an operator command: a dry run by default, `--apply` to write, and
+  nothing on any boot or upgrade path invokes it. It has no HTTP surface.
+  
+  - **The scope comes from the holder.** `sys_secret` records no producer, and a
+    version-1 ciphertext binds no scope, so each row is re-sealed under the scope of
+    the producer whose holder references it: `settings` for a `sys_setting.value_enc`
+    handle, `object_secret_field` for a `secret:` ref on a business row,
+    `datasource_credential` for a `sys_secret:` `credentialsRef`. The holders come from
+    the same cross-producer reference union `os secret orphans` reads. A row nothing
+    references, a row whose holders belong to different producers, and every row while
+    a holder family could not be read are left as they are and counted, never re-sealed
+    under a guessed scope. `--apply` refuses an incomplete union and names the family.
+  - **Resumable.** A row already sealed under the current derivation is skipped as
+    done, so a stopped run finishes the rest when re-run and a finished run writes
+    nothing.
+  - **Safe against a live deployment.** Each row is written by one conditional update,
+    keyed on its id and the ciphertext the run read. A row a producer changed in
+    between is not overwritten, and a re-run picks it up. A driver with no
+    `updateMany` is refused before any row is opened.
+  - **Fails closed.** A row that does not open, or whose re-seal does not open to the
+    same plaintext under the same scope, is not written. The run finishes the rest and
+    exits 1. The check happens before the write.
+  - **Output is classes and counts only.** It never prints a plaintext, a ciphertext
+    or a row id.
+  
+  The command resolves its data key from `OS_SECRET_KEY`, `OS_DEV_CRYPTO_KEY` or the
+  persisted key file, in the strict posture: it never mints a key, and it hands the
+  settings service it boots the same provider so that service does not mint one
+  either. With no key it refuses before opening any row.
+  
+  `@objectstack/service-settings` publishes `ciphertextDerivationStatus` (and its
+  `CiphertextDerivationStatus` type). It is `LocalCryptoProvider`'s own reading of
+  which derivation sealed a stored ciphertext, read off its marker without opening it:
+  `current`, `superseded` or `unknown`. The re-wrap classifies rows with it rather than
+  restating the marker grammar.
+- 76fec88: Platform plumbing in these four packages now passes the explicit system opt-in (`{ isSystem: true }`) on its data-engine calls. Until now it reached the engine with no principal and no opt-in, and the security middleware let that through only because of its principal-less hand-off.
+  
+  Clause-②: yes (widening)
+  
+  - **Why `yes (widening)`:** two exported option types gain an optional `context` that an adapter must forward as-is. They are `SettingsEngine.find` / `.insert` (`@objectstack/service-settings`) and `SecretStoreEngineLike.delete` (`@objectstack/service-datasource`), so both packages take a `minor`. An implementation written against the old types still type-checks, and nothing accepted or refused at any door changes.
+  - **service-settings:** `SettingsService` reads and writes its own `sys_setting` rows under the opt-in: `loadRows`, plus the existence probe and insert in `upsertRow` (the update already used it). The `sys_setting_audit` writer does too.
+  - **service-datasource:** the `sys_metadata` helpers behind runtime datasources use the opt-in. They cover boot restore, cluster convergence, and persist and delete behind the admin doors. So do the `sys_secret` binder's `bind`, `unbind` and `resolve`.
+  - **plugin-webhooks:** the auto-enqueuer's subscription refresh and the redeliver guard's subscription lookup use the opt-in.
+  - **service-messaging:** two paths use the opt-in. One is the dispatcher's claim path: `claim`, `claimDigest` and the visibility-timeout reap on both outboxes. The other is the emit fan-out: the `sys_notification` row, the recipient's address and locale reads, the preference reads, the inbox row and the delivered receipt.
+  - **A user reference that names no user is still refused.** The engine skips its dangling-reference check for an `isSystem` write, so each producer that writes a user reference checks it first. The checked references are the `actor_id` of `sys_notification`, `sys_inbox_message` and `sys_setting_audit`, and the `user_id` of a user-scope `sys_setting` row. An unknown id is refused with the engine's own answer: `VALIDATION_FAILED`, one `reference_not_found` finding, and the same message. A write that names no user is unchanged.
+  - What each call reads and writes is otherwise unchanged. None of the gates the middleware runs before its hand-off applies to these objects.
+  - ⛔ No new export on any package entry, and no new elevation API.
+- 0d8ea5e: fix(service-settings)!: the Localization settings no longer offer `date_format`, `time_format`, `number_format` or `first_day_of_week`: dates, times, numbers and the week start follow the locale (#21958)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The four keys were settings values, not metadata: only the platform-shipped localizationSettingsManifest declared them (only platform code declares a settings manifest), SettingsManifestSchema and every other spec declaration are unchanged, and a value stored for one of them lives in sys_setting (runtime state, ADR-0007), not sys_metadata, and is kept as it is. Nothing read the keys in objectstack, objectui, cloud or hotcrm, so no consumer has anything to rewrite and objectstack migrate meta has nothing to reach. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a settings key (not already-registered); and the change is the value of an exported manifest constant, not an interface or a type alone (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING**: the Localization settings namespace (`localizationSettingsManifest`) drops four specifiers that nothing ever read: `date_format`, `time_format`, `number_format` and `first_day_of_week`, together with the Formats group they made up and their copy in the `en`, `zh-CN`, `ja-JP` and `es-ES` settings bundles. Setup → Localization no longer shows them, and `GET /api/settings/localization` no longer serves them. The maintainer ruled that dates, times, numbers and the first day of the week follow the user's locale (language and region), as Salesforce derives them from a Locale, and that the four separate settings retire rather than being implemented. `timezone`, `locale`, `default_country`, `currency` and `fiscal_year_start` are unchanged. The manifest's `version` is now 2, as the `SettingsManifest.version` contract asks when keys are removed.
+  
+  **A value a workspace already stored for one of the four is kept.** Measured at the REST surface:
+  
+  - The `sys_setting` row stays exactly as it was. No read, save or reset rewrites or deletes it.
+  - `GET /api/settings/localization` does not resolve it: the key is absent from both `manifest.specifiers` and `values`.
+  - A `PUT /api/settings/localization` that names one of the four is refused with `400 UNKNOWN_KEY` (`details.key` names it), the answer every undeclared key gets. The refusal covers the whole batch, so a live key sent beside it does not land either.
+  - A stored row never blocks saving the live keys, and the built-in `reset` action leaves it in place.
+  - In process, `settings.get('localization', 'date_format')` (or any of the four) now rejects with `SETTINGS_UNKNOWN_KEY`.
+  - An `OS_LOCALIZATION_DATE_FORMAT`, `OS_LOCALIZATION_TIME_FORMAT`, `OS_LOCALIZATION_NUMBER_FORMAT` or `OS_LOCALIZATION_FIRST_DAY_OF_WEEK` variable is no longer read. It set a value that nothing read before either.
+  
+  **What to do after upgrading.** Nothing has to be rewritten: the four keys never changed how anything rendered. There is no replacement key. `locale`, the workspace's language and region, is what decides how dates, times and numbers are written. The console's calendar and timeline do not yet take their first day of the week from it; that is objectui work, tracked and shipped separately.
+  
+  It ships as `minor` under the launch-window convention for narrowings.
+
+### Patch Changes
+
+- ba57588: The settings audit trail records a secret-valued setting (an encrypted key) with the crypto provider's keyed digest, never an unkeyed one (#21792).
+  
+  Clause-②: no
+  
+  - **Both ledgers.** The `sys_audit_log` `config_change` row (`valueDigest`, spelled `<encrypted:hmac-sha256:…>`) and the `sys_setting_audit` row (`new_hash`) now carry `ICryptoProvider.keyedDigest(value)` for a secret-valued setting. Before, they carried the unkeyed `digest` (`sha256:…`). This covers the `sys_secret` path and the legacy inline-adapter path.
+  - **Change detection still works.** The keyed digest is stable for equal values under one key, so the trail still shows whether a secret changed and whether it went back to an earlier value. Rotating the data key changes every later fingerprint. Rows written before this release keep their old `sha256:` value.
+  - **No keyed digest, no fingerprint.** When no crypto provider is wired (a host that builds `SettingsService` with only a `CryptoAdapter`), or the provider refuses a keyed digest, the audit rows record the write with no value fingerprint: `valueDigest` is `<encrypted>` and `new_hash` is null. The service logs this once per key at `warn`. The settings write itself is never refused for it. The adapter's own `digest` is no longer used for secrets.
+  - **Non-secret settings are unchanged.** They keep the adapter's `digest` of the canonical JSON.
+  - **Contract text (`@objectstack/spec`).** The `ICryptoProvider` docs for `digest` and `keyedDigest` now state the rule: a secret's audit fingerprint comes from `keyedDigest`, never from `digest`, and with no keyed digest the trail records none. No type, export or schema changes.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [48fa7a3]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1878ef9]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [a2aadab]
+- Updated dependencies [fe10172]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [045f764]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [a0176ef]
+- Updated dependencies [149153c]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [607463d]
+- Updated dependencies [cab6396]
+- Updated dependencies [e864db5]
+- Updated dependencies [7665c54]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [f76c622]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/platform-objects@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/types@17.7.0
+
 ## 17.6.0
 
 ### Patch Changes

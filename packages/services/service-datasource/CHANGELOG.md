@@ -1,5 +1,314 @@
 # @objectstack/service-external-datasource
 
+## 17.7.0
+
+### Minor Changes
+
+- 07e933b: fix(service-datasource)!: "Import as Object" saves the imported federated object through the metadata door's own save, so it is durable and reads from its remote table; federated validation stops reporting the platform's injected anchors as missing remote columns (#21788)
+  
+  **BREAKING** — the import route now answers `400` to some re-imports that used to answer `201`.
+  
+  Clause-②: no (narrowing)
+  
+  - **The import was neither durable nor mapped.** `POST /api/v1/datasources/:name/external/tables/:remote/import` held the generated object in the metadata service's memory only. No `sys_metadata` row was written, the object's storage was not synced, and the driver was never told the object's remote table. An object imported under a name that differs from its remote table answered `201` and then `500 DATABASE_ERROR` (`no such table: <name>`) on its first read. Every import was gone after a restart (`404 OBJECT_NOT_FOUND`).
+  - **It now saves like `PUT /api/v1/meta/object/:name`.** The import calls `saveMetaItem` on the `protocol` service with the request that door sends for an `object`. The object becomes a `sys_metadata` row the next boot binds, it is written through to the engine registry, and it is mapped onto its `external.remoteName` table. An import under a different name and one under the remote table's own name both serve the remote rows, before and after a restart. The save door is looked up when an import runs. A deployment with no metadata save door still refuses the import with "requires a writable metadata store", before any remote introspection.
+  - **What narrows.** The metadata door's refusals now apply to the import, and the route relays each one as `400 EXTERNAL_IMPORT_ERROR` with the door's message. A re-import that would drop a field the stored object already has, or change its type, is refused as a destructive change. It used to answer `201` with an in-memory overwrite that a restart discarded. An import whose `name` collides with an object the metadata door will not overwrite is refused the same way. The route's request and response shapes are unchanged.
+  - **If a re-import or a name is refused:** import the table again under a new `name`. To change an object you already imported, save its new definition through `PUT /api/v1/meta/object/:name?force=true`, which accepts the destructive change on purpose. Re-submitting the import with `?force=true` does not help, because the import route reads no `force`.
+  - **Federated validation compares only what the remote owns.** A stored federated object is read back with the anchors the platform injects without storage (`organization_id`, `created_by`, `updated_by`, `owner_id`, `owning_business_unit_id`). The boot validation gate and `POST …/external/validate` reported each of them as a `missing_column` at error severity. So once a datasource with the default `external.validation.onMismatch: 'fail'` held such an object, it refused to boot. Validation now skips the columns `unprovisionedInjectedColumns` names. This closes the boot abort for objects saved through `PUT /api/v1/meta/object/:name`, not only for imports. A declared column the remote lacks is still a `missing_column` at error severity, and `fail` still aborts on it.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a runtime refusal on one REST route: the external-table import now relays the metadata door's own save refusals (a destructive re-import, a name that door will not overwrite) as 400 where it answered 201 with an in-memory write no restart kept. No authorable metadata key, spelling, export, config field or stored shape moves: no schema changes, no sys_metadata row is read or rewritten, and which table or name an operator meant to re-import is not something a ledger entry can rewrite. The validation half refuses less, not more. The other categories are closed on facts: @objectstack/service-datasource publishes (not unpublished); no ADR-0087 id covers this route (not already-registered); and the change is a runtime verdict, not a declaration (not runtime-interface-only or type-surface-only). -->
+- bc7747c: fix(service-datasource)!: on `objectstack start`, external validation and the boot gate compare every federated object
+  
+  **BREAKING (narrowing)** — on `objectstack start` a deployment with real schema drift on a
+  federated object can now refuse to boot, as its `external.validation.onMismatch` setting
+  declares.
+  
+  The federation service (`ExternalDatasourceServicePlugin`) read the `metadata` service once,
+  in its `init()`, and kept the answer. `objectstack start` composes no metadata plugin: its
+  `metadata` service is the kernel's in-memory fallback, which the kernel registers after every
+  plugin's `init()`, just before the start phase. So on `start` the federation service kept "no
+  metadata service" for the life of the process, and every read behind it answered as if the
+  deployment declared nothing. It now asks for the `metadata` service each time it reads it, so
+  `start` sees what `objectstack dev` always saw.
+  
+  | on `objectstack start` | before | now |
+  | --- | --- | --- |
+  | the boot gate (ADR-0015 §5.2) | logged "all federated objects match their remote schema" with `objects: 0`, having compared nothing, so no `onMismatch` policy ever applied | compares every federated object and applies each datasource's `onMismatch` to every measured mismatch |
+  | `POST /api/v1/datasources/:name/external/validate` | `ok: true` with no rows | one row per federated object bound to the datasource, with its diffs |
+  | `POST /api/v1/datasources/:name/external/refresh-catalog` | answered the snapshot, never stored it | also stores it as the datasource's `external_catalog` record |
+  | `GET /api/v1/datasources/:name/external/tables` | ignored the datasource's `external.allowedSchemas` | leaves out a table whose schema is outside them |
+  | draft and import names | never resolved a package namespace: drafts were unprefixed, and an import's explicit `name` was never held to the ADR-0028 prefix rule | resolve the namespace of the datasource's package when the datasource carries package provenance; an import whose explicit `name` lacks that prefix is refused `400 EXTERNAL_IMPORT_ERROR` |
+  
+  **What to do if a `start` deployment now refuses to boot.** Under `onMismatch: 'fail'` (the
+  default) the boot stops with `ExternalSchemaMismatchError`, naming the object, the datasource
+  and each drifted column. Either fix the drift (align the object's fields, its
+  `external.columnMap` or `external.ignoreColumns`, or the remote table) or set
+  `external.validation.onMismatch: 'warn'` on that datasource, which boots and logs the drift
+  instead. To see the drift before deploying, call
+  `POST /api/v1/datasources/:name/external/validate` on `objectstack dev`, which already
+  compared. A remote that cannot be reached still never stops the boot. An import refused for
+  its name takes a `name` carrying the datasource package's namespace prefix.
+  
+  **Unchanged.** `objectstack dev`, and every composition that registers a metadata plugin before
+  the federation service, answers exactly as before: measured on the showcase, every federation
+  door and the boot gate gave the same answers before and after. What validation judges, what
+  each `onMismatch` value does, and the boot gate's skip for a datasource that sets
+  `external.validation.checkOnBoot: false` are unchanged.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, spelling, export, config field or stored shape is removed or renamed, and no stored row is read or rewritten: on a composition with no metadata plugin the federation service now reads the metadata service it always declared it reads, so the boot gate and the federation doors judge the objects and datasources the deployment already declares. The handling above is an operator choice between two settings that already exist, not a FROM to TO mapping that objectstack migrate meta could apply. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers when a plugin resolves a service (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+- 76fec88: Platform plumbing in these four packages now passes the explicit system opt-in (`{ isSystem: true }`) on its data-engine calls. Until now it reached the engine with no principal and no opt-in, and the security middleware let that through only because of its principal-less hand-off.
+  
+  Clause-②: yes (widening)
+  
+  - **Why `yes (widening)`:** two exported option types gain an optional `context` that an adapter must forward as-is. They are `SettingsEngine.find` / `.insert` (`@objectstack/service-settings`) and `SecretStoreEngineLike.delete` (`@objectstack/service-datasource`), so both packages take a `minor`. An implementation written against the old types still type-checks, and nothing accepted or refused at any door changes.
+  - **service-settings:** `SettingsService` reads and writes its own `sys_setting` rows under the opt-in: `loadRows`, plus the existence probe and insert in `upsertRow` (the update already used it). The `sys_setting_audit` writer does too.
+  - **service-datasource:** the `sys_metadata` helpers behind runtime datasources use the opt-in. They cover boot restore, cluster convergence, and persist and delete behind the admin doors. So do the `sys_secret` binder's `bind`, `unbind` and `resolve`.
+  - **plugin-webhooks:** the auto-enqueuer's subscription refresh and the redeliver guard's subscription lookup use the opt-in.
+  - **service-messaging:** two paths use the opt-in. One is the dispatcher's claim path: `claim`, `claimDigest` and the visibility-timeout reap on both outboxes. The other is the emit fan-out: the `sys_notification` row, the recipient's address and locale reads, the preference reads, the inbox row and the delivered receipt.
+  - **A user reference that names no user is still refused.** The engine skips its dangling-reference check for an `isSystem` write, so each producer that writes a user reference checks it first. The checked references are the `actor_id` of `sys_notification`, `sys_inbox_message` and `sys_setting_audit`, and the `user_id` of a user-scope `sys_setting` row. An unknown id is refused with the engine's own answer: `VALIDATION_FAILED`, one `reference_not_found` finding, and the same message. A write that names no user is unchanged.
+  - What each call reads and writes is otherwise unchanged. None of the gates the middleware runs before its hand-off applies to these objects.
+  - ⛔ No new export on any package entry, and no new elevation API.
+- 753e7a1: fix(service-datasource,runtime,metadata-protocol)!: a stored datasource row no longer displaces a code-defined datasource at boot, and the metadata door refuses edits to the host's `default` (#21922, #21944)
+  
+  Clause-②: no (narrowing)
+  
+  A code-defined datasource (one the installed artifact declares in `*.datasource.ts`, or the host's own `default`) is read-only: `DatasourceSchema.origin` publishes it as "GitOps-owned, read-only in the UI", and the datasource-admin service states "code wins on collision". The boot restore broke both. It registered every stored `datasource` row in `sys_metadata` over whatever the runtime had registered from code, so after a restart a row left under a code-defined name was served by the admin door, editable there when it carried `origin: 'runtime'`, and handed to pool rehydration. A stored `default` row opened a second live pool named `default` on the row's own connection. The metadata door also still saved edits to `default`, the one code-defined datasource no package declares.
+  
+  The runtime now keeps one in-memory set of the datasource names it registers from code, on the kernel service `code-datasource-names`: `AppPlugin` adds the datasources the artifact declares and `DefaultDatasourcePlugin` adds `default`, both in `init()`, so the set is complete before any `start()` runs. The boot restore skips a stored row under a name in that set, and the metadata door's code-datasource check reads the same set.
+  
+  **BREAKING — what moves for consumers.**
+  
+  - After a restart over a stored row under a code-defined datasource's name, `GET /api/v1/datasources` serves the code definition (`origin: code`) instead of the row, and `PATCH /api/v1/datasources/:name` answers `400 DATASOURCE_ADMIN_ERROR` ("… is code-defined and cannot be edited at runtime.") where it answered 200 for a row that carried `origin: 'runtime'`.
+  - No live pool is opened from such a row at boot.
+  - `PUT /api/v1/meta/datasource/default` answered 200 and now answers `403 NOT_OVERRIDABLE`. `DELETE /api/v1/meta/datasource/default` with no stored row answered 200 and now answers the same `403`. The refusal's remedy names the host's database configuration (the database URL the server starts with), which is what defines `default`; every other code-defined datasource's refusal still names its `*.datasource.ts` source.
+  - The skipped row is kept, and the boot logs one warning naming it.
+  
+  **Remedy.**
+  
+  - To change a code-defined datasource, change its code definition and redeploy: its `*.datasource.ts` source, or the host's database configuration for `default`.
+  - A row the boot warning names is removable, and removing it is the repair: `DELETE /api/v1/meta/datasource/:name` answers 200 and deletes it.
+  
+  **Unchanged.** A runtime datasource with no code twin restores, saves and deletes through both doors as before. A host that composes neither `AppPlugin` nor `DefaultDatasourcePlugin` registers no set, and its stored rows restore as before. While a stored row exists under a code-defined name, `GET /api/v1/meta/datasource/:name` still serves that row (the metadata door reads its stored overlay first); after the `DELETE` above it serves the code definition, in the same boot.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a boot-restore verdict and a metadata-door verdict on datasources the host registers from code, which the published contract already calls read-only: no authorable key, spelling, export or stored shape moves, and no stored row is rewritten, converted or dropped. A row an earlier runtime write left under a code-defined name stays in sys_metadata and is removed by the operator with the metadata door's own DELETE; which stored edit an operator meant to keep is not something a ledger entry can rewrite. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id covers this restore or this door (not already-registered); and the change is a verdict, not a declaration (not runtime-interface-only or type-surface-only). -->
+
+### Patch Changes
+
+- f9bcd08: Datasource and approval refusals, warnings, field help and generated-draft comments no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  Some strings these two packages show to operators, administrators and flow authors pointed at an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - `@objectstack/service-datasource`: the credential-migration refusal says an unbindable key is either an alias spelling from before inline credentials were refused at publish, which no connection builder reads, or turso's `encryptionKey`, which has no secret slot of its own because the one slot carries the `authToken`; the remote-primary-key comment in a generated object draft says a driver's introspection can report only the first column of a composite key, so the list is a lower bound.
+  - `@objectstack/plugin-approvals`: the `queue` approver warning says the platform has no ownership queue to expand the type from, that the type is no longer offered for authoring, and to route the step to a team, department or position instead; the live-record warnings say approvers are being resolved against the trigger snapshot instead of the live record they are normally resolved from; the recall refusal's log line names the admin override; the `sys_approval_action` `via_override` help (in every shipped locale) says a platform or organization admin may act on any pending request, so that one nobody in its slate can decide never stays stuck; the cross-organization team, team-member and manager warnings, the expanded-to-nobody warning, the revise-window refusal, the `attachments` help and the `sys_approval_delegation` description drop their citations.
+  
+  Text only: no status, error code, field, route or control flow moves. A client or log filter that matches the old text (for example a tracker-number suffix) needs the new spelling.
+- 57cc695: feat(spec): `CryptoContext` gains a required `scope` discriminant, and `LocalCryptoProvider` binds it into a delimiter-safe, versioned AAD (ADR-0128 D1–D3, #21326 stage 1)
+  
+  Clause-②: yes
+  
+  **BREAKING** for `ICryptoProvider` implementers and for every direct caller of
+  `encrypt`, `decrypt` or `rotateKey`: `CryptoContext.scope` is required, so a
+  context literal without it stops compiling (`TS2741`), and the compiler names the
+  missing member. `LocalCryptoProvider` also refuses such a context at runtime with
+  `CryptoContextScopeError`, for a caller the compiler never saw. Code that only
+  injects a provider is unaffected.
+  
+  `scope` is a member of the new closed set `CRYPTO_CONTEXT_SCOPES` (type
+  `CryptoContextScope`), one member per producer of `CryptoContext`:
+  `settings` (`SettingsService`), `object_secret_field` (the ObjectQL engine's
+  secret-field path) and `datasource_credential` (the datasource secret binder).
+  Each producer in this release passes its own member on every call. A new producer
+  adds its own member; it never borrows an existing one.
+  
+  What the contract now requires of every provider that binds AAD:
+  
+  - **Producer-discriminated (D1).** The AAD binds `(scope, namespace, key)`, so a
+    ciphertext sealed by one producer does not authenticate under another
+    producer's context, whatever the two `(namespace, key)` pairs are.
+  - **Delimiter-safe (D2).** Distinct triples produce distinct AAD bytes. An
+    unescaped join is not permitted.
+  - **Versioned.** A ciphertext records which AAD derivation sealed it, and is
+    opened only with that derivation. An unknown derivation fails closed. No second
+    derivation or scope is ever tried after a failure (D3).
+  
+  `LocalCryptoProvider` seals every new value under derivation version 2: a lead
+  byte that never occurs in UTF-8, a versioned label, then the scope, namespace and
+  key, each prefixed with its 4-byte length. The ciphertext carries a `v2:` marker.
+  A ciphertext with no marker is version 1, the bare base64 every earlier release
+  sealed, and it still opens with the older `(namespace, key)` binding. Existing
+  secrets therefore keep working with no action, and carry the older binding until
+  they are re-wrapped. Re-wrapping existing ciphertext at rest is stage 2 of
+  #21326. `rotateKey` already re-seals a version-1 handle under version 2. Any other
+  marker is refused with `UnknownCiphertextVersionError`.
+  
+  Operational note: a secret set or rotated by this release carries the `v2:`
+  marker, and an earlier release cannot open it. A rollback past this release needs
+  those values to be set again.
+  
+  `@objectstack/objectql` and `@objectstack/service-datasource` pass their own
+  scope on every seal and open. Their public surface is unchanged.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) `CryptoContext` and `ICryptoProvider` are TypeScript contracts with no metadata surface: no Zod schema, no authorable key, no export renamed or removed, and no stored row changes shape (`sys_secret.ciphertext` is provider-defined, and every existing ciphertext still opens), so `objectstack migrate meta` has nothing to rewrite. The affected party is a provider implementer or a direct caller, and the compiler names the missing member at their call site. -->
+- e864db5: fix(service-datasource): a destructive re-import's refusal names the remedies that work from the import route, instead of a `?force=true` that route never reads (#21841)
+  
+  Clause-②: yes (widening)
+  
+  - **What was wrong.** "Import as Object" (`POST /api/v1/datasources/:name/external/tables/:remote/import`) saves through the metadata door's own `saveMetaItem`. A re-import that would drop or retype a field the stored object still carries is refused by that save's destructive-change gate, and the import route relays the refusal as `400 EXTERNAL_IMPORT_ERROR`. The refusal ended `re-submit with ?force=true to proceed.` The import route reads no `force`, so a caller who did exactly that got the identical refusal back.
+  - **What the refusal says now.** The import states its own write face, and the refusal ends: this import cannot be forced, because the external-table import route accepts no `force`. Import the table under a new `name`, or save the changed definition through `PUT /api/v1/meta/object/:name?force=true`, which accepts the destructive change on purpose. Both remedies are measured on the showcase: each one answers `201` or `200` where the re-import answered `400`. The same words appear in this package's earlier changeset for the import.
+  - **What widens.** `SaveMetaItemRequestSchema.writeFace` (`@objectstack/spec`) and `saveMetaItem`'s `writeFace` parameter (`@objectstack/metadata-protocol`) gain one member, `'external-import'`. The member is stated by the server. No door reads it from a request body, and the import's own options cannot carry it, or a `force`, into the save. Nothing accepted today is refused.
+  - **What does not change.** The refusal itself stays: a destructive re-import is still `400 EXTERNAL_IMPORT_ERROR`, and the stored definition does not move. The import route gains no `force`. Acknowledging a destructive change stays on the metadata door. The other faces' wording is unchanged. A `422 INVALID_METADATA` relayed by the import keeps its full findings in the message, because the import route's envelope carries no `issues`.
+- 25eb7de: fix(service-datasource): `POST /api/v1/datasources/:name/external/validate` sees a federated object saved at runtime, with no restart (#21842)
+  
+  Clause-②: no
+  
+  - **What was wrong.** The federation service read its objects from the `metadata` service. That service holds a copy of the engine's object registry taken once at boot. `PUT /api/v1/meta/object/:name`, and the external-table import that saves through it, write `sys_metadata` and the engine registry, but never that copy. So after a federated object was saved at runtime, validate answered the code-defined objects only, and listed the saved one after a restart. An object re-saved at runtime was judged on its definition as it stood at boot.
+  - **What it reads now.** `ExternalDatasourceServicePlugin` reads objects (`listObjects` and `getObject`) from the engine's object registry on the `objectql` service, which is the registry the save writes through to. The registry is looked up when validation runs, not when the plugin starts. A saved or imported object is listed and judged on what was saved, the moment the save answers.
+  - **What does not move.** The comparison is unchanged: the same federation predicate, the same column and type checks, and datasource definitions read from the same place. On `objectstack dev` the boot validation gate sweeps the same objects with the same verdicts as before. No route's request or response shape changes, and no export is added.
+- faf8dce: An import over a code-defined datasource is held to the namespace of the package that declares it (ADR-0028), and the draft door answers the prefixed name (#21889).
+  
+  Clause-②: no
+  
+  - **Before.** `POST /api/v1/datasources/:name/external/tables/:remote/import` with an explicit `name` that carried no namespace prefix answered `201` and saved an unprefixed federated object, and `POST …/external/tables/:remote/draft` answered the bare remote table name with a `TODO(namespace)` note. Measured on the showcase's `showcase_external` under `objectstack dev` and `objectstack start`.
+  - **`@objectstack/runtime`.** `AppPlugin` registers each code-defined datasource through `applyProtection` with the id and version of the package body that declares it, so the item carries `_packageId`, `_packageVersion` and `_provenance: 'package'`. On an ADR-0130 `packages[]` artifact each datasource takes its own body's id, never the artifact's top-level manifest id. A top-level datasource that no body declares keeps its registration under the artifact's own id, and a warning names it.
+  - **`@objectstack/service-datasource`.** The federation service reads the datasource's package record from the engine registry (`registry.getPackage` on the `objectql` service), the store the runtime publish gate reads for the same check. It used to ask the `metadata` service, which holds no package records in any composition, so no datasource resolved a namespace. The package id still comes only from the stamped `_packageId`.
+  - **What a caller sees now.** On a datasource whose package declares `manifest.namespace`, an unprefixed import `name` answers `400 EXTERNAL_IMPORT_ERROR` with ADR-0028's message, which names the prefixed name to use. An import with no `name` override saves the prefixed name the draft derives (for example `showcase_customers` instead of `customers`). `GET /api/v1/meta/datasource` lists the three provenance keys on a code-defined datasource; all three are declared on `DatasourceSchema`. The datasource admin list (`GET /api/v1/datasources`) is unchanged, and the admin door still refuses to edit or remove a code-defined datasource.
+  - **Unchanged.** A datasource that carries no `_packageId` (the host `default` is one) and a package that declares no namespace resolve no namespace, so their imports and drafts answer as before.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [db0cf22]
+- Updated dependencies [f97660c]
+- Updated dependencies [13a24ec]
+- Updated dependencies [fd5a1cd]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [30af17e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [35dfb81]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [440cd32]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [5d095a0]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [a2aadab]
+- Updated dependencies [fe10172]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [da40a5f]
+- Updated dependencies [045f764]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [a0176ef]
+- Updated dependencies [149153c]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [cab6396]
+- Updated dependencies [e864db5]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/driver-memory@17.7.0
+  - @objectstack/driver-mongodb@17.7.0
+  - @objectstack/driver-sql@17.7.0
+  - @objectstack/driver-turso@17.7.0
+  - @objectstack/types@17.7.0
+  - @objectstack/driver-sqlite-wasm@17.7.0
+
 ## 17.6.0
 
 ### Patch Changes
