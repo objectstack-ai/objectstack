@@ -30,6 +30,10 @@
 // mounts `ExternalDatasourceServicePlugin` itself, as `objectstack dev` and
 // `serve` do. The working directory is a temporary one because the showcase's
 // external datasource and its fixture both name a cwd-relative SQLite file.
+//
+// [#21889] Both imported names carry the showcase's ADR-0028 prefix:
+// `showcase_external` is declared by the showcase package (namespace
+// `showcase`), so an import over it is held to that namespace.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack, { onEnable } from '@objectstack/example-showcase';
@@ -43,9 +47,9 @@ import { join } from 'node:path';
 const DATASOURCE = 'showcase_external';
 const REMOTE = 'customers';
 /** The object the first import creates and the re-import would shrink. */
-const NAME = 'dogfood_ext_cust_21841';
+const NAME = 'showcase_dogfood_ext_cust_21841';
 /** The remedy's "new `name`". */
-const NEW_NAME = 'dogfood_ext_cust_21841_v2';
+const NEW_NAME = 'showcase_dogfood_ext_cust_21841_v2';
 /** The column the re-import leaves out, so the stored object would lose its field. */
 const DROPPED = 'region';
 /** The re-import's options: the same table, one column fewer. */

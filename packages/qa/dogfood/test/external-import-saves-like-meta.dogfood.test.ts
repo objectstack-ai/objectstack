@@ -31,6 +31,13 @@
 // `serve` do. The working directory is a temporary one because the showcase's
 // external datasource and its fixture both name a cwd-relative SQLite file:
 // this file's remote database is its own, not one a parallel file writes.
+//
+// [#21889] Both imported names carry the showcase's ADR-0028 prefix:
+// `showcase_external` is declared by the showcase package (namespace
+// `showcase`), so an import over it is held to that namespace. That retires the
+// shape this file's control first pinned, an object named exactly as its
+// remote table (`orders`), which the namespace now refuses; the control imports
+// with no `name` override instead, under the prefixed name the draft derives.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack, { onEnable } from '@objectstack/example-showcase';
@@ -43,9 +50,9 @@ import { join } from 'node:path';
 /** The showcase's external datasource and its two remote tables (`external-fixture.ts`). */
 const DATASOURCE = 'showcase_external';
 /** Imported under a name that differs from its remote table — the defect's shape. */
-const RENAMED = 'dogfood_ext_cust_21788';
-/** Imported under the remote table's own name — the shape that hid the defect. */
-const SAME_NAME = 'orders';
+const RENAMED = 'showcase_dogfood_ext_cust_21788';
+/** Imported with no `name` override: the draft's name, the remote table's prefixed with the namespace. */
+const DERIVED = 'showcase_orders';
 
 const importPath = (remote: string) => `/datasources/${DATASOURCE}/external/tables/${remote}/import`;
 
@@ -101,11 +108,12 @@ describe('Import as Object persists like the metadata door (showcase, cold boot)
     );
   });
 
-  it('control: an object imported under its remote table\'s own name serves the remote rows', async () => {
-    const imported = await call('POST', importPath('orders'), { name: SAME_NAME });
+  it('control: an object imported with no name override is saved under the prefixed name and serves the remote rows', async () => {
+    const imported = await call('POST', importPath('orders'), {});
     expect(imported.status, JSON.stringify(imported.json)).toBe(201);
+    expect((imported.json as { data?: { object?: { name?: string } } }).data?.object?.name).toBe(DERIVED);
 
-    const read = await call('GET', `/data/${SAME_NAME}`);
+    const read = await call('GET', `/data/${DERIVED}`);
     expect(read.status, JSON.stringify(read.json)).toBe(200);
     expect(recordsOf(read.json)).toHaveLength(4);
   });
@@ -120,8 +128,8 @@ describe('Import as Object persists like the metadata door (showcase, cold boot)
     expect.soft(renamed.status, JSON.stringify(renamed.json)).toBe(200);
     expect.soft(recordsOf(renamed.json)).toHaveLength(3);
 
-    const sameName = await call('GET', `/data/${SAME_NAME}`);
-    expect.soft(sameName.status, JSON.stringify(sameName.json)).toBe(200);
-    expect.soft(recordsOf(sameName.json)).toHaveLength(4);
+    const derived = await call('GET', `/data/${DERIVED}`);
+    expect.soft(derived.status, JSON.stringify(derived.json)).toBe(200);
+    expect.soft(recordsOf(derived.json)).toHaveLength(4);
   }, 180_000);
 });

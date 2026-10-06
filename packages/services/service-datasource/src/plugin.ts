@@ -24,7 +24,7 @@ import {
 // the first time instead of silently dead.
 
 /**
- * The `'metadata'` service members this plugin reads: datasource and package
+ * The `'metadata'` service members this plugin reads: datasource
  * definitions, and the catalog write. Objects are not read here — see
  * `objectRegistry` in {@link ExternalDatasourceServicePlugin.init}.
  */
@@ -75,7 +75,7 @@ export class ExternalDatasourceServicePlugin implements Plugin {
     const engine = safeGetService<IDataEngine>(ctx, 'data');
 
     /**
-     * [#21876] The `'metadata'` service: every datasource and package read
+     * [#21876] The `'metadata'` service: every datasource read
      * below, and the catalog write, go through it. Objects are read from the
      * engine's registry instead ([#21842], `objectRegistry` below).
      *
@@ -218,13 +218,22 @@ export class ExternalDatasourceServicePlugin implements Plugin {
        * Both links are read, not assumed:
        *  - `_packageId` is stamped onto every registered metadata item that has
        *    package coords (`applyProtection`, `@objectstack/spec/shared`), by
-       *    both load paths — the artifact loader and `registry.registerItem`.
+       *    every load path — the artifact loader, `registry.registerItem`, and
+       *    `AppPlugin`'s registration of a code-defined datasource, which
+       *    stamps the package body that declares it ([#21889]).
        *    `'sys_metadata'` is the rehydration sentinel, not a real package, so
        *    it is excluded exactly as the registry's own `isCodeArtifactBody`
        *    excludes it.
        *  - the package record is what `installPackage` stored under
-       *    `manifest.id`, i.e. the same `{ manifest }` shape the runtime publish
-       *    gate reads for this identical check.
+       *    `manifest.id` in the engine registry (`registry.getPackage` on the
+       *    `'objectql'` service), the store the runtime publish gate reads for
+       *    this identical check (`publishPackageDrafts`,
+       *    `@objectstack/metadata-protocol`). [#21889] It used to be asked of
+       *    the `'metadata'` service, which no composition writes package
+       *    records into, so no datasource ever resolved a namespace. ⛔ One
+       *    store, one id: the id comes only from `_packageId`, never guessed,
+       *    and no second store is consulted when the registry has no record.
+       *    The engine is resolved where it is used, like `metadata()` above.
        *
        * Every step is allowed to come up empty (a DB-only datasource, a
        * GitOps deployment with no package registry, a legacy package that
@@ -233,15 +242,16 @@ export class ExternalDatasourceServicePlugin implements Plugin {
        */
       getNamespace: async (datasource: string) => {
         try {
-          const service = metadata();
-          const ds = (await service?.get('datasource', datasource)) as
+          const ds = (await metadata()?.get('datasource', datasource)) as
             | { _packageId?: unknown }
             | undefined;
           const pkgId = typeof ds?._packageId === 'string' ? ds._packageId : undefined;
           if (!pkgId || pkgId === 'sys_metadata') return undefined;
-          const pkg = (await service?.get('package', pkgId)) as
-            | { manifest?: { namespace?: unknown } }
-            | undefined;
+          const registry = safeGetService<{ registry?: { getPackage?: (id: string) => unknown } }>(
+            ctx,
+            'objectql',
+          )?.registry;
+          const pkg = registry?.getPackage?.(pkgId) as { manifest?: { namespace?: unknown } } | undefined;
           const ns = pkg?.manifest?.namespace;
           return typeof ns === 'string' ? ns : undefined;
         } catch {
