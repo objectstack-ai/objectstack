@@ -45,6 +45,38 @@ Derived from the changesets objectui declared over the range — 36 releasing of
 
 ⚠️ 3 of these carry a breaking change: 3 by the author's own breaking annotation in the changeset body — objectui declares no `major` inside a launch window (`scripts/check-changeset-no-major.mjs`). Each is marked **BREAKING** in the list above — read them before compiling the release record.
 
-<!-- adr-0087: TODO — the pin bump cannot answer this; a human must (objectstack#6494) -->
+<!-- adr-0087: not-required (no-migration-prescription)
+     This diff moves `.objectui-sha` and the artefacts that travel with it: this console
+     changeset, the regenerated `sdui.manifest.json` and its record
+     `scripts/sdui-manifest.record.json`, the re-recorded
+     `packages/sdui-parser/objectui-lockstep.json` (objectui's `packages/sdui-parser/src` is
+     byte-identical across the range) and the re-measured pin citations in `packages/spec/src`,
+     which carry their own `@objectstack/spec` patch changeset. It adds, removes or renames no
+     ObjectStack-authorable key: no Zod schema, no spec declaration and no stored
+     `sys_metadata` shape moves in it, so `objectstack migrate meta` has nothing here to
+     rewrite, and this body carries no FROM/TO prescription of its own.
+     The range carries three declared-breaking objectui changes, each by its author's
+     breaking annotation and none by a declared `major`. Each is objectui's own package
+     surface, with its upstream record, and each is answered here:
+     (1) objectui#4425 (`eb4552e71`) and (2) objectui#11709 (`89cc738da`): objectui's
+     `@object-ui/types` faces refuse `label` on a `metric-card` in an objectui `dashboard`
+     node's `widgets[]` slot, and judge a `metric-card` inside a widget's legacy `component`
+     envelope by the slot's component arm alone. `metric-card` is objectui's own node type:
+     it is neither a member of `@objectstack/spec`'s `PageComponentType` nor a
+     `ComponentPropsMap` row, the ObjectStack dashboard widget's `type` vocabulary is the
+     chart types (`metric`, `kpi` and the rest), no example or package source in this
+     repository authors a `metric-card` node, and the regenerated `sdui.manifest.json`
+     carries no `metric-card` entry.
+     (3) objectui#11678 (`48c82c9d5`): `@object-ui/app-shell`'s `RecentItem` becomes a
+     union, and `addRecentItem` stops taking a label for an object, dashboard, page or
+     report entry. No code in this repository imports `@object-ui/app-shell`, and the only
+     code here that names the `ui.recent` preference is the SQL driver's tests, which store
+     that row as an opaque value. Lists stored in the old shape are read by identity
+     upstream, so no stored row has to change.
+     Where an entry mirrors an ObjectStack key, the ledger entry belongs to the
+     `packages/spec` PR that lands it, never to the pin bump.
+     Scope of the claim, stated rather than implied: it is a claim about THIS diff, not a
+     per-entry re-measurement of the upstream declared-breaking entries.
+-->
 
 objectui range: `0abd4f9f8769...a58626c88dc8`
