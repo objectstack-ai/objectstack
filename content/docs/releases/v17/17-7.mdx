@@ -433,8 +433,12 @@ no mechanical rewrite for any of this.
   `/api/v1/meta/datasource/default` answer `403` too, naming the host's database
   configuration as the remedy (`753e7a1`, #21965). Change a code-defined
   datasource in its source, or in the host's database URL for `default`, and
-  `DELETE` a row the warning names. A runtime datasource saved through the
-  metadata door is also listed and editable through `/api/v1/datasources` —
+  `DELETE` a row the warning names. Until you do, the metadata door's reads in
+  17.7.0 still serve that row, not the code definition the boot and the admin
+  door use: `GET /api/v1/meta/datasource/:name`, the
+  `GET /api/v1/meta/datasource` list and the `effective` layer of `/layers`.
+  That half of #21922 landed on `main` after 17.7.0 was published (`1abfc58`,
+  #21985). A runtime datasource saved through the metadata door is also listed and editable through `/api/v1/datasources` —
   that fix shipped without a CHANGELOG entry; see [Also shipped in
   17.7.0](#also-shipped-in-1770--not-in-its-changelog).
 
