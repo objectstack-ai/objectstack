@@ -57,7 +57,7 @@ describe('NotificationChannelSchema', () => {
 // gate that cannot fail. Sabotage-verified in the PR: S1 re-declares a removed
 // const in notification.zod.ts, S2 re-exports it from another entry under the
 // bare name (the route a "./system does not export it" assertion would miss).
-describe('[#4616] notification-template orphan removal', () => {
+describe('notification-template orphan removal', () => {
   /** Names that must not be exported by ANY public entry point. */
   const REMOVED = [
     // #4616 — this change.

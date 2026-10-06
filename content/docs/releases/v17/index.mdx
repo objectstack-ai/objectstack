@@ -1,6 +1,6 @@
 ---
 title: v17
-description: "The v17 line — a truth-telling release. Files become owned records, the export privilege stops riding on read, the SDK is reconciled against the routes the server mounts, and a boot that cannot reach its datasource stops pretending it can. Per-release notes for 17.0.0 through 17.6.0."
+description: "The v17 line — a truth-telling release. Files become owned records, the export privilege stops riding on read, the SDK is reconciled against the routes the server mounts, and a boot that cannot reach its datasource stops pretending it can. Per-release notes for 17.0.0 through 17.7.0."
 ---
 
 **The v17 line** is a truth-telling release. Where v16 made *declared metadata*
@@ -13,15 +13,16 @@ readable by everyone in the tenant. Alongside that, `agent.tools[]`, the
 GraphQL surface, the `ObjectStackProtocol` alias, and a long tail of
 parsed-but-never-enforced spec clusters are removed rather than maintained.
 
-> **Release status: 17.6.0 is released**, and is the current version of the v17
-> line. It was published on 2026-10-02, taking over from
+> **Release status: 17.7.0 is released**, and is the current version of the v17
+> line. It was published on 2026-10-06, taking over from
+> 17.6.0 — published 2026-10-02, which took over from
 > 17.5.0 — published 2026-09-29, which took over from
 > 17.4.0 — published 2026-09-09, which took over from
 > 17.3.0 — published 2026-09-04, which took over from
 > 17.2.0 — published 2026-08-23, which took over from 17.1.0 — published
 > 2026-08-20, which took over from 17.0.0 — published 2026-08-14, closing a
 > train that ran through `17.0.0-rc.0` … `rc.6` (the last of them cut
-> 2026-08-10). A plain install now resolves 17.6.0. `changeset pre
+> 2026-08-10). A plain install now resolves 17.7.0. `changeset pre
 > exit` ran with the 17.0.0 cut, so the `@objectstack/*` packages no longer
 > publish as `17.0.0-rc.N`. Caret ranges on `^16.x` hold at 16.x until you opt
 > in, which is the reason this train is a major at all: its breaking density
@@ -29,8 +30,8 @@ parsed-but-never-enforced spec clusters are removed rather than maintained.
 > dead-cluster retirements) is too high to auto-upgrade `^16.x` consumers into
 > on their next install.
 >
-> ⚠️ **17.1.0, 17.2.0, 17.3.0, 17.4.0, 17.5.0 and 17.6.0 are minors by version
-> number, not by blast radius. Moving between them is not a tag swap.** Several of 17.1.0's security
+> ⚠️ **17.1.0, 17.2.0, 17.3.0, 17.4.0, 17.5.0, 17.6.0 and 17.7.0 are minors by
+> version number, not by blast radius. Moving between them is not a tag swap.** Several of 17.1.0's security
 > corrections change who can read or write on an existing deployment — read its
 > upgrade checklist below. 17.2.0 adds write-path accept-set tightenings of the
 > same shape: a by-id `update`/`delete` that used to silently drop an extra
@@ -81,12 +82,27 @@ parsed-but-never-enforced spec clusters are removed rather than maintained.
 > **[known issues](/docs/releases/v17/17-6#known-issues-found-after-publish)**
 > and its **[upgrade checklist](/docs/releases/v17/17-6#upgrade-checklist)**
 > before upgrading.
+>
+> 17.7.0 stays in that register. App-authored hook, action and job bodies reach
+> `sys_metadata` and `sys_metadata_history` only through the metadata API, and a
+> flow can no longer write them (its `get_record` node is served the projected
+> body and a keyed hash); flow secrets move into a write-only channel and the
+> audit ledger stops copying credential fields, so flow secrets, the JWT signing
+> keys and private share links are rotated after the upgrade; a write to a row the caller cannot read
+> answers as if the row did not exist; reads and writes stop returning a retired
+> field's leftover column; a public form needs `sharing.enabled: true`; and the
+> in-memory engine is no longer a boot store. Read **[Breaking changes &
+> migration in
+> 17.7.0](/docs/releases/v17/17-7#breaking-changes--migration-in-1770)** and its
+> **[upgrade checklist](/docs/releases/v17/17-7#upgrade-checklist)** before
+> upgrading.
 
 ## Per-release notes
 
 Each release below is a self-contained page: what it changed, what breaks, and its own upgrade checklist.
 
-- **[17.6.0](/docs/releases/v17/17-6)** — current
+- **[17.7.0](/docs/releases/v17/17-7)** — current
+- **[17.6.0](/docs/releases/v17/17-6)**
 - **[17.5.0](/docs/releases/v17/17-5)**
 - **[17.4.0](/docs/releases/v17/17-4)**
 - **[17.3.0](/docs/releases/v17/17-3)**
@@ -110,13 +126,13 @@ marked breaking — which is exactly why a checklist is not a restatement of
 [Breaking changes & migration in 17.3.0](/docs/releases/v17/17-3#breaking-changes--migration-in-1730).
 
 ⛔ **That run covered one hop, 17.2.0 → 17.3.0. Nobody has walked 17.1.0 →
-17.2.0 or 17.3.0 → 17.4.0, and 17.4.0 → 17.5.0 and 17.5.0 → 17.6.0 have been
-exercised only in part:** seven lines of the 17.5.0 list were run in an
+17.2.0, 17.3.0 → 17.4.0 or 17.6.0 → 17.7.0, and 17.4.0 → 17.5.0 and 17.5.0 →
+17.6.0 have been exercised only in part:** seven lines of the 17.5.0 list were run in an
 upgrade of HotCRM, a 17.4.0 app with a 17.4.0-created SQLite database, on
 2026-09-29, and 19 of the 30 lines of the 17.6.0 list in an upgrade of HotCRM
 from 17.5.0, on a 17.5.0-created SQLite database, on 2026-10-02; each says
-what was observed. Every other line in the 17.2.0, 17.4.0, 17.5.0 and 17.6.0
-lists is
+what was observed. Every other line in the 17.2.0, 17.4.0, 17.5.0, 17.6.0 and
+17.7.0 lists is
 derived from a change's own **Migration** note and is marked **not
 exercised**: accurate about what changed, unproven about what it costs to
 cross. The two kinds are kept apart on purpose — a step nobody has run,
@@ -124,7 +140,7 @@ presented beside steps that were, is how a reader finishes a checklist and
 believes they are done.
 </Callout>
 
-Per-release checklists: [17.6.0](/docs/releases/v17/17-6#upgrade-checklist) · [17.5.0](/docs/releases/v17/17-5#upgrade-checklist) · [17.4.0](/docs/releases/v17/17-4#upgrade-checklist) · [17.3.0](/docs/releases/v17/17-3#upgrade-checklist) · [17.2.0](/docs/releases/v17/17-2#upgrade-checklist) · [17.1.0](/docs/releases/v17/17-1#upgrade-checklist) · [17.0.0](/docs/releases/v17/17-0#upgrade-checklist)
+Per-release checklists: [17.7.0](/docs/releases/v17/17-7#upgrade-checklist) · [17.6.0](/docs/releases/v17/17-6#upgrade-checklist) · [17.5.0](/docs/releases/v17/17-5#upgrade-checklist) · [17.4.0](/docs/releases/v17/17-4#upgrade-checklist) · [17.3.0](/docs/releases/v17/17-3#upgrade-checklist) · [17.2.0](/docs/releases/v17/17-2#upgrade-checklist) · [17.1.0](/docs/releases/v17/17-1#upgrade-checklist) · [17.0.0](/docs/releases/v17/17-0#upgrade-checklist)
 
 ## References
 

@@ -98,7 +98,7 @@ describe('operation message catalog', () => {
  * `packages/plugins/plugin-security/src/permission-denied-user-copy.test.ts`,
  * against the real middleware and a real `II18nService`.
  */
-describe('operation message catalog — permission_denied (#7414)', () => {
+describe('operation message catalog — permission_denied, the 403 refusal as localized user copy', () => {
   /**
    * The vocabulary a business user must never read in a permission refusal.
    * `positions` is the internal authorization noun the reporter quoted; the
@@ -190,7 +190,7 @@ describe('operation message catalog — permission_denied (#7414)', () => {
  * capability AND-gate) deliberately reuses it, so its catalog coverage above is
  * already the coverage for that gate.
  */
-describe('operation message catalog — the row-level user copy (#7451)', () => {
+describe('operation message catalog — the row-level user copy, a sentence per situation', () => {
   /**
    * The vocabulary a business user must never read in a row-level refusal. It
    * is the #7414 list plus the two nouns these particular gates leaked:
@@ -303,7 +303,7 @@ describe('operation message catalog — the row-level user copy (#7451)', () => 
  * this catalog block is the only pin the keys have — same battery the #7451
  * family keys get.
  */
-describe('operation message catalog — sharing write denial and approvals recall (#12493)', () => {
+describe('operation message catalog — sharing write denial and approvals recall, two keys of their own', () => {
   /**
    * The vocabulary a business user must never read in these refusals. It is
    * the #7451 list plus the exact nouns the two measured raw strings leaked:
