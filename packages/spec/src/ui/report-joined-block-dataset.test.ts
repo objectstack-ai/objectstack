@@ -246,7 +246,7 @@ describe('the joined reports measured at the census parse unchanged', () => {
   });
 });
 
-describe('the report form offers a block\'s `dataset` as the dataset picker, marked required (#21714)', () => {
+describe('the report form offers a block\'s `dataset` as the dataset picker, marked required', () => {
   it('the "Joined blocks" repeater\'s `dataset` row declares `widget: \'ref:dataset\'` and `required: true`', () => {
     // Studio's report inspector renders this row spec: the widget hint picks
     // the cell's control, and `required` draws the column's marker and the

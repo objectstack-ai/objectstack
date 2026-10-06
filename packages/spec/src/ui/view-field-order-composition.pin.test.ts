@@ -113,7 +113,7 @@ const COMPOSED_LIST = {
   fieldOrder: ['amount', 'owner'],
 };
 
-describe('[#15184] the list-view field composition is declared, not implied', () => {
+describe('the list-view field composition is declared, not implied', () => {
   describe('declaration — the published `.describe()` of each composing key', () => {
     it.each(COMPOSITION)('`%s` names all three keys of the composition', (key) => {
       const text = description(key);

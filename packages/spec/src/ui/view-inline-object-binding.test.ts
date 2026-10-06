@@ -71,7 +71,7 @@ function refusalText(body: unknown): string {
   return JSON.stringify((r as { error?: { issues?: unknown } }).error?.issues ?? []);
 }
 
-describe('[#7741] the runtime write door refuses the unbound inline view config', () => {
+describe('the runtime write door refuses the unbound inline view config', () => {
   it('REFUSES the card\'s exact repro body through getMetadataTypeSchema(\'view\')', () => {
     const r = door().safeParse(REPRO);
     expect(r.success).toBe(false);
@@ -143,7 +143,7 @@ describe('[#7741] the runtime write door refuses the unbound inline view config'
   });
 });
 
-describe('[#7741] what the door still accepts, byte for byte', () => {
+describe('what the door still accepts, byte for byte', () => {
   it('ACCEPTS the properly bound inline body — and adds nothing to it', () => {
     const r = door().safeParse(BOUND);
     expect(r.success, JSON.stringify((r as { error?: { issues?: unknown } }).error?.issues)).toBe(true);
@@ -164,7 +164,7 @@ describe('[#7741] what the door still accepts, byte for byte', () => {
     expect(r.data).toEqual(record);
   });
 
-  it('ACCEPTS the container arm byte-identically — #6391\'s union membership is intact', () => {
+  it('ACCEPTS the container arm byte-identically — its union membership is intact', () => {
     const container = {
       object: 'showcase_task',
       list: { type: 'grid', columns: ['title'], data: { provider: 'object', object: 'showcase_task' } },
@@ -192,7 +192,7 @@ describe('[#7741] what the door still accepts, byte for byte', () => {
   });
 });
 
-describe('[#7741] the emitted contract declares what it enforces', () => {
+describe('the emitted contract declares what it enforces', () => {
   it('the inline arms\' JSON Schema marks `object` and `viewKind` required, in both io directions', () => {
     // Studio's SchemaForm is generated from this — declared = enforced means
     // an AI author is TOLD the binding is required before the 422 says so.

@@ -379,11 +379,16 @@ The Console `/login` and `/register` pages will now show a button for each enabl
 4. Provider redirects to `/api/v1/auth/callback/google`.
 5. better-auth creates a session and redirects to `callbackURL`.
 
-**OIDC/enterprise providers**:
+**OIDC/enterprise providers** (`oidcProviders`): better-auth's generic-OAuth plugin
+registers each one as a social provider and adds no endpoints of its own, so the flow uses
+the same two routes as above.
 1. User clicks **Continue with Okta SSO**.
-2. Client calls `POST /api/v1/auth/sign-in/oauth2` with `{ providerId: "okta", callbackURL }`.
+2. Client calls `POST /api/v1/auth/sign-in/social` with `{ provider: "okta", callbackURL }`,
+   where `provider` is the entry's `providerId`.
 3. Browser redirects to the provider's authorization endpoint.
-4. Provider redirects back; better-auth validates the OIDC token and creates a session.
+4. Provider redirects to `/api/v1/auth/callback/okta`. better-auth exchanges the code, reads
+   the user's profile from the ID token or `userInfoUrl`, creates a session and redirects to
+   `callbackURL`.
 
 ## Linking to an existing account
 

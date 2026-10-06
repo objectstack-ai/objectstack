@@ -102,7 +102,7 @@ const OVERLAY_BASE = {
 // ===========================================================================
 // 1. The doors — a posture is a property of a PARSE (#4583)
 // ===========================================================================
-describe('#5074 — the two doors, which is the whole point of the split', () => {
+describe('the two doors, which is the whole point of the split: strict at authoring, reopened on the wire', () => {
   it('the `view` metadata type resolves to a registered schema (the wire / 422 door)', () => {
     expect(getMetadataTypeSchema('view')).toBeDefined();
   });
@@ -126,7 +126,7 @@ describe('#5074 — the two doors, which is the whole point of the split', () =>
 // ===========================================================================
 // 2. The AUTHORING gate — tightened
 // ===========================================================================
-describe('#5074 — `ViewItemSchema` is the authoring gate and is now strict', () => {
+describe('`ViewItemSchema` is the authoring gate and is now strict', () => {
   it('the one-letter `confg` typo is REJECTED, not stripped into an empty ViewItem', () => {
     // The failure the ruling turned on: before the split this parsed clean and
     // produced a ViewItem with no view configuration at all — #1535's
@@ -189,7 +189,7 @@ describe('#5074 — `ViewItemSchema` is the authoring gate and is now strict', (
     expect(reject(ListViewSchema, { columns: ['name'], sort: [CONSOLE_SORT_ROW] })).toContain('console row key');
   });
 
-  it('…and `direction` is still answered with `order` — #4721, the silently REVERSED sort', () => {
+  it('…and `direction` is still answered with `order` — it once parsed as a silently REVERSED sort', () => {
     // `{ field, direction: 'desc' }` used to parse to `{ field, order: 'asc' }`.
     // This alias is why closing the sort entry was worth doing at all.
     expect(reject(ListViewSchema, { columns: ['name'], sort: [{ field: 'name', direction: 'desc' }] }))
@@ -205,7 +205,7 @@ describe('#5074 — `ViewItemSchema` is the authoring gate and is now strict', (
 // ===========================================================================
 // 3. The WIRE door — every console PUT body still parses, at every depth
 // ===========================================================================
-describe('#5074 — the wire door accepts what the platform itself writes', () => {
+describe('the wire door accepts what the platform itself writes', () => {
   it('member 1 carries the pin round-trip: `{...storedItem, isPinned}` (`ObjectView.tsx:882`)', () => {
     accept(ViewItemWireSchema, { ...RECORD, isPinned: true, sortOrder: 3 });
     accept(ViewMetadataSchema, { ...RECORD, isPinned: true, sortOrder: 3 });
@@ -269,13 +269,13 @@ describe('#5074 — the wire door accepts what the platform itself writes', () =
   // It runs in the same `z.preprocess` stage as `stripViewConsoleDecorations`,
   // so it is the first thing every body above meets. These pin that it is inert
   // on the wire — the failure mode of a precondition is 422-ing our own writes.
-  it('#5599 — the precondition does not disturb the decoration strip it shares a stage with', () => {
+  it('the identity precondition does not disturb the decoration strip it shares a stage with', () => {
     // The strip runs only AFTER the identity check passes; a decorated body
     // must still arrive at the union stripped, not rejected.
     accept(ViewMetadataSchema, { ...OVERLAY_BASE, sort: [CONSOLE_SORT_ROW], filter: [CONSOLE_FILTER_ROW] });
   });
 
-  it('#5599 — a body carrying ONLY an aux round-trip key still reaches the union', () => {
+  it('identity precondition — a body carrying ONLY an aux round-trip key still reaches the union', () => {
     // `updateView` PUTs `{ ...current, ...partial }`; when there is no stored
     // item to merge, `current` is empty and the body is the bare partial.
     // `isPinned`/`sortOrder` are declared on member 1, so they are vocabulary.
@@ -295,7 +295,7 @@ describe('#5074 — the wire door accepts what the platform itself writes', () =
     }
   });
 
-  it('#5599 — …but a body speaking NO view key is stopped before any member runs', () => {
+  it('identity precondition — …but a body speaking NO view key is stopped before any member runs', () => {
     const r = ViewMetadataSchema.safeParse({ nope: 1 });
     expect(r.success).toBe(false);
     if (r.success) return;
@@ -307,7 +307,7 @@ describe('#5074 — the wire door accepts what the platform itself writes', () =
 // ===========================================================================
 // 4. The strip removes the decoration and NOTHING else
 // ===========================================================================
-describe('#5074 — `stripViewConsoleDecorations`, the write-path mirror of `stripReadDecorations`', () => {
+describe('`stripViewConsoleDecorations`, the write-path mirror of `stripReadDecorations`', () => {
   it('declares its vocabulary rather than hard-coding a key at the call site', () => {
     expect([...VIEW_CONSOLE_ROW_DECORATIONS]).toEqual(['id']);
   });
@@ -372,7 +372,7 @@ describe('#5074 — `stripViewConsoleDecorations`, the write-path mirror of `str
 // ===========================================================================
 // 5. The two landmines the ruling named
 // ===========================================================================
-describe('#5074 — landmine 1: `/api/v1/meta/types/view` must still get an `anyOf`', () => {
+describe('landmine 1: `/api/v1/meta/types/view` must still get an `anyOf`', () => {
   it('the REGISTERED schema converts to a four-member `anyOf`, through the preprocess', () => {
     // Studio's SchemaForm is built from this. `z.preprocess` makes the root a
     // pipe; a pipe converts to its output side, so the union survives — but
@@ -397,7 +397,7 @@ describe('#5074 — landmine 1: `/api/v1/meta/types/view` must still get an `any
     expect(json).not.toContain('"console row key"');
   });
 
-  it('#5599 — the identity precondition is invisible to the emitted contract', () => {
+  it('the identity precondition is invisible to the emitted contract', () => {
     // This is WHY the check reports through the existing preprocess's `ctx`
     // rather than as an extra pipe stage. `z.unknown().superRefine(…).pipe(union)`
     // would satisfy the output-direction assertion above and silently degrade
@@ -420,7 +420,7 @@ describe('#5074 — landmine 1: `/api/v1/meta/types/view` must still get an `any
   });
 });
 
-describe('#5074 — landmine 2: the lazySchema Proxy / ADR-0089 D3a trap', () => {
+describe('landmine 2: the lazySchema Proxy / ADR-0089 D3a trap', () => {
   // `lazySchema` returns a Proxy, and zod keys its `toJSONSchema` `seen` map on
   // the node it was handed. When a wrapper-type processor (pipe/lazy/optional)
   // then looks itself up by the REAL instance, the entry is missing and zod

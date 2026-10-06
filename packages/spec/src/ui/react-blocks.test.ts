@@ -89,7 +89,7 @@ describe('REACT_BLOCKS — overlay/schema seam', () => {
  * hold HERE or the gate rejects what the contract still advertises (or, worse,
  * stops rejecting what came back).
  */
-describe('REACT_BLOCKS — the record:* family is out (#4413)', () => {
+describe('REACT_BLOCKS — the record:* family is out, since no renderer read the props it published', () => {
   it('publishes no block that needs a record context', () => {
     const offenders = REACT_BLOCKS.filter((b) => isRecordContextBlockType(b.schemaType));
     expect(offenders.map((b) => b.tag)).toEqual([]);
@@ -144,7 +144,7 @@ describe('REACT_BLOCKS — the record:* family is out (#4413)', () => {
  * both directions — the canonical props must be published, and a retired
  * spelling must not quietly come back (or stay published beside its tombstone).
  */
-describe('REACT_BLOCKS — vocabulary convergence (#11284) and the ListView alias retirement (#14791)', () => {
+describe('REACT_BLOCKS — vocabulary converges on the metadata tier, and the ListView alias retirement', () => {
   it('every curated dataProps entry resolves to a real schema prop', () => {
     // `build-react-blocks-contract`'s allow-list FILTERS the schema's props, so
     // a curated name the schema does not declare is silently dropped from the
@@ -180,7 +180,7 @@ describe('REACT_BLOCKS — vocabulary convergence (#11284) and the ListView alia
     }
   });
 
-  it('ListView: objectName / viewType are RETIRED — data / type are the only spellings, data required (#14791)', () => {
+  it('ListView: objectName / viewType are RETIRED — data / type are the only spellings, data required', () => {
     const lv = REACT_BLOCKS.find((b) => b.tag === 'ListView')!;
     const names = lv.interactions.map((i) => i.name);
     // No alias and no deprecation row: retired with no window.

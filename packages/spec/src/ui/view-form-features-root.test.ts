@@ -80,7 +80,7 @@ const formWithFieldPredicate = (visibleWhen: unknown) => ({
   sections: [{ fields: [{ field: 'phone', visibleWhen }] }],
 });
 
-describe('form-view predicates reject the features.* root (objectui#6262)', () => {
+describe('form-view predicates reject the features.* root', () => {
   it('refuses a field-level visibleWhen naming features.* (bare-string shorthand)', () => {
     const issues = reject(formWithFieldPredicate('features.multiOrgEnabled == true'));
     expectFeaturesRefusal(issues, ['sections', 0, 'fields', 0, 'visibleWhen']);
@@ -205,7 +205,7 @@ describe('positive controls — the scanner narrows exactly as far as the ruling
     accept(formWithFieldPredicate('record.tag == "features"'));
   });
 
-  it('an AST-only envelope no longer reaches this scanner — #15811 refuses it one layer up', () => {
+  it('an AST-only envelope no longer reaches this scanner — an evaluated slot requires a `source`, so it is refused one layer up', () => {
     // It used to pass here, and the reason was sound as far as it went: the
     // authoring shape is the source string, and an AST-only envelope has
     // nothing to scan. What that boundary left open is that the slot admitted

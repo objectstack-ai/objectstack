@@ -203,7 +203,7 @@ describe('批 14 — curated prescriptions', () => {
    * (prescriptions, aliases, the executor projection) is pinned in
    * `dashboard-compareto.test.ts`.
    */
-  it('dashboard compareTo: no longer a union — the #4001 arm-error limit does not apply to it (#5011)', () => {
+  it('dashboard compareTo: no longer a union but the executor contract — the strictness arm-error limit does not apply to it', () => {
     const r = DashboardWidgetSchema.safeParse({
       id: 'w1', dataset: 'sales', values: ['revenue'],
       compareTo: { offset: '7d', granularity: 'month' },
@@ -327,7 +327,7 @@ function importersOf(targetRel: string): string[] {
   return out.sort();
 }
 
-describe('批 14 — the file that split, after #5015 retired its dead half', () => {
+describe('批 14 — the file that split, after its dead half was retired', () => {
   // ── What this block is now, and why it is not just deleted ────────────────
   //
   // 批 14 measured eleven strip sites and reclassified two — `NotificationAction`
@@ -366,7 +366,7 @@ describe('批 14 — the file that split, after #5015 retired its dead half', ()
     expect(importersOf('ui/sharing.zod')).not.toContain('stack.zod.ts');
   });
 
-  it('SharingConfig keeps the live carrier that made this file split (#5015 took the other half)', () => {
+  it('SharingConfig keeps the live carrier that made this file split (EmbedConfig, the other half, was retired)', () => {
     // The carrier is specific, and that asymmetry IS the 批 14 reclassification:
     // the form view names `SharingConfigSchema`. `EmbedConfigSchema` was named by
     // nothing, which is what #5015 acted on.

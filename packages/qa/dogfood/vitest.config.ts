@@ -143,7 +143,7 @@ runProjectCliOverridePreflight({
 //     `.objectstack/data` exists in the package directory: that throw is the guard.
 //   - The `globalSetup` below is ROOT-level: one run, one call, covering both
 //     projects and each `OS_TEST_SHARD` slice (measured). It clears a stale
-//     `.objectstack` at the start and removes the run's temporary root at the end.
+//     `.objectstack` at the start and removes the run's per-file directories at the end.
 //     Its teardown judges nothing, because a throw there exits 0 on vitest 4.1.11.
 // Both modules' headers carry the rest, including what a dogfood author owes.
 const PER_FILE_CWD = './test/per-file-cwd.setup.ts';

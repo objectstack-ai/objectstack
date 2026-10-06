@@ -72,7 +72,7 @@ const GANTT_REQUIRED = { startDateField: 'start_date', endDateField: 'end_date',
 // ===========================================================================
 // 1. The card's probe — five blocks, one undeclared key, two lit controls
 // ===========================================================================
-describe('the card\'s probe: every view config block refuses `bogus_key_xyz` (#15469)', () => {
+describe('the probe that found the gap: every view config block refuses `bogus_key_xyz`', () => {
   it('CONTROLS — the mechanism works in this zod, in this process', () => {
     // Two spellings of a closed object, so "the sibling schemas refuse" below
     // is measured against a lit instrument rather than assumed.
@@ -96,7 +96,7 @@ describe('the card\'s probe: every view config block refuses `bogus_key_xyz` (#1
     expect(issues.filter((i) => i.code !== 'unrecognized_keys'), 'the ONLY issue is the unknown key').toHaveLength(0);
   });
 
-  it('gantt — the strictObject error suggests the closest declared key (the #14471 typo)', () => {
+  it('gantt — the strictObject error suggests the closest declared key (the `colourField` typo)', () => {
     const [issue] = refuse(GanttConfigSchema, { ...GANTT_REQUIRED, colourField: 'status' });
     expect(issue.message).toContain('`colourField`');
     expect(issue.message).toMatch(/Did you mean .*`colourField` → `colorField`/);
@@ -140,7 +140,7 @@ const FULL_TEN = {
   },
 } as const;
 
-describe('the ten keys plugin-gantt read through the window are DECLARED (#15469)', () => {
+describe('the ten keys plugin-gantt read through the window are DECLARED', () => {
   it('the shape carries exactly the ten, beside the nineteen it already had', () => {
     const keys = Object.keys(GanttConfigSchema.shape);
     for (const k of Object.keys(FULL_TEN)) expect(keys, `${k} must be a declared member`).toContain(k);
@@ -225,7 +225,7 @@ describe('the ten keys plugin-gantt read through the window are DECLARED (#15469
 // ===========================================================================
 // 3. The doors — the closure reaches an author through the schemas they parse with
 // ===========================================================================
-describe('a gantt typo is refused AT `gantt` through the real doors (#15469)', () => {
+describe('a gantt typo is refused AT `gantt` through the real doors', () => {
   const typoView = { type: 'gantt', columns: ['name'], gantt: { ...GANTT_REQUIRED, colourField: 'status' } };
 
   it('ListViewSchema — refused at [gantt], naming the key and suggesting colorField', () => {

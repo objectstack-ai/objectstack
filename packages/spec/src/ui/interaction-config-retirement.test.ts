@@ -57,7 +57,7 @@ import {
 // conditional-type pin in this package was a no-op until #5286 (tsconfig excluded
 // `**/*.test.ts`; vitest never enables `typecheck`), so the compiler-API walk
 // with anti-vacuity guards is the load-bearing instrument.
-describe('[#4988] ui/ interaction config family retirement', () => {
+describe('ui/ interaction config family retirement — renderer behaviour, not authored metadata', () => {
   /** Every name the five modules exported (32 schema/enum consts + 32 types). */
   const RETIRED_NAMES = [
     // touch.zod.ts
@@ -145,7 +145,7 @@ describe('[#4988] ui/ interaction config family retirement', () => {
     // ── ABSENCE (every entry, not just ./ui) ──────────────────────────────
     for (const name of RETIRED_NAMES) {
       const holders = holdersOf(name);
-      expect(holders, `${name} must have zero holders after #4988`).toEqual([]);
+      expect(holders, `${name} must have zero holders after the family retirement`).toEqual([]);
     }
 
     // ── SURVIVAL (on ./ui, where they live) ───────────────────────────────
@@ -186,7 +186,7 @@ describe('[#4988] ui/ interaction config family retirement', () => {
       }
     };
     walk(srcRoot);
-    expect(importers, 'a resurrected import means the retirement is being undone — re-read #4988').toEqual([]);
+    expect(importers, 'a resurrected import means the retirement is being undone — these are renderer behaviour, not authored metadata').toEqual([]);
   });
 
   it('runtime namespace agrees with the compiler view', async () => {
@@ -200,7 +200,7 @@ describe('[#4988] ui/ interaction config family retirement', () => {
     }
   });
 
-  it('the bare `ConflictResolution` name is now published by NOBODY — #4738 left it to ./ui alone', async () => {
+  it('the bare `ConflictResolution` name is now published by NOBODY — the connector-side rename left it to ./ui alone', async () => {
     // #4738 renamed the connector-side enum to `ConnectorConflictResolution`
     // BECAUSE `ui/offline.zod.ts` owned the bare name. That owner is gone, so
     // the bare name is unowned rather than re-homed: the rename is not undone

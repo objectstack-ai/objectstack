@@ -94,7 +94,7 @@ function meaningOf(field: any): string | undefined {
   return undefined;
 }
 
-describe('VIEW_CONSOLE_ROUND_TRIP_KEYS — the census record (#20456)', () => {
+describe('VIEW_CONSOLE_ROUND_TRIP_KEYS — the census record of the keys the console reads back', () => {
   it('equals the measured census, key for key and branch for branch', () => {
     const record = Object.fromEntries(
       Object.entries(VIEW_CONSOLE_ROUND_TRIP_KEYS).map(([k, v]) => [k, [...v].sort()]),
@@ -104,7 +104,7 @@ describe('VIEW_CONSOLE_ROUND_TRIP_KEYS — the census record (#20456)', () => {
   });
 });
 
-describe('each census key is declared on each member that judges its row (#20456)', () => {
+describe('each census key is declared on each member that judges its row', () => {
   const pairs = Object.entries(CENSUS).flatMap(([key, branches]) => branches.map((b) => [key, b] as const));
 
   it.each(pairs)('`%s` is a declared, described member of `%s`', (key, branch) => {
@@ -127,7 +127,7 @@ describe('each census key is declared on each member that judges its row (#20456
   });
 });
 
-describe('the declarations are typed, not passthrough (#20456)', () => {
+describe('the declarations are typed, not passthrough', () => {
   it.each([
     ['isPinned', 'yes'],
     ['sortOrder', 1.5],
@@ -144,7 +144,7 @@ describe('the declarations are typed, not passthrough (#20456)', () => {
   });
 });
 
-describe('what the census mapped to an existing spelling stays undeclared (#20456)', () => {
+describe('what the census mapped to an existing spelling stays undeclared', () => {
   it.each([
     ['objectName', 'object'],
     ['id', 'name'],
@@ -158,7 +158,7 @@ describe('what the census mapped to an existing spelling stays undeclared (#2045
   });
 });
 
-describe('the authoring door still refuses the console-only keys (#20456)', () => {
+describe('the authoring door still refuses the console-only keys', () => {
   it.each(['visibility', 'isPinned', 'sortOrder', '_isOverride'])('`defineViewItem` input with `%s` is refused by name', (key) => {
     const r = ViewItemSchema.safeParse({ ...ROW.viewItem, [key]: VALUE[key] });
     expect(r.success).toBe(false);
