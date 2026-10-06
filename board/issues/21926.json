@@ -1,0 +1,36 @@
+{
+  "number": 21926,
+  "kind": "pull_request",
+  "title": "docs(sso): the OIDC flow uses /sign-in/social and /callback/:id",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-06T01:10:53Z",
+  "updated_at": "2026-10-06T01:35:08Z",
+  "closed_at": "2026-10-06T01:35:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-06T01:35:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21926",
+  "body": "Closes #21885\n\nClause-②: no\n\n## What changes\n\n`content/docs/permissions/sso.mdx`, the \"OAuth flow\" section only. Step 2 of the OIDC flow told readers to call `POST /api/v1/auth/sign-in/oauth2` with `{ providerId }`. Nothing registers that route, so a reader following the page got a 404. The OIDC steps now use the two routes the social flow already uses:\n\n- Step 2: `POST /api/v1/auth/sign-in/social` with `{ provider: \"okta\", callbackURL }`, where `provider` is the `oidcProviders` entry's `providerId`.\n- Step 4: the provider redirects to `/api/v1/auth/callback/okta`. better-auth exchanges the code, reads the profile from the ID token or `userInfoUrl`, creates a session and redirects to `callbackURL`.\n- A one-line lead-in says why: better-auth's generic-OAuth plugin registers each `oidcProviders` entry as a social provider and adds no endpoints of its own.\n\nNo product change, no other page, no changeset (docs do not publish).\n\n## Grounding for each route\n\n**`POST /api/v1/auth/sign-in/social`** (OIDC step 2, changed; social step 2, re-checked and unchanged)\n\n- Ledger row, `packages/plugins/plugin-auth/src/auth-route-ledger.ts` line 167:\n  `{ route: 'POST /api/v1/auth/sign-in/social', family: 'core-auth', source: 'better-auth', disposition: 'sdk', client: 'auth.signInWithProvider' },`\n- Published-route list, same file, line 433: `'POST /api/v1/auth/sign-in/social',`\n- Body shape, installed better-auth 1.7.3, `dist/api/routes/sign-in.mjs` line 40: `provider: SocialProviderListEnum`. In `@better-auth/core` `dist/social-providers/index.mjs` line 78 that is `z.enum(socialProviderList).or(z.string())`, so a generic provider id is accepted. The handler looks `c.body.provider` up in `c.context.socialProviders`.\n- The generic-OAuth plugin, `dist/plugins/generic-oauth/index.mjs` lines 61-66: \"registers any OAuth/OIDC provider as a first-class social provider. Providers are used through the standard `signIn.social` and `callback/:id` core endpoints — no plugin-specific endpoints needed.\" Its `init` prepends the generic providers to `ctx.socialProviders` (line 272).\n- Tests merged with #21872, `packages/plugins/plugin-auth/src/implicit-account-linking.test.ts`:\n  - lines 10-11: \"driving a real OAuth round trip (`/sign-in/social` → `/callback/:id`) through generic-OAuth providers\"\n  - line 246: `{ provider: providerId, callbackURL: AFTER, disableRedirect: true, ...extraBody },` posted to `sign-in/social`\n\n**`/api/v1/auth/callback/:id`** (OIDC step 4, now named; social step 4 `/callback/google`, re-checked and unchanged)\n\n- Published-route list, `auth-route-ledger.ts` line 321 `'GET /api/v1/auth/callback/:id',` and line 372 `'POST /api/v1/auth/callback/:id',`\n- Callback path, better-auth 1.7.3 `dist/oauth2/utils.mjs` line 29: `if (!provider.callbackPath) return` the path `/callback/` plus `provider.id`. The generic-OAuth plugin sets no `callbackPath`, and `auth-manager.ts` passes `providerId: p.providerId` straight through (line 3710).\n- Test, `implicit-account-linking.test.ts` line 254: the callback is requested at `${BASE}/api/v1/auth/callback/${providerId}?code=code-1&state=…`.\n\n**`POST /api/v1/auth/sign-in/oauth2`** (removed)\n\n- `grep -c \"sign-in/oauth2\" packages/plugins/plugin-auth/src/auth-route-ledger.ts` gives `0`, in both the ledger rows and the published-route list.\n\nThe section names no other route.\n\n## Validation\n\nAll at head `57258e13b4`. `node scripts/pm/dispatch-gates.mjs` derived 44 gate commands for this one-file change. Every one of them exited 0, and `--ran` reconciled them: \"44 derived famil(ies) accounted for — 44 run, 0 NOT-MEASURED (a DERIVED zero — all 44 recorded an exit code and none of them is 3)\".\n\n- Docs gates that read this page: `check:doc-authoring`, `check:doc-anchors` (429 fragment links resolve), `check-doc-route-spelling --advisory` (\"every shape-matched literal spells its ledger row\"), `check:docs-single-h1`, `check:doc-frontmatter`, `check:docs-redirects`, `check:docs-transcript-drift`, `check:nul-bytes`. All passed.\n- Four gates first exited 3 (PREREQUISITE NOT MET, nothing measured): `check:doc-formula-expressions`, `check:doc-security-posture`, `check:docs-transcript-drift` and `check:skill-examples`. I built `@objectstack/lint...`, `@objectstack/spec` and `@objectstack/client-react...`, then re-ran all four. Each exited 0.\n\n## Acceptance notes\n\n- Outside this section and untouched: the SAML flow names `POST /api/v1/auth/sign-in/sso`. The ledger's pinned config (`LEDGERED_PLUGIN_CONFIG`) does not turn on `sso`, so the ledger neither confirms nor refutes that route. Noting it here only.\n\nChanges 1 file: `content/docs/permissions/sso.mdx`, +8 / -3.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv)_\n"
+}

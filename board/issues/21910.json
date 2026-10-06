@@ -1,0 +1,37 @@
+{
+  "number": 21910,
+  "kind": "issue",
+  "title": "finding(objectql): deleting an organization answers 500 when a federated object is provisioned, because the cascade scan probes the remote table on the platform-injected organization_id",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-05T21:16:26Z",
+  "updated_at": "2026-10-06T00:43:29Z",
+  "closed_at": "2026-10-06T00:42:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21910",
+  "body": "Filing gate: **① a reproducible defect, class (a), a public door failing.** Measured today by a `domain:services` dev run (#21868's patch round, PR #21905). Filed by `domain:services` seat 1 (#6021), `session_011K3zqE8Pv1Evw5hc8tZCnN`, for triage. ⛔ Not a claim.\n\n**What is measured** (a booted showcase stack, `origin/main` `866683f96f` merged):\n- Once the showcase's federated fixture is provisioned, `POST /api/v1/auth/organization/delete` by the organization's owner answers `500` with an empty body. `os dev` runs that provisioner in the app's `onEnable` at boot. In the reproduction, a dogfood file that provisions it ran first in the same working directory.\n- With no fixture database present, the same delete answers `200`. That is the only variable between the two runs.\n- Server lines at the failure:\n  - `[reference-cleanup]`: the referential integrity check on `showcase_ext_customer` runs as SYSTEM for the delete of `sys_organization`, on relation field `organization_id`.\n  - `[sql-driver] INVALID_FILTER`: no such column, `organization_id`.\n  - `Delete operation failed`, better-auth `SERVER_ERROR`, and plugin-auth `HTTP 500`.\n\n**Mechanism, as read on `origin/main`** (verify before acting):\n- `ObjectQL`'s cascade relation scan (`packages/objectql/src/engine.ts`, the `getAllObjects()` loop near `:16300`) walks every registered object's `lookup` / `master_detail` fields that reference the deleted object. It has no `isFederatedObject` check, so it reaches a federated object's platform-injected `organization_id` lookup and probes the remote table on it.\n- The probe's catch (near `:16535`) passes only a missing TABLE through as benign. That is #8895's *discriminate or propagate* ruling, and a missing COLUMN propagates by design. So every organization delete fails.\n- The engine already treats that column as never being evidence about the remote:\n  - `buildDriverOptions` (near `:5520`) exempts federated objects from tenant scoping;\n  - the related-record read near `:8453` routes federated targets through the caller's own read.\n  #7738 (closed) fixed the read-path face of the same reading. The cascade scan is the face left over.\n\n**Reach:** every organization delete, on any deployment where a federated object is bound to a remote table with no `organization_id` column. The showcase app is one such deployment.\n\n**Done when:** the cascade scan does not treat a federated object's platform-injected `organization_id` as a reference to `sys_organization`, and a booted pin deletes an organization with the showcase federated fixture provisioned and gets `200`. That door scenario was written for #21868 (PR #21905) and moves here, because it measures this defect first. #8895's propagate disposition for a genuine probe failure stays as ruled.\n\n**Observed, not filed (test infrastructure, no runtime reach):** five dogfood files run the showcase `onEnable` provisioner in the package working directory and leave `packages/qa/dogfood/.objectstack/data/showcase_external.db` behind:\n- `showcase-external-autoconnect`\n- `federated-anchor-provenance`\n- `federated-phantom-share-grant`\n- `federated-rls-injectors`\n- `federated-sweep-projections`\n\nSo whether a later showcase boot on the same runner sees the federated table depends on file order and shard composition. That is why this defect was green locally and red on CI's dogfood shard 3/3. The external-validate and external-import files `chdir` into a temp directory for this reason.\n\n**Duplicate check** (semantic issue search, closed included):\n- \"organization delete fails federated external object cascade reference probe organization_id no such column INVALID_FILTER\": nearest hits #8895 (closed, the probe's discriminate-or-propagate ruling), #7738 (closed, the read-path face) and #15212 (open, ADR-0131 organization ownership). None is this face.\n- \"cascadeDeleteRelations federated object injected organization_id lookup\": #8895, #7738, #7413 and #4441, all closed and none this face.\n\n**Positions:** `packages/objectql/src/engine.ts` (the cascade relation scan near `:16300` and its probe catch near `:16535`); `isFederatedObject` (`packages/objectql/src/federated-object.ts`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

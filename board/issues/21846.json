@@ -2,8 +2,8 @@
   "number": 21846,
   "kind": "issue",
   "title": "security(auth): implicit account linking on social / OIDC sign-in is broader than the platform's account-ownership rules allow — detail withheld pending maintainer",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:identity",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -24,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-05T08:29:27Z",
-  "updated_at": "2026-10-05T16:54:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-06T00:24:38Z",
+  "closed_at": "2026-10-06T00:23:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 7,
   "locked": false,

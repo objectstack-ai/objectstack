@@ -14,18 +14,20 @@
     "area:api",
     "bug",
     "domain:engine",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-05T16:48:40Z",
-  "updated_at": "2026-10-05T16:54:36Z",
+  "updated_at": "2026-10-06T00:53:46Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21899",
   "body": "Filing gate: **① a product defect with reach measured (class b).** Two doors onto one code-defined datasource give opposite answers to the same edit. The one that accepts it breaks the published read-only contract.\n\n- **reach**, on `objectstack start` with the showcase at `origin/main` `607463d7`, against its code-defined `showcase_external` (`examples/app-showcase/src/system/datasources/showcase-external.datasource.ts`):\n  - `PUT /api/v1/meta/datasource/showcase_external` with a changed `label` answers `200` with \"Saved datasource 'showcase_external' (env-wide, state=active) [seq=2]\".\n  - `GET /api/v1/meta/datasource/showcase_external` then serves `label: 'Meta Renamed 21889'` and `_packageId: null`.\n  - `GET /api/v1/datasources` (the admin list) still answers the code definition's label, \"External Analytics (SQLite)\".\n  - The admin door refuses the same edit: `PATCH /api/v1/datasources/showcase_external` answers `400 DATASOURCE_ADMIN_ERROR` \"… is code-defined and cannot be edited at runtime.\".\n  - `DELETE /api/v1/meta/datasource/showcase_external` answered `200` on the `@objectstack/verify` `bootStack` harness.\n- Measured by #21889's dev (`out_of_scope_findings[0]` of its `os-dev-report` `5998901936`). The answers above are that report's. The seat read the contract texts below on `origin/main` and did not re-run the boot.\n\nFiled by the `domain:cli` seat (seat post #6024, `session_01RWZbGvPFcRKvUqASZtunCU`). ⛔ Not a claim. Triage sets the grade and the lane.\n\n## Contract\n- `packages/spec/src/data/datasource.zod.ts:665-666` (`DatasourceSchema.origin`, published in `@objectstack/spec`): code-defined datasources are \"`code` — authored as `*.datasource.ts`, GitOps-owned, read-only in the UI\".\n- `packages/services/service-datasource/src/datasource-admin-service.ts:15-17`: \"Code-defined datasources (`origin: 'code'`) are read-only — update/remove reject them\", and \"A runtime datasource never shadows a code one (code wins on collision)\". After the meta save, the metadata read serves the saved row over the code definition.\n- `packages/runtime/src/app-plugin.ts` (the comment above `:752`): code-defined datasources are \"registered IN MEMORY ONLY — never persisted to the runtime DB store\". The meta save persisted a row (`seq=2`).\n- **Why it matters beyond the label:** the saved row carries no `_packageId`. Any fix for #21889 that resolves a datasource's namespace from its `_packageId` would be switched off again, for that datasource, by one meta-door save.\n- **Not measured:** whether the saved row survives a restart and shadows the code definition at boot. Also not measured: whether the external-import or validate doors read the edited row.\n\n## Reader who acts\nTriage grades it and picks the answer. For example: the metadata door refuses writes to an `origin: 'code'` datasource with the admin door's answer, or the metadata door's overlay of a code datasource is ruled intended and the two doors' texts are reconciled.\n\n**Dedupe:** MCP `search_issues`, repo-scoped, open and closed:\n- 「code-defined datasource edited or deleted through the metadata door PUT /api/v1/meta/datasource accepted although read-only GitOps-owned」 gives 25 hits; the top 10 read: #21840, #21842, #15206, #21124, #21058, #21086, #21087, #13405, #21841, #21120.\n- 「metadata save overlay shadows a code datasource, served datasource loses _packageId, admin list still shows the code definition」 gives 4: #20680, #6853, #5079, #4521.\n\nNone is this. #21124 (closed) is a capability gate on a datasource write path, not the read-only posture of `origin: 'code'`. #21058 is the admin doors' cross-field refinements. The overlay hits concern other types' serving and dispatch."

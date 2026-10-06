@@ -1,0 +1,32 @@
+{
+  "number": 21935,
+  "kind": "pull_request",
+  "title": "test(dogfood): each file's temporary cwd is created from a base the scratch-dir scan can read",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-06T02:01:51Z",
+  "updated_at": "2026-10-06T02:19:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21935",
+  "body": "Fixes #21924\nClause-②: no\n\n## What changes\n\n`main`'s hourly `Lint & Type Check` run is red on one `dispatch-gates` self-test case (run `37394652870` at `be97cf3c93`, `Lint & Repo Gates`, step `PM dispatch-gates self-test`):\n\n> ✗ no mkdtempSync site in this tree takes a base the scan cannot read — UNRESOLVED: packages/qa/dogfood/test/per-file-cwd.setup.ts:60 (a base this scan cannot read: inject('dogfoodCwdRoot'))\n\nPR #21919 added that site for #21914. The guard is right: a `mkdtempSync` base handed over through `inject()` is an expression the tree's scratch-directory scan cannot read. So the fix is at the site, and nothing in the guard or the scan changes.\n\n- **`packages/qa/dogfood/test/per-file-cwd.setup.ts`**: each file's directory is now `mkdtempSync(join(tmpdir(), perFileDirPrefix(runTag)))`. The base is `tmpdir()`, outside the tree by construction, and the scan reads it as such.\n  - Only the run's TAG crosses `inject()` (key renamed `dogfoodCwdRoot` to `dogfoodRunTag`), and only as a name component.\n  - A tag carrying a path separator or `..` is refused.\n- **`packages/qa/dogfood/test/per-file-cwd.global-setup.ts`**:\n  - At start it clears a stale `.objectstack` (unchanged). It reserves the run's tag as `mkdtempSync(join(tmpdir(), 'os-dogfood-run-'))` (unchanged expression) and provides its basename.\n  - At END it removes every system-temp entry named with this run's prefix (`perFileDirPrefix`, exported here and imported by the setup module, so the prefix has one spelling), then the reservation.\n  - The removal stays run-level, so the memoized `shared-showcase` boot keeps its handles until the run ends. A concurrent run carries another tag and is never touched.\n  - The teardown still judges nothing.\n- **`packages/qa/dogfood/vitest.config.ts`**: one comment line (\"removes the run's per-file directories at the end\").\n\nUnchanged from #21914: every file still runs in its own temporary cwd; the cwd is restored in `afterAll`; and the throwing `afterAll` guard on `packages/qa/dogfood/.objectstack/data` is untouched.\n\nOut of scope here: the rule, the case and `scripts/pm/dispatch-gates.mjs` are untouched. Nothing is skipped or recorded as an exception.\n\n## Evidence\n\n- **Reproduced first**, on `origin/main` `faf8dce4` with no change: `pnpm check:pm-dispatch-gates` gave `✗ dispatch-gates self-test: 1 of 1976 case(s) failed.`. The one red case is the line quoted above, at `per-file-cwd.setup.ts:60`. The battery took 821.9s.\n- **At head `2edc5d59`**: `pnpm check:pm-dispatch-gates` gave `✓ no mkdtempSync site in this tree takes a base the scan cannot read` and `✓ dispatch-gates self-test: 1976 cases pass.` (780.2s).\n- **The case still fails on a planted unreadable base.** A second worktree was checked out at `2edc5d59`, and `scripts/ablation-replace.mjs` (wrap mode) replaced the site with `process.chdir(mkdtempSync(join(inject('dogfoodRunTag'), 'file-')));`. The anchor went from 1 to 0, and the blob from `dc1d3de3` to `51346b9f`.\n  - Result: `✗ dispatch-gates self-test: 1 of 1976 case(s) failed.`, and the red case was exactly `... UNRESOLVED: packages/qa/dogfood/test/per-file-cwd.setup.ts:73 (a base this scan cannot read: inject('dogfoodRunTag'))`.\n  - Restore was proven: blob after restore equals HEAD (`dc1d3de3`), `git diff HEAD` is empty, and `git status --porcelain` is empty. The second worktree was then removed.\n- **#21914's behaviour, re-proven at `2edc5d59`**:\n  - Whole dogfood suite, `pnpm --filter @objectstack/dogfood test`: `Test Files  208 passed | 1 skipped (209)`, `Tests  1606 passed | 9 skipped (1615)`. Afterwards `packages/qa/dogfood/.objectstack` does not exist. Zero `/tmp/os-dogfood-run-*` entries before the run and zero after it.\n  - H4 ablation through `scripts/ablation-replace.mjs`: the central `process.chdir(...)` was dropped (blob `dc1d3de3` to `ad6684f2`) and two files were run, `showcase-external-autoconnect` and `showcase-search`. Result: `Test Files  2 failed (2)`. Both failed in the guard: `.../packages/qa/dogfood/.objectstack/data exists after this test file ran. Entries: showcase_external.db` (plus `-shm` / `-wal` on the shared-showcase file).\n  - The restore was proven (blob equals HEAD, `git diff HEAD` empty). The restored leg gave `2 passed`, exit 0, and left nothing in the package dir. Zero temp entries were left after each leg, the red one included.\n- **Gates**: `dispatch-gates --commands` over the 3 changed paths derived 47 families. All 47 ran at `2edc5d59`, and `dispatch-gates --ran` reported `47 derived famil(ies) accounted for — 47 run, 0 NOT-MEASURED`.\n  - `check:dual-build-cjs-loads` first exited 3 (prerequisite: `packages/apps/studio/dist` missing), then exited 0 after building it.\n  - `pnpm lint` exits 0, and `pnpm --filter @objectstack/dogfood typecheck` is green.\n  - `check:pm-dispatch-gates` is path-scoped, so this PR's CI may not schedule it, which is how the red reached `main`. It was run here in full at the head, as above.\n\n## Acceptance notes\n\n- Open PR #21930 also edits `packages/qa/dogfood/vitest.config.ts`, in the `isolated` project's alias block (about line 295). This PR changes one comment line near line 146. The hunks do not overlap.\n- How this red reached `main`: #21919's own CI did not schedule `check:pm-dispatch-gates`, because that battery is path-scoped and the battery's live-tree half reads every tracked source. This is noted, not filed: the scoping is the merge-group ruling that `lint.yml` documents, and the hourly full run caught the red as designed.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RWZbGvPFcRKvUqASZtunCU)_\n"
+}

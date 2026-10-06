@@ -1,0 +1,36 @@
+{
+  "number": 21927,
+  "kind": "pull_request",
+  "title": "docs(drivers): a plugin driver's config is its author's to keep free of credentials",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-06T01:11:01Z",
+  "updated_at": "2026-10-06T01:44:48Z",
+  "closed_at": "2026-10-06T01:44:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-06T01:44:46Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21927",
+  "body": "Refs #21840\n\nClause-②: no\n\n## What\n\nOne paragraph in `content/docs/data-modeling/drivers.mdx`, after the note that a plugin-contributed driver's `config` is left unvalidated. It adds that the platform does not guess which keys of that `config` hold credentials, that the `config` is stored and served to administrators as written, and that keeping secrets out of it is the plugin author's responsibility, with the credential going in the bound secret (`external.credentialsRef`).\n\nThis is the one change the maintainer kept when #21840 was closed as not planned (ruling on #21921).\n\n## Checks\n\n- `node scripts/check-doc-authoring.mjs`: exit 0.\n- Docs only, so nothing is published and no changeset is needed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018zT8d8NpiQ1ExhuNd5TxY6\n"
+}
