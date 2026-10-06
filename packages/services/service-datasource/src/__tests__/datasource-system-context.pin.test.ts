@@ -24,6 +24,11 @@ import { describe, it, expect } from 'vitest';
 import type { CryptoContext, CryptoHandle, ICryptoProvider } from '@objectstack/spec/contracts';
 import { DatasourceAdminServicePlugin } from '../datasource-admin-plugin.js';
 import { createDatasourceSecretBinder } from '../datasource-secret-binder.js';
+import {
+  assertEngineDeleteDispatch,
+  assertEngineFindOnePredicate,
+  assertEngineUpdateDispatch,
+} from '@objectstack/metadata-core';
 // Pay the dist-resolved spec subpath's first transform at module load, as the
 // sibling plugin suite does (`check-test-source-alias`, clocked-window rule).
 import '@objectstack/spec/kernel';
@@ -47,12 +52,14 @@ function recordingStore() {
     registerDatasourceDef() {},
     getDriverByName() { return undefined; },
     async findOne(object: string, query: any, options?: any) {
+      assertEngineFindOnePredicate(object, query);
       calls.push({ verb: 'findOne', object, context: ctxOf(query, options) });
       return rows.find((r) => match(r, query?.where)) ?? null;
     },
     async find(object: string, query: any, options?: any) {
       calls.push({ verb: 'find', object, context: ctxOf(query, options) });
-      return rows.filter((r) => match(r, query?.where));
+      const hits = rows.filter((r) => match(r, query?.where));
+      return typeof query?.limit === 'number' ? hits.slice(0, query.limit) : hits;
     },
     async insert(object: string, row: Record<string, unknown>, options?: any) {
       calls.push({ verb: 'insert', object, context: options?.context });
@@ -60,12 +67,14 @@ function recordingStore() {
       return row;
     },
     async update(object: string, row: Record<string, unknown>, options?: any) {
+      assertEngineUpdateDispatch(row, options);
       calls.push({ verb: 'update', object, context: options?.context });
       const i = rows.findIndex((r) => r.id === options?.where?.id);
       if (i >= 0) rows[i] = { ...rows[i], ...row };
       return 1;
     },
     async delete(object: string, options?: any) {
+      assertEngineDeleteDispatch(options);
       calls.push({ verb: 'delete', object, context: options?.context });
       const i = rows.findIndex((r) => r.id === options?.where?.id);
       if (i >= 0) rows.splice(i, 1);

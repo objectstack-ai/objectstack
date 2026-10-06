@@ -17,9 +17,11 @@
 import { describe, it, expect } from 'vitest';
 import { AutoEnqueuer } from './auto-enqueuer.js';
 import { createWebhookRedeliverGuard } from './redeliver-guard.js';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 type Call = { verb: string; object: string; context: unknown };
 
+/** A read-only double: a write this pin does not expect has no method to land on. */
 function recordingEngine(rows: Array<Record<string, unknown>>) {
     const calls: Call[] = [];
     const ctxOf = (query: any, options: any) => options?.context ?? query?.context;
@@ -29,12 +31,10 @@ function recordingEngine(rows: Array<Record<string, unknown>>) {
             return rows;
         },
         async findOne(object: string, query: any, options?: any) {
+            assertEngineFindOnePredicate(object, query);
             calls.push({ verb: 'findOne', object, context: ctxOf(query, options) });
             return rows.find((r) => r.id === query?.where?.id) ?? null;
         },
-        async insert() { throw new Error('recording engine: no writes expected'); },
-        async update() { throw new Error('recording engine: no writes expected'); },
-        async delete() { throw new Error('recording engine: no writes expected'); },
     };
     return { engine: engine as any, calls };
 }

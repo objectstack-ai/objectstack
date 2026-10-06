@@ -26,6 +26,7 @@ import { SqlNotificationOutbox } from './sql-outbox.js';
 import { SqlHttpOutbox } from './sql-http-outbox.js';
 import { MessagingService } from './messaging-service.js';
 import { createInboxChannel } from './inbox-channel.js';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 type Call = { verb: string; object: string; context: unknown };
 
@@ -47,6 +48,7 @@ function recordingEngine(answer: (verb: string, object: string, query: any) => u
             return (answer('find', object, query) as unknown[]) ?? [];
         },
         async findOne(object: string, query: any, options?: any) {
+            assertEngineFindOnePredicate(object, query);
             calls.push({ verb: 'findOne', object, context: ctxOf(query, options) });
             return answer('findOne', object, query) ?? null;
         },
@@ -54,12 +56,9 @@ function recordingEngine(answer: (verb: string, object: string, query: any) => u
             calls.push({ verb: 'insert', object, context: options?.context });
             return { id: `${object}_1`, ...data };
         },
-        async update(object: string, _data: Record<string, unknown>, options?: any) {
+        async update(object: string, data: Record<string, unknown>, options?: any) {
+            assertEngineUpdateDispatch(data, options);
             calls.push({ verb: 'update', object, context: options?.context });
-            return 1;
-        },
-        async delete(object: string, options?: any) {
-            calls.push({ verb: 'delete', object, context: options?.context });
             return 1;
         },
         async count() { return 0; },

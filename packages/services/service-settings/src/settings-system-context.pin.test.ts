@@ -33,7 +33,11 @@ function matches(row: Record<string, unknown>, where: Record<string, unknown>): 
   });
 }
 
-/** An `IDataEngine`-shaped double that records the context each call carried. */
+/**
+ * An `IDataEngine`-shaped double that records the context each call carried.
+ * It implements only the verbs the moved calls use — `find` and `insert` — so
+ * a call this pin does not expect fails loudly instead of being answered.
+ */
 function recordingEngine() {
   const rows: Array<Record<string, unknown>> = [];
   const calls: Call[] = [];
@@ -43,25 +47,13 @@ function recordingEngine() {
   const engine = {
     async find(object: string, query: any, options?: any) {
       calls.push({ verb: 'find', object, context: readContext(query, options) });
-      return rows.filter((r) => matches(r, query?.where ?? {}));
-    },
-    async findOne(object: string, query: any, options?: any) {
-      calls.push({ verb: 'find', object, context: readContext(query, options) });
-      return rows.find((r) => matches(r, query?.where ?? {})) ?? null;
+      const hits = rows.filter((r) => matches(r, query?.where ?? {}));
+      return typeof query?.limit === 'number' ? hits.slice(0, query.limit) : hits;
     },
     async insert(object: string, data: Record<string, unknown>, options?: any) {
       calls.push({ verb: 'insert', object, context: options?.context });
       if (object === 'sys_setting') rows.push({ ...data });
       return { ...data };
-    },
-    async update(object: string, data: Record<string, unknown>, options?: any) {
-      calls.push({ verb: 'update', object, context: options?.context });
-      for (const r of rows) if (matches(r, options?.where ?? {})) Object.assign(r, data);
-      return 1;
-    },
-    async delete(object: string, options?: any) {
-      calls.push({ verb: 'delete', object, context: options?.context });
-      return 0;
     },
   };
   return { engine, calls, rows };
@@ -74,25 +66,25 @@ const MANIFEST = {
 } as any;
 
 describe('[#21913] SettingsService engine calls carry the explicit system opt-in', () => {
-  it('loadRows, and upsertRow on both its insert and its update branch, pass isSystem on every sys_setting call', async () => {
+  it('loadRows, and upsertRow on its existence probe and insert, pass isSystem on every sys_setting call', async () => {
     const { engine, calls, rows } = recordingEngine();
     const svc = new SettingsService();
     svc.registerManifest(MANIFEST);
     svc.bindEngine(wrapEngineAsSettingsEngine(engine as any));
 
-    // loadRows (read path), then upsertRow's insert branch, then its update branch.
+    // loadRows (read path), then upsertRow's existence probe and insert branch.
+    // (Its update branch already carried the opt-in before this change.)
     expect((await svc.get('localization', 'timezone', { userId: 'u1' })).value).toBe('UTC');
     await svc.set('localization', 'timezone', 'Asia/Tokyo', { userId: 'u1' });
-    await svc.set('localization', 'timezone', 'Europe/Paris', { userId: 'u1' });
     expect(rows).toHaveLength(1);
-    expect((await svc.get('localization', 'timezone', { userId: 'u1' })).value).toBe('Europe/Paris');
+    expect((await svc.get('localization', 'timezone', { userId: 'u1' })).value).toBe('Asia/Tokyo');
 
     const onSettings = calls.filter((c) => c.object === 'sys_setting');
     // The pin is about a population, so it first proves the population is there:
-    // reads, the first write's insert and the second write's update all ran.
-    expect(onSettings.filter((c) => c.verb === 'find').length).toBeGreaterThanOrEqual(4);
+    // the reads ran, and the write took the insert branch.
+    expect(onSettings.filter((c) => c.verb === 'find').length).toBeGreaterThanOrEqual(3);
     expect(onSettings.filter((c) => c.verb === 'insert')).toHaveLength(1);
-    expect(onSettings.filter((c) => c.verb === 'update')).toHaveLength(1);
+    expect(onSettings).toHaveLength(calls.length);
     for (const call of onSettings) {
       expect(call.context, `${call.verb} on ${call.object}`).toEqual({ isSystem: true });
     }
