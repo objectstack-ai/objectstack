@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { renderValidationMessage } from '@objectstack/spec/system';
+import { validationFailure } from '@objectstack/types';
 
 /** The object every user reference below targets. */
 export const USER_OBJECT = 'sys_user';
@@ -40,8 +41,11 @@ export interface UserReferenceField {
  *    does;
  *  - the same answer: `VALIDATION_FAILED` carrying one `reference_not_found`
  *    finding on the field, rendered from the same catalog entry and the
- *    field's label. The differential pin holds it equal to the engine's
- *    refusal over a real engine.
+ *    field's label. It is built by `validationFailure` (`@objectstack/types`),
+ *    the shared constructor for the shape every door serves as
+ *    `400 VALIDATION_FAILED`, so this package stamps no code of its own. The
+ *    differential pin holds it equal to the engine's refusal over a real
+ *    engine.
  *
  * A write that names no user (`null`, `undefined`, `''`) is unchanged: the
  * engine never checked an empty reference either.
@@ -66,13 +70,9 @@ export async function assertUserReferenceResolves(
     field: ref.field,
     params: { ...constraint, value: String(value) },
   });
-  const error = new Error(message) as Error & { code: string; fields: unknown[] };
-  error.name = 'ValidationError';
-  error.code = 'VALIDATION_FAILED';
-  error.fields = [
+  throw validationFailure(message, [
     { field: ref.field, code: 'reference_not_found', message, label: ref.label, constraint, value: String(value) },
-  ];
-  throw error;
+  ]);
 }
 
 /**

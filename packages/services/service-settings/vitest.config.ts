@@ -73,6 +73,13 @@ export default defineConfig({
         find: /^@objectstack\/platform-objects\/system$/,
         replacement: path.resolve(__dirname, '../../platform-objects/src/system/index.ts'),
       },
+      // `platform-objects/identity` arrived with the user-reference pin
+      // (`settings-user-reference.pin.test.ts`), which registers `sys_user` on a
+      // real engine; same explicit-subpath shape as `system` above.
+      {
+        find: /^@objectstack\/platform-objects\/identity$/,
+        replacement: path.resolve(__dirname, '../../platform-objects/src/identity/index.ts'),
+      },
       {
         find: /^@objectstack\/platform-objects$/,
         replacement: path.resolve(__dirname, '../../platform-objects/src/index.ts'),
