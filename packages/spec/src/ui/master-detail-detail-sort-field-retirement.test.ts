@@ -486,7 +486,7 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     expect(judge('"ui/ObjectMasterDetailFormProps:details.sortField",')).toBeNull();
   });
 
-  it('the narrowing exempts only an inline grid field\'s own `sortField` (#21768)', () => {
+  it('the narrowing exempts only an inline grid field\'s own `sortField`, a key the grid widget declares', () => {
     // The inline `grid` form field declares the key: exempt, in each spelling of its widget.
     expect(judge("customFields: [{ name: 'lines', type: 'grid', columns: [{ name: 'qty', type: 'number' }], sortField: 'position' }]")).toBeNull();
     expect(judge('{ "name": "lines", "type": "grid", "sortField": "position" }')).toBeNull();

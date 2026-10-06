@@ -81,7 +81,7 @@ const sentenceContaining = (source: string, anchor: string): string => {
 /** Root tokens that are still true on these surfaces and must stay in place. */
 const SURVIVING_ROOTS = ['features', 'os.user'] as const;
 
-describe('#17203 — no UI prose face advertises `app` as an expression-scope root', () => {
+describe('no UI prose face advertises `app` as an expression-scope root — the renderer no longer mounts it', () => {
   describe('published faces (read by authoring tools and republished into the reference docs)', () => {
     it('`PageComponentSchema.visibleWhen`.describe() does not name `app` among the mounted roots', () => {
       // ⚠️ NOT `.shape` — ADR-0089 D3a made this schema a `.strict().transform(…)`

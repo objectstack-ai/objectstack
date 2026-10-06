@@ -22,7 +22,7 @@ import { PageComponentSchema } from './page.zod';
 // the curation's job is to catch the vocabularies authors still carry in —
 // the Tailwind ramp, and the knobs of the retired `responsive` block.
 // ---------------------------------------------------------------------------
-describe('unknown keys are rejected, not stripped (#4001 batch 13)', () => {
+describe('unknown keys are rejected, not stripped (batch 13)', () => {
   const unknownKeyIssue = (schema: { safeParse: (v: unknown) => any }, value: unknown) => {
     const result = schema.safeParse(value);
     expect(result.success).toBe(false);

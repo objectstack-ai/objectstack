@@ -96,7 +96,7 @@ describe('I18nLabelSchema', () => {
   // runtime to the same line. Each rejection pin asserts the named error
   // content (issue code + message), not just parse failure.
 
-  it('rejects a lone `key` — the enforcement hole #10492 closes', () => {
+  it('rejects a lone `key`, which used to parse as a locale map', () => {
     const r = I18nLabelSchema.safeParse({ key: 'common.save' });
     expect(r.success).toBe(false);
     const issues = JSON.stringify(r.error?.issues);
@@ -164,7 +164,7 @@ describe('I18nLabelSchema', () => {
     expect(
       description,
       'no key is generated for any label — a plain string is translatable only where a resolver + '
-      + 'translation slot exist for its surface (#5377)',
+      + 'translation slot exist for its surface',
     ).not.toMatch(/auto-generated/i);
   });
 });
@@ -186,7 +186,7 @@ describe('AriaPropsSchema', () => {
     expect(result.ariaLabel).toBe('Close dialog');
   });
 
-  it('accepts ariaLabel as an inline locale map — it rides `I18nLabelSchema` (#5728)', () => {
+  it('accepts ariaLabel as an inline locale map — it rides `I18nLabelSchema`', () => {
     const result = AriaPropsSchema.parse({ ariaLabel: { en: 'Close dialog', 'zh-CN': '关闭对话框' } });
     expect(result.ariaLabel).toEqual({ en: 'Close dialog', 'zh-CN': '关闭对话框' });
   });
@@ -200,7 +200,7 @@ describe('AriaPropsSchema', () => {
     })).toThrow();
   });
 
-  it('does not promise a generated translation key for `ariaLabel` either (#5377)', () => {
+  it('does not promise a generated translation key for `ariaLabel` either', () => {
     // The reporter's second surviving point. `ariaLabel` overrides the shared
     // describe, so it never carried the "auto-generated" sentence verbatim —
     // but it inherited the assumption, and there is no bundle slot addressing
@@ -271,7 +271,7 @@ function reject(schema: { safeParse: (v: unknown) => { success: boolean; error?:
   return JSON.stringify(r.error?.issues ?? []);
 }
 
-describe('#4001 批 16 — AriaPropsSchema is closed (the door is real)', () => {
+describe('批 16 — AriaPropsSchema is closed (the door is real)', () => {
   it('the controls parse — this suite fails closed, not by rejecting everything', () => {
     expect(AriaPropsSchema.safeParse({}).success).toBe(true);
     expect(AriaPropsSchema.safeParse({ ariaLabel: 'Close dialog' }).success).toBe(true);
@@ -371,7 +371,7 @@ describe('#4001 批 16 — AriaPropsSchema is closed (the door is real)', () => 
     expect(reject(objectuiAria as never, { ariaLabel: 'x', bogus: 1 })).toContain('these ARIA attributes');
   });
 
-  it('has no `.merge()` riders left at all — the four it had were retired at #4988', async () => {
+  it('has no `.merge()` riders left at all — the four it had were retired with the interaction-config family', async () => {
     // REPLACED WHOLESALE at #4988, not re-spelled. This test used to name five
     // shapes in `animation` / `dnd` / `keyboard` / `touch` and assert each still
     // accepted an undeclared key, because `X.merge(AriaPropsSchema.partial())`
