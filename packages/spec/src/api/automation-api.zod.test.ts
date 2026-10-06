@@ -89,7 +89,7 @@ describe('AutomationRunPathParamsSchema', () => {
 // List Flows — RETIRED (#19543, door ④)
 // ==========================================
 
-describe('the GET /api/v1/automation flow-list door is retired (#19543)', () => {
+describe('the GET /api/v1/automation flow-list door is retired', () => {
   // Flows are metadata (ADR-0106); the list is `GET /api/v1/meta/flow`. The
   // three schemas left with the route and are registered as whole-def removals
   // (`RETIRED_DEFS_BY_MAJOR[18]`), so an export that came back would be a
@@ -324,7 +324,7 @@ describe('TriggerFlowResponseSchema', () => {
   // undeclared keys (BaseResponseSchema.extend + plain z.object), so before
   // the widening the paused-run triple below "passed" while the parse silently
   // dropped `status`, the `runId` a caller resumes with and the whole screen.
-  it('should preserve the paused-run triple — status, runId and the screen (#9378/#9510 third state)', () => {
+  it('should preserve the paused-run triple — status, runId and the screen (a pause is the third state, not a failure)', () => {
     const result = TriggerFlowResponseSchema.parse({
       success: true,
       data: {
@@ -596,7 +596,7 @@ describe('ListRunsRequestSchema', () => {
     })).toThrow();
   });
 
-  it('declares exactly the canonical ExecutionStatus set (#7359)', () => {
+  it('declares exactly the canonical ExecutionStatus set', () => {
     // The wire's filter and the runtime boundary that now enforces it must
     // accept ONE set. The boundary reads `ExecutionStatus.options`; this pins
     // that the schema does too, so a member added to the enum cannot end up
@@ -754,7 +754,7 @@ describe('AutomationApiContracts', () => {
     expect(Object.keys(AutomationApiContracts)).toHaveLength(8);
   });
 
-  it('declares no flow-list entry and no GET at the bare /api/v1/automation path (#19543)', () => {
+  it('declares no flow-list entry and no GET at the bare /api/v1/automation path', () => {
     expect(Object.keys(AutomationApiContracts)).not.toContain('listFlows');
     const routes = Object.values(AutomationApiContracts).map((c) => `${c.method} ${c.path}`);
     expect(routes).not.toContain('GET /api/v1/automation');

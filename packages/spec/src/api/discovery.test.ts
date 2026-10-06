@@ -858,7 +858,7 @@ describe('WellKnownCapabilitiesSchema', () => {
     expect(undocumented, 'vocabulary keys with no .describe()').toEqual([]);
   });
 
-  it('[#5672] is the ONE vocabulary — WELL_KNOWN_CAPABILITY_KEYS is derived from it', () => {
+  it('is the ONE vocabulary — WELL_KNOWN_CAPABILITY_KEYS is derived from it', () => {
     expect([...WELL_KNOWN_CAPABILITY_KEYS].sort())
       .toEqual(Object.keys(WellKnownCapabilitiesSchema.shape).sort());
     // The union of the two historically disjoint producer halves: 7 + 7 with
@@ -1013,7 +1013,7 @@ describe('RouteHealthReportSchema', () => {
   });
 });
 
-describe('Service self-description marker (ADR-0076 D12, #2462)', () => {
+describe('Service self-description marker (ADR-0076 D12)', () => {
   it('ServiceSelfInfoSchema accepts stub and degraded declarations', () => {
     expect(() => ServiceSelfInfoSchema.parse({ status: 'stub' })).not.toThrow();
     expect(() => ServiceSelfInfoSchema.parse({
@@ -1090,7 +1090,7 @@ describe('Service self-description marker (ADR-0076 D12, #2462)', () => {
 // schema's shape. That last step only stays honest while the two shapes are
 // the same modulo declared aliases — which is what this gate pins.
 
-describe('[#4828] DiscoverySchema ↔ GetDiscoveryResponseSchema', () => {
+describe('DiscoverySchema ↔ GetDiscoveryResponseSchema', () => {
   /** The one declared deprecated alias, and its removal is scheduled (protocol 18). */
   const DECLARED_ALIASES = ['apiName'] as const;
 
@@ -1129,7 +1129,7 @@ describe('[#4828] DiscoverySchema ↔ GetDiscoveryResponseSchema', () => {
 // no error. The producer-side conformance tests now check `routes` keys the same
 // way they check top-level keys, and derive their allowance from
 // `ApiRoutesSchema`; these two pin that the allowance is the real one.
-describe('[#5679] routes: the declared key set the producer gates check against', () => {
+describe('routes: the declared key set the producer gates check against', () => {
   it('is the very schema `DiscoverySchema` nests, not a second copy of it', () => {
     // The three producer gates read `ApiRoutesSchema.shape`. That is only a
     // faithful allowance while it IS what `DiscoverySchema.routes` declares —
@@ -1164,7 +1164,7 @@ describe('[#5679] routes: the declared key set the producer gates check against'
   });
 });
 
-describe('[#4828] scoping (decision 3 — declare what REST actually emits)', () => {
+describe('scoping (ruled: declare what REST actually emits)', () => {
   const base = {
     name: 'ObjectStack',
     version: '1.0.0',
@@ -1204,7 +1204,7 @@ describe('[#4828] scoping (decision 3 — declare what REST actually emits)', ()
   });
 });
 
-describe('[#4828] resolveDiscoveryEnvironment (decision 4 — enum, not passthrough)', () => {
+describe('resolveDiscoveryEnvironment (ruled: an enum, not a passthrough)', () => {
   it('maps every documented NODE_ENV spelling into the declared enum', () => {
     const table: Array<[string, string]> = [
       ['production', 'production'],
@@ -1231,7 +1231,7 @@ describe('[#4828] resolveDiscoveryEnvironment (decision 4 — enum, not passthro
   // declining to answer and resolves conservatively to `production`; a spelling
   // this repo does not recognise is a GUESS and never claims production.
   // Collapsing them back into one is the regression these two guard.
-  it('an UNSET value advertises production — the host declined to say (#5673, #5936)', () => {
+  it('an UNSET value advertises production — the host declined to say', () => {
     // Blank counts as unset: `NODE_ENV=` exports an empty string, and the
     // runtime's `getEnv` has always folded that into its default. Were it
     // treated as "anything else" the two producers would drift again on exactly
@@ -1249,7 +1249,7 @@ describe('[#4828] resolveDiscoveryEnvironment (decision 4 — enum, not passthro
   // the source now says, and would have kept passing only because the declared
   // answer happened to equal the fallback's. Re-spelled to inputs that are
   // genuinely outside both the taxonomy and the operator shorthands.
-  it('never CLAIMS production for an unrecognized spelling (#4828)', () => {
+  it('never CLAIMS production for an unrecognized spelling', () => {
     for (const raw of ['qa', 'uat', 'nonsense']) {
       expect(resolveDiscoveryEnvironment(raw), raw).toBe('development');
     }
@@ -1279,7 +1279,7 @@ describe('[#4828] resolveDiscoveryEnvironment (decision 4 — enum, not passthro
  * written down, in a table whose whole purpose is to be read by the next
  * author. The repair is a row each, and a type that keeps the table total.
  */
-describe('[#6287] the fold table is total over EnvironmentType', () => {
+describe('the fold table is total over EnvironmentType', () => {
   /**
    * The declared fold per bucket. This mirrors the source table on purpose: it
    * is the RUNTIME half of the pin and it proves the *values*, so a silent
@@ -1321,7 +1321,7 @@ describe('[#6287] the fold table is total over EnvironmentType', () => {
     expect(resolveDiscoveryEnvironment('Trial')).toBe('sandbox');
   });
 
-  it('leaves the #5936 two-rule split standing (absence ≠ unrecognised)', () => {
+  it('leaves the two-rule split standing (absence ≠ unrecognised)', () => {
     // Neither new row may be read as loosening those. Absence is still the host
     // declining to answer; an unrecognised spelling is still a guess.
     expect(resolveDiscoveryEnvironment(undefined)).toBe('production');

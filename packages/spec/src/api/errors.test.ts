@@ -43,7 +43,7 @@ describe('StandardErrorCode', () => {
     expect(StandardErrorCode.parse('INSUFFICIENT_PRIVILEGES')).toBe('INSUFFICIENT_PRIVILEGES');
   });
 
-  it('refuses the retired batch-operation codes (ADR-0112 amendment 2026-08-18, #9266)', () => {
+  it('refuses the retired batch-operation codes (ADR-0112 amendment 2026-08-18)', () => {
     // Retired under ADR-0049 enforce-or-remove: no producer ever emitted them;
     // the batch surface reports these conditions per row via the ledger-registered
     // ROLLED_BACK / NOT_ATTEMPTED codes instead. The wrong spelling must fail at
@@ -296,7 +296,7 @@ describe('ErrorHttpStatusMap', () => {
   });
 });
 
-describe('HttpStatusErrorCodeMap / standardErrorCodeForHttpStatus (#3842)', () => {
+describe('HttpStatusErrorCodeMap / standardErrorCodeForHttpStatus', () => {
   it('names each status the runtime actually returns', () => {
     expect(standardErrorCodeForHttpStatus(400)).toBe('VALIDATION_ERROR');
     expect(standardErrorCodeForHttpStatus(401)).toBe('UNAUTHENTICATED');
@@ -436,7 +436,7 @@ describe('EnhancedApiErrorSchema.fieldErrors retirement (ADR-0114 D4)', () => {
 // than a bare unrecognized-key error, and the value survives at the same
 // magnitude. Asserting the message, not just `.toThrow()`: a bare throw stays
 // green when the schema throws for some unrelated reason.
-describe('EnhancedApiError.retryAfter \u2192 retryAfterSeconds (#15677 \u2014 BREAKING on the ADR-0112 wire envelope)', () => {
+describe('EnhancedApiError.retryAfter \u2192 retryAfterSeconds (BREAKING on the ADR-0112 wire envelope)', () => {
   const base = { code: 'RATE_LIMIT_EXCEEDED' as const, message: 'Rate limit exceeded' };
 
   it('REFUSES the retired `retryAfter` spelling with the rename in the message', () => {

@@ -60,7 +60,7 @@ const TRANSPORT_SPELLINGS: ReadonlyArray<readonly [string, unknown]> = [
   ['the SortNode array', [{ field: 'name', order: 'desc' }]],
 ];
 
-describe('[#18977] $orderby is declared twice — the two accept sets', () => {
+describe('$orderby is declared twice — the two accept sets', () => {
   describe('§1 ODataQuerySchema.$orderby — the OData URL-convention vocabulary', () => {
     it.each(ODATA_SPELLINGS)('accepts %s', (_label, value) => {
       const parsed = ODataQuerySchema.safeParse({ $orderby: value });

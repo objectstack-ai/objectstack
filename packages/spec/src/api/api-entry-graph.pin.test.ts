@@ -74,7 +74,7 @@ function valueGraph(entry: string): Set<string> {
   return new Set([...seen].map((f) => relative(SRC, f).split('\\').join('/')));
 }
 
-describe('`@objectstack/spec/api` stays off the assembled package body (#18576 ruling, letter B)', () => {
+describe('`@objectstack/spec/api` stays off the assembled package body (ruled: split the entry rather than watch its weight)', () => {
   const api = valueGraph('api/index.ts');
   const assembled = valueGraph('api-assembled/index.ts');
 

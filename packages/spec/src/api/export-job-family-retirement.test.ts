@@ -101,7 +101,7 @@ const MUST_SURVIVE_CONTRACTS = ['IAutomationService', 'RunListResult'] as const;
 const SPEC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SRC_ROOT = path.join(SPEC_ROOT, 'src');
 
-describe('[#17158] export-job family retirement — the public surface', () => {
+describe('export-job family retirement — the public surface', () => {
   it('every retired name has ZERO holders on any public entry; the survivors still stand', () => {
     for (const needed of ['.', './api', './contracts', './automation']) {
       expect(EXPORT_ENTRY_POINTS, `exports map must include ${needed}`).toContain(needed);
@@ -109,7 +109,7 @@ describe('[#17158] export-job family retirement — the public surface', () => {
     expect(exportNamesOf('./api').length, './api must export a non-trivial surface').toBeGreaterThan(100);
 
     for (const name of RETIRED_NAMES) {
-      expect(holdersOf(name), `${name} must have zero holders after #17158`).toEqual([]);
+      expect(holdersOf(name), `${name} must have zero holders after the export-job family retirement`).toEqual([]);
     }
     const survivors: Array<[string, readonly string[]]> = [
       ['./api', MUST_SURVIVE_API],
@@ -155,7 +155,7 @@ describe('[#17158] export-job family retirement — the public surface', () => {
       }
     };
     walk(SRC_ROOT);
-    expect(importers, 'a resurrected import means the retirement is being undone — re-read #17158').toEqual([]);
+    expect(importers, 'a resurrected import means the retirement is being undone — nothing served, bound or consumed the family').toEqual([]);
   });
 
   it('the generated shards no longer list any of the thirteen defs or forty-three names', () => {
@@ -197,7 +197,7 @@ describe('[#17158] export-job family retirement — the public surface', () => {
   });
 });
 
-describe('[#17158] ADR-0087 registration', () => {
+describe('ADR-0087 registration', () => {
   it('declares all thirteen defs under major 18, with the D3 semantic entry wired and no D2 conversion', () => {
     for (const def of RETIRED_DEFS) {
       expect(RETIRED_DEFS_BY_MAJOR[18], `${def} must be declared`).toContain(def);
@@ -246,7 +246,7 @@ describe('[#17158] ADR-0087 registration', () => {
 // typed import of a retired name fails `tsc` in its own package — the enforced
 // channel there. The residue this leg covers is what `tsc` does not compile:
 // JSON, YAML, MD, MDX and untyped `.js` / `.mjs` / `.cjs`.
-describe('[#17158] tree-scoped absence: nothing inside the declared radius references a retired name', () => {
+describe('tree-scoped absence: nothing inside the declared radius references a retired name', () => {
   const REPO_ROOT = path.resolve(SPEC_ROOT, '../..');
   const THIS_FILE = path.relative(REPO_ROOT, fileURLToPath(import.meta.url)).split(path.sep).join('/');
 
@@ -346,6 +346,6 @@ describe('[#17158] tree-scoped absence: nothing inside the declared radius refer
     for (const root of WALK_ROOTS) walk(path.join(REPO_ROOT, root));
     // Anti-vacuity: the walk really covered the tree.
     expect(visited).toBeGreaterThan(1000);
-    expect(offenders, 'a reference to a retired name means the retirement is being undone — re-read #17158').toEqual([]);
+    expect(offenders, 'a reference to a retired name means the retirement is being undone — nothing served, bound or consumed the family').toEqual([]);
   });
 });

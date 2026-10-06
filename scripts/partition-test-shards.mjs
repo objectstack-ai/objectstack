@@ -203,22 +203,37 @@ export const MAX_MEASURED_OVER_PREDICTED = 1.5;
 // on a reading of 1231.52s (run 34009395649 attempt 2, job 101427282674)
 // against a 458.15s dataset entry: the mean was then ~800s, the bound ~1041s,
 // and the whole CLI stood at 1.54x of the mean. Until a refresh landed, pin 3c
-// substituted that reading into the stale dataset. The refresh then measured
-// the whole workspace again -- run 36380128221, 72 packages, 7430.00s -- and
-// moved the MEAN, not only the CLI: @objectstack/spec at 1391.38s became the
-// heaviest item, and on that dataset
+// substituted that reading into the stale dataset.
 //
-//   CLI sliced at 2                         max/mean 1.124x   heaviest 1391s (spec)
-//   CLI whole, as measured there (733.33s)  max/mean 1.124x   heaviest 1391s (spec)
-//   CLI whole at its worst (1231.52s)       max/mean 1.053x   heaviest 1391s (spec)
+// ⚠ THE ENTRY WAS FIRST RETIRED ON A FIGURE THAT WAS NOT THE CLI'S WHOLE COST
+// (#21758). The refresh of run 36380128221 (72 packages, 7430.00s) recorded the
+// CLI at 733.33s -- its two slice windows summed within that ONE run, the only
+// sample that refresh had -- and this block solved the bound against it,
+// C <= (1.3/6)(6696.67 + C), to "fits whole until ~1852s". Once the CLI ran
+// whole, its windows read 1659.03s and 1667.97s (runs 37199214385 and
+// 37212954836), 2.26-2.27x that entry. The conclusion survived, since both sit
+// under ~1852s; the figure it was argued from did not.
 //
-// -- all inside 1.3x, and slicing moves no bin's maximum. Solving
-// C <= (1.3/6)(6696.67 + C) for the CLI's whole cost C, it fits whole until it
-// reaches ~1852s, 1.5x its worst reading. n = 1 is the derived answer, so the
-// entry is retired. The MECHANISM stays, and its pins run on fixtures: the item
-// grammar, expandSlices, the vitest file-count floor, the OS_TEST_SHARD wiring
-// judge and the generator's slice reassembly. The next package pin 3 names is
-// one entry here, plus its own OS_TEST_SHARD wiring, away from being sliced.
+// RE-DERIVED on the refresh that measured the CLI WHOLE (#21826): run
+// 37262126122, 72 packages, 9781.33s, the CLI at 1702.69s and now the heaviest
+// item. The other 71 packages total 8078.64s, so the mean is 1630.22s and the
+// bound 2119.29s, and on that dataset
+//
+//   CLI whole, as measured there (1702.69s)   max/mean 1.044x   heaviest 1703s (cli)
+//   CLI sliced at 2                           max/mean 1.002x   heaviest 1135s (spec)
+//   CLI whole at its worst since (1753.66s)   max/mean 1.070x   heaviest 1754s (cli)
+//
+// -- all inside 1.3x. Whole, the CLI fills bin 1 alone and the other five bins
+// sit at 1614.77-1616.73s. Slicing would lower the maximum, but the bound is
+// already met at n = 1, which is exactly the refusal pin 3c makes of a
+// `{ '@objectstack/cli': 2 }` entry ("Retire the entry"). Solving
+// C <= (1.3/6)(8078.64 + C) for the CLI's whole cost C, it fits whole until it
+// reaches ~2234s: 1.31x its dataset entry, 1.27x its worst reading since
+// (run 37415122516). n = 1 is the derived answer, so the entry stays retired.
+// The MECHANISM stays, and its pins run on fixtures: the item grammar,
+// expandSlices, the vitest file-count floor, the OS_TEST_SHARD wiring judge and
+// the generator's slice reassembly. The next package pin 3 names is one entry
+// here, plus its own OS_TEST_SHARD wiring, away from being sliced.
 //
 // ⛔ Slicing is a SCHEDULING fact, not a measurement one: the dataset keeps
 // holding each package's WHOLE cost, and the division by n happens here. That

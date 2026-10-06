@@ -1509,6 +1509,116 @@
       ]
     },
     {
+      "id": "access-security.public-form-withdrawal-layers",
+      "title": "A public form's withdrawal holds across metadata layers: an organization overlay cannot re-open a form the env-wide definition withdrew, only an explicit false withdraws, a package's shipped false withdraws, and the env-wide definition may open a package-closed form",
+      "since": "v17.7",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "anonymous (no Authorization header, no cookie) on both public form doors, GET /api/v1/forms/:slug and POST /api/v1/forms/:slug/submit",
+        "platform admin (the seeded admin), saving the form at two scopes from one session: env-wide (no active organization) and in the Default Organization, which is the organization the anonymous doors read on a single-posture boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the stock public form: examples/app-showcase/src/ui/views/inquiry.view.ts#InquiryViews, formViews.contact (enabled and allowAnonymous true, publicLink '/forms/contact-us'), served as the flattened view item showcase_inquiry.contact with its sharing at config.sharing",
+          "the stock single tenancy posture and its Default Organization, whose owner is the seeded admin (packages/plugins/plugin-auth/src/ensure-default-organization.ts#ensureDefaultOrganization). The doors resolve the organization through tenancy.defaultOrgId(), and the admin moves between scopes with POST /api/v1/auth/organization/set-active (organizationId null for env-wide). Under a walled posture the doors read no organization, and an org-scoped change of intake is refused for that reason instead (packages/metadata-protocol/src/protocol.ts#anonymousFormIntakeOrgScopeRefusal): out of this item",
+          "a boot you own (pnpm dev -- --fresh -p <port>): the steps leave an env-wide row and an organization overlay of the stock form behind, which would change access-security.public-form-intake's next run on a shared boot. Teardown is discarding the tempdir"
+        ],
+        "knownGaps": [
+          "THE RULED KNOWN LIMIT (#21835 comment 6005722623, 「保持现状，写进文档」): the anonymous doors judge a form by the name of the view item they serve, and the save check runs only on an organization-scoped save or publish. So an organization overlay that was stored before the env-wide withdrawal, or that a rollback or commit revert restores (neither is gated), and that keeps the form open under a different key or slot than the env-wide definition, can still be served. content/docs/ui/public-data-collection.mdx states it under 'Known limit.'. This item neither stages nor scores it: a run that meets it records it against that ruling, never as a FAIL and never as a new finding. Withdrawing the form in that organization's overlay closes it",
+          "acceptance[4] and acceptance[5] (package-shipped forms) have no stock fixture: the showcase ships its public form open, and no stock package ships one closed. Score both from the pins named in their verify (oracle test) and record that the verdict rests on the pins. ⛔ Do not edit a package's artifact on disk to plant one",
+          "acceptance[2] (only an explicit false withdraws) is pinned at the doors and at the write door by unit tests only; the dogfood drives explicit false switches alone, so steps 8-9 are its only end-to-end reading. Its premise is the stored body: a view save stores the authored keys and does not materialise schema defaults (packages/metadata-protocol/src/protocol.ts#projectStorableViewBody), so an omitted allowAnonymous stays absent. If step 8's env-wide read serves an allowAnonymous key at all, the premise failed: record acceptance[2] blocked(fixture) instead of scoring it",
+          "two packages that each ship a view of the same name are outside this item's fixture and are not scored here. The package rule is the one the docs page's 'Known limit: packages and names' states at the run's commit; #21934 (open when this item was written) may narrow it"
+        ]
+      },
+      "steps": [
+        "boot showcase on a fresh DB you own, on the stock posture; sign in as the admin. Read GET /api/v1/auth/get-session and record session.activeOrganizationId as ORG (the Default Organization); if it is null, read the one sys_organization row as the admin and set it active. Prove the scope server-side before every save below: the save response's message names org=ORG for an organization save and 'env-wide' for an env-wide one",
+        "the probe, anonymous, from a client with no cookie jar and no Authorization header: GET /api/v1/forms/contact-us, then POST /api/v1/forms/contact-us/submit with name set to a fresh unique marker, plus email and message; capture each status and body code. Then, as the admin, count the showcase_inquiry rows carrying that marker (GET /api/v1/data/showcase_inquiry?name=MARKER). Baseline: run the probe once on the stock form (open: 200, 201, one row)",
+        "as the admin, GET /api/v1/meta/view/showcase_inquiry.contact and keep the item with every key that starts with '_' removed. Every save below PUTs this body back to the same path and changes only config.sharing",
+        "precondition: set-active ORG; PUT the body with config.sharing.allowAnonymous true (an organization overlay that keeps the form open); run the probe",
+        "env-wide withdrawal: set-active null; PUT the body with config.sharing.allowAnonymous false, publicLink kept; run the probe",
+        "write door: set-active ORG; PUT the overlay again with allowAnonymous true (the overlay as it was before the withdrawal) and capture status and code; PUT it with allowAnonymous false and capture; PUT it with allowAnonymous true again and capture; after each refusal, GET the item at ORG and compare its config.sharing with the previous read; run the probe",
+        "the organization narrows for itself: set-active null; PUT the body with allowAnonymous true env-wide (open env-wide while the organization's overlay stays withdrawn from step 6); run the probe",
+        "explicit only, an absent switch: set-active null; PUT the body with the config.sharing.allowAnonymous key deleted (enabled true, publicLink kept); GET the item env-wide and confirm the served config.sharing carries no allowAnonymous key (the premise, see knownGaps); set-active ORG; PUT the body with allowAnonymous true and capture the status; run the probe",
+        "explicit only, no link: set-active null; PUT the body with config.sharing set to enabled false and allowAnonymous false and NO publicLink; set-active ORG; PUT the body with allowAnonymous true again and capture the status; run the probe",
+        "control, open at both layers: set-active null; PUT the body with allowAnonymous true (the stock sharing); set-active ORG; PUT allowAnonymous true; run the probe, and as the admin read the landed row's organization_id",
+        "run the pins named in automated.ref; acceptance[4] and acceptance[5] are scored from the metadata-protocol and metadata-core files"
+      ],
+      "acceptance": [
+        {
+          "clause": "an env-wide withdrawal is not re-opened by an organization overlay: with the organization's overlay open (step 4's probe served) and the env-wide definition withdrawing the form with its link kept (step 5), both doors answer 404 with code FORM_NOT_FOUND and the probe leaves no row",
+          "oracle": "api",
+          "verify": "step 4's probe is recorded first (a form closed at both layers is closed for an unrelated reason); then step 5's GET and POST status and body code, and the admin's count for step 5's marker, which is 0. Mechanism: packages/rest/src/rest-server.ts#registerFormEndpoints reads the env-wide view list beneath the organization's read and drops a candidate that packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeWithdrawnIn finds withdrawn",
+          "evidence": "the probes of steps 4 and 5 (status, code, row count) and the two save responses with the scope each names"
+        },
+        {
+          "clause": "an organization-scoped save cannot leave the withdrawn form open: re-saving the overlay as it was before the withdrawal, and re-opening it after a withdrawal, both answer 403 with code NOT_OVERRIDABLE and change nothing; the save that keeps the form withdrawn answers 200; both doors stay closed",
+          "oracle": "api",
+          "verify": "step 6's three responses (status, then the code at the top level or under error), the organization reads around each refusal (unchanged), and step 6's probe (404 FORM_NOT_FOUND twice, no row). Mechanism: packages/metadata-protocol/src/protocol.ts#anonymousFormIntakeReopenRefusal, reached from saveMetaItem and from the draft promotion of publishMetaItem; the draft-promotion half is pinned by the metadata-protocol file only",
+          "evidence": "step 6's save responses, the organization reads and the probe"
+        },
+        {
+          "clause": "only an explicit false withdraws: an env-wide definition that keeps the link but leaves allowAnonymous absent, or a sharing that names no public link, withdraws nothing, so the organization-scoped save that opens the form answers 200 and both doors serve it (GET 200, POST 201, one row)",
+          "oracle": "api",
+          "verify": "steps 8 and 9: the premise read (no allowAnonymous key served env-wide), the organization save's status, and each probe. Mechanism: packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormExplicitWithdrawals (a sharing withdraws only when it keeps a non-empty publicLink and sets enabled or allowAnonymous to false)",
+          "evidence": "the premise read, the two organization save responses and the two probes"
+        },
+        {
+          "clause": "an organization can always narrow for itself, and a form open at every layer is served: open env-wide with the organization's overlay withdrawn, both doors answer 404 FORM_NOT_FOUND; open at both layers, both doors accept and the landed row's organization_id is ORG",
+          "oracle": "api",
+          "verify": "step 7's probe (closed) and step 10's probe (open) with the landed row's organization_id",
+          "evidence": "the two probes and the landed row read"
+        },
+        {
+          "clause": "a package's shipped false withdraws (#21835 comment 6005722623, 「包内的 false 算显式关闭」): a package artifact parsed by the stack schema (strict defineStack, the default) whose form keeps its publicLink without switching enabled on carries the schema default enabled false, which counts as an explicit withdrawal, so an organization-scoped save that opens it answers 403 NOT_OVERRIDABLE and stores nothing. An artifact that reached the runtime unparsed (defineStack with strict false, a hand-built manifest) is judged as written",
+          "oracle": "test",
+          "verify": "pnpm --filter @objectstack/metadata-protocol exec vitest run --maxWorkers=2 src/protocol.org-scoped-write-refused.test.ts, the 'single: a package-shipped form' cases 'the parsed artifact carries an explicit `false` that keeps the link' and 'a schema-parsed `false` is a withdrawal: an org-scoped save that opens it is refused'; and pnpm --filter @objectstack/metadata-core exec vitest run --maxWorkers=2 src/anonymous-form-intake.test.ts, the case 'a schema-parsed `false` that keeps the link IS a withdrawal (a package artifact fails closed)'. No stock fixture (knownGaps)",
+          "evidence": "the two test runs, naming the cases above as passed"
+        },
+        {
+          "clause": "the env-wide definition may open a package-closed form (#21835 comment 6005722623, 「不算，环境级是开关」): the package artifact is part of the env-wide definition, not a layer beneath it, so an env-wide save with both switches on is accepted, the env-wide list the doors read then serves that open body as the only item of its name, and an organization-scoped save that keeps it open is accepted",
+          "oracle": "test",
+          "verify": "the same metadata-protocol run, the case 'the env-wide definition is the switch: an env-wide save opens it, and the env-wide list serves that body'. The row anchor that makes the artifact the env-wide body is packages/metadata-protocol/src/protocol.ts#envWideRawViewRows (for a form one package ships: the active env-wide row of the name, else that package's artifact). No stock fixture (knownGaps)",
+          "evidence": "the metadata-protocol run, naming the case above as passed"
+        }
+      ],
+      "negative": [
+        "a 200 or 201, or a landed row, at either door in step 5 or step 6 is the #21835 regression (an organization overlay re-opening an env-wide withdrawal): FAIL",
+        "a 200 to an organization-scoped save in step 6 that leaves the form open is a FAIL of the write door even while the doors stay closed: the platform accepted a change it will never honour",
+        "with the premise read holding, a closed door in step 8 or step 9 is a FAIL of the explicit-only rule (#21835 comment 5994082238, 「不算，写进文档」): an absent switch or a missing link withdraws nothing",
+        "a door probed with the admin's cookie or bearer token scores the admin, not the public: re-run it anonymously (auth-state-leak)",
+        "the ruled known limit (knownGaps, first entry) is not a FAIL"
+      ],
+      "traps": [
+        "auth-state-leak"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/showcase-public-form-withdrawal-layers.dogfood.test.ts ('showcase: a public form withdrawal at any metadata layer holds', 5 cases: acceptance[0], [1] and [3] end to end on a showcase boot with an organization) + packages/rest/src/public-form-withdrawal.test.ts ('a public form withdrawal is a kill switch: layering only narrows intake': the doors, including 'only an explicit false withdraws: env-wide link + enabled true with allowAnonymous absent does not close the org's open form' and 'not a withdrawal: the public link cleared env-wide leaves the organization's open form served') + packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts ('org-scoped anonymous form intake changes the anonymous doors cannot see': the write door, including 'single: a package-shipped form') + packages/metadata-core/src/anonymous-form-intake.test.ts (the anonymousFormIntakeWithdrawnIn cases). acceptance[2] has no end-to-end pin, and acceptance[4] and [5] have no stock fixture (knownGaps)"
+      },
+      "source": [
+        "packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeWithdrawnIn (the one judgement the doors and the write door share: a body of the same view name withdraws a candidate matched by slot or by slug; the package is not compared)",
+        "packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormExplicitWithdrawals (explicit only: a sharing that keeps its publicLink and sets enabled or allowAnonymous to false; a schema-parsed artifact carries the default enabled false, which counts)",
+        "packages/rest/src/rest-server.ts#registerFormEndpoints (resolveFormBySlug: the organization from tenancy.defaultOrgId(), and the env-wide view list read beneath it as the layer; a withdrawn form answers 404 FORM_NOT_FOUND on both doors)",
+        "packages/metadata-protocol/src/protocol.ts#anonymousFormIntakeReopenRefusal (the write door: 403 NOT_OVERRIDABLE, judged on the expanded body against the env-wide list and on the raw body against the row anchor; reached from saveMetaItem and from the draft promotion, never from rollbackMetaItem or revertCommit, which is the second half of the ruled known limit)",
+        "packages/metadata-protocol/src/protocol.ts#envWideRawViewRows (the row anchor, for a form one package ships: the active env-wide row of the name, else that package's artifact. How it resolves when several packages ship the name is #21934's)",
+        "content/docs/ui/public-data-collection.mdx, section '4. Withdraw a public form' (the published rules and both known limits)",
+        "#21835 (the 17.7 regression; rulings in comments 5994082238 and 6005722623) · PR #21864 (the fix, merge 3c7785d4ab) · #21934 (open when this item was written: package-identity follow-ups of the same fix)",
+        "sibling: access-security.public-form-intake owns the single-layer half (whitelist, forged-anchor strip, publicFormGrant, unpublish kills the link). This item owns how a withdrawal composes across layers"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-06",
+          "change": "new: PR #21864 made a public form's withdrawal a kill switch across metadata layers, and no item asserted it; access-security.public-form-intake covers the single-layer withdrawal only. Adds the #21835 row of #21932: an env-wide withdrawal is not re-opened by an organization overlay (both doors and the write door), only an explicit false withdraws, a package's shipped false withdraws, and the env-wide definition may open a package-closed form. The ruled known limit (#21835 comment 6005722623) is recorded as a knownGap, not a clause",
+          "ref": "#21932"
+        }
+      ]
+    },
+    {
       "id": "access-security.share-link-capability-tokens",
       "title": "Share-link capability tokens: anon resolve renders the record minus redactFields, password/audience gates hold, revoke/expire refuse without leaking, the stored password hash never leaves the server, the password travels in the X-Share-Password header, and public answers are never cached",
       "since": "v16",

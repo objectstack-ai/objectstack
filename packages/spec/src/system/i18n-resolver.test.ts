@@ -3548,6 +3548,175 @@ describe('translateObject — catalog vs explicit override (#8284)', () => {
   });
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// translateObject — a field's translated help is served on `description` (#21948)
+// ────────────────────────────────────────────────────────────────────────────
+
+import { FieldSchema } from '../data/field.zod';
+
+/**
+ * #21948 — the bundle's `objects.<object>.fields.<field>.help` entry is the
+ * translation of the field's `description` (the i18n extractor writes it from
+ * that key), and it used to be served on a `help` key `FieldSchema` does not
+ * declare. Every consumer that reads only declared keys rendered the English
+ * `description`, and the console warned once per such field on every load.
+ *
+ * The entry is served on `description` now, under ADR-0029 D9.2a: the catalog
+ * applies only while the served `description` still equals the packaged
+ * field's (`valueOverridesPackagedBase`), and with no packaged base it applies.
+ */
+describe('translateObject — a field\'s translated help is served on `description`', () => {
+  const TWO_FACTOR_EN =
+    'Whether two-factor authentication is enabled for this user. Maintained by the better-auth `twoFactor` plugin.';
+  const TWO_FACTOR_ZH = '该用户是否已启用双因素认证。由 better-auth 的 `twoFactor` 插件维护。';
+
+  /** The packaged declaration, as the owner contributor holds it. */
+  const PACKAGED = {
+    name: 'sys_user',
+    label: 'User',
+    fields: {
+      two_factor_enabled: {
+        name: 'two_factor_enabled',
+        type: 'boolean',
+        label: 'Two-Factor Enabled',
+        description: TWO_FACTOR_EN,
+      },
+      phone: {
+        name: 'phone',
+        type: 'text',
+        label: 'Phone',
+        description: 'Contact number.',
+        inlineHelpText: 'Include the country code.',
+      },
+      nickname: { name: 'nickname', type: 'text', label: 'Nickname' },
+    },
+  };
+
+  /**
+   * What the extractor writes: `en` repeats the packaged `description` under
+   * `help`, `zh-CN` is its translation. `nickname` has no entry at all.
+   */
+  const BUNDLE: TranslationBundle = {
+    en: {
+      objects: {
+        sys_user: {
+          fields: {
+            two_factor_enabled: { label: 'Two-Factor Enabled', help: TWO_FACTOR_EN },
+            phone: { label: 'Phone', help: 'Contact number.' },
+          },
+        },
+      },
+    } as any,
+    'zh-CN': {
+      objects: {
+        sys_user: {
+          fields: {
+            two_factor_enabled: { label: '已启用双因素认证', help: TWO_FACTOR_ZH },
+            phone: { label: '电话', help: '联系电话。' },
+          },
+        },
+      },
+    } as any,
+  };
+
+  const clone = <V>(value: V): V => JSON.parse(JSON.stringify(value));
+  const fieldsOf = (out: unknown) => (out as { fields: Record<string, Record<string, unknown>> }).fields;
+  const unrecognizedKeys = (def: unknown) => {
+    const parsed = FieldSchema.safeParse(def);
+    return parsed.success ? [] : parsed.error.issues.filter((issue) => issue.code === 'unrecognized_keys');
+  };
+
+  it('serves the zh-CN translation on `description`, carries no `help` key, and parses with no unrecognized key', () => {
+    const field = fieldsOf(translateObject(clone(PACKAGED), BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED }))
+      .two_factor_enabled;
+    expect(field.description).toBe(TWO_FACTOR_ZH);
+    expect('help' in field).toBe(false);
+    expect(field.label).toBe('已启用双因素认证');
+    expect(unrecognizedKeys(field)).toEqual([]);
+  });
+
+  it('leaves a field with no bundle entry exactly as it came — the control', () => {
+    const doc = clone(PACKAGED);
+    const field = fieldsOf(translateObject(doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED })).nickname;
+    expect(field).toEqual(PACKAGED.fields.nickname);
+    expect('description' in field).toBe(false);
+    expect('help' in field).toBe(false);
+  });
+
+  it('a field declaring both `description` and `inlineHelpText` gets the translation on `description`; `inlineHelpText` is untouched', () => {
+    const field = fieldsOf(translateObject(clone(PACKAGED), BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED })).phone;
+    expect(field.description).toBe('联系电话。');
+    expect(field.inlineHelpText).toBe('Include the country code.');
+    expect('help' in field).toBe(false);
+    expect(unrecognizedKeys(field)).toEqual([]);
+  });
+
+  it('keeps a `description` that diverged from the packaged field, in every locale, through the type dispatch', () => {
+    // The REST boundary reaches `translateObject` through the dispatcher, so the
+    // packaged base has to arrive there for the comparison to be made at all.
+    const served = clone(PACKAGED);
+    served.fields.two_factor_enabled.description = 'Edited by the tenant.';
+    for (const locale of ['zh-CN', 'en']) {
+      const fields = fieldsOf(translateMetadataDocument('object', clone(served), BUNDLE, { locale, packagedBase: PACKAGED }));
+      expect(fields.two_factor_enabled.description).toBe('Edited by the tenant.');
+      expect('help' in fields.two_factor_enabled).toBe(false);
+    }
+    // Judged per field: the undiverged sibling is still translated…
+    const zh = fieldsOf(translateMetadataDocument('object', clone(served), BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED }));
+    expect(zh.phone.description).toBe('联系电话。');
+    // …and the field `label` stays a flat `catalog ?? document`, as before.
+    expect(zh.two_factor_enabled.label).toBe('已启用双因素认证');
+  });
+
+  it('a field the packaged base does not declare counts as diverged', () => {
+    // An `objectExtensions` field is folded on after the owner's declaration,
+    // which is all the base carries.
+    const served = clone(PACKAGED) as any;
+    served.fields.extra = { name: 'extra', type: 'text', label: 'Extra', description: 'Added by an extension.' };
+    const bundle = clone(BUNDLE) as any;
+    bundle['zh-CN'].objects.sys_user.fields.extra = { help: '扩展添加。' };
+    const field = fieldsOf(translateObject(served, bundle, { locale: 'zh-CN', packagedBase: PACKAGED })).extra;
+    expect(field.description).toBe('Added by an extension.');
+    expect('help' in field).toBe(false);
+  });
+
+  it('with no packaged base, the catalog applies — "unknown" is not "authored"', () => {
+    const served = clone(PACKAGED);
+    served.fields.two_factor_enabled.description = 'Edited by the tenant.';
+    for (const packagedBase of [undefined, null]) {
+      const field = fieldsOf(translateObject(clone(served), BUNDLE, { locale: 'zh-CN', packagedBase })).two_factor_enabled;
+      expect(field.description).toBe(TWO_FACTOR_ZH);
+      expect('help' in field).toBe(false);
+    }
+    expect(fieldsOf(translateObject(clone(served), BUNDLE, { locale: 'zh-CN' })).two_factor_enabled.description)
+      .toBe(TWO_FACTOR_ZH);
+  });
+
+  it('an absent served `description` is not an override — the catalog fills it', () => {
+    const served = clone(PACKAGED) as any;
+    delete served.fields.two_factor_enabled.description;
+    const field = fieldsOf(translateObject(served, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED })).two_factor_enabled;
+    expect(field.description).toBe(TWO_FACTOR_ZH);
+  });
+
+  it('judges an array-shaped field list against an array-shaped base by field name', () => {
+    const asArray = (doc: typeof PACKAGED) => ({ ...doc, fields: Object.values(doc.fields) });
+    const served = clone(PACKAGED);
+    served.fields.two_factor_enabled.description = 'Edited by the tenant.';
+    const out = translateObject(asArray(served) as any, BUNDLE, { locale: 'zh-CN', packagedBase: asArray(PACKAGED) });
+    const byName = Object.fromEntries((out.fields as any[]).map((f) => [f.name, f]));
+    expect(byName.two_factor_enabled.description).toBe('Edited by the tenant.');
+    expect(byName.phone.description).toBe('联系电话。');
+    expect((out.fields as any[]).some((f) => 'help' in f)).toBe(false);
+  });
+
+  it('does not mutate the input document', () => {
+    const doc = clone(PACKAGED);
+    translateObject(doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(doc).toEqual(PACKAGED);
+  });
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // Screen-flow copy resolvers (#7646 / #11287)
 // ════════════════════════════════════════════════════════════════════════════
