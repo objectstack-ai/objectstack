@@ -28,7 +28,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 import { authIdentityObjects } from './manifest';
 
@@ -199,6 +199,26 @@ async function expectReadFaultRefusal(attempt: Promise<unknown>, object: string)
 /** The registration answer an ObjectQL engine gives through `getSchema`. */
 const schemaFor = (...registered: string[]) => vi.fn((object: string) => (registered.includes(object) ? { name: object } : undefined));
 
+/**
+ * An engine double that answers the registration question (`getSchema`) beside
+ * its two reads. Its `findOne` keeps ObjectQL's own predicate contract
+ * (`assertEngineFindOnePredicate`), so it is no looser than the engine it
+ * stands in for.
+ */
+function registeringEngine(
+  registered: string[],
+  answers: { findOne: () => Promise<unknown>; find: () => Promise<unknown> },
+) {
+  return {
+    getSchema: schemaFor(...registered),
+    findOne: vi.fn(async (object: string, q?: Query) => {
+      assertEngineFindOnePredicate(object, q as never);
+      return answers.findOne();
+    }),
+    find: vi.fn(answers.find),
+  };
+}
+
 describe('organization slug guard — fails closed when a read cannot answer (#21941)', () => {
   it('an organization read that throws is refused (503), and the environment read is never made', async () => {
     // SUPERSEDED PIN, quoted — what the guard answered before:
@@ -217,13 +237,12 @@ describe('organization slug guard — fails closed when a read cannot answer (#2
 
   it('an environment read that throws is refused (503) — on an engine that registers the object', async () => {
     // SUPERSEDED PIN, quoted — `find` threw and the hook resolved `undefined`.
-    const engine = {
-      getSchema: schemaFor('sys_organization', 'sys_environment'),
-      findOne: vi.fn(async () => ORG),
-      find: vi.fn(async () => {
+    const engine = registeringEngine(['sys_organization', 'sys_environment'], {
+      findOne: async () => ORG,
+      find: async () => {
         throw new Error('connection reset');
-      }),
-    };
+      },
+    });
     const update = await slugGuard(engine);
     await expectReadFaultRefusal(update('acme-new'), 'sys_environment');
     expect(engine.find).toHaveBeenCalledTimes(1);
@@ -241,30 +260,27 @@ describe('organization slug guard — fails closed when a read cannot answer (#2
   });
 
   it('a healthy read on a registered object still refuses the change while an active environment references the org, and allows it otherwise', async () => {
-    const refusing = {
-      getSchema: schemaFor('sys_organization', 'sys_environment'),
-      findOne: vi.fn(async () => ORG),
-      find: vi.fn(async () => ENVS),
-    };
+    const refusing = registeringEngine(['sys_organization', 'sys_environment'], {
+      findOne: async () => ORG,
+      find: async () => ENVS,
+    });
     await expectSlugRefusal((await slugGuard(refusing))('acme-new'));
-    const allowing = {
-      getSchema: schemaFor('sys_organization', 'sys_environment'),
-      findOne: vi.fn(async () => ORG),
-      find: vi.fn(async () => [{ id: 'e2', status: 'archived' }]),
-    };
+    const allowing = registeringEngine(['sys_organization', 'sys_environment'], {
+      findOne: async () => ORG,
+      find: async () => [{ id: 'e2', status: 'archived' }],
+    });
     await expect((await slugGuard(allowing))('acme-new')).resolves.toBeUndefined();
   });
 
   it('an engine that does not register `sys_environment` declares the guard inapplicable — nothing is read', async () => {
-    const engine = {
-      getSchema: schemaFor('sys_organization'),
-      findOne: vi.fn(async () => {
+    const engine = registeringEngine(['sys_organization'], {
+      findOne: async () => {
         throw new Error('must not be read');
-      }),
-      find: vi.fn(async () => {
+      },
+      find: async () => {
         throw new Error('must not be read');
-      }),
-    };
+      },
+    });
     const update = await slugGuard(engine);
     await expect(update('acme-new')).resolves.toBeUndefined();
     expect(engine.getSchema).toHaveBeenCalledWith('sys_environment');
