@@ -1002,7 +1002,7 @@ describe('CollaborationSessionSchema', () => {
 // collision that got this population ruled: milliseconds here, seconds on the
 // tenant surface. Both old spellings are `retiredKey()` tombstones; asserted on
 // the issue CODE and the prescription, never on a bare `toThrow()`.
-describe('collaboration session durations carry their unit (#15679)', () => {
+describe('collaboration session durations carry their unit in the key name', () => {
   it('REFUSES the retired `idleTimeout` with the rename in the message', () => {
     const result = CollaborationSessionConfigSchema.safeParse({ mode: 'ot', idleTimeout: 600000 });
     expect(result.success).toBe(false);

@@ -53,7 +53,7 @@ describe('EmailProviderSchema', () => {
     expect(accepted).toEqual([...DELIVERABLE_PROVIDERS]);
   });
 
-  it('accepts smtp — shipped by plugin-email since #5087 (ADR-0012)', () => {
+  it('accepts smtp — shipped by the SMTP transport in plugin-email (ADR-0012)', () => {
     // The single assertion #5104 is about: green after the enum gained
     // 'smtp', red on any revert of it.
     expect(EmailProviderSchema.safeParse('smtp').success).toBe(true);
@@ -123,7 +123,7 @@ describe('EmailServiceConfigSchema', () => {
 // assertion below reads `parsed.data`, so each one is green after the
 // declaration and red on a revert of it.
 // ─────────────────────────────────────────────────────────────────────────────
-describe('EmailServiceConfigSchema — keys the CLI reads (#5307)', () => {
+describe('EmailServiceConfigSchema — keys the CLI reads', () => {
   it('carries queueDelivery through the parse, not into the bin', () => {
     for (const queueDelivery of [true, false]) {
       const parsed = EmailServiceConfigSchema.safeParse({ queueDelivery });

@@ -363,7 +363,7 @@ describe('resolveDocAudiences — union over claiming books (§6.7)', () => {
 });
 
 // ── Inline translation maps retired in 17.0.0 (#4667, ADR-0049) ─────────────
-describe('retired book translation maps (#4667)', () => {
+describe('retired book translation maps', () => {
   it('rejects a book-level `translations` map and names the live neighbour', () => {
     // The prescription has to mention `doc.translations`: that key is live on
     // every doc render path and is what the author actually wanted. Without it
@@ -410,7 +410,7 @@ describe('retired book translation maps (#4667)', () => {
 // book-tree response contract (#12038)
 // ==========================================
 
-describe('ResolvedBookSchema is the book-tree response contract (#12038)', () => {
+describe('ResolvedBookSchema is the book-tree response contract', () => {
   // The conformance suite for the `GET /meta/book/:name/tree` ledger rows
   // (#3877's no-row-without-conformance rule). Stronger than the handwritten
   // captures its meta.* siblings use: `resolveBookTree()` is pure and lives in
