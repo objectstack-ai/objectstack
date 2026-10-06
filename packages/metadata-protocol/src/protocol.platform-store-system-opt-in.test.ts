@@ -110,13 +110,15 @@ function makeStubEngine() {
             }
             return findRow(opts.where)?.row ?? null;
         },
-        async find(table: string, opts: { where: Record<string, unknown>; context?: unknown }) {
+        async find(table: string, opts: { where: Record<string, unknown>; limit?: number; context?: unknown }) {
             record('find', table, opts?.context);
-            if (table === 'sys_metadata_history') {
-                return historyRows.filter((h) => matchesHistory(h, opts.where ?? {}));
-            }
-            if (table !== 'sys_metadata') return [];
-            return Array.from(rows.values()).filter((r) => matchesMetadataWhere(r, opts.where ?? {}));
+            const hits: unknown[] = table === 'sys_metadata_history'
+                ? historyRows.filter((h) => matchesHistory(h, opts.where ?? {}))
+                : table === 'sys_metadata'
+                    ? Array.from(rows.values()).filter((r) => matchesMetadataWhere(r, opts.where ?? {}))
+                    : [];
+            // The caller's bound, applied after the filter, by presence.
+            return typeof opts?.limit === 'number' ? hits.slice(0, opts.limit) : hits;
         },
         async insert(table: string, data: Record<string, unknown>, options?: { context?: unknown }) {
             record('insert', table, options?.context);
