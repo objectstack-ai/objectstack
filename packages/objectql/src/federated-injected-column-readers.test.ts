@@ -360,29 +360,37 @@ function injectedColumnNames(): ReadonlySet<string> {
   return new Set(Object.keys(injectedSystemColumnDefs({ name: 'probe', external: { remoteName: 'probe' }, fields: {} })));
 }
 
-/** The name of the function a node sits in, or `<module>` for top-level code. */
-function siteOf(node: ts.Node): string {
-  for (let p: ts.Node | undefined = node.parent; p; p = p.parent) {
-    if (
-      (ts.isMethodDeclaration(p) || ts.isFunctionDeclaration(p) || ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p)) &&
-      p.name
-    ) {
-      return p.name.getText();
-    }
-    if (ts.isConstructorDeclaration(p)) return 'constructor';
-    const fnInit = (init: ts.Expression | undefined) => !!init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init));
-    if (ts.isPropertyDeclaration(p) && fnInit(p.initializer)) return p.name.getText();
-    if (
-      ts.isVariableDeclaration(p) &&
-      fnInit(p.initializer) &&
-      ts.isVariableDeclarationList(p.parent) &&
-      ts.isVariableStatement(p.parent.parent) &&
-      ts.isSourceFile(p.parent.parent.parent)
-    ) {
-      return p.name.getText();
-    }
+/**
+ * The name a node gives the code inside it when it is a function-like
+ * container, or `undefined` when it is not. A node's site is the name of its
+ * NEAREST such ancestor, or `<module>` for top-level code. The walk below
+ * hands that name down as it descends, so each node's site costs nothing.
+ * The first version asked for every node by climbing to the root: O(nodes x
+ * depth) over 2.8 MB of source, about 1.5 s a scan and three scans a run.
+ * Under the CPU contention a Test Core shard runs at (four suites of three
+ * workers on four cores), two of those scans measured past vitest's 5 s
+ * default timeout.
+ */
+function containerName(p: ts.Node, sf: ts.SourceFile): string | undefined {
+  if (
+    (ts.isMethodDeclaration(p) || ts.isFunctionDeclaration(p) || ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p)) &&
+    p.name
+  ) {
+    return p.name.getText(sf);
   }
-  return '<module>';
+  if (ts.isConstructorDeclaration(p)) return 'constructor';
+  const fnInit = (init: ts.Expression | undefined) => !!init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init));
+  if (ts.isPropertyDeclaration(p) && fnInit(p.initializer)) return p.name.getText(sf);
+  if (
+    ts.isVariableDeclaration(p) &&
+    fnInit(p.initializer) &&
+    ts.isVariableDeclarationList(p.parent) &&
+    ts.isVariableStatement(p.parent.parent) &&
+    ts.isSourceFile(p.parent.parent.parent)
+  ) {
+    return p.name.getText(sf);
+  }
+  return undefined;
 }
 
 function calleeName(call: ts.CallExpression): string | undefined {
@@ -392,7 +400,19 @@ function calleeName(call: ts.CallExpression): string | undefined {
   return undefined;
 }
 
+/** The one scan this file makes: every test reads the same answer. */
+let scanned: Scan | undefined;
+
+/**
+ * Parsing the package source is the one costly step in this file, so a test
+ * that may be the first to call this declares {@link SCAN_BUDGET_MS} rather
+ * than borrowing vitest's 5 s default, which is a budget for a unit, not for a
+ * parse of the whole package on a shared runner.
+ */
+const SCAN_BUDGET_MS = 30_000;
+
 function scanObjectqlSources(): Scan {
+  if (scanned) return scanned;
   // Located from THIS test file's own path, as `engine-middleware-operation-vocabulary.test.ts`
   // does: the package's build config targets CommonJS, where `import.meta` is TS1470.
   const testPath = expect.getState().testPath;
@@ -416,8 +436,8 @@ function scanObjectqlSources(): Scan {
   for (const file of files) {
     const rel = relative(srcDir, file).split(sep).join('/');
     const sf = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
-    const visit = (n: ts.Node): void => {
-      const site = `${rel}#${siteOf(n)}`;
+    const visit = (n: ts.Node, siteName: string): void => {
+      const site = `${rel}#${siteName}`;
       if (ts.isCallExpression(n)) {
         const name = calleeName(n);
         if (name) {
@@ -454,11 +474,13 @@ function scanObjectqlSources(): Scan {
       ) {
         seams.add(`${site} :: organization_id`);
       }
-      ts.forEachChild(n, visit);
+      const inner = containerName(n, sf) ?? siteName;
+      ts.forEachChild(n, (child) => visit(child, inner));
     };
-    visit(sf);
+    visit(sf, '<module>');
   }
-  return { seams, calls, files: files.map((f) => relative(srcDir, f).split(sep).join('/')), columns };
+  scanned = { seams, calls, files: files.map((f) => relative(srcDir, f).split(sep).join('/')), columns };
+  return scanned;
 }
 
 const siteKeyOf = (seamKey: string): string => seamKey.slice(0, seamKey.indexOf(' :: '));
@@ -474,7 +496,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
     expect([...scan.columns]).toEqual(
       expect.arrayContaining(['organization_id', 'owning_business_unit_id', 'owner_id', 'created_by', 'updated_by']),
     );
-  });
+  }, SCAN_BUDGET_MS);
 
   it('has a row for every seam use in the source, and no row for a use that is gone', () => {
     const scan = scanObjectqlSources();
@@ -488,7 +510,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
         'its row to READERS in this file.',
     ).toEqual([]);
     expect(stale, 'A READERS row names a seam use the source no longer has: delete or re-key the row.').toEqual([]);
-  });
+  }, SCAN_BUDGET_MS);
 
   it('a disposition that says the site asks a federated predicate is true of the source', () => {
     const scan = scanObjectqlSources();
@@ -509,7 +531,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
         expect(asks.some((p) => own.has(p)), `${key}: the site asks none of ${asks.join(', ')}`).toBe(true);
       }
     }
-  });
+  }, SCAN_BUDGET_MS);
 
   it('the sites that skip are exactly the cascade scan, its plan, and the lifecycle tenant partition', () => {
     const skipping = new Set(
