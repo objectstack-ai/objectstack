@@ -51,7 +51,14 @@ function makeGate() {
     const objectql = {
         find,
         getObjects: vi.fn().mockReturnValue({}),
-        registry: { getObject: vi.fn().mockReturnValue(null), getRegisteredTypes: vi.fn().mockReturnValue([]) },
+        // The engine REGISTERS `sys_environment_member`: the gate asks the
+        // registry before it reads, and an engine that registers no such object
+        // declares the gate inapplicable (#21941) — which would make "skipped"
+        // and "checked" both return `null` again.
+        registry: {
+            getObject: vi.fn((name: string) => (name === 'sys_environment_member' ? { name } : null)),
+            getRegisteredTypes: vi.fn().mockReturnValue([]),
+        },
     };
     const auth = {
         getApi: async () => ({
