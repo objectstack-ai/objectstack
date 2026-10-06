@@ -17,7 +17,7 @@
  * ## The crossing, and its fence
  *
  * `object` joins `runtimeTypes`, and the gate's `runtimeWriteType` reaches the
- * rule (`StackExpressionOptions`), which on an object write runs the
+ * rule (`runStackExpressionPasses`), which on an object write runs the
  * field-formula pass alone. Every other object-borne pass the build runs —
  * validation-rule predicates, the field-rule slots, option `visibleWhen`, the
  * object's own action predicates — is FENCED off this door by name, and the
@@ -31,7 +31,7 @@
 import { describe, expect, it } from 'vitest';
 import { EXPRESSION_INVALID, runAuthoringRules } from './authoring-rules.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
-import { validateStackExpressions } from './validate-expressions.js';
+import { runStackExpressionPasses, validateStackExpressions } from './validate-expressions.js';
 
 /** The card's object, with the formula under test. `sharingModel` keeps `security-owd-unset` quiet. */
 const fxSqrt = (expression: string, over: Record<string, unknown> = {}) => ({
@@ -157,6 +157,8 @@ describe('#22019 — the fence: every other object-borne expression pass stays o
     // option narrows ONLY on `object`, so nothing about the three existing
     // doors moves.
     const stack = { objects: [withFieldRule()] };
-    expect(validateStackExpressions(stack, { runtimeWriteType: 'flow' })).toEqual(validateStackExpressions(stack));
+    expect(runStackExpressionPasses(stack, { runtimeWriteType: 'flow' })).toEqual(validateStackExpressions(stack));
+    // And the object pass set is a strict subset of what the build reports.
+    expect(runStackExpressionPasses(stack, { runtimeWriteType: 'object' })).toEqual([]);
   });
 });

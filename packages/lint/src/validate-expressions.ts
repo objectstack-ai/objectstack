@@ -1174,7 +1174,7 @@ function evaluatedSourceRefusal(raw: unknown): { message: string; source: string
   return { message: verdict.error.issues[0]?.message ?? EVALUATED_EXPRESSION_SOURCE_REQUIRED, source };
 }
 
-/** Options for {@link validateStackExpressions}. */
+/** Options for {@link runStackExpressionPasses}. */
 export interface StackExpressionOptions {
   /**
    * [#22019] The singular metadata type of the per-write snapshot the runtime
@@ -1206,7 +1206,20 @@ export interface StackExpressionOptions {
  * Validate every predicate in the stack. Returns the list of issues (empty =
  * clean). Caller decides how to surface / whether to fail the build.
  */
-export function validateStackExpressions(stack: AnyRec, options: StackExpressionOptions = {}): ExprIssue[] {
+export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
+  return runStackExpressionPasses(stack, {});
+}
+
+/**
+ * {@link validateStackExpressions} with the runtime publish gate's write type
+ * — the one body both run, so the CLI and the door cannot drift apart.
+ *
+ * [#22019] Kept OFF the package's public entry on purpose: the write type is
+ * the gate's private input, read only by this rule's registry entry
+ * (`authoring-rules.ts`), and the published `validateStackExpressions(stack)`
+ * keeps the signature it always had.
+ */
+export function runStackExpressionPasses(stack: AnyRec, options: StackExpressionOptions): ExprIssue[] {
   const issues: ExprIssue[] = [];
   // [#22019] See {@link StackExpressionOptions.runtimeWriteType}: on an object
   // write only the field-formula pass judges. Every other loop below reads an
