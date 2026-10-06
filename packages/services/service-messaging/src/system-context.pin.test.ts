@@ -180,10 +180,10 @@ describe('[#21913] the emit fan-out carries the explicit system opt-in', () => {
 
 /** Plain-equality `where` over seeded rows — anything else is refused, loudly. */
 function matchRows(rows: Array<Record<string, unknown>>, where: Record<string, unknown> = {}) {
-    for (const k of Object.keys(where)) {
+    return rows.filter((r) => Object.entries(where).every(([k, v]) => {
         if (k.startsWith('$')) throw new Error(`recording engine: unimplemented combinator ${k}`);
-    }
-    return rows.filter((r) => Object.entries(where).every(([k, v]) => (r[k] ?? null) === (v ?? null)));
+        return (r[k] ?? null) === (v ?? null);
+    }));
 }
 
 const USER_SCOPED = new Set(['sys_inbox_message', 'sys_notification_receipt']);
