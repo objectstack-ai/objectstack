@@ -80,9 +80,12 @@ export const ApiErrorSchema = lazySchema(() => z.object({
    *    and the marked text are one value, so a boundary that rewraps or
    *    substitutes `message` (sanitisation, truncation, the sandbox debug
    *    wrapper) can never accidentally promote platform prose into the marked
-   *    channel. Platform/driver code never sets it. Same audience-split
-   *    precedent as `developerMessage` on the DELETE_RESTRICTED envelope
-   *    (#7307), pointed the other way.
+   *    channel. It is set only by a producer that authors end-user text with
+   *    no host state: an application hook, or a platform refusal that carries
+   *    static guidance (the packaged-permission-set lock's refusals in
+   *    `@objectstack/plugin-security`). Platform and driver diagnostics never
+   *    set it. Same audience-split precedent as `developerMessage` on the
+   *    DELETE_RESTRICTED envelope (#7307), pointed the other way.
    *
    * It never replaces `message` — the diagnostic channel keeps its own wording
    * for logs and developers.

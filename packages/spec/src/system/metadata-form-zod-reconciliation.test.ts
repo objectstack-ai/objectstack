@@ -295,8 +295,9 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   // its group below. Three more were ruled rather than read (ruling record
   // 5861442317, #19332): authored through its own editor, code-declared
   // platform configuration, and no registered widget spells this union. Each
-  // holds exactly the keys that ruling put in it, and the test at the end of
-  // this file also reads what this package can read of each.
+  // holds exactly the keys that ruling put in it, plus any key a later ruling
+  // of its own added (`field.picklist`, record 5995552118), and the test at the
+  // end of this file also reads what this package can read of each.
   //
   // `view` rows are here although `view` is outside the top-level direction
   // until its per-arm forms exist: each reason holds on every arm, so none of
@@ -391,27 +392,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'externalSharingModel',
     why: 'declared, not enforced yet — liveness verdict `planned` (ADR-0090 D11: validated at authoring time only; the audience-aware evaluator branch that would honour it is scheduled, not built). No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
   },
-  {
-    kind: 'omit',
-    type: 'field',
-    path: ROOT_PATH,
-    key: 'picklist',
-    why: 'declared, not enforced yet — liveness verdict `planned` (the server-side resolution that serves a picklist-bound field its options is not landed). No offer until it is enforced; the field designer offering a picklist is a later Studio phase',
-  },
-  {
-    kind: 'omit',
-    type: 'action',
-    path: ROOT_PATH,
-    key: 'onSuccess',
-    why: 'declared, not enforced yet — both of its children (`navigate`, `openIn`) carry the liveness verdict `planned`: no console consumer reads the block yet. No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
-  },
-  {
-    kind: 'omit',
-    type: 'action',
-    path: ROOT_PATH,
-    key: 'outcomeMessages',
-    why: "declared, not enforced yet — liveness verdict `planned` (#21095: the console reader that picks the entry named by the handler's `outcome` is a later link of the same ruling). No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate",
-  },
 
   // Renderer-owned vocabulary — a key is admitted here only when all three
   // hold: its `describe()` says the spec declares no vocabulary for its value;
@@ -433,7 +413,11 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   // the editor is another registered metadata type, the key stores that
   // type's own node, and the test at the end of this file reads it. The page
   // designer and the import flow live outside this package, so those two
-  // rows rest on the ruling alone.
+  // rows rest on the ruling alone. `field.picklist` joined the class by a
+  // ruling of its own (record 5995552118, #21863 2B); its editor, the object
+  // designer's shared-picklist picker, lives in objectui (objectui#10202
+  // phase 2), so that row rests on that ruling and on the one that placed the
+  // picker there (record 5755653853, #18164 batch #209 item 1 A).
   {
     kind: 'omit',
     type: 'object',
@@ -461,6 +445,13 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'external',
     why: 'authored through its own editor — the import flow (ruling record 5861442317, #19332): the external-datasource import, which the Studio import dialog and `os datasource introspect` both reach through `POST /datasources/:name/external/tables/:remote/draft`, drafts the binding from the remote table it read, so the binding comes from the remote table rather than from a name typed into this form',
+  },
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'picklist',
+    why: "authored through its own editor — the object designer's shared-picklist picker (ruling record 5861442317, #19332; the picker placed there by ruling record 5755653853, #18164 batch #209 item 1 A): the key is enforced, liveness verdict `live` (the server resolves the named picklist onto the served field's `options` and judges a write against that set), and its offer was decided as that picker in the object designer's select-field editor, so a text row in this form would be a second, weaker entry beside it, where an author types a list name instead of picking one",
   },
 
   // Code-declared platform configuration (ruling record 5861442317, #19332):
@@ -1411,7 +1402,8 @@ describe('the ledger has a root coordinate, and the overlay is not surface', () 
 //   subset row rests on the same reading (its full editor is the `field`
 //   type). The page designer and the import flow live in objectui and in the
 //   datasource service, out of this package's reach, and are held to the
-//   ruling's word.
+//   ruling's word. So is the object designer's shared-picklist picker, in
+//   objectui, held to the word of the ruling that admitted `field.picklist`.
 // - No registered widget spells this union. The node is a union, and one of
 //   its arms has a value `FormSelectOptionSchema` refuses as an option
 //   `value`. That no widget renders the whole union is a reading of objectui's
@@ -1421,11 +1413,16 @@ describe('the ledger has a root coordinate, and the overlay is not surface', () 
 //   declared in other packages. The ruling's key list is its only admission.
 // ────────────────────────────────────────────────────────────────────────────
 
-/** The ruling's three classes, each with the keys it put there, transcribed from the record. */
+/**
+ * The ruling's three classes, each with the keys it put there, transcribed from
+ * the record. One key was added later by a ruling of its own, the admission the
+ * test below asks for: `field.picklist`, into the own-editor class (record
+ * 5995552118, #21863 2B).
+ */
 const RULED_ROOT_REASONS: ReadonlyArray<{ reason: string; keys: readonly string[] }> = [
   {
     reason: 'authored through its own editor',
-    keys: ['object.actions', 'object.listViews', 'object.external', 'page.slots'],
+    keys: ['object.actions', 'object.listViews', 'object.external', 'page.slots', 'field.picklist'],
   },
   {
     reason: 'code-declared platform configuration',
@@ -1447,6 +1444,7 @@ const RULED_EDITORS: Readonly<Record<string, { type: string } | { surface: strin
   'object.listViews': { type: 'view' },
   'page.slots': { surface: 'the page designer' },
   'object.external': { surface: 'the import flow' },
+  'field.picklist': { surface: "the object designer's shared-picklist picker" },
 };
 
 /** Is `type.key` a key the ruling put in the class `reason` names? */

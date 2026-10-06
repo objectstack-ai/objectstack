@@ -672,11 +672,13 @@ export function mapDataError(error: any, object?: string): { status: number; bod
  * Why riding it across the FAULT terminals is safe rather than a #5437/#7543
  * regression: those disciplines withhold text the producer never addressed to
  * the caller — driver prose, a crash's `TypeError: …`. `userMessage` is the
- * opposite by construction: it exists on an error only because an author
- * deliberately wrote user-facing text onto it (`declaredUserMessage` answers
- * `undefined` for everything else — platform and driver code never sets the
- * field), so carrying it discloses nothing that was not authored for exactly
- * this audience. A genuine crash carries no marking and its envelope is
+ * opposite by construction: it exists on an error only because its producer
+ * deliberately wrote end-user text with no host state onto it — an
+ * application hook, or a platform refusal carrying static guidance such as
+ * the packaged-permission-set lock's (`declaredUserMessage` answers
+ * `undefined` for everything else; platform and driver diagnostics never set
+ * the field) — so carrying it discloses nothing that was not authored for
+ * exactly this audience. A genuine crash carries no marking and its envelope is
  * byte-identical to before. The one thing the marking never does is move the
  * STATUS or the `code` — a marked crash is still the sanitised 500.
  */

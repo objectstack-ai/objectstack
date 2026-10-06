@@ -35,9 +35,11 @@
  * `object` is derived from the ROUTE, never from `details.object` (which, on a
  * cascade delete, names a CHILD the caller never addressed). `§3` drives that
  * exact fixture **with a mark present**, so the repair cannot be read as
- * loosening the withhold: the marked channel is authored end-user text,
- * carried as a declared top-level sibling of `code`/`message`, and platform and
- * driver code never set it.
+ * loosening the withhold: the marked channel is authored end-user text with
+ * no host state (an application hook's, or a platform refusal's static
+ * guidance such as the packaged-permission-set lock's), carried as a declared
+ * top-level sibling of `code`/`message`; platform and driver diagnostics never
+ * set it.
  *
  * That same ruling is also why the change is owed: it makes REST's shape the
  * contract for BOTH transports, and REST's shape has carried the mark on this

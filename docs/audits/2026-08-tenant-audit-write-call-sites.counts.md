@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 232 |
-| Object name statically decidable | 154 |
+| Write call sites | 233 |
+| Object name statically decidable | 155 |
 | Object name chosen at run time | 78 |
-| Against a tenancy-enabled object | 153 |
+| Against a tenancy-enabled object | 154 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 148 |
+| Threading a tenant context | 149 |
 | Provably carrying none | 17 |
 | …and decidably tenancy-enabled | 9 |
 | Options argument unreadable | 67 |
 | …and decidably tenancy-enabled | 34 |
-| Threading a decidably elevated context | 113 |
+| Threading a decidably elevated context | 114 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 102 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-05 at `34782539c`.
+Measured on 2026-10-05 at `3d34c6efd`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 605 |
-| engine-shaped types recognised | 68 |
+| tracked non-test sources scanned | 607 |
+| engine-shaped types recognised | 69 |
 | declared objects in the registry | 116 |
-| same-named calls subtracted as non-engine | 155 |
+| same-named calls subtracted as non-engine | 158 |
 
 ## Every site
 
@@ -183,7 +183,7 @@ Measured on 2026-10-05 at `34782539c`.
 | `packages/plugins/plugin-sharing/src/primary-bu-projection.ts` | `update` | `sys_user` | enabled | elevated | 2 |
 | `packages/plugins/plugin-sharing/src/record-orphan-cleanup.ts` | `delete` | `table` | undecidable | options unreadable | 2 |
 | `packages/plugins/plugin-sharing/src/share-link-service.ts` | `insert` | `sys_share_link` | enabled | elevated | 1 |
-| `packages/plugins/plugin-sharing/src/share-link-service.ts` | `update` | `sys_share_link` | enabled | elevated | 2 |
+| `packages/plugins/plugin-sharing/src/share-link-service.ts` | `update` | `sys_share_link` | enabled | elevated | 3 |
 | `packages/plugins/plugin-sharing/src/sharing-plugin.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-sharing/src/sharing-rule-service.ts` | `delete` | `sys_record_share` | enabled | options unreadable | 3 |
 | `packages/plugins/plugin-sharing/src/sharing-rule-service.ts` | `delete` | `sys_sharing_rule` | enabled | options unreadable | 1 |

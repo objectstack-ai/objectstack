@@ -12157,9 +12157,11 @@ export class RestServer {
                 // derivation and one reason with two copies is this lane's own
                 // recurring defect). `userMessage` has NO invariant left for a
                 // caller to re-derive. `declaredUserMessage` already decided
-                // PRESENCE — the field exists on an error only because an
-                // author deliberately wrote caller-facing text onto it, and
-                // platform and driver code never set it — and
+                // PRESENCE — the field exists on an error only because its
+                // producer deliberately wrote end-user text with no host state
+                // onto it (an application hook, or a platform refusal carrying
+                // static guidance such as the packaged-permission-set lock's;
+                // platform and driver diagnostics never set it) — and
                 // `truncateClientMessage` already applied #5423's bound to the
                 // value. Reading `refusal.body.userMessage` IS the rule; there
                 // is no second function to run it through, and running one

@@ -24,15 +24,17 @@
  * the one every reader asks:
  *  - validate compares each federated object, and a drifted column is reported;
  *  - the boot gate's sweep lists every federated object;
- *  - the draft's name carries the namespace of the datasource's package;
- *  - the import's explicit name is held to that namespace, and refused when
- *    it breaks it;
  *  - the refreshed catalog is persisted;
  *  - the remote-table list honours the datasource's `allowedSchemas`.
  * The service is asked again at each use, never remembered from the first
  * one. A service registered BEFORE `init()` (the `objectstack dev` ordering)
  * gets the same answers. With no `'metadata'` service at all, every reader
  * keeps its documented fallback.
+ *
+ * [#21889] The namespace half (the draft's prefix and the import's name
+ * check) moved to `external-namespace-reads-engine-registry.test.ts`: the
+ * package record it needs lives in the engine registry, not in the metadata
+ * service, so a `package` map seeded here pinned a store no composition fills.
  *
  * The plugin is imported through a RELATIVE specifier, so these cases measure
  * `src/` and need no build. The booted-stack half (the showcase on a
@@ -111,7 +113,6 @@ function metadataFake(
   const store = new Map<string, Map<string, unknown>>([
     ['datasource', new Map([['warehouse', datasource]])],
     ['object', new Map<string, unknown>([[CUSTOMER.name, CUSTOMER], [ORDER.name, ORDER]])],
-    ['package', new Map([['com.acme.warehouse', { manifest: { id: 'com.acme.warehouse', namespace: 'wh' } }]])],
   ]);
   const typeMap = (type: string) => {
     let map = store.get(type);
@@ -212,32 +213,6 @@ describe('the federation service reads a metadata service registered after init 
     ]);
   });
 
-  it('the draft\'s name carries the namespace of the datasource\'s package', async () => {
-    const { service } = await startOrdering(
-      metadataFake({ name: 'warehouse', schemaMode: 'external', _packageId: 'com.acme.warehouse' }),
-    );
-
-    const draft = await service.generateObjectDraft('warehouse', 'customers');
-
-    expect(draft.name).toBe('wh_customers');
-  });
-
-  it('the import\'s explicit name is held to that namespace, and refused when it breaks it', async () => {
-    const { h, service } = await startOrdering(
-      metadataFake({ name: 'warehouse', schemaMode: 'external', _packageId: 'com.acme.warehouse' }),
-    );
-    const saveMetaItem = vi.fn(async () => ({ success: true }));
-    h.services.set('protocol', { saveMetaItem });
-
-    const outcome = await service
-      .importObject('warehouse', 'customers', { name: 'ext_customers' })
-      .catch((e: unknown) => e);
-
-    expect(outcome).toBeInstanceOf(Error);
-    expect(outcome).toMatchObject({ code: 'EXTERNAL_IMPORT_ERROR', status: 400 });
-    expect(saveMetaItem).not.toHaveBeenCalled();
-  });
-
   it('the refreshed catalog is persisted', async () => {
     const { service, metadata } = await startOrdering();
 
@@ -285,9 +260,9 @@ describe('the federation service reads a metadata service registered after init 
 });
 
 describe('control: a metadata service registered before init (the dev ordering) gives the same answers', () => {
-  it('validate, the sweep, the draft and the catalog write answer as under the start ordering', async () => {
+  it('validate, the sweep and the catalog write answer as under the start ordering', async () => {
     const h = harness();
-    const metadata = metadataFake({ name: 'warehouse', schemaMode: 'external', _packageId: 'com.acme.warehouse' });
+    const metadata = metadataFake();
     h.services.set('metadata', metadata.service);
     const service = await federation(h);
 
@@ -296,7 +271,6 @@ describe('control: a metadata service registered before init (the dev ordering) 
     expect(report.results.find((r) => r.object === 'wh_customer')?.diffs).toEqual([
       expect.objectContaining({ kind: 'missing_column', column: 'email' }),
     ]);
-    expect((await service.generateObjectDraft('warehouse', 'customers')).name).toBe('wh_customers');
     await service.refreshCatalog('warehouse');
     expect(metadata.register).toHaveBeenCalledWith('external_catalog', 'warehouse_catalog', expect.anything());
   });
