@@ -14,7 +14,7 @@ import type {
 } from './outbox.js';
 import { hashPartition } from './backoff.js';
 import { toEpochMs } from './audit-timestamp.js';
-import { dispatcherAckCasOptions, dispatcherSweepOptions } from './outbox-dispatcher-scope.js';
+import { DISPATCHER_SYSTEM_CONTEXT, dispatcherAckCasOptions, dispatcherSweepOptions } from './outbox-dispatcher-scope.js';
 import {
     NotificationAckError,
     notificationAckLostClaimMessage,
@@ -153,7 +153,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             },
             fields: ['id'],
             limit: opts.limit,
-        });
+        }, { context: DISPATCHER_SYSTEM_CONTEXT });
         if (!candidates.length) return [];
         const ids = (candidates as Array<{ id: string }>).map((c) => c.id);
 
@@ -163,7 +163,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             { status: 'in_flight', claimed_by: opts.nodeId, claimed_at: now },
             // Environment-wide by design: the dispatcher drains every
             // organization's queue. Warrant in `outbox-dispatcher-scope.ts`.
-            dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }),
+            { ...dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }), context: DISPATCHER_SYSTEM_CONTEXT },
         );
 
         // 4. Read back only the rows we own. [commit d9cf78eaa] The read-back WHERE just
@@ -172,7 +172,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         //    cast, and states nothing the query did not already establish.
         const claimed = (await this.engine.find(this.objectName, {
             where: { id: { $in: ids }, claimed_by: opts.nodeId, claimed_at: now, status: 'in_flight' },
-        })) as DeliveryRow[];
+        }, { context: DISPATCHER_SYSTEM_CONTEXT })) as DeliveryRow[];
         return claimed.map((r) => ({ ...this.toRecord(r), claimedBy: opts.nodeId, claimedAt: now }));
     }
 
@@ -194,7 +194,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             },
             fields: ['id'],
             limit: 10000,
-        });
+        }, { context: DISPATCHER_SYSTEM_CONTEXT });
         if (!candidates.length) return [];
         const ids = (candidates as Array<{ id: string }>).map((c) => c.id);
 
@@ -204,13 +204,13 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             { status: 'in_flight', claimed_by: opts.nodeId, claimed_at: now },
             // Environment-wide by design: the dispatcher drains every
             // organization's queue. Warrant in `outbox-dispatcher-scope.ts`.
-            dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }),
+            { ...dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }), context: DISPATCHER_SYSTEM_CONTEXT },
         );
 
         // 4. Read back the rows we own — same credential stamp as claim().
         const claimed = (await this.engine.find(this.objectName, {
             where: { id: { $in: ids }, claimed_by: opts.nodeId, claimed_at: now, status: 'in_flight' },
-        })) as DeliveryRow[];
+        }, { context: DISPATCHER_SYSTEM_CONTEXT })) as DeliveryRow[];
         return claimed.map((r) => ({ ...this.toRecord(r), claimedBy: opts.nodeId, claimedAt: now }));
     }
 
@@ -342,7 +342,10 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             { status: 'pending', claimed_by: null, claimed_at: null },
             // Environment-wide by design: recovers rows a crashed node abandoned,
             // for every organization. Warrant in `outbox-dispatcher-scope.ts`.
-            dispatcherSweepOptions({ status: 'in_flight', claimed_at: { $lt: now - claimTtlMs } }),
+            {
+                ...dispatcherSweepOptions({ status: 'in_flight', claimed_at: { $lt: now - claimTtlMs } }),
+                context: DISPATCHER_SYSTEM_CONTEXT,
+            },
         );
     }
 

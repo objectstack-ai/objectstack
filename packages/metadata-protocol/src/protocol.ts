@@ -103,6 +103,10 @@ import {
     // The one rule for which forms a `view` body opens to anonymous intake —
     // the same rule the anonymous form doors in `@objectstack/rest` serve by.
     anonymousFormIntakeSlugs,
+    // A withdrawal is a kill switch: the doors' layer predicate, which the
+    // org-scoped write door asks before accepting a re-opening write.
+    anonymousFormIntakeCandidates,
+    anonymousFormIntakeWithdrawnIn,
     // [#21476] The posture IN FORCE, read off the `tenancy` service the one way
     // the anonymous form doors read it — the runtime authoring gate's input for
     // its public-form intake advisory (see `tenancyPostureInForce()`).
@@ -15954,6 +15958,8 @@ export class ObjectStackProtocolImplementation implements
         name: string;
         organizationId: string | null | undefined;
         body: unknown;
+        /** The package binding the row is saved under (a container's expansion is placed by it). */
+        packageId?: string | null;
     }): Promise<Error | null> {
         if (!args.organizationId) return null;
         const singular = PLURAL_TO_SINGULAR[args.type] ?? args.type;
@@ -15963,7 +15969,9 @@ export class ObjectStackProtocolImplementation implements
             | undefined;
         if (typeof tenancy?.defaultOrgId !== 'function') return null;
         const doorOrganization = await tenancy.defaultOrgId();
-        if (doorOrganization === args.organizationId) return null;
+        if (doorOrganization === args.organizationId) {
+            return this.anonymousFormIntakeReopenRefusal({ ...args, type: singular, organizationId: args.organizationId });
+        }
         const proposed = anonymousFormIntakeSlugs(args.body);
         const served = anonymousFormIntakeSlugs(
             ((await this.getMetaItem({ type: singular, name: args.name })) as any)?.item,
@@ -15987,6 +15995,115 @@ export class ObjectStackProtocolImplementation implements
         err.organizationId = args.organizationId;
         err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
         return err;
+    }
+
+    /**
+     * An organization-scoped `view` write, in the organization the anonymous
+     * form doors read, that would leave open a public form the env-wide layer
+     * withdrew. Returns the refusal, or `null` when the write is fine.
+     *
+     * A withdrawal is a kill switch: an explicit withdrawal of a public form
+     * (the same view, the same slot, the link kept with `enabled` or
+     * `allowAnonymous` cleared) at any layer closes it, and layering may only
+     * narrow intake, never re-open it. The doors enforce that at read time
+     * (`registerFormEndpoints` in `@objectstack/rest` reads the env-wide layer
+     * beneath the organization's and lets its withdrawal close the form), so
+     * such a write would be accepted and then never honoured. It is refused
+     * instead, and the author is pointed at the env-wide definition, which is
+     * the switch.
+     *
+     * Judged by the doors' own verdict ({@link anonymousFormIntakeWithdrawnIn})
+     * over the env-wide `view` list, for every form this write would leave
+     * open — whether or not the organization's current definition has it open
+     * already, so re-saving an overlay that was open before the env-wide
+     * withdrawal is refused too. The body is judged as the list read serves
+     * it: a container-shaped body (`formViews`, `form`, …) is expanded into
+     * the view items the doors read ({@link expandRuntimeViewContainer}). An
+     * organization-scoped save that keeps the form withdrawn, or that opens
+     * nothing the env-wide layer withdrew, is never refused here.
+     */
+    private async anonymousFormIntakeReopenRefusal(args: {
+        type: string;
+        name: string;
+        organizationId: string;
+        body: unknown;
+        packageId?: string | null;
+    }): Promise<Error | null> {
+        if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) return null;
+        const raw = args.body as Record<string, unknown>;
+        // The name stamp the container-collision judge applies (a body with no
+        // `name` is a container under the save name); a view item is the save
+        // name's own row.
+        const stamped = raw.name ? raw : { ...raw, name: args.name };
+        const served: unknown[] = isAggregatedViewContainer(stamped)
+            ? this.expandRuntimeViewContainer(args.type, stamped, { packageId: args.packageId ?? undefined })
+            : [{ ...raw, name: args.name }];
+        const open = served.flatMap((view) => anonymousFormIntakeCandidates(view).map((c) => ({ view, c })));
+        if (open.length === 0) return null;
+        const envWide: any = await this.getMetaItems({ type: args.type });
+        const layer: unknown[] = Array.isArray(envWide?.items) ? envWide.items : [];
+        const closed = new Set(
+            open.filter(({ view, c }) => anonymousFormIntakeWithdrawnIn(layer, view, c)).map(({ c }) => c.slug),
+        );
+        // The same judgement anchored on the stored ROW this overlay is keyed
+        // by: the env-wide body of row `name`, as stored (a container is not
+        // expanded, so a form moved to another key or slot, renamed through
+        // `form.name`, or renamed by an expansion collision is still matched
+        // against the form it was, by slot or by slug).
+        const envRows = (await this.envWideRawViewRows(args.type, args.name)).map((r) => ({ ...r, name: args.name }));
+        if (envRows.length > 0) {
+            const own = { ...raw, name: args.name };
+            for (const c of anonymousFormIntakeCandidates(own)) {
+                if (anonymousFormIntakeWithdrawnIn(envRows, own, c)) closed.add(c.slug);
+            }
+        }
+        const reopened = [...closed].sort();
+        if (reopened.length === 0) return null;
+        const list = reopened.map((s) => `'/forms/${s}'`).join(', ');
+        const err: any = new Error(
+            `Metadata item 'view/${args.name}' cannot keep public form ${list} open for anonymous intake `
+            + `in organization '${args.organizationId}': the env-wide definition withdraws it. A withdrawal is `
+            + `a kill switch, so an organization overlay may narrow a public form's intake but never re-open it, `
+            + `and the anonymous form doors keep answering it as not found. Save this overlay with the form's `
+            + `sharing withdrawn (enabled or allowAnonymous false), or, to publish the form again, save it `
+            + `env-wide (retry with no active organization) with sharing enabled and anonymous access allowed. `
+            + `See docs/adr/0005-metadata-customization-overlay.md.`
+        );
+        err.code = 'NOT_OVERRIDABLE';
+        err.status = 403;
+        // The sentence an end user is shown (the producer-declared channel).
+        err.userMessage = `This public form was withdrawn for the whole environment, so it cannot be open `
+            + `for one organization. Publish it again from the environment-wide form definition.`;
+        err.organizationId = args.organizationId;
+        err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
+        return err;
+    }
+
+    /**
+     * The env-wide body of the `view` row `name`, as stored: the active
+     * env-wide `sys_metadata` row when there is one (the env-wide overlay is
+     * keyed by its own name, ADR-0005), else the code package's artifact of
+     * that name. Empty when neither exists.
+     *
+     * Read raw, never through the list read: that serves a container only as
+     * its expansion, whose item names and slots the overlay author chooses,
+     * and the kill switch anchors identity on the row instead.
+     */
+    private async envWideRawViewRows(type: string, name: string): Promise<Record<string, unknown>[]> {
+        let records: any[] = [];
+        try {
+            records = await this.readActiveOverlayRows({ type }, undefined);
+        } catch (error) {
+            // [#5532] Only an unprovisioned store means "no rows".
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        }
+        const stored = this.storedOverlayEntries({ type }, records)
+            .filter((e) => e.name === name && e.organizationId === null)
+            .map((e) => e.data)
+            .filter((d): d is Record<string, unknown> => !!d && typeof d === 'object' && !Array.isArray(d));
+        if (stored.length > 0) return stored;
+        const artifact = this.lookupArtifactItem(type, name);
+        return artifact && typeof artifact === 'object' ? [artifact as Record<string, unknown>] : [];
     }
 
     /**
@@ -19496,6 +19613,7 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 organizationId: request.organizationId,
                 body: request.item,
+                ...(request.packageId ? { packageId: request.packageId } : {}),
             });
             if (intakeRefusal) throw intakeRefusal;
         }
@@ -21485,9 +21603,26 @@ export class ObjectStackProtocolImplementation implements
         // Without this the gate would be trivially bypassable by anyone who
         // saves `?mode=draft` and then POSTs `/publish` — which is exactly what
         // Studio's designer surface does on every edit.
+        //
+        // The draft is read under ONE package key, and `repo.promoteDraft`
+        // below promotes under that same key, so the body judged here is the
+        // body that becomes active. ADR-0048 keys a draft by
+        // `(org, type, name, package_id)`: two packages can each hold a draft
+        // of the same name in one org, and a read without the package
+        // dimension picks either. The key is the caller's stated binding
+        // (spelled exactly as `repo.promoteDraft` receives it); with none
+        // stated, the binding of the draft row this promotion resolves, read
+        // once and then stated to both the read and the promotion.
+        let draftKey: string | null | undefined = 'packageId' in request ? (request.packageId ?? null) : undefined;
+        if (draftKey === undefined) {
+            const draftRow = await this.engine.findOne('sys_metadata', {
+                where: { type: singularType, name: request.name, organization_id: orgId, state: 'draft' },
+            });
+            if (draftRow) draftKey = (draftRow as { package_id?: string | null }).package_id ?? null;
+        }
         const draftForGate = await repo.get(
             { type: singularType, name: request.name, org: orgId ?? 'env' } as Parameters<typeof repo.get>[0],
-            { state: 'draft' },
+            { state: 'draft', ...(draftKey !== undefined ? { packageId: draftKey } : {}) },
         );
         // [#21470] …and the divergent `name` refusal, on the same body and for
         // the same reason: a draft stored before `saveMetaItem` judged every
@@ -21503,11 +21638,15 @@ export class ObjectStackProtocolImplementation implements
         // The promotion half of {@link anonymousFormIntakeOrgScopeRefusal}: a
         // draft saved before that refusal existed must not reach `active`.
         if (draftForGate) {
+            // The binding the promoted row is placed by: the key the draft was
+            // read under above (a container's expansion is placed by it).
+            const draftPackageId = draftKey;
             const intakeRefusal = await this.anonymousFormIntakeOrgScopeRefusal({
                 type: singularType,
                 name: request.name,
                 organizationId: orgId,
                 body: draftForGate.body,
+                ...(draftPackageId ? { packageId: draftPackageId } : {}),
             });
             if (intakeRefusal) throw intakeRefusal;
         }
@@ -21606,11 +21745,14 @@ export class ObjectStackProtocolImplementation implements
                 // audit writer. This door's default says what happened without it.
                 message: request.message || 'publish draft',
                 intent,
-                // [#8907] Spread, not `packageId: request.packageId`: `null` is
-                // a meaningful scope (the unbound row) and `undefined` means
-                // "no package in hand", so the key must be ABSENT rather than
-                // present-and-undefined for the historical resolution to hold.
-                ...('packageId' in request ? { packageId: request.packageId ?? null } : {}),
+                // [#8907] Spread: `null` is a meaningful scope (the unbound
+                // row), so the key is ABSENT rather than present-and-undefined
+                // when there is none. The key the gated draft was read under (see `draftForGate`):
+                // the stated binding, or the resolved row's own when none was
+                // stated, so the promotion cannot pick a different package's
+                // draft than the one judged above. Absent only when no draft
+                // was found, where the promotion answers `NO_DRAFT` as before.
+                ...(draftKey !== undefined ? { packageId: draftKey } : {}),
             });
             return { singularType, orgId, advisories: runtimeAdvisories, result };
         } catch (err: any) {

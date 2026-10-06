@@ -79,7 +79,7 @@ void [
   parsedArtifactScalarConfig,
 ];
 
-describe('[#19920] a ViewItem config is typed by its arm, not unknown', () => {
+describe('a ViewItem config is typed by its arm, not unknown', () => {
   it('each body typed through the published names parses at its door', () => {
     expect(ViewItemSchema.safeParse(listItem).success).toBe(true);
     expect(ViewItemSchema.safeParse(formItem).success).toBe(true);

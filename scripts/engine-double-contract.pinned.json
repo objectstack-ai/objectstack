@@ -4102,6 +4102,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-system-context.pin.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-system-context.pin.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-system-context.pin.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-job/src/db-job-adapter.degraded-outcome.test.ts",
       "verb": "update",
       "pinned": 1
@@ -4204,6 +4219,16 @@
     {
       "file": "packages/services/service-messaging/src/sql-outbox-audit-columns.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/system-context.pin.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/system-context.pin.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

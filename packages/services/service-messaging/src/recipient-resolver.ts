@@ -2,6 +2,7 @@
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import type { Audience, AudienceSpec } from './messaging-service.js';
+import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
 
 /**
  * Cheap "looks like an email" heuristic so we attempt id resolution. Hand-rolled
@@ -200,7 +201,13 @@ export class RecipientResolver {
     private async resolveEmail(email: string, data: IDataEngine | undefined): Promise<string> {
         if (!data) return email;
         try {
-            const user = await data.findOne(this.userObject, { where: { email }, fields: ['id'] });
+            // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: a
+            // directory read on the recipient's behalf whose only use is the id.
+            const user = await data.findOne(
+                this.userObject,
+                { where: { email }, fields: ['id'] },
+                { context: FAN_OUT_SYSTEM_CONTEXT },
+            );
             const id = user?.id;
             if (id != null && String(id).length > 0) return String(id);
             this.opts.logger.warn(`[recipients] no '${this.userObject}' matched email '${email}'; keeping verbatim`);

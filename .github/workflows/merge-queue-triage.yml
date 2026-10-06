@@ -101,6 +101,45 @@ name: Merge Queue Triage
 # `skip`/`only` written anywhere. Weakening a gate stays a human act, and an
 # anchor issue is a place for that conversation, not a verdict in it.
 #
+# ## A shard that never got a runner is not a test failure (limb ③)
+#
+# On 2026-10-05 one PR was ejected twice with nothing in it failing: queue
+# build 37371558473 had eight jobs cancelled before any of them was handed a
+# runner, and 37374282440 had one (`Test Core (5/6)`). In both, the only
+# `failure` was an AGGREGATE gate (`Test Core`, `Dogfood Regression Gate`)
+# refusing because a shard of its own family published no attestation. The
+# comment printed those aggregates as the failure and "日志不可读" beside them,
+# and a person had to open the jobs to tell a runner outage from a test red.
+#
+# So every run is now CLASSIFIED, from the job RECORD and never from log text:
+#
+#   infra:no-runner  a job ended `cancelled` with an empty `runner_name` and no
+#                    steps, OR its check run carries the "not acquired by
+#                    Runner" annotation (read only for a cancelled job the
+#                    record did not already decide).
+#
+# The BUILD is `infra:no-runner` only when that explains EVERY red: each other
+# red job is an aggregate whose failed steps are all `Verify … results` AND
+# whose own shard family (`<name> (k/n)`) has a no-runner member. Anything left
+# unexplained — a real failing step, a cancelled job that did get a runner, an
+# annotation that could not be read — makes it `failure`, read the way it
+# always was. That direction is the safe one: a mis-read outage costs a person
+# a look, a mis-read failure would be waved through as weather.
+#
+# ⛔ The attestation rule does not move (#6082): a shard that never ran still
+# does not count as passing, and nothing here changes whether a build is
+# green. This changes how a red is NAMED and what the comment advises.
+#
+# Re-queue budget: ONE per PR head sha. An `infra:no-runner` comment carries a
+# per-head marker; the next `infra:no-runner` red on the SAME head finds it and
+# says the budget is spent and a person has to look. A `failure` never earns
+# the advice. ⚠️ The ACT is not wired: this job holds no credential that can
+# enqueue a pull request (GitHub's auto-merge / enqueue mutations need
+# `contents: write`, and a merge group created by this run's own GITHUB_TOKEN
+# is not one CI is known to build), so the comment states the verdict and a
+# person or seat performs the one re-queue. The harness enforces that: an
+# enqueue call is an unmodelled API and fails the battery.
+#
 # Fires on conclusion == failure ONLY. 'cancelled' is the queue evicting an
 # entry because something AHEAD of it failed (or a manual cancel) — it says
 # nothing about this PR, so it gets no comment (the same run-lifecycle
@@ -110,7 +149,9 @@ name: Merge Queue Triage
 # workflow_run executes in the DEFAULT branch's context: this file must be on
 # main before it fires, it never checks out or runs PR code, and it holds the
 # minimum permissions (actions: read for logs, pull-requests: write for the
-# comment, issues: write for the anchor issue limb ② files and refreshes).
+# comment and the PR head limb ③ keys its budget on, issues: write for the
+# anchor issue limb ② files and refreshes, checks: read for the "not acquired
+# by Runner" annotation limb ③ consults).
 #
 # Delivery is retried, never assumed (#9424). A transient GitHub API failure used
 # to kill this job outright — github-script hands any throw from the script to
@@ -156,6 +197,7 @@ jobs:
       actions: read
       pull-requests: write
       issues: write
+      checks: read
     steps:
       - name: Post the triage comment
         uses: actions/github-script@v9
@@ -244,12 +286,17 @@ jobs:
             // redelivered workflow_run stops HERE, before any sighting is recorded
             // and before any anchor is touched, so one queue build contributes its
             // signature exactly once however many times GitHub delivers it.
+            //
+            // The listing is kept (`prComments`) because limb ③ reads its
+            // per-head re-queue markers out of the same comments; `null` means
+            // it could not be read, which limb ③ must not mistake for "none".
             let alreadyPosted = false;
+            let prComments = null;
             try {
-              const existing = await github.rest.issues.listComments({
+              prComments = await github.paginate(github.rest.issues.listComments, {
                 owner, repo, issue_number: prNumber, per_page: 100,
               });
-              alreadyPosted = existing.data.some((c) => (c.body ?? '').includes(marker));
+              alreadyPosted = prComments.some((c) => (c.body ?? '').includes(marker));
             } catch (error) {
               core.warning(
                 `Could not read #${prNumber}'s comments to check for an existing triage `
@@ -268,6 +315,93 @@ jobs:
               owner, repo, run_id: run.id, per_page: 100,
             });
             const failedJobs = jobs.filter((j) => j.conclusion === 'failure');
+
+            // ── Limb ③: classify the red — infra:no-runner or failure ──────
+            //
+            // Keyed on the job RECORD (see the header), never on log text: a
+            // job that never got a runner has no log to read. The annotation
+            // is consulted only for a cancelled job the record did not
+            // already decide, so the common case costs no extra request.
+            const NO_RUNNER_ANNOTATION = /not acquired by Runner/i;
+            const AGGREGATE_STEP = /^Verify .* results$/;
+            const GREEN = new Set(['success', 'skipped', 'neutral']);
+            const redJobs = jobs.filter((j) => !GREEN.has(j.conclusion));
+            const noRunnerByRecord = (j) => j.conclusion === 'cancelled'
+              && String(j.runner_name ?? '') === ''
+              && (j.steps ?? []).length === 0;
+            const noRunner = [];
+            const annotationRefusals = [];
+            for (const j of redJobs.filter((x) => x.conclusion === 'cancelled')) {
+              if (noRunnerByRecord(j)) { noRunner.push({ job: j, via: 'record' }); continue; }
+              const checkRunId = Number(String(j.check_run_url ?? '').split('/').pop()) || j.id;
+              try {
+                const res = await github.rest.checks.listAnnotations({
+                  owner, repo, check_run_id: checkRunId, per_page: 100,
+                });
+                if ((res.data ?? []).some((a) => NO_RUNNER_ANNOTATION.test(String(a?.message ?? '')))) {
+                  noRunner.push({ job: j, via: 'annotation' });
+                }
+              } catch (error) {
+                annotationRefusals.push(`${j.name}（${describe(error)}）`);
+              }
+            }
+            const noRunnerNames = noRunner.map((x) => x.job.name);
+            // An aggregate red is EXPLAINED only by a no-runner member of its
+            // OWN shard family. A `Verify … results` failure with no such
+            // member is a shard that ran and did not attest — unexplained.
+            const explainedAggregate = (j) => {
+              const failedSteps = (j.steps ?? []).filter((s) => s.conclusion === 'failure');
+              return j.conclusion === 'failure'
+                && failedSteps.length > 0
+                && failedSteps.every((s) => AGGREGATE_STEP.test(s.name))
+                && noRunnerNames.some((n) => n.startsWith(`${j.name} (`));
+            };
+            const explainedAggregates = redJobs.filter(explainedAggregate);
+            const unexplained = redJobs.filter((j) =>
+              !noRunner.some((x) => x.job === j) && !explainedAggregates.includes(j));
+            const infraOnly = noRunner.length > 0 && unexplained.length === 0;
+            const buildClass = infraOnly ? 'infra:no-runner' : 'failure';
+            if (annotationRefusals.length > 0) {
+              core.warning(
+                `Could not read the check-run annotations of ${annotationRefusals.length} cancelled job(s), `
+                + 'so they were NOT classified as infra:no-runner and the build reads as `failure`.',
+                { title: 'infra:no-runner classification incomplete' },
+              );
+            }
+
+            // The re-queue budget: ONE per PR head sha. The head is read from
+            // the PR itself (the queue ref names the BASE the build stacked
+            // on, not the PR's head). Every way of not knowing — head
+            // unreadable, comments unreadable — is `unknown`, never `once`:
+            // a second automatic chance is the thing this must not invent.
+            const NO_RUNNER_MARK = /<!-- merge-queue-infra:no-runner\|pr=(\d+)\|head=([0-9a-f]{40})\|run=(\d+) -->/g;
+            let prHead = null;
+            let requeue = null;
+            if (infraOnly) {
+              let headRefusal = null;
+              try {
+                const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+                const sha = String(pr.data?.head?.sha ?? '');
+                if (/^[0-9a-f]{40}$/.test(sha)) prHead = sha;
+              } catch (error) {
+                headRefusal = describe(error);
+              }
+              if (!prHead) {
+                requeue = { verdict: 'unknown', why: `读不到 PR 当前的 head sha（${headRefusal ?? 'head.sha 缺失'}）` };
+              } else if (prComments === null) {
+                requeue = { verdict: 'unknown', why: '读不到本 PR 的评论，无法确认这个 head 是否已经用掉过一次 infra:no-runner 重排' };
+              } else {
+                const priorRuns = new Set();
+                for (const c of prComments) {
+                  for (const mm of String(c.body ?? '').matchAll(NO_RUNNER_MARK)) {
+                    if (Number(mm[1]) === prNumber && mm[2] === prHead && mm[3] !== String(run.id)) priorRuns.add(mm[3]);
+                  }
+                }
+                requeue = priorRuns.size === 0
+                  ? { verdict: 'once' }
+                  : { verdict: 'person', priorRuns: [...priorRuns] };
+              }
+            }
 
             // ── Log harvest ────────────────────────────────────────────────
             //
@@ -834,6 +968,54 @@ jobs:
               ? `⚠️ **本 PR 过去 24h 已在队列失败 ${priorFailuresThisPr} 次（不含本次）。** 内容未变而反复失败 ⇒ 高度怀疑 flaky 测试或与同组 PR 的语义冲突，重排不解决。`
               : '本 PR 过去 24h 无队列失败记录（首次）。';
 
+            // ── Limb ③ in the comment: the class, by name, and the verdict ──
+            const nameList = (list) => {
+              const shown = list.slice(0, 20).map((n) => `\`${n}\``).join('、');
+              return list.length > 20 ? `${shown} 等共 ${list.length} 个` : shown;
+            };
+            const classLines = [];
+            if (infraOnly) {
+              classLines.push(
+                '**分类：`infra:no-runner`** —— 这次的红**全部**来自没拿到 runner 的 job，**不是测试失败**。',
+                '判据读的是 job 记录，不是日志：`cancelled` + `runner_name` 为空 + 0 个步骤，或 check run 带 “not acquired by Runner” 注解。',
+                '',
+                `- 没拿到 runner 的 job（${noRunner.length} 个）：${nameList(noRunnerNames)}`,
+              );
+              if (explainedAggregates.length > 0) {
+                classLines.push(`- 聚合 job 的红只因为同族分片没跑：${nameList(explainedAggregates.map((j) => j.name))}（失败步骤只有 \`Verify … results\`）`);
+              }
+              classLines.push('- ⛔ 没跑的分片**仍然不算通过**（证明规则不变）：这里只改「这次红怎么归类」，不改「构建算不算绿」。');
+              if (requeue.verdict === 'once') {
+                classLines.push(
+                  `- **重排判定：可以重排一次。** 这是 head \`${prHead.slice(0, 12)}\` 第一次因 infra:no-runner 被弹出。`
+                    + '本 workflow 没有入队所需的凭据，**不会自动重排** —— 请人工重排**一次**。同一个 head 再次 infra:no-runner 红就交给人，不再重排。',
+                );
+              } else if (requeue.verdict === 'person') {
+                classLines.push(
+                  `- ⛔ **重排判定：交给人，不要再重排。** head \`${prHead.slice(0, 12)}\` 已经因 infra:no-runner 被弹出过`
+                    + `（队列构建 ${requeue.priorRuns.map((id) => `[${id}](https://github.com/${owner}/${repo}/actions/runs/${id})`).join('、')}），`
+                    + '每个 head 只给一次重排。连续没拿到 runner 需要人去看 runner 状态。',
+                );
+              } else {
+                classLines.push(`- ⚠️ **重排判定：无法确认**（${requeue.why}）⇒ 按「交给人」处理，不要据此重排。`);
+              }
+            } else {
+              classLines.push('**分类：`failure`** —— 按下面的日志分诊。');
+              if (noRunner.length > 0) {
+                classLines.push(
+                  '',
+                  `- 另有 ${noRunner.length} 个 job 没拿到 runner（${nameList(noRunnerNames)}），`
+                    + `但还有它们解释不了的红：${nameList(unexplained.map((j) => `${j.name} · ${j.conclusion}`))} ⇒ 不是纯 infra:no-runner，⛔ 不按 runner 故障重排。`,
+                );
+              }
+            }
+            if (annotationRefusals.length > 0) {
+              classLines.push(`- ⚠️ ${annotationRefusals.length} 个 cancelled job 的注解读不到，未能判定是否 no-runner，已按 failure 计：${annotationRefusals.join('、')}`);
+            }
+            const noRunnerMarker = infraOnly && prHead
+              ? `<!-- merge-queue-infra:no-runner|pr=${prNumber}|head=${prHead}|run=${run.id} -->`
+              : null;
+
             // The sighting markers this comment contributes to the 24 h ledger.
             const sightingMarkers = runKeys.map((k) => `<!-- queue-signature:${k}|pr=${prNumber}|run=${run.id} -->`);
 
@@ -842,6 +1024,8 @@ jobs:
               '',
               `队列构建 [${run.id}](${run.html_url}) 红了。队列跑的是**全量**套件（PR 侧 CI 只跑 affected 子集），`,
               '所以失败的测试可能在本 PR 没碰过的包里 —— 那不是重排能修的。每次盲目重排都会让排在后面的所有 PR 重建一轮。',
+              '',
+              ...classLines,
               '',
               '**失败的 job（日志抽取，best effort）：**',
               '',
@@ -871,6 +1055,7 @@ jobs:
               '',
               marker,
               ...sightingMarkers,
+              ...(noRunnerMarker ? [noRunnerMarker] : []),
               '---',
               '_Generated by [Claude Code](https://claude.ai/code) · merge-queue-triage workflow (#4859)_',
             ].join('\n');

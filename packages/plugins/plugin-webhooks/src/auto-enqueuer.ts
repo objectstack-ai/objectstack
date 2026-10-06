@@ -23,6 +23,16 @@ import {
 } from './webhook-legacy-cleartext.js';
 
 /**
+ * [#21913] The execution context the subscription cache refresh
+ * ({@link AutoEnqueuer.refresh}) reads `sys_webhook` under: the explicit system
+ * opt-in. It is the platform reading its own delivery configuration on a boot
+ * and timer path that has no caller, so it may not rely on a missing principal
+ * to pass the security middleware's principal-less hand-off, which ADR-0096 D5
+ * closes.
+ */
+const SYSTEM_CTX = { isSystem: true } as const;
+
+/**
  * The authored trigger vocabulary, taken from the spec rather than restated
  * here — this file both validates authored triggers and maps events onto them,
  * so a locally-spelled union would be a second contract free to drift from the
@@ -378,9 +388,11 @@ export class AutoEnqueuer {
     private async doRefresh(): Promise<void> {
         let rows: any[];
         try {
-            rows = await this.engine.find(this.subscriptionsObject, {
-                where: { active: true },
-            });
+            rows = await this.engine.find(
+                this.subscriptionsObject,
+                { where: { active: true } },
+                { context: SYSTEM_CTX },
+            );
         } catch (err) {
             this.logger?.warn?.(
                 `[webhook-auto-enqueuer] failed to load ${this.subscriptionsObject}`,

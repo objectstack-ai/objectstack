@@ -52,6 +52,26 @@ System-managed anchors (`owner_id`, `organization_id`, audit columns, `id`) are 
 
 Set `sharingModel: 'private'` on the object so submissions are staff-scoped after creation. The public path only ever **inserts**; it never lists.
 
+### 4. Withdraw a public form
+
+To stop taking submissions, keep the form's `publicLink` and set a switch to `false`: `enabled: false` or `allowAnonymous: false`. Both anonymous endpoints then answer `404 FORM_NOT_FOUND`, and nothing is created.
+
+A withdrawal is a kill switch across metadata layers. If the environment-wide definition withdraws the form, an organization's copy of the same view cannot open it again: the endpoints keep answering not found, and an organization-scoped save or publish that would leave the form open is refused with `403 NOT_OVERRIDABLE`. To publish the form again, save it environment-wide with both switches on. An organization's copy can always withdraw the form for itself.
+
+**What counts as a withdrawal.** Only an explicit `false` withdraws, on a sharing that keeps its `publicLink`. A switch that is simply absent is not a withdrawal. Removing the `sharing` block, clearing the `publicLink`, or deleting the view at one layer does not withdraw the form at the other layers. A form that only an organization publishes stays open there.
+
+**Which form a withdrawal closes.** Two checks apply the rule, and they match forms differently:
+
+- **Saving and publishing in an organization** judges the organization's copy against the stored environment-wide definition it overrides (the row its copy is keyed by). Inside that definition, a withdrawn form is the same form as the organization's when they share a place (`form`, the same `formViews` entry, or the view's own `config`) or a public link. A match on either is enough, so a renamed `formViews` key, a `form.name`, a move to another place, a renamed expanded item, and a new or re-cased slug all still count as the same form. A form that differs from every withdrawn form in both place and link is a different form, such as a sibling in the same view.
+- **The anonymous endpoints** judge each form by the name of the view item they serve. Beneath the organization's read they read the environment-wide view list, and a form is closed when the environment-wide item of the same name explicitly withdraws a form in the same place or under the same link.
+- **A different view is a different form.** A different view that uses the same public link (for example, another app's "contact us" form) neither closes this one nor is closed by it.
+
+**Forms a package ships.** A package's form is part of the environment-wide definition, not a separate layer beneath it. A definition parsed by the stack schema (strict `defineStack`, the default) gets the schema's default `enabled: false`, so a shipped form that keeps its link without setting `enabled: true` counts as withdrawn and an organization's copy cannot open it. A definition loaded without that parse (`defineStack(..., { strict: false })` or a hand-built manifest) is judged as written: a switch it leaves out is absent, which is not a withdrawal, so set `enabled: false` explicitly to ship a form closed. The environment-wide definition is the administrator's switch: an environment-wide save may open a form that the package ships closed.
+
+**Known limit: packages and names.** A withdrawal of a view name closes that name in every package. When two packages each ship a view of the same name, one package's withdrawal also closes the other package's form of that name. This may close more than was meant, but it never leaves a withdrawn form open. Per-package precision is tracked in #21934.
+
+**Known limit.** The save check runs only when an organization's copy is saved or published. A copy that was already stored before the environment-wide withdrawal, or that a rollback or revert restores, is judged only by the endpoints, which match by served item name. If that copy keeps the form open under a different key or place than the environment-wide definition, the endpoints can still serve it. To close it, withdraw the form in that organization's copy too; the next organization-scoped save of a copy that keeps it open is refused.
+
 ## Why
 
 Authorization is **derived from the declaration**, not configured separately — so the grant can't drift wider than the form. There is no standing "anonymous can write to this object" rule to misconfigure: the only thing the public can do is create one record through one whitelisted form. This is the difference from Airtable, where interfaces can't be shared publicly at all (only forms can) — here the same FormView metadata renders both internally (authed) and publicly (anonymous) through one renderer.

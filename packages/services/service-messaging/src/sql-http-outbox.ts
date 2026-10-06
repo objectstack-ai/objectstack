@@ -4,7 +4,12 @@ import { randomUUID } from 'node:crypto';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { hashPartition } from './backoff.js';
 import { toEpochMs } from './audit-timestamp.js';
-import { dispatcherAckCasOptions, dispatcherAckOptions, dispatcherSweepOptions } from './outbox-dispatcher-scope.js';
+import {
+    DISPATCHER_SYSTEM_CONTEXT,
+    dispatcherAckCasOptions,
+    dispatcherAckOptions,
+    dispatcherSweepOptions,
+} from './outbox-dispatcher-scope.js';
 import { deliveryBody, signBody } from './http-sender.js';
 import {
     HttpAckError,
@@ -230,7 +235,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
             },
             fields: ['id'],
             limit: opts.limit,
-        });
+        }, { context: DISPATCHER_SYSTEM_CONTEXT });
         if (candidates.length === 0) return [];
 
         const ids = (candidates as Array<{ id: string }>).map((c) => c.id);
@@ -241,13 +246,13 @@ export class SqlHttpOutbox implements IHttpOutbox {
             { status: 'in_flight', claimed_by: opts.nodeId, claimed_at: now },
             // Environment-wide by design: the dispatcher drains every
             // organization's queue. Warrant in `outbox-dispatcher-scope.ts`.
-            dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }),
+            { ...dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }), context: DISPATCHER_SYSTEM_CONTEXT },
         );
 
         // 4. Read back the rows we actually own.
         const claimed = (await this.engine.find(this.objectName, {
             where: { id: { $in: ids }, claimed_by: opts.nodeId, claimed_at: now, status: 'in_flight' },
-        })) as DeliveryRow[];
+        }, { context: DISPATCHER_SYSTEM_CONTEXT })) as DeliveryRow[];
 
         // 5. [#8118] Recover the redacted header column for the rows this
         // claim now owns — the one read that must see the authored map.
@@ -271,10 +276,13 @@ export class SqlHttpOutbox implements IHttpOutbox {
             { status: 'pending', claimed_by: null, claimed_at: null },
             // Environment-wide by design: recovers rows a crashed node abandoned,
             // for every organization. Warrant in `outbox-dispatcher-scope.ts`.
-            dispatcherSweepOptions({
-                status: 'in_flight',
-                claimed_at: { $lt: now - claimTtlMs },
-            }),
+            {
+                ...dispatcherSweepOptions({
+                    status: 'in_flight',
+                    claimed_at: { $lt: now - claimTtlMs },
+                }),
+                context: DISPATCHER_SYSTEM_CONTEXT,
+            },
         );
     }
 

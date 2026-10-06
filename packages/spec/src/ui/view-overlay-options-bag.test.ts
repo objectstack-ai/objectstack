@@ -77,7 +77,7 @@ function under(issues: Issue[], prefix: PropertyKey[]): Array<Omit<Issue, 'path'
     .sort((a, b) => `${a.path}|${a.code}`.localeCompare(`${b.path}|${b.code}`));
 }
 
-describe('[#20051] the bag declares exactly the list kinds, derived from the shape', () => {
+describe('the bag declares exactly the list kinds, derived from the shape', () => {
   it('declares one block per list-view kind that has a block — `grid` has none', () => {
     // A pin on the DERIVATION (`listViewKindBlocks`): the list is not
     // hand-maintained in the schema, so it is stated once here, where a new
@@ -88,7 +88,7 @@ describe('[#20051] the bag declares exactly the list kinds, derived from the sha
   });
 });
 
-describe('[#20051] a direct and an `options`-wrapped out-of-contract key get the same refusal', () => {
+describe('a direct and an `options`-wrapped out-of-contract key get the same refusal', () => {
   it('the card\'s headline: `options.timeline.metaFields` is refused by name, as `timeline.metaFields` is', () => {
     const timeline = { startDateField: 'created_at', titleField: 'name', metaFields: ['region'] };
     const direct = listOverlayIssues(overlay({ type: 'timeline', timeline }));
@@ -136,7 +136,7 @@ describe('[#20051] a direct and an `options`-wrapped out-of-contract key get the
   });
 });
 
-describe('[#20051] the bag itself is closed', () => {
+describe('the bag itself is closed', () => {
   it('`options.foo` is refused by name at `options`, not dropped', () => {
     const issues = listOverlayIssues(overlay({ options: { foo: 1 } }));
     const hit = issues.find((i) => i.code === 'unrecognized_keys');
@@ -157,7 +157,7 @@ describe('[#20051] the bag itself is closed', () => {
   });
 });
 
-describe('[#20051] a legal `options.KIND` still parses and round-trips', () => {
+describe('a legal `options.KIND` still parses and round-trips', () => {
   it('CONTROL: the legacy `options.map` bag objectui pins is accepted and kept in the parse output', () => {
     // objectui `packages/app-shell/src/views/InterfaceListPage.mapConfig.test.tsx`
     // — "CONTROL: the legacy `options.map` bag is still forwarded on its own
@@ -205,7 +205,7 @@ describe('[#20051] a legal `options.KIND` still parses and round-trips', () => {
   });
 });
 
-describe('[#20051] the form overlay cannot take the bag the list overlay refused', () => {
+describe('the form overlay cannot take the bag the list overlay refused', () => {
   it('a column-less, type-less body with a bad `options` bag is refused, not accepted as a form', () => {
     // Without the form overlay's `options` pin this body is ACCEPTED: the list
     // member refuses it (no `columns`, and the bag), the form member — which
@@ -252,7 +252,7 @@ describe('[#20051] the form overlay cannot take the bag the list overlay refused
  * `.strip()` used to drop it unread; with the save storing the parsed body it
  * would have vanished on a `200` instead.
  */
-describe('[#20051] a ViewItem record carries no top-level `options` bag', () => {
+describe('a ViewItem record carries no top-level `options` bag', () => {
   const record = (extra: Record<string, unknown> = {}) => ({
     name: 'crm_lead.board',
     object: 'crm_lead',

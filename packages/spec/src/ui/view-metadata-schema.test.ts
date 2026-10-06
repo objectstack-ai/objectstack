@@ -18,7 +18,7 @@ import { ListViewSchema, ViewItemSchema, ViewMetadataSchema } from './view.zod';
 
 const PLACEHOLDER_DATA = { provider: 'object', object: 'crm_lead' } as const;
 
-describe('ViewMetadataSchema — genuine validation across the three runtime shapes (#3095)', () => {
+describe('ViewMetadataSchema — genuine validation across the three runtime shapes', () => {
   // ── shape 2: standalone ViewItem record ───────────────────────────────────
   describe('ViewItem record form', () => {
     it('accepts a well-formed list ViewItem', () => {
@@ -92,7 +92,7 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
       expect(ViewMetadataSchema.safeParse({ listViews: {} }).success).toBe(false);
     });
 
-    it('REJECTS a bare `{}` — the pin this line used to make, reversed by #5599', () => {
+    it('REJECTS a bare `{}` — the pin this line used to make, reversed by the identity precondition', () => {
       // This assertion previously read `.toBe(true)`, justified as "legacy-
       // compatible … a truly empty body carries no viewKind/object, so every
       // consumer that filters on identity drops it". #5599 measured what that
@@ -122,7 +122,7 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
       expect(r.success).toBe(true);
     });
 
-    it('REJECTS a raw list config with NO object binding — the #7741 dead row, with located guidance', () => {
+    it('REJECTS a raw list config with NO object binding — a row no read path could serve, with located guidance', () => {
       // ⚠️ Deliberate inversion (#7741, ruled 2026-08-12, direction B). This
       // test used to PIN acceptance of exactly this body ("adhoc PUT, no
       // registry entry to inherit from") — and QA run #7695 measured what that
@@ -212,7 +212,7 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
   });
 
   // ── #5599: the identity precondition, ahead of all four arms ──────────────
-  describe('identity precondition (#5599)', () => {
+  describe('identity precondition — a body must read as a view before any member judges it', () => {
     // The reproduction from the issue, verbatim. On `origin/main` every input
     // in this block was ACCEPTED and reduced to `{ type: 'simple' }` — member 4
     // (`FormViewSchema.extend(…).strip()`) both strips unknown keys and requires
@@ -384,7 +384,7 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
       expect(ViewMetadataSchema.safeParse({ groupByField: 'stage' }).success).toBe(false);
     });
 
-    it('does NOT close the arms — `.strip()` round-tripping is untouched (#5074)', () => {
+    it('does NOT close the arms — `.strip()` round-tripping is untouched', () => {
       // The ruling on #5599 kept every arm's `.strip()`: a body that speaks the
       // vocabulary still carries undeclared aux keys through without a 422.
       // This is the deliberate residue of the minimal fix, pinned so a later
@@ -403,14 +403,14 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
   // authorable (objectui's `gridNonAuthorKeys` disposition). The two halves
   // below are the card's executable acceptance criterion; a change that flips
   // either one is reversing a ruling, not tidying a schema.
-  describe('columnState — runtime-only overlay key (#9933)', () => {
+  describe('columnState — runtime-only overlay key', () => {
     // The REAL payload, measured: objectui's `persistViewPatch` sends
     // `{ columnState: { order?, widths? }, _isOverride: true }` and
     // `normalizeViewMetadata` inherits `name`/`object`/`viewKind` from the
     // shadowed entry (#2555). Before commit d5552ca13 this body carried no declared key,
     // so the identity precondition 422'd it — the ruled patch-only write for
     // a column drag could not persist.
-    it('HALF 1 — the overlay face accepts a `columnState`-only patch (the objectui#5233 payload)', () => {
+    it('HALF 1 — the overlay face accepts a `columnState`-only patch (the patch-only write the console persists)', () => {
       const r = ViewMetadataSchema.safeParse({
         name: 'showcase_task.default',
         object: 'showcase_task',
@@ -421,7 +421,7 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
       expect(r.success).toBe(true);
     });
 
-    it('HALF 1 — a baseline-less columnState patch is refused at the MEMBERS (binding pair, #7741), not the precondition', () => {
+    it('HALF 1 — a baseline-less columnState patch is refused at the MEMBERS (the object + viewKind binding pair), not the precondition', () => {
       // `columnState` is vocabulary now, so the precondition stays inert; what
       // refuses the unbound body is the members' object+viewKind requirement.
       const r = ViewMetadataSchema.safeParse({ columnState: { order: ['name'] } });

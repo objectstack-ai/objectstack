@@ -22,6 +22,11 @@
  *
  * Clearing either switch withdraws the form from every anonymous door.
  *
+ * A withdrawal is a kill switch: any metadata layer whose body of the same
+ * view name explicitly withdraws the form (the link kept, a switch set to
+ * `false`), matched by slot or by slug, closes it, and layering may only narrow
+ * intake, never re-open it ({@link anonymousFormIntakeWithdrawnIn}).
+ *
  * The candidates are the three shapes a view carries a form in: the nested
  * `form`, every `formViews` entry, and the flattened `config` of a
  * `viewKind: 'form'` item.
@@ -239,4 +244,104 @@ export function anonymousFormIntakeUnavailableMessage(slug: string, u: Anonymous
         + `submission carries no organization, and an insert without one into a walled object is refused. `
         + anonymousFormIntakeUnavailableRemedy(u)
     );
+}
+
+/**
+ * Where a form sits in a `view` body, independent of its content: the nested
+ * `form`, one `formViews` entry, or the flattened `config`.
+ */
+function anonymousFormSlot(view: Record<string, any>, candidate: AnonymousFormIntakeCandidate): string {
+    if (candidate.form === view.form) return 'form';
+    if (candidate.key !== undefined && view.formViews?.[candidate.key] === candidate.form) {
+        return `formViews:${candidate.key}`;
+    }
+    return 'config';
+}
+
+/**
+ * The forms a `view` body EXPLICITLY withdraws, with their slot and slug: a
+ * form `sharing` that keeps a non-empty `publicLink` and sets `enabled ===
+ * false` or `allowAnonymous === false`. Judged on the body as stored: a switch
+ * that is absent is not a withdrawal (only an explicit `false` is), and a
+ * sharing with no public link withdraws nothing — removing the sharing block or
+ * clearing the link is not a withdrawal. A package artifact parsed by the
+ * stack schema (strict `defineStack`) carries the schema's default
+ * `enabled: false`, which is an explicit `false`: a shipped form that keeps its
+ * link without switching `enabled` on is withdrawn (fail closed). An artifact
+ * that reached the runtime unparsed (`strict: false`, a hand-built manifest)
+ * is judged as written, so a switch it omits is absent. The env-wide definition is the
+ * switch above it, so an env-wide save may still open it.
+ */
+function anonymousFormExplicitWithdrawals(view: unknown): Array<{ slot: string; slug: string }> {
+    if (!view || typeof view !== 'object') return [];
+    const v = view as Record<string, any>;
+    const forms: Array<{ slot: string; form: unknown }> = [];
+    if (v.form && typeof v.form === 'object') forms.push({ slot: 'form', form: v.form });
+    if (v.formViews && typeof v.formViews === 'object') {
+        for (const [key, fv] of Object.entries(v.formViews)) forms.push({ slot: `formViews:${key}`, form: fv });
+    }
+    if (v.viewKind === 'form' && v.config && typeof v.config === 'object') forms.push({ slot: 'config', form: v.config });
+    const out: Array<{ slot: string; slug: string }> = [];
+    for (const { slot, form } of forms) {
+        const sharing = form && typeof form === 'object' ? (form as Record<string, unknown>).sharing : undefined;
+        if (!sharing || typeof sharing !== 'object') continue;
+        const s = sharing as Record<string, unknown>;
+        if (typeof s.publicLink !== 'string' || !s.publicLink) continue;
+        if (s.enabled !== false && s.allowAnonymous !== false) continue;
+        out.push({ slot, slug: publicFormSlug(s.publicLink) });
+    }
+    return out;
+}
+
+/**
+ * Does one metadata layer withdraw an open form candidate? A WITHDRAWAL IS A
+ * KILL SWITCH: layering may only narrow anonymous intake, never re-open it, so
+ * the anonymous form doors serve a candidate only when no layer beneath it
+ * withdraws it, and the organization-scoped write door refuses a save that
+ * would leave one open.
+ *
+ * Identity is the `name`: the layer withdraws the candidate only through a
+ * body of the same `name` as the candidate's `view`. What that name is depends
+ * on the caller. The organization-scoped write door passes the env-wide body
+ * of the stored row the overlay is keyed by, so a key rename, a `form.name`,
+ * a slot move or an expansion rename is still judged against the form it was.
+ * The anonymous doors pass the env-wide view list and the item they serve, so
+ * they judge by the served item name (a known limit: an overlay stored before
+ * the withdrawal, or restored by rollback or revert, that moves its form to
+ * another key or slot is not matched there). The layer withdraws the
+ * candidate when its body of that name EXPLICITLY
+ * withdraws a form ({@link anonymousFormExplicitWithdrawals}) that matches the
+ * candidate by slot (the same `form`, `formViews` key or `config`) OR by slug
+ * (the same public link, compared exactly as the doors resolve it). Either
+ * match is enough, so the same form cannot escape a withdrawal by moving to
+ * another slot or key, or by pointing its link at a new slug; only a form that
+ * differs from every withdrawn one in both is a different form (a sibling in
+ * the same container).
+ *
+ * Another row that publishes or withdraws the same slug is a different form
+ * and closes nothing. The package a body is bound to is NOT compared: a
+ * withdrawal of a name closes that name's form in every package (a known
+ * limit that fails closed: it may over-close another package's form of the
+ * same name, never under-close). A layer with no body of the row, or whose body has no
+ * explicit withdrawal, withdraws nothing, so a form published only in an
+ * organization stays open there.
+ */
+export function anonymousFormIntakeWithdrawnIn(
+    layer: ReadonlyArray<unknown>,
+    view: unknown,
+    candidate: AnonymousFormIntakeCandidate,
+): boolean {
+    if (!view || typeof view !== 'object') return false;
+    const v = view as Record<string, any>;
+    const name = typeof v.name === 'string' && v.name ? v.name : undefined;
+    if (name === undefined) return false;
+    const slot = anonymousFormSlot(v, candidate);
+    for (const other of layer) {
+        if (!other || typeof other !== 'object') continue;
+        if ((other as Record<string, unknown>).name !== name) continue;
+        for (const w of anonymousFormExplicitWithdrawals(other)) {
+            if (w.slot === slot || w.slug === candidate.slug) return true;
+        }
+    }
+    return false;
 }
