@@ -57,7 +57,7 @@ import {
 } from '@objectstack/spec';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
-import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
+import { createObjectQLAdapterFactory, withSystemContext, withSystemReadContext } from './objectql-adapter.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
 import {
@@ -3334,8 +3334,14 @@ export class AuthManager {
             const orgId = member?.organizationId;
             if (!newSlug || !orgId) return;
 
-            const dataEngine = this.config.dataEngine as any;
-            if (!dataEngine) return;
+            // Both reads run as the platform (`withSystemContext`): this hook
+            // IS the slug guard — the organization id is the `where`, not the
+            // reader — so neither read reaches the engine with no principal
+            // and no opt-in (the security middleware's principal-less
+            // hand-off, ADR-0096). The catches below are unchanged.
+            const rawEngine = this.config.dataEngine;
+            if (!rawEngine) return;
+            const dataEngine = withSystemContext(rawEngine) as any;
 
             let currentSlug: string | undefined;
             try {
