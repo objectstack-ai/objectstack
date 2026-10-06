@@ -233,6 +233,17 @@ export interface DraftDrainFailure {
 }
 
 /**
+ * [#21934] {@link SysMetadataRepository.promoteDraft}'s refusal when the draft
+ * row it reads is not the draft its caller judged
+ * (`opts.expectedDraftHash`): `expectedParent` is the judged draft's hash
+ * (`null` when the caller judged that no draft exists), `actualHead` the hash
+ * of the draft row now stored. Raised before anything is written. A
+ * {@link ConflictError}, so every caller that already answers a conflict
+ * answers this one; the protocol tells the two apart to word its refusal.
+ */
+export class DraftConflictError extends ConflictError {}
+
+/**
  * Sub-set of the ObjectQL engine shape we depend on. Kept narrow so
  * tests can stub it with a plain mock. Mirrors the real engine's
  * `options.context` pattern so transactions can thread through.
@@ -942,6 +953,19 @@ export class SysMetadataRepository implements MetadataRepository {
        * what lands in `active`, never which draft is consumed.
        */
       deriveActiveBody?: (draftBody: unknown) => unknown;
+      /**
+       * [#21934] The hash of the draft the caller judged before this
+       * promotion, or `null` when it judged that no draft exists. Stated → the
+       * draft row this promotion reads must be that draft: a row with another
+       * hash (a draft saved after the caller's read), or any draft row where
+       * the caller judged none, is refused with a {@link DraftConflictError}
+       * before anything is written, so the promotion writes only the body its
+       * caller judged. A missing draft row still answers `NO_DRAFT`.
+       *
+       * Omitted → no expectation: the draft row read here is promoted, as
+       * before.
+       */
+      expectedDraftHash?: string | null;
     },
   ): Promise<{
     version: string;
@@ -984,6 +1008,12 @@ export class SysMetadataRepository implements MetadataRepository {
     }
     const draftPackageId = (draftRow as { package_id?: string | null }).package_id ?? null;
     const draft = this.rowToItem(ref, draftRow);
+    // [#21934] The draft the caller judged, and no other: a caller that read
+    // the draft to judge it states that draft's hash, and the row read here
+    // must still be it.
+    if (opts.expectedDraftHash !== undefined && draft.hash !== opts.expectedDraftHash) {
+      throw new DraftConflictError(this.fullRef(ref), opts.expectedDraftHash, draft.hash);
+    }
     // Read the active row through the SAME package scope we will write, so the
     // optimistic-lock `parentVersion` matches the exact row `put` upserts.
     // (Package-less drafts → packageId null → identical to the prior behaviour.)

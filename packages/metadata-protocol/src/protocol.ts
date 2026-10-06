@@ -43,7 +43,7 @@ import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
 import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
-import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
+import { DraftConflictError, SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
 import { isOriginGatedType, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 import {
     resolveArtifactLockLayer,
@@ -9060,15 +9060,26 @@ export class ObjectStackProtocolImplementation implements
                 // read naming the package serves that row before it asks any
                 // expansion. The expansion still seats the slot, so a stand-in
                 // held back by the merge is served there, as the package's.
+                //
+                // [#21934] Only a name an expansion writes is upserted by name.
+                // Every other name keeps what the package-aware merge seated for
+                // it: one item per package that ships the name (ADR-0048), as the
+                // list serves it when no row is stored. The env-wide list is the
+                // layer the anonymous form doors judge a withdrawal against, so
+                // it holds every package's body of a name.
                 if (isView && records.length > 0) {
-                    const byName = new Map<string, unknown>();
-                    for (const it of items as any[]) {
-                        if (it && typeof it === 'object' && typeof it.name === 'string') byName.set(it.name, it);
-                    }
                     const ownRowNames = this.namesWithOwnStoredRow(records);
                     const standInNames = this.namesWithOwnStoredRow(standInRows);
-                    for (const { item: vi } of this.expandStoredViewContainers(request.type, overlays)) {
-                        if (ownRowNames.has(vi.name as string)) continue;
+                    const expansions = this.expandStoredViewContainers(request.type, overlays)
+                        .filter(({ item: vi }) => !ownRowNames.has(vi.name as string));
+                    const written = new Set(expansions.map(({ item: vi }) => vi.name as string));
+                    const byName = new Map<string, unknown>();
+                    for (const it of items as any[]) {
+                        if (it && typeof it === 'object' && typeof it.name === 'string' && written.has(it.name)) {
+                            byName.set(it.name, it);
+                        }
+                    }
+                    for (const { item: vi } of expansions) {
                         const held = byName.get(vi.name as string) as Record<string, unknown> | undefined;
                         if (held !== undefined && standInNames.has(vi.name as string)) {
                             // Seated: a copy the `unseated` record does not hold,
@@ -9080,7 +9091,17 @@ export class ObjectStackProtocolImplementation implements
                         }
                         byName.set(vi.name as string, vi);
                     }
-                    items = Array.from(byName.values());
+                    const merged: unknown[] = [];
+                    for (const it of items as any[]) {
+                        if (!it || typeof it !== 'object' || typeof it.name !== 'string') continue;
+                        if (!written.has(it.name)) {
+                            merged.push(it);
+                        } else if (byName.has(it.name)) {
+                            merged.push(byName.get(it.name));
+                            byName.delete(it.name);
+                        }
+                    }
+                    items = [...merged, ...byName.values()];
                 }
 
                 // Only hydrate the global registry for unscoped (control-plane)
@@ -16049,7 +16070,9 @@ export class ObjectStackProtocolImplementation implements
         // by: the env-wide body of row `name`, as stored (a container is not
         // expanded, so a form moved to another key or slot, renamed through
         // `form.name`, or renamed by an expansion collision is still matched
-        // against the form it was, by slot or by slug).
+        // against the form it was, by slot or by slug). [#21934] One body per
+        // package that holds the name ({@link envWideRawViewRows}), so every
+        // package's withdrawal of it is judged, whatever the registry order.
         const envRows = (await this.envWideRawViewRows(args.type, args.name)).map((r) => ({ ...r, name: args.name }));
         if (envRows.length > 0) {
             const own = { ...raw, name: args.name };
@@ -16080,10 +16103,15 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * The env-wide body of the `view` row `name`, as stored: the active
-     * env-wide `sys_metadata` row when there is one (the env-wide overlay is
-     * keyed by its own name, ADR-0005), else the code package's artifact of
-     * that name. Empty when neither exists.
+     * The env-wide bodies of the `view` row `name`, as stored, for every
+     * package that holds the name. [#21934] Resolved per package, the way the
+     * list read resolves each package's item (ADR-0048): the package's own
+     * active env-wide `sys_metadata` row (the env-wide overlay is keyed by its
+     * own name, ADR-0005), else the package-less env-wide row, which stands in
+     * for every package's row of the name, else that package's artifact of
+     * the name. So a stored row of one package anchors that package only, and
+     * every package that ships the name is judged on its own definition,
+     * whatever the registry order. Empty when no package holds the name.
      *
      * Read raw, never through the list read: that serves a container only as
      * its expansion, whose item names and slots the overlay author chooses,
@@ -16099,11 +16127,18 @@ export class ObjectStackProtocolImplementation implements
         }
         const stored = this.storedOverlayEntries({ type }, records)
             .filter((e) => e.name === name && e.organizationId === null)
-            .map((e) => e.data)
-            .filter((d): d is Record<string, unknown> => !!d && typeof d === 'object' && !Array.isArray(d));
-        if (stored.length > 0) return stored;
-        const artifact = this.lookupArtifactItem(type, name);
-        return artifact && typeof artifact === 'object' ? [artifact as Record<string, unknown>] : [];
+            .filter((e) => !!e.data && typeof e.data === 'object' && !Array.isArray(e.data));
+        const bodies = stored.map((e) => e.data as Record<string, unknown>);
+        const withOwnRow = new Set(stored.map((e) => e.packageId));
+        // The package-less row stands in for every package without a row of its own.
+        if (withOwnRow.has(undefined)) return bodies;
+        for (const artifact of this.shippedArtifactsOf(type, name)) {
+            if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) continue;
+            const pkg = (artifact as { _packageId?: unknown })._packageId;
+            if (typeof pkg === 'string' && withOwnRow.has(pkg)) continue;
+            bodies.push(artifact as Record<string, unknown>);
+        }
+        return bodies;
     }
 
     /**
@@ -21582,24 +21617,6 @@ export class ObjectStackProtocolImplementation implements
             );
             if (orgRefusal) throw orgRefusal;
         }
-        // ADR-0010 L3 — lock blocks publish too (publishing is a write).
-        //
-        // [#8594] `lockWriteRefusal`, not `assertLockAllowsWrite`: the row rides
-        // OUT on the error and each caller records it on its own side of its own
-        // transaction. See this method's header for why it cannot be written here.
-        const _publishLockRefusal = await this.lockWriteRefusal({
-            type: request.type,
-            name: request.name,
-            ...(request.organizationId ? { organizationId: request.organizationId } : {}),
-            // [#21761] The promotion's address carries its package, as the read's does.
-            ...(request.packageId ? { packageId: request.packageId } : {}),
-            operation: 'publish',
-            ...(request.actor ? { actor: request.actor } : {}),
-            source: 'protocol.publishMetaItem',
-        });
-        if (_publishLockRefusal) {
-            throw withPendingAudit(_publishLockRefusal.err, _publishLockRefusal.audit);
-        }
         await this.ensureOverlayIndex();
         const orgId = request.organizationId ?? null;
         const repo = this.getOverlayRepo(orgId);
@@ -21619,13 +21636,43 @@ export class ObjectStackProtocolImplementation implements
         // dimension picks either. The key is the caller's stated binding
         // (spelled exactly as `repo.promoteDraft` receives it); with none
         // stated, the binding of the draft row this promotion resolves, read
-        // once and then stated to both the read and the promotion.
+        // once and then stated to the lock lookup, the read and the promotion.
         let draftKey: string | null | undefined = 'packageId' in request ? (request.packageId ?? null) : undefined;
         if (draftKey === undefined) {
-            const draftRow = await this.engine.findOne('sys_metadata', {
-                where: { type: singularType, name: request.name, organization_id: orgId, state: 'draft' },
-            });
+            // [#21934] Read ahead of the lock check, so a store that cannot be
+            // read is answered here as the lock read answers it (#5706): an
+            // unprovisioned `sys_metadata` holds no draft, and any other failure
+            // is the 503 the lock read raised before this read moved above it.
+            let draftRow: unknown;
+            try {
+                draftRow = await this.engine.findOne('sys_metadata', {
+                    where: { type: singularType, name: request.name, organization_id: orgId, state: 'draft' },
+                });
+            } catch (error) {
+                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            }
             if (draftRow) draftKey = (draftRow as { package_id?: string | null }).package_id ?? null;
+        }
+        // ADR-0010 L3 — lock blocks publish too (publishing is a write).
+        //
+        // [#8594] `lockWriteRefusal`, not `assertLockAllowsWrite`: the row rides
+        // OUT on the error and each caller records it on its own side of its own
+        // transaction. See this method's header for why it cannot be written here.
+        const _publishLockRefusal = await this.lockWriteRefusal({
+            type: request.type,
+            name: request.name,
+            ...(request.organizationId ? { organizationId: request.organizationId } : {}),
+            // [#21761] The promotion's address carries its package, as the read's does.
+            // [#21934] It is the key resolved above, the one the gate reads the
+            // draft under and the promotion writes under: the caller's stated
+            // binding, else the resolved draft row's own.
+            ...(draftKey ? { packageId: draftKey } : {}),
+            operation: 'publish',
+            ...(request.actor ? { actor: request.actor } : {}),
+            source: 'protocol.publishMetaItem',
+        });
+        if (_publishLockRefusal) {
+            throw withPendingAudit(_publishLockRefusal.err, _publishLockRefusal.audit);
         }
         const draftForGate = await repo.get(
             { type: singularType, name: request.name, org: orgId ?? 'env' } as Parameters<typeof repo.get>[0],
@@ -21760,6 +21807,11 @@ export class ObjectStackProtocolImplementation implements
                 // draft than the one judged above. Absent only when no draft
                 // was found, where the promotion answers `NO_DRAFT` as before.
                 ...(draftKey !== undefined ? { packageId: draftKey } : {}),
+                // [#21934] …and the promotion writes only the draft the gate
+                // judged: the judged draft's hash (`null` when the gate found
+                // none), so a draft saved after the gate's read is refused as a
+                // conflict instead of being promoted unjudged.
+                expectedDraftHash: draftForGate ? draftForGate.hash : null,
             });
             return { singularType, orgId, advisories: runtimeAdvisories, result };
         } catch (err: any) {
@@ -21768,7 +21820,10 @@ export class ObjectStackProtocolImplementation implements
                 const conflict = await this.metadataConflictRefusal(
                     err,
                     `${request.type}/${request.name}`,
-                    `${request.type}/${request.name} published row advanced while you held the draft.`,
+                    err instanceof DraftConflictError
+                        ? `${request.type}/${request.name} draft changed after this publish judged it, so nothing was `
+                            + `published. Publish again to judge and promote the current draft.`
+                        : `${request.type}/${request.name} published row advanced while you held the draft.`,
                 );
                 // [#8594] Attached, not written — same reason as the lock gate
                 // above. The repository's own transaction has already unwound by
