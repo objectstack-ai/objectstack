@@ -326,10 +326,9 @@ function anonymousFormExplicitWithdrawals(view: unknown): Array<{ slot: string; 
  * name in every package only when its layer holds every package's body of the
  * name. The organization-scoped write door anchors one body per package. The
  * env-wide view list the anonymous doors read holds one item per package of a
- * name, with one exception: where a package's env-wide copy of a view
- * container is saved, the list holds that copy's expansion alone for each form
- * it expands, so the doors can miss another package's withdrawal of that
- * form, whether saved or shipped (per-package expansion is #21967). A layer
+ * name: a package's saved env-wide copy of a view container serves that
+ * package's item of each form it expands, and a package-less copy stands in
+ * for every package with no copy of its own. A layer
  * with no body of the row, or whose body has no explicit withdrawal, withdraws
  * nothing, so a form published only in an organization stays open there.
  */

@@ -2004,6 +2004,58 @@ function servedOverlayRowCandidates(address: {
 }
 
 /**
+ * [#21967, ADR-0048] The package dimension of
+ * {@link servedOverlayRowCandidates}, in its order: with a package, that
+ * package (`packageId`) and then the package-less rows (`null`); with none,
+ * `undefined`, which matches a row of any package.
+ */
+function addressPackages(packageId: string | undefined): ReadonlyArray<string | null | undefined> {
+    return [...new Set(servedOverlayRowCandidates({ organizationId: undefined, packageId })
+        .map((candidate) => candidate.packageId))];
+}
+
+/**
+ * [#21967, ADR-0048] The stored view container expansion that serves `name`
+ * at the address of `packageId`, among `expansions`
+ * ({@link ObjectStackProtocolImplementation.expandStoredViewContainers}, each
+ * paired with the container row it came from); `undefined` when none does.
+ *
+ * The package order is the package dimension of
+ * {@link servedOverlayRowCandidates}, the one prefer-local resolution: with a
+ * package, the expansion of that package's own container row first, then the
+ * expansion of a package-less one, which stands in for every package with no
+ * container row of its own, and never another package's; with none, any
+ * expansion. Within one package the last expansion of the name wins, as
+ * before (two containers of one package that expand one name are refused at
+ * the save door).
+ *
+ * Both doors select through this function: the list read
+ * ({@link ObjectStackProtocolImplementation.readFlattenedMetaItems}) for each
+ * package's slot of the name, and the by-name read
+ * ({@link ObjectStackProtocolImplementation.resolveRowlessExpandedView}) for
+ * the package it names. So a package's slot in the list and the by-name read
+ * naming that package serve the same expansion. Before, the list upserted the
+ * last expansion of a name over every package's item of it, so one package's
+ * stored copy of a container displaced another package's item of each name
+ * the copy expands, a withdrawn public form included.
+ */
+function servedViewExpansion<E extends { packageId: string | undefined }>(
+    expansions: ReadonlyArray<{ item: Record<string, unknown>; container: E }>,
+    name: string,
+    packageId: string | undefined,
+): { item: Record<string, unknown>; container: E } | undefined {
+    for (const pkg of addressPackages(packageId)) {
+        let served: { item: Record<string, unknown>; container: E } | undefined;
+        for (const expanded of expansions) {
+            if (expanded.item.name !== name) continue;
+            if (pkg === undefined || (expanded.container.packageId ?? null) === pkg) served = expanded;
+        }
+        if (served !== undefined) return served;
+    }
+    return undefined;
+}
+
+/**
  * ADR-0048 (#1828) — package-aware overlay merge for the unscoped metadata list.
  *
  * `baseItems` (the lower layer: registry artifacts, or the running result) and
@@ -9051,9 +9103,10 @@ export class ObjectStackProtocolImplementation implements
                 // override for it (ADR-0005 keys an overlay by its own name);
                 // an expansion fills only a name with no row of its own. The
                 // test is {@link namesWithOwnStoredRow} over this caller's
-                // `records`, the one the by-name read asks, so the two doors
-                // answer the same row for the name. An item the registry or a
-                // package supplies under the name is still replaced, as before.
+                // `records` at the slot's package ([#21967]), the one the
+                // by-name read asks, so the two doors answer the same row for
+                // the name. An item the registry or a package supplies under the
+                // name is still replaced, as before.
                 //
                 // [#21817] In a list scoped to a package, a package-less row
                 // of the name stands in ahead of the expansion too: the by-name
@@ -9061,47 +9114,120 @@ export class ObjectStackProtocolImplementation implements
                 // expansion. The expansion still seats the slot, so a stand-in
                 // held back by the merge is served there, as the package's.
                 //
-                // [#21934] Only a name an expansion writes is upserted by name.
-                // Every other name keeps what the package-aware merge seated for
-                // it: one item per package that ships the name (ADR-0048), as the
+                // [#21934] Only a name an expansion writes is upserted. Every
+                // other name keeps what the package-aware merge seated for it:
+                // one item per package that ships the name (ADR-0048), as the
                 // list serves it when no row is stored. The env-wide list is the
                 // layer the anonymous form doors judge a withdrawal against, so
                 // it holds every package's body of a name.
-                if (isView && records.length > 0) {
-                    const ownRowNames = this.namesWithOwnStoredRow(records);
+                //
+                // [#21967] …and a name an expansion writes is upserted per
+                // package, never over every package's item of the name. Each
+                // slot of the name (the package of an item listed under it, or
+                // of a container row that expands it) serves
+                // {@link servedViewExpansion} for that package: the expansion of
+                // the package's own container row, else of a package-less one,
+                // which stands in for every package with no container row of its
+                // own (ADR-0048), as the by-name read naming the package serves
+                // it. A slot neither reaches keeps its item. Before, the last
+                // expansion of the name replaced every package's item of it, so
+                // one package's stored copy of a container displaced another
+                // package's item of each name the copy expands, and the
+                // anonymous form doors could miss that package's withdrawal of a
+                // form, shipped or saved. In a list scoped to a package the
+                // package-less container rows stand in the same way, in the
+                // slots the package seats only: a stand-in never seats a slot
+                // ([#21817]).
+                if (isView && (records.length > 0 || standInRows.length > 0)) {
+                    // [#21510, #21967] The names a stored row of its own holds
+                    // at a slot's package ({@link namesWithOwnStoredRow}, the
+                    // predicate the by-name read asks for the package it
+                    // names): an expansion never displaces such a row, and a
+                    // row of one package keeps no other package's slot.
+                    const ownRowNamesAt = new Map<string | undefined, ReadonlySet<string>>();
+                    const ownRowNames = (pkg: string | undefined): ReadonlySet<string> => {
+                        let names = ownRowNamesAt.get(pkg);
+                        if (names === undefined) ownRowNamesAt.set(pkg, (names = this.namesWithOwnStoredRow(records, pkg)));
+                        return names;
+                    };
                     const standInNames = this.namesWithOwnStoredRow(standInRows);
-                    const expansions = this.expandStoredViewContainers(request.type, overlays)
-                        .filter(({ item: vi }) => !ownRowNames.has(vi.name as string));
+                    const expansions = this.expandStoredViewContainers(
+                        request.type,
+                        packageId ? [...overlays, ...this.storedOverlayEntries(request, standInRows)] : overlays,
+                    );
                     const written = new Set(expansions.map(({ item: vi }) => vi.name as string));
-                    const byName = new Map<string, unknown>();
-                    for (const it of items as any[]) {
-                        if (it && typeof it === 'object' && typeof it.name === 'string' && written.has(it.name)) {
-                            byName.set(it.name, it);
-                        }
-                    }
-                    for (const { item: vi } of expansions) {
-                        const held = byName.get(vi.name as string) as Record<string, unknown> | undefined;
-                        if (held !== undefined && standInNames.has(vi.name as string)) {
-                            // Seated: a copy the `unseated` record does not hold,
-                            // stamped as the merge stamps a stand-in.
-                            if (unseated?.has(held)) {
-                                byName.set(vi.name as string, held._packageId === undefined ? { ...held, _packageId: packageId } : { ...held });
+                    const boundNames = new Set(expansions
+                        .filter(({ container }) => container.packageId !== undefined)
+                        .map(({ item: vi }) => vi.name as string));
+                    // The package of an item's slot, as the package-aware merge
+                    // keys it; a list scoped to a package seats every item in
+                    // that package's slot.
+                    const slotPackage = (it: Record<string, unknown>): string | undefined => packageId
+                        ?? (typeof it._packageId === 'string' && it._packageId !== '' ? it._packageId : undefined);
+                    const slotKey = (name: string, pkg: string | undefined) => `${name}\u0000${pkg ?? ''}`;
+                    const filled = new Set<string>();
+                    const filledNames = new Set<string>();
+                    const serve = (
+                        name: string,
+                        pkg: string | undefined,
+                        held: Record<string, unknown> | undefined,
+                    ): Record<string, unknown> | undefined => {
+                        filled.add(slotKey(name, pkg));
+                        filledNames.add(name);
+                        const served = servedViewExpansion(expansions, name, pkg);
+                        // [#21817] In a list scoped to a package, a package-less
+                        // row of the name stands in ahead of the expansion too:
+                        // the by-name read naming the package serves that row
+                        // before it asks any expansion. The package's own
+                        // expansion still seats the slot, so a stand-in held back
+                        // by the merge is served there, as the package's: a copy
+                        // the `unseated` record does not hold, stamped as the
+                        // merge stamps a stand-in.
+                        if (held !== undefined && standInNames.has(name)) {
+                            if (unseated?.has(held) && served !== undefined && served.container.packageId !== undefined) {
+                                return held._packageId === undefined ? { ...held, _packageId: pkg } : { ...held };
                             }
-                            continue;
+                            return held;
                         }
-                        byName.set(vi.name as string, vi);
-                    }
+                        if (served === undefined || ownRowNames(pkg).has(name)) return held;
+                        const own = served.container.packageId;
+                        if (own !== undefined) filled.add(slotKey(name, own));
+                        // A package-less container's expansion standing in for a
+                        // package carries that package's provenance, as a
+                        // package-less row standing in does
+                        // ({@link mergePackageAwareOverlay}), so the last pass
+                        // below grafts that package's artifact envelope on it, as
+                        // the by-name read naming the package does.
+                        return pkg !== undefined && own === undefined ? { ...served.item, _packageId: pkg } : served.item;
+                    };
                     const merged: unknown[] = [];
                     for (const it of items as any[]) {
                         if (!it || typeof it !== 'object' || typeof it.name !== 'string') continue;
                         if (!written.has(it.name)) {
                             merged.push(it);
-                        } else if (byName.has(it.name)) {
-                            merged.push(byName.get(it.name));
-                            byName.delete(it.name);
+                            continue;
                         }
+                        const pkg = slotPackage(it);
+                        if (filled.has(slotKey(it.name, pkg))) continue;
+                        merged.push(serve(it.name, pkg, it));
                     }
-                    items = [...merged, ...byName.values()];
+                    // A slot no listed item holds. A package's own container
+                    // row's expansion seats that package's slot of the name. A
+                    // package-less container's expansion of a name nothing else
+                    // serves is listed on its own, in a list scoped to no package
+                    // only.
+                    for (const { item: vi, container } of expansions) {
+                        const name = vi.name as string;
+                        const own = container.packageId;
+                        if (own !== undefined) {
+                            if (filled.has(slotKey(name, own))) continue;
+                        } else if (packageId !== undefined || filledNames.has(name) || boundNames.has(name)) {
+                            continue;
+                        }
+                        const out = serve(name, own, undefined);
+                        if (out !== undefined) merged.push(out);
+                    }
+                    items = merged;
                 }
 
                 // Only hydrate the global registry for unscoped (control-plane)
@@ -9610,12 +9736,13 @@ export class ObjectStackProtocolImplementation implements
 
     /**
      * [#21442] Every item the stored view containers in `overlays` expand, in
-     * the order the list read upserts them by name (a later expansion of a
-     * name replaces an earlier one), each paired with the stored row it was
-     * expanded from. The one expansion pass both doors run: the list read
-     * serves the items, and {@link resolveRowlessExpandedView} also needs the
-     * row. Each container goes through {@link expandRuntimeViewContainer},
-     * unchanged.
+     * row order, each paired with the stored row it was expanded from. The one
+     * expansion pass both doors run: the list read serves the items, and
+     * {@link resolveRowlessExpandedView} also needs the row. Each container
+     * goes through {@link expandRuntimeViewContainer}, unchanged. [#21967]
+     * Which of them serves a name at a package's address is
+     * {@link servedViewExpansion}'s answer, for both doors: within one package
+     * a later expansion of a name replaces an earlier one.
      */
     private expandStoredViewContainers<E extends { data: unknown; packageId: string | undefined }>(
         type: string,
@@ -9645,11 +9772,23 @@ export class ObjectStackProtocolImplementation implements
      * so a name that has a row in one organization only is row-less for every
      * other caller. ⛔ Never a second test of "this name has its own row":
      * two tests are two rules, and the doors would disagree again.
+     *
+     * [#21967] …and both pass the package whose slot they fill, so a name that
+     * has a row in one package only is row-less for every other package's
+     * slot. With `packageId`, a row counts when it is bound to that package or
+     * package-less, the package dimension of {@link servedOverlayRowCandidates}
+     * (a package-less row stands in for every package, ADR-0048); with none,
+     * every row counts. Before, the list asked with no package for every slot,
+     * so one package's row of a name kept every other package's container
+     * expansion of it out of the list, while the by-name read naming that
+     * other package served the expansion.
      */
-    private namesWithOwnStoredRow(records: readonly any[]): ReadonlySet<string> {
+    private namesWithOwnStoredRow(records: readonly any[], packageId?: string): ReadonlySet<string> {
+        const packages = addressPackages(packageId);
         const names = new Set<string>();
         for (const record of records) {
-            if (typeof record?.name === 'string') names.add(record.name);
+            if (typeof record?.name !== 'string') continue;
+            if (packages.some((pkg) => pkg === undefined || (record?.package_id ?? null) === pkg)) names.add(record.name);
         }
         return names;
     }
@@ -9674,8 +9813,13 @@ export class ObjectStackProtocolImplementation implements
      * ({@link readActiveOverlayRows}, same `packageId`, same gated `orgId`),
      * the same parse ({@link storedOverlayEntries}) and the same expansion
      * ({@link expandStoredViewContainers} over
-     * {@link expandRuntimeViewContainer}), the last expansion of the name
-     * winning as it does in the list. Nothing is persisted or registered: an
+     * {@link expandRuntimeViewContainer}), selected for the address by the
+     * same function ({@link servedViewExpansion}). [#21967] Naming a package,
+     * that is the package's slot in the list: the expansion of the package's
+     * own container row, else of a package-less one, which stands in (the
+     * package-less rows are read as the list scoped to the package reads
+     * them); naming none, any expansion of the name, the last one winning.
+     * Nothing is persisted or registered: an
      * expansion is derived from its container on every read, so there is no
      * second copy to drift from it (ADR-0005 keys an overlay by its own name).
      * ⛔ No kernel-specific branch — every kernel answers through this path.
@@ -9693,23 +9837,32 @@ export class ObjectStackProtocolImplementation implements
     ): Promise<RowlessExpandedView | undefined> {
         if ((PLURAL_TO_SINGULAR[request.type] ?? request.type) !== 'view') return undefined;
         let records: any[] = [];
+        // [#21967] Naming a package, the package-less rows in scope stand in,
+        // read as the list scoped to that package reads them (the
+        // package-agnostic read, filtered back to the package-less rows).
+        let standInRows: any[] = [];
         try {
             records = await this.readActiveOverlayRows(
                 { type: request.type, ...(request.packageId ? { packageId: request.packageId } : {}) },
                 orgId,
             );
+            if (request.packageId) {
+                standInRows = (await this.readActiveOverlayRows({ type: request.type }, orgId))
+                    .filter((row) => (row?.package_id ?? null) === null);
+            }
         } catch (error) {
             // [#5532] The list read's rule: only an unprovisioned store means
             // "no rows". Any other failure is not answered as "nothing expands
             // this name".
             this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
-        if (this.namesWithOwnStoredRow(records).has(request.name)) return undefined;
-        let found: RowlessExpandedView | undefined;
-        for (const expanded of this.expandStoredViewContainers(request.type, this.storedOverlayEntries(request, records))) {
-            if (expanded.item.name === request.name) found = expanded;
-        }
-        return found;
+        const rows = [...records, ...standInRows];
+        if (this.namesWithOwnStoredRow(rows, request.packageId).has(request.name)) return undefined;
+        return servedViewExpansion(
+            this.expandStoredViewContainers(request.type, this.storedOverlayEntries(request, rows)),
+            request.name,
+            request.packageId,
+        );
     }
 
     /**
@@ -19206,8 +19359,9 @@ export class ObjectStackProtocolImplementation implements
      *
      * Both read doors give a name with a stored row of its own that row
      * (#21510's one predicate, {@link namesWithOwnStoredRow}), and fill a
-     * row-less name with an expansion, the last one read winning
-     * ({@link expandStoredViewContainers}). So a container whose ROW name is
+     * row-less name with an expansion, the last one read winning within a
+     * package's slot and on a by-name read that names no package
+     * ({@link servedViewExpansion}). So a container whose ROW name is
      * served from elsewhere hides that view on both doors and, being no view
      * itself, leaves no read answering a view under the name; a container
      * whose EXPANSION takes such a name replaces that view on both doors with
