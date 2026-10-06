@@ -1581,7 +1581,7 @@
         {
           "clause": "the env-wide definition may open a package-closed form (#21835 comment 6005722623, 「不算，环境级是开关」): the package artifact is part of the env-wide definition, not a layer beneath it, so an env-wide save with both switches on is accepted, the env-wide list the doors read then serves that open body as the only item of its name, and an organization-scoped save that keeps it open is accepted",
           "oracle": "test",
-          "verify": "the same metadata-protocol run, the case 'the env-wide definition is the switch: an env-wide save opens it, and the env-wide list serves that body'. The row anchor that makes the artifact the env-wide body is packages/metadata-protocol/src/protocol.ts#envWideRawViewRows (the active env-wide row of the name, else the package artifact). No stock fixture (knownGaps)",
+          "verify": "the same metadata-protocol run, the case 'the env-wide definition is the switch: an env-wide save opens it, and the env-wide list serves that body'. The row anchor that makes the artifact the env-wide body is packages/metadata-protocol/src/protocol.ts#envWideRawViewRows (for a form one package ships: the active env-wide row of the name, else that package's artifact). No stock fixture (knownGaps)",
           "evidence": "the metadata-protocol run, naming the case above as passed"
         }
       ],
@@ -1604,7 +1604,7 @@
         "packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormExplicitWithdrawals (explicit only: a sharing that keeps its publicLink and sets enabled or allowAnonymous to false; a schema-parsed artifact carries the default enabled false, which counts)",
         "packages/rest/src/rest-server.ts#registerFormEndpoints (resolveFormBySlug: the organization from tenancy.defaultOrgId(), and the env-wide view list read beneath it as the layer; a withdrawn form answers 404 FORM_NOT_FOUND on both doors)",
         "packages/metadata-protocol/src/protocol.ts#anonymousFormIntakeReopenRefusal (the write door: 403 NOT_OVERRIDABLE, judged on the expanded body against the env-wide list and on the raw body against the row anchor; reached from saveMetaItem and from the draft promotion, never from rollbackMetaItem or revertCommit, which is the second half of the ruled known limit)",
-        "packages/metadata-protocol/src/protocol.ts#envWideRawViewRows (the row anchor: the active env-wide row of the name, else the package artifact)",
+        "packages/metadata-protocol/src/protocol.ts#envWideRawViewRows (the row anchor, for a form one package ships: the active env-wide row of the name, else that package's artifact. How it resolves when several packages ship the name is #21934's)",
         "content/docs/ui/public-data-collection.mdx, section '4. Withdraw a public form' (the published rules and both known limits)",
         "#21835 (the 17.7 regression; rulings in comments 5994082238 and 6005722623) · PR #21864 (the fix, merge 3c7785d4ab) · #21934 (open when this item was written: package-identity follow-ups of the same fix)",
         "sibling: access-security.public-form-intake owns the single-layer half (whitelist, forged-anchor strip, publicFormGrant, unpublish kills the link). This item owns how a withdrawal composes across layers"
