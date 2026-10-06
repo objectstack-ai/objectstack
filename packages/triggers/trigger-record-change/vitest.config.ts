@@ -31,8 +31,13 @@ export default defineConfig({
     environment: 'node',
   },
   resolve: {
-    alias: {
-      '@objectstack/formula': path.resolve(__dirname, '../../formula/src/index.ts'),
-    },
+    // Anchored array form: the object form matches by PREFIX, so a bare
+    // `@objectstack/spec` key would swallow every subpath (the ENOTDIR trap
+    // `check-test-source-alias` names). `@objectstack/spec/data` is imported
+    // for a VALUE (`SECRET_MASK`) by `trigger-record-credential-mask.test.ts`.
+    alias: [
+      { find: /^@objectstack\/formula$/, replacement: path.resolve(__dirname, '../../formula/src/index.ts') },
+      { find: /^@objectstack\/spec\/data$/, replacement: path.resolve(__dirname, '../../spec/src/data/index.ts') },
+    ],
   },
 });
