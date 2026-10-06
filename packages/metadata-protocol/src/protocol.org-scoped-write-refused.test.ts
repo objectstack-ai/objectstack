@@ -1112,3 +1112,59 @@ describe('a package-less organization overlay, two packages shipping its view na
         });
     }
 });
+
+// A publish promotes only the draft its gate judged. The gate reads the draft
+// to judge it, and the promotion reads the draft row again to write it; the
+// promotion is handed the judged draft's hash, so a draft saved between the
+// two reads is refused as a conflict, never promoted unjudged.
+describe('a publish promotes only the draft its gate judged', () => {
+    const judged = { ...VIEW, label: 'Org grid (judged)' };
+    const later = { ...VIEW, label: 'Org grid (saved after the gate read)' };
+
+    /** A draft save that lands after the gate's read and before the promotion's read. */
+    function saveBeforePromotion(protocol: any, body: unknown) {
+        const repo = protocol.getOverlayRepo(null);
+        const promote = repo.promoteDraft.bind(repo);
+        repo.promoteDraft = async (...args: unknown[]) => {
+            expect((await protocol.saveMetaItem({ type: 'view', name: VIEW.name, item: body, mode: 'draft' })).success)
+                .toBe(true);
+            return promote(...args);
+        };
+    }
+
+    const labelsIn = (rows: Map<string, Row>, state: string) => Array.from(rows.values())
+        .filter((r) => r.type === 'view' && r.name === VIEW.name && r.state === state)
+        .map((r) => (typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata).label);
+
+    it('a draft saved after the gate read is not promoted, and the conflict answers', async () => {
+        const { protocol, rows } = makeProtocol();
+        expect((await protocol.saveMetaItem({ type: 'view', name: VIEW.name, item: judged, mode: 'draft' })).success)
+            .toBe(true);
+        saveBeforePromotion(protocol, later);
+
+        await expect(protocol.publishMetaItem({ type: 'view', name: VIEW.name }))
+            .rejects.toMatchObject({ code: 'METADATA_CONFLICT', status: 409 });
+        expect(labelsIn(rows, 'active')).toEqual([]);
+        expect(labelsIn(rows, 'draft')).toEqual([later.label]);
+    });
+
+    it('a draft saved where the gate judged none is not promoted, and the conflict answers', async () => {
+        const { protocol, rows } = makeProtocol();
+        saveBeforePromotion(protocol, later);
+
+        await expect(protocol.publishMetaItem({ type: 'view', name: VIEW.name }))
+            .rejects.toMatchObject({ code: 'METADATA_CONFLICT', status: 409 });
+        expect(labelsIn(rows, 'active')).toEqual([]);
+        expect(labelsIn(rows, 'draft')).toEqual([later.label]);
+    });
+
+    it('control: with no save in between, the judged draft is promoted and its draft row drained', async () => {
+        const { protocol, rows } = makeProtocol();
+        expect((await protocol.saveMetaItem({ type: 'view', name: VIEW.name, item: judged, mode: 'draft' })).success)
+            .toBe(true);
+
+        expect((await protocol.publishMetaItem({ type: 'view', name: VIEW.name })).success).toBe(true);
+        expect(labelsIn(rows, 'active')).toEqual([judged.label]);
+        expect(labelsIn(rows, 'draft')).toEqual([]);
+    });
+});

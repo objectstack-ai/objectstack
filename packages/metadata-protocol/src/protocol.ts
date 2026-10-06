@@ -43,7 +43,7 @@ import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
 import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
-import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
+import { DraftConflictError, SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
 import { isOriginGatedType, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 import {
     resolveArtifactLockLayer,
@@ -21774,6 +21774,11 @@ export class ObjectStackProtocolImplementation implements
                 // draft than the one judged above. Absent only when no draft
                 // was found, where the promotion answers `NO_DRAFT` as before.
                 ...(draftKey !== undefined ? { packageId: draftKey } : {}),
+                // [#21934] …and the promotion writes only the draft the gate
+                // judged: the judged draft's hash (`null` when the gate found
+                // none), so a draft saved after the gate's read is refused as a
+                // conflict instead of being promoted unjudged.
+                expectedDraftHash: draftForGate ? draftForGate.hash : null,
             });
             return { singularType, orgId, advisories: runtimeAdvisories, result };
         } catch (err: any) {
@@ -21782,7 +21787,10 @@ export class ObjectStackProtocolImplementation implements
                 const conflict = await this.metadataConflictRefusal(
                     err,
                     `${request.type}/${request.name}`,
-                    `${request.type}/${request.name} published row advanced while you held the draft.`,
+                    err instanceof DraftConflictError
+                        ? `${request.type}/${request.name} draft changed after this publish judged it, so nothing was `
+                            + `published. Publish again to judge and promote the current draft.`
+                        : `${request.type}/${request.name} published row advanced while you held the draft.`,
                 );
                 // [#8594] Attached, not written — same reason as the lock gate
                 // above. The repository's own transaction has already unwound by
