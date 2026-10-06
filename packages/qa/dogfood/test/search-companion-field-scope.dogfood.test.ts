@@ -78,15 +78,27 @@ const stackDef = defineStack({
   objects: [RowScoped, HiddenField],
 });
 
+const objectGrants = {
+  [ROWS]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+  [HIDDEN]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+};
+
+/** Everyone's fallback: the object grants, no field rule. */
+const baselineSet: PermissionSet = PermissionSetSchema.parse({
+  name: 'cmpscope_baseline',
+  label: 'Companion Scope Baseline — object grants only',
+  objects: objectGrants,
+});
+
+/** The member's own set: the same grants, with `name` hidden on `cmpscope_hidden`. */
 const memberSet: PermissionSet = PermissionSetSchema.parse({
   name: 'cmpscope_member',
-  label: 'Companion Scope Member — own rows; name hidden on cmpscope_hidden',
-  objects: {
-    [ROWS]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
-    [HIDDEN]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
-  },
+  label: 'Companion Scope Member — name hidden on cmpscope_hidden',
+  objects: objectGrants,
   fields: { [`${HIDDEN}.name`]: { readable: false, editable: false } },
 });
+
+const SYS = { context: { isSystem: true } } as const;
 
 interface SearchBody {
   hits: Array<{ object: string; id: string; title: string }>;
@@ -142,13 +154,27 @@ describe('dogfood: with the pinyin search companion on, a member searches only w
     process.env.OS_SEARCH_PINYIN_ENABLED = '1';
     stack = await bootStack(stackDef as never, {
       security: new SecurityPlugin({
-        defaultPermissionSets: [...securityDefaultPermissionSets, memberSet],
-        fallbackPermissionSet: memberSet.name,
+        defaultPermissionSets: [...securityDefaultPermissionSets, baselineSet, memberSet],
+        fallbackPermissionSet: baselineSet.name,
       }),
       extraPlugins: [new PinyinSearchPlugin({ enabled: true, backfill: false })],
     });
     adminToken = await stack.signIn();
-    memberToken = await stack.signUp('cmpscope-member@verify.test');
+    const memberEmail = 'cmpscope-member@verify.test';
+    memberToken = await stack.signUp(memberEmail);
+
+    // Bind the member to its own set (the fallback stays everyone else's).
+    const ql = await stack.kernel.getServiceAsync<{
+      findOne(object: string, opts: unknown): Promise<{ id?: unknown } | null>;
+      insert(object: string, data: Record<string, unknown>, opts: unknown): Promise<unknown>;
+    }>('objectql');
+    const idOf = async (object: string, where: Record<string, unknown>) =>
+      String((await ql.findOne(object, { where, ...SYS }))?.id ?? '');
+    const userId = await idOf('sys_user', { email: memberEmail });
+    const setId = await idOf('sys_permission_set', { name: memberSet.name });
+    expect(userId, 'member user seeded').toBeTruthy();
+    expect(setId, 'member permission set seeded').toBeTruthy();
+    await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: setId }, SYS);
 
     memberRowId = await create(memberToken, ROWS, { name: CJK_NAME });
     adminRowId = await create(adminToken, ROWS, { name: CJK_NAME });
@@ -200,6 +226,8 @@ describe('dogfood: with the pinyin search companion on, a member searches only w
       const { status, text, body } = await search(memberToken, `q=${CODE}&objects=${HIDDEN}`);
       expect(status, text).toBe(200);
       expect(hitIds(body, HIDDEN)).toEqual([hiddenRowId]);
+      // …and the hit carries nothing of the hidden field.
+      expect(text).not.toContain(CJK_NAME);
     });
 
     it("the member's global search yields no hit", async () => {
