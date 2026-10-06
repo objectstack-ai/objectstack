@@ -67,7 +67,7 @@ import {
 // conditional-type pin in this package was a no-op until #5286 (tsconfig
 // excluded `**/*.test.ts`; vitest never enables `typecheck`), so the
 // compiler-API walk with anti-vacuity guards is the load-bearing instrument.
-describe('[#5055] ui/ widget + i18n family retirement', () => {
+describe('ui/ widget + i18n family retirement — doorless vocabularies removed, not tightened', () => {
   /** The 20 names the ten retired defs exported (10 schema consts + 10 types). */
   const RETIRED_NAMES = [
     // widget.zod.ts — the widget-registration vocabulary
@@ -132,7 +132,7 @@ describe('[#5055] ui/ widget + i18n family retirement', () => {
     // ── ABSENCE (every entry, not just ./ui) ──────────────────────────────
     for (const name of [...RETIRED_NAMES, ...RETIRED_PARSED_ALIASES]) {
       const holders = holdersOf(name);
-      expect(holders, `${name} must have zero holders after #5055`).toEqual([]);
+      expect(holders, `${name} must have zero holders after the widget + i18n retirement`).toEqual([]);
     }
 
     // ── SURVIVAL (on ./ui, where they live) ───────────────────────────────
@@ -193,7 +193,7 @@ describe('[#5055] ui/ widget + i18n family retirement', () => {
     }
   });
 
-  it('the surviving `error` slot is exactly the one objectui pinned to (objectui#3289)', async () => {
+  it('the surviving `error` slot is exactly the one objectui renamed its own slot onto, with no alias', async () => {
     // The keep is only defensible while the consumer's assertion holds. objectui
     // asserts `HasKey<FieldWidgetProps, 'error'>` and
     // `Equal<FieldWidgetComponentProps['error'], FieldWidgetProps['error']>`

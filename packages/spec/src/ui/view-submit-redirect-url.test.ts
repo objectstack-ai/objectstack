@@ -62,7 +62,7 @@ const redirectTo = (url: unknown) => ({ ...FORM_BASE, submitBehavior: { kind: 'r
 // ===========================================================================
 // 1. The door — the refine has to be reachable, or none of the rest counts
 // ===========================================================================
-describe('#7496 — the door', () => {
+describe('the ruled redirect `url` shape — the door', () => {
   it('the redirect arm still parses at all (the control)', () => {
     const parsed = accept(redirectTo('/thanks')) as { submitBehavior?: { url?: string } };
     expect(parsed.submitBehavior?.url).toBe('/thanks');
@@ -92,7 +92,7 @@ describe('#7496 — the door', () => {
 // ===========================================================================
 // 2. Ruled bullet 1 — relative paths only (the open-redirect face)
 // ===========================================================================
-describe('#7496 bullet 1 — relative paths only', () => {
+describe('ruled bullet 1 — relative paths only', () => {
   it.each([
     ['https', 'https://example.com/thanks'],
     ['http', 'http://example.com/thanks'],
@@ -184,7 +184,7 @@ describe('#7496 bullet 1 — relative paths only', () => {
 // ===========================================================================
 // 3. Ruled bullet 2 — interpolation only from declared record fields
 // ===========================================================================
-describe('#7496 bullet 2 — `{{record.<field>}}` and nothing else', () => {
+describe('ruled bullet 2 — `{{record.<field>}}` and nothing else', () => {
   it.each([
     ['in a path segment', '/records/{{record.id}}'],
     ['in a query value', '/thanks?ref={{record.public_ref}}'],
@@ -234,7 +234,7 @@ describe('#7496 bullet 2 — `{{record.<field>}}` and nothing else', () => {
 // ===========================================================================
 // 4. Ruled bullet 3 — verbatim redirect on the resolved relative path
 // ===========================================================================
-describe('#7496 bullet 3 — the value reaches the consumer unchanged', () => {
+describe('ruled bullet 3 — the value reaches the consumer unchanged', () => {
   it.each([
     ['a plain path', '/thanks'],
     ['a nested path', '/console/records/crm_lead'],
@@ -268,7 +268,7 @@ describe('#7496 bullet 3 — the value reaches the consumer unchanged', () => {
 // ===========================================================================
 // 5. Cross-face — the sibling arms and the alias curation still behave
 // ===========================================================================
-describe('#7496 — the neighbours the refine must not disturb', () => {
+describe('the ruled redirect `url` shape — the neighbours the refine must not disturb', () => {
   it.each([
     ['thank-you', { kind: 'thank-you', title: 'Thanks' }],
     ['continue', { kind: 'continue' }],

@@ -312,7 +312,7 @@ describe('GanttConfigSchema', () => {
     expect(GanttConfigSchema.parse(config)).toMatchObject({ parentField: 'parent_id', typeField: 'row_type' });
   });
 
-  it('declares the members plugin-gantt used to read through `.passthrough()` — and refuses an undeclared one (#15469)', () => {
+  it('declares the members plugin-gantt used to read through `.passthrough()` — and refuses an undeclared one', () => {
     const config = {
       startDateField: 'start_date',
       endDateField: 'end_date',
@@ -339,7 +339,7 @@ describe('GanttConfigSchema', () => {
   // plugin-gantt GanttView.tsx: `GanttViewMode` / the `VIEW_MODES` runtime
   // guard), not invented; if a granularity joins or leaves the renderer, this
   // pin and the schema move together.
-  describe('viewMode (#9463)', () => {
+  describe('viewMode — the granularities the gantt renderer honours, measured', () => {
     const base = {
       startDateField: 'start_date',
       endDateField: 'end_date',
@@ -438,7 +438,7 @@ describe('ListViewSchema', () => {
    * The `unrecognized_keys` control on the same call is what makes the
    * negative a verdict rather than a schema reporting nothing.
    */
-  describe('[#17053] the legacy string `sort` clause is retired', () => {
+  describe('the legacy string `sort` clause is retired — one spelling, the array', () => {
     const withSort = (sort: unknown) => ({ columns: ['name'], sort });
 
     it('REFUSES the bare string clause at `sort`, prescribing the array form', () => {
@@ -870,7 +870,7 @@ describe('FormViewSchema', () => {
   // upgraded from a renderer fact to a parse refusal), a wizard must declare
   // its steps, and the `steps:` spelling gets a guidance-refusal — never an
   // alias. Breadth is ruled NARROW: exactly this step-key family.
-  describe('wizard tightening (#13704)', () => {
+  describe('wizard tightening — sections are the steps, the inert step keys are refused, no key is added', () => {
     const STEP = { label: 'Step', fields: ['name'] };
     const issueAt = (r: ReturnType<typeof FormViewSchema.safeParse>, path: string) =>
       r.success ? undefined : r.error.issues.find((i) => i.path.join('.') === path);
@@ -946,7 +946,7 @@ describe('FormViewSchema', () => {
       }).success).toBe(true);
     });
 
-    it('the refusal is wizard-scoped: the SAME step keys stay accepted on tabbed/simple (#6237\'s split)', () => {
+    it('the refusal is wizard-scoped: the SAME step keys stay accepted on tabbed/simple (the ruled split confines it to wizard steps)', () => {
       for (const type of ['simple', 'tabbed'] as const) {
         const r = FormViewSchema.safeParse({
           type,
@@ -1006,7 +1006,7 @@ describe('FormViewSchema', () => {
         expect(issueAt(r, 'sections')?.message).toMatch(/empty/);
       });
 
-      it('a populated legacy `groups` bucket IS steps (the #6926 fold feeds the wizard)', () => {
+      it('a populated legacy `groups` bucket IS steps (the producer-side `groups` fold feeds the wizard)', () => {
         expect(FormViewSchema.safeParse({ type: 'wizard', groups: [STEP] }).success).toBe(true);
       });
 
@@ -1022,7 +1022,7 @@ describe('FormViewSchema', () => {
         expect(issueAt(r, 'sections')?.message).toMatch(/empty/);
       });
 
-      it('the flattened runtime overlay stays EXEMPT — a partial patch is its contract (#7025 membership)', () => {
+      it('the flattened runtime overlay stays EXEMPT — a partial patch is its contract, and the union corpus pins it accepted', () => {
         // `{ type: 'wizard' }` beside the required binding, `sections` supplied
         // by the shadowed base view — the `overlay.form.identity` shape the
         // #7025 corpus pins as ACCEPTED. Moving that membership needs its own
@@ -1058,7 +1058,7 @@ describe('FormViewSchema', () => {
  * (acceptance, and the `pane` error path) cannot, which is the measured reason
  * an unfolded alias survived this file for its whole life.
  */
-describe('FormViewSchema — the `groups` legacy alias folds onto `sections` (#6926)', () => {
+describe('FormViewSchema — the `groups` legacy alias folds onto `sections`', () => {
   const S = (label: string) => ({ label, fields: [label.toLowerCase()] });
   const has = (o: unknown, k: string) => Object.prototype.hasOwnProperty.call(o as object, k);
 
@@ -1725,7 +1725,7 @@ describe('FormFieldSchema', () => {
    * `min`/`max` stay bare numbers — any numeric bound is a legal value,
    * exactly as on the object-field surface.
    */
-  describe('malformed constraint values are refused at authoring (#12174)', () => {
+  describe('malformed constraint values are refused at authoring', () => {
     const lengthCases: Array<[value: number, code: string]> = [
       [0, 'too_small'],     // vacuous "no minimum" / accepts-nothing maximum
       [-5, 'too_small'],
@@ -1821,7 +1821,7 @@ describe('FormFieldSchema', () => {
    * bottom of it — and they are re-asserted here against the same probe so the
    * before/after reading is one test's worth of evidence.
    */
-  describe('an unrenderable scale is refused at authoring (#19088)', () => {
+  describe('an unrenderable scale is refused at authoring', () => {
     const parseScale = (scale: number) => FormFieldSchema.safeParse({ field: 'amount', scale });
 
     /** Did `fn` throw a RangeError? (Probing the platform, not the schema.) */
@@ -1890,7 +1890,7 @@ describe('FormFieldSchema', () => {
       }
     });
 
-    it('leaves the malformed-declaration refusals (#8321/#12174) reading exactly as before', () => {
+    it('leaves the malformed-declaration refusals (a negative or fractional scale) reading exactly as before', () => {
       // The dark control, in one place: the codes and the wording below are the
       // readings taken on this same probe BEFORE the upper bound was added.
       const negative = parseScale(-1);
@@ -2237,7 +2237,7 @@ describe('GroupingConfigSchema', () => {
     expect(() => GroupingConfigSchema.parse(grouping)).toThrow();
   });
 
-  it('fields .describe() states shape semantics without a fixed level cap (#7084)', () => {
+  it('fields .describe() states shape semantics without a fixed level cap', () => {
     const shape = (GroupingConfigSchema as unknown as { shape: Record<string, { description?: string }> }).shape;
     const doc = shape.fields!.description ?? '';
 
@@ -2423,7 +2423,7 @@ describe('GalleryConfigSchema', () => {
   });
 });
 
-describe('ListMapConfigSchema (#9340 — the eighth visualization block)', () => {
+describe('ListMapConfigSchema — the eighth visualization block', () => {
   it('accepts the full documented renderer surface — every key plugin-map reads, no extras', () => {
     // Mirrors objectui's own `ObjectMapConfigSchema` (`@object-ui/types`,
     // imported by `ObjectMap.tsx`): the spec block and the renderer's read set
@@ -2466,7 +2466,7 @@ describe('ListMapConfigSchema (#9340 — the eighth visualization block)', () =>
     expect(ListMapConfigSchema.safeParse({ mapStyle: 'https://tiles.example/style.json' }).success).toBe(false);
   });
 
-  it('accepts the showcase task shape — the exact declaration #9340 exists to make legal', () => {
+  it('accepts the showcase task shape — the exact declaration this block exists to make legal', () => {
     // showcase_task has `title`, not `name`; before this block existed the
     // renderer default left every marker title undefined and there was no
     // spec-legal way to say otherwise.
@@ -2511,7 +2511,7 @@ describe('ListMapConfigSchema (#9340 — the eighth visualization block)', () =>
     expect(ListMapConfigSchema.safeParse({ center: [37.7749, -122.4194] }).success).toBe(true);
   });
 
-  it('is declarable on a map list view — the gap #9340 closes', () => {
+  it('is declarable on a map list view — the gap this block closes', () => {
     const view = {
       label: 'Work Locations (Map)',
       type: 'map' as const,
@@ -2598,7 +2598,7 @@ describe('TimelineConfigSchema', () => {
 //
 // `KanbanConfigSchema.groupByField` is the site that makes this its own card:
 // it is REQUIRED, so the padded value cannot be withdrawn by omitting the key.
-describe('groupByField — a padded field name is refused (#17499)', () => {
+describe('groupByField — a padded field name is refused', () => {
   /**
    * Per schema: the minimal valid block MINUS `groupByField`, and the sibling
    * `z.string()` keys on that same schema the DARK control probes.
@@ -2793,7 +2793,7 @@ describe('RowColorConfigSchema', () => {
   // that would have caught it checks presence only, so the hex map turned it
   // GREEN. This pins the two properties that made the old sentence a trap,
   // rather than the wording that replaced it.
-  it('⛔ the `colors` describe never offers a hex — it names what actually resolves (#18791)', () => {
+  it('⛔ the `colors` describe never offers a hex — it names what actually resolves', () => {
     const description = (RowColorConfigSchema as unknown as {
       shape: { colors: { description?: string } };
     }).shape.colors.description ?? '';
@@ -2873,7 +2873,7 @@ describe('ListColumnSchema pinned and summary', () => {
   });
 });
 
-describe('ListColumnSchema summary object form and prefix (objectui#2231)', () => {
+describe('ListColumnSchema summary object form and prefix — spec-owned, no longer an objectui-local extension', () => {
   it('should accept the { type, field } summary form aggregating another field', () => {
     const column: ListColumn = {
       field: 'amount',
@@ -3141,7 +3141,7 @@ describe('Airtable-style ListView enhancements', () => {
 // Protocol Improvement Tests: FormView defaultSort
 // ============================================================================
 
-describe('FormViewSchema — retired defaultSort (#3896 close-out)', () => {
+describe('FormViewSchema — retired defaultSort (audit close-out: nothing read it)', () => {
   it('REJECTS the retired `defaultSort` and points at the related list view', () => {
     let message = '';
     try {
@@ -3209,7 +3209,7 @@ describe('FormViewSchema - buttons & defaults', () => {
     expect(result.defaults).toBeUndefined();
   });
 
-  it('marks both keys live now the ObjectForm renderer folds them (framework#1894 / #2998)', () => {
+  it('marks both keys live now the ObjectForm renderer folds them', () => {
     const shape = (FormViewSchema as unknown as z.ZodObject<z.ZodRawShape>).shape;
     for (const key of ['buttons', 'defaults'] as const) {
       // The renderer wiring landed (objectui ObjectForm foldFormButtons), so the
@@ -3383,7 +3383,7 @@ describe('UserActionsConfigSchema', () => {
   // as `ua?.hideFields === true` / `ua?.rowColor === true` (absent ⇒ hidden).
   // Normalising the three to one default would silently flip a toolbar
   // affordance on every view that never wrote the key.
-  it('pins the group-ON / hideFields-OFF / rowColor-OFF defaults asymmetry (objectui#5435)', () => {
+  it('pins the group-ON / hideFields-OFF / rowColor-OFF defaults asymmetry, copied from what the renderer reads', () => {
     const config = UserActionsConfigSchema.parse({});
     expect(config.group).toBe(true);
     expect(config.hideFields).toBe(false);
@@ -3393,7 +3393,7 @@ describe('UserActionsConfigSchema', () => {
   // objectui's normalize-list-view fold maps legacy `showGroup` /
   // `showHideFields` / `showColor` onto exactly these keys, so this document is
   // the fold's own OUTPUT — before adoption the save gate rejected it by name.
-  it('accepts the legacy-fold output through ListViewSchema (acceptance criterion, objectstack#11195)', () => {
+  it('accepts the legacy-fold output through ListViewSchema (the acceptance criterion for adopting the three keys)', () => {
     const result = ListViewSchema.safeParse({
       name: 'my_view',
       label: 'My View',
@@ -3549,7 +3549,7 @@ describe('UserFiltersSchema (ADR-0047)', () => {
     expect(() => UserFiltersSchema.parse({ element: 'sidebar' })).toThrow();
   });
 
-  it('should accept allowAddTab on the tabs element (#5073 — promoted from objectui)', () => {
+  it('should accept allowAddTab on the tabs element (promoted from objectui)', () => {
     const uf = UserFiltersSchema.parse({
       element: 'tabs',
       allowAddTab: true,
@@ -3558,7 +3558,7 @@ describe('UserFiltersSchema (ADR-0047)', () => {
     expect(uf.allowAddTab).toBe(true);
   });
 
-  it('should reject an unknown key (#5073 — this shape is closed)', () => {
+  it('should reject an unknown key (this shape is closed)', () => {
     expect(() => UserFiltersSchema.parse({ element: 'dropdown', allowAddTabb: true })).toThrow();
   });
 
@@ -3823,7 +3823,7 @@ describe('ListViewSchema filter field', () => {
 // ============================================================================
 // Issue #7: ListView responsive and performance config
 // ============================================================================
-describe('ListViewSchema — retired responsive/performance (#3896 close-out)', () => {
+describe('ListViewSchema — retired responsive/performance (audit close-out: no renderer read them)', () => {
   it('REJECTS the retired `responsive` with the prescription', () => {
     expect(() => ListViewSchema.parse({
       type: 'grid', columns: ['name'], responsive: { hiddenOn: ['xs'] },
@@ -3844,7 +3844,7 @@ describe('ListViewSchema — retired responsive/performance (#3896 close-out)', 
 // Every measured reader copied the key forward; ObjectGrid, where the chains
 // end, never spells any of the three.
 // ============================================================================
-describe('ListViewSchema — retired striped/bordered/virtualScroll (#7176 pass-through-only)', () => {
+describe('ListViewSchema — retired striped/bordered/virtualScroll (every reader only passed them through)', () => {
   it('REJECTS the retired `striped` with the prescription', () => {
     expect(() => ListViewSchema.parse({
       type: 'grid', columns: ['name'], striped: true,
@@ -3860,7 +3860,7 @@ describe('ListViewSchema — retired striped/bordered/virtualScroll (#7176 pass-
       type: 'grid', columns: ['name'], virtualScroll: true,
     })).toThrow(/`view\.virtualScroll`.*removed.*large datasets page via `pagination`/s);
   });
-  it('the prescriptions carry the pinned migrate sentence (#7176 rides the protocol-17 conversion)', () => {
+  it('the prescriptions carry the pinned migrate sentence (the retirement rides the protocol-17 conversion)', () => {
     for (const key of ['striped', 'bordered', 'virtualScroll'] as const) {
       let message = '';
       try {
@@ -3908,7 +3908,7 @@ describe('ListViewSchema — retired striped/bordered/virtualScroll (#7176 pass-
 // legacy bare array stays accepted and lifts to `{ formats }` at parse.
 // `'pdf'` left the enum in the same change (#1301 NOT_PLANNED).
 // ============================================================================
-describe('ListViewSchema.exportOptions — object form + array lift + pdf retirement (#8010)', () => {
+describe('ListViewSchema.exportOptions — object form + array lift + pdf retirement', () => {
   it('accepts the object form with all five renderer-read keys, byte-preserved (no unrecognized_keys)', () => {
     const exportOptions = {
       formats: ['csv', 'xlsx', 'json'] as const,
@@ -4004,7 +4004,7 @@ describe('HttpMethodSubsetSchema/HttpRequestSchema backward compat', () => {
 // entries. `HttpRequestSchema` was never duplicated — `./ui` imports and
 // re-exports `./shared`'s const — so the only thing that ever split was the type
 // alias, which is exactly the part runtime cannot see. Hence two layers.
-describe('[#4688] HttpRequest is single-source across ./shared and ./ui', () => {
+describe('HttpRequest is single-source across ./shared and ./ui', () => {
   it('both entry points expose the very same schema declaration at runtime', async () => {
     const sharedEntry = await import('../shared/index');
     const uiEntry = await import('../ui/index');
@@ -4084,7 +4084,7 @@ describe('[#4688] HttpRequest is single-source across ./shared and ./ui', () => 
 // `**/*.test.ts`; vitest never enables `typecheck`). The compiler-API test is
 // therefore the load-bearing one; the runtime tests below it guard the value
 // ranges the whole argument rests on.
-describe('[#4691] `HttpMethod` is not exported from ./ui', () => {
+describe('`HttpMethod` is not exported from ./ui', () => {
   it('resolves the export surface: ./ui has no `HttpMethod`, ./shared and ./api share one', () => {
     // A sanity anchor: if this entry resolved to nothing, the absence
     // assertions below would prove nothing at all.
@@ -4096,7 +4096,7 @@ describe('[#4691] `HttpMethod` is not exported from ./ui', () => {
 
     // 2. …but it still offers the 5-value type under its own name, so the
     //    migration stays inside this entry point.
-    expect(uiNames, '`HttpMethodType` was renamed at #5832').not.toContain('HttpMethodType');
+    expect(uiNames, '`HttpMethodType` was renamed to `HttpMethodSubset`').not.toContain('HttpMethodType');
     expect(maybeOriginOf('./ui', 'HttpMethodSubset'), './ui must export `HttpMethodSubset`').toBeDefined();
     expect(originFileOf('./ui', 'HttpMethodSubset')).toBe('src/shared/http.zod.ts');
 
@@ -4233,7 +4233,7 @@ describe('ADR-0089 D3a — strict view form schemas (loud mis-layered keys)', ()
  * future edit that folds the sentence back into the middle passes all of them
  * and fails here.
  */
-describe('visibility unknown-key message order — fix before history (#6416 / #6619)', () => {
+describe('visibility unknown-key message order — fix before history', () => {
   const HISTORY =
     'Before ADR-0089 D3a these were dropped silently, shipping inert metadata; ' +
     'a mis-layered or stale key is now a loud parse error.';
@@ -4362,7 +4362,7 @@ const viewDoorsCarryingObjectLevelChecks = [
  * on different mechanisms (an `error` map keyed on `issue.input` vs a
  * `retiredKey()` tombstone), so each is pinned on its own.
  */
-describe("ListViewSchema — the RETIRED `page` view type (#17063)", () => {
+describe("ListViewSchema — the RETIRED `page` view type", () => {
   /**
    * Walk `invalid_union` wrappers and return every issue, nested arms included
    * — the same helper the calendar block below needs, for the same reason.
@@ -4521,7 +4521,7 @@ const flattenUnionIssues = (issues: z.ZodIssue[]): z.ZodIssue[] =>
  * larger bug, and `navigation` is one `strictObject`, so the blast radius of a
  * mistake here is the whole block.
  */
-describe('ListViewSchema — the RETIRED `navigation.view` binding (#16885)', () => {
+describe('ListViewSchema — the RETIRED `navigation.view` binding', () => {
   describe.each(viewDoorsCarryingObjectLevelChecks)('%s', (_label, parse) => {
     it('REFUSES `navigation.view` with the tombstone prescription, not a bare unknown-key report', () => {
       const r = parse({ type: 'grid', columns: ['name'], navigation: { view: 'summary_view' } });
@@ -4596,7 +4596,7 @@ describe('ListViewSchema — the RETIRED `navigation.view` binding (#16885)', ()
   });
 });
 
-describe("ListViewSchema — calendar in `appearance.allowedVisualizations` requires the `calendar:` block (#13817)", () => {
+describe("ListViewSchema — calendar in `appearance.allowedVisualizations` requires the `calendar:` block", () => {
   // The same three doors, and since #17063 this is the ONLY object-level check
   // they carry — it is attached at three separate points for the zod-4 reason,
   // and a missing re-attachment is invisible (the door keeps accepting, which
@@ -4705,9 +4705,9 @@ describe("ListViewSchema — calendar in `appearance.allowedVisualizations` requ
 // it is a published-surface narrowing and belongs to a ruling, not to a pin.
 // ============================================================================
 
-describe("ListViewSchema — the `type: 'calendar'` axis is NOT gated by the #13817 check (#16577)", () => {
+describe("ListViewSchema — the `type: 'calendar'` axis is NOT gated by the `allowedVisualizations` check (ruled: a completeness warning)", () => {
   describe.each(viewDoorsCarryingObjectLevelChecks)('%s', (_label, parse) => {
-    it("ACCEPTS `type: 'calendar'` with no `calendar:` block — the axis #13817 does not gate", () => {
+    it("ACCEPTS `type: 'calendar'` with no `calendar:` block — the axis the `allowedVisualizations` check does not gate", () => {
       const r = parse({ type: 'calendar', columns: ['name'] });
       expect(r.success, r.success === false ? JSON.stringify((r as unknown as { error: z.ZodError }).error.issues) : '').toBe(true);
     });
@@ -4753,7 +4753,7 @@ describe("ListViewSchema — the `type: 'calendar'` axis is NOT gated by the #13
 // pinning, because one of the two is a silent downgrade.
 // ============================================================================
 
-describe('ListViewSchema — `viewType` is not a spelling of `type` (#16577)', () => {
+describe('ListViewSchema — `viewType` is not a spelling of `type`', () => {
   it('is an UNKNOWN key at the two authoring doors — refused, not aliased', () => {
     for (const [label, parse] of [
       ['ListViewSchema', (b: Record<string, unknown>) => ListViewSchema.safeParse(b)],
@@ -4790,7 +4790,7 @@ describe('ListViewSchema — `viewType` is not a spelling of `type` (#16577)', (
 // with no declared precedence between them.
 // ============================================================================
 
-describe('view row bound — no per-kind `limit` on the view configs (#19228)', () => {
+describe('view row bound — `pagination.pageSize` is the one bound; no per-kind `limit` on the view configs', () => {
   it('refuses `limit` BY NAME on each per-kind view config', () => {
     const PER_KIND = [
       ['gallery', GalleryConfigSchema as unknown as z.ZodTypeAny],
