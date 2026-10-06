@@ -50,11 +50,22 @@ const PACKAGE_ID = 'com.example.showcase';
 /** A name no package declares: a runtime datasource. */
 const RUNTIME_DS = 'dogfood_rt_21899';
 
-/** The sentences the two refusals carry, spelled out — never read back from the table under test. */
-const SAVE_SENTENCE = `Datasource '${CODE_DS}' is code-defined and cannot be edited at runtime: it is read-only. `
-    + 'Edit the *.datasource.ts source that declares it and redeploy. See docs/adr/0062-external-datasource-runtime.md.';
-const DELETE_SENTENCE = `Datasource '${CODE_DS}' is code-defined and cannot be removed at runtime: it is read-only. `
-    + 'Edit the *.datasource.ts source that declares it and redeploy. See docs/adr/0062-external-datasource-runtime.md.';
+/**
+ * What the two refusals say: the admin door's verdict as the first sentence, in
+ * the admin door's words, then the remedy — the wording triage ruled the
+ * refusal must carry, so it is asserted beside the code and status, never
+ * instead of them. Spelled out, never read back from the table under test.
+ */
+const SAVE_VERDICT = `Datasource '${CODE_DS}' is code-defined and cannot be edited at runtime: it is read-only.`;
+const DELETE_VERDICT = `Datasource '${CODE_DS}' is code-defined and cannot be removed at runtime: it is read-only.`;
+const REMEDY = 'Edit the *.datasource.ts source that declares it and redeploy.';
+/** The verdict first, the remedy after it, and no operator hatch prescribed. */
+const expectVerdict = (message: unknown, verdict: string) => {
+    const text = String(message);
+    expect(text.startsWith(`${verdict} `), text).toBe(true);
+    expect(text).toContain(REMEDY);
+    expect(text).not.toContain('OS_METADATA_WRITABLE');
+};
 
 /** A schema-valid datasource body, so a refusal is the door's and never a 422. */
 const body = (name: string, label: string) => ({ name, label, driver: 'sqlite', config: { filename: `${name}.db` } });
@@ -211,6 +222,21 @@ describe('[#21899] the resolver — a datasource an installed package declares i
     it('a registry with no package records answers false (nothing is guessed)', () => {
         expect(makeSession().protocol.isArtifactBacked('datasource', CODE_DS)).toBe(false);
     });
+
+    it('both refusals arrive whole through the REST door\'s 500-character bound for an 88-character name', () => {
+        // `truncateClientMessage` (packages/rest/src/error-response.ts) keeps a
+        // message only while it is SHORTER than 500 characters.
+        const longName = `ds_${'x'.repeat(85)}`;
+        expect(longName).toHaveLength(88);
+        const { protocol } = makeSession({
+            packages: [{ manifest: { id: PACKAGE_ID, datasources: [{ name: longName, driver: 'sqlite', config: {} }] } }],
+        });
+        for (const operation of ['save', 'delete'] as const) {
+            const message = String(protocol.packagedBaseRefusal({ type: 'datasource', name: longName, operation })?.message);
+            expect(message.length, operation).toBeLessThan(500);
+            expect(message.endsWith('See docs/adr/0062-external-datasource-runtime.md.'), operation).toBe(true);
+        }
+    });
 });
 
 for (const { label, environmentId } of KERNELS) {
@@ -230,7 +256,7 @@ for (const { label, environmentId } of KERNELS) {
             const err = await refusalOf(protocol.saveMetaItem({ type: 'datasource', name: CODE_DS, item: body(CODE_DS, 'Meta Renamed 21899') }));
 
             expect({ code: err?.code, status: err?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
-            expect(err.message).toBe(SAVE_SENTENCE);
+            expectVerdict(err.message, SAVE_VERDICT);
             expect(rows.size).toBe(0);
             expect(historyRows).toEqual([]);
         });
@@ -257,7 +283,7 @@ for (const { label, environmentId } of KERNELS) {
             const err = await refusalOf(protocol.deleteMetaItem({ type: 'datasource', name: CODE_DS }));
 
             expect({ code: err?.code, status: err?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
-            expect(err.message).toBe(DELETE_SENTENCE);
+            expectVerdict(err.message, DELETE_VERDICT);
             expect(rows.size).toBe(0);
             expect(historyRows).toEqual([]);
         });
@@ -390,6 +416,6 @@ describe('[#21899] the repository delete gate lifts the origin-gated type only',
             { parentVersion: null, actor: null, intent: 'override-artifact' },
         ));
         expect({ code: err?.code, status: err?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
-        expect(err.message).toBe(SAVE_SENTENCE);
+        expectVerdict(err.message, SAVE_VERDICT);
     });
 });
