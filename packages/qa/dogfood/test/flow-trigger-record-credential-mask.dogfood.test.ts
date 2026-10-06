@@ -38,6 +38,7 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field, SECRET_MASK } from '@objectstack/spec/data';
 import type { Flow } from '@objectstack/spec/automation';
+import { RecordChangeTriggerPlugin } from '@objectstack/trigger-record-change';
 
 const OBJ = 'ftrm_vault';
 const ECHO = 'ftrm_echo';
@@ -133,6 +134,8 @@ const fixtureStack = defineStack({
     name: 'Flow Trigger Record Credential Mask Fixture',
     description: 'One credential-holding object and one record-change flow that pauses.',
   },
+  // ADR-0097: the flow's record-change start node needs both capabilities.
+  requires: ['automation', 'triggers'],
   objects: [Vault, Echo],
   flows: [flow],
 });
@@ -146,7 +149,11 @@ const leaksIn = (body: unknown): string[] => {
 };
 
 const boot = (dbFile: string) =>
-  bootStack(fixtureStack as unknown as Parameters<typeof bootStack>[0], { automation: true, databaseFile: dbFile });
+  bootStack(fixtureStack as unknown as Parameters<typeof bootStack>[0], {
+    automation: true,
+    databaseFile: dbFile,
+    extraPlugins: [new RecordChangeTriggerPlugin()],
+  });
 
 /** Create a vault row through the engine, then update it through REST so the flow fires and pauses. */
 async function pauseOne(
