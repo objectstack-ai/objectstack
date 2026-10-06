@@ -1736,6 +1736,22 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "エラーメッセージ",
         helpText: "アクションが失敗したときに、元のエラーの代わりに表示するエラーメッセージ。"
       },
+      outcomeMessages: {
+        label: "結果別の成功メッセージ",
+        helpText: "ハンドラーの結果ごとの成功メッセージ（JSON で記述）。各キーはハンドラーが成功時のペイロードで返す snake_case の `outcome` 値、各値はその結果に表示するラベルです（例：{\"archived\": \"アーカイブしました\", \"already_archived\": \"すでにアーカイブ済みです\"}）。ラベルには ${result.*} を埋め込めます。対応する項目がない結果には成功メッセージが表示され、ハンドラーが返さないキーは表示されることがありません。結果ダイアログや `operation: 'update'` とは併用できません。"
+      },
+      onSuccess: {
+        label: "成功後の遷移",
+        helpText: "アクション成功後の遷移。開くルートと、それを開く場所を指定します。"
+      },
+      "onSuccess.navigate": {
+        label: "遷移先",
+        helpText: "アクション成功後に開くルートまたは URL テンプレート。${param.*}（パラメーターダイアログで収集した値）、${ctx.*}（origin、apiBase、user、org、recordId、selection）、${result.*}（サーバーの応答。例：${result.id}）を埋め込めます。相対値はアプリ内のルートです。"
+      },
+      "onSuccess.openIn": {
+        label: "遷移を開く場所",
+        helpText: "遷移をどこで開くか。'self'（既定）はその場で遷移し、'newTab' は新しいブラウザタブで開きます。"
+      },
       refreshAfter: {
         label: "完了後に更新",
         helpText: "アクション完了後にリスト/ページを更新"

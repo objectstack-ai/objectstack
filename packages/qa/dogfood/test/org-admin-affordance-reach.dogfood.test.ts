@@ -115,6 +115,8 @@ describe('org-admin affordances follow the membership grade (served metadata × 
   const tokens = {} as Record<Grade, string>;
   const sessionUser = {} as Record<Grade, Record<string, unknown>>;
   const served = {} as Record<Grade, Map<string, ServedAction>>;
+  /** The field names each grade is served per object — what the metadata-plane field mask left. */
+  const servedFields = {} as Record<Grade, Record<string, string[]>>;
   let features: Record<string, unknown>;
   /** A representative row per object — the binding a row action is evaluated against. */
   const rowOf = {} as Record<string, Record<string, unknown>>;
@@ -181,11 +183,13 @@ describe('org-admin affordances follow the membership grade (served metadata × 
       expect(session.status).toBe(200);
       sessionUser[grade] = ((await session.json()) as { user: Record<string, unknown> }).user;
       served[grade] = new Map();
+      servedFields[grade] = {};
       for (const object of OBJECTS) {
         const meta = await stack.apiAs(tokens[grade], 'GET', `/meta/object/${object}`);
         expect(meta.status, `${grade} reads /meta/object/${object}`).toBe(200);
-        const body = (await meta.json()) as { item?: { actions?: ServedAction[] } };
+        const body = (await meta.json()) as { item?: { actions?: ServedAction[]; fields?: Record<string, unknown> } };
         for (const action of body.item?.actions ?? []) served[grade].set(`${object}.${action.name}`, action);
+        servedFields[grade][object] = Object.keys(body.item?.fields ?? {});
       }
     }
   }, 240_000);
@@ -224,16 +228,6 @@ describe('org-admin affordances follow the membership grade (served metadata × 
     return gateAdmits(grade, site);
   };
 
-  /**
-   * The one site the metadata-plane field mask (ADR-0106) withholds below
-   * tenant-admin grade: `sys_user.invite_user`'s `role` param names
-   * `sys_user.role`, a field those callers cannot read, so the whole action is
-   * dropped from their `/meta/object/sys_user` — independently of this gate.
-   * Every other site must be served to every grade, or a verdict below would be
-   * the mask's rather than the gate's.
-   */
-  const MASKED_BELOW_TENANT_ADMIN = ['sys_user.invite_user'];
-
   it('the session face carries each grade under its projected name, and no other grade', () => {
     // The capability half of every composed predicate is ON here, so each
     // verdict below is decided by the grade term alone.
@@ -251,12 +245,30 @@ describe('org-admin affordances follow the membership grade (served metadata × 
     expect(ALL.filter((site) => gateAdmits(grade, site))).toEqual(ALL.filter((site) => EXPECTED[grade].includes(site)));
   });
 
+  // Every site is served to every grade, so each verdict below is the gate's
+  // rather than the metadata-plane field mask's.
   it.each(Object.keys(EXPECTED) as Grade[])('%s is offered, on its own served metadata, exactly those it is served', (grade) => {
     const unserved = ALL.filter((site) => !served[grade].has(site));
-    const tenantAdmin = grade === 'owner' || grade === 'admin';
-    expect(unserved).toEqual(tenantAdmin ? [] : MASKED_BELOW_TENANT_ADMIN);
+    expect(unserved).toEqual([]);
     const shown = ALL.filter((site) => offered(grade, site));
-    expect(shown).toEqual(ALL.filter((site) => EXPECTED[grade].includes(site) && !unserved.includes(site)));
+    expect(shown).toEqual(ALL.filter((site) => EXPECTED[grade].includes(site)));
+  });
+
+  it('a delegated_admin is offered Invite User on sys_user; a plain member is not — by the reach gate, not the field mask', () => {
+    // `invite_user`'s `role` param names `sys_member.role` through
+    // `objectOverride`. Neither grade is served `sys_user.role`, so a mask that
+    // read the param as THIS object's field withheld the action from both. Both
+    // ARE served `sys_member.role`, the field the param actually names.
+    for (const grade of ['delegated_admin', 'member'] as const) {
+      expect(servedFields[grade].sys_user, `${grade} is not served sys_user.role`).not.toContain('role');
+      expect(servedFields[grade].sys_member, `${grade} is served sys_member.role`).toContain('role');
+      expect(served[grade].has('sys_user.invite_user'), `${grade} is served sys_user.invite_user`).toBe(true);
+    }
+    expect(offered('delegated_admin', 'sys_user.invite_user')).toBe(true);
+    // The member is served the same action and is still not offered it: the
+    // served `requiresMembershipReach` predicate excludes its grade.
+    expect(gateAdmits('member', 'sys_user.invite_user')).toBe(false);
+    expect(offered('member', 'sys_user.invite_user')).toBe(false);
   });
 
   it('a plain member sees none of them on the member, invitation and team lists', () => {

@@ -1275,9 +1275,12 @@ function safeJsonStringify(v: unknown): string {
  * writes `const e = new Error(msg); e.userMessage = msg; throw e`, and the
  * text must survive the VM flattening the throw to a string, or the marking
  * dies exactly where its primary producers live. Crossing INTO the VM is safe
- * for the same reason `code` is: the value is author-written user-facing text
- * by construction (platform and driver code never sets the field), so it
- * carries no host state a sandboxed body could exfiltrate — and it keeps the
+ * for the same reason `code` is: the value is text its producer authored for
+ * the end user (an application hook's, or a platform refusal's static
+ * guidance such as the packaged-permission-set lock's, which names no set,
+ * package, id or path), and platform and driver diagnostics never set the
+ * field, so it carries no host state a sandboxed body could exfiltrate — and
+ * it keeps the
  * established property that a body which catches, inspects and re-throws a
  * host error does not lose the structured payload.
  */

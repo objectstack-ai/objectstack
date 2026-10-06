@@ -66,6 +66,7 @@ import {
     ObjectSchemaMaskEvaluationError,
     applyObjectSchemaMask,
     organizationIdForMetaRead,
+    relateObjectSchemaMaskPosture,
     type ObjectSchemaMaskPosture,
 } from '@objectstack/metadata-core';
 import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
@@ -2329,6 +2330,11 @@ export const META_UNDETERMINED_CACHE_CONTROL = 'private, no-store';
  * posture's schema went out with no `Cache-Control` at all, where `RestServer`
  * answers `private, no-store` — the header the ADR (and the posture's own
  * `warn` line) promises.
+ *
+ * [#21884] Hand it the posture RELATED to this document
+ * (`relateObjectSchemaMaskPosture`): an action param reading another object
+ * through `objectOverride` is judged against that object, and a posture nobody
+ * related withholds such an action (fail closed).
  */
 export function projectMetaObjectSchema(
     posture: ObjectSchemaMaskPosture,
@@ -2364,7 +2370,9 @@ async function maskMetaObjectList(
             if (maskError instanceof ObjectSchemaMaskEvaluationError) return { ok: false, object: objectName };
             throw maskError;
         }
-        const masked = projectMetaObjectSchema(posture, item);
+        // [#21884] The params that read another object through `objectOverride`
+        // are judged against THAT object — related here, after the fetch.
+        const masked = projectMetaObjectSchema(await relateObjectSchemaMaskPosture(posture, item), item);
         if (!masked.ok) return { ok: false, object: objectName };
         cacheControl ??= masked.cacheControl;
         projected.push(masked.document);
@@ -2718,8 +2726,10 @@ export function createMetaItemAnswer(
             visible = resolveDocLocale(visible as any, sources.requestLocale());
         }
 
-        // 4. [ADR-0106 D1/D5(1)] The mask, under the posture resolved before the fetch.
-        const masked = projectMetaObjectSchema(maskPosture, visible);
+        // 4. [ADR-0106 D1/D5(1)] The mask, under the posture resolved before the
+        //    fetch — related [#21884] to the objects this document's action params
+        //    read through `objectOverride`, which only the fetched document names.
+        const masked = projectMetaObjectSchema(await relateObjectSchemaMaskPosture(maskPosture, visible), visible);
         if (!masked.ok) return { kind: 'mask-fault', object: name };
         visible = masked.document;
 
@@ -2898,11 +2908,15 @@ export function createMetaLayeredAnswer(
             }
         }
 
-        // 3. [ADR-0106 D5(4)] The mask, on every layer.
+        // 3. [ADR-0106 D5(4)] The mask, on every layer — under one posture
+        //    related [#21884] over every layer, so each object an `objectOverride`
+        //    param names is asked about once.
+        const layerDocuments = META_ITEM_MASKED_LAYERS.map((layer) => (served.has(layer) ? served.get(layer) : layered?.[layer]));
+        const layerPosture = await relateObjectSchemaMaskPosture(maskPosture, ...layerDocuments);
         let cacheControl: typeof META_UNDETERMINED_CACHE_CONTROL | undefined;
         for (const layer of META_ITEM_MASKED_LAYERS) {
             const document = served.has(layer) ? served.get(layer) : layered?.[layer];
-            const masked = projectMetaObjectSchema(maskPosture, document);
+            const masked = projectMetaObjectSchema(layerPosture, document);
             if (!masked.ok) return { kind: 'mask-fault', object: name };
             cacheControl ??= masked.cacheControl;
             if (masked.document !== document) served.set(layer, masked.document);
