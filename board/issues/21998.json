@@ -2,15 +2,17 @@
   "number": 21998,
   "kind": "pull_request",
   "title": "ci(test-core): wire the shard timing-drift check: red past 1.5x measured/predicted, warning past 1.3x",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
   "labels": [
+    "ci/cd",
+    "size/m",
     "skip-changeset"
   ],
   "assignees": [
@@ -19,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-06T14:24:14Z",
-  "updated_at": "2026-10-06T14:25:10Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-06T15:37:01Z",
+  "closed_at": "2026-10-06T15:36:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-06T15:36:58Z",
   "comments": 0,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/21998",

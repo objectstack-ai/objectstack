@@ -2,7 +2,7 @@
   "number": 21991,
   "kind": "pull_request",
   "title": "fix(plugin-approvals): Setup → Approvals → Requests opens the tenant-wide list, and a merged-app pin closes the caller-scoped first-view family",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -23,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-06T13:23:21Z",
-  "updated_at": "2026-10-06T14:07:06Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-06T14:43:17Z",
+  "closed_at": "2026-10-06T14:43:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-06T14:43:15Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/21991",

@@ -1,0 +1,31 @@
+{
+  "number": 22027,
+  "kind": "issue",
+  "title": "decision: #21980 merge condition — a no-package by-name read of a shared view name now answers the stored copy, not the owner's shipped item (before the change it depended on registry order): land PR #22023, or hold it?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:engine",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-06T17:52:48Z",
+  "updated_at": "2026-10-06T17:52:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22027",
+  "body": "Filing gate: **② a decision only the maintainer can make.** Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) on the maintainer's instruction 「需要我决裁的问题，立决策卡」. ⛔ Not a claim. Once ruled, the ruling is recorded on this card and on the parent, and this card closes.\n\nParent: #21980 (p2 security, in flight; the claim stands). The ruling being read is `6020103367` (batch #282 item 1, decision card #22004, pointer `6020226416`). The seat's question is `6021658627`; the dev's report is `6021602255`. Classes, positions and functions only.\n\n### 维护者速读\n上次你裁 A 时附了一个合入条件：在\"不分环境\"的运行方式下，不指定包、按名称读取两个包共用的名字，改动后必须和改动前一样，返回属主包发布的那一份，绝不能返回空。\n\n开发在两种内核、两种注册顺序下各读了三次，加起来测了 72 次读取：\n- **一次都没有返回空**，停止条件没有触发。你担心的那一行水合改动对这次读取没有影响。\n- **但\"返回属主包那一份\"这句话，在改动前就不成立。** 改动前返回哪一份取决于注册顺序。改动后统一返回存储的副本：存储覆盖层优先，这是 ADR-0005 的读取顺序，也是本卡方向本身带来的结果。\n\n- **A**：条件按\"不能返回空\"理解，已经满足。合入 PR #22023，放进最后一个 17.x。返回内容里带错包标识的问题由 #22024 单独处理。\n- **B**：条件按字面理解，必须返回属主包那一份。PR 先不合，需要再改\"不指定包时的按名读取规则\"，这超出了上次裁决的范围。\n\n推荐 **A**。回一个字母：A / B。\n\n### 四棱（os-decision-facets）\n- ① 项目长远合理性：A 让答案由一条成文的读取顺序决定（ADR-0005：存储层优先于代码层），不再取决于注册顺序，比改动前更确定。B 要在\"不指定包\"的读取上另立一条\"属主优先\"规则，与 ADR-0005 的层叠顺序方向相反，需要另一次裁决。\n- ② 实际业务拉动：公开表单撤回的安全修复（p2）等着这次合入，并且在最后一个 17.x 的清单上（#22009 的裁决）。\n- ③ 防 AI 犯错：A 下的答案有 pin (h) 钉住：有答案、两种内核返回同一份、与环境级列表一致。B 会扩大范围，并推迟一个安全修复。\n- ④ 创业阶段不扩散：A 不新增键、不新增规则；B 新增一条读取规则。\n\nPrior rulings read: view container, by-name read, overlay order. Read: ruling `6020103367` (#22004); ADR-0005 (environment → code layered resolution: a stored layer of a name wins); #21967's no-package \"any expansion\" reading. Thread: #21980 `6021602255`, `6021658627`. ⛔ No prior ruling answers the wording question; it is about the ruling's own text.\n\n## 一句话问题\n裁决附带的合入条件写的是\"返回属主包发布的那一份\"，但它要防的是\"返回空\"。实测从不返回空，但也不总是返回属主那一份，而且改动前同样不是。条件算不算满足？\n\n## 选项 × 代价\n| 选项 | 做什么 | 代价 |\n|:--|:--|:--|\n| A | 条件视为满足，合入 PR #22023（`Clause-②: no (narrowing)`，`minor` changeset 加 BREAKING 行） | 改动前属主先注册的那些格子里，答案从属主发布的那份变成存储副本（ADR-0005 顺序）；返回内容里的包标识错位由 #22024 单独修 |\n| B | PR 暂不合入，先让不指定包的按名读取改为属主优先 | 新范围，要另立裁决；安全修复和最后一个 17.x 一起推迟；与 ADR-0005 层叠顺序相反 |\n\n## 推荐 + 回退 + 置信缺口\n- **推荐 A。** 条件的停止判据是\"返回空\"，实测 72 次读取没有一次触发。字面上的\"属主那一份\"在改动前就因注册顺序而不稳定，所以\"和改动前一样\"从来不是一个按属主固定的基线。\n- **两年后的样子：** 每个按名读取都由成文的层叠顺序回答，并且显式带上包身份（#22024 的方向）。不再出现\"谁先注册谁先答\"。\n- **回退 B。**\n- **置信缺口：** 没有盘点有多少写入方会存这种副本（changeset 里已写明）。\n- 只看①选 A；②③④ 是否翻转：否。\n\n## 裁后执行\n- **A：** `domain:engine` 席位让 PR #22023 走完 CI 后合入。分诊把 #22024 按它自己的卡分诊。\n- **B：** PR 暂停，分诊为\"不指定包时属主优先\"立卡并送裁。"
+}
