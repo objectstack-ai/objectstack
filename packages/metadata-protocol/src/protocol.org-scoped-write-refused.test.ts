@@ -652,6 +652,54 @@ describe('org-scoped anonymous form intake changes the anonymous doors cannot se
         expect(orgRows(rows).filter((r) => r.org === 'org_a' && r.state === 'active')).toEqual([]);
     });
 
+    // ADR-0048 keys a draft by its package too: two packages can each hold a
+    // draft of the same view in one organization. The promotion judges the
+    // draft it promotes, under the same key, never the other package's.
+    describe('walled: two packages hold a draft of the same view in one organization', () => {
+        async function seedTwoPackageDrafts() {
+            const { protocol, rows } = makeTenancyProtocol(null);
+            await publishEnvWide(protocol);
+            // Package A's draft leaves the anonymous intake alone; package B's
+            // withdraws it, which an organization the doors never read refuses.
+            await seedLegacyOrgDraft(protocol, {
+                type: 'view', name: 'task.intake_form', body: FORM_VIEW(true, 'Intake (A)'),
+                organizationId: 'org_a', packageId: 'pkg_a',
+            });
+            await seedLegacyOrgDraft(protocol, {
+                type: 'view', name: 'task.intake_form', body: FORM_VIEW(false),
+                organizationId: 'org_a', packageId: 'pkg_b',
+            });
+            const draftsOf = () => Array.from(rows.values())
+                .filter((r) => r.organization_id === 'org_a' && r.state === 'draft')
+                .map((r) => r.package_id)
+                .sort();
+            const activeOf = () => Array.from(rows.values())
+                .filter((r) => r.organization_id === 'org_a' && r.state === 'active')
+                .map((r) => r.package_id);
+            expect(draftsOf()).toEqual(['pkg_a', 'pkg_b']);
+            return { protocol, draftsOf, activeOf };
+        }
+
+        it('promoting package B judges B\'s draft: refused, and nothing becomes active', async () => {
+            const { protocol, draftsOf, activeOf } = await seedTwoPackageDrafts();
+            await expect(protocol.publishMetaItem({
+                type: 'view', name: 'task.intake_form', organizationId: 'org_a', packageId: 'pkg_b',
+            })).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403, organizationId: 'org_a' });
+            expect(activeOf()).toEqual([]);
+            expect(draftsOf()).toEqual(['pkg_a', 'pkg_b']);
+        });
+
+        it('control: promoting package A judges A\'s draft and promotes it, leaving B\'s draft pending', async () => {
+            const { protocol, draftsOf, activeOf } = await seedTwoPackageDrafts();
+            const res = await protocol.publishMetaItem({
+                type: 'view', name: 'task.intake_form', organizationId: 'org_a', packageId: 'pkg_a',
+            });
+            expect(res.success).toBe(true);
+            expect(activeOf()).toEqual(['pkg_a']);
+            expect(draftsOf()).toEqual(['pkg_b']);
+        });
+    });
+
     it('control (walled): an org-scoped edit that leaves the anonymous intake alone still saves', async () => {
         const { protocol, rows } = makeTenancyProtocol(null);
         await publishEnvWide(protocol);

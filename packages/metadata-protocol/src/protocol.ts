@@ -16017,9 +16017,14 @@ export class ObjectStackProtocolImplementation implements
         // `name` is a container under the save name); a view item is the save
         // name's own row.
         const stamped = raw.name ? raw : { ...raw, name: args.name };
+        // The package the row is saved under is part of its identity
+        // (ADR-0048), carried the way the list read serves it (`_packageId`),
+        // so another package's withdrawal of the same name closes nothing.
+        // An expansion's items carry theirs already.
+        const bound = args.packageId ? { _packageId: args.packageId } : {};
         const served: unknown[] = isAggregatedViewContainer(stamped)
             ? this.expandRuntimeViewContainer(args.type, stamped, { packageId: args.packageId ?? undefined })
-            : [{ ...raw, name: args.name }];
+            : [{ ...raw, name: args.name, ...bound }];
         const open = served.flatMap((view) => anonymousFormIntakeCandidates(view).map((c) => ({ view, c })));
         if (open.length === 0) return null;
         const envWide: any = await this.getMetaItems({ type: args.type });
@@ -16034,7 +16039,7 @@ export class ObjectStackProtocolImplementation implements
         // against the form it was, by slot or by slug).
         const envRows = (await this.envWideRawViewRows(args.type, args.name)).map((r) => ({ ...r, name: args.name }));
         if (envRows.length > 0) {
-            const own = { ...raw, name: args.name };
+            const own = { ...raw, name: args.name, ...bound };
             for (const c of anonymousFormIntakeCandidates(own)) {
                 if (anonymousFormIntakeWithdrawnIn(envRows, own, c)) closed.add(c.slug);
             }
@@ -21432,9 +21437,26 @@ export class ObjectStackProtocolImplementation implements
         // Without this the gate would be trivially bypassable by anyone who
         // saves `?mode=draft` and then POSTs `/publish` — which is exactly what
         // Studio's designer surface does on every edit.
+        //
+        // The draft is read under ONE package key, and `repo.promoteDraft`
+        // below promotes under that same key, so the body judged here is the
+        // body that becomes active. ADR-0048 keys a draft by
+        // `(org, type, name, package_id)`: two packages can each hold a draft
+        // of the same name in one org, and a read without the package
+        // dimension picks either. The key is the caller's stated binding
+        // (spelled exactly as `repo.promoteDraft` receives it); with none
+        // stated, the binding of the draft row this promotion resolves, read
+        // once and then stated to both the read and the promotion.
+        let draftKey: string | null | undefined = 'packageId' in request ? (request.packageId ?? null) : undefined;
+        if (draftKey === undefined) {
+            const draftRow = await this.engine.findOne('sys_metadata', {
+                where: { type: singularType, name: request.name, organization_id: orgId, state: 'draft' },
+            });
+            if (draftRow) draftKey = (draftRow as { package_id?: string | null }).package_id ?? null;
+        }
         const draftForGate = await repo.get(
             { type: singularType, name: request.name, org: orgId ?? 'env' } as Parameters<typeof repo.get>[0],
-            { state: 'draft' },
+            { state: 'draft', ...(draftKey !== undefined ? { packageId: draftKey } : {}) },
         );
         // [#21470] …and the divergent `name` refusal, on the same body and for
         // the same reason: a draft stored before `saveMetaItem` judged every
@@ -21450,15 +21472,9 @@ export class ObjectStackProtocolImplementation implements
         // The promotion half of {@link anonymousFormIntakeOrgScopeRefusal}: a
         // draft saved before that refusal existed must not reach `active`.
         if (draftForGate) {
-            // The binding the promoted row is placed by: the request's, else the
-            // draft row's own (a container's expansion is placed by it).
-            let draftPackageId: string | null | undefined = request.packageId;
-            if (draftPackageId === undefined && singularType === 'view' && orgId) {
-                const draftRow = await this.engine.findOne('sys_metadata', {
-                    where: { type: singularType, name: request.name, organization_id: orgId ?? null, state: 'draft' },
-                });
-                draftPackageId = (draftRow as { package_id?: string | null } | null)?.package_id ?? null;
-            }
+            // The binding the promoted row is placed by: the key the draft was
+            // read under above (a container's expansion is placed by it).
+            const draftPackageId = draftKey;
             const intakeRefusal = await this.anonymousFormIntakeOrgScopeRefusal({
                 type: singularType,
                 name: request.name,
@@ -21563,11 +21579,14 @@ export class ObjectStackProtocolImplementation implements
                 // audit writer. This door's default says what happened without it.
                 message: request.message || 'publish draft',
                 intent,
-                // [#8907] Spread, not `packageId: request.packageId`: `null` is
-                // a meaningful scope (the unbound row) and `undefined` means
-                // "no package in hand", so the key must be ABSENT rather than
-                // present-and-undefined for the historical resolution to hold.
-                ...('packageId' in request ? { packageId: request.packageId ?? null } : {}),
+                // [#8907] Spread: `null` is a meaningful scope (the unbound
+                // row), so the key is ABSENT rather than present-and-undefined
+                // when there is none. The key the gated draft was read under (see `draftForGate`):
+                // the stated binding, or the resolved row's own when none was
+                // stated, so the promotion cannot pick a different package's
+                // draft than the one judged above. Absent only when no draft
+                // was found, where the promotion answers `NO_DRAFT` as before.
+                ...(draftKey !== undefined ? { packageId: draftKey } : {}),
             });
             return { singularType, orgId, advisories: runtimeAdvisories, result };
         } catch (err: any) {
