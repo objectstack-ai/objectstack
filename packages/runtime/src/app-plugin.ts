@@ -159,11 +159,11 @@ export class AppPlugin implements Plugin {
     /** What `grantedPermissions` bound to on this artifact — see {@link ArtifactGrantBinding}. */
     private grantBindingResult?: ArtifactGrantBinding;
     /**
-     * [#21922] {@link codeDefinedDatasourceOwners}, computed once: `init()`
-     * contributes the names to the host's code-datasource set and `start()`
-     * registers the same list, so the two can never disagree about which
-     * datasources this artifact registers from code — and the residual-owner
-     * warning prints once, not once per phase.
+     * [#21922] {@link codeDefinedDatasourceOwners}, computed once: the host's
+     * code-datasource set reads the names through the contribution `init()`
+     * registers, and `start()` registers the same list, so the two can never
+     * disagree about which datasources this artifact registers from code — and
+     * the residual-owner warning prints once, at whichever read comes first.
      */
     private codeDatasourceOwners?: Array<{ datasource: any; owner: { packageId?: string; packageVersion?: string } }>;
     /** When true, init/start become no-ops — env has no app payload. */
@@ -439,10 +439,15 @@ export class AppPlugin implements Plugin {
         // plugin's boot restore — a `start()` — never registers a stored row
         // over one of them, whatever order the plugins were composed in. The
         // in-memory registration itself stays in `start()` (see there).
-        const codeNames = this.codeDefinedDatasourceOwners(ctx)
+        //
+        // Contributed as a FUNCTION the set resolves at its first read, never
+        // resolved here: the names come from `collections`, which walks
+        // `packages[]`, and the manifest registration above is the one thing
+        // in `init()` allowed to touch `packages[]` (#15292's falsifier in
+        // `plugin-dev` pins it). `CodeDatasourceNames` says the rest.
+        contributeCodeDatasourceNames(ctx, () => this.codeDefinedDatasourceOwners(ctx)
             .map(({ datasource }) => datasource?.name)
-            .filter((name): name is string => typeof name === 'string' && name.length > 0);
-        if (codeNames.length > 0) contributeCodeDatasourceNames(ctx, codeNames);
+            .filter((name): name is string => typeof name === 'string' && name.length > 0));
     }
 
     /**
@@ -730,7 +735,7 @@ export class AppPlugin implements Plugin {
         datasource: any;
         owner: { packageId?: string; packageVersion?: string };
     }> {
-        const listOf =(dsDefs: unknown): any[] =>
+        const listOf = (dsDefs: unknown): any[] =>
             Array.isArray(dsDefs)
                 ? dsDefs
                 : dsDefs && typeof dsDefs === 'object'
