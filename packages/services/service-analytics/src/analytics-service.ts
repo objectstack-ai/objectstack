@@ -2492,8 +2492,8 @@ export class AnalyticsService implements IAnalyticsService {
         const previewResult = await new DatasetExecutor(previewService).execute(compiled, selection, context);
         // ADR-0021 result-column enrichment runs on this path too. Every key it
         // writes describes the dataset's OWN authored columns — a measure's
-        // `label` / `format` / `currency` / `percentScale` / `builtinAggregate`
-        // and the `type` its aggregate really returns, plus a dimension column's
+        // `label` / `format` / `currency` / `percentScale` / `builtinAggregate` /
+        // `aggregate` and the `type` its aggregate really returns, plus a dimension column's
         // header `label` — all read off the dataset definition and
         // `sourceFieldMeta`, never off the rows. #16097: this early `return`
         // used to sit ~250 lines ahead of that block, so the same dataset in the
@@ -2777,8 +2777,8 @@ export class AnalyticsService implements IAnalyticsService {
   /**
    * ADR-0021 — describe the result's COLUMNS from the dataset's own authored
    * definition: a measure's `label` / `format` / `currency` / `percentScale` /
-   * `builtinAggregate` and the `type` its aggregate really returns, then a
-   * dimension column's header `label`.
+   * `builtinAggregate` / `aggregate` and the `type` its aggregate really
+   * returns, then a dimension column's header `label`.
    *
    * **Every key here is read off the DATASET** (the authored measure or
    * dimension) **and `sourceFieldMeta`** (the source object's declared field
@@ -2864,6 +2864,16 @@ export class AnalyticsService implements IAnalyticsService {
         // #14492: it would catch an author who really named a field `Count`,
         // and break the moment the default is spelled in another language.
         if (f.builtinAggregate == null && m.label == null && m.aggregate) f.builtinAggregate = m.aggregate;
+        // The aggregate itself, stated whatever the header says. The
+        // discriminator above answers only "is this header the server's
+        // default?", so a LABELLED `count` ("Tasks") reached the wire as a bare
+        // `type: 'number'` and a chart could not tell it from a `sum`: it drew
+        // 0.75 / 1.5 / 2.25 ticks on a count axis. Read off the authored
+        // measure like every other key here, so the live and preview paths
+        // agree by construction. ⛔ Not on a derived measure: the compiler
+        // ignores a `derived` measure's stray `aggregate` and computes it from
+        // its `of` measures, so that `aggregate` describes nothing on the wire.
+        if (f.aggregate == null && !m.derived && m.aggregate) f.aggregate = m.aggregate;
         if (f.format == null && m.format) f.format = m.format;
         // Currency chain. A MONETARY measure resolves its display currency
         // from: explicit measure `currency` → the source field's FIXED
