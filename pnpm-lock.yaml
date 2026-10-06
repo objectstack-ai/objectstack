@@ -1941,6 +1941,9 @@ importers:
 
   packages/plugins/plugin-sharing:
     dependencies:
+      '@noble/hashes':
+        specifier: ^2.4.0
+        version: 2.4.0
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core

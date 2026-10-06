@@ -1736,6 +1736,22 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Mensaje de error",
         helpText: "Mensaje de error que se muestra cuando la acción falla, en lugar del error original."
       },
+      outcomeMessages: {
+        label: "Mensajes por resultado",
+        helpText: "Mensaje de éxito por cada resultado del manejador, en JSON: cada clave es un valor `outcome` en snake_case que el manejador devuelve en su carga útil de éxito, y cada valor es la etiqueta que se muestra para ese resultado, p. ej., {\"archived\": \"Archivado\", \"already_archived\": \"Ya estaba archivado\"}. Una etiqueta puede interpolar ${result.*}. Un resultado sin entrada muestra el mensaje de éxito; una clave que el manejador nunca devuelve no se muestra nunca. No se admite junto a un diálogo de resultado ni con `operation: 'update'`."
+      },
+      onSuccess: {
+        label: "Al completarse",
+        helpText: "Navegación tras completarse la acción: la ruta que se abre y dónde se abre."
+      },
+      "onSuccess.navigate": {
+        label: "Navegar a",
+        helpText: "Ruta o plantilla de URL que se abre tras completarse la acción. Puede interpolar ${param.*} (los valores que recogió el diálogo de parámetros), ${ctx.*} (origin, apiBase, user, org, recordId, selection) y ${result.*} (la respuesta del servidor, p. ej., ${result.id}). Un valor relativo es una ruta dentro de la aplicación."
+      },
+      "onSuccess.openIn": {
+        label: "Abrir navegación en",
+        helpText: "Dónde se abre la navegación: 'self' (el valor predeterminado) navega en la misma pestaña y 'newTab' abre una pestaña nueva del navegador."
+      },
       refreshAfter: {
         label: "Actualizar después",
         helpText: "Actualiza la lista/página tras completar la acción"

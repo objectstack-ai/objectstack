@@ -385,6 +385,35 @@ The Console `/login` and `/register` pages will now show a button for each enabl
 3. Browser redirects to the provider's authorization endpoint.
 4. Provider redirects back; better-auth validates the OIDC token and creates a session.
 
+## Linking to an existing account
+
+A social, OIDC or enterprise SSO sign-in may arrive with an email that already belongs to a
+local account, one that is not linked to this provider yet. The platform then links the
+identity to that account automatically (an *implicit* link) only under these rules:
+
+- **The local account's email must be verified.** If it is not, no link is written and the
+  callback redirects with `error=account_not_linked`. The user signs in with their existing
+  method and links the provider from account settings, or verifies their email first.
+- **The platform identity provider is the exception.** `objectstack-cloud` links to an
+  unverified local account, because it creates the environment owner's account itself,
+  without a mailbox round-trip.
+- **An unlink is honoured.** After a user unlinks a provider, signing in with that provider
+  no longer re-links it, for any provider, `objectstack-cloud` included. The user links it
+  again explicitly from account settings (`POST /api/v1/auth/link-social` while signed in),
+  which also ends the refusal. If the unlink cannot be recorded, the unlink itself fails and
+  the provider stays linked.
+
+An explicit link from account settings does not depend on whether the signed-in user's
+email is verified. It still requires the provider to vouch for the email (a trusted
+provider or an `email_verified` claim) and the email to match the account's.
+
+`account.accountLinking.requireLocalEmailVerified` in the auth plugin config changes the first
+rule. Unset (the default) gives the rules above. `true` applies the verified-email
+requirement to every provider, `objectstack-cloud` included. `false` turns the requirement
+off, which the library warns is an account-takeover risk; the unlink rule still applies.
+`account.accountLinking.trustedProviders` relaxes only the provider-side `email_verified`
+claim and never the local requirement.
+
 ---
 
 ## Notes

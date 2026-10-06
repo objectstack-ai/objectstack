@@ -630,7 +630,15 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // shipped `*.form.ts` corpus differenced against the merge base
     // `d78a0bda07` adds exactly `field :: useGrouping :: data.type == 'number'`
     // and removes none.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(83);
+    // It is 85 today, an ADDITION of TWO: #21863 offered the action form's
+    // `outcomeMessages` and `onSuccess` rows, each gated on the two action types
+    // whose parse accepts the key. Measured, not inferred: the shipped
+    // `*.form.ts` corpus differenced against the merge base `607463d736` by
+    // `<form>::<field>::<source>`, 83 → 85, adds exactly
+    // `action :: outcomeMessages` and `action :: onSuccess`, both
+    // `data.type == 'api' || data.type == 'script'`, and removes none. The two
+    // `onSuccess` sub-rows carry no predicate.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(85);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -731,7 +739,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // literal.
     // It is 58 today: the field form's `useGrouping` row is gated on
     // `data.type == 'number'`, a single-quoted literal comparison.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(58);
+    // It is 62 today: #21863's two new predicates each hold two single-quoted
+    // literal comparisons, `data.type == 'api'` and `data.type == 'script'`,
+    // on `action :: outcomeMessages` and on `action :: onSuccess`.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(62);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);

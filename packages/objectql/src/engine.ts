@@ -304,7 +304,8 @@ import {
   withDeclaredColumnsOnly,
 } from './declared-read-columns.js';
 // [#21777] "Is this schema the remote's?" One predicate, shared with the boot sync.
-import { isFederatedObject } from './federated-object.js';
+// [#21910] And its tenant-anchor refinement, which both cascade walks ask.
+import { isFederatedObject, isFederatedInjectedTenantAnchor } from './federated-object.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
   resolveEngineDeleteDispatch,
@@ -15832,7 +15833,7 @@ export class ObjectQL implements IObjectQLEngine {
         const childName = (child as any)?.name as string | undefined;
         const fields = (child as any)?.fields as Record<string, any> | undefined;
         if (!childName || !fields) continue;
-        for (const fdef of Object.values(fields)) {
+        for (const [fieldName, fdef] of Object.entries(fields)) {
           if (!fdef || (fdef.type !== 'master_detail' && fdef.type !== 'lookup')) continue;
           // [#18550] The carrier is read through the ONE arbiter, so a
           // `reference` no reader can read REFUSES here instead of reading as
@@ -15856,6 +15857,12 @@ export class ObjectQL implements IObjectQLEngine {
           let resolvedRef: string | undefined;
           try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
           if (ref !== name && resolvedRef !== name) continue;
+          // [#21910] The scan skips a federated object's injected tenant
+          // anchor, so this walk does too: the participant test stays the
+          // scan's own, as the comment above requires. A federated object this
+          // walk still reaches through any other relation keeps the verdict
+          // `'split'`, because the scan probes that relation.
+          if (isFederatedInjectedTenantAnchor(child, fieldName)) continue;
           out.push(childName);
           break;
         }
@@ -16323,6 +16330,26 @@ export class ObjectQL implements IObjectQLEngine {
         let resolvedRef: string | undefined;
         try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
         if (ref !== object && resolvedRef !== object) continue;
+
+        // [#21910] A federated object's platform-INJECTED tenant anchor is not
+        // a reference to `sys_organization`, so it is not a relation to probe.
+        // On a federated object that column exists in the registered schema
+        // and nowhere else: the probe below was refused by the driver
+        // (`INVALID_FILTER`, no such column), its catch propagated the refusal
+        // as #8895 rules for a missing column, and every organization delete
+        // answered 500 on a deployment with a federated object bound.
+        // `buildDriverOptions` and the related-record read already refuse this
+        // reading of the same column. {@link isFederatedInjectedTenantAnchor}
+        // says why it is exactly that column, and
+        // {@link ObjectQL.planCascadeAtomicity} asks it too.
+        //
+        // ⛔ The catch below is deliberately NOT widened to pass a missing
+        // column as benign. That would invert #8895's discriminate or
+        // propagate for every object, not just this injected column: an
+        // `organization_id` the author declared on a federated object, and any
+        // other lookup the author declares on one, stay in the scan, and their
+        // probe failures still propagate.
+        if (isFederatedInjectedTenantAnchor(child, fieldName)) continue;
 
         // A master-detail parent owns its children: cascade by default (the
         // child FK is typically required, so set_null would be invalid). Only
