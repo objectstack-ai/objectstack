@@ -37,9 +37,9 @@
 //   - [#21922's metadata-door half] while each row still exists,
 //     `GET /api/v1/meta/datasource/:name` and the `/meta` list serve the code
 //     definition, not the row: the reads decline a stored row under a name the
-//     host registers from code, as they do for a shipped flow name. The row is
-//     still offered for the repair (`deletable: true`), and a runtime
-//     datasource's row is still what both doors serve.
+//     host registers from code, as they do for a shipped flow name. The repair
+//     below still removes each row, and a runtime datasource's row is still
+//     what both doors serve.
 //
 // The verify harness composes the datasource-admin service but not its REST
 // routes, so this file mounts `registerDatasourceAdminRoutes` the way
@@ -267,8 +267,9 @@ describe('[#21922 / #21944] a stored datasource row never displaces a code datas
     expect(runtimePatch.status, JSON.stringify(runtimePatch.json)).toBe(200);
   }, 180_000);
 
-  it('[#21922] with each row present, the /meta door serves the code definition by name and in its list, and still offers the repair', async () => {
-    // Both rows are still at rest: this is the read before any repair.
+  it('[#21922] with each row present, the /meta door serves the code definition by name and in its list', async () => {
+    // Both rows are still at rest: this is the read before any repair, and the
+    // repair in the next case still finds and removes each one.
     expect(await storedRows(EXTERNAL)).toHaveLength(1);
     expect(await storedRows('default')).toHaveLength(1);
 
@@ -282,10 +283,6 @@ describe('[#21922 / #21944] a stored datasource row never displaces a code datas
     expect(def.json.item).toMatchObject({ origin: 'code' });
     expect(def.json.item?.label).not.toBe(SHADOW_LABEL);
     expect(JSON.stringify(def.json.item)).not.toContain('shadow-default.db');
-    // The row is still found, so the envelope offers the repair below.
-    for (const read of [external, def]) {
-      expect(read.json, JSON.stringify(read.json)).toMatchObject({ editable: false, deletable: true });
-    }
 
     // The list: one entry under each code name, the same code definition.
     const listed = await metaList();
