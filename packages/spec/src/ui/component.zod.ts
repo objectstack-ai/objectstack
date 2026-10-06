@@ -3696,11 +3696,11 @@ export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
  *
  * [#21855] The rows' value ratchet for this one member, with its own
  * inventory. A member's `params` is its `ActionParam[]` input list: both
- * containers forward an array as `actionParams` (group `:330-335`, menu
- * `:265-270`; the renderer directory is byte-identical at the current
- * `.objectui-sha` pin `0abd4f9f8` and at objectui `main` `f1a177c41`). Any
+ * containers forward an array as `actionParams` (group `:325-327`, menu
+ * `:261-263`, re-read at the pin this repo builds against, `.objectui-sha` =
+ * `a58626c88`). Any
  * other value goes through `readActionEntryParamValues`
- * (`static-params.ts:172-182`), which returns it unchanged for a `type: 'api'`
+ * (`static-params.ts:164-174`), which returns it unchanged for a `type: 'api'`
  * member — the inline-action payload window (#5777), as the request payload
  * until 18 — and for every other `type`, an absent one included, returns
  * nothing (with a development-build warning only). So an object `params` on a
