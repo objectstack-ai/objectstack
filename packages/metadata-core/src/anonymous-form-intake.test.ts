@@ -217,14 +217,18 @@ describe('anonymousFormIntakeWithdrawnIn — an explicit withdrawal of the same 
         )).toBe(false);
     });
 
-    describe('the package is part of the row (ADR-0048)', () => {
+    // Known limit (fails closed): the package a body is bound to is not
+    // compared, so a withdrawal of a name closes that name in every package.
+    describe('the package is not compared: a withdrawal of a name closes it in every package', () => {
         const bound = (body: Record<string, unknown>, pkg: string) => ({ ...body, _packageId: pkg });
         const withdrawn = view({ ...OPEN, enabled: false });
 
-        it('another package\'s withdrawal of the same name closes nothing', () => {
+        it('another package\'s withdrawal of the same name closes this package\'s form too', () => {
             const openA = bound(openView, 'pkg_a');
             const [c] = anonymousFormIntakeCandidates(openA);
-            expect(anonymousFormIntakeWithdrawnIn([bound(withdrawn, 'pkg_b')], openA, c)).toBe(false);
+            expect(anonymousFormIntakeWithdrawnIn([bound(withdrawn, 'pkg_b')], openA, c)).toBe(true);
+            // Another package's OPEN body of the name withdraws nothing.
+            expect(anonymousFormIntakeWithdrawnIn([bound(openView, 'pkg_b')], openA, c)).toBe(false);
         });
 
         it('the same package\'s withdrawal of the same name closes it', () => {

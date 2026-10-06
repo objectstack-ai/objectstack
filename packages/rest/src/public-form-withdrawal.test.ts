@@ -273,14 +273,24 @@ describe('a public form withdrawal is a kill switch: layering only narrows intak
     expect((await s.post()).statusCode).toBe(201);
   });
 
-  // ADR-0048: the package is part of the row. The list reads serve one item
-  // per package for a name, each carrying its `_packageId`.
-  it('another package\'s withdrawal of the same view name does not close this package\'s form', async () => {
+  // The list reads serve one item per package for a name, each carrying its
+  // `_packageId`. Known limit (fails closed): the package is not compared, so
+  // a withdrawal of a view name closes that name in every package.
+  it('another package\'s withdrawal of the same view name closes this package\'s form too', async () => {
+    const openA = { ...formView(true), _packageId: 'pkg_a' };
+    await expectClosed(build({
+      envWide: true, inOrg: true, tenancy: 'org',
+      orgViews: [openA],
+      envWideViews: [{ ...formView(true), _packageId: 'pkg_a' }, { ...formView(false), _packageId: 'pkg_b' }],
+    }));
+  });
+
+  it('control: every package\'s body of the view name open serves the form', async () => {
     const openA = { ...formView(true), _packageId: 'pkg_a' };
     const s = build({
       envWide: true, inOrg: true, tenancy: 'org',
       orgViews: [openA],
-      envWideViews: [{ ...formView(true), _packageId: 'pkg_a' }, { ...formView(false), _packageId: 'pkg_b' }],
+      envWideViews: [{ ...formView(true), _packageId: 'pkg_a' }, { ...formView(true), _packageId: 'pkg_b' }],
     });
     expect((await s.get()).statusCode).toBe(200);
     expect((await s.post()).statusCode).toBe(201);

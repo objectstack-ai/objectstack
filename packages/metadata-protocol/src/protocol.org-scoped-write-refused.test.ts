@@ -897,6 +897,56 @@ describe('org-scoped anonymous form intake changes the anonymous doors cannot se
         expect(on.success).toBe(true);
     });
 
+    // Known limit (fails closed): a withdrawal of a view name closes that name
+    // in every package, so the row anchor judges an overlay against the
+    // env-wide row of its name whichever package that row came from. Two
+    // packages ship the container `task`; the env-wide row read for the name
+    // is package B's, which withdraws the form.
+    describe('single: two packages ship the same view name', () => {
+        const LINK = '/forms/walled-intake';
+        const open = { enabled: true, allowAnonymous: true, publicLink: LINK };
+        const shippedA = {
+            name: 'task', object: 'task', formViews: { intake_form: { sharing: open } }, _packageId: 'pkg_a',
+        };
+        const shippedB = {
+            name: 'task', object: 'task',
+            formViews: { intake_form: { sharing: { ...open, allowAnonymous: false } } }, _packageId: 'pkg_b',
+        };
+
+        function makeTwoPackageProtocol() {
+            const { engine, rows } = makeStubEngine();
+            engine.registry.listItems = (type: string) => (type === 'view' ? [shippedA, shippedB] : []);
+            engine.registry.getArtifactItem = (type: string, name: string, pkg?: string) => {
+                if (type !== 'view' || name !== 'task') return undefined;
+                if (pkg === 'pkg_a') return shippedA;
+                return shippedB;
+            };
+            const services = new Map<string, unknown>([['tenancy', { defaultOrgId: async () => 'org_a' }]]);
+            const protocol = new ObjectStackProtocolImplementation(engine, () => services, 'env_prod') as any;
+            return { protocol, rows };
+        }
+
+        it('a row-anchored rename by a package-bound org save is refused, and nothing is saved', async () => {
+            const { protocol, rows } = makeTwoPackageProtocol();
+            const renamed = { name: 'task', object: 'task', formViews: { intake_v2: { sharing: open } } };
+            await expect(protocol.saveMetaItem({
+                type: 'view', name: 'task', item: renamed, organizationId: 'org_a', packageId: 'pkg_a',
+            })).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403, organizationId: 'org_a' });
+            expect(orgRows(rows).filter((r) => r.org === 'org_a')).toEqual([]);
+        });
+
+        it('control: the same package-bound org save that keeps the form withdrawn saves', async () => {
+            const { protocol } = makeTwoPackageProtocol();
+            const kept = {
+                name: 'task', object: 'task',
+                formViews: { intake_v2: { sharing: { ...open, allowAnonymous: false } } },
+            };
+            expect((await protocol.saveMetaItem({
+                type: 'view', name: 'task', item: kept, organizationId: 'org_a', packageId: 'pkg_a',
+            })).success).toBe(true);
+        });
+    });
+
     // A package's shipped form is part of the env-wide definition, not a layer
     // of its own beneath it. A schema-parsed `false` on the artifact (the schema
     // defaults `enabled` to false) is an explicit withdrawal, so it fails closed;

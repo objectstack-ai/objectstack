@@ -16017,14 +16017,9 @@ export class ObjectStackProtocolImplementation implements
         // `name` is a container under the save name); a view item is the save
         // name's own row.
         const stamped = raw.name ? raw : { ...raw, name: args.name };
-        // The package the row is saved under is part of its identity
-        // (ADR-0048), carried the way the list read serves it (`_packageId`),
-        // so another package's withdrawal of the same name closes nothing.
-        // An expansion's items carry theirs already.
-        const bound = args.packageId ? { _packageId: args.packageId } : {};
         const served: unknown[] = isAggregatedViewContainer(stamped)
             ? this.expandRuntimeViewContainer(args.type, stamped, { packageId: args.packageId ?? undefined })
-            : [{ ...raw, name: args.name, ...bound }];
+            : [{ ...raw, name: args.name }];
         const open = served.flatMap((view) => anonymousFormIntakeCandidates(view).map((c) => ({ view, c })));
         if (open.length === 0) return null;
         const envWide: any = await this.getMetaItems({ type: args.type });
@@ -16039,7 +16034,7 @@ export class ObjectStackProtocolImplementation implements
         // against the form it was, by slot or by slug).
         const envRows = (await this.envWideRawViewRows(args.type, args.name)).map((r) => ({ ...r, name: args.name }));
         if (envRows.length > 0) {
-            const own = { ...raw, name: args.name, ...bound };
+            const own = { ...raw, name: args.name };
             for (const c of anonymousFormIntakeCandidates(own)) {
                 if (anonymousFormIntakeWithdrawnIn(envRows, own, c)) closed.add(c.slug);
             }
