@@ -16590,6 +16590,13 @@ export class ObjectStackProtocolImplementation implements
      * effective layer — the loader's body — is what the door serves, and in
      * every other case the door serves the stored row as before. One decision
      * point for the three reads; the doors hold no copy of the rule.
+     *
+     * [#21922] The layered read asks this predicate through
+     * {@link declinesStoredRow}, which also declines the stored row of a
+     * code-defined datasource name. The published doors ask this predicate
+     * alone, so for such a name they still serve the stored row: the active
+     * overlay row, as the route's spec describes it. That door is not moved
+     * here.
      */
     isShippedFlowName(type: string, name: unknown): boolean {
         if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'flow') return false;
