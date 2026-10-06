@@ -5151,9 +5151,9 @@ export class ObjectQL implements IObjectQLEngine {
     this.logger.warn(
       `formula field '${field}' on '${object}' could not be evaluated, so it reads null wherever this `
       + `fault holds (${error.kind}: ${headline}). If the expression itself is at fault — an unknown `
-      + 'function, a missing field — `os validate` locates it with the build\'s message; if it faults '
-      + 'on some records\' values, guard the operands it reads. Reported once per object and field '
-      + 'per engine instance.',
+      + 'function, a missing field — `os validate`, or a re-save of the object, refuses it with a located '
+      + 'message; if it faults on some records\' values, guard the operands it reads. Reported once per '
+      + 'object and field per engine instance.',
       { object, field, kind: error.kind, error: error.message },
     );
   }
