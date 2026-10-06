@@ -72,7 +72,8 @@ description: "Release notes and upgrade checklist for 17.7.0 of the v17 line."
 - **Public forms open only on an explicit switch.** A form is served
   anonymously only when its `sharing` sets `enabled: true` beside
   `allowAnonymous` and `publicLink` (`6dd99b8`, #21566), and a withdrawal at
-  any metadata layer holds (`3c7785d`, #21864). ⚠️ **A form that set only
+  any metadata layer holds, within two [known limits](#public-forms)
+  (`3c7785d`, #21864). ⚠️ **A form that set only
   `allowAnonymous` and `publicLink` answers `404 FORM_NOT_FOUND` after the
   upgrade.**
 - **Jobs carry their own code.** A job takes a sandboxed `body` (`f1e4ae5`,
@@ -155,8 +156,8 @@ explicitly breaking. Several things in this release change behaviour on a
 - a view container with no `form` no longer serves its first `formViews` entry
   as the default create and edit form;
 - a stored datasource row under a code-defined name no longer replaces the code
-  definition at boot, and `PUT` / `DELETE /api/v1/meta/datasource/default`
-  answer `403`;
+  definition at boot, and `PUT /api/v1/meta/datasource/default`, and a `DELETE`
+  of it with no stored row, answer `403`;
 - on `objectstack start`, the federation boot gate compares every federated
   object, so the default `onMismatch: 'fail'` can stop a boot that used to pass;
 - the environment-membership gate and the organization slug guard answer
@@ -203,7 +204,9 @@ rewrite; each says so. An app keeps `engines.protocol: '^17'`.
 
 `sys_metadata` holds each metadata body as stored, credential material
 included, and `sys_metadata_history` holds its versions. For app-authored work,
-the metadata protocol is now their only writer and their only reader.
+the metadata protocol is now their only writer. A sandboxed hook, action or job
+body also reads them only through it, and a flow's `get_record` node reads them
+only in the projected, keyed form the data door serves.
 
 - **Sandboxed bodies.** A hook with a sandboxed `body` whose `object` names
   either table, alone or in a list, is not bound: it is refused at
@@ -238,9 +241,8 @@ the metadata protocol is now their only writer and their only reader.
   `409 METADATA_CONFLICT`; take the token from the next read and retry. Filter,
   sort and group on the two content-hash columns and on the history table's
   `change_note` answer `400 INVALID_FIELD` on the data door, the MCP stdio
-  reader and the analytics door. On the data door, so does a filter that
-  reaches the body or a hash column through a `{ $field }` comparand, or more
-  than 32 combinators deep (`5d0e4e2`, #21619).
+  reader and the analytics door. On the data door, so does any filter that
+  reaches the body or a hash column indirectly (`5d0e4e2`, #21619).
 
 **Migration.** Change metadata with `PUT /api/v1/meta/:type/:name`, and read it
 with `GET /api/v1/meta/:type/:name` and `…/history`. Delete a body hook bound to
@@ -312,7 +314,9 @@ no mechanical rewrite for any of this.
   older bare form still opens. ⚠️ **A secret set or rotated on 17.7.0 cannot be
   opened by an earlier release**, so a rollback past it needs those values set
   again. `os secret rewrap` (dry run by default, `--apply` to write) re-seals the
-  older ciphertext at rest (`0557c2f`, #21469).
+  older ciphertext at rest (`0557c2f`, #21469). Nothing on the upgrade path runs
+  it, and a row it re-seals carries `v2:` too, so an applied run has the same
+  rollback cost.
 
 #### On the write doors, a row the caller cannot read is not there
 
@@ -348,8 +352,9 @@ no mechanical rewrite for any of this.
   now also keeps verification values in the database, so a reset link, one-time
   code or verification link that was in flight in the cache alone at deploy time
   can no longer be consumed, and its user requests a fresh one.
-  Set `account.accountLinking.requireLocalEmailVerified: false` to restore the
-  old linking, after reading the library's account-takeover warning.
+  Set `account.accountLinking.requireLocalEmailVerified: false` to turn the
+  local-verification check off again (an unlinked provider still does not
+  re-link implicitly), after reading the library's account-takeover warning.
 
 #### Reads and writes serve declared fields, and the engine refuses names it does not know
 
@@ -429,9 +434,10 @@ no mechanical rewrite for any of this.
   `*.datasource.ts` answers `403 NOT_OVERRIDABLE` (it answered `200` and stored a
   row), and so does a `DELETE` with no stored row (`9cc2c79`, #21942). The boot
   restore no longer lets a stored row displace a code-defined datasource, opens
-  no pool from one, and logs one warning naming it; `PUT` and `DELETE` on
-  `/api/v1/meta/datasource/default` answer `403` too, naming the host's database
-  configuration as the remedy (`753e7a1`, #21965). Change a code-defined
+  no pool from one, and logs one warning naming it; `PUT` on
+  `/api/v1/meta/datasource/default`, and a `DELETE` there with no stored row,
+  answer `403` too, naming the host's database configuration as the remedy
+  (`753e7a1`, #21965). Change a code-defined
   datasource in its source, or in the host's database URL for `default`, and
   `DELETE` a row the warning names. Until you do, the metadata door's reads in
   17.7.0 still serve that row, not the code definition the boot and the admin
@@ -672,8 +678,9 @@ measured by any of the changes.
   #21893), against `ApprovalNodeConfigSchema`: an undeclared key, a refused
   value (`escalation.timeoutHours: 0.5`, under its minimum of 1) and a missing
   `approvers` are refused at `os validate`, `os compile`, `defineStack`, the
-  metadata save door and `registerFlow`, where they used to register and fail
-  every run that reached the node. A stored flow carrying one is skipped at
+  metadata save door and `registerFlow`. `registerFlow` already refused an
+  undeclared key; a refused value used to register there and fail every run
+  that reached the node. A stored flow carrying one is skipped at
   boot with a warning. D3 `flow-approval-node-config-contract-refused`.
 - **A flow the `kernel:ready` bind refuses is withdrawn** (`54fb60a`, #21897).
   It used to stay registered and `active` from the boot pull, with its trigger
@@ -746,7 +753,12 @@ measured by any of the changes.
   withdraws is refused `403 NOT_OVERRIDABLE`. A package-shipped form that was
   parsed by the strict stack schema and keeps its link without switching
   `enabled` on is a withdrawal. Between 17.6.0 and this change an organization
-  overlay could re-open such a form; that never shipped in a release.
+  overlay could re-open such a form; that never shipped in a release. Two
+  limits remain. The form doors may still serve an organization overlay's copy
+  of the form when that overlay was stored before the withdrawal, or restored by
+  a rollback or commit revert, which the save check does not gate: withdraw the
+  form in that overlay too. And a withdrawal closes the view's name in every
+  package that ships a view of that name (#21934).
 - **Walled postures** (`a7ab047`, #21580; `ce53218`, #21473). A form whose object
   is walled by an organization column answers `404 FORM_NOT_FOUND` to anonymous
   visitors (its submit used to answer `500`); the administrator's read explains
@@ -858,6 +870,13 @@ measured by any of the changes.
 
 #### Smaller breaking changes
 
+- `action-name-undefined` now reads a `record:related_list` block's
+  `properties.actions`: each id must name an action of the related object
+  (defined on it, or a `stack.actions` entry bound to it by `objectName`) that
+  declares a `list_toolbar`, `list_item` or `record_related` location, so a
+  stack that built clean can fail `os validate`, `os lint` and `os build`
+  (`0fc8087`, #21626). Such an id never drew a button; define the action on the
+  related object, or remove the id.
 - A file field's `accept` / `maxSize` refusal answers
   `400 ERR_FILE_CONSTRAINT` naming the field (it was `500`), and
   `FileConstraintError` is constructed as `(field, constraint, message)`
@@ -1000,15 +1019,20 @@ Everything else is in the per-package `CHANGELOG.md` files.
   them before.
 - Field-level reads are narrowed on more surfaces: the object-schema mask
   removes a denied field's references from the whole served document
-  (`a6a7547`, #21743) and judges an `objectOverride` param against the object it
-  names (`e6dc7a2`, #21904); an activity row whose every changed field the
-  reader is withheld is no longer served (`3bddd4a`, #21427); global search
-  skips the objects and fields the caller cannot read instead of answering `403`
-  (`87712ab`, #21879); and a field-narrowed search no longer matches through the
-  pinyin companion of a field outside the set (`0728cbf`, #21930).
+  (`a6a7547`, #21743); an activity row whose every changed field the reader is
+  withheld is no longer served (`3bddd4a`, #21427); and a field-narrowed search
+  no longer matches through a field outside the set (`0728cbf`, #21930). The
+  mask also judges an `objectOverride` param against the object it names, so a
+  delegated admin is now served the invite action (`e6dc7a2`, #21904), and
+  global search skips the objects and fields the caller cannot read instead of
+  answering `403` (`87712ab`, #21879).
 - A write refusal on an attachment or a comment no longer names a parent record
   the caller cannot read (`50b5e03`, #21769), and a by-id write of a hidden row
   answers as a missing one ([above](#on-the-write-doors-a-row-the-caller-cannot-read-is-not-there)).
+- A withdrawn public form is refused on both anonymous form routes and creates
+  no record, and both routes refuse the request, instead of serving the form,
+  when a service they need to resolve it is registered but cannot be reached
+  (`49524f6`, #21420).
 - The stored-metadata family's credential material stays behind the door:
   keyed content hashes, refused evaluate shapes, projected reads for host code
   and flows, and no access for app-authored bodies
@@ -1017,8 +1041,8 @@ Everything else is in the per-package `CHANGELOG.md` files.
   responses, events, webhooks, approval snapshots, flow trigger records and the
   share-link password hash
   ([above](#credentials-leave-the-copies-they-were-made-into)); the datasource
-  read redaction resolves a driver by every spelling the write door accepts
-  (`fb69825`, #21963).
+  read redaction identifies a driver the way the write door does (`fb69825`,
+  #21963).
 - A hook's `handler` name can no longer bind to another package's function
   (`98eb3b9`, #21653), an in-process verb can no longer address an
   unregistered table by name (`eb9ef79`, #21545), and a plugin signature labelled
@@ -1118,7 +1142,8 @@ Five pin moves carry the console half of this release:
 releasing objectui changesets (74, 111, 17, 24 and 3) of the 254 added across
 173 objectui commits; 25 changesets release nothing, and 13 commits carry no
 changeset. The per-commit lists are in `packages/console/CHANGELOG.md` under
-`## 17.7.0`.
+`## 17.7.0`; the second pin's list stops at 100 of its 111 releasing
+changesets.
 
 - **17.6.0's console issues are fixed** in the first pin: the dataset designer
   no longer writes `field: ''` (objectui `0858267e4`), an External or
@@ -1271,8 +1296,8 @@ believes they are done — so this list claims nothing it has not been given.
 - **Find code that addresses an object by a name the registry does not hold**
   through the engine, and register the object. *Not exercised.*
 - **If you may need to roll back past 17.7.0**, keep a way to set again every
-  secret you set or rotate on it: an earlier release cannot open the new `v2:`
-  ciphertext. *Not exercised.*
+  secret you set, rotate or re-wrap on it: an earlier release cannot open the
+  new `v2:` ciphertext. *Not exercised.*
 
 **Getting onto the release**
 
@@ -1306,8 +1331,12 @@ believes they are done — so this list claims nothing it has not been given.
   *Not exercised.*
 - **Resume, cancel or purge paused flow runs created before the upgrade**; they
   still hold clear credential values. *Not exercised.*
-- **Run `os secret rewrap`, then `os secret rewrap --apply`**, to re-seal older
-  `sys_secret` ciphertext. *Not exercised.*
+- **Optional, and only once you will not roll back past 17.7.0: run
+  `os secret rewrap`, then `os secret rewrap --apply`**, to re-seal older
+  `sys_secret` ciphertext. Nothing on the upgrade path runs it. Every row it
+  re-seals carries `v2:`, which an earlier release cannot open, so `--apply`
+  removes the rollback path for those secrets: a rollback past 17.7.0 needs
+  each of them set again. *Not exercised.*
 - **On `objectstack start` with federated objects**, expect the boot gate to
   compare them; fix any drift it names or set `onMismatch: 'warn'`. *Not
   exercised.*
@@ -1327,8 +1356,8 @@ believes they are done — so this list claims nothing it has not been given.
   `approval` node configs. *Not exercised.*
 - **Fix the new author-time errors:** `resultDialog` translation keys under an
   action with no `resultDialog`, cube members over JSON-stored or incompatible
-  columns, `record:related_list` action ids its related object cannot draw, and
-  html-page literals of the wrong type. *Not exercised.*
+  columns, `record:related_list` action ids that name no drawable action of the
+  related object, and html-page literals of the wrong type. *Not exercised.*
 - **Read the new `component-props-*` advisories** on page blocks and rewrite each
   member in the shape the [page-block
   table](#page-blocks-take-the-shape-their-renderers-read-21464) names; rename
