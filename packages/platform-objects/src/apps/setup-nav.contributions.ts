@@ -70,10 +70,11 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
     items: [
       // `viewName` names the tenant-wide list (#21960). With no view named,
       // the console opens the object's FIRST declared list view, and
-      // `sys_user` declares `me` first — a one-row view of the caller — so an
-      // administrator landed on themselves and read "this organization has
-      // one user". `me` stays a tab in the view switcher; the Account app's
-      // profile entry is the `account:profile_card` component, not that view.
+      // `sys_user` used to declare `me` first — a one-row view of the caller —
+      // so an administrator landed on themselves and read "this organization
+      // has one user". Every object entry here names its unscoped view the
+      // same way (#21972), so no entry depends on the declared order; `me`
+      // stays a tab in the view switcher.
       { id: 'nav_users', type: 'object', label: 'Users', objectName: 'sys_user', viewName: 'all_users', icon: 'user' },
       // The ACTIVE organization's record page (Members / Invitations / Teams
       // tabs with the better-auth row actions), rendered inside the app shell
@@ -105,7 +106,7 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // and Sharing Rules / Record Shares by @objectstack/plugin-sharing
       // (ADR-0029 K2). Only API Keys (sys_api_key, an identity object owned by
       // plugin-auth) remains a platform-objects base entry here.
-      { id: 'nav_api_keys', type: 'object', label: 'API Keys', objectName: 'sys_api_key', icon: 'key', requiredPermissions: ['manage_platform_settings'] },
+      { id: 'nav_api_keys', type: 'object', label: 'API Keys', objectName: 'sys_api_key', viewName: 'all_keys', icon: 'key', requiredPermissions: ['manage_platform_settings'] },
     ],
   },
   // group_approvals is contributed by @objectstack/plugin-approvals, which owns
@@ -142,7 +143,7 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
     items: [
       // Audit Logs (sys_audit_log) is contributed by @objectstack/plugin-audit
       // which now owns it (ADR-0029 K2).
-      { id: 'nav_sessions', type: 'object', label: 'Sessions', objectName: 'sys_session', icon: 'monitor' },
+      { id: 'nav_sessions', type: 'object', label: 'Sessions', objectName: 'sys_session', viewName: 'all_sessions', icon: 'monitor' },
       { id: 'nav_notifications', type: 'object', label: 'Notification Events', objectName: 'sys_notification', viewName: 'recent', icon: 'bell', requiresObject: 'sys_notification' },
     ],
   },
@@ -151,7 +152,7 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
     group: 'group_advanced',
     priority: BASE_PRIORITY,
     items: [
-      { id: 'nav_oauth_apps', type: 'object', label: 'OAuth Applications', objectName: 'sys_oauth_application', icon: 'app-window' },
+      { id: 'nav_oauth_apps', type: 'object', label: 'OAuth Applications', objectName: 'sys_oauth_application', viewName: 'all_apps', icon: 'app-window' },
       // No `nav_jwks` here (#7544). `sys_jwks` is the environment's JWT SIGNING
       // KEY store (`private_key` — private key material), and it declares
       // `enable.apiEnabled: false` / `apiMethods: []`, so the generic data API
@@ -182,8 +183,8 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // nav entry for them can only ever render "failed to load". They're
       // reachable by id (get) when needed; no browse menu. (Re-adding requires
       // enabling `list` on the object — a security decision.)
-      { id: 'nav_accounts', type: 'object', label: 'Identity Links', objectName: 'sys_account', icon: 'link-2' },
-      { id: 'nav_user_preferences', type: 'object', label: 'User Preferences', objectName: 'sys_user_preference', icon: 'sliders' },
+      { id: 'nav_accounts', type: 'object', label: 'Identity Links', objectName: 'sys_account', viewName: 'all_links', icon: 'link-2' },
+      { id: 'nav_user_preferences', type: 'object', label: 'User Preferences', objectName: 'sys_user_preference', viewName: 'all_preferences', icon: 'sliders' },
     ],
   },
 ];

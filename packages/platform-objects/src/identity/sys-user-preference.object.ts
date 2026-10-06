@@ -34,6 +34,18 @@ export const SysUserPreference = ObjectSchema.create({
   highlightFields: ['user_id', 'key'],
 
   listViews: {
+    // [#21972] Declared FIRST on purpose: a route that names no view opens the
+    // first declared list view, so a caller-scoped view (`mine`) is never
+    // first. Setup's `nav_user_preferences` names this view.
+    all_preferences: {
+      type: 'grid',
+      name: 'all_preferences',
+      label: 'All',
+      data: { provider: 'object', object: 'sys_user_preference' },
+      columns: ['user_id', 'key', 'created_at', 'updated_at'],
+      sort: [{ field: 'updated_at', order: 'desc' }],
+      pagination: { pageSize: 100 },
+    },
     mine: {
       type: 'grid',
       name: 'mine',
@@ -53,15 +65,6 @@ export const SysUserPreference = ObjectSchema.create({
       sort: [{ field: 'user_id', order: 'asc' }, { field: 'key', order: 'asc' }],
       grouping: { fields: [{ field: 'user_id', order: 'asc', collapsed: true }] },
       pagination: { pageSize: 200 },
-    },
-    all_preferences: {
-      type: 'grid',
-      name: 'all_preferences',
-      label: 'All',
-      data: { provider: 'object', object: 'sys_user_preference' },
-      columns: ['user_id', 'key', 'created_at', 'updated_at'],
-      sort: [{ field: 'updated_at', order: 'desc' }],
-      pagination: { pageSize: 100 },
     },
   },
 
