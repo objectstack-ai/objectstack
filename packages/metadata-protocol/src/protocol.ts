@@ -8923,7 +8923,10 @@ export class ObjectStackProtocolImplementation implements
         // [#20913] A shipped flow name serves the loader's entries only — see
         // {@link isShippedFlowName}. This is the registry half: a stored row
         // the hydration registered under the bare key is not one of them.
-        items = items.filter((it) => !this.isStoredFlowEntryOfShippedName(request.type, it));
+        // [#21922] …and a code-defined datasource name serves the
+        // MetadataService's code definition, merged in below. One predicate
+        // for both: {@link declinesStoredRow}, whose registry half this is.
+        items = items.filter((it) => !this.isStoredEntryOfDeclinedName(request.type, it));
 
         // Always consult the DB so metadata persisted by the seeder /
         // bulkRegister shows up even when the registry already has unrelated
@@ -8979,8 +8982,11 @@ export class ObjectStackProtocolImplementation implements
                 // [#20913] …and the stored-row half: a row of a shipped flow name
                 // is not merged into the package's slot. It is still hydrated
                 // below, as the tenant row it is, so the boot pull reports it.
+                // [#21922] The same for a row under a code-defined datasource
+                // name ({@link declinesStoredRow}): the MetadataService's code
+                // definition, merged in below, is the item the list serves.
                 const mergeable = overlays.filter(
-                    ({ data }) => !this.isShippedFlowName(request.type, (data as { name?: unknown } | null)?.name),
+                    ({ data }) => !this.declinesStoredRow(request.type, (data as { name?: unknown } | null)?.name),
                 );
                 // [#21804] Each row travels with its place (scope and stored
                 // spelling), so the merge picks a package's slot by the
@@ -8990,9 +8996,9 @@ export class ObjectStackProtocolImplementation implements
                     data, packageId: recPkg, stored: { organizationId: recOrg, type: recType },
                 }));
                 // [#21817] The package-less rows, placed the same way, as
-                // stand-ins: the same parse and the same shipped-flow rule.
+                // stand-ins: the same parse and the same stored-row rule.
                 const standIns = this.storedOverlayEntries(request, standInRows)
-                    .filter(({ data }) => !this.isShippedFlowName(request.type, (data as { name?: unknown } | null)?.name))
+                    .filter(({ data }) => !this.declinesStoredRow(request.type, (data as { name?: unknown } | null)?.name))
                     .map(({ data, organizationId: recOrg, type: recType }) => ({
                         data, packageId: undefined, stored: { organizationId: recOrg, type: recType }, standIn: true,
                     }));
@@ -9975,7 +9981,22 @@ export class ObjectStackProtocolImplementation implements
         // `orgId` is `undefined` for `flow`, which declares no org override.
         // What becomes of the stored rows themselves (keep, refuse, migrate) is
         // not decided here.
-        const shippedFlowActiveRead = readState === 'active' && this.isShippedFlowName(request.type, request.name);
+        //
+        // ── [#21922, ADR-0062 D4, ADR-0126 §3] A code-defined DATASOURCE name ──
+        //
+        // The stored-row half covers a second name class, through the same
+        // predicate ({@link declinesStoredRow}): a datasource name the host
+        // registers from code ({@link isDeclaredCodeDatasource}). "Code wins on
+        // collision": its code definition is the MetadataService's in-memory
+        // registration, which step 2 serves, and a stored row under the name is
+        // residue, never a layer of it. Adopted, the row was served here while
+        // the list, the admin door and the boot restore all served the code
+        // definition. This read needs no registry half for it: step 2 answers
+        // before step 3's bare registry slot, which is where a hydrated copy of
+        // the row sits. The row is still FOUND (`storedRowServed` below), so the
+        // `/meta` DELETE that removes it as repair stays `deletable`. A draft
+        // is answered as a draft, as above.
+        const storedRowDeclined = readState === 'active' && this.declinesStoredRow(request.type, request.name);
 
         // ADR-0033 draft-overlay preview (non-strict): when the caller opts in
         // (admin-gated upstream), prefer a `state='draft'` row if one exists, else
@@ -10043,8 +10064,8 @@ export class ObjectStackProtocolImplementation implements
                 ...(request.packageId ? { packageId: request.packageId } : {}),
             }))?.row;
             storedRowServed = record !== undefined && record !== null;
-            // [#20946] The stored-row half — see `shippedFlowActiveRead` above.
-            if (record && !shippedFlowActiveRead) {
+            // [#20946, #21922] The stored-row half — see `storedRowDeclined` above.
+            if (record && !storedRowDeclined) {
                 item = this.convertStoredItem(
                     String(record.type ?? request.type),
                     storedRowDocument(record),
@@ -10093,8 +10114,9 @@ export class ObjectStackProtocolImplementation implements
         // the `_lock` gate makes: the strictest lock among the item's stored
         // rows in scope, whichever package each is bound to. Not the row served
         // above, which is the address's preferred CONTENT (ADR-0048), and read
-        // whether or not that row is adopted (a shipped flow name does not
-        // serve its stored row, #20946, and the gate binds it all the same).
+        // whether or not that row is adopted (a shipped flow name, #20946, and a
+        // code-defined datasource name, #21922, do not serve their stored row,
+        // and the gate binds it all the same).
         let overlayLockLayer: unknown;
         try {
             overlayLockLayer = await this.overlayLockLayerAt({
@@ -10206,10 +10228,12 @@ export class ObjectStackProtocolImplementation implements
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
                 if (alt) item = this.engine.registry.getItem(alt, request.name, request.packageId);
             }
-            // [#20946] The registry half — see `shippedFlowActiveRead` above.
+            // [#20946] The registry half — see `storedRowDeclined` above.
             // `getItem` answers the bare slot first, and for a shipped flow name
             // that slot holds the hydrated stored row, which is not one of the
             // loader's entries; the loader's entry is the one the list serves.
+            // [#21922] Flow-only: a code-defined datasource's definition is not
+            // in the registry, and step 2 has already served it.
             if (this.isStoredFlowEntryOfShippedName(request.type, item)) {
                 item = this.lookupArtifactItem(request.type, request.name, request.packageId);
             }
@@ -10342,7 +10366,9 @@ export class ObjectStackProtocolImplementation implements
      * would return, i.e. overlay-wins merge — except for a flow name the
      * loader ships, where `getMetaItem` serves the loader's body, so
      * `effective` is the code layer and a stored row of that name is
-     * reported in `overlay` as a shadowed layer, #21002).
+     * reported in `overlay` as a shadowed layer, #21002; and likewise for a
+     * code-defined datasource name, whose code layer is the MetadataService's
+     * in-memory registration, #21922).
      *
      * Drives the "Code default vs Overlay vs Effective" diff tab in the
      * generic Metadata Resource Edit page. Admins can see exactly what
@@ -10737,12 +10763,19 @@ export class ObjectStackProtocolImplementation implements
         // package ships, keeps overlay-wins. What becomes of the stored rows
         // themselves (keep, refuse, migrate) is not decided here.
         //
+        // [#21922] The same holds for a code-defined DATASOURCE name, through
+        // the one predicate both name classes share ({@link declinesStoredRow}):
+        // `getMetaItem` serves the MetadataService's code definition, so that is
+        // `effective` here (the code layer above reads the MetadataService
+        // first), and the stored row stays reported in `overlay` — the residue
+        // the `/meta` DELETE removes as repair.
+        //
         // [#21442] A name a stored container expands (above) takes the expanded
         // item as its effective layer: the container row in `overlay` is the
         // layer it derives from, not the value the by-name read serves.
         const effectiveBase: unknown | null = expandedFrom !== undefined
             ? expandedFrom.item
-            : overlay !== null && !this.isShippedFlowName(request.type, request.name)
+            : overlay !== null && !this.declinesStoredRow(request.type, request.name)
                 ? this.foldObjectExtendersFromRegistry(request.type, request.name, overlay)
                 : code;
         // [#21738] The lock is the one item-lock resolution's — the
@@ -16536,7 +16569,9 @@ export class ObjectStackProtocolImplementation implements
      * neither merged into the package's slot nor lets it stand in for it —
      * {@link isStoredFlowEntryOfShippedName} for the registry's list, this
      * predicate by NAME for a row read from the store, whose own bytes decide
-     * nothing. Merged, such a row was served under the package's provenance
+     * nothing ([#21922] the reads ask both through {@link declinesStoredRow}
+     * and its registry half, which add the code-defined datasource names).
+     * Merged, such a row was served under the package's provenance
      * and the automation engine's `kernel:ready` sync armed it over the body
      * the boot pull had armed: the stored body dispatched while every receipt
      * named the package.
@@ -16573,6 +16608,61 @@ export class ObjectStackProtocolImplementation implements
      */
     private isStoredFlowEntryOfShippedName(type: string, item: unknown): boolean {
         return this.isShippedFlowName(type, (item as { name?: unknown } | null | undefined)?.name)
+            && !isCodeArtifactBody(item);
+    }
+
+    /**
+     * [#21922, ADR-0062 D4, ADR-0126 §3] Is `name` one whose STORED row the
+     * active reads never adopt, judged by NAME? The one decision the by-name
+     * read ({@link getMetaItem}), the flattened view
+     * ({@link readFlattenedMetaItems}, both faces) and the layered read's
+     * effective layer ({@link getMetaItemLayered}) take before they serve a
+     * stored row. ⛔ No read carries a copy of it, and it opens no precedence
+     * path of its own: the row is skipped, and each read falls through to the
+     * code layer it already reads next.
+     *
+     * Exactly two answers, each its own type's, neither re-derived here:
+     *
+     *  - a FLOW name the loader's set holds ({@link isShippedFlowName},
+     *    #20913 / #20946 / #21002) — Regime C, "never an overlay read path";
+     *    the reads serve the loader's entry;
+     *  - a CODE-DEFINED DATASOURCE name ({@link isDeclaredCodeDatasource}: the
+     *    host's code-datasource set, then the installed packages'
+     *    declarations) — "code wins on collision", the datasource-admin
+     *    service's invariant, which the boot restore obeys too. The code
+     *    definition is the MetadataService's in-memory registration, and that
+     *    is the layer the reads serve. A stored row under such a name is never
+     *    a layer of it, only residue ({@link originGatedRemovalRefusal}): it
+     *    stays at rest, the boot restore names it in a warning, and the `/meta`
+     *    DELETE removes it as repair.
+     *
+     * ⛔ Never a row's, slot's or body's `origin` — the caller sets it.
+     *
+     * Every other type, and a name neither predicate holds for, keeps
+     * ADR-0005's read order: the stored overlay wins. Each caller scopes it to
+     * the ACTIVE read, so a draft is answered as a draft.
+     *
+     * What it does not move: whether a read FOUND a stored row
+     * (`storedRowServed`, the fact {@link servedLockState}'s `deletable`
+     * reads), the `_lock` gate's overlay layer ({@link overlayLockLayerAt},
+     * read whether or not the row is adopted), and the DELETE's own row probe.
+     */
+    private declinesStoredRow(type: string, name: unknown): boolean {
+        if (this.isShippedFlowName(type, name)) return true;
+        return typeof name === 'string' && name !== '' && this.isDeclaredCodeDatasource(type, name);
+    }
+
+    /**
+     * [#21922] The registry half of {@link declinesStoredRow}: a registry entry
+     * under such a name that is not a code artifact body — the stored row
+     * {@link hydrateOverlayIntoRegistry} registered under the bare key,
+     * tenant-marked. For a flow name it answers what
+     * {@link isStoredFlowEntryOfShippedName} answers. A code-defined datasource
+     * is never a SchemaRegistry item at all (its code definition is the
+     * MetadataService's), so every entry it matches is a hydrated row.
+     */
+    private isStoredEntryOfDeclinedName(type: string, item: unknown): boolean {
+        return this.declinesStoredRow(type, (item as { name?: unknown } | null | undefined)?.name)
             && !isCodeArtifactBody(item);
     }
 
