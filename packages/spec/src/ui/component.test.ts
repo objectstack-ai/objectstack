@@ -288,7 +288,10 @@ describe('PageAccordionProps variant — declared because the accordion renderer
 // same file's `ComponentRegistry.register('accordion', …)` publishes the key to
 // the Studio block designer at `:1222` (the `items` input, documented as
 // `[{ label, icon?, collapsed?, children }]`). Measured at the pin this repo
-// builds against — `.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+// builds against — `.objectui-sha` = `a58626c88`, re-read there 2026-10-06:
+// every objectui file this record cites is byte-identical across the hop from
+// `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
+// At `0abd4f9f8`, re-read there 2026-10-05:
 // every objectui file this record cites is byte-identical across the hop from
 // `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
 // At `9dfaca654`. Re-derived at that pin
@@ -437,7 +440,10 @@ describe('PageTabsProps items[].value / items[].count — declared because the t
 // same file's `ComponentRegistry.register('tabs', …)` publishes the key to the
 // Studio block designer at `:1007` (the `items` input, documented as
 // `[{ label, value?, icon?, count?, visibleWhen?, children }]`). Measured at
-// the pin this repo builds against — `.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+// the pin this repo builds against — `.objectui-sha` = `a58626c88`, re-read there 2026-10-06:
+// every objectui file this record cites is byte-identical across the hop from
+// `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
+// At `0abd4f9f8`, re-read there 2026-10-05:
 // every objectui file this record cites is byte-identical across the hop from
 // `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
 // At `9dfaca654`. Re-derived at
@@ -3693,7 +3699,15 @@ describe('object-* block props schemas — declared, so the props gate has a sch
 // #16503 — the spec half of objectui#8172 (decision batch #68, 2026-09-07,
 // option A: the contract declares the capability that already ships, is
 // documented and is in use). Measured at the objectui pin this repo builds
-// against (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+// against (`.objectui-sha` = `a58626c88`, re-read there 2026-10-06:
+// `ObjectKanban.tsx` changed (+65/-2, objectui#11629: each column header totals
+// the view's `summarizeField`), which MOVED the `$top` read `752` -> `762` and
+// the default `:97` -> `:98`, both byte-identical; `plugin-kanban.mdx` gained
+// one feature bullet above the `limit` row and the `limit: 250` snippet,
+// neither of which changed; and `plugin-kanban/src/index.tsx`,
+// `plugin-kanban/src/types.ts` and `objectql.ts` are byte-identical (`git diff
+// --quiet`), so `488-492` and `4754` did not move.
+// At `0abd4f9f8`, re-read there 2026-10-05:
 // every objectui file this record cites is byte-identical across the hop from
 // `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
 // At `9dfaca654`; re-measured there 2026-10-05 —
@@ -3794,9 +3808,9 @@ describe('object-* block props schemas — declared, so the props gate has a sch
 // `limit?: number` member moved `3735` -> `3832`. All five files were
 // byte-identical across the hop onto `62597c588`, and were last re-READ at
 // `87af769e9` 2026-09-20, the hop that moved every anchor and renamed one
-// face outright): `plugin-kanban/src/ObjectKanban.tsx:752`
+// face outright): `plugin-kanban/src/ObjectKanban.tsx:762`
 // queries `$top: resolveRowLimit(schema.limit, DEFAULT_KANBAN_FETCH_BATCH_SIZE)`
-// (100, `:97`; the bare `??` became `resolveRowLimit` in objectui#9925, which drops
+// (100, `:98`; the bare `??` became `resolveRowLimit` in objectui#9925, which drops
 // and reports a cap the contract refuses),
 // `plugin-kanban/src/index.tsx:488-492` maps `limit: 'limit'` in
 // `OBJECT_KANBAN_DATA_SOURCE`, ⚠️ `KanbanSchema` is RETIRED at this pin and
@@ -3864,7 +3878,15 @@ describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces alre
 // since retired that block, objectui#8257). Unlike `limit` above — a key four
 // objectui faces already implemented, so the spec was the half that was wrong
 // — `quickAdd` was FORWARDED and never read: at the pin this repo builds
-// against (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+// against (`.objectui-sha` = `a58626c88`, re-read there 2026-10-06:
+// `KanbanBoardCore.tsx` is byte-identical (`git diff --quiet`), so `:78` and
+// `:111-112` did not move; `ObjectKanban.tsx` (+65/-2) and `KanbanImpl.tsx`
+// (+48/-1) changed for objectui#11629 (each column header totals the view's
+// `summarizeField`), and every anchor in them MOVED with its line
+// byte-identical: the spread `1669` -> `1731`, still the `schema` bag handed to
+// `KanbanBoardCore`, and the gate `624` -> `668` and `637` -> `681`; and the
+// counts re-read the same, 2 / 2 / 11.
+// At `0abd4f9f8`, re-read there 2026-10-05:
 // every objectui file this record cites is byte-identical across the hop from
 // `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
 // At `9dfaca654`; re-measured there 2026-10-05 —
@@ -3924,11 +3946,11 @@ describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces alre
 // below it, not the spread; at `f8a9d0fb0` (2026-09-24) it
 // had MOVED `1563` -> `1578` the same way (objectui#10068's `$orderby`); both
 // files were byte-identical across the hop onto `62597c588`, and every anchor
-// was re-READ at `87af769e9` 2026-09-20) `ObjectKanban.tsx:1669`
+// was re-READ at `87af769e9` 2026-09-20) `ObjectKanban.tsx:1731`
 // spreads the
 // authored bag into `KanbanBoardCore` (into `KanbanRenderer` until
 // objectui#11234, which reads the pair off it no more) and `KanbanImpl` gates the affordance on
-// `quickAdd && onQuickAdd` (`KanbanImpl.tsx:624`, `:637` — the file is spelled
+// `quickAdd && onQuickAdd` (`KanbanImpl.tsx:668`, `:681` — the file is spelled
 // here because those two ranges are NOT in `ObjectKanban.tsx`), while
 // `onQuickAdd` is a
 // host-supplied FUNCTION no producer puts on an `object-kanban` node
@@ -4029,7 +4051,10 @@ describe('ObjectKanbanPropsSchema quickAdd is retired', () => {
 // #9881 and commit 60e0f900a recorded the accordion and tab items; these two close the set.
 //
 // The button record re-measured at the pin this repo builds against —
-// `.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+// `.objectui-sha` = `a58626c88`, re-read there 2026-10-06:
+// every objectui file this record cites is byte-identical across the hop from
+// `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
+// At `0abd4f9f8`, re-read there 2026-10-05:
 // every objectui file this record cites is byte-identical across the hop from
 // `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
 // At `9dfaca654`, re-derived there 2026-10-05: every objectui
@@ -4197,7 +4222,16 @@ describe('ObjectMetricPropsSchema icon liveness', () => {
 //
 // The acceptance the card names, pinned: each row's KEY SET is the one the
 // renderer's read points support at the pin this repo builds against
-// (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+// (`.objectui-sha` = `a58626c88`, re-read there 2026-10-06:
+// `ObjectMap.tsx`, `ObjectGantt.tsx` and `record-source.ts` are byte-identical
+// across the hop off `0abd4f9f8` (`git diff --quiet`), so every anchor in them
+// held unmoved; `ObjectTree.tsx` +81/-3 changed for objectui#11686 (a tree cell
+// draws the same field face a list cell does), none of it on a cited line, so
+// the tree's rung-1 call `resolveRecordSourceConfig(schema, 'view-data')` MOVED
+// `:637` -> `:714`, its shorthand read `(rest as any).data` `:868` -> `:945`
+// and its `schema.navigation` read `:1057` -> `:1135`, each byte-identical, and
+// the set of `schema.*` keys each renderer reads is the same at both pins.
+// At `0abd4f9f8`, re-read there 2026-10-05:
 // every objectui file this record cites is byte-identical across the hop from
 // `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
 // At `9dfaca654`; re-measured there 2026-10-05 —

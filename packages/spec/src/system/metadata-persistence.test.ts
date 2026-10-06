@@ -573,7 +573,7 @@ describe('PackagePublishResultSchema', () => {
 // (`filesystem-loader.ts`, `database-loader.ts`) or writes a literal `0`
 // (`memory-loader.ts`, `remote-loader.ts`). Milliseconds, integral, non-negative
 // — which is exactly `DurationMs`.
-describe('metadata load/save result durations declare milliseconds (#18124)', () => {
+describe('metadata load/save result durations declare milliseconds', () => {
   it('loadTime refuses a fractional millisecond count and a negative span', () => {
     const fractional = MetadataLoadResultSchema.safeParse({ data: null, loadTime: 42.5 });
     expect(fractional.success).toBe(false);

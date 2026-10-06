@@ -1509,6 +1509,12 @@ Each was open when this page was written.
 - **Anonymous endpoints** stay unable to read or write objects until #21158
   lands — see [the deny
   baseline](#a-caller-that-resolves-no-permission-set-gets-the-deny-baseline-21217-21134-21051).
+  **Correction (2026-10-06):** #21158 will not land. It was closed as not
+  planned on 2026-10-04, on the maintainer's ruling that there is no demand for
+  the `guest` anchor's grants, so in 17.7.0 too an app-declared anonymous
+  endpoint (`authRequired: false`) cannot read or write objects. See [Notable
+  fixes in 17.7.0](/docs/releases/v17/17-7#notable-fixes-in-1770) (its "17.6.0's
+  known issues" list) on the 17.7.0 page.
 - The [known console issues](#new-in-console-studio--objectui-pins-in-1760) at
   the bundled pin.
 

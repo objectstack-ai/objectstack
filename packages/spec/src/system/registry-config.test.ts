@@ -212,7 +212,7 @@ describe('RegistryConfigSchema', () => {
 // lines apart, both bare, and the `min(1000)` bound on the timeout reads as one
 // second under the right unit and sixteen minutes under the wrong one — both in
 // range, so no parse could have caught the mistake.
-describe('registry duration keys carry their unit (#15679)', () => {
+describe('registry duration keys carry their unit in the key name', () => {
   const url = 'https://registry.example.com';
 
   it('REFUSES the retired `syncInterval` with the rename in the message', () => {

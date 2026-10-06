@@ -28,6 +28,7 @@
 import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { SysMetadataRepository } from './sys-metadata-repository.js';
 
 interface Row {
     id: string;
@@ -291,6 +292,40 @@ describe('platform-store calls carry the explicit system opt-in (#21911)', () =>
         });
         await expectSystemOptIn(calls, 'deletePackage', async () => {
             await protocol.deletePackage({ packageId: 'com.example.pincopy', allTenants: true } as any).catch(() => undefined);
+        });
+    });
+});
+
+describe('[#21908] row 23 — the repository reads the engine-lane slice left carry the opt-in', () => {
+    it('SysMetadataRepository.getByHash, list, history and watch’s replay', async () => {
+        const { engine, calls, historyRows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await protocol.saveMetaItem({
+            type: 'view', name: 'proj_task_grid', item: viewBody('proj_task_grid'), mode: 'publish',
+        });
+        // The population the reads below must find, written by the save above.
+        expect(historyRows.length).toBeGreaterThan(0);
+        const hash = String(historyRows[0].checksum);
+        const ref = { type: 'view', name: 'proj_task_grid' } as any;
+        const repo = new SysMetadataRepository({ engine, organizationId: null });
+
+        await expectSystemOptIn(calls, 'getByHash', async () => {
+            expect(await repo.getByHash(ref, hash)).not.toBeNull();
+        });
+        await expectSystemOptIn(calls, 'list', async () => {
+            const headers: unknown[] = [];
+            for await (const h of repo.list({ type: 'view' } as any)) headers.push(h);
+            expect(headers).toHaveLength(1);
+        });
+        await expectSystemOptIn(calls, 'history', async () => {
+            const events: unknown[] = [];
+            for await (const e of repo.history(ref)) events.push(e);
+            expect(events.length).toBeGreaterThan(0);
+        });
+        await expectSystemOptIn(calls, 'replayFromHistory', async () => {
+            const it = repo.watch({} as any, 0)[Symbol.asyncIterator]();
+            expect((await it.next()).done).toBe(false);
+            await it.return?.();
         });
     });
 });

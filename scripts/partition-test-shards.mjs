@@ -82,7 +82,8 @@
 // written (#16173). Every Test Core shard already passes `--summarize`, so the
 // run it just finished has written the measured truth to `.turbo/runs/`; this
 // mode reads that back, compares it to what this script PREDICTED for the same
-// packages, and reds past MAX_MEASURED_OVER_PREDICTED. Without it the dataset
+// packages, raises a `::warning::` past WARN_MEASURED_OVER_PREDICTED, and reds
+// past MAX_MEASURED_OVER_PREDICTED. Without it the dataset
 // rots silently in one direction and the only instrument that notices is a
 // shard killed by the job timeout -- which is a shard that produced NO reading
 // while the rollup read green.
@@ -172,6 +173,32 @@ export const MAX_SHARD_OVER_MEAN = 1.3;
 // ⛔ Raising this to absorb a red is the one move that cannot be right: the
 // number it would be raised past is a measurement of the dataset being wrong.
 export const MAX_MEASURED_OVER_PREDICTED = 1.5;
+
+// The WARNING tier under that red (#16465): past this factor `--check-drift`
+// raises a `::warning::` annotation on the shard and the step stays green.
+// One quantity, two thresholds -- the same measured/predicted ratio over the
+// same executed windows, so the warning is the red's early half and never a
+// second rule. A shard past MAX_MEASURED_OVER_PREDICTED gets the red alone.
+//
+// ⚠ It is NOT MAX_SHARD_OVER_MEAN, though both read 1.3 today. That one bounds
+// the predicted bins against EACH OTHER (max/mean of one split); this one bounds
+// one shard's measurement against ITS OWN prediction. Neither is derived from
+// the other, so moving one never moves the other -- which is why this is its
+// own constant rather than a reference to that one.
+//
+// Why 1.3, and why a warning rather than a red:
+//
+//   - it sits ABOVE the healthy population the red was measured against (the
+//     five healthy shards of run 34013842594 topped out at 1.18x), so a green
+//     dataset does not raise it;
+//   - it sits AT the split's own balance tolerance, which is the point the
+//     docblock above names as where drift stops being something the
+//     partitioner absorbs -- past it the dataset is due a refresh, not yet
+//     wrong enough to block anyone;
+//   - it is a warning by ruling: one red rule per signal, and that rule is the
+//     1.5x above. The self-test pins the band between the two as non-empty, so
+//     the warning cannot be made unreachable by moving either end.
+export const WARN_MEASURED_OVER_PREDICTED = 1.3;
 
 // ── SHARDING ONE PACKAGE BELOW PACKAGE GRANULARITY (#16173) ────────────────
 //
@@ -792,6 +819,7 @@ export function driftReport(
   // the same way: NOT MEASURED is not a pass, and it is not a failure either.
   const measurable = rows.length > 0 && predictedTotal > 0;
   const ratio = measurable ? measuredTotal / predictedTotal : null;
+  const drifted = measurable && ratio > factor;
   return {
     rows,
     unpredicted,
@@ -799,7 +827,102 @@ export function driftReport(
     measuredTotal,
     ratio,
     measurable,
-    drifted: measurable && ratio > factor,
+    drifted,
+    // The warning BAND, exclusive of the red: a drifted shard is reported by
+    // the red alone, so one shard never carries two verdicts. Strict `>` like
+    // the red, so a reading exactly at WARN_MEASURED_OVER_PREDICTED is green.
+    warned: measurable && !drifted && ratio > WARN_MEASURED_OVER_PREDICTED,
+  };
+}
+
+// The four verdicts `--check-drift` can print, rendered without printing them,
+// so the self-test can read what a runner will receive. `out` is stdout, where
+// the runner parses workflow commands; the annotation is the warning tier's
+// ONLY effect, so it is pinned here rather than trusted to the caller.
+//
+// A workflow-command message is one line: `%`, CR and LF are escaped the way
+// the runner un-escapes them, so a package name or label can never end the
+// annotation early or start a second command.
+export function escapeWorkflowCommandMessage(text) {
+  return String(text).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+}
+
+export function renderDriftVerdict(report, label) {
+  const skipped =
+    report.unpredicted.length === 0
+      ? ''
+      : ` ${report.unpredicted.length} package(s) carry no dataset entry and were excluded ` +
+        `(estimated, not predicted): ${report.unpredicted.join(', ')}.`;
+
+  if (!report.measurable) {
+    return {
+      verdict: 'NOT MEASURED',
+      exitCode: 0,
+      out: [],
+      err: [
+        `shard-timing-drift: NOT MEASURED -- ${label} finished no test task that was both a cache ` +
+          'MISS and carried a dataset entry, so this run says nothing about whether ' +
+          `scripts/test-shard-timings.json is still true.${skipped}`,
+      ],
+    };
+  }
+
+  const head =
+    `${report.measuredTotal.toFixed(1)}s measured vs ${report.predictedTotal.toFixed(1)}s predicted ` +
+    `across ${report.rows.length} package(s) = ${report.ratio.toFixed(2)}x ` +
+    `(warning past ${WARN_MEASURED_OVER_PREDICTED}x, red past ${MAX_MEASURED_OVER_PREDICTED}x)`;
+  const ratioOf = (r) => (r.predicted > 0 ? `${(r.measured / r.predicted).toFixed(2)}x, ` : '');
+  const worst = report.rows
+    .slice(0, 5)
+    .map(
+      (r) =>
+        `    ${r.name}: predicted ${r.predicted.toFixed(1)}s, measured ${r.measured.toFixed(1)}s ` +
+        `(${ratioOf(r)}${r.overshoot >= 0 ? '+' : ''}${r.overshoot.toFixed(1)}s)`
+    )
+    .join('\n');
+
+  if (report.drifted) {
+    return {
+      verdict: 'DRIFT',
+      exitCode: 1,
+      out: [],
+      err: [
+        `shard-timing-drift: DRIFT -- ${label}, ${head}.${skipped}\n` +
+          '  Heaviest overshoots:\n' +
+          `${worst}\n` +
+          '  scripts/test-shard-timings.json no longer describes this workspace, so the shard split\n' +
+          '  is balancing a quantity that is not the runtime. Refresh it -- see\n' +
+          '  scripts/measure-test-shard-timings.mjs for the two refresh paths -- and ⛔ do NOT\n' +
+          '  hand-edit the dataset or raise this bound to absorb the gap. Expect the refresh to red\n' +
+          "  this script's own balance pins if a single suite has outgrown the acceptance bound:\n" +
+          '  that is those pins working, and the remedy they name is splitting that suite below\n' +
+          '  package granularity, never a different shard count.',
+      ],
+    };
+  }
+
+  if (report.warned) {
+    const top = report.rows[0];
+    return {
+      verdict: 'WARN',
+      exitCode: 0,
+      out: [
+        `::warning title=Test Core shard timing drift::${escapeWorkflowCommandMessage(
+          `${label}: ${head}. Heaviest overshoot: ${top.name}, predicted ${top.predicted.toFixed(1)}s, ` +
+            `measured ${top.measured.toFixed(1)}s. scripts/test-shard-timings.json is drifting from the ` +
+            'runtime; refresh it before it reaches the red (see scripts/measure-test-shard-timings.mjs). ' +
+            'Not a failure: this step stays green until the red bound.'
+        )}`,
+      ],
+      err: [`shard-timing-drift: WARN -- ${label}, ${head}.${skipped}\n  Heaviest overshoots:\n${worst}`],
+    };
+  }
+
+  return {
+    verdict: 'OK',
+    exitCode: 0,
+    out: [],
+    err: [`shard-timing-drift: OK -- ${label}, ${head}.${skipped}`],
   };
 }
 
@@ -887,13 +1010,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // heaviest package do not depend on what the live map slices.
   'the balancing pins (#10472)': 25,
   'predicted-vs-measured drift (#16173)': 9,
+  'drift warning tier under the red (#16465)': 12,
   'file-level slice items (#16173)': 20,
   'file-level slices reach vitest through OS_TEST_SHARD (#19278)': 11,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 10;
+const SELF_TEST_BATTERY_FLOOR = 11;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1434,6 +1558,118 @@ function selfTest() {
     }
   });
 
+  // -- THE WARNING TIER UNDER THE RED (#16465) ----------------------------
+  //
+  // Same ratio, same executed windows, a lower threshold that annotates and
+  // never fails. Fixtures are scaled to the 100s `slow` entry above, so a
+  // measured N seconds reads as N/100x. What these hold: the band is
+  // (WARN, RED], it is exclusive of the red, it is non-empty, its effect is an
+  // annotation a runner will actually parse, and a replay never enters it.
+  battery('drift warning tier under the red (#16465)');
+  const tierOf = (seconds) => driftReport(measuredMap({ slow: seconds }), driftTimings);
+
+  check(() => {
+    const r = tierOf(131);
+    if (!r.warned || r.drifted) {
+      throw new Error(`drift warning: a 1.31x reading came back warned=${r.warned} drifted=${r.drifted}`);
+    }
+  });
+  // The lower edge: strict `>`, like the red, so exactly at the factor is green.
+  check(() => {
+    const r = tierOf(WARN_MEASURED_OVER_PREDICTED * 100);
+    if (r.warned || r.drifted) {
+      throw new Error('drift warning: a reading exactly AT the warning factor was flagged');
+    }
+  });
+  // The upper edge belongs to the warning: AT the red is not yet a red.
+  check(() => {
+    const r = tierOf(MAX_MEASURED_OVER_PREDICTED * 100);
+    if (!r.warned || r.drifted) {
+      throw new Error(`drift warning: a reading exactly AT the red came back warned=${r.warned} drifted=${r.drifted}`);
+    }
+  });
+  // Past the red the red alone speaks: one shard, one verdict.
+  check(() => {
+    const r = tierOf(151);
+    if (r.warned || !r.drifted) {
+      throw new Error(`drift warning: a 1.51x reading came back warned=${r.warned} drifted=${r.drifted}`);
+    }
+  });
+  // The healthy population the red was measured against topped out at 1.18x.
+  check(() => {
+    const r = tierOf(118);
+    if (r.warned || r.drifted) throw new Error('drift warning: a healthy 1.18x reading was flagged');
+  });
+  // A replay-only shard is NOT MEASURED, never a warning in either direction.
+  check(() => {
+    const r = driftReport(replayed.samples, driftTimings);
+    if (r.warned || r.drifted) throw new Error('drift warning: a summary of replays and failures was flagged');
+  });
+  // The band is non-empty, or the warning is a declared tier nothing can reach.
+  check(() => {
+    if (!(WARN_MEASURED_OVER_PREDICTED < MAX_MEASURED_OVER_PREDICTED)) {
+      throw new Error(
+        `drift warning: WARN_MEASURED_OVER_PREDICTED (${WARN_MEASURED_OVER_PREDICTED}) is not below ` +
+          `MAX_MEASURED_OVER_PREDICTED (${MAX_MEASURED_OVER_PREDICTED}) -- the warning band is empty`
+      );
+    }
+  });
+  // Not below the split's own tolerance: under it, the warning would fire on
+  // drift the partitioner is built to absorb, and a warning on healthy input is
+  // one everybody learns to scroll past. (A relation, not a reuse: see the
+  // constant's docblock.)
+  check(() => {
+    if (WARN_MEASURED_OVER_PREDICTED < MAX_SHARD_OVER_MEAN) {
+      throw new Error(
+        `drift warning: WARN_MEASURED_OVER_PREDICTED (${WARN_MEASURED_OVER_PREDICTED}) sits below ` +
+          `MAX_SHARD_OVER_MEAN (${MAX_SHARD_OVER_MEAN}), inside the drift the split absorbs`
+      );
+    }
+  });
+
+  // What the runner receives. The verdict is the whole effect of this tier, so
+  // it is read as rendered text, never printed here (a self-test line opening
+  // with a workflow command would mint a real annotation on every lint run).
+  const label = 'Test Core (9/9)';
+  check(() => {
+    const v = renderDriftVerdict(tierOf(131), label);
+    const commands = v.out.filter((line) => line.startsWith('::'));
+    if (v.verdict !== 'WARN' || v.exitCode !== 0 || commands.length !== 1) {
+      throw new Error(
+        `drift warning: rendered ${v.verdict} exit ${v.exitCode} with ${commands.length} workflow command(s)`
+      );
+    }
+    if (!commands[0].startsWith('::warning ') || !commands[0].includes(label) || commands[0].includes('\n')) {
+      throw new Error(`drift warning: the annotation is not one ::warning line naming the shard: ${commands[0]}`);
+    }
+  });
+  check(() => {
+    const v = renderDriftVerdict(tierOf(151), label);
+    if (v.verdict !== 'DRIFT' || v.exitCode !== 1 || v.out.some((line) => line.startsWith('::'))) {
+      throw new Error(`drift warning: a red rendered ${v.verdict} exit ${v.exitCode}, ${v.out.length} stdout line(s)`);
+    }
+  });
+  check(() => {
+    for (const [seconds, expected] of [[118, 'OK'], [WARN_MEASURED_OVER_PREDICTED * 100, 'OK']]) {
+      const v = renderDriftVerdict(tierOf(seconds), label);
+      if (v.verdict !== expected || v.exitCode !== 0 || v.out.length !== 0) {
+        throw new Error(`drift warning: ${seconds / 100}x rendered ${v.verdict} with ${v.out.length} stdout line(s)`);
+      }
+    }
+    const nm = renderDriftVerdict(driftReport(replayed.samples, driftTimings), label);
+    if (nm.verdict !== 'NOT MEASURED' || nm.exitCode !== 0 || nm.out.length !== 0) {
+      throw new Error(`drift warning: a replay-only shard rendered ${nm.verdict}`);
+    }
+  });
+  // One line per command: a newline smuggled in through a label or package
+  // name would end the annotation and open whatever followed it as a command.
+  check(() => {
+    const escaped = escapeWorkflowCommandMessage('50% done\r\n::error::x');
+    if (escaped !== '50%25 done%0D%0A::error::x') {
+      throw new Error(`drift warning: workflow-command escaping produced ${JSON.stringify(escaped)}`);
+    }
+  });
+
   // -- FILE-LEVEL SLICE ITEMS (#16173) ------------------------------------
   //
   // The grammar, its refusals, and the two joins that read it. The balancing
@@ -1794,11 +2030,13 @@ function selfTest() {
 
 // `--check-drift`: the shard just measured itself, so read that back.
 //
-// Every verdict this prints is one of exactly three, and NOT MEASURED is a
-// first-class one rather than a quiet pass. A shard whose test tasks were all
-// cache replays has said nothing about the dataset, and reporting that as OK is
-// the #4690 shape -- a check that read nothing reporting as a check that found
-// nothing wrong.
+// Every verdict this prints is one of exactly four -- OK, WARN, DRIFT and NOT
+// MEASURED (renderDriftVerdict) -- and only DRIFT exits non-zero. WARN is the
+// annotation tier under the red (WARN_MEASURED_OVER_PREDICTED), and NOT
+// MEASURED is a first-class verdict rather than a quiet pass. A shard whose
+// test tasks were all cache replays has said nothing about the dataset, and
+// reporting that as OK is the #4690 shape -- a check that read nothing
+// reporting as a check that found nothing wrong.
 function checkDrift(argv) {
   const inputs = [];
   let label = 'this shard';
@@ -1840,52 +2078,10 @@ function checkDrift(argv) {
   }
   const timings = loadTimings();
   const report = driftReport(merged, timings, MAX_MEASURED_OVER_PREDICTED, observedSlices);
-  const skipped =
-    report.unpredicted.length === 0
-      ? ''
-      : ` ${report.unpredicted.length} package(s) carry no dataset entry and were excluded ` +
-        `(estimated, not predicted): ${report.unpredicted.join(', ')}.`;
-
-  if (!report.measurable) {
-    console.error(
-      `shard-timing-drift: NOT MEASURED -- ${label} finished no test task that was both a cache ` +
-        'MISS and carried a dataset entry, so this run says nothing about whether ' +
-        `scripts/test-shard-timings.json is still true.${skipped}`
-    );
-    return;
-  }
-
-  const head =
-    `${report.measuredTotal.toFixed(1)}s measured vs ${report.predictedTotal.toFixed(1)}s predicted ` +
-    `across ${report.rows.length} package(s) = ${report.ratio.toFixed(2)}x ` +
-    `(bound ${MAX_MEASURED_OVER_PREDICTED}x)`;
-  const worst = report.rows
-    .slice(0, 5)
-    .map(
-      (r) =>
-        `    ${r.name}: predicted ${r.predicted.toFixed(1)}s, measured ${r.measured.toFixed(1)}s ` +
-        `(${r.predicted > 0 ? `${(r.measured / r.predicted).toFixed(2)}x, ` : ''}` +
-        `${r.overshoot >= 0 ? '+' : ''}${r.overshoot.toFixed(1)}s)`
-    )
-    .join('\n');
-
-  if (!report.drifted) {
-    console.error(`shard-timing-drift: OK -- ${label}, ${head}.${skipped}`);
-    return;
-  }
-  console.error(
-    `shard-timing-drift: DRIFT -- ${label}, ${head}.${skipped}\n` +
-      '  Heaviest overshoots:\n' +
-      `${worst}\n` +
-      '  scripts/test-shard-timings.json no longer describes this workspace, so the shard split\n' +
-      '  is balancing a quantity that is not the runtime. Refresh it -- see\n' +
-      '  scripts/measure-test-shard-timings.mjs for the two refresh paths -- and ⛔ do NOT\n' +
-      '  hand-edit the dataset or raise this bound to absorb the gap. Expect the refresh to red\n' +
-      "  this script's own balance pins if a single suite has outgrown the acceptance bound:\n" +
-      '  that is those pins working, and the remedy they name is splitting that suite below\n' +
-      '  package granularity, never a different shard count.'
-  );
-  process.exit(1);
+  const rendered = renderDriftVerdict(report, label);
+  for (const line of rendered.out) console.log(line);
+  for (const line of rendered.err) console.error(line);
+  if (rendered.exitCode !== 0) process.exit(rendered.exitCode);
 }
 
 function main() {

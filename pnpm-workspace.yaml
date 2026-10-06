@@ -313,6 +313,14 @@ overrides:
   # transitive-only via next's optional dependency, and 0.35.4 is a patch inside
   # the 0.35 line the pin already held, so nothing declares a range that has to
   # move in lockstep.
+  # 2026-10-06 (#22013): sharp GHSA-wq5f-xc86-pv6w (8.9 high, a memory bug in
+  # the librsvg its prebuilt binaries bundle; range introduced:0 -> fixed:0.35.5,
+  # read from the OSV offline npm database the scanner downloads) — the target
+  # lifts again, from ^0.35.4 to ^0.35.5, and the selector stays untouched at
+  # the <0.36.0 caret boundary. A dedupe, not a forced upgrade: next@16.3.6
+  # declares the optional `sharp: ^0.35.4`, which already admits 0.35.5, and
+  # 0.35.4 was the single resolved copy. Its prebuilt @img/sharp-* binaries
+  # move with it (0.35.5, libvips 1.3.4), because sharp pins them exactly.
   # @hono/node-server GHSA-frvp-7c67-39w9 has no 1.x fix — @modelcontextprotocol/sdk
   # declares ^1.19.9 and only imports getRequestListener, which 2.x still exports.
   # ⚠️ @hono/node-server is the exception to this block's "transitive-only" heading:
@@ -326,7 +334,7 @@ overrides:
   # workspace's resolution from re-locking 5.0.9; overrides do not reach downstream
   # installs, so a consumer's own brace-expansion copy is theirs to lift.
   'brace-expansion@>=5.0.0 <6.0.0': '^5.0.12'
-  'sharp@>=0.34.0 <0.36.0': '^0.35.4'
+  'sharp@>=0.34.0 <0.36.0': '^0.35.5'
   'react-router@<8.3.0': '^8.3.0'
   '@sveltejs/kit@<2.69.1': '^2.69.1'
   '@hono/node-server@<3.0.0': '^2.0.10'
@@ -569,3 +577,33 @@ overrides:
   #     Re-check when a mermaid release declares a katex range that admits
   #     0.18.2: the entry then turns into a dedupe and stays as the floor.
   'katex@>=0.11.0 <0.19.0': '^0.18.2'
+  # OSV 2026-10-06 (#22013, PR #22002 run 37483796939) — one more advisory that
+  # names a fixed version, so this is the "take the fix" path osv-scanner.toml's
+  # header prescribes and NOT an exemption. (The same scan's sharp row is the
+  # target lift on the sharp entry above.)
+  #   shell-quote GHSA-pqg4-j6r4-53mv (9.2 critical) — quote() lets a line
+  #     terminator in a string after a `{ comment }` token end the comment, so
+  #     the rest of that string runs as shell input. Range introduced:1.8.4 ->
+  #     fixed:1.11.0, read from the OSV offline npm database the scanner
+  #     downloads. Flagged at the single resolved copy 1.10.0.
+  #   A dedupe onto the patched line, not a forced upgrade: the one path is
+  #     launch-editor@2.14.1 (declares `shell-quote: ^1.8.4`, which admits the
+  #     fix) <- @changesets/cli@3.0.3 <- the root package.json's
+  #     devDependencies, and the copy sat on 1.10.0 through lockfile inertia
+  #     (the devalue mechanism above).
+  #   Why an override and not a bump: no release up that path forces the fix.
+  #     @changesets/cli 3.0.3 is npm `latest` and declares launch-editor
+  #     ^2.14.1; launch-editor's latest, 2.14.2, declares shell-quote ^1.10.0,
+  #     which still admits the flagged 1.10.0 (npm view, 2026-10-06). So a bump
+  #     would move a devDependency and still leave the floor to this entry.
+  #   The ^1.11.0 target floats to 1.12.0, the newest 1.x. launch-editor calls
+  #     shell-quote in one place, parse() on the editor command (guess.js);
+  #     1.11.0 and 1.12.0 only teach parse() ANSI-C quoting and more operators,
+  #     and the vulnerable quote() is never called on this path. The fix is
+  #     taken anyway: the gate reads the lockfile, not the call graph.
+  #   Transitive-only and dev-only: nothing publishable declares shell-quote,
+  #     so check-override-consistency.mjs's manifest rule has no declared range
+  #     to hold in lockstep. The floor is the advisory's 1.8.4; the bound sits
+  #     at the 2.0.0 major boundary per this block's header rule, never
+  #     `<1.11.0`.
+  'shell-quote@>=1.8.4 <2.0.0': '^1.11.0'

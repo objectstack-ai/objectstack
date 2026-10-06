@@ -80,6 +80,12 @@ export function dispatcherSweepOptions(
  * `SqlNotificationOutbox.claim` / `claimDigest` / `reapExpired` and
  * `SqlHttpOutbox.claim` / `reapExpired` issue.
  *
+ * [#21908] And by the ACK that closes each attempt — `SqlNotificationOutbox.ack`
+ * and `SqlHttpOutbox.ack` (both arities, `ackById` included): the state read,
+ * the compare-and-set write and the read-back. Same warrant, re-derived: `ack`
+ * has exactly the two callers {@link dispatcherAckOptions} names, both inside a
+ * dispatcher's `runPartition()` tick.
+ *
  * The warrant is {@link dispatcherSweepOptions}'s, read for authorization
  * instead of tenancy: no request, session or principal exists on the
  * `setInterval` tick that reaches these sites, so no caller's grants could
@@ -92,6 +98,27 @@ export function dispatcherSweepOptions(
  * tenant, the line this file draws for `bypassTenantAudit` too.
  */
 export const DISPATCHER_SYSTEM_CONTEXT = { isSystem: true } as const;
+
+
+/**
+ * [#21908] The execution context the outboxes' PRODUCER-side calls run under:
+ * the explicit system opt-in, carried by `SqlNotificationOutbox.enqueue` and
+ * `SqlHttpOutbox.enqueue` / `recordUndeliverable` (the dedup read, the insert,
+ * and the read that resolves a lost dedup race) and by both outboxes' `list`.
+ *
+ * The warrant is the outbox contract's: `INotificationOutbox` /
+ * `IHttpOutbox` carry no caller at all. `enqueue` is reached from the emit
+ * fan-out and from the HTTP producers (webhook auto-enqueue, flow callouts),
+ * each of which has already decided that a delivery should exist; the row it
+ * writes is the outbox's own bookkeeping, stamped with the PRODUCER's
+ * organization on the row (#13546), not a caller's. Without the opt-in these
+ * calls reach the data engine with no principal and no system opt-in, which is
+ * the principal-less hand-off ADR-0096 D5 closes.
+ *
+ * ⛔ Never on `redeliver`: it is the one request-reachable call on these
+ * objects, and it threads the caller's tenant (see {@link DISPATCHER_SYSTEM_CONTEXT}).
+ */
+export const OUTBOX_SYSTEM_CONTEXT = { isSystem: true } as const;
 
 
 /**

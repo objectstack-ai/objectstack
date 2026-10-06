@@ -68,7 +68,6 @@
 - 公开面 = 包构建后的入口声明所达,⛔ 不只数入口的再导出清单。
 - 所达 = 再导出名,加经其 props、参数与返回类型可达的每个类型。
 - 语言包键已发布:包导出语言包及其派生类型(`TranslationKeys = typeof en`)即发布每个键。
-- `Clause-②: yes` 至少 `minor`:AGENTS.md Post-Task Checklist 第 3 条,本行在认领处复述。
 - 席位读不定(席位不做构建)⇒ 认领写明,dev 在报告里于构建声明闭包上实测,实测定案。
 - 档位引 `dispatch-gates --tier --repo 仓`⛔ 不凭记忆;天花板拼常量名并同行引据,⛔ 不抄模型 id
 - 末行 Serial constraints cleared 是落在评论里的读数,同包在飞单不点名等于没查。
@@ -180,4 +179,5 @@
 - 判决 ACCEPT:issue 英文短评论,核对清单结论 + 抽查读数 + 偏差,链接 PR,⛔ 不复述其叙事。
 - `mcp_calls` 点名写工具(`settings.json` deny 清单 + `update_pull_request`)⇒ 拒收,⛔ 不带注放行。
 - 判决 REWORK:逐项反馈,同认领重派;补丁轮优先 SendMessage 续派原 dev;最多 2 轮,第三次升级。
-- 判决 ESCALATE:见 SKILL.md 〈升级与决策〉。
+- 判决 ESCALATE:见〈升级与决策〉;熔断任一命中亦判,PR 暂停,答复前 ⛔ 不派下一轮。
+- 熔断三条:独立安全复审连续 2 轮不过;diff 超首次复核规模 2 倍;上轮修复引入新 HIGH。

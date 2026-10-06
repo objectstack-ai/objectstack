@@ -861,7 +861,7 @@ describe('ObjectStorageConfigSchema', () => {
 // twin mirrors carries no unit token. No gate can catch the twin being renamed
 // along with this one — the marker exempts it either way — so a find-and-replace
 // that harmonised the two would land silently. The pin below is the only guard.
-describe('object-storage durations carry their unit (#15679)', () => {
+describe('object-storage durations carry their unit in the key name', () => {
   it('REFUSES the retired `AccessControlConfig.maxAge` with the rename in the message', () => {
     const result = AccessControlConfigSchema.safeParse({ corsEnabled: true, maxAge: 3600 });
     expect(result.success).toBe(false);

@@ -583,6 +583,20 @@ describe('[#13178] the engine leg: the store’s context becomes DriverOptions.t
     expect(del!.options?.tenantId).toBe('org_A');
   });
 
+  it('[#21908] create carries it beside the explicit system opt-in — the organization stamp survives', async () => {
+    // Under the opt-in the organizations plugin's fill-only stamp stands down;
+    // what stamps the column is this channel, so it has to still arrive.
+    const { engine, calls } = await makeEngine();
+    const store = new StorageMetadataStore(engine as any);
+
+    await store.createFile({ ...fileRec('f9'), owner_id: 'u1' }, { organizationId: 'org_A' });
+    await store.createSession(sessionRec('s9'), { organizationId: 'org_A' });
+
+    const creates = calls.filter((c) => c.method === 'create');
+    expect(creates.map((c) => c.object)).toEqual(['sys_file', 'sys_upload_session']);
+    for (const c of creates) expect(c.options?.tenantId).toBe('org_A');
+  });
+
   it('and WITHOUT the repair’s context there is none — the shape the audit exists to catch', async () => {
     const { engine, calls } = await makeEngine();
     const store = new StorageMetadataStore(engine as any);

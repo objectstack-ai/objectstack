@@ -6,6 +6,7 @@ import { hashPartition } from './backoff.js';
 import { toEpochMs } from './audit-timestamp.js';
 import {
     DISPATCHER_SYSTEM_CONTEXT,
+    OUTBOX_SYSTEM_CONTEXT,
     dispatcherAckCasOptions,
     dispatcherAckOptions,
     dispatcherSweepOptions,
@@ -163,10 +164,12 @@ export class SqlHttpOutbox implements IHttpOutbox {
         input: Omit<EnqueueHttpInput, 'signingSecret' | 'undeliverableReason'>,
         terminal: { signature: string | undefined; status: HttpDeliveryStatus; error?: string },
     ): Promise<string> {
+        // The explicit system opt-in on every call of the producer side — see
+        // OUTBOX_SYSTEM_CONTEXT.
         const existing = await this.engine.findOne(this.objectName, {
             where: { source: input.source, dedup_key: input.dedupKey },
             fields: ['id'],
-        });
+        }, { context: OUTBOX_SYSTEM_CONTEXT });
         if (existing?.id) return existing.id as string;
 
         const id = randomUUID();
@@ -202,13 +205,13 @@ export class SqlHttpOutbox implements IHttpOutbox {
             updated_at: now,
         };
         try {
-            await this.engine.insert(this.objectName, row);
+            await this.engine.insert(this.objectName, row, { context: OUTBOX_SYSTEM_CONTEXT });
             return id;
         } catch (err) {
             const winner = await this.engine.findOne(this.objectName, {
                 where: { source: input.source, dedup_key: input.dedupKey },
                 fields: ['id'],
-            });
+            }, { context: OUTBOX_SYSTEM_CONTEXT });
             if (winner?.id) return winner.id as string;
             throw err;
         }
@@ -354,10 +357,12 @@ export class SqlHttpOutbox implements IHttpOutbox {
         // The runtime half of the credential contract, for JS callers and
         // casts: refused before any IO.
         assertHttpClaimCredential(id, claimed);
+        // Every call of the ack carries the dispatcher's opt-in — see
+        // DISPATCHER_SYSTEM_CONTEXT.
         const current = (await this.engine.findOne(this.objectName, {
             where: { id },
             fields: ['status', 'attempts', 'claimed_by', 'claimed_at'],
-        })) as Pick<DeliveryRow, 'status' | 'attempts' | 'claimed_by' | 'claimed_at'> | null;
+        }, { context: DISPATCHER_SYSTEM_CONTEXT })) as Pick<DeliveryRow, 'status' | 'attempts' | 'claimed_by' | 'claimed_at'> | null;
         // An id matching no row: no state to corrupt, no claim to lose.
         if (!current) return;
         // Not claimed at all — reaped back to the queue, already terminal, or
@@ -388,7 +393,10 @@ export class SqlHttpOutbox implements IHttpOutbox {
             // but the id is silently discarded (#11009). Declared a global-sweep
             // site — no request context exists on the tick that reaches here.
             // Warrant in `outbox-dispatcher-scope.ts`.
-            dispatcherAckCasOptions(id, 'in_flight', claimed.claimedBy, claimed.claimedAt),
+            {
+                ...dispatcherAckCasOptions(id, 'in_flight', claimed.claimedBy, claimed.claimedAt),
+                context: DISPATCHER_SYSTEM_CONTEXT,
+            },
         );
 
         // Did the conditional write land? `IDataEngine.update` declares its
@@ -399,7 +407,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
         const after = (await this.engine.findOne(this.objectName, {
             where: { id },
             fields: ['status', 'attempts'],
-        })) as Pick<DeliveryRow, 'status' | 'attempts'> | null;
+        }, { context: DISPATCHER_SYSTEM_CONTEXT })) as Pick<DeliveryRow, 'status' | 'attempts'> | null;
         if (!after || after.status !== patch.status || (after.attempts ?? 0) !== attempts) {
             throw new HttpAckError(httpAckLostClaimMessage(id, after?.status ?? 'unknown'), 'DELIVERY_NOT_ELIGIBLE');
         }
@@ -414,7 +422,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
         const current = (await this.engine.findOne(this.objectName, {
             where: { id },
             fields: ['attempts'],
-        })) as { attempts?: number } | null;
+        }, { context: DISPATCHER_SYSTEM_CONTEXT })) as { attempts?: number } | null;
         if (!current) return;
 
         await this.engine.update(
@@ -423,7 +431,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
             // Single-record write, audited under the `update` op. Declared a
             // global-sweep site — no request context reaches it. Warrant in
             // `outbox-dispatcher-scope.ts`.
-            dispatcherAckOptions(id),
+            { ...dispatcherAckOptions(id), context: DISPATCHER_SYSTEM_CONTEXT },
         );
     }
 
@@ -431,7 +439,11 @@ export class SqlHttpOutbox implements IHttpOutbox {
         const where: Record<string, unknown> = {};
         if (filter?.status) where.status = filter.status;
         if (filter?.source) where.source = filter.source;
-        const rows = (await this.engine.find(this.objectName, { where })) as DeliveryRow[];
+        const rows = (await this.engine.find(
+            this.objectName,
+            { where },
+            { context: OUTBOX_SYSTEM_CONTEXT },
+        )) as DeliveryRow[];
         return rows.map((r) => this.toDelivery(r));
     }
 

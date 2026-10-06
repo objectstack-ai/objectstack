@@ -23,6 +23,7 @@ import type {
 import { INBOX_OBJECT, RECEIPT_OBJECT } from './inbox-channel.js';
 import { type InboxCaller, resolveInboxRecipient } from './inbox-caller.js';
 import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
+import { INBOX_SYSTEM_CONTEXT } from './inbox-system-context.js';
 import { assertActorReferenceResolves } from './actor-reference.js';
 
 /** The L2 event object every `emit()` writes one row to (ADR-0030). */
@@ -545,7 +546,12 @@ export class MessagingService {
         if (opts.type) where.topic = opts.type;
 
         const [rows, stateByNotif] = await Promise.all([
-            data.find(INBOX_OBJECT, { where, orderBy: [{ field: 'created_at', order: 'desc' }], limit }) as Promise<Array<Record<string, unknown>>>,
+            // The explicit system opt-in, scoped by `where.user_id` — see INBOX_SYSTEM_CONTEXT.
+            data.find(
+                INBOX_OBJECT,
+                { where, orderBy: [{ field: 'created_at', order: 'desc' }], limit },
+                { context: INBOX_SYSTEM_CONTEXT },
+            ) as Promise<Array<Record<string, unknown>>>,
             this.readReceiptStates(data, userId),
         ]);
 
@@ -641,10 +647,11 @@ export class MessagingService {
         where: Record<string, unknown>,
         stateByNotif: ReadonlyMap<string, string>,
     ): Promise<number> {
+        // `where` is listInbox's own, so it carries `user_id` — see INBOX_SYSTEM_CONTEXT.
         const ids = (await data.find(INBOX_OBJECT, {
             where,
             fields: ['notification_id'],
-        })) as Array<Record<string, unknown>>;
+        }, { context: INBOX_SYSTEM_CONTEXT })) as Array<Record<string, unknown>>;
 
         let unread = 0;
         for (const row of ids) {
@@ -671,7 +678,7 @@ export class MessagingService {
     private async readReceiptStates(data: IDataEngine, userId: string): Promise<Map<string, string>> {
         const receipts = await (data.find(RECEIPT_OBJECT, {
             where: { user_id: userId, channel: 'inbox' },
-        }) as Promise<Array<Record<string, unknown>>>).catch(() => [] as Array<Record<string, unknown>>);
+        }, { context: INBOX_SYSTEM_CONTEXT }) as Promise<Array<Record<string, unknown>>>).catch(() => [] as Array<Record<string, unknown>>);
 
         const stateByNotif = new Map<string, string>();
         for (const r of receipts) {
@@ -860,7 +867,7 @@ export class MessagingService {
             data.find(INBOX_OBJECT, {
                 where: { user_id: userId },
                 fields: ['notification_id'],
-            }) as Promise<Array<Record<string, unknown>>>,
+            }, { context: INBOX_SYSTEM_CONTEXT }) as Promise<Array<Record<string, unknown>>>,
             this.readReceiptStates(data, userId),
         ]);
 
@@ -886,9 +893,15 @@ export class MessagingService {
     ): Promise<number> {
         const where = { notification_id: notificationId, user_id: userId, channel: 'inbox' };
         const flipToRead = async (): Promise<boolean> => {
-            const existing = await data.findOne(RECEIPT_OBJECT, { where, fields: ['id'] });
+            // Under INBOX_SYSTEM_CONTEXT: the read is keyed on `user_id`, and the
+            // update addresses only the id that read returned.
+            const existing = await data.findOne(RECEIPT_OBJECT, { where, fields: ['id'] }, { context: INBOX_SYSTEM_CONTEXT });
             if (!existing?.id) return false;
-            await data.update(RECEIPT_OBJECT, { state: 'read', at }, { where: { id: existing.id } } as never);
+            await data.update(
+                RECEIPT_OBJECT,
+                { state: 'read', at },
+                { where: { id: existing.id }, context: INBOX_SYSTEM_CONTEXT } as never,
+            );
             return true;
         };
 
@@ -931,7 +944,7 @@ export class MessagingService {
                 at,
                 organization_id: organizationId,
                 created_at: at,
-            });
+            }, { context: INBOX_SYSTEM_CONTEXT });
             return 1;
         } catch (err) {
             if (isUniqueViolationError(err) && (await flipToRead())) return 1;
@@ -955,10 +968,12 @@ export class MessagingService {
         notificationId: string,
     ): Promise<string | null> {
         try {
+            // One event row, two columns, used only as the stamp on the
+            // caller's own receipt — see INBOX_SYSTEM_CONTEXT.
             const row = await data.findOne(NOTIFICATION_EVENT_OBJECT, {
                 where: { id: notificationId },
                 fields: ['id', 'organization_id'],
-            });
+            }, { context: INBOX_SYSTEM_CONTEXT });
             const org = (row as Record<string, unknown> | undefined)?.organization_id;
             return org != null && String(org) !== '' ? String(org) : null;
         } catch (err) {
@@ -1295,10 +1310,12 @@ export class MessagingService {
     /** Find an existing event id by its dedup key, tolerating lookup failure. */
     private async findEventByDedupKey(data: IDataEngine, dedupKey: string): Promise<string | undefined> {
         try {
+            // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT. The id it
+            // finds is the one `emit()` answers for a key the emitter named.
             const row = await data.findOne(NOTIFICATION_EVENT_OBJECT, {
                 where: { dedup_key: dedupKey },
                 fields: ['id'],
-            });
+            }, { context: FAN_OUT_SYSTEM_CONTEXT });
             const id = row?.id;
             return id != null && String(id).length > 0 ? String(id) : undefined;
         } catch (err) {

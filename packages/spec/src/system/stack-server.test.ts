@@ -58,7 +58,7 @@ describe('server: reaches the runtime through defineStack', () => {
   });
 });
 
-describe('server: carries only keys with a consumer (#4938 stays shut)', () => {
+describe('server: carries only keys with a consumer — the retired HttpServerConfig keys stay out', () => {
   it('declares exactly `security` and `trustProxy`', () => {
     // The hard constraint from the 2026-08-03 adjudication. If this list grows,
     // the new key must have arrived with an executor — the whole reason the
@@ -90,7 +90,7 @@ describe('server: carries only keys with a consumer (#4938 stays shut)', () => {
   });
 });
 
-describe('server.security.rateLimit is strict from birth (#4001)', () => {
+describe('server.security.rateLimit is strict from birth', () => {
   it('accepts every declared key', () => {
     expect(ServerRateLimitConfigSchema.parse({ enabled: true, windowMs: 1000, maxRequests: 3 }))
       .toEqual({ enabled: true, windowMs: 1000, maxRequests: 3 });
