@@ -10,22 +10,34 @@
 //      left by a developer's earlier run on a tree without this isolation, or by
 //      a crashed run. The guard judges only what THIS run leaves, so an old
 //      leftover never reds a run that wrote nothing.
-//   2. It creates ONE temporary root for the run and hands it to every worker
-//      through `provide` / `inject`. Each test file makes its own working
-//      directory under that root.
+//   2. It reserves a TAG for the run, `os-dogfood-run-XXXXXX`, as a directory
+//      `mkdtempSync` creates under the system temp directory, and hands the tag
+//      (a name, never a path) to every worker through `provide` / `inject`.
+//      Each test file makes its own working directory directly under the system
+//      temp directory, named `<tag>-file-XXXXXX`.
 //
-// At the END of the run it removes that root, and with it every per-file
-// directory. The removal is run-level, not per-file: on the `shared-showcase`
-// project (`isolate: false`) one memoized boot serves every file on a worker,
-// and its SQLite handles stay open in the directory of the file that booted it.
+// At the END of the run it removes every directory whose name starts with this
+// run's `<tag>-file-`, then the reservation itself. Another run's directories
+// carry another tag, so a concurrent run on the same machine is never touched.
+// The removal is run-level, not per-file: on the `shared-showcase` project
+// (`isolate: false`) one memoized boot serves every file on a worker, and its
+// SQLite handles stay open in the directory of the file that booted it.
+//
+// Why a tag and not a shared parent path (#21924): every `mkdtempSync` base in
+// this tree must be one the tree's scratch-directory scan can read, so that an
+// in-tree fixture root can never hide behind an expression
+// (`scripts/pm/dispatch-gates.mjs`, "no mkdtempSync site in this tree takes a
+// base the scan cannot read"). A path handed over through `inject()` is such an
+// expression. `join(tmpdir(), ...)` is not: it is outside the tree by
+// construction, whatever name follows it.
 //
 // ⛔ This teardown never JUDGES anything. On vitest 4.1.11 an error thrown from
 // a globalSetup teardown is printed as `error during close` and the run still
 // exits 0 (measured), so a guard placed here would be a false green. The guard
 // is a throwing `afterAll` in the per-file module, which fails a test file.
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { TestProject } from 'vitest/node';
 
@@ -34,19 +46,29 @@ const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 declare module 'vitest' {
   export interface ProvidedContext {
-    /** The run's temporary root; each test file makes its working directory under it. */
-    dogfoodCwdRoot: string;
+    /** The run's tag; each test file makes its working directory as `join(tmpdir(), '<tag>-file-')`. */
+    dogfoodRunTag: string;
   }
 }
 
-let runRoot: string | undefined;
+/** The prefix of every per-file directory a run tagged `tag` creates under the system temp directory. */
+export function perFileDirPrefix(tag: string): string {
+  return `${tag}-file-`;
+}
+
+let reservation: string | undefined;
 
 export function setup(project: TestProject): void {
   rmSync(join(PACKAGE_ROOT, '.objectstack'), { recursive: true, force: true });
-  runRoot = mkdtempSync(join(tmpdir(), 'os-dogfood-run-'));
-  project.provide('dogfoodCwdRoot', runRoot);
+  reservation = mkdtempSync(join(tmpdir(), 'os-dogfood-run-'));
+  project.provide('dogfoodRunTag', basename(reservation));
 }
 
 export function teardown(): void {
-  if (runRoot) rmSync(runRoot, { recursive: true, force: true });
+  if (!reservation) return;
+  const prefix = perFileDirPrefix(basename(reservation));
+  for (const name of readdirSync(tmpdir())) {
+    if (name.startsWith(prefix)) rmSync(join(tmpdir(), name), { recursive: true, force: true });
+  }
+  rmSync(reservation, { recursive: true, force: true });
 }
