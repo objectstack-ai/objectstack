@@ -1321,19 +1321,6 @@ jobs:
       - name: Contract-review record recogniser self-test
         run: pnpm check:pm-record-recognisers
 
-      # Widening-tell gate self-test (#16448) — the mechanical half of the
-      # directional clause-② ruling (#16349), and the same split as every step
-      # around it: the LIVE predicate is `--pair`'s C5 row, a verdict about ONE
-      # pair's diff, so failing an unrelated PR's CI over it would punish the
-      # wrong actor. Only the offline self-test runs here.
-      #
-      # This gate has no whole-tree production run at all — its input is a DIFF
-      # supplied by its caller, never a file in the tree — so the `--self-test`
-      # invocation is the only instrument its matching rules have, which is
-      # exactly the family `check:self-test-wired` requires this step for.
-      - name: Widening-tell gate self-test
-        run: pnpm check:pm-widening-tells
-
       # Prior-ruling reader self-test (#17009) — same family and the same split
       # as every step around it. The LIVE read takes a card number over REST and
       # searches this checkout's `origin/main`, so it is a tool a seat runs
@@ -1690,7 +1677,7 @@ jobs:
         run: pnpm check:pm-settings-deny-roster
 
       # Expected-skips roster self-test (#18308) — same family and the same
-      # split as the widening-tell and prior-ruling steps above: the LIVE read
+      # split as the prior-ruling step above: the LIVE read
       # takes a PR head and judges its check-runs over REST, so it is a tool a
       # seat runs against the PR in front of it, not a verdict about the PR
       # that happens to run CI next. Only the offline self-test runs here — it

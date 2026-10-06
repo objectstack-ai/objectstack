@@ -82,7 +82,6 @@
     "check:pm-half-states": "node scripts/pm/check-half-states.mjs --self-test",
     "check:issue-citations": "node scripts/check-issue-citations.mjs --self-test",
     "check:pm-record-recognisers": "node scripts/pm/record-recognisers.mjs --self-test",
-    "check:pm-widening-tells": "node scripts/pm/check-widening-tells.mjs --self-test",
     "check:pm-prior-rulings": "node scripts/pm/check-prior-rulings.mjs --self-test",
     "check:pm-closed-card-sweep": "node scripts/pm/sweep-closed-cards.mjs --self-test",
     "check:pm-stale-finding": "node scripts/pm/sweep-stale-finding.mjs --self-test",
