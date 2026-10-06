@@ -16,7 +16,7 @@ The runtime now keeps one in-memory set of the datasource names it registers fro
 
 - After a restart over a stored row under a code-defined datasource's name, `GET /api/v1/datasources` serves the code definition (`origin: code`) instead of the row, and `PATCH /api/v1/datasources/:name` answers `400 DATASOURCE_ADMIN_ERROR` ("… is code-defined and cannot be edited at runtime.") where it answered 200 for a row that carried `origin: 'runtime'`.
 - No live pool is opened from such a row at boot.
-- `PUT /api/v1/meta/datasource/default` answered 200 and now answers `403 NOT_OVERRIDABLE`. `DELETE /api/v1/meta/datasource/default` with no stored row answered 200 and now answers the same `403`.
+- `PUT /api/v1/meta/datasource/default` answered 200 and now answers `403 NOT_OVERRIDABLE`. `DELETE /api/v1/meta/datasource/default` with no stored row answered 200 and now answers the same `403`. The refusal's remedy names the host's database configuration (the database URL the server starts with), which is what defines `default`; every other code-defined datasource's refusal still names its `*.datasource.ts` source.
 - The skipped row is kept, and the boot logs one warning naming it.
 
 **Remedy.**

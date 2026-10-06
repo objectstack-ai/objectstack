@@ -29,7 +29,9 @@
 //   - the `/meta` door's `DELETE` of such a row (the repair) removes it, and
 //     what the admin door serves does not change;
 //   - `PUT` and `DELETE` on `/api/v1/meta/datasource/default` are refused with
-//     the answer the door gives every code-defined datasource;
+//     the answer the door gives every code-defined datasource, its remedy
+//     naming the host's database configuration — no `*.datasource.ts`
+//     declares `default`;
 //   - a runtime datasource with no code twin still restores, and one still
 //     saves through the `/meta` door.
 //
@@ -177,6 +179,13 @@ describe('[#21922 / #21944] a stored datasource row never displaces a code datas
     const del = refusal(await call('DELETE', '/meta/datasource/default'));
     expect({ status: del.status, code: del.code }).toEqual({ status: 403, code: 'NOT_OVERRIDABLE' });
     expect(del.message.startsWith("Datasource 'default' is code-defined and cannot be removed at runtime: it is read-only."), del.message).toBe(true);
+
+    // The remedy tells the truth about `default`: no `*.datasource.ts` declares
+    // it — the host defines it from the database the server starts with.
+    for (const message of [put.message, del.message]) {
+      expect(message).toContain("It is defined by the host's database configuration");
+      expect(message).not.toContain('.datasource.ts');
+    }
 
     expect(await storedRows('default')).toEqual([]);
   });

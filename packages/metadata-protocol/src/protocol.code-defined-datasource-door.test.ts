@@ -434,6 +434,19 @@ const CODE_NAMES_SERVICE = 'code-datasource-names';
 const DEFAULT_SAVE_VERDICT = "Datasource 'default' is code-defined and cannot be edited at runtime: it is read-only.";
 const DEFAULT_DELETE_VERDICT = "Datasource 'default' is code-defined and cannot be removed at runtime: it is read-only.";
 const hostServices = (names: string[]) => new Map<string, unknown>([[CODE_NAMES_SERVICE, new Set(names)]]);
+/**
+ * The remedy `default`'s refusal must carry: no `*.datasource.ts` declares
+ * `default` — the host defines it from the database the server starts with —
+ * so the sentence names that, and never the source-file remedy.
+ */
+const HOST_REMEDY = "It is defined by the host's database configuration";
+const expectHostRemedy = (message: unknown) => {
+    const text = String(message);
+    expect(text).toContain(HOST_REMEDY);
+    expect(text).toContain('restart the server');
+    expect(text).not.toContain('.datasource.ts');
+    expect(text).not.toContain('OS_METADATA_WRITABLE');
+};
 
 describe('[#21944] the resolver reads the host\'s code-datasource set', () => {
     it('sees a name the host registers from code, and only the `datasource` type', () => {
@@ -471,6 +484,7 @@ for (const { label, environmentId } of KERNELS) {
 
             expect({ code: err?.code, status: err?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
             expect(String(err?.message).startsWith(`${DEFAULT_SAVE_VERDICT} `), String(err?.message)).toBe(true);
+            expectHostRemedy(err?.message);
             expect(rows.size).toBe(0);
             expect(historyRows).toEqual([]);
         });
@@ -482,6 +496,7 @@ for (const { label, environmentId } of KERNELS) {
 
             expect({ code: err?.code, status: err?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
             expect(String(err?.message).startsWith(`${DEFAULT_DELETE_VERDICT} `), String(err?.message)).toBe(true);
+            expectHostRemedy(err?.message);
             expect(rows.size).toBe(0);
         });
 
@@ -492,6 +507,19 @@ for (const { label, environmentId } of KERNELS) {
 
             expect(res).toMatchObject({ success: true, reset: true });
             expect(Array.from(rows.values()).filter((r) => r.name === 'default')).toEqual([]);
+        });
+
+        it('side by side: `default` names the host\'s configuration, a package-declared datasource still names its source', async () => {
+            const { protocol } = session();
+
+            const host = await refusalOf(protocol.saveMetaItem({ type: 'datasource', name: 'default', item: body('default', 'x') }));
+            const packaged = await refusalOf(protocol.saveMetaItem({ type: 'datasource', name: CODE_DS, item: body(CODE_DS, 'x') }));
+
+            expect({ code: host?.code, status: host?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+            expect({ code: packaged?.code, status: packaged?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+            expectHostRemedy(host?.message);
+            expectVerdict(packaged?.message, SAVE_VERDICT);
+            expect(String(packaged?.message)).not.toContain(HOST_REMEDY);
         });
 
         it('control: a runtime datasource still saves with the set registered', async () => {
