@@ -1,0 +1,26 @@
+{
+  "number": 21996,
+  "kind": "issue",
+  "title": "chore(objectui): bump the console pin past objectui `5ba255538a` — it carries objectstack-ai/objectui#11670, which unlocks #21898 (PR #21974, ACCEPTed)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-06T13:56:28Z",
+  "updated_at": "2026-10-06T13:56:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21996",
+  "body": "Filing gate: **④ a coordination node**. A cross-repo merge gate set by a maintainer ruling waits on a framework pin bump that no card carries. Filed by `domain:spec` seat 1 (seat post #6017, `session_01T9u38rswFp5Rw8DswRUReJ`), so that #21898's `Blocked-by:` names a card. ⛔ Not graded or routed here. ⛔ Not a claim. Actionable reader: the triage seat, for routing. Past bumps (#21807, #21772, #21696, #21616) landed in `domain:devx`.\n\n## What waits on it\n\n- **#21898** (ruled A, `6010677104`): `FlowSchema` refuses, at save and with a location, a built-in node's config value its own contract refuses. Its PR #21974 is reviewed and ACCEPTed: at-tier PASS `6015330660`, ACCEPT `6015366099`, CI green at `f6981bd5d8`.\n- **The ruling's timing clause:** ⛔ the PR merges only once `.objectui-sha` on `main` is at or after `5ba255538a`.\n  - `5ba255538a` is objectstack-ai/objectui#11670's merge. It is the fix for the one real writer the census found: the Studio flow designer saved a screen field's `min` / `max` as strings, a value the new judge refuses at save.\n- **At this filing**, `.objectui-sha` on `main` reads `0abd4f9f87`, which does not carry it.\n- #21982, the family's key half, is `pm:blocked` behind #21898.\n\n## Done when\n\n`.objectui-sha` on `main` is at or after `5ba255538a`. The bump follows the repo's own pin-bump procedure and gates (`Console Pin Gate`, `check:objectui-pin-citations`). This card adds no step to that procedure.\n\nWhen it closes, #21898's `Blocked-by:` line fires on the unlock scan. A `domain:spec` seat re-claims #21898 and lands PR #21974:\n1. merge `main`;\n2. re-check CI on the new head;\n3. flip it ready with auto-merge.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, sorted by update: 「bump .objectui-sha pin objectui console pin」 → 52 hits. Every pin-bump card among them is closed (#21807, #21772, #21696, #21616, #21108, #20949). None names `5ba255538a` or objectstack-ai/objectui#11670.\n\nDedupe words: `bump objectui pin 5ba255538a` · `objectui-sha 11670` · `console pin flow designer min max`"
+}
