@@ -18,8 +18,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { SettingsService } from './settings-service.js';
-import { buildSettingAuditWriter, wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
+import { SettingsServicePlugin, buildSettingAuditWriter, wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
+import { LocalCryptoProvider } from './local-crypto-provider.js';
 
 type Call = { verb: 'find' | 'insert' | 'update' | 'delete'; object: string; context: unknown };
 
@@ -35,8 +37,10 @@ function matches(row: Record<string, unknown>, where: Record<string, unknown>): 
 
 /**
  * An `IDataEngine`-shaped double that records the context each call carried.
- * It implements only the verbs the moved calls use — `find` and `insert` — so
- * a call this pin does not expect fails loudly instead of being answered.
+ * It implements only the verbs the moved calls use — `find` and `insert`, and
+ * [#21908] the `update` / `delete` a rotation and the `sys_secret` store issue,
+ * each routed through the engine's own dispatch predicate — so a call this pin
+ * does not expect fails loudly instead of being answered.
  */
 function recordingEngine() {
   const rows: Array<Record<string, unknown>> = [];
@@ -49,13 +53,25 @@ function recordingEngine() {
       calls.push({ verb: 'find', object, context: readContext(query, options) });
       // The user-scope insert first proves its `user_id` names a user (#21913).
       if (object === 'sys_user') return [{ id: query?.where?.id }];
-      const hits = rows.filter((r) => matches(r, query?.where ?? {}));
+      const hits = rows.filter((r) => (r.__object ?? 'sys_setting') === object && matches(r, query?.where ?? {}));
       return typeof query?.limit === 'number' ? hits.slice(0, query.limit) : hits;
     },
     async insert(object: string, data: Record<string, unknown>, options?: any) {
       calls.push({ verb: 'insert', object, context: options?.context });
-      if (object === 'sys_setting') rows.push({ ...data });
+      if (object === 'sys_setting' || object === 'sys_secret') rows.push({ __object: object, ...data });
       return { ...data };
+    },
+    async update(object: string, data: Record<string, unknown>, options?: any) {
+      assertEngineUpdateDispatch(data, options);
+      calls.push({ verb: 'update', object, context: options?.context });
+      const where = options?.where ?? { id: data.id };
+      for (const row of rows.filter((r) => r.__object === object && matches(r, where))) Object.assign(row, data);
+      return 1;
+    },
+    async delete(object: string, options?: any) {
+      assertEngineDeleteDispatch(options);
+      calls.push({ verb: 'delete', object, context: options?.context });
+      return 1;
     },
   };
   return { engine, calls, rows };
@@ -107,5 +123,64 @@ describe('[#21913] SettingsService engine calls carry the explicit system opt-in
       encrypted: false,
     } as any);
     expect(calls).toEqual([{ verb: 'insert', object: 'sys_setting_audit', context: { isSystem: true } }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#21908] Stage 1 of the closure: the `sys_secret` store and the rotation's
+// verification read.
+// ---------------------------------------------------------------------------
+
+const SECRET_MANIFEST = {
+  namespace: 'sms',
+  version: 1,
+  label: 'SMS',
+  scope: 'tenant',
+  specifiers: [{ type: 'password', key: 'twilio_auth_token', label: 'Auth token', required: false, encrypted: true }],
+} as any;
+
+describe('[#21908] the sys_secret store and readStoredHandle carry the explicit system opt-in', () => {
+  it('the store the plugin builds: insert, get, update and delete each pass isSystem', async () => {
+    const { engine, calls } = recordingEngine();
+    const store = (new SettingsServicePlugin() as any).buildSecretStore(engine);
+    const row = { id: 'sec_1', namespace: 'sms', key: 'k', kms_key_id: 'local', alg: 'aes-256-gcm', version: 1, ciphertext: 'c1' };
+
+    await store.insert(row);
+    expect(await store.get('sec_1')).toMatchObject({ id: 'sec_1', ciphertext: 'c1' });
+    await store.update('sec_1', { ciphertext: 'c2', version: 2 });
+    await store.delete('sec_1');
+
+    expect(calls.map((c) => `${c.verb}:${c.object}`)).toEqual([
+      'insert:sys_secret', 'find:sys_secret', 'update:sys_secret', 'delete:sys_secret',
+    ]);
+    for (const call of calls) {
+      expect(call.context, `${call.verb} on ${call.object}`).toEqual({ isSystem: true });
+    }
+  });
+
+  it('a rotation: the secret writes, the row update and the verification read after it all pass isSystem', async () => {
+    const { engine, calls } = recordingEngine();
+    const svc = new SettingsService({
+      env: {},
+      engine: wrapEngineAsSettingsEngine(engine as any),
+      cryptoProvider: new LocalCryptoProvider(),
+      secretStore: (new SettingsServicePlugin() as any).buildSecretStore(engine),
+    } as any);
+    svc.registerManifest(SECRET_MANIFEST);
+
+    await svc.set('sms', 'twilio_auth_token', 'alpha');
+    await svc.set('sms', 'twilio_auth_token', 'beta');
+    expect((await svc.get<string>('sms', 'twilio_auth_token')).value).toBe('beta');
+
+    // The population: the second write updated the row, then re-read it
+    // (`readStoredHandle`) before it reaped the rotated-away secret.
+    const verbs = calls.map((c) => `${c.verb}:${c.object}`);
+    const updateAt = verbs.indexOf('update:sys_setting');
+    expect(updateAt).toBeGreaterThan(-1);
+    expect(verbs.slice(updateAt + 1)).toEqual(expect.arrayContaining(['find:sys_setting', 'delete:sys_secret']));
+    expect(verbs.filter((v) => v === 'insert:sys_secret')).toHaveLength(2);
+    for (const call of calls) {
+      expect(call.context, `${call.verb} on ${call.object}`).toEqual({ isSystem: true });
+    }
   });
 });

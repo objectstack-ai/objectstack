@@ -131,25 +131,33 @@ function writeOptionsFor(
 }
 
 /**
- * [#21908] The execution context {@link StorageMetadataStore.createFile}'s
- * `sys_file` insert runs under: the explicit system opt-in, taken inside this
- * store (maintainer ruling Q1), merged with the acting organization's
- * `tenantId` when there is one.
+ * [#21908] The engine options the two INSERT doors of this store —
+ * {@link StorageMetadataStore.createFile} (`sys_file`) and
+ * {@link StorageMetadataStore.createSession} (`sys_upload_session`) — run
+ * under: the explicit system opt-in, taken inside this store (maintainer
+ * ruling Q1), with the acting organization's `tenantId` beside it when there
+ * is one.
  *
- * Before this the insert reached the data engine with a tenant-only context
+ * Before this each insert reached the data engine with a tenant-only context
  * (or none), no principal and no opt-in, and passed the security middleware
  * only through its principal-less hand-off (ADR-0096 E1), which D5 closes.
  * Carrying the caller's principal instead is not open: no member grant exists
- * on `sys_file`, so uploads would break.
+ * on `sys_file` / `sys_upload_session`, so uploads would break.
  *
- * What it keeps is the door-derived scope, unchanged: the row is stamped
- * `owner_id` with the uploading user the door resolved from the session, and
- * `tenantId` still reaches `DriverOptions.tenantId`, where the driver's
- * `injectTenantOnInsert` stamps the organization exactly as before
- * ({@link StorageWriteContext}). ⛔ Never drop the `tenantId` from this
- * context: under the opt-in no other layer stamps the organization.
+ * What it keeps is the door-derived scope, unchanged. The `sys_file` row is
+ * stamped `owner_id` with the uploading user the door resolved from the
+ * session; the `sys_upload_session` row carries no user column and is bound to
+ * that file by `file_id`. `tenantId` still reaches `DriverOptions.tenantId`,
+ * where the driver's `injectTenantOnInsert` stamps the organization exactly as
+ * before ({@link StorageWriteContext}). ⛔ Never drop the `tenantId` here:
+ * under the opt-in no other layer stamps the organization.
  */
-const CREATE_FILE_SYSTEM_CONTEXT = { isSystem: true } as const;
+function systemInsertOptionsFor(
+  context?: StorageWriteContext,
+): { context: { isSystem: true; tenantId?: string } } {
+  const tenant = writeOptionsFor(context)?.context;
+  return { context: { ...(tenant ?? {}), isSystem: true } };
+}
 
 /**
  * Persisted upload-session record (matches `sys_upload_session` object schema).
@@ -341,11 +349,6 @@ export class StorageMetadataStore {
     const now = new Date().toISOString();
     const full: FileRecord = { created_at: now, updated_at: now, ...rec };
     const options = writeOptionsFor(context);
-    // [#21908] The engine insert carries the explicit system opt-in, keeping the
-    // acting organization beside it — see CREATE_FILE_SYSTEM_CONTEXT.
-    const insertOptions = {
-      context: { ...(options?.context ?? {}), ...CREATE_FILE_SYSTEM_CONTEXT },
-    };
     if (!this.engine) {
       // The engine-absent stand-in has no schema to ask, so it records what it
       // was told rather than deriving a column: a no-engine deployment has no
@@ -359,8 +362,10 @@ export class StorageMetadataStore {
       this.files.set(stamped.id, stamped);
       return stamped;
     }
+    // [#21908] The explicit system opt-in, the organization kept beside it —
+    // see systemInsertOptionsFor.
     await this.engineOp('sys_file', 'insert', FILE_INSERT_CONSEQUENCE, (engine) =>
-      engine.insert('sys_file', full, insertOptions),
+      engine.insert('sys_file', full, systemInsertOptionsFor(context)),
     );
     return full;
   }
@@ -486,8 +491,10 @@ export class StorageMetadataStore {
       this.sessions.set(stamped.id, stamped);
       return stamped;
     }
+    // [#21908] The explicit system opt-in, the organization kept beside it —
+    // see systemInsertOptionsFor.
     await this.engineOp('sys_upload_session', 'insert', SESSION_INSERT_CONSEQUENCE, (engine) =>
-      engine.insert('sys_upload_session', full, options),
+      engine.insert('sys_upload_session', full, systemInsertOptionsFor(context)),
     );
     return full;
   }
