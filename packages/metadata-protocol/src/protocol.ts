@@ -9995,6 +9995,9 @@ export class ObjectStackProtocolImplementation implements
         //    served-row resolution — see {@link findServedOverlayRow}. It
         //    decides the CONTENT only; the lock is selected below from this
         //    read's address ([#21761]).
+        // [#21899] Whether a stored row was found — the fact the origin-gated
+        // repair's `deletable` reads ({@link servedLockState}).
+        let storedRowServed = false;
         try {
             const record = (await this.findServedOverlayRow({
                 type: request.type,
@@ -10003,6 +10006,7 @@ export class ObjectStackProtocolImplementation implements
                 state: readState,
                 ...(request.packageId ? { packageId: request.packageId } : {}),
             }))?.row;
+            storedRowServed = record !== undefined && record !== null;
             // [#20946] The stored-row half — see `shippedFlowActiveRead` above.
             if (record && !shippedFlowActiveRead) {
                 item = this.convertStoredItem(
@@ -10275,7 +10279,9 @@ export class ObjectStackProtocolImplementation implements
         // [#21738] The lock is the one item-lock resolution's (above), over the
         // layers this read resolved — never the served document's `_lock`.
         const artifactBacked = this.isArtifactBacked(request.type, request.name);
-        const lockState = this.servedLockState(request.type, request.name, decorated, artifactBacked, itemLock);
+        const lockState = this.servedLockState(
+            request.type, request.name, decorated, artifactBacked, itemLock, storedRowServed,
+        );
         return {
             type: request.type,
             name: request.name,
@@ -10743,6 +10749,7 @@ export class ObjectStackProtocolImplementation implements
         // doors answer — the same derivation `getMetaItem` publishes.
         const lockState = this.servedLockState(
             request.type, request.name, code ?? overlay ?? {}, artifactBacked, itemLock,
+            overlay !== null && overlay !== undefined,
         );
 
         // [#8154] The per-type credential redaction, on the ONE read exit
@@ -16298,6 +16305,15 @@ export class ObjectStackProtocolImplementation implements
      * ⛔ Not a policy. Which writes are refused is decided at the doors; this
      * method only reports their answer, so a door that moves moves this read
      * with it.
+     *
+     * [#21899] One removal verdict depends on the store, not the registry: an
+     * origin-gated code-defined item ({@link originGatedRemovalRefusal}) is
+     * refused removal unless a stored row exists, whose delete is repair. So
+     * `storedRowServed` — whether the read found a stored row for the item —
+     * is the one store fact this derivation takes, and only that verdict reads
+     * it: `deletable` is true while there is such a row to remove, false once
+     * there is none. Every other removal verdict ignores it. The diagnostics
+     * tile passes none (it counts `lock !== 'none'`, which both answers are).
      */
     private servedLockState(
         type: string,
@@ -16305,12 +16321,14 @@ export class ObjectStackProtocolImplementation implements
         document: unknown,
         artifactBacked: boolean,
         itemLock: ItemLock,
+        storedRowServed = false,
     ): ReturnType<typeof resolveLockState> {
         const { provenance, packageId, packageVersion } = extractProtection(document);
         const editable = evaluateLockForWrite(itemLock.lock) === null
             && this.packagedBaseRefusal({ type, name, operation: 'save' }) === null;
+        const removalRefusal = this.packagedBaseRefusal({ type, name, operation: 'delete' });
         const deletable = evaluateLockForDelete(itemLock.lock) === null
-            && this.packagedBaseRefusal({ type, name, operation: 'delete' }) === null;
+            && (removalRefusal === null || (storedRowServed && isOriginGatedType(type)));
         const lock = MetadataLockSchema.options.find((state) =>
             (evaluateLockForWrite(state) === null) === editable
             && (evaluateLockForDelete(state) === null) === deletable);
@@ -16791,9 +16809,9 @@ export class ObjectStackProtocolImplementation implements
      * ({@link SysMetadataRepository.assertDeleteAllowed}), because it is
      * topology-independent and is the gate a host-config kernel asks.
      *
-     * The read envelope keeps answering `deletable: false` (the item is not
-     * removable) and `resettable: true` (its stored row is, which is what this
-     * repair is), through the {@link packagedBaseRefusal} it already asks.
+     * The read envelope reports the same verdict ({@link servedLockState}):
+     * `editable: false` always, and `deletable` true exactly while the read
+     * found a stored row for the delete to remove.
      */
     private originGatedRemovalRefusal(type: string, name: string): Error | null {
         if (!isOriginGatedType(type)) return null;

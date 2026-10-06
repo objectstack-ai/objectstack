@@ -86,6 +86,7 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { SysMetadataRepository, resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
+import { isOriginGatedType } from './packaged-base-regime.js';
 
 /**
  * THE TIER THAT MOVES, derived from the registry and never listed by hand
@@ -119,9 +120,17 @@ const OVERLAY_INCAPABLE_TYPES: readonly string[] = DEFAULT_METADATA_TYPE_REGISTR
  * the boundary sweep below turned it red on the control-plane leg with a
  * SUCCESSFUL delete, which is pre-existing, documented, and outside this
  * card. `protocol.code-only-types.test.ts` owns that tier.
+ *
+ * [#21899] …and minus the ORIGIN-GATED type (`datasource`, ADR-0126 §3:
+ * code-defined read-only, runtime-created free). It shares these flags with
+ * `object`, but the runtime never persists a code-defined datasource, so a
+ * stored row under its name is residue whose removal is repair — its own tier,
+ * pinned (refused with no row, admitted with one) in
+ * `protocol.code-defined-datasource-door.test.ts`.
  */
 const OVERLAY_INCAPABLE_RUNTIME_CREATABLE_TYPES: readonly string[] = DEFAULT_METADATA_TYPE_REGISTRY
     .filter((e) => !e.supportsOverlay && !e.allowOrgOverride && e.allowRuntimeCreate)
+    .filter((e) => !isOriginGatedType(e.type))
     .map((e) => e.type)
     .sort();
 

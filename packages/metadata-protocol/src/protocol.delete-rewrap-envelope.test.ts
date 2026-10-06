@@ -80,7 +80,7 @@ import { ErrorCode } from '@objectstack/spec/api';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
-import { packagedBaseRegimeRow } from './packaged-base-regime.js';
+import { isOriginGatedType, packagedBaseRegimeRow } from './packaged-base-regime.js';
 
 /**
  * The tier whose artifact-backed delete is refused BY THE REPOSITORY on a
@@ -92,9 +92,16 @@ import { packagedBaseRegimeRow } from './packaged-base-regime.js';
  * and routes the delete into the repository in the first place.
  *
  * `object` is the specimen ADR-0029 D9 pins; the rest ride the same flags.
+ *
+ * [#21899] Minus the ORIGIN-GATED type (`datasource`): the repository lifts
+ * its delete gate for a stored row under a code-defined name (repair), so it
+ * refuses no such delete. The removal refusal for a code-defined datasource is
+ * the protocol's, answered when no row exists, and is pinned in
+ * `protocol.code-defined-datasource-door.test.ts`.
  */
 const REPO_REFUSED_TYPES: readonly string[] = DEFAULT_METADATA_TYPE_REGISTRY
     .filter((e) => !e.supportsOverlay && !e.allowOrgOverride && e.allowRuntimeCreate)
+    .filter((e) => !isOriginGatedType(e.type))
     .map((e) => e.type)
     .sort();
 

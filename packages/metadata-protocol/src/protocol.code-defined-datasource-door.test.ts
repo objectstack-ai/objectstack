@@ -148,7 +148,13 @@ function makeSession(opts: {
             registerItem: () => {},
             registerObject: () => {},
             listItems: () => [],
-            getItem: () => undefined,
+            // The served code definition, as the runtime's in-memory
+            // registration serves it on a read.
+            getItem: (type: string, name: string) =>
+                (type === 'datasource' && name === CODE_DS && (opts.packages ?? []).length > 0
+                    ? { ...body(CODE_DS, 'External Analytics (SQLite)'), origin: 'code' }
+                    : undefined),
+            applyNavContributions: (app: unknown) => app,
             // A code-defined datasource is never a SchemaRegistry item — the
             // artifact-only lookup misses it, exactly as on a booted showcase.
             getArtifactItem: () => undefined,
@@ -271,13 +277,22 @@ for (const { label, environmentId } of KERNELS) {
             expect({ code: again?.code, status: again?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
         });
 
-        it('the read envelope agrees: not editable, not deletable, resettable', () => {
-            const { protocol } = session();
-            expect(protocol.packagedBaseRefusal({ type: 'datasource', name: CODE_DS, operation: 'save' })?.message).toBe(SAVE_SENTENCE);
-            expect(protocol.packagedBaseRefusal({ type: 'datasource', name: CODE_DS, operation: 'delete' })?.message).toBe(DELETE_SENTENCE);
-            const state = protocol.servedLockState('datasource', CODE_DS, {}, true, { lock: 'none' });
-            expect({ editable: state.editable, deletable: state.deletable, resettable: state.resettable })
-                .toEqual({ editable: false, deletable: false, resettable: true });
+        it('the read envelope agrees with the doors: never editable, deletable only while a stored row exists', async () => {
+            const flags = (r: any) => ({ lock: r.lock, editable: r.editable, deletable: r.deletable, resettable: r.resettable });
+            const read = async (protocol: any) => ({
+                byName: flags(await protocol.getMetaItem({ type: 'datasource', name: CODE_DS })),
+                layered: flags(await protocol.getMetaItemLayered({ type: 'datasource', name: CODE_DS })),
+            });
+
+            // No stored row: PUT and DELETE are both refused (above).
+            const none = await read(session().protocol);
+            expect(none.byName).toEqual({ lock: 'full', editable: false, deletable: false, resettable: true });
+            expect(none.layered).toEqual(none.byName);
+
+            // A pre-existing stored row: PUT is refused, DELETE removes it (above).
+            const residue = await read(session([shadowRow(CODE_DS)]).protocol);
+            expect(residue.byName).toEqual({ lock: 'no-overlay', editable: false, deletable: true, resettable: true });
+            expect(residue.layered).toEqual(residue.byName);
         });
 
         it('control: a runtime datasource still saves and deletes through this door', async () => {
