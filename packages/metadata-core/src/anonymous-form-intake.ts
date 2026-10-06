@@ -23,7 +23,7 @@
  * Clearing either switch withdraws the form from every anonymous door.
  *
  * A withdrawal is a kill switch: any metadata layer whose body of the same
- * stored row explicitly withdraws the form (the link kept, a switch set to
+ * view name explicitly withdraws the form (the link kept, a switch set to
  * `false`), matched by slot or by slug, closes it, and layering may only narrow
  * intake, never re-open it ({@link anonymousFormIntakeWithdrawnIn}).
  *
@@ -264,7 +264,11 @@ function anonymousFormSlot(view: Record<string, any>, candidate: AnonymousFormIn
  * false` or `allowAnonymous === false`. Judged on the body as stored: a switch
  * that is absent is not a withdrawal (only an explicit `false` is), and a
  * sharing with no public link withdraws nothing — removing the sharing block or
- * clearing the link is not a withdrawal.
+ * clearing the link is not a withdrawal. A body served as parsed (a package
+ * artifact) carries the schema's default `enabled: false`, which is an
+ * explicit `false`: a shipped form that keeps its link without switching
+ * `enabled` on is withdrawn (fail closed). The env-wide definition is the
+ * switch above it, so an env-wide save may still open it.
  */
 function anonymousFormExplicitWithdrawals(view: unknown): Array<{ slot: string; slug: string }> {
     if (!view || typeof view !== 'object') return [];
@@ -294,9 +298,16 @@ function anonymousFormExplicitWithdrawals(view: unknown): Array<{ slot: string; 
  * withdraws it, and the organization-scoped write door refuses a save that
  * would leave one open.
  *
- * Identity is the stored row: `layer` holds bodies of rows, and the candidate's
- * `view` is a body of a row of the same `name` — the row its overlay is keyed
- * by. The layer withdraws the candidate when its body of that row EXPLICITLY
+ * Identity is the `name`: the layer withdraws the candidate only through a
+ * body of the same `name` as the candidate's `view`. What that name is depends
+ * on the caller. The organization-scoped write door passes the env-wide body
+ * of the stored row the overlay is keyed by, so a key rename, a `form.name`,
+ * a slot move or an expansion rename is still judged against the form it was.
+ * The anonymous doors pass the env-wide view list and the item they serve, so
+ * they judge by the served item name (a known limit: an overlay stored before
+ * the withdrawal, or restored by rollback or revert, that moves its form to
+ * another key or slot is not matched there). The layer withdraws the
+ * candidate when its body of that name EXPLICITLY
  * withdraws a form ({@link anonymousFormExplicitWithdrawals}) that matches the
  * candidate by slot (the same `form`, `formViews` key or `config`) OR by slug
  * (the same public link, compared exactly as the doors resolve it). Either
