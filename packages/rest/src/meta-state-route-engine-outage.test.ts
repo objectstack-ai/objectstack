@@ -342,11 +342,11 @@ describe('[#15405] §0 reachability of this consumer, measured', () => {
         // if it ever lands in a clocked window again (file head). Its own work,
         // measured on a 4-vCPU container: 3 ms idle, 12-16 ms with this file
         // confined to a third of one core, 3-23 ms confined to a fifth. The load
-        // it must not carry: 3574-3661 ms with the file run alone, 893 ms inside
-        // the whole-package run (an earlier file had already cached the
-        // transform). 500 ms sits about 20x above the first and below both of
-        // the second, so the regression reads red on an IDLE box, well before a
-        // loaded shard turns it into the 5000 ms timeout.
+        // it must not carry: 3574-3661 ms with the file run alone, 893 and
+        // 1723 ms in two whole-package runs (an earlier file had already cached
+        // the transform). 500 ms sits about 20x above the first and below every
+        // reading of the second, so the regression reads red on an IDLE box,
+        // well before a loaded shard turns it into the 5000 ms timeout.
         expect(
             ownWorkMs,
             "this case paid a module load inside its clocked window: keep the module-top import of '@objectstack/objectql' at the file head",
