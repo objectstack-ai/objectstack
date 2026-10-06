@@ -3418,7 +3418,8 @@ const ACTION_NODE_GUIDANCE = {
  *   hoist makes `schema.params` the same object, so an array here is the input
  *   list and an object is the static values. (A node-level object `params`
  *   outside `properties` is ignored with a development warning.)
- * - Forwarded to the runner (`:215-318`): `description`, `target`, `openIn`,
+ * - Forwarded to the runner (`action-button.tsx:215-318` first line
+ *   `type: schema.actionType,`): `description`, `target`, `openIn`,
  *   `method`, `bodyExtra`, `bodyShape`, `operation`, `patch`,
  *   `confirmText`, `successMessage`, `errorMessage`, `refreshAfter`,
  *   `undoable`, `recordIdField`, `locations`, `toast`, `resultDialog`,
@@ -3532,7 +3533,8 @@ export type ActionButtonPropsParsed = z.infer<typeof ActionButtonPropsSchema>;
  *   `action:button`. `variant` — `:119`, `primary` mapped to `default`,
  *   renderer default `ghost`.
  * - `params` — `:143-146`, routed exactly as on `action:button`.
- * - Forwarded (`:160-211`): `actionType`, `name`, `target`, `openIn`,
+ * - Forwarded (`action-icon.tsx:160-211` first line
+ *   `type: schema.actionType,`): `actionType`, `name`, `target`, `openIn`,
  *   `method`, `bodyExtra`, `bodyShape`, `operation`, `patch`,
  *   `confirmText`, `successMessage`, `errorMessage`, `refreshAfter`,
  *   `locations`, `toast`, `resultDialog`, `onSuccess`, `objectName`.
@@ -3997,7 +3999,8 @@ export type ActionMenuPropsParsed = z.infer<typeof ActionMenuPropsSchema>;
 /**
  * `element:definition-list` — a compact key/value `<dl>`
  * (`components/src/renderers/basic/data-list.tsx` at the pin). Props are read
- * through `readProps` (`:42-47`, `properties` first). Read points: `items`
+ * through `readProps` (`data-list.tsx:42-47` first line
+ * `const props = readProps<{`, `properties` first). Read points: `items`
  * (`:48`), `columns` (`:49`), `inline` (`:63`), and per item `term` (`:66`) and
  * `description` (`:68`).
  *
