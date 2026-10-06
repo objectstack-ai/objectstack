@@ -19,10 +19,18 @@
 // ## What it does
 //
 // At module top level, which runs before the test file's own imports, it makes
-// a directory under the run's temporary root and `chdir`s into it. `afterAll`
-// restores the previous working directory. The directories are removed at the
-// end of the run by the globalSetup, not here: the memoized `shared-showcase`
-// boot keeps its SQLite handles open in the first file's directory.
+// a directory directly under the system temp directory, named with the run's
+// tag (`<tag>-file-XXXXXX`), and `chdir`s into it. `afterAll` restores the
+// previous working directory. The directories are removed at the end of the
+// run by the globalSetup, which sweeps its own tag, not here: the memoized
+// `shared-showcase` boot keeps its SQLite handles open in the first file's
+// directory.
+//
+// The base is spelled `join(tmpdir(), ...)` on purpose (#21924): the tree's
+// scratch-directory scan must be able to read every `mkdtempSync` base, and a
+// path received through `inject()` is one it cannot read. Only the run's TAG
+// comes through `inject()`, as a name component, and it is refused below if
+// it could carry a separator.
 //
 // The invariant for every dogfood author: a file runs in its own temporary
 // cwd, so anything cwd-relative it writes is its own and disappears with the
@@ -38,26 +46,31 @@
 // what this run leaves.
 import { afterAll, inject } from 'vitest';
 import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { perFileDirPrefix } from './per-file-cwd.global-setup.js';
 
 /** `packages/qa/dogfood`, resolved from this module's own location. */
 const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 /** What a file must never leave in the package directory. */
 const LEFTOVER = join(PACKAGE_ROOT, '.objectstack', 'data');
 
-const runRoot = inject('dogfoodCwdRoot');
-if (!runRoot) {
+const runTag = inject('dogfoodRunTag');
+if (!runTag) {
   throw new Error(
-    'per-file-cwd.setup.ts: no run root was provided. The globalSetup ' +
+    'per-file-cwd.setup.ts: no run tag was provided. The globalSetup ' +
       '`test/per-file-cwd.global-setup.ts` must be wired in packages/qa/dogfood/vitest.config.ts; ' +
       'without it this file would run in the package directory.',
   );
 }
+if (/[\\/]|\.\./.test(runTag)) {
+  throw new Error(`per-file-cwd.setup.ts: the run tag ${JSON.stringify(runTag)} is not a plain directory name.`);
+}
 
 const previousCwd = process.cwd();
 const presentAtStart = existsSync(LEFTOVER);
-process.chdir(mkdtempSync(join(runRoot, 'file-')));
+process.chdir(mkdtempSync(join(tmpdir(), perFileDirPrefix(runTag))));
 
 afterAll(() => {
   process.chdir(previousCwd);
