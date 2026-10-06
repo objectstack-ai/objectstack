@@ -560,10 +560,12 @@ overrides:
   #     The target resolves to 0.18.10, not 0.18.11: 0.18.11 is deprecated on
   #     npm ("Accidentally published with breaking changes"), and pnpm skips it.
   #   Transitive-only and docs-only: nothing publishable declares katex, so
-  #     check-override-consistency.mjs lists it as an override it cannot
-  #     cross-check against a declared range — correct for this shape. The
-  #     floor is the advisory's 0.11.0; the bound is 0.19.0, the caret boundary
-  #     of the 0.18 target line, per this block's header rule — never `<0.18.2`.
+  #     check-override-consistency.mjs's manifest rule has no declared range to
+  #     hold in lockstep and says nothing about this entry (measured; neither
+  #     census lists it: mermaid consumes it, and the bound clears the target
+  #     floor). The floor is the advisory's 0.11.0; the bound is 0.19.0, the
+  #     caret boundary of the 0.18 target line, per this block's header rule —
+  #     never `<0.18.2`.
   #     Re-check when a mermaid release declares a katex range that admits
   #     0.18.2: the entry then turns into a dedupe and stays as the floor.
   'katex@>=0.11.0 <0.19.0': '^0.18.2'
