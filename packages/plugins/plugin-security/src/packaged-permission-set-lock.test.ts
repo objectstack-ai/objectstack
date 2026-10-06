@@ -76,8 +76,13 @@
 import { describe, it, expect } from 'vitest';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { mapDataError, resolveThrownHttpError } from '@objectstack/types';
 import { SysPermissionSet } from './objects/sys-permission-set.object.js';
-import { classifyPackagedPermissionSet } from './packaged-permission-set-lock.js';
+import {
+  classifyPackagedPermissionSet,
+  PackagedPermissionSetLockedError,
+  PackagedPermissionSetProvenanceUnknownError,
+} from './packaged-permission-set-lock.js';
 import { registerPackagedPermissionSetLockGate } from './packaged-permission-set-lock-gate.js';
 import {
   createPermissionSetWriteThrough,
@@ -983,5 +988,151 @@ describe('[#21789] the lock judges "shipped by a code package" from the row\'s p
       .resolves.toBeUndefined();
     await expect(gate!({ type: 'permission', name: 'ehr_quality_inspector', body: packagedSet() }))
       .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The refusal's guidance reaches the END USER — `userMessage` on the wire
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The console renders a refusal's `userMessage` verbatim and substitutes its
+ * generic "You don't have permission to save this record." for every 403 that
+ * carries none (the objectui#5210 producer-side opt-in; `declaredUserMessage`
+ * in `@objectstack/types` is the one read every door applies). An unmarked
+ * lock refusal therefore told the admin nothing about the clone path, which is
+ * the whole point of the ruling the lock implements.
+ *
+ * The wire envelope is computed by the producer's own mapping, not restated:
+ *
+ *  - `mapDataError` is the call the REST `/data` door makes in its catch
+ *    (`PATCH` and `POST /data/:object[/:id]`, `rest-server.ts`) — the door that
+ *    serves Setup's save, measured on a booted showcase as the flat
+ *    `{ error, code, object }` body;
+ *  - `resolveThrownHttpError` is the dispatcher door's resolution of the same
+ *    throw.
+ *
+ * Every case asserts the envelope (`status` + `code`) AND the `userMessage`:
+ * the code and status are the refusal's identity and must not move, and the
+ * marked text is what this block is about. The text itself is not pinned word
+ * for word — what is pinned is what the end user must and must not be shown:
+ * the guidance (clone it), and none of the diagnostic's machine names, package
+ * ids or API paths (the console's friendly-copy rule, objectstack#3821).
+ */
+describe('the lock refusal carries its guidance as `userMessage` on the wire envelope', () => {
+  const PACKAGE_ID = 'com.example.ehr';
+  const SET_NAME = 'ehr_quality_inspector';
+
+  /** End-user copy: a non-empty string carrying none of the diagnostic's machine identifiers. */
+  const expectEndUserCopy = (text: unknown, ...machineNames: string[]) => {
+    expect(typeof text, 'userMessage must be present on the wire').toBe('string');
+    expect(String(text).trim().length).toBeGreaterThan(0);
+    for (const machineName of machineNames) {
+      expect(text, `userMessage must not name '${machineName}'`).not.toContain(machineName);
+    }
+    expect(text, 'userMessage must not carry an API path').not.toMatch(/\/api\//);
+  };
+
+  const refusedUpdate = async () => {
+    const ql = makeQl([packagedSet()]);
+    const protocol = makeHatchOpenProtocol(ql, { [SET_NAME]: packagedSet() });
+    registerPermissionSetProjection(protocol, { ql });
+    ql.permRows.push(packagedRow());
+    return run(makeMiddleware(ql, protocol), {
+      object: 'sys_permission_set', operation: 'update', context: userCtx,
+      data: { id: 'ps_pkg', description: 'edit' },
+    }).then(() => null, (e: any) => e);
+  };
+
+  it('UPDATE at the data door: 403 NOT_OVERRIDABLE with the clone guidance in `userMessage`', async () => {
+    const rejection = await refusedUpdate();
+    expect(rejection).toBeInstanceOf(PackagedPermissionSetLockedError);
+
+    const wire = mapDataError(rejection, 'sys_permission_set');
+    expect(wire.status).toBe(403);
+    expect(wire.body.code).toBe('NOT_OVERRIDABLE');
+    expectEndUserCopy(wire.body.userMessage, SET_NAME, PACKAGE_ID, 'sys_permission_set');
+    expect(String(wire.body.userMessage)).toMatch(/clone it instead/i);
+    // The diagnostic channel is untouched: it still names the set and the
+    // package for logs and developers. The mark never replaces `message`.
+    expect(String(wire.body.error)).toContain(SET_NAME);
+    expect(String(wire.body.error)).toContain(PACKAGE_ID);
+  });
+
+  it('INSERT of a packaged name at the data door: 403 NOT_OVERRIDABLE with its own guidance (choose another name, or clone)', async () => {
+    const ql = makeQl([packagedSet()]);
+    const protocol = makeHatchOpenProtocol(ql, { [SET_NAME]: packagedSet() });
+    registerPermissionSetProjection(protocol, { ql });
+    const rejection = await run(makeMiddleware(ql, protocol), {
+      object: 'sys_permission_set', operation: 'insert', context: userCtx,
+      data: { name: SET_NAME, label: 'Mine', object_permissions: '{}' },
+    }).then(() => null, (e: any) => e);
+    expect(rejection).toBeInstanceOf(PackagedPermissionSetLockedError);
+
+    const wire = mapDataError(rejection, 'sys_permission_set');
+    expect(wire.status).toBe(403);
+    expect(wire.body.code).toBe('NOT_OVERRIDABLE');
+    expectEndUserCopy(wire.body.userMessage, SET_NAME, PACKAGE_ID, 'sys_permission_set');
+    expect(String(wire.body.userMessage)).toMatch(/different name/i);
+    expect(String(wire.body.userMessage)).toMatch(/clone/i);
+
+    // Each operation carries the guidance that fits it.
+    const update = mapDataError(await refusedUpdate(), 'sys_permission_set');
+    expect(wire.body.userMessage).not.toBe(update.body.userMessage);
+  });
+
+  it('the dispatcher door resolves the same throw to the same status, code and `userMessage`', async () => {
+    const rejection = await refusedUpdate();
+    const rest = mapDataError(rejection, 'sys_permission_set');
+    const resolved = resolveThrownHttpError(rejection);
+    expect(resolved.status).toBe(403);
+    expect(resolved.code).toBe('NOT_OVERRIDABLE');
+    expectEndUserCopy(resolved.userMessage, SET_NAME, PACKAGE_ID);
+    expect(resolved.userMessage).toBe(rest.body.userMessage);
+  });
+
+  it('the metadata door\'s registered lock throws the same class with the same `userMessage`', async () => {
+    const ql = makeQl([shippedArtifact()]);
+    let gate: ((ctx: { type: string; name: string; body: unknown }) => Promise<void>) | undefined;
+    const protocol = {
+      registerAuthoringGate: (_type: string, g: typeof gate) => { gate = g; },
+      getMetaItemLayered: async ({ name }: { name: string }) => ({ type: 'permission', name, code: null, overlay: null, effective: null }),
+    };
+    expect(registerPackagedPermissionSetLockGate(protocol, ql)).toBe(true);
+
+    const rejection = await gate!({ type: 'permission', name: SET_NAME, body: packagedSet() })
+      .then(() => null, (e: any) => e);
+    expect(rejection).toBeInstanceOf(PackagedPermissionSetLockedError);
+    const resolved = resolveThrownHttpError(rejection);
+    expect(resolved.status).toBe(403);
+    expect(resolved.code).toBe('NOT_OVERRIDABLE');
+    expectEndUserCopy(resolved.userMessage, SET_NAME, PACKAGE_ID);
+    expect(resolved.userMessage).toBe(mapDataError(await refusedUpdate(), 'sys_permission_set').body.userMessage);
+  });
+
+  it('the fail-closed sibling (provenance unknown): 403 NOT_OVERRIDABLE with retry-or-clone guidance, and no diagnostic reason', async () => {
+    const ql = makeQl([]);
+    ql.registry = { listItems: () => { throw new Error('registry unavailable'); } };
+    const protocol = makeHatchOpenProtocol(ql, {});
+    protocol.getMetaItemLayered = async () => { throw new Error('metadata store unavailable'); };
+    registerPermissionSetProjection(protocol, { ql });
+    ql.permRows.push({ id: 'ps_x', name: 'unknown_provenance', managed_by: 'admin', system_permissions: '[]' });
+    const rejection = await run(makeMiddleware(ql, protocol), {
+      object: 'sys_permission_set', operation: 'update', context: userCtx,
+      data: { id: 'ps_x', system_permissions: '["whatever"]' },
+    }).then(() => null, (e: any) => e);
+    expect(rejection).toBeInstanceOf(PackagedPermissionSetProvenanceUnknownError);
+
+    const wire = mapDataError(rejection, 'sys_permission_set');
+    expect(wire.status).toBe(403);
+    expect(wire.body.code).toBe('NOT_OVERRIDABLE');
+    expectEndUserCopy(
+      wire.body.userMessage, 'unknown_provenance', 'sys_permission_set',
+      'registry unavailable', 'metadata store unavailable',
+    );
+    expect(String(wire.body.userMessage)).toMatch(/try again/i);
+    expect(String(wire.body.userMessage)).toMatch(/clone/i);
+    // The reason stays where it was: the diagnostic channel.
+    expect(String(wire.body.error)).toContain('registry unavailable');
   });
 });

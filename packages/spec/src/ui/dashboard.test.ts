@@ -160,7 +160,7 @@ describe('DashboardWidgetSchema (dataset-bound)', () => {
  * `toContain` in the block above stays green either way. An edit that folds the
  * sentence back into the middle passes all of them and fails here.
  */
-describe('widget unknown-key message order — fix before history (#6416 / #6619)', () => {
+describe('widget unknown-key message order — fix before history', () => {
   const HISTORY =
     'Undeclared top-level keys were dropped silently before strict validation, ' +
     'shipping inert metadata; a stale or mis-layered key is now a loud parse error.';
@@ -202,7 +202,7 @@ describe('widget unknown-key message order — fix before history (#6416 / #6619
   );
 
   orderPin(
-    'drill branch (#5022): the "AUTOMATIC" answer comes first',
+    'drill branch: the "AUTOMATIC" answer comes first',
     { drillDown: { enabled: true } },
     'drillDown',
     'Drill-through on a dashboard is AUTOMATIC and not configurable per widget',
@@ -224,7 +224,7 @@ describe('widget unknown-key message order — fix before history (#6416 / #6619
       .toBe(`Unrecognized key(s) on this dashboard widget: \`zzWrongKey\`. ${HISTORY}`);
   });
 
-  it('a near-miss of a DECLARED key now gets the rename the bespoke map never offered (#6619)', () => {
+  it('a near-miss of a DECLARED key now gets the rename the bespoke map never offered', () => {
     // `colourVariant` was this block's no-fix fixture while the map was
     // hand-written: it answered with nothing but the history, leaving the
     // author to find `colorVariant` alone. Folding onto the shared template
@@ -243,7 +243,7 @@ describe('widget unknown-key message order — fix before history (#6416 / #6619
     expect(m.endsWith(` ${HISTORY}`)).toBe(true);
   });
 
-  it('keys from TWO families now surface BOTH prescriptions, in declaration order (#6619)', () => {
+  it('keys from TWO families now surface BOTH prescriptions, in declaration order', () => {
     // The one deliberate behaviour change in the fold. The hand-written map
     // was an if/else chain: a widget carrying `categoryField` AND `component`
     // got only the legacy-analytics answer, and the quarantine verdict was
@@ -261,7 +261,7 @@ describe('widget unknown-key message order — fix before history (#6416 / #6619
     expect(m.split(legacy)).toHaveLength(2);
   });
 
-  it('a set answers once however many of its members are written (#6619)', () => {
+  it('a set answers once however many of its members are written', () => {
     const m = messageFor({ categoryField: 'stage', valueField: 'amount', aggregate: 'sum' });
     expect(m.split('The pre-ADR-0021 inline analytics shape')).toHaveLength(2);
     expect(m.endsWith(` ${HISTORY}`)).toBe(true);
@@ -330,14 +330,14 @@ describe('Dashboard presentation sub-schemas', () => {
     expect(GlobalFilterOptionsFromSchema.parse({ object: 'user', valueField: 'id', labelField: 'name' }).object).toBe('user');
   });
 
-  it('GlobalFilterSchema.name — optional stable variable key (framework#2501)', () => {
+  it('GlobalFilterSchema.name — optional stable variable key', () => {
     const named = GlobalFilterSchema.parse({ name: 'region', field: 'sales_region', type: 'select' });
     expect(named.name).toBe('region');
     // name stays optional — runtime defaults it to `field`.
     expect(GlobalFilterSchema.parse({ field: 'region' }).name).toBeUndefined();
   });
 
-  describe('GlobalFilterSchema.object — i18n label-resolution key (#7804)', () => {
+  describe('GlobalFilterSchema.object — i18n label-resolution key', () => {
     it('accepts a string object name and threads it through unchanged', () => {
       const f = GlobalFilterSchema.parse({ field: 'sales_channel', type: 'select', object: 'opportunity' });
       expect(f.object).toBe('opportunity');
@@ -391,7 +391,7 @@ describe('Dashboard presentation sub-schemas', () => {
     });
   });
 
-  it('DashboardWidgetSchema.filterBindings — field override / opt-out (framework#2501)', () => {
+  it('DashboardWidgetSchema.filterBindings — field override / opt-out', () => {
     const w = DashboardWidgetSchema.parse({
       id: 'accounts_signed', type: 'line', dataset: 'accounts', values: ['count'],
       filterBindings: { dateRange: 'signed_at', region: 'sales_region', status: false },
@@ -416,7 +416,7 @@ describe('Dashboard presentation sub-schemas', () => {
  * through to "a bare string means equality on that day", and emits a condition
  * no row matches. The dashboard reads 0 everywhere and looks deliberately empty.
  */
-describe('date-range preset vocabulary (#4614)', () => {
+describe('date-range preset vocabulary — one source, in the spec', () => {
   const dateFilter = (defaultValue: unknown) =>
     GlobalFilterSchema.parse({ field: 'created_at', type: 'date', defaultValue });
 
@@ -537,7 +537,7 @@ describe('date-range preset vocabulary (#4614)', () => {
 // REJECTS with the prescription, and the shared shape it used to reference is
 // untouched everywhere else. Splitting one shared schema's two embeds is
 // exactly the change that silently over-reaches, so the control is not optional.
-describe('[#4876] DashboardWidgetSchema — retired `responsive`', () => {
+describe('DashboardWidgetSchema — retired `responsive`', () => {
   const widget = { id: 'orders_kpi', type: 'metric', dataset: 'orders', values: ['total'] };
 
   it('REJECTS an authored `responsive` with the prescription (not "unrecognized key")', () => {
@@ -608,7 +608,7 @@ describe('[#4876] DashboardWidgetSchema — retired `responsive`', () => {
 //     `header.actions[]`);
 //   - `aria` — ARIA attributes that never reached the DOM, the dashboard-level
 //     `aria` retired by #3896 one level down.
-describe('[#5010] DashboardWidgetSchema — retired action trio + `aria`', () => {
+describe('DashboardWidgetSchema — retired action trio + `aria`', () => {
   const widget = { id: 'orders_kpi', type: 'metric', dataset: 'orders', values: ['total'] };
 
   const parseWith = (extra: Record<string, unknown>): string => {
@@ -714,7 +714,7 @@ describe('[#5010] DashboardWidgetSchema — retired action trio + `aria`', () =>
 // The alias half is the part with no other guard: `refresh` / `autoRefresh` /
 // `pollInterval` were rename hints pointing at the OLD spelling, and a hint
 // left pointing at a tombstone would prescribe a key the shape refuses.
-describe('dashboard.refreshInterval carries its unit (#15680)', () => {
+describe('dashboard.refreshInterval carries its unit', () => {
   const base = { name: 'dash_x', label: 'D', widgets: [] };
 
   it('REFUSES the retired `refreshInterval` with the rename in the message', () => {
@@ -749,7 +749,7 @@ describe('dashboard.refreshInterval carries its unit (#15680)', () => {
 // labels
 // ────────────────────────────────────────────────────────────────────────────
 
-describe('#16458 — DashboardHeaderAction fields carry an item-level `title`', () => {
+describe('DashboardHeaderAction fields carry an item-level `title`', () => {
   const ROW_TITLES: Record<string, string> = {
     label: 'Label',
     actionUrl: 'Action URL',
@@ -847,7 +847,7 @@ describe('#16458 — DashboardHeaderAction fields carry an item-level `title`', 
     expect(declared).toEqual(ROW_TITLES);
   });
 
-  it('control — `columns` still declares no default and parses to undefined when absent (#16458 item ④ deliberately not landed)', () => {
+  it('control — `columns` still declares no default and parses to undefined when absent (the renderer infers it from widget spans)', () => {
     const js = z.toJSONSchema(DashboardSchema, { io: 'input', unrepresentable: 'any' }) as any;
     expect(js.properties.columns.default).toBeUndefined();
     const parsed = DashboardSchema.parse({ name: 'dash_x', label: 'D', widgets: [] });
@@ -1112,7 +1112,7 @@ describe('DashboardWidgetOptions.stageOrder — the ADR-0049 type gate', () => {
  * `checkDashboardWidgetMetricMeasureArity` (>1 on the family → `custom` at
  * `values`).
  */
-describe('[#17779] DashboardWidgetSchema — the metric family takes exactly one measure', () => {
+describe('DashboardWidgetSchema — the metric family takes exactly one measure', () => {
   const widget = (over: Record<string, unknown>) => ({ ...WIDGET_BASE, ...over });
   const refusal = (value: Record<string, unknown>) => {
     const r = DashboardWidgetSchema.safeParse(value);
@@ -1259,7 +1259,7 @@ describe('[#17779] DashboardWidgetSchema — the metric family takes exactly one
  * family keeps its own refusal, unchanged, from
  * `checkDashboardWidgetMetricMeasureArity`.
  */
-describe('[#20958] DashboardWidgetSchema — a dimensionless widget takes several measures only on a multi-measure type', () => {
+describe('DashboardWidgetSchema — a dimensionless widget takes several measures only on a multi-measure type', () => {
   // No `dimensions` on purpose: WIDGET_BASE carries one, and that is the
   // variable this block turns.
   const DIMLESS = { id: 'pipeline_mix', dataset: 'contracts', layout: { x: 0, y: 0, w: 6, h: 4 } } as const;
@@ -1402,7 +1402,7 @@ describe('[#20958] DashboardWidgetSchema — a dimensionless widget takes severa
     expect(checkDashboardWidgetChartMeasureArity.length).toBe(2);
   });
 
-  it('[#21293] no longer exports `checkDashboardWidgetDimensionlessMeasureArity` — renamed with its second arm', () => {
+  it('no longer exports `checkDashboardWidgetDimensionlessMeasureArity` — renamed with its second arm', () => {
     // The surviving export above is the lit control that the namespace is
     // really populated.
     expect('checkDashboardWidgetDimensionlessMeasureArity' in (ui as Record<string, unknown>)).toBe(false);
@@ -1438,7 +1438,7 @@ describe('[#20958] DashboardWidgetSchema — a dimensionless widget takes severa
  * (`checkDashboardWidgetChartMeasureArity`), same `custom` issue at `values`;
  * `scatter` and `radar` with a dimension are outside the ruling.
  */
-describe('[#21293] DashboardWidgetSchema — a single-series type takes one measure WITH a dimension too', () => {
+describe('DashboardWidgetSchema — a single-series type takes one measure WITH a dimension too', () => {
   // `WIDGET_BASE` carries `dimensions: ['status']` — the variable this block
   // holds fixed.
   const widget = (over: Record<string, unknown>) => ({ ...WIDGET_BASE, ...over });
