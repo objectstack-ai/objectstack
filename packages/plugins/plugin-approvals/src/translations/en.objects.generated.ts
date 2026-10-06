@@ -104,6 +104,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_requests: {
+        label: "All"
+      },
       my_pending: {
         label: "My Pending",
         emptyState: {
@@ -116,9 +119,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       completed: {
         label: "Completed"
-      },
-      all_requests: {
-        label: "All"
       }
     },
     _actions: {
