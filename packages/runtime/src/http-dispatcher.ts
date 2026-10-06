@@ -1469,7 +1469,8 @@ export class HttpDispatcher {
             let rows = await ql.find('sys_environment_member', {
                 where: { environment_id: environmentId, user_id: userId },
                 limit: 1,
-            } as any, { context: { isSystem: true } });
+                context: { isSystem: true },
+            } as any);
             if (rows && (rows as any).value) rows = (rows as any).value;
             const isMember = Array.isArray(rows) && rows.length > 0;
 
