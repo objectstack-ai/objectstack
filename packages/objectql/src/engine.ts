@@ -304,8 +304,8 @@ import {
   withDeclaredColumnsOnly,
 } from './declared-read-columns.js';
 // [#21777] "Is this schema the remote's?" One predicate, shared with the boot sync.
-// [#21910] And its tenant-anchor refinement, which both cascade walks ask.
-import { isFederatedObject, isFederatedInjectedTenantAnchor } from './federated-object.js';
+// [#21910, #21918] And its injected-column refinement, which both cascade walks ask.
+import { isFederatedObject, isFederatedUnprovisionedInjectedColumn } from './federated-object.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
   resolveEngineDeleteDispatch,
@@ -15857,12 +15857,13 @@ export class ObjectQL implements IObjectQLEngine {
           let resolvedRef: string | undefined;
           try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
           if (ref !== name && resolvedRef !== name) continue;
-          // [#21910] The scan skips a federated object's injected tenant
-          // anchor, so this walk does too: the participant test stays the
-          // scan's own, as the comment above requires. A federated object this
-          // walk still reaches through any other relation keeps the verdict
+          // [#21910, #21918] The scan skips every column the registry injected
+          // into a federated object and the object does not provision, so this
+          // walk does too: the participant test stays the scan's own, as the
+          // comment above requires. A federated object this walk still reaches
+          // through a relation its author declared keeps the verdict
           // `'split'`, because the scan probes that relation.
-          if (isFederatedInjectedTenantAnchor(child, fieldName)) continue;
+          if (isFederatedUnprovisionedInjectedColumn(child, fieldName)) continue;
           out.push(childName);
           break;
         }
@@ -16331,25 +16332,30 @@ export class ObjectQL implements IObjectQLEngine {
         try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
         if (ref !== object && resolvedRef !== object) continue;
 
-        // [#21910] A federated object's platform-INJECTED tenant anchor is not
-        // a reference to `sys_organization`, so it is not a relation to probe.
-        // On a federated object that column exists in the registered schema
-        // and nowhere else: the probe below was refused by the driver
-        // (`INVALID_FILTER`, no such column), its catch propagated the refusal
-        // as #8895 rules for a missing column, and every organization delete
-        // answered 500 on a deployment with a federated object bound.
+        // [#21910, #21918] A lookup the registry INJECTED into a federated
+        // object, and the object does not provision, is not a reference to
+        // anything, so it is not a relation to probe. That is the tenant
+        // anchor `organization_id`, the ADR-0117 D1 anchor
+        // `owning_business_unit_id`, and the owner and audit lookups
+        // `owner_id` / `created_by` / `updated_by`. On a federated object each
+        // exists in the registered schema and nowhere else: the probe below
+        // was refused by the driver (`INVALID_FILTER`, no such column), its
+        // catch propagated the refusal as #8895 rules for a missing column,
+        // and deleting the organization, business unit or user it names was
+        // refused on a deployment with a federated object bound.
         // `buildDriverOptions` and the related-record read already refuse this
-        // reading of the same column. {@link isFederatedInjectedTenantAnchor}
-        // says why it is exactly that column, and
-        // {@link ObjectQL.planCascadeAtomicity} asks it too.
+        // reading of the tenant column.
+        // {@link isFederatedUnprovisionedInjectedColumn} reads which columns
+        // those are from the registry's own provenance, never from a list of
+        // names, and {@link ObjectQL.planCascadeAtomicity} asks it too.
         //
         // ⛔ The catch below is deliberately NOT widened to pass a missing
         // column as benign. That would invert #8895's discriminate or
-        // propagate for every object, not just this injected column: an
-        // `organization_id` the author declared on a federated object, and any
-        // other lookup the author declares on one, stay in the scan, and their
-        // probe failures still propagate.
-        if (isFederatedInjectedTenantAnchor(child, fieldName)) continue;
+        // propagate for every object, not just these injected columns: a
+        // lookup the author declared on a federated object, including an
+        // author's own `organization_id` or `owner_id`, stays in the scan, and
+        // its probe failure still propagates.
+        if (isFederatedUnprovisionedInjectedColumn(child, fieldName)) continue;
 
         // A master-detail parent owns its children: cascade by default (the
         // child FK is typically required, so set_null would be invalid). Only
