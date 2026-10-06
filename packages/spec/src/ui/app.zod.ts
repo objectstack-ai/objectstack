@@ -429,7 +429,17 @@ export const ObjectNavItemSchema = lazySchema(() => strictObject(navItemSurface(
   ...BaseNavItemSchema.shape,
   type: z.literal('object'),
   objectName: z.string().describe('Target object name'),
-  viewName: z.string().optional().describe('Default list view to open. Defaults to "all". Ignored when `recordId` is set.'),
+  /**
+   * The rule this sentence states is the console's, read at the objectui commit
+   * `.objectui-sha` pins: an entry with no `viewName` links to the bare object
+   * route, where `ObjectView` opens `defaultViewId || views[0]` — the view
+   * `buildViewTabs` marks `isDefault` (the default `list`), else the first
+   * declared list view. Its `all` tab is the fallback `buildViewTabs` adds only
+   * when the object has no list view at all, so `all` is no default (#21973).
+   */
+  viewName: z.string().optional().describe(
+    'Default list view to open. When omitted, the console opens the object\'s default list view, else its first declared list view; `all` names the console\'s fallback tab, which exists only for an object that declares no list view. Ignored when `recordId` is set.',
+  ),
   /**
    * When set, navigate straight to the detail page of this specific
    * record instead of the object's list view. Supports template
