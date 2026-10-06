@@ -1168,3 +1168,40 @@ describe('a publish promotes only the draft its gate judged', () => {
         expect(labelsIn(rows, 'draft')).toEqual([]);
     });
 });
+
+// The lock a publish consults is the one at the address it promotes: the
+// package key the publish resolved (the caller's stated binding, else the
+// draft row's own), not only the package the request stated. With two
+// packages' env-wide rows of one view both locked, the refusal carries the
+// lock of the package whose draft is being promoted.
+describe('a publish consults the lock of the package key it resolved', () => {
+    const locked = (pkg: string) => ({ ...VIEW, _lock: 'full', _lockReason: `${pkg} keeps this view as shipped` });
+
+    async function seedLockedRowsAndDraft(draftPackage: string) {
+        const { protocol, rows } = makeProtocol();
+        await protocol.ensureOverlayIndex();
+        const repo = protocol.getOverlayRepo(null);
+        const ref = { type: 'view', name: VIEW.name, org: 'env' };
+        const opts = { parentVersion: null, actor: null, source: 'test.seed', intent: 'runtime-only' as const };
+        for (const pkg of ['pkg_a', 'pkg_b']) {
+            await repo.put(ref, locked(pkg), { ...opts, state: 'active', packageId: pkg });
+        }
+        await repo.put(ref, { ...VIEW, label: 'Org grid (draft)' }, { ...opts, state: 'draft', packageId: draftPackage });
+        const draftsOf = () => Array.from(rows.values()).filter((r) => r.state === 'draft').map((r) => r.package_id);
+        return { protocol, draftsOf };
+    }
+
+    it('a publish that states no package consults the lock of the draft row\'s own package', async () => {
+        const { protocol, draftsOf } = await seedLockedRowsAndDraft('pkg_b');
+        await expect(protocol.publishMetaItem({ type: 'view', name: VIEW.name }))
+            .rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403, lock: 'full', lockReason: 'pkg_b keeps this view as shipped' });
+        expect(draftsOf()).toEqual(['pkg_b']);
+    });
+
+    it('control: a publish that states its package consults that package\'s lock', async () => {
+        const { protocol, draftsOf } = await seedLockedRowsAndDraft('pkg_a');
+        await expect(protocol.publishMetaItem({ type: 'view', name: VIEW.name, packageId: 'pkg_a' }))
+            .rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403, lock: 'full', lockReason: 'pkg_a keeps this view as shipped' });
+        expect(draftsOf()).toEqual(['pkg_a']);
+    });
+});

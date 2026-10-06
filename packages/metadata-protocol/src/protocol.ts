@@ -21596,24 +21596,6 @@ export class ObjectStackProtocolImplementation implements
             );
             if (orgRefusal) throw orgRefusal;
         }
-        // ADR-0010 L3 — lock blocks publish too (publishing is a write).
-        //
-        // [#8594] `lockWriteRefusal`, not `assertLockAllowsWrite`: the row rides
-        // OUT on the error and each caller records it on its own side of its own
-        // transaction. See this method's header for why it cannot be written here.
-        const _publishLockRefusal = await this.lockWriteRefusal({
-            type: request.type,
-            name: request.name,
-            ...(request.organizationId ? { organizationId: request.organizationId } : {}),
-            // [#21761] The promotion's address carries its package, as the read's does.
-            ...(request.packageId ? { packageId: request.packageId } : {}),
-            operation: 'publish',
-            ...(request.actor ? { actor: request.actor } : {}),
-            source: 'protocol.publishMetaItem',
-        });
-        if (_publishLockRefusal) {
-            throw withPendingAudit(_publishLockRefusal.err, _publishLockRefusal.audit);
-        }
         await this.ensureOverlayIndex();
         const orgId = request.organizationId ?? null;
         const repo = this.getOverlayRepo(orgId);
@@ -21633,13 +21615,34 @@ export class ObjectStackProtocolImplementation implements
         // dimension picks either. The key is the caller's stated binding
         // (spelled exactly as `repo.promoteDraft` receives it); with none
         // stated, the binding of the draft row this promotion resolves, read
-        // once and then stated to both the read and the promotion.
+        // once and then stated to the lock lookup, the read and the promotion.
         let draftKey: string | null | undefined = 'packageId' in request ? (request.packageId ?? null) : undefined;
         if (draftKey === undefined) {
             const draftRow = await this.engine.findOne('sys_metadata', {
                 where: { type: singularType, name: request.name, organization_id: orgId, state: 'draft' },
             });
             if (draftRow) draftKey = (draftRow as { package_id?: string | null }).package_id ?? null;
+        }
+        // ADR-0010 L3 — lock blocks publish too (publishing is a write).
+        //
+        // [#8594] `lockWriteRefusal`, not `assertLockAllowsWrite`: the row rides
+        // OUT on the error and each caller records it on its own side of its own
+        // transaction. See this method's header for why it cannot be written here.
+        const _publishLockRefusal = await this.lockWriteRefusal({
+            type: request.type,
+            name: request.name,
+            ...(request.organizationId ? { organizationId: request.organizationId } : {}),
+            // [#21761] The promotion's address carries its package, as the read's does.
+            // [#21934] It is the key resolved above, the one the gate reads the
+            // draft under and the promotion writes under: the caller's stated
+            // binding, else the resolved draft row's own.
+            ...(draftKey ? { packageId: draftKey } : {}),
+            operation: 'publish',
+            ...(request.actor ? { actor: request.actor } : {}),
+            source: 'protocol.publishMetaItem',
+        });
+        if (_publishLockRefusal) {
+            throw withPendingAudit(_publishLockRefusal.err, _publishLockRefusal.audit);
         }
         const draftForGate = await repo.get(
             { type: singularType, name: request.name, org: orgId ?? 'env' } as Parameters<typeof repo.get>[0],
