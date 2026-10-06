@@ -18859,6 +18859,21 @@ export class ObjectStackProtocolImplementation implements
      * own `code` layer (for a package-less container too, through the
      * runtime-only `getItem` arm), where `env_local`, which registers nothing,
      * reported neither. With the marker both kernels give one answer.
+     *
+     * ## [#21980] Never under a name another package ships
+     *
+     * The registry keeps one bare slot per name, and `SchemaRegistry.getItem`
+     * answers it before any package's own entry, whichever package the read
+     * names. So an expansion registered there under a name another package
+     * also ships answered THAT package's by-name read on an unscoped kernel:
+     * `getMetaItem` naming the other package fell through to the registry and
+     * served this container's view, while the list served the other package's
+     * own item in its slot ({@link servedViewExpansion}). Such an expansion is
+     * not registered. Every kernel's by-name read already answers it from its
+     * stored row, ahead of the registry ({@link resolveRowlessExpandedView}),
+     * for its own package and for a read that names none, and the list expands
+     * the row itself. A name that only the container's own package ships, or
+     * that no package ships, is registered as before.
      */
     private hydrateExpandedViewItems(
         type: string,
@@ -18866,7 +18881,13 @@ export class ObjectStackProtocolImplementation implements
         options: { packageId?: string | null; organizationId: string | null },
         registry: any,
     ): void {
+        let shipping: ShippingPackages | undefined;
         for (const item of this.expandRuntimeViewContainer(type, data, { ...options, tenantAuthored: true })) {
+            shipping ??= this.shippingPackagesOf(type);
+            const own = item._packageId;
+            const anotherShips = this.shippedArtifactsOf(type, String(item.name), shipping)
+                .some((artifact) => (artifact as { _packageId?: unknown })._packageId !== own);
+            if (anotherShips) continue;
             registry.registerItem(type, item, 'name' as any);
         }
     }

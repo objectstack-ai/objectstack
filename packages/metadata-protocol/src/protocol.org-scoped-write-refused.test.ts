@@ -1728,5 +1728,38 @@ describe('each package\'s copy of a view container expands into its own package\
                 }
             }
         }
+
+        // Two packages ship the container on an object no code package owns,
+        // and only one of them stores a copy. On an unscoped kernel the copy's
+        // expansion used to be registered under the bare name, which the
+        // registry answers ahead of either package's own entry, so the by-name
+        // read naming the OTHER package served the copy while the list served
+        // that package's own item. Each package's by-name read answers its own
+        // item, on both kernels, whichever package stores the copy.
+        describe('(g) two packages ship the container and one stores a copy: the by-name read naming each package answers its own item', () => {
+            const PACKAGES = [OTHER, COPYING] as const;
+            for (const [kernel, environmentId] of KERNELS) {
+                for (const m of MEMBERS) {
+                    for (const copying of PACKAGES) {
+                        it(`${kernel}; ${m.member}; ${copying} stores the copy`, async () => {
+                            const copyTitle = `Intake (${copying} copy)`;
+                            const shipped = PACKAGES.map((pkg): [string, Record<string, unknown>] =>
+                                [pkg, { object: 'task', ...m.body(SHIPPED_TITLE(pkg), true, SLUG) }]);
+                            const { protocol } = harness(shipped, environmentId);
+                            expect((await protocol.saveMetaItem({
+                                type: 'view', name: 'task', packageId: copying,
+                                item: { name: 'task', object: 'task', ...m.body(copyTitle, false, SLUG) },
+                            })).success).toBe(true);
+                            const [name] = loaderNames(m.body('x', true, SLUG));
+                            for (const pkg of PACKAGES) {
+                                const own = pkg === copying ? copyTitle : SHIPPED_TITLE(pkg);
+                                expect(await byNameTitle(protocol, name, pkg), `the by-name read of ${name} naming ${pkg}`).toBe(own);
+                                expect(await slotTitles(protocol, name, pkg), `${pkg}'s slot of ${name}`).toEqual([own]);
+                            }
+                        });
+                    }
+                }
+            }
+        });
     });
 });
