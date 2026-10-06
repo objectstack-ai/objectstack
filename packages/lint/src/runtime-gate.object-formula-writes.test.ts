@@ -26,7 +26,7 @@
  *
  * The protocol-level half — the same verdict through the real `saveMetaItem`
  * and `publishMetaItem`, and the door/build equality of the finding — is
- * `packages/metadata-protocol/src/protocol.object-formula-save-door.test.ts`.
+ * the #22019 block of `packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts`.
  */
 import { describe, expect, it } from 'vitest';
 import { EXPRESSION_INVALID, runAuthoringRules } from './authoring-rules.js';

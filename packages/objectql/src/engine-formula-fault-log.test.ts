@@ -26,7 +26,8 @@
  *    formula that evaluates logs nothing.
  *
  * The save-door half (the same expression is now refused at publish) lives in
- * `@objectstack/metadata-protocol`'s `protocol.object-formula-save-door.test.ts`.
+ * `@objectstack/metadata-protocol`'s `protocol.runtime-authoring-gate.test.ts`
+ * (its #22019 block).
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ObjectQL } from './engine.js';
@@ -65,8 +66,12 @@ function makeStubDriver() {
   const driver = {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
-    async find(object: string, ast: { where?: unknown }) {
-      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where)).map((r) => ({ ...r }));
+    // The caller's bound, applied AFTER the filter and by PRESENCE: a double that
+    // ignores `limit` answers more rows than a real driver would.
+    async find(object: string, ast: { where?: unknown; limit?: number }) {
+      const rows = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      const page = typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+      return page.map((r) => ({ ...r }));
     },
     async findOne(object: string, ast: { where?: unknown }) {
       for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return { ...r };
