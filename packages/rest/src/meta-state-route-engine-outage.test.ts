@@ -101,6 +101,39 @@
  * same 501 instead of escaping to the route's own `500 EMAIL_SEND_FAILED`.
  */
 
+// [#21920] Pay the state route's `@objectstack/objectql` load at MODULE LOAD,
+// never inside a clocked window.
+//
+// The route reaches `legalNextStates` through a dynamic
+// `await import('@objectstack/objectql')` in `rest-server.ts`, kept dynamic on
+// purpose (a devDependency there: a host without the data engine degrades to
+// 501 rather than failing to load). This package's tests resolve that specifier
+// through `dist/`, so the first request to reach that line pays the vite
+// transform and evaluation of objectql's whole module graph, inside whichever
+// `it()` first gets PAST the gate with a schema: §0's multi-kernel case. Measured
+// on a 4-vCPU container, this file run alone, before this import existed:
+//
+//   * idle: that case cost 3574-3661 ms of the 5000 ms `testTimeout`. Phase-timed,
+//     the handler call is all of it (2.7-2.8 s in a stripped probe); wiring and
+//     boot are under 1 ms each, and the cold KERNEL branch answering a 404 before
+//     the load costs 1.5 ms. So it is the load, not a multi-kernel first-request
+//     cost: under plain Node the same cold import is ~0.6 s on top of the core
+//     and spec this server already loads, and a host whose engine IS objectql
+//     has it loaded before any request.
+//   * confined to one core beside two busy loops: `Test timed out in 5000ms` on
+//     3 of 3 runs, and the load, still in flight, then landed on §3's served
+//     CONTROL (3714-4330 ms), the next case to reach the same line.
+//
+// A module-top import is paid during COLLECTION, which vitest clocks against
+// nothing (AGENTS.md § Build & Test; `scripts/check-test-source-alias.mjs`
+// carries the runner measurement). ⛔ Not a `beforeAll` with a budget, and not a
+// raised timeout: either only moves the window around the cost, and
+// `dev-plugin-security-enforcement-warning.test.ts` (plugin-dev) records such a
+// hook budget being exhausted on a heavier shard. The dynamic call in
+// `rest-server.ts` stays where it is; this only decides where the first load is
+// paid. §0's multi-kernel case pins it with a budget on its own work.
+import '@objectstack/objectql';
+
 import { describe, it, expect, vi } from 'vitest';
 import {
     AUTHZ_STORE_UNAVAILABLE_CODE,
@@ -299,9 +332,25 @@ describe('[#15405] §0 reachability of this consumer, measured', () => {
         // and the route's own engine line is what decides. This is the
         // precondition every case in §1–§4 depends on; without it they would
         // all be measuring the gate.
+        const started = performance.now();
         const seen = await driveStateOnKernelHost(providerHealthy);
+        const ownWorkMs = performance.now() - started;
         expect(seen.outcome).toBe('answered');
         expect(seen.status).toBe(200);
+        // [#21920] PIN — this is the file's FIRST case to reach the route's
+        // `import('@objectstack/objectql')`, so it is the one that pays that load
+        // if it ever lands in a clocked window again (file head). Its own work,
+        // measured on a 4-vCPU container: 3 ms idle, 12-16 ms with this file
+        // confined to a third of one core, 3-23 ms confined to a fifth. The load
+        // it must not carry: 3574-3661 ms with the file run alone, 893 and
+        // 1723 ms in two whole-package runs (an earlier file had already cached
+        // the transform). 500 ms sits about 20x above the first and below every
+        // reading of the second, so the regression reads red on an IDLE box,
+        // well before a loaded shard turns it into the 5000 ms timeout.
+        expect(
+            ownWorkMs,
+            "this case paid a module load inside its clocked window: keep the module-top import of '@objectstack/objectql' at the file head",
+        ).toBeLessThan(500);
     });
 });
 
