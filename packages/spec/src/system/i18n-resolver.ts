@@ -1420,6 +1420,36 @@ function packagedPart(
 }
 
 /**
+ * The packaged counterpart of one served FIELD of an object, with the same
+ * three answers as {@link packagedPart}: `undefined` when no packaged base was
+ * supplied, `{}` when the base is known but declares no such field (a field
+ * authored after the fact — an `objectExtensions` field is folded on after the
+ * owner's declaration the base carries), and the packaged field otherwise.
+ *
+ * A separate finder only because a field map is a record keyed by field name
+ * (the canonical shape) where {@link packagedPart} walks an array; the array
+ * shape some reads flatten to is matched by `name`, as `translateObject`
+ * itself accepts both.
+ */
+function packagedObjectField(
+  packagedObject: Record<string, unknown> | undefined,
+  fieldName: string,
+): Record<string, unknown> | undefined {
+  if (packagedObject === undefined) return undefined;
+  const fields = packagedObject.fields;
+  if (Array.isArray(fields)) {
+    for (const candidate of fields) {
+      const record = asRecord(candidate);
+      if (record !== undefined && record.name === fieldName) return record;
+    }
+    return {};
+  }
+  const map = asRecord(fields);
+  if (map === undefined || !Object.prototype.hasOwnProperty.call(map, fieldName)) return {};
+  return asRecord(map[fieldName]) ?? {};
+}
+
+/**
  * Overlay `dashboards.<name>.globalFilters.<key>.{label,options.<value>}`
  * onto one authored filter (#16772). Returns the input object itself when
  * nothing resolved, so `translateDashboard` can tell "untouched" from
@@ -2414,10 +2444,15 @@ export interface ObjectLike {
   listViews?: Record<string, unknown>;
 }
 
+/**
+ * Minimal field shape consumed by `translateObject`. It names only keys
+ * `FieldSchema` declares: there is no `help` here, because a field spells its
+ * help text `description` / `inlineHelpText`. The bundle's field `help` entry
+ * is served on `description` (see {@link translateObject}).
+ */
 export interface ObjectFieldLike {
   name?: string;
   label?: string;
-  help?: string;
   description?: string;
   options?: Array<{ label?: string; value: string | number | boolean }>;
   [key: string]: any;
@@ -2906,7 +2941,8 @@ function translateObjectListViews(
 /**
  * Apply the active locale to an object metadata document. Translates the
  * object's `label` / `pluralLabel` / `description`, walks each field to
- * translate its `label`, `help`, and per-option `label`s, walks any
+ * translate its `label`, its `description` (from the bundle's field `help`
+ * entry — see below), and per-option `label`s, walks any
  * inline-declared `actions` through {@link translateAction}, and overlays the
  * copy of each EMBEDDED `listViews` entry from the `_views` keys the i18n
  * extractor writes for it ({@link translateObjectListViews}). The input document
@@ -2949,13 +2985,35 @@ function translateObjectListViews(
  * conservative edges. `?layers=true` stays untranslated and diagnostic,
  * unchanged.
  *
- * The rule is scoped to the three SCALARS, which are what the ruling covers:
- * `fields` is a key-keyed spread whose per-field labels have their own
- * (per-field) catalog keys, and no read has been measured to diverge on them.
- * The embedded `listViews` follow the VIEW translator's application of the
- * same rule (ADR-0029 D9.2a, as {@link translateView} applies it), judged per
- * view against the packaged object's own `listViews` — see
- * {@link translateObjectListViews}.
+ * The ruling covers the three SCALARS. A field's `label` stays a flat
+ * `catalog ?? document`: `fields` is a key-keyed spread whose per-field labels
+ * have their own (per-field) catalog keys, and no read has been measured to
+ * diverge on them. The embedded `listViews` follow the VIEW translator's
+ * application of the same rule (ADR-0029 D9.2a, as {@link translateView}
+ * applies it), judged per view against the packaged object's own `listViews` —
+ * see {@link translateObjectListViews}.
+ *
+ * ## A field's translated help is served on `description` — ADR-0029 D9.2a
+ *
+ * The bundle addresses a field's help as `objects.<object>.fields.<field>.help`
+ * (`FieldTranslationSchema.help`), and the i18n extractor writes that entry
+ * from the field's `description` (`packages/cli/src/utils/i18n-extract.ts`;
+ * its other source, a field `help`, is a key `FieldSchema` refuses). So the
+ * entry is the translation of `description`, and it is served THERE. It is
+ * ⛔ never served on a `help` key, which `FieldSchema` does not declare: the
+ * served field def then carried a key the contract refuses, every consumer
+ * that reads only declared keys rendered the source-language `description`,
+ * and the console's ingestion step warned once per such field (#21948). It is
+ * ⛔ not served on `inlineHelpText` either, which the extractor never reads.
+ *
+ * `description` is a key the catalog had never touched, so it follows the
+ * rule above, as every string this translator added since does: the catalog
+ * applies only while the served field's `description` still equals the same
+ * field's in {@link TranslateDocumentOptions.packagedBase}, judged by
+ * {@link valueOverridesPackagedBase} (⛔ never a second comparison). A field
+ * the base does not declare was authored after the fact, and its description
+ * counts as diverged; no base supplied means nothing is inferred and the
+ * catalog applies.
  */
 export function translateObject<T extends ObjectLike>(
   doc: T,
@@ -2982,6 +3040,7 @@ export function translateObject<T extends ObjectLike>(
   const label = resolveScalar('label', doc.label);
   const pluralLabel = resolveScalar('pluralLabel', doc.pluralLabel);
   const description = resolveScalar('description', doc.description);
+  const packagedObject = asRecord(opts?.packagedBase);
 
   const translateField = (name: string, def: ObjectFieldLike): ObjectFieldLike => {
     const next: ObjectFieldLike = { ...def };
@@ -2989,8 +3048,13 @@ export function translateObject<T extends ObjectLike>(
       lookupObjectFieldAttr(bundle, objectName, name, 'label', opts) ??
       builtinSystemFieldLabel(name, def.label, opts);
     if (translatedLabel) next.label = translatedLabel;
-    const translatedHelp = lookupObjectFieldAttr(bundle, objectName, name, 'help', opts);
-    if (translatedHelp) next.help = translatedHelp;
+    // The bundle's field `help` entry translates `description`, and is served
+    // there — never on an undeclared `help` — unless the served description
+    // diverged from the packaged field's (ADR-0029 D9.2a; see the docblock).
+    if (!valueOverridesPackagedBase(packagedObjectField(packagedObject, name), 'description', def.description)) {
+      const translatedDescription = lookupObjectFieldAttr(bundle, objectName, name, 'help', opts);
+      if (translatedDescription) next.description = translatedDescription;
+    }
     if (Array.isArray(def.options)) {
       // A picklist-bound field is served with its list's options resolved
       // onto it (`PicklistServedFieldSchema`), and INHERITS the list's option
