@@ -1491,7 +1491,7 @@ export class HttpDispatcher {
         //    cannot be asked reads as before: it is asked, and a fault refuses.
         //  - THE READ THROWS ⇒ refused. Anything the registered read raises.
         const qlService = await this.getObjectQLService(this.requestKernel(context));
-        const ql: any = qlService ?? await this.resolveService(this.requestKernel(context), 'objectql');
+        const ql = qlService ?? await this.resolveService(this.requestKernel(context), 'objectql');
         if (!ql) {
             throw new AuthzStoreUnavailableError(
                 ENVIRONMENT_MEMBER_OBJECT,
