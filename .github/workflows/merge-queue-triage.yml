@@ -104,7 +104,7 @@ name: Merge Queue Triage
 # ## A shard that never got a runner is not a test failure (limb ③)
 #
 # On 2026-10-05 one PR was ejected twice with nothing in it failing: queue
-# build 37371558473 had ten jobs cancelled before any of them was handed a
+# build 37371558473 had eight jobs cancelled before any of them was handed a
 # runner, and 37374282440 had one (`Test Core (5/6)`). In both, the only
 # `failure` was an AGGREGATE gate (`Test Core`, `Dogfood Regression Gate`)
 # refusing because a shard of its own family published no attestation. The
