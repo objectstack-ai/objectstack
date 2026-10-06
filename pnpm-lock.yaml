@@ -2069,6 +2069,9 @@ importers:
       '@objectstack/plugin-email':
         specifier: workspace:*
         version: link:../../plugins/plugin-email
+      '@objectstack/plugin-pinyin-search':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-pinyin-search
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../../plugins/plugin-security

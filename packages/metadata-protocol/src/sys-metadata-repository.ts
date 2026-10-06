@@ -467,8 +467,17 @@ export class SysMetadataRepository implements MetadataRepository {
     // ADR-0048 — when a package scope is supplied, resolve the row owned by
     // that package (used by saveMetaItem to read the correct parent-version
     // lineage before an upsert). Omitted → legacy "any package" match.
+    //
+    // [#21911, ADR-0096] This read, and every store call of `put`, `delete`,
+    // `promoteDraft`, `restoreVersion`, `listDrafts` and the two lineage
+    // counters, carries the explicit system opt-in (`{ ...ctx, isSystem: true }`
+    // inside a transaction, so the handle rides along): the repository is
+    // platform plumbing under a door that already authorized the caller, and
+    // it scopes its own rows by organization. None of them reaches the data
+    // engine as a principal-less context.
     const row = await this.engine.findOne('sys_metadata', {
       where: this.whereFor(ref, state, opts && 'packageId' in opts ? (opts.packageId ?? null) : undefined),
+      context: { isSystem: true },
     });
     if (!row) return null;
     return this.rowToItem(ref, row);
@@ -584,7 +593,7 @@ export class SysMetadataRepository implements MetadataRepository {
       } else {
         activeWhere.organization_id = null;
       }
-      const activeRow = await this.engine.findOne('sys_metadata', { where: activeWhere });
+      const activeRow = await this.engine.findOne('sys_metadata', { where: activeWhere, context: { isSystem: true } });
       const activePkg = (activeRow as { package_id?: string | null } | null)?.package_id ?? null;
       if (activePkg) targetPackageId = activePkg;
     }
@@ -597,7 +606,7 @@ export class SysMetadataRepository implements MetadataRepository {
       // overlay. A package-less save (packageId null) targets the global row.
       let existing = await this.engine.findOne('sys_metadata', {
         where: this.whereFor(ref, state, targetPackageId),
-        context: ctx,
+        context: { ...ctx, isSystem: true },
       });
       // [#11087] Orphan-draft adoption: when the package binding above was
       // INHERITED (caller named none), a pre-fix draft for the same
@@ -608,7 +617,7 @@ export class SysMetadataRepository implements MetadataRepository {
       if (!existing && state === 'draft' && opts.packageId == null && targetPackageId !== null) {
         existing = await this.engine.findOne('sys_metadata', {
           where: this.whereFor(ref, state, null),
-          context: ctx,
+          context: { ...ctx, isSystem: true },
         });
       }
       const existingHash: string | null = existing?.checksum ?? null;
@@ -672,11 +681,11 @@ export class SysMetadataRepository implements MetadataRepository {
         }
         await this.engine.update('sys_metadata', parentRowData, {
           where: { id: existingId },
-          context: ctx,
+          context: { ...ctx, isSystem: true },
         });
       } else {
         parentRowData.created_at = now;
-        await this.engine.insert('sys_metadata', parentRowData, { context: ctx });
+        await this.engine.insert('sys_metadata', parentRowData, { context: { ...ctx, isSystem: true } });
       }
 
       // Durable history append — same transaction, so the parent write
@@ -702,7 +711,7 @@ export class SysMetadataRepository implements MetadataRepository {
           recorded_by: opts.actor ?? null,
           recorded_at: now,
         },
-        { context: ctx },
+        { context: { ...ctx, isSystem: true } },
       );
 
       const item: MetadataItem = {
@@ -787,7 +796,7 @@ export class SysMetadataRepository implements MetadataRepository {
           state,
           'packageId' in opts ? (opts.packageId ?? null) : undefined,
         ),
-        context: ctx,
+        context: { ...ctx, isSystem: true },
       });
       if (!existing) {
         throw new ConflictError(this.fullRef(ref), opts.parentVersion, null);
@@ -817,7 +826,7 @@ export class SysMetadataRepository implements MetadataRepository {
 
       await this.engine.delete('sys_metadata', {
         where: { id: existingId },
-        context: ctx,
+        context: { ...ctx, isSystem: true },
       });
 
       if (state === 'active') {
@@ -843,7 +852,7 @@ export class SysMetadataRepository implements MetadataRepository {
             recorded_by: opts.actor ?? null,
             recorded_at: now,
           },
-          { context: ctx },
+          { context: { ...ctx, isSystem: true } },
         );
       }
 
@@ -963,6 +972,7 @@ export class SysMetadataRepository implements MetadataRepository {
         'draft',
         'packageId' in opts ? (opts.packageId ?? null) : undefined,
       ),
+      context: { isSystem: true },
     });
     if (!draftRow) {
       const err: any = new Error(
@@ -1062,6 +1072,7 @@ export class SysMetadataRepository implements MetadataRepository {
         name: full.name,
         version: targetVersion,
       },
+      context: { isSystem: true },
     });
     if (!row) {
       const err: any = new Error(
@@ -1102,6 +1113,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // carries no `package_id` column, so a vanished binding is not recoverable.
     const activeRow = await this.engine.findOne('sys_metadata', {
       where: this.whereFor(ref, 'active'),
+      context: { isSystem: true },
     });
     const activePackageId =
       (activeRow as { package_id?: string | null } | null)?.package_id ?? null;
@@ -1188,7 +1200,7 @@ export class SysMetadataRepository implements MetadataRepository {
     }
     if (filter?.type) where.type = filter.type;
     if (filter?.packageId) where.package_id = filter.packageId;
-    const rows = await this.engine.find('sys_metadata', { where });
+    const rows = await this.engine.find('sys_metadata', { where, context: { isSystem: true } });
     return (rows as any[]).map((row) => ({
       type: row.type,
       name: row.name,
@@ -2073,7 +2085,7 @@ export class SysMetadataRepository implements MetadataRepository {
     try {
       const rows = await this.engine.find(this.historyTable, {
         where: { organization_id: this.organizationId },
-        context: ctx,
+        context: { ...ctx, isSystem: true },
       });
       let max = 0;
       for (const row of rows as Array<{ event_seq?: number | null }>) {
@@ -2117,7 +2129,7 @@ export class SysMetadataRepository implements MetadataRepository {
           type: ref.type,
           name: ref.name,
         },
-        context: ctx,
+        context: { ...ctx, isSystem: true },
       });
       let max = 0;
       for (const row of rows as Array<{ version?: number | null }>) {

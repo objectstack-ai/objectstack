@@ -80,6 +80,8 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 // ADR-0048 — a package-less save scopes the upsert lookup to the
                 // GLOBAL row (package_id IS NULL), not any package's row.
                 where: { type: 'view', name: 'test_grid', organization_id: 'org_alpha', state: 'active', package_id: null },
+                // [#21911] The platform store read carries the explicit system opt-in.
+                context: { isSystem: true },
             });
             expect(mockEngine.insert).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
                 organization_id: 'org_alpha',
@@ -154,6 +156,8 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             // the assertion could no longer fail.
             expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
                 where: { type: 'view', name: 'test_grid', state: 'active', organization_id: 'org_alpha' },
+                // [#21911] The platform store read carries the explicit system opt-in.
+                context: { isSystem: true },
             });
         });
 
@@ -341,7 +345,9 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
             expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
                 // ADR-0048 — package-less save scopes the lookup to the global row.
-                where: { type: 'app', name: 'test_app', organization_id: null, state: 'active', package_id: null }
+                where: { type: 'app', name: 'test_app', organization_id: null, state: 'active', package_id: null },
+                // [#21911] The platform store read carries the explicit system opt-in.
+                context: { isSystem: true },
             });
             expect(mockEngine.insert).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
                 name: 'test_app',
@@ -368,6 +374,8 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
             expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
                 where: { type: 'view', name: 'test_grid', organization_id: 'org_alpha', state: 'active', package_id: 'com.acme.beta' },
+                // [#21911] The platform store read carries the explicit system opt-in.
+                context: { isSystem: true },
             });
             expect(mockEngine.insert).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
                 package_id: 'com.acme.beta',
@@ -742,7 +750,9 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
             expect(result.item).toMatchObject(sampleApp);
             expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
-                where: { type: 'app', name: 'test_app', state: 'active', organization_id: null }
+                where: { type: 'app', name: 'test_app', state: 'active', organization_id: null },
+                // [#21911] The platform store read carries the explicit system opt-in.
+                context: { isSystem: true },
             });
         });
 
@@ -1021,7 +1031,9 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             // DB *is* queried (always-merge semantics) so seeded metadata
             // surfaces even when the registry already has unrelated items.
             expect(mockEngine.find).toHaveBeenCalledWith('sys_metadata', {
-                where: { type: 'app', state: 'active', organization_id: null }
+                where: { type: 'app', state: 'active', organization_id: null },
+                // [#21911] The platform store read carries the explicit system opt-in.
+                context: { isSystem: true },
             });
         });
 
@@ -1164,7 +1176,9 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             expect(result.items).toHaveLength(1);
             expect(result.items[0]).toMatchObject(sampleApp);
             expect(mockEngine.find).toHaveBeenCalledWith('sys_metadata', {
-                where: { type: 'app', state: 'active', organization_id: null }
+                where: { type: 'app', state: 'active', organization_id: null },
+                // [#21911] The platform store read carries the explicit system opt-in.
+                context: { isSystem: true },
             });
         });
 

@@ -59,7 +59,7 @@ function unionOptions(): readonly unknown[] {
   return (out._zod?.def?.options ?? []) as readonly unknown[];
 }
 
-describe('[#6391] the union members are contractual, not positional', () => {
+describe('the union members are contractual, not positional', () => {
   it('exposes exactly four branches, in the union\'s own order', () => {
     expect([...VIEW_METADATA_BRANCHES]).toEqual([
       'viewItem',
@@ -99,7 +99,7 @@ describe('[#6391] the union members are contractual, not positional', () => {
   });
 });
 
-describe('[#6391] selectViewMetadataBranch reads the members\' own discriminants', () => {
+describe('selectViewMetadataBranch reads the members\' own discriminants', () => {
   const CASES: Array<[string, unknown, ViewMetadataBranch | null]> = [
     ['a nested config is a ViewItem record', { viewKind: 'list', config: LIST_CFG }, 'viewItem'],
     ['…even when the config is the broken part', { viewKind: 'list', config: { type: 'grid', columns: 1 } }, 'viewItem'],
@@ -127,7 +127,7 @@ describe('[#6391] selectViewMetadataBranch reads the members\' own discriminants
   });
 });
 
-describe('[#6391] diagnoseViewMetadata names the failing branch', () => {
+describe('diagnoseViewMetadata names the failing branch', () => {
   // The worked example from the issue: a flattened list overlay whose `columns`
   // is a string. Before this change the ONLY structural route to that leaf was
   // `error.issues[0].errors[2]` — member position 2 — while the rendered
@@ -243,7 +243,7 @@ describe('[#6391] diagnoseViewMetadata names the failing branch', () => {
 // `normalizeViewMetadata` inherits identity, #2555) stays in ACCEPTED with its
 // parse output re-measured, and the unbound original moves to REFUSED so the
 // flip itself is pinned rather than silently absorbed.
-describe('[#7025] the acceptance face of ViewMetadataSchema — as re-ruled by #7741', () => {
+describe('the acceptance face of ViewMetadataSchema — frozen by the diagnostics work; every move since is deliberate and pinned', () => {
   const SECTION = { label: 'Main', collapsible: false, collapsed: false, columns: 1, fields: ['name'] };
   /** [#7741] The binding pair the write path inherits onto a shadowing overlay. */
   const BOUND_LIST = { object: 'crm_lead', viewKind: 'list' } as const;

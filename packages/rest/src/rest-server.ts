@@ -78,6 +78,7 @@ import {
     // Which form candidates the anonymous form doors serve — the one rule the
     // metadata protocol also judges organization-scoped `view` writes by.
     anonymousFormIntakeCandidates,
+    anonymousFormIntakeWithdrawnIn,
     // [#21476] Whether such a form can take intake on this posture, and why not
     // — the one predicate the runtime authoring gate's advisory reads too.
     anonymousFormIntakePosture,
@@ -10723,11 +10724,24 @@ export class RestServer {
         // shared with the write-time judgement in `@objectstack/metadata-protocol`
         // (`anonymousFormIntakeCandidates`): `sharing.enabled === true`,
         // `sharing.allowAnonymous === true` and a `publicLink` naming the slug.
-        const findPublicFormView = (views: any[], slug: string): { view: any; form: any; object: string } | null => {
+        //
+        // A withdrawal is a kill switch: layering may only narrow anonymous
+        // intake, never re-open it. A candidate is served only when no layer
+        // beneath the read it is found in explicitly withdraws the same form
+        // (`anonymousFormIntakeWithdrawnIn`: the same view name, matched by
+        // slot or by slug, the link kept with a switch set to `false`).
+        // Another view publishing the same slug is a different form and closes
+        // nothing.
+        const findPublicFormView = (
+            views: any[],
+            slug: string,
+            layers: ReadonlyArray<ReadonlyArray<unknown>>,
+        ): { view: any; form: any; object: string } | null => {
             for (const view of views ?? []) {
                 if (!view || typeof view !== 'object') continue;
                 for (const c of anonymousFormIntakeCandidates(view)) {
                     if (c.slug !== slug) continue;
+                    if (layers.some((layer) => anonymousFormIntakeWithdrawnIn(layer, view, c))) continue;
                     const objectName = anonymousFormObjectName(view, c.form);
                     if (!objectName) continue;
                     return { view, form: c.form, object: objectName };
@@ -10781,13 +10795,28 @@ export class RestServer {
                 ...(environmentId ? { environmentId } : {}),
                 ...(organizationId ? { organizationId } : {}),
             };
-            const result: any = await p.getMetaItems(viewsRequest);
-            const items: any[] = Array.isArray(result?.items)
+            const listOf = (result: any): any[] => (Array.isArray(result?.items)
                 ? result.items
                 : Array.isArray(result)
                     ? result
-                    : [];
-            const match = findPublicFormView(items, slug);
+                    : []);
+            const items = listOf(await p.getMetaItems(viewsRequest));
+            // The organization read prefers the organization's overlay of a
+            // view over the env-wide one, so on its own it cannot see an
+            // env-wide withdrawal that overlay disagrees with. Read the
+            // env-wide layer too, and let its withdrawal of the same form close
+            // it: an organization overlay can narrow intake, never re-open it.
+            // (The read the form is found in holds only that view's own body,
+            // which is open, so it withdraws nothing of its own.)
+            const layers: any[][] = [];
+            if (organizationId) {
+                const envWideRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
+                    type: 'view',
+                    ...(environmentId ? { environmentId } : {}),
+                };
+                layers.push(listOf(await p.getMetaItems(envWideRequest)));
+            }
+            const match = findPublicFormView(items, slug, layers);
             if (!match) return null;
             // [#21476] A form that cannot take intake on this posture is not
             // offered: `null` here IS the withdrawn form's answer on both

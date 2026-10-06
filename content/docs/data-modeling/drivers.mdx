@@ -154,10 +154,18 @@ Two things live **outside** `config`, because they are not driver-specific:
 
 A plugin-contributed driver (`com.vendor.snowflake`) has no contract in this
 repo, so its `config` is left unvalidated rather than judged against a shape the
-platform does not have. The platform also does not guess which of its keys hold
-credentials: `config` is stored and served to administrators as written. Keeping
-secrets out of it is the plugin author's responsibility; put the credential in
-the bound secret (`external.credentialsRef`) instead.
+platform does not have, and is stored as written. The platform also does not
+guess which of its keys hold credentials. On read it withholds only what it
+withholds for every driver: a key named exactly `password` or `authToken`, or
+one of their former aliases (`FORMER_CREDENTIAL_ALIASES`), and, in a URL-shaped
+string value, the password in its userinfo and its credential query parameters
+(`CREDENTIAL_URL_QUERY_PARAM_NAMES`, such as `?password=`). Both apply at every
+depth of nested objects, but not inside arrays. Everything else in `config` is
+served to administrators as written (`redactDatasourceConfig` in
+`datasource-credential-redaction.ts`), and a withheld value still sits in the
+stored row. Keeping secrets out of `config` is the plugin author's
+responsibility; put the credential in the bound secret
+(`external.credentialsRef`) instead.
 
 <Callout type="info">
 The same schemas are projected to JSON Schema for

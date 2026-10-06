@@ -38,14 +38,14 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 | Object name chosen at run time | 78 |
 | Against a tenancy-enabled object | 154 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 149 |
-| Provably carrying none | 17 |
-| …and decidably tenancy-enabled | 9 |
-| Options argument unreadable | 67 |
-| …and decidably tenancy-enabled | 34 |
-| Threading a decidably elevated context | 114 |
+| Threading a tenant context | 164 |
+| Provably carrying none | 9 |
+| …and decidably tenancy-enabled | 2 |
+| Options argument unreadable | 60 |
+| …and decidably tenancy-enabled | 33 |
+| Threading a decidably elevated context | 121 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 102 |
+| Threading a context of undecidable elevation | 103 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-05 at `3d34c6efd`.
+Measured on 2026-10-06 at `3832674ac`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 607 |
-| engine-shaped types recognised | 69 |
+| tracked non-test sources scanned | 609 |
+| engine-shaped types recognised | 70 |
 | declared objects in the registry | 116 |
-| same-named calls subtracted as non-engine | 158 |
+| same-named calls subtracted as non-engine | 159 |
 
 ## Every site
 
@@ -208,24 +208,26 @@ Measured on 2026-10-05 at `3d34c6efd`.
 | `packages/services/service-automation/src/suspended-run-store.ts` | `delete` | `sys_automation_run` | enabled | elevated | 3 |
 | `packages/services/service-automation/src/suspended-run-store.ts` | `insert` | `sys_automation_run` | enabled | elevated | 2 |
 | `packages/services/service-automation/src/suspended-run-store.ts` | `update` | `sys_automation_run` | enabled | elevated | 2 |
-| `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `delete` | `sys_metadata` | enabled | PROVABLY NONE | 1 |
-| `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `insert` | `sys_metadata` | enabled | PROVABLY NONE | 1 |
-| `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `update` | `sys_metadata` | enabled | PROVABLY NONE | 2 |
-| `packages/services/service-datasource/src/datasource-secret-binder.ts` | `delete` | `sys_secret` | enabled | PROVABLY NONE | 1 |
-| `packages/services/service-datasource/src/datasource-secret-binder.ts` | `insert` | `sys_secret` | enabled | PROVABLY NONE | 1 |
+| `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `delete` | `sys_metadata` | enabled | elevated | 1 |
+| `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `insert` | `sys_metadata` | enabled | elevated | 1 |
+| `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `update` | `sys_metadata` | enabled | elevated | 2 |
+| `packages/services/service-datasource/src/datasource-secret-binder.ts` | `delete` | `sys_secret` | enabled | elevated | 1 |
+| `packages/services/service-datasource/src/datasource-secret-binder.ts` | `insert` | `sys_secret` | enabled | elevated | 1 |
 | `packages/services/service-job/src/db-job-adapter.ts` | `insert` | `sys_job` | enabled | elevated | 1 |
 | `packages/services/service-job/src/db-job-adapter.ts` | `update` | `sys_job` | enabled | elevated | 3 |
 | `packages/services/service-job/src/db-job-adapter.ts` | `insert` | `sys_job_run` | enabled | elevated | 1 |
 | `packages/services/service-job/src/db-job-adapter.ts` | `update` | `sys_job_run` | enabled | elevated | 1 |
-| `packages/services/service-messaging/src/inbox-channel.ts` | `insert` | `objectName` | undecidable | options unreadable | 1 |
-| `packages/services/service-messaging/src/inbox-channel.ts` | `insert` | `receiptObject` | undecidable | PROVABLY NONE | 1 |
+| `packages/services/service-messaging/src/inbox-channel.ts` | `insert` | `objectName` | undecidable | context, elevation undecidable | 1 |
+| `packages/services/service-messaging/src/inbox-channel.ts` | `insert` | `receiptObject` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-messaging/src/messaging-service.ts` | `insert` | `RECEIPT_OBJECT` | undecidable | PROVABLY NONE | 1 |
 | `packages/services/service-messaging/src/messaging-service.ts` | `update` | `RECEIPT_OBJECT` | undecidable | options unreadable | 1 |
-| `packages/services/service-messaging/src/messaging-service.ts` | `insert` | `sys_notification` | enabled | options unreadable | 1 |
+| `packages/services/service-messaging/src/messaging-service.ts` | `insert` | `sys_notification` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-messaging/src/sql-http-outbox.ts` | `insert` | `this.objectName` | undecidable | options unreadable | 1 |
-| `packages/services/service-messaging/src/sql-http-outbox.ts` | `update` | `this.objectName` | undecidable | options unreadable | 5 |
+| `packages/services/service-messaging/src/sql-http-outbox.ts` | `update` | `this.objectName` | undecidable | context, elevation undecidable | 2 |
+| `packages/services/service-messaging/src/sql-http-outbox.ts` | `update` | `this.objectName` | undecidable | options unreadable | 3 |
 | `packages/services/service-messaging/src/sql-outbox.ts` | `insert` | `this.objectName` | undecidable | options unreadable | 1 |
-| `packages/services/service-messaging/src/sql-outbox.ts` | `update` | `this.objectName` | undecidable | options unreadable | 4 |
+| `packages/services/service-messaging/src/sql-outbox.ts` | `update` | `this.objectName` | undecidable | context, elevation undecidable | 3 |
+| `packages/services/service-messaging/src/sql-outbox.ts` | `update` | `this.objectName` | undecidable | options unreadable | 1 |
 | `packages/services/service-queue/src/db-queue-adapter.ts` | `delete` | `sys_job_queue` | enabled | context, elevation undecidable | 2 |
 | `packages/services/service-queue/src/db-queue-adapter.ts` | `insert` | `sys_job_queue` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-queue/src/db-queue-adapter.ts` | `update` | `sys_job_queue` | enabled | context, elevation undecidable | 6 |
@@ -235,7 +237,7 @@ Measured on 2026-10-05 at `3d34c6efd`.
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `delete` | `sys_secret` | enabled | elevated | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_secret` | enabled | options unreadable | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `update` | `sys_secret` | enabled | options unreadable | 1 |
-| `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_setting_audit` | enabled | PROVABLY NONE | 1 |
+| `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_setting_audit` | enabled | elevated | 1 |
 | `packages/services/service-settings/src/settings-service.ts` | `insert` | `this.objectName` | undecidable | options unreadable | 1 |
 | `packages/services/service-settings/src/settings-service.ts` | `update` | `this.objectName` | undecidable | options unreadable | 1 |
 | `packages/services/service-storage/src/attachment-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 3 |

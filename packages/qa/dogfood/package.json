@@ -26,6 +26,7 @@
     "@objectstack/plugin-audit": "workspace:*",
     "@objectstack/plugin-auth": "workspace:*",
     "@objectstack/plugin-email": "workspace:*",
+    "@objectstack/plugin-pinyin-search": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
     "@objectstack/plugin-sharing": "workspace:*",
     "@objectstack/plugin-webhooks": "workspace:*",

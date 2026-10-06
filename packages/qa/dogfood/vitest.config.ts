@@ -295,6 +295,15 @@ export default defineConfig({
               find: /^@objectstack\/service-datasource$/,
               replacement: path.resolve(__dirname, '../../services/service-datasource/src/index.ts'),
             },
+            // [#21880] `search-companion-field-scope.dogfood.test.ts` mounts
+            // `PinyinSearchPlugin` on a real boot, and the companion values it
+            // writes are what every search in that file matches through. The
+            // plugin's fill path is part of the pin's subject, so the verdict
+            // is aliased to THIS checkout's source, not to the last `pnpm build`.
+            {
+              find: /^@objectstack\/plugin-pinyin-search$/,
+              replacement: path.resolve(__dirname, '../../plugins/plugin-pinyin-search/src/index.ts'),
+            },
           ],
         },
         test: {

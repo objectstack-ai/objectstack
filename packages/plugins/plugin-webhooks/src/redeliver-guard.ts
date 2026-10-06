@@ -59,6 +59,18 @@ import {
     resolveWebhookSecret,
 } from './webhook-secret.js';
 
+/**
+ * [#21913] The execution context the guard reads `sys_webhook` under: the
+ * explicit system opt-in. The guard runs inside the messaging service's
+ * redeliver path, after the delivery row has been read under the requesting
+ * caller's organization, and reads the subscription that row belongs to only
+ * for its existence, name and secret posture — the inputs of the refusal
+ * reason it returns. What it reads and returns is unchanged by the opt-in; it
+ * may simply no longer rely on a missing principal to pass the security
+ * middleware's principal-less hand-off, which ADR-0096 D5 closes.
+ */
+const SYSTEM_CTX = { isSystem: true } as const;
+
 /** The delivery-row fields this guard reads. Structural — no messaging import. */
 export interface RedeliverGuardRow {
     /** Producer domain; only `'webhook'` rows are this guard's business. */
@@ -79,9 +91,11 @@ export function createWebhookRedeliverGuard(
     return async (row) => {
         if (row.source !== 'webhook') return undefined;
 
-        const subscription = (await engine.findOne(subscriptionsObject, {
-            where: { id: row.refId },
-        })) as Record<string, unknown> | null;
+        const subscription = (await engine.findOne(
+            subscriptionsObject,
+            { where: { id: row.refId } },
+            { context: SYSTEM_CTX },
+        )) as Record<string, unknown> | null;
 
         if (!subscription) {
             return (
