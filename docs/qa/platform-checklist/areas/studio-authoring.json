@@ -614,7 +614,7 @@
       "title": "The Studio CEL editors reach the SAME verdict as the engine: formula result-type inference, previous. completion in conditional rules, and RLS lint + test-run — the editor UI, not a second grammar",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin"],
@@ -627,7 +627,8 @@
         ],
         "knownGaps": [
           "the CEL editors lazy-load @objectstack/formula and FEATURE-DETECT every entry point (celAuthoring.ts) — a missing/older engine degrades to no lint / no suggestions / test-run 'unavailable', never an exception. If the vendored bundle lacks the engine, record the affected clauses blocked(dependency) and verify the graceful-degradation clause instead",
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact.",
+          "acceptance[7] (graceful degradation) is PIN-ONLY BY DESIGN: its verify forbids hand-breaking the bundle. The environment it needs is an objectui checkout at the .objectui-sha revision with its install done, to run packages/app-shell/src/views/metadata-admin/celAuthoring.test.ts (describe 'celAuthoring · graceful degradation', present at objectui 0abd4f9f8769). QA run #21784 had no runnable checkout and recorded blocked(environment) (parked on #22017 row 16), which is the right verdict without one: never a hand-driven verdict, never inferred from the source. CI in this repository does not run objectui's suites; objectui's own CI does, on objectui PRs"
         ]
       },
       "steps": [
@@ -720,6 +721,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 16). A8 was blocked(environment): its pin lives only in objectui and no checkout at the pin was runnable. Disposition: pin. The existing objectui pin (celAuthoring.test.ts, 'graceful degradation') is confirmed at the current .objectui-sha (0abd4f9f8769), and a knownGap names the environment that runs it and the verdict without it. No clause changed",
+          "ref": "#22017"
         }
       ]
     },
@@ -1264,7 +1271,7 @@
       "title": "The metadata governance sweep: GET /meta/diagnostics reports every STORED item failing spec validation with located errors, refuses outages and bad spellings loudly instead of answering '0 problems', and the Studio diagnostics page + directory tile badges paint the same numbers",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin (the governance surface is Studio's)"],
@@ -1275,7 +1282,7 @@
           "the stock metadata corpus (any booted showcase — the sweep runs over whatever the store holds)"
         ],
         "knownGaps": [
-          "THE POSITIVE ENTRY LEG IS FIXTURE-BLOCKED ON STOCK, BY CONSTRUCTION: every authoring door validates at save (the 422 gate studio-authoring.authoring-validation-not-persisted proves), so a stock boot's store holds NO invalid item and the sweep legitimately answers clean — entries:[], total:0. An invalid STORED row exists only via spec evolution (a row saved under an older spec the current schema rejects — the population POST /meta/_migrate-stored exists for), and sys_metadata is a storage table, not a data-plane object, so a runner cannot plant one through /api/v1/data either. The invalid-entry clause therefore scores blocked(fixture) until a stale-row fixture exists (a pre-seeded DB snapshot from an older spec revision is the honest recipe candidate); the CLEAN-store empty state is the live positive in the meantime, and the outage/spelling refusals are pinned at the unit layer",
+          "THE POSITIVE ENTRY LEG IS FIXTURE-BLOCKED ON STOCK, BY CONSTRUCTION: every authoring door validates at save (the 422 gate studio-authoring.authoring-validation-not-persisted proves), so a stock boot's store holds NO invalid item and the sweep legitimately answers clean — entries:[], total:0. An invalid STORED row exists only via spec evolution (a row saved under an older spec the current schema rejects — the population POST /meta/_migrate-stored exists for), and sys_metadata is a storage table, not a data-plane object, so a runner cannot plant one through /api/v1/data either. The invalid-entry clause therefore scores blocked(fixture) until a stale-row fixture exists (a pre-seeded DB snapshot from an older spec revision is the honest recipe candidate); the CLEAN-store empty state is the live positive in the meantime, and the outage/spelling refusals are pinned at the unit layer. The environment the invalid-entry leg needs is a store that already holds such a row. A stock environment never does, by design (QA run #21784, parked on #22017 row 17), and no CI job builds one. The located-error half is unit-pinned at the producer: packages/metadata-protocol/src/metadata-diagnostics.union-issues.test.ts (computeMetadataDiagnostics names the offending key per union branch, and decorateMetadataItem carries it). That pin scores neither the sweep entry nor the page's deep link",
           "severity=warning ADDS NO ROWS ON TODAY'S PRODUCERS: the sweep's contract includes warning-only entries (protocol.ts getMetaDiagnostics: valid items with diagnostics.warnings), but computeMetadataDiagnostics emits errors only and the docstring reserves warnings 'for a future lint layer' — no read-decoration producer emits a warning at head. The severity clause asserts the MECHANISM (param accepted, error rows unchanged), not warning rows; a warning row appearing is a finding that the lint layer landed (revise this item), never noise",
           "REPO OWNERSHIP (ADR-0054): the API half — route, sweep, stats, refusals — is objectstack's; the page markup, grouping, deep links, badges are objectui's (metadata-admin/DiagnosticsPage.tsx, DirectoryPage.tsx, useMetadata.ts). A locator or copy fix goes to objectui"
         ]
@@ -1363,7 +1370,8 @@
         "studio-authoring.authoring-validation-not-persisted (why stock stores are clean — the save-time gate; also the known spurious _diagnostics banner on the DESIGNER, which is that item's business, not this sweep's)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-30", "change": "new item (2026-08-30 sweep, angle 4): the governance sweep GET /meta/diagnostics + its two Studio surfaces had no coverage — nothing asserted the stats/tile parity seam, the #8924 spelling refusal (whose regression the page paints as 'All clear'), the #8855 outage honesty, or the clean-store empty state. Grounded against source with two corrections to the register hypothesis: the scoping query param is ?package= (not ?packageId= — that is the protocol-layer argument name), and severity=warning cannot 'add warning-only entries' on stock because no producer emits warnings at head (reserved for a future lint layer) — authored as a mechanism clause with the lint-layer tripwire recorded. The invalid-stored-row positive is blocked(fixture) by construction (save doors validate; sys_metadata is not a data-plane object), with the stale-row snapshot named as the honest fixture candidate", "ref": "#sweep-2026-08-30" }
+        { "revision": 1, "date": "2026-08-30", "change": "new item (2026-08-30 sweep, angle 4): the governance sweep GET /meta/diagnostics + its two Studio surfaces had no coverage — nothing asserted the stats/tile parity seam, the #8924 spelling refusal (whose regression the page paints as 'All clear'), the #8855 outage honesty, or the clean-store empty state. Grounded against source with two corrections to the register hypothesis: the scoping query param is ?package= (not ?packageId= — that is the protocol-layer argument name), and severity=warning cannot 'add warning-only entries' on stock because no producer emits warnings at head (reserved for a future lint layer) — authored as a mechanism clause with the lint-layer tripwire recorded. The invalid-stored-row positive is blocked(fixture) by construction (save doors validate; sys_metadata is not a data-plane object), with the stale-row snapshot named as the honest fixture candidate", "ref": "#sweep-2026-08-30" },
+        { "revision": 2, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 17). A7 was blocked(fixture): an invalid stored row cannot be planted, because every authoring door validates at save. Disposition: recorded knownGap. The leg cannot be reached on a stock environment by design. The knownGap now names the environment it needs (a store already holding a stale row), says no CI job builds one, and points at the producer-level pin as mechanism-only. No clause changed", "ref": "#22017" }
       ]
     },
     {

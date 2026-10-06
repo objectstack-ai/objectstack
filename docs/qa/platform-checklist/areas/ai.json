@@ -596,7 +596,7 @@
       "title": "Console AI affordances gate on the access-filtered agent catalog: an agent-less boot hides FAB / chat dock / ⌘⇧I / top-bar link and redirects a stale /ai bookmark without flash — with the ungated bare system/ai-approvals route pinned as an expected-fail probe",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": ["admin (form sign-in — the pending-actions poll sends the COOKIE half only, credentials:'include' with no bearer header, so an injected-token session reads as anonymous there)"],
@@ -608,7 +608,7 @@
           "a REAL form sign-in (not an injected localStorage token): the AI Approvals page's poll authenticates by cookie only (usePendingActions call() sends credentials:'include' and no Authorization header), so without the cookie half the poll answers 401 AUTH_REQUIRED instead of the 501 this item pins (RUNNER.md console-session fact)"
         ],
         "knownGaps": [
-          "the ENTITLED side of the gate (catalog >= 1 agent ⇒ FAB/dock/link/route all appear) has NO open-framework fixture: service-ai is Cloud/EE and no stock agent-serving harness exists. The only lever is the VITE_AI_BASE_URL opt-in pointing the catalog fetch at an external AI server (useAiSurface.ts resolveAiApiBase), which needs a console REBUILD plus such a server — score those clauses blocked(fixture), never inferred from the hook's source",
+          "the ENTITLED side of the gate (catalog >= 1 agent ⇒ FAB/dock/link/route all appear) has NO open-framework fixture: service-ai is Cloud/EE and no stock agent-serving harness exists. The only lever is the VITE_AI_BASE_URL opt-in pointing the catalog fetch at an external AI server (useAiSurface.ts resolveAiApiBase), which needs a console REBUILD plus such a server — score those clauses blocked(environment), never inferred from the hook's source. The environment this side needs is a deployment whose agent catalog serves at least one agent to the admin: the Cloud/Enterprise @objectstack/service-ai, or the VITE_AI_BASE_URL rebuild above. Neither exists in the open framework, by design, and CI has neither (QA run #21782, parked on #22017 row 9). objectui unit-pins the signal's mechanism (packages/app-shell/src/hooks/__tests__/useAiSurface.test.ts, 'is enabled when the catalog serves at least one agent'; packages/app-shell/src/console/__tests__/RequireAiSurface.test.tsx, 'renders the AI surface when the server serves agents'). Those pin the hook, not the affordance sweep, so they do not score the entitled side",
           "the PER-SEAT half of the signal (ai_seat holder sees agents, seat-less user gets an empty catalog on the SAME deployment — ADR-0068, the objectui#1992 revert) is equally cloud-only: on an open boot the catalog is empty for every principal, so per-seat differentiation is unobservable here",
           "the /_console bundle is vendored and may be stale — verify affordance absence against current objectui app-shell or a fresh build before scoring (stale-console-bundle)"
         ]
@@ -632,7 +632,7 @@
           "evidence": "the catalog request/response trace"
         },
         {
-          "clause": "every gated affordance is ABSENT on the empty catalog: no FAB, no chat dock (⌘⇧I inert — the listener is not armed), no top-bar AI entry, no Home AI CTAs — hidden-during-load is the designed flash-free behavior, so a settled screenshot precedes every DOM read. The ENTITLED side (>= 1 agent ⇒ all of them appear) is blocked(fixture) on the open framework — record it blocked, never ticked from the hook's source",
+          "clause": "every gated affordance is ABSENT on the empty catalog: no FAB, no chat dock (⌘⇧I inert — the listener is not armed), no top-bar AI entry, no Home AI CTAs — hidden-during-load is the designed flash-free behavior, so a settled screenshot precedes every DOM read. The ENTITLED side (>= 1 agent ⇒ all of them appear) is blocked(environment) on the open framework (fixtures.knownGaps names the environment) — record it blocked, never ticked from the hook's source",
           "oracle": "screenshot",
           "verify": "settled screenshots of shell chrome + Home show none of the affordances; post-screenshot DOM reads confirm; ⌘⇧I produces no mount (ConsoleLayout.tsx gates the listener on dockEnabled = the same signal)",
           "evidence": "the region screenshots + the ⌘⇧I non-event"
@@ -681,7 +681,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "new item (sweep 2026-08-30, cross-angle hit 1+4): the console-side AI gating had no coverage — the catalog-signal design (useAiSurfaceEnabled) hides FAB/dock/⌘⇧I/header/Home affordances and no-flash-redirects /ai on an agent-less boot, while SystemHubPage's 'AI Approvals' card is built ungated and its page polls the dead /ai/pending-actions endpoint every 5s (501) rendering a fake empty queue beside the error alert. Authored as a NEW browser sibling of ai.open-edition-honest-degradation (which keeps the API half) rather than extending it, so neither surface double-covers the other; the two K2 defect clauses are expected-fail probes, the defect row itself is the sweep's FOLLOW-UPS entry", "ref": "#sweep-2026-08-30" },
-        { "revision": 2, "date": "2026-10-05", "change": "clause 4, steps 6-7, negative 3, the title and the source re-pointed (stale, #21782 VF4). objectui 9eea12a2b (objectui#10507, fixing objectui#3743) removed SystemHubPage and its 'AI Approvals' card before 17.6.0, so K2's card half is moot. The clause now asserts that no console surface advertises the entry (verifier's wording). The route half of K2 remains: system/ai-approvals is still registered ungated (AppContent systemRoutes), so steps 6-7 reach it by URL and clause 6 keeps its expected-fail scoring. Negative 3 names clause 6 only. Re-read at objectui 9dfaca6543: unchanged", "ref": "#21797" }
+        { "revision": 2, "date": "2026-10-05", "change": "clause 4, steps 6-7, negative 3, the title and the source re-pointed (stale, #21782 VF4). objectui 9eea12a2b (objectui#10507, fixing objectui#3743) removed SystemHubPage and its 'AI Approvals' card before 17.6.0, so K2's card half is moot. The clause now asserts that no console surface advertises the entry (verifier's wording). The route half of K2 remains: system/ai-approvals is still registered ungated (AppContent systemRoutes), so steps 6-7 reach it by URL and clause 6 keeps its expected-fail scoring. Negative 3 names clause 6 only. Re-read at objectui 9dfaca6543: unchanged", "ref": "#21797" },
+        { "revision": 3, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 9). A2's entitled side was blocked(fixture) as the clause prescribed. Disposition: recorded knownGap. The side cannot be reached in the open framework by design (service-ai is Cloud/Enterprise). The knownGap names the environment it needs, says CI lacks it, and reclassifies the verdict blocked(environment); A2's clause follows. It also names the objectui hook pins as mechanism-only", "ref": "#22017" }
       ]
     },
     {

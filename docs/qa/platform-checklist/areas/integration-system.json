@@ -1525,7 +1525,7 @@
       "title": "A shipped driver's datasource credential can never be authored inline NOR read back: every inline-credential door refuses at publish, and BOTH read doors redact, including legacy alias spellings already sitting in stored rows. A plugin driver's config is its author's to keep credential-free; the platform redacts only its fixed credential spellings there and does not guess",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "mixed",
       "personas": ["seeded admin", "authenticated non-admin", "anonymous"],
@@ -1538,7 +1538,7 @@
         "knownGaps": [
           "The legacy-alias clause tests a row shape the CURRENT parse refuses to create — a stored row from before the aliases moved to `guidance`. It is only reachable by writing the row directly (⚠️ NOT through the runtime wizard: POST /api/v1/datasources refuses an alias-spelled config key 400 DATASOURCE_ADMIN_ERROR — the aliases moved to `guidance`, which refuses them, #8078 — measured on a stock showcase boot with `passwd` and by QA run #21056. The run planted its rows with a direct sys_metadata write while the server was STOPPED, then booted and read through both doors). If the run cannot write such a row, that clause is blocked(fixture) and MUST be recorded — a redaction that has never been tested against the shape it exists for is an untested redaction.",
           "`encryptionKey` (turso) is deliberately STILL WRITABLE while being redacted on read (#8081 scope item 4). Scoring it as a write refusal is a false fail; the correct expectation is write-accepted + read-redacted.",
-          "acceptance[1] (the credential-bound datasource actually connects) and acceptance[6] (judged by a connect probe after the echoed-mask round-trip) need a reachable, credential-protected database of a SHIPPED driver (postgres, mysql or mongo). Stock showcase and the QA container provide none, and every run so far recorded both clauses blocked(environment) (#21784, #21845). No recipe is proven yet. A run that has such a database (for example a postgres:16 service like the one ci.yml's live-PG job starts) binds external.credentialsRef to it and scores both clauses. A run without one records both blocked(environment). ⛔ Never score either clause from a successful publish alone, which proves the paved path is accepted, not that it connects. The stored-credential half of acceptance[6] can still be read without a database (after the PATCH, the admin door still reports hasSecret and the bound secret handle is unchanged); record that as a partial reading, separate from the connect half",
+          "acceptance[1] (the credential-bound datasource actually connects) and acceptance[6] (judged by a connect probe after the echoed-mask round-trip) need a reachable, credential-protected database of a SHIPPED driver (postgres, mysql or mongo). Stock showcase and the QA container provide none, and every run so far recorded both clauses blocked(environment) (#21784, #21845). No recipe is proven yet. A run that has such a database (for example a postgres:16 service like the one ci.yml's live-PG job starts) binds external.credentialsRef to it and scores both clauses. A run without one records both blocked(environment). CI has postgres and mysql only inside the Temporal Conformance (live PG + MySQL) job (.github/workflows/ci.yml services postgres:16 and mysql:8.0), which runs no checklist item, and has no mongo anywhere; the QA container has none of the three (QA run #21784, parked on #22017 row 18). ⛔ Never score either clause from a successful publish alone, which proves the paved path is accepted, not that it connects. The stored-credential half of acceptance[6] can still be read without a database (after the PATCH, the admin door still reports hasSecret and the bound secret handle is unchanged); record that as a partial reading, separate from the connect half",
           "the plugin-driver boundary is RULED (#21921, docs note in content/docs/data-modeling/drivers.mdx): for a driver the platform ships no contract for, the platform neither validates config nor guesses which of its keys are credentials. Keeping credentials out of a plugin driver's config, through external.credentialsRef, is the plugin author's responsibility. Only the platform's FIXED credential spellings are redacted there by name (acceptance[5]). A credential under any other key of a plugin driver's config being stored and served to administrators as written is that boundary, never a finding"
         ]
       },
@@ -1647,6 +1647,12 @@
           "date": "2026-10-06",
           "change": "two re-checks from #21932. (1) acceptance[1] and acceptance[6] (A2 and A7 in run records) have been blocked(environment) in every run (no reachable postgres, mysql or mongo). A knownGap now records the gap: what a run needs, what it may not score from (a successful publish alone), and the partial reading available without a database. No recipe is claimed, because none is proven. (2) The plugin-driver boundary is ruled (#21921, docs #21927): the platform does not guess which keys of a plugin driver's config are credentials. acceptance[5], step 7, the unknown-driver negative and the title now say that only the fixed spellings (canonical keys, former aliases, URL credentials) are redacted for such a driver. A non-canonical key served as written is the boundary, not a FAIL. Nothing about shipped drivers changes",
           "ref": "#21932"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 18). Already recorded as a knownGap by #21932 (revision 3): A2 / A7 need a reachable, credential-protected postgres, mysql or mongo. This revision adds only whether CI has one (postgres and mysql inside the Temporal Conformance job, which runs no checklist item; no mongo) and cites the record. No clause changed",
+          "ref": "#22017"
         }
       ]
     },
@@ -1753,7 +1759,7 @@
       "title": "Setup → Datasources federation UI (ADR-0015 §6.4): SchemaBrowser mirrors the remote-table listing, ImportObjectDialog lands a REAL object through the metadata channel, Refresh catalog and ValidationPanel drive the three previously-uncovered federation routes (import / refresh-catalog / validate) behind their capability floors",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1767,8 +1773,8 @@
           "the built console mounted (the panel lives in the app-shell metadata-admin engine)"
         ],
         "knownGaps": [
-          "the federation-unavailable 503 arm is NOT reachable on a stock boot (serve.ts wires ExternalDatasourceServicePlugin unconditionally — same bound as datasource-admin-lifecycle's 503 clause); it needs a deliberately unwired boot",
-          "AND when that 503 IS reached, the UI's designed friendly state is EXPECTED-FAIL at head: objectui api.ts jsonOrThrow matches the RETIRED pre-#3843 body shape (`body.error === 'external_service_unavailable'`, api.ts, pinned by its own api.test.ts) while the server has answered the envelope `{ success:false, error:{ code:'SERVICE_UNAVAILABLE', message } }` since the sendError consolidation (external-datasource-routes.ts; response-envelope.ts) — so ExternalServiceUnavailableError cannot fire against a real head server and the 'Federation is not enabled on this server.' / SchemaBrowser 'unavailable' states are dead code live. Record the ACTUAL render (generic error text), never tick the friendly-hint clause green, and check for an existing objectui card before filing",
+          "the federation-unavailable 503 arm is NOT reachable on a stock boot (serve.ts wires ExternalDatasourceServicePlugin unconditionally — same bound as datasource-admin-lifecycle's 503 clause); it needs a deliberately unwired boot. No CLI flag or preset unwires it: serve.ts wires the plugin whenever @objectstack/service-datasource resolves (QA run #21784, parked on #22017 row 21)",
+          "the UI's 503 detector is FIXED at the current pin. objectui 0abd4f9f8769 (objectui#11628, objectui PR #11640) maps the server's 503 envelope { success:false, error:{ code:'SERVICE_UNAVAILABLE', message } } to ExternalServiceUnavailableError (packages/app-shell/src/views/metadata-admin/external/api.ts). Its api.test.ts pins that for all four reads ('%s maps 503 SERVICE_UNAVAILABLE to the typed error') and pins that a 503 naming another code is not read as 'federation not wired'. QA runs #21782 / #21784 ran objectui 2e818d0b51ec, whose detector still matched the retired pre-#3843 string body, so acceptance[6]'s expected-fail was true for them and is stale now (re-pointed on #22017 row 21)",
           "the 'unreachable' diff kind (spec 2026-08-23, emitted by external-datasource-service.ts) is NEWER than the DIFF_LABEL map objectui compiles against: ValidationPanel.tsx labels 9 kinds and lacks 'unreachable', so a validate run reporting an unreachable remote renders an unlabelled kind cell at head — the exact objectstack#4115 class the map's totality gate exists to catch; it will fail objectui's compile at the next spec pin bump (the panel's own comment documents the mechanism working that way for default_mismatch). Expected-fail if observed live; do not file as new without checking",
           "diff-kind labels beyond the in-sync fixture need INDUCED drift — reuse external-schema-drift-gate's induced-drift recipe notes (scratch copy, measured column-type change); the stock in-sync fixture proves only the all-green render"
         ]
@@ -1782,7 +1788,7 @@
         "the server-side import twin: POST /api/v1/datasources/showcase_external/external/tables/orders/import (a second, scratch import) → 201 { object }; confirm it too landed and is queryable; then delete/clean up both imported objects",
         "Validation tab: run validation; capture POST .../external/validate → { ok, results } (URL-scoped work, #10537) and compare the rendered per-object verdict rows against it; on the in-sync stock fixture expect all-green; if an induced-drift scratch copy is available, confirm each reported diff kind renders with its DIFF_LABEL text",
         "the floor, both sides: replay tables + validate as the no-capability session (403 PERMISSION_DENIED naming manage_platform_settings) and import + refresh-catalog as the same session (403 naming manage_metadata — FEDERATION_WRITE_CAPABILITY), plus one anonymous probe of each family (401 UNAUTHENTICATED, decided before any service lookup); also probe the UI import door's floor: the no-capability session's PUT /api/v1/meta/object/<name> refuses ('Rewriting stored metadata requires the `manage_metadata` capability')",
-        "ONLY on a deliberately unwired boot (see knownGaps): drive the Tables tab into the 503 and record what the UI ACTUALLY renders — expected-fail against the designed 'Federation is not enabled on this server.' state"
+        "run the objectui api.test.ts 503 cases (acceptance[6]). ONLY on a deliberately unwired boot (see knownGaps), also drive the Tables tab into the 503 and record that the designed 'Federation is not enabled on this server.' state renders"
       ],
       "acceptance": [
         {
@@ -1822,10 +1828,10 @@
           "evidence": "the 401/403 responses, keyed by route and persona"
         },
         {
-          "clause": "federation-unavailable honesty (EXPECTED-FAIL at head, record — do not tick): the server's 503 names the external-datasource service in the envelope; the UI was DESIGNED to map it to a friendly 'Federation is not enabled on this server.' / 'unavailable' state, but its detector matches the retired pre-#3843 string body, so at head the real envelope falls through to the generic error path — the run records the actual render and the mismatch, and must not score the generic error as the friendly state working",
-          "oracle": "dom",
-          "verify": "on a deliberately unwired boot: the 503 envelope (external-datasource-routes.ts) vs the UI detector (api.ts, ExternalServiceUnavailableError) and the stale pin (api.test.ts); on a stock boot this clause is not-applicable-live",
-          "evidence": "the 503 response + the actual rendered state, side by side"
+          "clause": "federation-unavailable honesty: the server's 503 names the external-datasource service in the envelope (SERVICE_UNAVAILABLE), and the UI maps it to its designed 'Federation is not enabled on this server.' / 'unavailable' state instead of the generic error path. It is scored from the objectui pin in `automated` (the detector against the real envelope). The live render needs a deliberately unwired boot, which a stock boot never is (fixtures.knownGaps)",
+          "oracle": "test",
+          "verify": "run objectui packages/app-shell/src/views/metadata-admin/external/api.test.ts at the .objectui-sha revision and cite its 503 cases. On a deliberately unwired boot, also screenshot the Tables tab and read the rendered unavailable state against the 503 body (external-datasource-routes.ts). On a stock boot the live half is not-applicable",
+          "evidence": "the pin output (and, on an unwired boot, the 503 response + the rendered state)"
         }
       ],
       "negative": [
@@ -1841,8 +1847,12 @@
         "wrong-persona",
         "auth-state-leak"
       ],
+      "automated": {
+        "kind": "unit",
+        "ref": "objectui, for acceptance[6] ONLY: packages/app-shell/src/views/metadata-admin/external/api.test.ts, the 503 SERVICE_UNAVAILABLE → ExternalServiceUnavailableError cases, present at 0abd4f9f8769. Run it in an objectui checkout at the .objectui-sha revision and cite the output; every other clause still needs the run"
+      },
       "source": [
-        "objectui packages/app-shell/src/views/metadata-admin/external/api.ts (the five-route client; the retired-shape 503 detector; listRemoteTables/generateObjectDraft/refreshCatalog/validateDatasource/importObjectDraft — the import door is PUT /api/v1/meta/object/:name)",
+        "objectui packages/app-shell/src/views/metadata-admin/external/api.ts (the five-route client; the 503 detector, which reads the envelope since objectui#11628; listRemoteTables/generateObjectDraft/refreshCatalog/validateDatasource/importObjectDraft — the import door is PUT /api/v1/meta/object/:name)",
         "objectui packages/app-shell/src/views/metadata-admin/external/{SchemaBrowser,ImportObjectDialog,ValidationPanel,ExternalDatasourcePanel}.tsx (the P5 surfaces; ValidationPanel.tsx DIFF_LABEL total over the imported spec union — the #4115 recurrence guard) + previews/DatasourcePreview.tsx (panel keyed off schemaMode !== 'managed')",
         "objectui packages/app-shell/src/views/metadata-admin/datasource/register.ts (Setup → Datasources = the engine route; left-nav names it directly, objectui#3660)",
         "packages/rest/src/external-datasource-routes.ts#refuseFederationRequest (the five-route family), (import → 201 { object }, EXTERNAL_IMPORT_ERROR), (refresh-catalog), (validate, #10537 URL-scoped), (refuseFederationRequest — read=manage_platform_settings, write=manage_metadata, #9686 anonymous floor), (the 503 envelope)",
@@ -1856,6 +1866,12 @@
           "date": "2026-08-30",
           "change": "new item from the 2026-08-30 coverage sweep (built-in-apps angle): the federation Studio UI and three of the five federation routes (import / refresh-catalog / validate) had no checklist coverage — external-schema-introspection covers only the two read twins. Grounded against source with two register corrections: (1) the UI's import door is PUT /api/v1/meta/object/:name (api.ts importObjectDraft), not the server's /external/tables/:remote/import route — both are covered as two doors into one metadata channel; (2) the register's 'federation-less boot surfaces the 503 as the named hint' is EXPECTED-FAIL at head: the UI's 503 detector matches the retired pre-#3843 string body while the server answers the sendError envelope, so the friendly state is dead code live (recorded as a knownGap + expected-fail clause, not asserted). Also recorded the 'unreachable' diff kind (2026-08-23) outrunning objectui's DIFF_LABEL pin — the #4115 class the map's compile-time totality will catch at the next spec bump",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 21), re-pointed clause. A7 was blocked: it needs an unwired boot, and its expected-fail rested on objectui's 503 detector matching the retired string body. Measured at the current .objectui-sha 0abd4f9f8769: objectui#11628 (PR #11640) maps the server's SERVICE_UNAVAILABLE envelope to ExternalServiceUnavailableError, pinned by api.test.ts. The run's console (2e818d0b51ec) predates it. A7 flips from expected-fail to the positive assertion, scored from that pin (oracle test); knownGaps[1], step 9, `automated` and source follow. The live render still needs an unwired boot, which no flag or preset gives (knownGaps[0])",
+          "ref": "#22017"
         }
       ]
     }

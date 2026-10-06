@@ -497,7 +497,7 @@
       "title": "The built-in apps a stock boot REGISTERS (Setup / Account) render every merged-nav destination; app-level and entry-level gates are enforced, not errored — and Studio's deliberate absence is asserted, never hunted",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -513,7 +513,7 @@
         "knownGaps": [
           "the SSO Providers entry (nav_sso_providers → sys_sso_provider) is contributed ONLY when the external-IdP RP is wired (OS_SSO_ENABLED self-host / cloud planAllowsSso — plugin-auth auth-plugin.ts isSsoWired()). On a stock open-framework boot it is ABSENT by design (not gated-and-erroring); assert its absence, never treat it as a missing surface",
           "Studio is NOT registered on a stock boot, by product decision — this is a carve-out to ASSERT, not a fixture to provision. STUDIO_APP is defined (packages/platform-objects/src/apps/studio.app.ts) and packaged (packages/apps/studio, com.objectstack.studio), but both boot paths deliberately skip it with the identical note: '@objectstack/studio is intentionally NOT default-loaded — the console ships a dedicated Studio surface at /_console/studio/<pkg>/<pillar>, so Studio no longer needs to exist as a navigable app tile' (plugin-dev/src/dev-plugin.ts and cli/src/commands/serve.ts, the ADR-0048 app-package loop in each — both register only setup and account). So ?id=studio answering 200 {\\\"items\\\":[]} is the CORRECT observation on every stock boot, not a showcase-specific gap and not a missing built-in. ⛔ Do not install the package to 'restore' it: that changes what the boot ships and is a maintainer decision, not a run's. The prior wave already walked everything reachable here — Setup 43/43 and Account 7/7 destinations, 50/50 ok, zero pageerror (#9453). Studio's own surfaces are covered by area studio-authoring against /_console/studio, not through a nav tile.",
-          "Browse Marketplace's catalog comes from the cloud registry (default https://cloud.objectos.ai, DEFAULT_CLOUD_URL; cloud ADR-0009 marketplace plugins). Where the environment denies that egress the surface renders the named state 'Failed to load marketplace · Forbidden' (QA run #21056, sandbox egress denied): score the catalog content blocked(environment) and the named error as the surface rendering honestly — never as a render failure of this item"
+          "Browse Marketplace's catalog comes from the cloud registry (default https://cloud.objectos.ai, DEFAULT_CLOUD_URL; cloud ADR-0009 marketplace plugins). Where the environment denies that egress the surface renders the named state 'Failed to load marketplace · Forbidden' (QA run #21056, sandbox egress denied): score the catalog content blocked(environment) and the named error as the surface rendering honestly — never as a render failure of this item. The environment the catalog leg needs is a boot whose process can reach the control plane: the default packages/cloud-connection/src/cloud-url.ts#DEFAULT_CLOUD_URL (https://cloud.objectos.ai), or an OS_CLOUD_URL that answers. No CI job drives this item, and the QA sandbox's egress proxy denies the host (QA run #21782, parked on #22017 row 10)"
         ]
       },
       "steps": [
@@ -600,6 +600,12 @@
           "date": "2026-10-01",
           "change": "checklist-accuracy findings of QA run #21056, re-measured on a stock dev boot: Setup serves 45 destinations and Account 8 for the admin, Account 8 for the member too (acceptance[4]'s control reads 8 vs 8; steps[5] names the eighth, nav_connect_agent). The member persona is the seeded Mei, not a fresh sign-up, which invite_only refuses. knownGaps records the marketplace catalog's cloud egress dependency",
           "ref": "#21060"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 10). The marketplace catalog content was blocked(environment): egress to the catalog was denied. Disposition: recorded knownGap. The existing knownGap now names the environment the leg needs (a boot that reaches DEFAULT_CLOUD_URL or a reachable OS_CLOUD_URL) and that no CI job drives it. No clause changed",
+          "ref": "#22017"
         }
       ]
     },
@@ -1820,7 +1826,7 @@
       "title": "Marketplace console honesty: nav entries live and die with their capability, the disabled state renders the configuration conclusion (never a red 'failed to load') for every viewer ahead of the admin guard, Installed Apps drives the real same-origin lifecycle, and an enabled runtime turns a non-admin away with access-denied",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -1834,7 +1840,7 @@
           "the marketplace routes are registered by DefaultAppContent in @object-ui/app-shell (system/marketplace, system/marketplace/:packageId), so they exist for every host console"
         ],
         "knownGaps": [
-          "rendering the browse CATALOG (boot A) needs the public control plane reachable — on an egress-blocked runner the catalog leg is blocked(environment); the DISABLED state (boot B) is the leg this item can always prove, and it is the one #5504 was about"
+          "rendering the browse CATALOG (boot A) needs the public control plane reachable — on an egress-blocked runner the catalog leg is blocked(environment). The environment it needs is a boot whose process reaches the control plane: the default packages/cloud-connection/src/cloud-url.ts#DEFAULT_CLOUD_URL (https://cloud.objectos.ai), or an OS_CLOUD_URL that answers. No CI job drives this item, and the QA sandbox's egress proxy denies the host (QA run #21782, parked on #22017 row 10); the DISABLED state (boot B) is the leg this item can always prove, and it is the one #5504 was about"
         ]
       },
       "steps": [
@@ -1903,6 +1909,12 @@
           "date": "2026-10-05",
           "change": "clause 4, step 5, negative 3, the title and the source re-pointed (stale by design, #21782 VF4). objectui d524bde29 (#5557 via #5582, 2026-08-21) moved the MarketplaceDisabled return ahead of the !isAdmin guard (MarketplacePage; MarketplacePackagePage in 2573ff434), so on a no-marketplace runtime every viewer gets the Disabled card. This landed before 17.6.0, and revision 1 was authored against the superseded #5583 ordering. The verifier's wording is used for the clause, and negative 3 flips with it. Re-read at objectui 9dfaca6543: unchanged. One measured nuance is recorded in the verify text: 'no package fetch' holds on the package page, whose fetch effects are isAdmin-gated, while the catalog page's list fetch is not admin-gated. The member persona now reads invite + sign-up (stock invite_only)",
           "ref": "#21797"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 10). Boot A's catalog content was blocked(environment): egress to the catalog was denied. Disposition: recorded knownGap. The knownGap now names the environment the leg needs (a boot that reaches DEFAULT_CLOUD_URL or a reachable OS_CLOUD_URL) and that no CI job drives it. No clause changed",
+          "ref": "#22017"
         }
       ]
     },
@@ -2173,7 +2185,7 @@
       "title": "Keyboard shortcut surface: `?` and ?shortcuts=1 open the dialog and Esc closes it, typing in an input never triggers it, the WIRED accelerators fire (⌘K, ⌘/Ctrl+B, ⌘⇧I where AI is present) — and the five advertised-but-DEAD accelerators (⌘/, N, R, ⌘E, ⌘D) plus the B-vs-⌘B display mismatch are EXPECTED-FAIL probes, never ticked green",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -2184,7 +2196,7 @@
         ],
         "knownGaps": [
           "⌘⇧I (chat dock) is wired but the dock only exists when the AI surface is present — on a stock open boot the agent catalog is empty, the listener is not armed and ⌘⇧I is deliberately inert; that WHOLE cell (inert-when-gated AND armed-when-entitled) is scored by ai.console-ai-surface-gating — here record only that the accelerator's handler exists and is gated, never a second verdict",
-          "⌘⇧O / ⌘⇧S are advertised in the dialog's 'AI assistant' group but their handlers are PAGE-SCOPED to the AI chat page (matchAiChatShortcut in AiChatPage) — on a stock open boot that page is unreachable, so these two cells are blocked(fixture) on stock; on an AI-enabled deployment probe them ON the chat page and record the page-scope honestly"
+          "⌘⇧O / ⌘⇧S are advertised in the dialog's 'AI assistant' group but their handlers are PAGE-SCOPED to the AI chat page (matchAiChatShortcut in AiChatPage) — on a stock open boot that page is unreachable, so these two cells cannot be reached on stock. That is an ENVIRONMENT gap (QA run #21782, parked on #22017 row 9): the AI chat page is reachable only where the access-filtered agent catalog serves at least one agent, i.e. a deployment running the Cloud/Enterprise @objectstack/service-ai, or a console rebuilt with VITE_AI_BASE_URL pointing at such a server (ai.console-ai-surface-gating knownGaps). The open framework ships no agent server by design and CI has no such deployment, so score them blocked(environment). objectui unit-pins only the key-to-intent mapping (packages/app-shell/src/console/ai/__tests__/matchAiChatShortcut.test.ts), which does not score the page-scope clause; on an AI-enabled deployment probe them ON the chat page and record the page-scope honestly"
         ]
       },
       "steps": [
@@ -2223,10 +2235,10 @@
           "evidence": "the five per-key traces/DOM reads"
         },
         {
-          "clause": "the advertised-but-page-scoped pair is recorded honestly: ⌘⇧O/⌘⇧S are listed globally but handled only on the AI chat page — on stock open boots blocked(fixture); on AI-enabled deployments they fire ON that page and do nothing elsewhere",
+          "clause": "the advertised-but-page-scoped pair is recorded honestly: ⌘⇧O/⌘⇧S are listed globally but handled only on the AI chat page — on stock open boots blocked(environment); on AI-enabled deployments they fire ON that page and do nothing elsewhere",
           "oracle": "dom",
           "verify": "keypress outside the chat page: no effect; on the chat page (where reachable): new-chat/list-toggle occur (matchAiChatShortcut)",
-          "evidence": "both contexts' traces, or the blocked(fixture) record on stock"
+          "evidence": "both contexts' traces, or the blocked(environment) record on stock"
         }
       ],
       "negative": [
@@ -2250,6 +2262,12 @@
           "date": "2026-08-30",
           "change": "new — authored in the 2026-08-30 sweep (console-UI angle). Grounding confirmed the register's defect hypothesis and widened it: the dialog advertises ⌘/, N, R, ⌘E and ⌘D with NO handler in the tree (expected-fail probes, defect K1 filed by the sweep), advertises bare B while the handler requires ⌘/Ctrl+B (display mismatch), and additionally advertises ⌘⇧O/⌘⇧S whose handlers are page-scoped to the AI chat page — recorded here as an honest page-scope cell the register had not listed. ⌘K and ⌘⇧I are wired (palette depth stays with search.console-global-search)",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 9). A5 was blocked(fixture) as the clause prescribed. Disposition: recorded knownGap. The leg cannot be reached in the open framework by design: ⌘⇧O / ⌘⇧S are handled only on the AI chat page, which exists only where an agent catalog serves an agent (Cloud/Enterprise service-ai). The knownGap names that environment, says CI lacks it, and reclassifies the verdict blocked(environment); A5's clause and evidence follow",
+          "ref": "#22017"
         }
       ]
     },

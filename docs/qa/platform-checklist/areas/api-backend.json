@@ -873,7 +873,7 @@
       "title": "Metadata-authored `api` endpoints mount as real URLs with their declared auth/cache policy",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -891,13 +891,13 @@
         "flow target — delegates to a flow",
         "policy: authRequired (default true)",
         "policy: cacheTtlSeconds → Cache-Control",
-        "script/proxy target — answer 501 in the open framework"
+        "script/proxy target — refused at authoring, never served; the runtime's 501 is a second door, pinned"
       ],
       "steps": [
         "boot showcase isolated; sign in as admin",
         "GET /api/v1/apps/showcase/tasks authed; capture status, body, and response headers",
         "GET the same endpoint unauthenticated; capture status",
-        "author a script-target endpoint shape in a scratch package and hit it; capture the 501",
+        "a script / proxy target cannot be authored into a live server. `api` is code-only (#5488: allowRuntimeCreate false, so no scratch package can hold one), and the stack schema refuses `type: 'script'` / `'proxy'`. Author one in a scratch config and run `os validate` (or `os build`); capture the refusal naming the endpoint, the type and the flow prescription. Do not attempt a live 501",
         "GET /apps/showcase/nope (no matching declaration); capture the transport 404"
       ],
       "acceptance": [
@@ -914,10 +914,10 @@
           "evidence": "the response"
         },
         {
-          "clause": "a script/proxy target answers 501 in the open framework (declared ≠ delivered surfaces honestly, not a fake 200)",
-          "oracle": "api",
-          "verify": "the 501 envelope",
-          "evidence": "the response"
+          "clause": "a script / proxy target is never served (declared ≠ delivered, refused loudly, never a fake 200). Authoring refuses it: the stack schema's `apis:` gate (packages/spec/src/api/endpoint-publish-gate.ts#validateApiEndpointDeclarations) rejects `type: 'script'` and `'proxy'`, naming the endpoint and the fix, and runtime authoring of `api` is withdrawn (#5488). The runtime keeps its own refusal for a declaration that reaches the store some other way: 501 NOT_IMPLEMENTED with a hint (packages/runtime/src/endpoint-executor.ts#planEndpointTarget)",
+          "oracle": "build",
+          "verify": "the scratch-config `os validate` / `os build` refusal for a script and a proxy endpoint; the runtime half from the pins in `automated` (packages/runtime/src/endpoint-executor.test.ts, '%s answers 501 NOT_IMPLEMENTED with a hint'; packages/spec/src/api/apis-publish-gates.test.ts, gate (a))",
+          "evidence": "the two refusals + the pin output"
         },
         {
           "clause": "an unmatched path under /apps/** falls through to the transport 404 — the notFound seam does not swallow it",
@@ -931,7 +931,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts + declarative-endpoint-policy.dogfood.test.ts"
+        "ref": "packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts + declarative-endpoint-policy.dogfood.test.ts; acceptance[2] (script / proxy never served) by packages/runtime/src/endpoint-executor.test.ts ('an unsupported declaration gets a structured 501, never invented semantics') + packages/spec/src/api/apis-publish-gates.test.ts ('gate (a) — the supported subset')"
       },
       "traps": [
         "dispatcher-vs-hono-route"
@@ -939,7 +939,8 @@
       "source": [
         "examples/app-showcase/src/system/apis/index.ts (the two live endpoints)",
         "ADR-0121 / #5040 (declarative endpoint E-series)",
-        "packages/runtime notFound-fallback mount seam"
+        "packages/runtime notFound-fallback mount seam",
+        "packages/spec/src/api/endpoint-publish-gate.ts#validateApiEndpointDeclarations (the authoring refusal of script / proxy targets, run by the stack schema) + packages/spec/src/kernel/metadata-plugin.zod.ts (api is code-only: allowRuntimeCreate false, #5488) + packages/runtime/src/endpoint-executor.ts#planEndpointTarget (the runtime's 501 second door)"
       ],
       "history": [
         {
@@ -947,6 +948,12 @@
           "date": "2026-08-08",
           "change": "initial — the coverage.json `api` waiver was STALE (showcase authors two live endpoints with dogfood pins); un-waived",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21720 parked on #22017 (row 13), re-pointed clause. A3 asserted a live 501 from a script / proxy endpoint authored in a scratch package, and the run found no way to author one without editing source. No public door produces one: api is code-only (#5488), and the stack schema refuses script / proxy targets (validateApiEndpointDeclarations, packages/spec/src/api/endpoint-publish-gate.ts). The runtime's 501 is a second door for a declaration that reaches the store another way, pinned by endpoint-executor.test.ts. A3 now asserts the authoring refusal (oracle build) and cites the pins; step 4, variant 5, `automated` and source follow",
+          "ref": "#22017"
         }
       ]
     },

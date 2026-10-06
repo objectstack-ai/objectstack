@@ -9,7 +9,7 @@
       "title": "Row-level security: restricted member sees only their rows; admin sees all",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -21,6 +21,9 @@
         "requires": [
           "showcase_private_note (OWD private, member_default grants create/read/edit)",
           "two fresh sign-ups, e.g. rls-a@verify.test / rls-b@verify.test"
+        ],
+        "knownGaps": [
+          "acceptance[5]'s D11 spot-check can be scored only by a runner holding the PRIVATE D11 write-up and its private fix card (maintainer-held, #7463 ruling). The environment this leg needs is that maintainer channel; no public run record, CI job or checkout carries it, by design. Without it, score the D11 spot-check blocked(dependency) (QA run #21720, parked on #22017 row 11), and still score the clause's other half, every skipped object in the verify report explained by its detail line, which needs nothing private. Never restate the defect to justify the verdict"
         ]
       },
       "steps": [
@@ -115,6 +118,12 @@
           "date": "2026-10-01",
           "change": "checklist-accuracy findings of QA run #21056. The private handle D11 collided with the public D11 row FOLLOW-UPS.md §7c later assigned to an unrelated two-factor defect; clause 5 and the naming-collision negative now say so (FOLLOW-UPS §7c carries the same note), still non-disclosing. Numbering, for every cross-reference here and in this item's history: \"clause N\" counts from 0 (acceptance[N]); run records number clauses from 1, so clause 5 here is a run record's A6. steps[0] mints A and B invite-first under the invite_only default",
           "ref": "#21060"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21720 parked on #22017 (row 11). A6 was blocked(dependency): the clause forbids ticking it without the private D11 write-up. Disposition: recorded knownGap. The item gains a knownGap naming the environment the D11 spot-check needs (the maintainer's private write-up and fix card, which no public record or CI carries by design) and separating the skipped-object half, which a public run can still score. Non-disclosing, as the clause requires",
+          "ref": "#22017"
         }
       ]
     },
@@ -123,7 +132,7 @@
       "title": "Write-path guards: readonly strip, owner_id forge/transfer denied, bulk validation",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -193,11 +202,11 @@
       ],
       "negative": [
         "run the forge/transfer clauses as ADMIN too and confirm they SUCCEED where legitimately privileged — the guard must gate on privilege, not break the admin path (wrong-persona trap, both sides)",
-        "isSystem writes must still set readonly fields (A1's isSystem carve-out): verify via an objectql write with context {isSystem:true} that lead_score IS settable system-side"
+        "isSystem writes must still set readonly fields (A1's isSystem carve-out): verify via an objectql write with context {isSystem:true} that lead_score IS settable system-side. No REST door reaches an in-process isSystem write, by design, so score this from the two objectql pins `automated` names for it (the exemption is one engine function, gated on isSystem, for every object)"
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts (+ showcase-static-readonly.dogfood.test.ts, showcase-readonly-when-parent.dogfood.test.ts)"
+        "ref": "packages/qa/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts (+ showcase-static-readonly.dogfood.test.ts, showcase-readonly-when-parent.dogfood.test.ts); negative[1] (the isSystem exemption, which no REST door reaches by design) by packages/objectql/src/engine-insert-static-readonly-strip.test.ts ('isSystem seeds the readonly column — the exemption the ruling names', the INSERT path) + packages/objectql/src/engine-readonly-strip-caller-values.test.ts ('an isSystem caller is untouched by any of this', the UPDATE path on a static readonly column), both on a real engine"
       },
       "traps": [
         "wrong-persona"
@@ -228,6 +237,12 @@
           "date": "2026-10-01",
           "change": "checklist-accuracy findings of QA run #21056. acceptance[5] said a bulk update touching a locked row drops the field for the batch; updateMany runs engine.update per row with its own drop listener (metadata-protocol updateManyData), so only the locked row loses the field and the report is per row, results[i].droppedFields. steps[0] mints the members invite-first under the invite_only default",
           "ref": "#21060"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21720 parked on #22017 (row 12). N2 was not runnable: there is no REST door for an in-process isSystem write, and no pin targeted it. Disposition: pin. engine-insert-static-readonly-strip.test.ts and engine-readonly-strip-caller-values.test.ts already prove the isSystem exemption on a real engine, on INSERT and UPDATE. `automated` names them for negative[1], and the negative says to score it from them",
+          "ref": "#22017"
         }
       ]
     },
