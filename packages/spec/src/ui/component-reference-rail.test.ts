@@ -30,8 +30,8 @@ const messagesOf = (result: { success: boolean; error?: { issues: { message: str
   return result.error!.issues.map((i) => i.message).join('\n');
 };
 
-describe('ComponentPropsMap["record:reference_rail"] (#8691)', () => {
-  it('exists, and is the exported schema (the row is what the #5068 gate dispatches on)', () => {
+describe('ComponentPropsMap["record:reference_rail"]', () => {
+  it('exists, and is the exported schema (the row is what the props gate dispatches on)', () => {
     expect(ComponentPropsMap['record:reference_rail']).toBe(RecordReferenceRailProps);
   });
 

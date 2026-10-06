@@ -46,6 +46,11 @@ import { materializeDeclaredFields, readInternalColumn } from '@objectstack/obje
 import { isPublicSharingEnabled } from '@objectstack/spec/data';
 import type { SharingEngine } from './sharing-service.js';
 import {
+  hashShareLinkPassword,
+  verifyShareLinkPassword,
+  isLegacyShareLinkPasswordHash,
+} from './share-link-password.js';
+import {
   deleteRowsForDeletedRecords,
   sweepOrphanedRowsByRecordExistence,
   type OrphanShareSweepOptions,
@@ -197,50 +202,20 @@ function normaliseExpiresAt(input: string | null | undefined, maxDays: number): 
 }
 
 /**
- * Weak password hash. Production deployments should swap in argon2 /
- * bcrypt via dependency injection (see `ShareLinkServiceOptions.hashPassword`).
- * The default uses SubtleCrypto SHA-256 with a per-row salt — strong
- * enough to keep the hash useless to a casual observer and to deflate
- * the cost of a database leak, but NOT a substitute for argon2 against
- * a determined attacker. The platform deliberately surfaces this in the
- * plugin docs so deployments can decide.
+ * [#21839] The one exit projection for a share-link row: every copy that
+ * leaves this service drops `password_hash`. The stored hash is needed by
+ * exactly one reader — the verification inside `resolveToken`, which recovers
+ * it into a local — and by no caller: not the creator (who chose the password),
+ * not the list, not the redemption result. `createLink` built its return value
+ * from the row it inserted, so the hash went back to the creator in the mint
+ * response; the list and the redemption result already came from engine reads
+ * that strip the `internal` column, and pass through here too so the
+ * guarantee does not rest on which engine is wired.
  */
-async function defaultHashPassword(password: string): Promise<string> {
-  const g: any = globalThis as any;
-  const subtle = g.crypto?.subtle;
-  const salt = generateToken(16);
-  if (!subtle) {
-    // Synthetic fallback — no SubtleCrypto means we're in a stripped
-    // runtime; emit a clearly-marked placeholder so the deployment is
-    // forced to wire in a real hasher rather than ship a weak one.
-    return `weak$${salt}$${password}`;
-  }
-  const enc = new TextEncoder();
-  const buf = await subtle.digest('SHA-256', enc.encode(salt + ':' + password));
-  const hex = Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-  return `sha256$${salt}$${hex}`;
-}
-
-async function defaultVerifyPassword(password: string, hash: string): Promise<boolean> {
-  if (hash.startsWith('weak$')) {
-    const [, , stored] = hash.split('$');
-    return stored === password;
-  }
-  if (hash.startsWith('sha256$')) {
-    const [, salt, expected] = hash.split('$');
-    const g: any = globalThis as any;
-    const subtle = g.crypto?.subtle;
-    if (!subtle) return false;
-    const enc = new TextEncoder();
-    const buf = await subtle.digest('SHA-256', enc.encode(salt + ':' + password));
-    const hex = Array.from(new Uint8Array(buf))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-    return hex === expected;
-  }
-  return false;
+function withoutPasswordHash<T extends ShareLink>(link: T): T {
+  if (!link || typeof link !== 'object' || !('password_hash' in link)) return link;
+  const { password_hash: _omitted, ...rest } = link;
+  return rest as T;
 }
 
 /**
@@ -396,9 +371,19 @@ function isLinkCreator(
 
 export interface ShareLinkServiceOptions {
   engine: SharingEngine;
-  /** Override the default SHA-256 hasher with argon2 / bcrypt for production. */
+  /**
+   * Override the default password hasher. The default is the platform's
+   * password hash — scrypt with the account-password parameters
+   * (`share-link-password.ts`) — so production needs no override.
+   */
   hashPassword?: (plain: string) => Promise<string>;
-  /** Companion verifier — must accept hashes produced by `hashPassword`. */
+  /**
+   * Companion verifier — must accept hashes produced by `hashPassword`.
+   *
+   * [#21839] Legacy stored forms are re-hashed on a successful redemption
+   * only while BOTH members are the defaults: an injected pair owns its own
+   * stored forms, and this service cannot tell which of them are legacy.
+   */
   verifyPassword?: (plain: string, hash: string) => Promise<boolean>;
   /**
    * Bypass the per-object opt-in check at MINT (useful when the schema scan
@@ -503,12 +488,17 @@ export class ShareLinkService implements IShareLinkService {
    * is made once, not once per refused write (the rule's own words).
    */
   private usageStampRefusalReported = false;
+  /** [#21839] Both password members are the defaults — legacy forms may be upgraded. */
+  private readonly upgradesLegacyPasswordHashes: boolean;
+  /** [#21839] Latched by the first refused legacy-hash upgrade; reported once. */
+  private passwordUpgradeRefusalReported = false;
 
   constructor(opts: ShareLinkServiceOptions) {
     this.engine = opts.engine;
     this.permissive = opts.permissive ?? false;
-    this.hashPassword = opts.hashPassword ?? defaultHashPassword;
-    this.verifyPassword = opts.verifyPassword ?? defaultVerifyPassword;
+    this.hashPassword = opts.hashPassword ?? hashShareLinkPassword;
+    this.verifyPassword = opts.verifyPassword ?? verifyShareLinkPassword;
+    this.upgradesLegacyPasswordHashes = !opts.hashPassword && !opts.verifyPassword;
     this.canManageShares = opts.canManageShares;
     this.canMintWithoutVisibility = opts.canMintWithoutVisibility;
     this.logger = opts.logger;
@@ -673,7 +663,8 @@ export class ShareLinkService implements IShareLinkService {
     };
 
     await this.engine.insert('sys_share_link', row, { context: SYSTEM_CTX });
-    return row;
+    // [#21839] The row as stored carries the hash; the mint response does not.
+    return withoutPasswordHash(row);
   }
 
   async revokeLink(idOrToken: string, context: ExecutionContext): Promise<void> {
@@ -776,7 +767,9 @@ export class ShareLinkService implements IShareLinkService {
     links.forEach((link, i) => {
       if (typeof tokens[i] === 'string') link.token = tokens[i] as string;
     });
-    return links;
+    // [#21839] The engine strips the hash already; the exit projection holds it
+    // whichever engine is wired.
+    return links.map(withoutPasswordHash);
   }
 
   async resolveToken(
@@ -820,10 +813,17 @@ export class ShareLinkService implements IShareLinkService {
       [row as unknown as Record<string, unknown>],
       'password_hash',
     );
+    // [#21839] A legacy stored form that just verified is re-hashed into the
+    // current one — but only once every later gate has passed (below), so a
+    // switched-off, gone or ineligible link takes no write.
+    let upgradePasswordFrom: string | undefined;
     if (passwordHash) {
       if (!probe.providedPassword) return null;
       const ok = await this.verifyPassword(probe.providedPassword, String(passwordHash));
       if (!ok) return null;
+      if (this.upgradesLegacyPasswordHashes && isLegacyShareLinkPasswordHash(passwordHash)) {
+        upgradePasswordFrom = probe.providedPassword;
+      }
     }
 
     // [commit fc9ba76a5] The object's policy is read HERE, before the record probe,
@@ -955,6 +955,10 @@ export class ShareLinkService implements IShareLinkService {
       new Set<string>([...(policy.redactFields ?? []), ...((row.redact_fields as string[]) ?? [])]),
     );
 
+    if (upgradePasswordFrom !== undefined) {
+      await this.upgradeLegacyPasswordHash(row, upgradePasswordFrom);
+    }
+
     // Stamp usage. A refusal here MUST NOT block the read — by this line the
     // token, the record and the policy have all answered and the holder is
     // owed the record — but it is a DURABILITY degradation, not telemetry to
@@ -973,7 +977,50 @@ export class ShareLinkService implements IShareLinkService {
       this.reportUsageStampRefusal(row, err);
     }
 
-    return { link: row, redactFields };
+    return { link: withoutPasswordHash(row), redactFields };
+  }
+
+  /**
+   * [#21839] Re-hash a link's password from a legacy stored form into the
+   * current one, after `resolveToken` verified the presented password against
+   * it. The plaintext is the presented one, so the new hash verifies the same
+   * password the old one did — the link keeps working, with the weak form gone.
+   *
+   * A refusal does not block the read (the holder proved the password and is
+   * owed the record), and the legacy hash it leaves behind still verifies. But
+   * the upgrade is a claimed persistence — the stored form was meant to stop
+   * being the weak one — so a refusal is reported at `error`, once per service
+   * instance, the way `reportUsageStampRefusal` reports the usage stamp. The
+   * report names the link, never the password or either hash.
+   */
+  private async upgradeLegacyPasswordHash(row: ShareLink, password: string): Promise<void> {
+    try {
+      const upgraded = await this.hashPassword(password);
+      await this.engine.update(
+        'sys_share_link',
+        { id: row.id, password_hash: upgraded },
+        { context: SYSTEM_CTX },
+      );
+    } catch (err) {
+      if (this.passwordUpgradeRefusalReported) return;
+      this.passwordUpgradeRefusalReported = true;
+      const cause = (err as { message?: unknown } | null | undefined)?.message ?? err;
+      const message =
+        '[share-link] legacy password hash upgrade REFUSED — a protected link still stores its password in the '
+        + 'legacy fast-hash form. The link keeps resolving (the legacy form still verifies), so nothing looks '
+        + 'broken, but the stored form is not the slow hash it should now be. Fix: resolve the storage refusal '
+        + 'named as the cause (the `sys_share_link` table, the driver, or the system-context write path); the '
+        + 'upgrade is retried on the link\'s next successful redemption. Reported ONCE per service instance — '
+        + `later refusals are silent. Cause: ${String(cause)}`;
+      const meta = {
+        link: row.id,
+        object: row.object_name,
+        record: row.record_id,
+        reason: (err as { code?: unknown } | null | undefined)?.code ?? 'UNKNOWN',
+      };
+      if (this.logger?.error) this.logger.error(message, meta);
+      else this.logger?.warn?.(message, meta);
+    }
   }
 
   /**

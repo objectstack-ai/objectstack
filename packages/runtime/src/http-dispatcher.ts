@@ -2828,7 +2828,10 @@ export class HttpDispatcher {
                 // SERVER-side diagnostics attached by `plugin-security` and are
                 // still dropped above. `userMessage` is the opposite by
                 // construction: it exists only because a producer wrote text
-                // FOR the caller, platform and driver code never set it, and it
+                // FOR the caller with no host state in it (an application
+                // hook, or a platform refusal carrying static guidance such as
+                // the packaged-permission-set lock's); platform and driver
+                // diagnostics never set it, and it
                 // lands as a declared top-level sibling of `code`/`message`
                 // (`ApiErrorSchema.userMessage`), never inside `details`.
                 // The mark never moves the status or the `code` (commit 79c46da90).

@@ -67,8 +67,57 @@ export function createShareLinksDomain(deps: DomainHandlerDeps): DomainRoute {
     };
 }
 
+/**
+ * [#21839] Response headers the two public routes (`/:token/resolve` and
+ * `/:token/messages`) answer with, on every outcome — success, refusal, or a
+ * thrown error. `Cache-Control: no-store` keeps the token-released record (and
+ * any refusal) out of every browser and shared cache; `Vary: X-Share-Password`
+ * marks the answer as depending on that request header for any cache that does
+ * not honour `no-store`. The plugin-sharing mount
+ * (`plugin-sharing/src/share-link-routes.ts`) sends the same pair.
+ */
+const PUBLIC_RESPONSE_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+    'Cache-Control': 'no-store',
+    Vary: 'X-Share-Password',
+});
+
+function isPublicShareLinkRoute(subPath: string, method: string): boolean {
+    const parts = subPath.replace(/^\/+/, '').split('/').filter(Boolean);
+    return (
+        method.toUpperCase() === 'GET' &&
+        parts.length === 2 &&
+        (parts[1] === 'resolve' || parts[1] === 'messages')
+    );
+}
+
 /** Body kept signature-compatible with the legacy `HttpDispatcher.handleShareLinks`. */
 export async function handleShareLinksRequest(
+    deps: DomainHandlerDeps,
+    subPath: string,
+    method: string,
+    body: any,
+    query: any,
+    context: HttpProtocolContext,
+): Promise<HttpDispatcherResult> {
+    const isPublic = isPublicShareLinkRoute(subPath, method);
+    let result: HttpDispatcherResult;
+    try {
+        result = await handleShareLinksRequestBody(deps, subPath, method, body, query, context);
+    } catch (err: unknown) {
+        // A throw from OUTSIDE the body's own try (service resolution, engine
+        // lookup) would otherwise leave a public route without the headers
+        // above. Authenticated routes keep their existing propagation.
+        if (!isPublic) throw err;
+        result = { handled: true, response: deps.errorFromThrown(err, 500) };
+    }
+    if (!result.response || !isPublic) return result;
+    return {
+        ...result,
+        response: { ...result.response, headers: { ...result.response.headers, ...PUBLIC_RESPONSE_HEADERS } },
+    };
+}
+
+async function handleShareLinksRequestBody(
     deps: DomainHandlerDeps,
     subPath: string,
     method: string,

@@ -85,7 +85,7 @@ describe('KNOWN_COMPONENT_TYPES covers every declared face', () => {
    * deliberate and has its own note in `component.zod.ts`, so a sweep that took
    * it in by accident is caught here rather than in a rendered page.
    */
-  it('the three #18305 blocks are known through their rows; object-chart still is not', () => {
+  it('object-map / object-gantt / object-tree are known through their rows; object-chart still is not', () => {
     for (const type of ['object-map', 'object-gantt', 'object-tree']) {
       expect(Object.keys(ComponentPropsMap), type).toContain(type);
       expect(isKnownComponentType(type), type).toBe(true);
@@ -121,7 +121,7 @@ describe('KNOWN_COMPONENT_TYPES covers every declared face', () => {
    * refuses it is the schema door (`PageComponentSchema.type`), not this
    * vocabulary — pinned in `component.test.ts`.
    */
-  it('user:profile is known through its kept row and refused by name at the parse (#14159)', () => {
+  it('user:profile is known through its kept row and refused by name at the parse', () => {
     expect(PageComponentType.options).not.toContain('user:profile');
     expect(hasReservedComponentNamespace('user:profile')).toBe(false);
     expect(isKnownComponentType('user:profile')).toBe(true);
@@ -135,7 +135,7 @@ describe('KNOWN_COMPONENT_TYPES covers every declared face', () => {
    * populates `ai:` — so the namespace list above is unchanged and the
    * `component-type-unknown` rule keeps claiming `ai:`.
    */
-  it('ai:chat_window is known through its kept row, not a candidate, and `ai:` stays reserved (#21504)', () => {
+  it('ai:chat_window is known through its kept row, not a candidate, and `ai:` stays reserved', () => {
     expect(PageComponentType.options).not.toContain('ai:chat_window');
     expect(isKnownComponentType('ai:chat_window')).toBe(true);
     expect(KNOWN_COMPONENT_TYPE_CANDIDATES).not.toContain('ai:chat_window');
