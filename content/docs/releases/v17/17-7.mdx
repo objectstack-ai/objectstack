@@ -1,0 +1,1431 @@
+---
+title: 17.7.0
+description: "Release notes and upgrade checklist for 17.7.0 of the v17 line."
+---
+
+## Highlights — 17.7.0
+
+- **App-authored code reaches stored metadata only through the metadata API.**
+  A sandboxed body is no longer bound as a hook on `sys_metadata` or
+  `sys_metadata_history`, a hook or action body may not write them, and a hook,
+  action or job body may not read them (`bd70706`, #21563; `316be32`, #21660);
+  a hook whose `body` targets them, and a flow write node
+  aimed at them, are refused at parse (`9e9d693`, #21592; `a2aadab`, #21687).
+  The data door serves a metadata body's content hash in keyed form only and
+  refuses filters that evaluate the body or the hash (`713b0fa`, #21436;
+  `5d0e4e2`, #21619). ⚠️ **Run `os migrate audit-metadata-bodies` once after
+  upgrading, and expect a version token held from before to be refused once
+  with `409 METADATA_CONFLICT`.**
+- **Credentials stop travelling in copies.** A flow's inbound `secret` and an
+  `http` node's `signingSecret` move into a write-only `sys_flow_credential`
+  channel (`96a9719`, #21377); the audit ledger stops recording `internal`
+  fields, and the platform's own credential columns are declared `internal`
+  (`50e1c65`, #21301); credential fields are masked on every write response,
+  record-change event, webhook body and flow trigger record (`a0176ef`,
+  #21816; `568dc0b`, #21866; `1f04696`, #21928). ⚠️ **Rotate every flow secret
+  and the JWT signing keys, re-mint private share links, and resume, cancel or
+  purge paused runs created before the upgrade.**
+- **"Hidden" and "gone" are one answer on the write doors.** A by-id update or
+  delete of a row the caller cannot read answers `404 RECORD_NOT_FOUND`
+  (`53021e3`, #21812), and a predicate update or delete matches only readable
+  rows (`cab6396`, #21900). On a walled posture, a create naming another
+  organization's `organization_id` is refused `403` instead of being restamped
+  (`251a7dd`, #21680).
+- **Reads and writes serve declared fields only.** A read with no projection,
+  and every record a write returns, no longer carry a column no metadata
+  declares (`5c9138b`, #21612; `5b5e83f`, #21631). ⚠️ **A conversion that
+  still reads a retired field's leftover column runs before the upgrade**, or
+  afterwards through the new operator-only `os migrate unmapped-columns`
+  (`759dbe9`, #21643).
+- **Metadata write doors agree with the read envelope.** The ADR-0010 `_lock`
+  gate runs on every kernel topology, reads the row the reads serve and takes
+  the strictest lock in scope (`c43a8ae`, #21715; `cf60dbc`, #21737;
+  `18c2ddc`, #21801; `18fe681`, #21844), and the reads report what the doors
+  refuse (`fe10172`, #21693). Every write door refuses a body whose `name`
+  disagrees with its row (`44defd4`, #21536), and a code-defined datasource is
+  read-only at the metadata door and at boot (`9cc2c79`, #21942; `753e7a1`,
+  #21965).
+- **Page blocks declare what their renderers read.** In nine stages of #21464
+  and three changes beside it (#21287, #21463, #21869), the `ComponentPropsMap`
+  members of `object-grid`, `object-kanban`,
+  `object-calendar`, `object-map`, `object-gantt`, `object-tree`,
+  `object-form`, `object-master-detail-form`, `object-metric`,
+  `object-timeline`, `action:group` and `action:menu` take the shape each block
+  reads instead of any value. These are advisory `component-props-*` findings
+  at `os validate`; a stored page still saves. Alongside them, `ai:chat_window`
+  is retired (`48eb9c1`, #21531), `element:text` drops `heading` /
+  `subheading` (`36ad321`, #21614), and every block of a `joined` report must
+  bind a `dataset` (`ed15448`, #21712).
+- **Agents state what the cloud AI runtime enforces.** `memory` requires
+  `maxEntries` and `reflectionInterval` once long-term memory is on and loses
+  `longTerm.store` (`22c2d6f`, #21413), `structuredOutput` is JSON-only
+  (`3937ad2`, #21367), and `lifecycle` is retired with the `StateMachineSchema`
+  family (`6e33b67`, #21461).
+- **Analytics and the engine stop answering what they cannot.** Analytics
+  refuses unselected `order` keys, fractional or negative windows, the row
+  wildcard outside `count`, and the cube metric types `number` / `string` /
+  `boolean` (`1caa603`, #21314; `6d67ad5`, #21399; `b793010`, #21431;
+  `99589f9`, #21452). The engine narrows `"true"` / `"1"` against a boolean
+  field and refuses other comparands with `400` (`9f13c94`, #21372;
+  `45efcfa`, #21404), and refuses a list under a scalar operator (`100c394`,
+  #21484).
+- **Public forms open only on an explicit switch.** A form is served
+  anonymously only when its `sharing` sets `enabled: true` beside
+  `allowAnonymous` and `publicLink` (`6dd99b8`, #21566), and a withdrawal at
+  any metadata layer holds, within two [known limits](#public-forms)
+  (`3c7785d`, #21864). ⚠️ **A form that set only
+  `allowAnonymous` and `publicLink` answers `404 FORM_NOT_FOUND` after the
+  upgrade.**
+- **Jobs carry their own code.** A job takes a sandboxed `body` (`f1e4ae5`,
+  #21538), which every artifact door now schedules (`6c5697d`, #21584), a
+  declarative `pull` of a mapping's connector source, and the `organization` it
+  runs as (`909229e`, #21668).
+- **Console:** five objectui pin moves —
+  `31971ff1e28f → 89cad75d5570 → ab1879721595 → 2e818d0b51ec → 9dfaca654311 →
+  0abd4f9f8769` (`8963dbf`, `1cbe165`, `100f68b`, `1354e7b`, `8832655`) —
+  carrying 229 releasing objectui changesets, 65 of them declared breaking
+  upstream. The first fixes all four [known console
+  issues](/docs/releases/v17/17-6#new-in-console-studio--objectui-pins-in-1760)
+  of 17.6.0; see [New in Console](#new-in-console-studio--objectui-pins-in-1770).
+
+---
+
+
+## What's new in 17.7.0
+
+17.7.0 was published to the `latest` tag on **2026-10-06**, 4 days after
+17.6.0, moving the whole version-locked train and no major; the runtime still
+implements protocol 17. The version commit `4e4e8814` (#21352) consumed **323
+changesets**, and that is the count this page uses. The 69 package
+`CHANGELOG.md` files that carry a 17.7.0 section list them as 444 per-package
+entries (194 minor, 250 patch) in 48 of those files, because a changeset that
+bumps several packages is listed in each; the entries de-duplicate to the same
+323. One of them describes code that 17.6.0 already shipped — see [Shipped in
+17.6.0](#shipped-in-1760--listed-again-in-1770s-changelog) — so 322 are new
+in this release. The publish ran from the version commit itself, and the npm
+packages carry two commits whose changesets the version commit did not consume
+— see [Also shipped in 17.7.0](#also-shipped-in-1770--not-in-its-changelog).
+The bundled Console advances five pins,
+`31971ff1e28f → 89cad75d5570 → ab1879721595 → 2e818d0b51ec → 9dfaca654311 →
+0abd4f9f8769`.
+
+⚠️ **Read this before treating the version number as a safety guarantee.** As
+with every minor of this line, entries that landed after the 17.0.0 cut ship as
+`minor` (or `patch`) under the lockstep launch-window convention while being
+explicitly breaking. Several things in this release change behaviour on a
+**running** deployment with nothing to parse-fail on:
+
+- a sandboxed hook bound to `sys_metadata` or `sys_metadata_history` is
+  refused at registration, a hook or action body's write of either table and a
+  hook, action or job body's read of one answer `403 PERMISSION_DENIED`, and a
+  flow `create_record` / `update_record` / `delete_record` node aimed at either
+  table fails its run;
+- a by-id update or delete of a row the caller cannot read answers
+  `404 RECORD_NOT_FOUND` instead of a `403`; a predicate (`multi: true`)
+  update or delete leaves out rows the caller cannot read, and one whose
+  readable match exceeds 10,000 rows is refused `400 INVALID_FILTER`;
+- on a walled posture, a create naming another organization's
+  `organization_id` is refused `403`, where it used to be stored in the
+  caller's active organization;
+- a read with no `fields`, every record a write returns, a hook's
+  `ctx.previous`, `data.record.*` events and the webhook `after` bodies that
+  carry them, and the audit ledger's create and delete values no longer carry a
+  column no metadata declares;
+- credential-class fields read as `SECRET_MASK` (or `null`) on write
+  responses, record-change events, webhook bodies, approval snapshots and a
+  record-change flow's `record` / `previous`; `internal` fields are absent
+  there and from new audit rows, and the platform's credential columns leave
+  `GET /api/v1/data/...`;
+- the first boot with a crypto provider moves every stored flow's `secret` /
+  `signingSecret` into `sys_flow_credential`; with no provider, a save carrying
+  one answers `503`, and cloning a flow that holds one answers `409`;
+- a public form is served anonymously only with `sharing.enabled: true`, and a
+  package-shipped form that keeps its link without switching `enabled` on
+  counts as withdrawn;
+- a filter that compares a boolean field with `"true"` or `"1"` now matches
+  the `true` rows, and any other string, a number other than `1` / `0`, a
+  `Date` or a list answers `400`; a row-level policy that compares a numeric or
+  boolean column with a comparand outside the accepted set is dropped, so its
+  read returns no rows and its write is refused unless a sibling policy grants;
+- the approvals service reads a position address only as `position:NAME`,
+  `sys_approval_action.actor_id` holds the person who acted, and the SLA and
+  dead-run sweeps record no actor;
+- the `_lock` gate refuses on a kernel with no environment id (the
+  showcase's topology) as it does on an environment kernel, and takes the
+  strictest lock among an item's rows and shipping packages;
+- a view container with no `form` no longer serves its first `formViews` entry
+  as the default create and edit form;
+- a stored datasource row under a code-defined name no longer replaces the code
+  definition at boot, and `PUT /api/v1/meta/datasource/default`, and a `DELETE`
+  of it with no stored row, answer `403`;
+- on `objectstack start`, the federation boot gate compares every federated
+  object, so the default `onMismatch: 'fail'` can stop a boot that used to pass;
+- the environment-membership gate and the organization slug guard answer
+  `503` when their own read fails, where they used to admit the request;
+- an external sign-in no longer links implicitly to a local user whose email is
+  not verified, and a provider the user unlinked does not link again
+  implicitly;
+- a flow that the `kernel:ready` bind refuses is withdrawn instead of staying
+  `active`, and a hook whose string `handler` names another package's function
+  is not bound;
+- `os dev -a`, `os start --artifact` and `OS_ARTIFACT_PATH` beside an
+  `objectstack.config.ts` serve the named artifact without loading the config,
+  unless the artifact is that config's own compiled output;
+- a `PUT /api/settings/localization` that names `date_format`, `time_format`,
+  `number_format` or `first_day_of_week` is refused `400 UNKNOWN_KEY`, the
+  live keys beside it included.
+
+### Breaking changes & migration in 17.7.0
+
+**This section is triaged, not exhaustive.** An entry is written up here when
+the change can be reached from something an application ships or operates — its
+metadata, its data, its own code calling the SDK / REST / CLI, its deployment
+config, or a plugin it authors. Everything else is left to the per-package
+`CHANGELOG.md` files. The five Console pin refreshes are described once under
+[New in Console](#new-in-console-studio--objectui-pins-in-1770) rather than
+enumerated here.
+
+The retirements in this release are registered under **protocol major 18**, as
+in 17.5.0 and 17.6.0. `os migrate meta --from 17` lists the source edits, and
+`os migrate meta --stored --apply` rewrites stored rows where a lossless
+conversion exists. The new ADR-0087 conversions are
+`agent-lifecycle-removed`, `agent-memory-long-term-store-removed`,
+`agent-structured-output-refused-members-removed`,
+`element-text-variant-heading-levels`, `object-grid-resizable-columns-removed`,
+`object-master-detail-form-detail-sort-field-removed`,
+`page-requires-non-compiled-kind-removed` and
+`translation-widget-sub-caption-removed`. The release also adds 41 D3 semantic
+entries — the judgements no conversion can make — and [the table at the end of
+this section](#every-adr-0087-entry-added-in-1770) maps each one to the entry
+below that carries its migration. Most breaking changes have **no** mechanical
+rewrite; each says so. An app keeps `engines.protocol: '^17'`.
+
+#### App-authored code reaches stored metadata through the metadata API only
+
+`sys_metadata` holds each metadata body as stored, credential material
+included, and `sys_metadata_history` holds its versions. For app-authored work,
+the metadata protocol is now their only writer. A sandboxed hook, action or job
+body also reads them only through it, and a flow's `get_record` node reads them
+only in the projected, keyed form the data door serves.
+
+- **Sandboxed bodies.** A hook with a sandboxed `body` whose `object` names
+  either table, alone or in a list, is not bound: it is refused at
+  registration with `PERMISSION_DENIED` / 403 and recorded in the bind log at
+  `error` (`bd70706`, #21563). A body's write of either table through `ctx.api`
+  answers `403` before it runs, and so does its read — `find`, `findOne`,
+  `count` and `aggregate`, in a transaction or not, elevated or not
+  (`316be32`, #21660). An action whose subject row is from either table answers
+  the same `403` before the body runs. A wildcard (`'*'`) body hook still binds,
+  and its body is not run for those tables' events.
+- **Authoring.** `HookSchema` refuses a hook carrying a `body` whose `object`
+  names either table (`9e9d693`, #21592), and `FlowSchema` refuses a
+  `create_record`, `update_record` or `delete_record` node whose
+  `config.objectName` names one (`a2aadab`, #21687), at `os validate`, at
+  `defineStack` (`422 STACK_SCHEMA_INVALID`) and at the metadata save door
+  (`422 INVALID_METADATA`). A stored flow carrying such a node is skipped at
+  boot with a warning, and the flows beside it register. The write nodes also
+  refuse the target at run time with `PERMISSION_DENIED` (`f40bb32`, #21649); a
+  `fault` edge does not route that refusal. A `get_record` node on either table
+  is served the projected body and the keyed hash (`a4f0cb0`, #21621), and its
+  filter over the body or a hash column is refused `INVALID_FIELD` (`96b0e31`,
+  #21641).
+- **Host code.** An action handler a host registers in code still reads both
+  tables through `ctx.api` and `ctx.engine.find`, served what the generic data
+  door serves — the body as its type's read projection and the hash keyed
+  (`abe8f28`, #21513) — and is refused the door's filter, sort, group and search
+  shapes over the body or a hash column with `400 INVALID_FIELD` (`2f837a5`,
+  #21539).
+- **The data door and the version token.** A metadata body's stored content
+  hash is served, and compared, only as a keyed digest (`713b0fa`, #21436).
+  ⚠️ A version token a client held from before the upgrade is refused once with
+  `409 METADATA_CONFLICT`; take the token from the next read and retry. Filter,
+  sort and group on the two content-hash columns and on the history table's
+  `change_note` answer `400 INVALID_FIELD` on the data door, the MCP stdio
+  reader and the analytics door. On the data door, so does any filter that
+  reaches the body or a hash column indirectly (`5d0e4e2`, #21619).
+
+**Migration.** Change metadata with `PUT /api/v1/meta/:type/:name`, and read it
+with `GET /api/v1/meta/:type/:name` and `…/history`. Delete a body hook bound to
+either table, and a flow write node aimed at one; on 17.7.0 neither runs. Filter the
+two tables by their scalar columns (the type, the name, the state). Then run
+`os migrate audit-metadata-bodies`, and `--apply` it, to drop the stored hash
+from the audit, activity and decision-audit copies already written. There is
+no mechanical rewrite for any of this.
+
+#### Credentials leave the copies they were made into
+
+- **Flow credentials have a write-only channel** (`96a9719`, #21377). An inbound
+  hook's start-node `secret` and an `http` node's `signingSecret` are moved by
+  the metadata save door into a new platform object, `sys_flow_credential`,
+  encrypted through the host crypto provider, masked on every read and read
+  back only when the engine verifies a post or signs a request. Authoring does
+  not change: a save that omits the key keeps the stored secret, `''` clears it,
+  a new value rotates it. On the first boot with a crypto provider, each stored
+  flow that still carries a credential is moved once and logged
+  (`[Automation] flow '…' … was stored in cleartext … ROTATE: …`); the run is
+  recorded in `sys_migration` as `flow-credential-channel`. ⚠️ **Rotate every
+  inbound and outbound flow secret that existed before the upgrade**: version
+  history and audit snapshots written before the move keep their copies. With
+  no crypto provider, a save carrying a flow credential answers
+  `503 SERVICE_UNAVAILABLE`, and `POST /api/v1/automation/:name/clone` refuses a
+  flow that holds one with `409 RESOURCE_CONFLICT` — a packaged inbound flow can
+  no longer be cloned in one step; author the copy as a new flow with its own
+  secret. Packaged flows are not moved.
+- **The audit ledger omits `internal` fields, and the platform's credential
+  columns are `internal`** (`50e1c65`, #21301). Neither `sys_audit_log` nor
+  `sys_activity` records an `internal: true` field any more, and the generic
+  data path stops returning the JWT signing key's private key, both
+  `sys_verification` credential columns, the two-factor secret and backup
+  codes, the SSO providers' OIDC and SAML blobs, the OAuth token columns, the
+  OAuth client secret digest, the SCIM credential digest, a share link's token
+  and password hash, and the approval action-token digest. ⚠️ **Rotate the JWT
+  signing keys, and revoke and re-mint share links that must stay private**:
+  ledger rows written before the upgrade are not rewritten. An integration that
+  read one of these columns through `GET /api/v1/data/...` reads share links
+  through `/api/v1/share-links`, and OAuth clients and SSO providers through
+  their auth routes.
+- **Copies are masked** like the generic read. Every write response that
+  returns a record (REST, batch and MCP) carries `SECRET_MASK` for a set
+  credential field and `null` for an unset one (`a0176ef`, #21816), and so do
+  `data.record.created` / `data.record.updated` events, an approval request's
+  stored snapshot, an outbound webhook's `before` / `after` / `changes` and its
+  delivery row, and knowledge-index documents (`568dc0b`, #21866); `internal`
+  fields are omitted there. A record-change flow's `record` and `previous` are
+  served on the same terms (`1f04696`, #21928): a condition that compares
+  `record.FIELD` with `previous.FIELD` on a credential field sees two equal masks,
+  so read a credential through a privileged binder instead. ⚠️ **Resume, cancel
+  or purge paused runs created before the upgrade**; their stored variables keep
+  the clear values.
+- **Share-link passwords** (`f5b8e29`, #21890). The stored hash never leaves the
+  server, new passwords are hashed with scrypt (a legacy hash still verifies and
+  is re-hashed on its first redemption), and the password can travel in the
+  `x-share-password` header, which the default CORS allow-list now carries. A
+  host that passes its own `allowHeaders` adds the header itself.
+- **Settings audit fingerprints** for a secret-valued setting use the crypto
+  provider's keyed digest, `hmac-sha256:…` (`ba57588`, #21809); with no keyed
+  digest the trail records the write with no fingerprint.
+- **Crypto providers** (host contract). `ICryptoProvider` gains a required
+  `keyedDigest(plain)` (`222ecc2`, #21292), and `CryptoContext` a required
+  `scope` from `CRYPTO_CONTEXT_SCOPES` (`57cc695`, #21453): an implementation
+  without `keyedDigest`, and a context literal without `scope` in an
+  implementation or a direct `encrypt` / `decrypt` / `rotateKey` caller, stop
+  compiling, and `LocalCryptoProvider` refuses a scope-less context at run time
+  with `CryptoContextScopeError`. New ciphertext carries a `v2:` marker and the
+  older bare form still opens. ⚠️ **A secret set or rotated on 17.7.0 cannot be
+  opened by an earlier release**, so a rollback past it needs those values set
+  again. `os secret rewrap` (dry run by default, `--apply` to write) re-seals the
+  older ciphertext at rest (`0557c2f`, #21469). Nothing on the upgrade path runs
+  it, and a row it re-seals carries `v2:` too, so an applied run has the same
+  rollback cost.
+
+#### On the write doors, a row the caller cannot read is not there
+
+- **By id** (`53021e3`, #21812). A by-id update or delete of a row the caller
+  cannot read answers `404 RECORD_NOT_FOUND`, with the body a nonexistent id
+  gets, for every principal class — FROM a `403` (`PERMISSION_DENIED`,
+  `FORBIDDEN`, or a parent-derived gate's code) TO the `404`. An uploader or a
+  comment author who can no longer read the parent record is now refused the
+  same way. A caller who can read the row but may not write it keeps its `403`.
+  `security/explain` answers the missing-record shape for such a write.
+- **By predicate** (`cab6396`, #21900). A `multi: true` update or delete
+  matches only the rows the caller can read, so a predicate that reaches only
+  hidden rows succeeds with zero rows, and one whose readable match exceeds
+  10,000 rows is refused `400 INVALID_FILTER` before anything is written. Grant
+  read access before asking a user to change rows, and batch a predicate above
+  the ceiling.
+- **A supplied `organization_id` on create** (`251a7dd`, #21680). On a walled
+  posture the insert stamp fills only an absent `organization_id`. A create that
+  names another tenant's organization is refused `403 PERMISSION_DENIED`
+  (it used to answer `201` and store the row in the active organization), an
+  import row naming one is reported failed, and under `group` a sister
+  organization the caller holds is admitted. Omit the key, or name the active
+  organization.
+- **Guards fail closed** (`80f9f7e`, #21954). The dispatcher's
+  environment-membership gate and the organization slug guard answer
+  `503 SERVICE_UNAVAILABLE` when their own read faults, where they used to admit
+  the request or the slug change.
+- **Implicit account linking** (`41a1135`, #21872). An external sign-in links to
+  an existing local user only when that user's email is verified; otherwise it
+  is refused with `error=account_not_linked`. The platform identity provider
+  (`objectstack-cloud`) keeps its exception, and a provider the user unlinked
+  is not linked again implicitly. A deployment that passes `secondaryStorage`
+  now also keeps verification values in the database, so a reset link, one-time
+  code or verification link that was in flight in the cache alone at deploy time
+  can no longer be consumed, and its user requests a fresh one.
+  Set `account.accountLinking.requireLocalEmailVerified: false` to turn the
+  local-verification check off again (an unlinked provider still does not
+  re-link implicitly), after reading the library's account-takeover warning.
+
+#### Reads and writes serve declared fields, and the engine refuses names it does not know
+
+- **Undeclared columns** (`5c9138b`, #21612; `5b5e83f`, #21631). A read with no
+  `fields` — the data door, by-id reads, export, search hits, `expand`ed records
+  and `engine.find` in process — serves the declared fields, the registry's
+  system columns, `id`, `created_at` and `updated_at`, and nothing else. The
+  record a write returns, a hook's `ctx.result` and `ctx.previous`,
+  `data.record.*` events, webhook `after` bodies and the audit ledger's create
+  and delete values follow the same rule. A field retired in an upgrade leaves
+  its column in the table until `os migrate apply --allow-destructive`, and that
+  column's values are no longer returned. ⚠️ **Run a conversion that copies
+  such a column into its replacement before upgrading**, while the field is
+  still declared, or afterwards read the values with
+  `os migrate unmapped-columns --object NAME` (`759dbe9`, #21643), which is
+  operator-only and read-only. No flag re-opens undeclared columns on a runtime
+  door; a reader that needs one declares it as a field. Cloning a record whose
+  table carries such a column now works.
+- **Unregistered object names** (`eb9ef79`, #21545). The engine's in-process
+  verbs — `find`, `findOne`, `count`, `aggregate`, `insert`, `update`, `delete`
+  and `validate` — refuse an object name the registry does not resolve with
+  `404 OBJECT_NOT_FOUND`, the data door's own envelope, before any hook or
+  driver runs; they used to hand the name to the driver as a table. Register the
+  object first; host code that must reach storage without a registry entry
+  addresses the driver itself.
+- **Readonly values on system writes** (`8843505`, #21695). A seed, migration
+  or `isSystem` write keeps its exemption from the readonly strip, but the value
+  it keeps is now checked for its type's shape: a seed's `'yesterday'` on a
+  readonly `datetime` is refused `VALIDATION_FAILED` and counted as a seed
+  error, where it used to be stored as written. Fix the value at its producer.
+
+#### Metadata write doors: names, locks, hooks and code-defined datasources
+
+- **A body's `name` must be its row's name** (`44defd4`, #21536; `5555047`,
+  #21483). The save, rollback, revert, publish and package-publish doors refuse,
+  with `400 VALIDATION_ERROR`, a body of any type whose own `name` differs from
+  the name the row is written under (a `translation` saved with `name: ''`
+  included). A body with no `name` passes, and a view's missing name is still
+  stamped. Set `name` to the save name, or save under the body's name.
+- **View containers** have one naming rule at the save door. A container saved
+  under a name its own expansion produces (`e367002`, #21618), under a name
+  another stored container of the same object expands to (`7b07749`, #21637),
+  or whose save or expanded names are already served elsewhere — another stored
+  container, of any object, or a view item a package ships — is refused
+  `400 VALIDATION_ERROR` (`eea82af`, #21648). A package-less container row
+  stored under a packaged view item's name now belongs to no package, so the
+  packaged views it used to replace are served again. A container saved for an
+  object another package ships expands under its own name,
+  `OBJECT.CONTAINER` and `OBJECT.CONTAINER.KEY`, with no `isDefault`
+  (`535d1d2`, #21430); a navigation `viewName` or form-action `target` that used
+  an old name now reaches the shipping package's view. And a container's `form`
+  is its default form (`41b1333`, #21535): a container with no `form` no longer
+  serves its first `formViews` entry as the default create and edit form — in
+  the CRM example that was the anonymous Web-to-Lead form — so move the intended
+  form into `form` and re-point `OBJECT.edit` to `OBJECT.form`.
+- **Hooks saved at runtime need a `body`** (`ced217c`, #21686; `7fd2c34`,
+  #21706). `PUT /api/v1/meta/hook/:name` refuses, with `400 VALIDATION_ERROR`,
+  every hook that carries no `body` — one whose `handler` names a function, and
+  one with neither. Such a hook used to be stored with a `200`, and on 17.7.0 it
+  could never bind. Give it a sandboxed `body`.
+- **The `_lock` gate** agrees with the reads. It now runs on a host-config
+  kernel — one with no `environmentId`, as the showcase boots — and answers
+  `403 ITEM_LOCKED` there as on an environment kernel (`c43a8ae`, #21715).
+  `DELETE /api/v1/meta/app/setup` is one write it now refuses: `setup`, `studio`
+  and `account` declare `protection.lock: 'full'`. An organization with no row
+  of its own is bound by the env-wide row's lock (`cf60dbc`, #21737), and an
+  item's lock is the strictest among its stored rows in scope (`18c2ddc`,
+  #21801) and among the installed packages that ship its name (`18fe681`,
+  #21844), whatever the row or registration order. The reads report the same
+  answer: a packaged flow, action, object, hook and the other types with no
+  overlay channel read `lock: 'full'`, `editable: false`, `deletable: false`
+  (`fe10172`, #21693), and an artifact's `_lock: 'none'` no longer masks a
+  stored row's lock (`b7a13c7`, #21759). A client that gated an edit affordance
+  on `editable` / `deletable` now hides it where the server refuses.
+- **Code-defined datasources are read-only at the metadata door and at boot.**
+  `PUT /api/v1/meta/datasource/:name` on a datasource a package declares in
+  `*.datasource.ts` answers `403 NOT_OVERRIDABLE` (it answered `200` and stored a
+  row), and so does a `DELETE` with no stored row (`9cc2c79`, #21942). The boot
+  restore no longer lets a stored row displace a code-defined datasource, opens
+  no pool from one, and logs one warning naming it; `PUT` on
+  `/api/v1/meta/datasource/default`, and a `DELETE` there with no stored row,
+  answer `403` too, naming the host's database configuration as the remedy
+  (`753e7a1`, #21965). Change a code-defined
+  datasource in its source, or in the host's database URL for `default`, and
+  `DELETE` a row the warning names. Until you do, the metadata door's reads in
+  17.7.0 still serve that row, not the code definition the boot and the admin
+  door use: `GET /api/v1/meta/datasource/:name`, the
+  `GET /api/v1/meta/datasource` list and the `effective` layer of `/layers`.
+  That half of #21922 landed on `main` after 17.7.0 was published (`1abfc58`,
+  #21985). A runtime datasource saved through the metadata door is also listed and editable through `/api/v1/datasources` —
+  that fix shipped without a CHANGELOG entry; see [Also shipped in
+  17.7.0](#also-shipped-in-1770--not-in-its-changelog).
+
+#### Page blocks take the shape their renderers read (#21464)
+
+A page block's `properties` is checked by the component-props gate on
+`os validate`, `os build` and `os lint`, which reports a refused value as an
+advisory `component-props-invalid` or `component-props-unknown-key` finding.
+A stored page still saves and loads: a component's `properties` is not parsed
+on the metadata save or load path. These members used to be `z.unknown()`, so
+any value passed and the renderer answered an off-shape one with a silent
+default; each now takes the shape its renderer reads, and its TypeScript type
+follows. None has a conversion; each row's D3 entry carries the judgement.
+
+| Block · members | Takes | Commit · D3 entry |
+|:--|:--|:--|
+| `object-grid` `exportOptions` | the list view's export options object, not a bare format array | `5a9292e` (#21287) · `ui-object-grid-export-options-closed` |
+| `object-grid` `rowHeight`, `rowColor`, `navigation`, `conditionalFormatting`, `bulkActionDefs`, `aggregations`, `operations` | the list view's own shapes; `aggregations` as `[{ field, type }]`, `operations` as four booleans | `aa46322` (#21463) · `ui-object-grid-row-members-typed` |
+| `object-map`, `object-gantt`, `object-tree` `navigation` | `NavigationConfigSchema`, `{ mode, size?, openNewTab?, preventNavigation? }` | `529d971` (#21502) · `ui-object-map-gantt-tree-navigation-typed` |
+| `object-grid` `fields`, `selection`, `selectable`, `rowActions`, `bulkActions`, `batchActions`; `object-kanban` `columns`; `object-calendar` `calendar` | field-name strings, `{ type }`, action names, lanes of one spelling, `{ startDateField, … }` | `7d674df` (#21559) · `ui-object-grid-kanban-calendar-list-members-typed` |
+| `object-form` `contentLayout`, `submitBehavior`, `navigateOnSuccess`, `mobile` | `'simple'` / `'tabbed'`, the form view's `submitBehavior`, a relative path, the mobile block | `958cfe2` (#21590) · `ui-object-form-members-typed` |
+| `object-metric` `aggregate`, `trend` | `{ field?, function, groupBy? }`, `{ value, label?, direction? }` | `3f1bc81` (#21622) · `ui-object-metric-aggregate-trend-typed` |
+| `object-metric` `compareTo`, `drillDown`; `object-grid` `columns` | `{ kind }`; the drill members without `filter` / `mode`; the list view's `columns` | `72f3c74` (#21673) · `ui-object-metric-compare-to-typed`, `ui-object-metric-drill-down-typed`, `ui-object-grid-columns-typed` |
+| `object-gantt` `markers`; `object-timeline` `mapping`; top-level `fields` of `object-form` and `object-master-detail-form` | `{ date, label?, color? }`; `{ title?, date?, description?, variant? }`; field names | `16d241a` (#21699) · `ui-object-gantt-markers-typed`, `ui-object-timeline-mapping-typed`, `ui-object-form-fields-names-typed` |
+| `object-kanban` `conditionalFormatting` | the list view's `[{ condition, style }]` | `ced3e1a` (#21711) · `ui-object-kanban-conditional-formatting-typed` |
+| `object-form` `customFields`; `sections` of `object-form` and `object-master-detail-form` | a closed runtime form field; one section shape, canonical spellings only (`visibleWhen`, a numeric `columns`) | `1289925` (#21742) · `ui-object-form-custom-fields-typed`, `ui-object-form-sections-typed` |
+| `object-metric` `drillDown.report`; `object-timeline` `items`; `action:group` / `action:menu` members | a `ReportSchema` report; the entry kind `variant` selects; a closed inline action (`type`, not `actionType`; `target`, not `endpoint`; `disabled`, not `enabled`) | `4331a6b` (#21764) · `ui-object-metric-drill-down-report-typed`, `ui-object-timeline-items-typed`, `ui-action-group-menu-members-typed` |
+| `action:group` / `action:menu` member `params` | an array, unless the member's `type` is `api`; static values go on their own `action:button` node | `88a39c0` (#21869) · `ui-action-group-menu-member-params-array-only` |
+
+Two keys are retired with a tombstone and a conversion, and `tsc` refuses them:
+
+- `object-grid` `resizableColumns` → `resizable`, the same boolean (`aa46322`,
+  #21463). Conversion `object-grid-resizable-columns-removed`; D3
+  `object-grid-resizable-columns-retired` for a grid that wrote both with
+  different values.
+- `object-master-detail-form` `details[].sortField` is deleted (`6ec54f0`,
+  #21632): the grid stamps the child object's first field named `position`,
+  `sort_order`, `sequence`, `line_no`, `line_number` or `sort`. Conversion
+  `object-master-detail-form-detail-sort-field-removed`; D3
+  `object-master-detail-form-detail-sort-field-retired`.
+
+One widening rides with them: an inline `object-form` field declares the `grid`
+widget's eight camelCase keys (`minRows`, `maxRows`, `allowAdd`, `allowDelete`,
+`allowReorder`, `totalField`, `addLabel`, `sortField`), and each snake_case
+spelling's refusal names its replacement (`6fb7115`, #21825).
+
+Three more page-level changes. The first and the third are refused at parse,
+so they also fail `defineStack` and the metadata save door; the second is a
+`properties` value, reported like the members above:
+
+- **`ai:chat_window` is retired** (`48eb9c1`, #21531). No renderer for it ever
+  shipped; the floating chat overlay on every page is the AI chat entry point.
+  Delete the node, and set the app's `defaultAgent` where `agentId` was meant.
+  `AIChatWindowProps` leaves `@objectstack/spec/ui`. D3
+  `ui-ai-chat-window-retired`; no conversion, because closing up a region is a
+  layout decision.
+- **`element:text` `variant` refuses `heading` and `subheading`** (`36ad321`,
+  #21614), the second release of the announced two-release convergence:
+  `heading` → `h2`, `subheading` → `h3`. Conversion
+  `element-text-variant-heading-levels`; D3
+  `element-text-variant-heading-subheading-retired`. The old spelling is an
+  advisory `component-props-invalid` finding and a `tsc` error, and a stored
+  page replays the rewrite when it is read. The rewrite keeps the heading
+  element, but `h2` / `h3` draw their own, larger styles.
+- **A page's `requires` is accepted only on `html` and `jsx` pages**
+  (`72af58c`, #21547), the kinds whose source is compiled at save; on `react`,
+  `full`, `slotted` and kind-less pages delete it. Conversion
+  `page-requires-non-compiled-kind-removed`; D3
+  `page-requires-non-compiled-kind-refused`. And on an html page, a literal of
+  the wrong type for a component input is now a compile **error** (`a4fd82a`,
+  #21678): write `aggregate={{"function":"count"}}`, not `aggregate="count"`.
+
+#### Reports, dashboards and translations
+
+- **Every block of a `joined` report binds a `dataset`** (`ed15448`, #21712),
+  refused at `blocks.N.dataset`; such a block never drew anything. A stored
+  report row keeps its bytes, carries the issue in `_diagnostics` and is refused
+  on its next save. Studio's report inspector now draws the block's `dataset` as
+  a required dataset picker (`9059082`, #21819). D3
+  `ui-report-joined-block-dataset-required`; no conversion.
+- **A `pie`, `donut`, `funnel`, `treemap` or `sankey` widget with a dimension
+  takes one measure** (`32d5769`, #21425): those types draw one series, so a
+  second `values` entry drew nothing. Write a `table` or `bar`, or one widget
+  per measure. The check export is renamed
+  `checkDashboardWidgetDimensionlessMeasureArity` →
+  `checkDashboardWidgetChartMeasureArity`, same signature. D3
+  `dashboard-widget-single-series-multi-measure-refused`.
+- **The widget translation key `subCaption` is retired** (`99e1912`, #21342):
+  delete `dashboards.DASHBOARD.widgets.WIDGET.subCaption`, and translate card
+  copy under the widget's `description`. Conversion
+  `translation-widget-sub-caption-removed`; D3
+  `translation-widget-sub-caption-retired`. An authored widget
+  `options.description` now draws the `unconsumed-widget-option` warning.
+- **Action translations.** `resultDialog.title`, `.description` and
+  `.acknowledge` under an action that declares no `resultDialog` are now
+  `translation-target-unknown` errors at `os validate` / `os build`
+  (`1371dc9`, #21304). At run time a bound action's copy is read only under
+  `objects.OBJECT._actions.ACTION`, never from `globalActions` (`3911901`,
+  #21344): move such keys, including translations stored at runtime, which
+  `os validate` does not see.
+- **A field's translated help is served on `description`** (`bab7685`, #21956),
+  not on an undeclared `help` key, and only while the description still equals
+  the packaged one. `ObjectFieldLike` drops its `help` member.
+
+#### Agents: the contract is what the cloud AI runtime enforces
+
+The cloud AI runtime refused the `memory`, `structuredOutput` and JSON Schema
+declarations below before an agent's first turn, and never read `lifecycle`;
+authoring now refuses all four by name. The out-of-repo population was not
+measured by any of the changes.
+
+- **`memory`** (`22c2d6f`, #21413). With `longTerm.enabled: true`,
+  `longTerm.maxEntries` and `reflectionInterval` are required (integers of at
+  least 1, no default); `reflectionInterval` without an enabled `longTerm` is
+  refused; `longTerm.store` is retired whatever it holds. Conversion
+  `agent-memory-long-term-store-removed` deletes `store`; D3
+  `agent-memory-store-retired-and-limits-required` carries the two numbers only
+  the author can choose. Retired key `ai/Agent:memory.longTerm.store`.
+- **`structuredOutput`** (`3937ad2`, #21367) is JSON-only: `regex`, `grammar`
+  and `xml` leave `format` and `fallbackFormat`, and `coerce_types` leaves
+  `transformPipeline`. Use `json_schema` with a JSON Schema, or `json_object`.
+  Conversion `agent-structured-output-refused-members-removed` deletes a block
+  whose `format` was retired, a retired `fallbackFormat` and the `coerce_types`
+  step; D3
+  `agent-structured-output-refused-members-retired` asks whether that agent
+  should now carry a `json_schema` contract. Studio's agent form now offers the
+  block (`ca0dfb6`, #21398).
+- **`lifecycle`** (`6e33b67`, #21461) is retired: it was parsed and never read.
+  Delete it; a conversation phase is a skill with `triggerConditions`, a
+  multi-step process is a flow, and record transitions are a `state_machine`
+  validation rule. `StateMachineSchema`, `StateNodeSchema`, `TransitionSchema`,
+  `ActionRefSchema`, `GuardRefSchema` and their types leave
+  `@objectstack/spec/automation` (and `StateNodeConfig` the root and `/ai`
+  entries) with no replacement. Conversion `agent-lifecycle-removed`; D3
+  `agent-lifecycle-retired`; retired key `ai/Agent:lifecycle` and the five
+  `automation/*` defs.
+- **JSON Schema slots** (`23365ea`, #21353). `action.ai.outputSchema` and
+  `agent.structuredOutput.schema` refuse a subschema with no `type` that
+  carries one of 22 type-scoped keywords (`properties`, `items`, `pattern`, …),
+  at its own path. Declare the `type`. D3
+  `ai-json-schema-untyped-subschema-refused`.
+
+#### Analytics answers only what it can compute
+
+- **`order` keys name selected members** (`1caa603`, #21314): a key that is not
+  one of the query's `dimensions`, `measures` or bucketed `timeDimensions`
+  answers `400 INVALID_FIELD` on both strategies and on `/analytics/sql`. The
+  native face used to answer `500`, or an arbitrary order on SQLite.
+- **`limit` and `offset` are non-negative integers** (`6d67ad5`, #21399):
+  `-1`, `1.5` and the like answer `400 VALIDATION_FAILED` at `/analytics/query`,
+  `/analytics/sql` and the dataset door; omit `limit` for "no limit". An
+  `offset` with no `limit` now runs on SQLite. D3
+  `analytics-query-window-non-negative-integer`.
+- **The row wildcard `'*'` belongs to `count` alone** (`b793010`, #21431): a cube
+  measure's `sql` or a dataset measure's `field` of `'*'` under any other
+  aggregate, and a cube dimension's `sql` of `'*'`, are refused at parse. A
+  stored dataset carrying one answers `400` on every query until it is fixed,
+  including queries that select only its other measures. D3
+  `analytics-row-wildcard-outside-count-refused`; no conversion.
+- **The cube metric types `number`, `string` and `boolean` are retired**
+  (`99589f9`, #21452): give each measure an aggregate (`count`, `sum`, `avg`,
+  `min`, `max`, `count_distinct`), keep a per-row value as a field, and move a
+  ratio to a dataset `derived` measure. A cube registered in process without
+  the parse is refused by both strategies. D3
+  `cube-metric-expression-types-retired`; no conversion.
+- **A caller-named measure must name a field** (`0b82391`, #21474): `_sum`,
+  `*`, `*_sum` and an empty spelling answer `400 INVALID_FIELD` (they answered
+  `500`). The console's analytics adapter posts `_sum` for a widget whose value
+  field is empty, and now shows that `400` as an error.
+- **Comparands on the native face follow the engine.** A comparand against a
+  declared boolean field (`8b123c0`, #21424) or number field (`086ad0a`,
+  #21446) is judged by the engine's rule before the statement compiles: an
+  accepted spelling is bound as its value, anything else answers
+  `400 INVALID_FILTER`. A list under a scalar operator is refused on every face
+  (`100c394`, #21484, below).
+- **Bounds and temporal values follow the engine** (`81e69ca`, #21553;
+  `1ca1eb0`, #21562). The native strategy and the draft preview read a bare-day
+  `$lte`, a `$between` maximum or a `dateRange` end as "through that whole day"
+  only on a declared `datetime` column, and the row-level read scope merged into
+  the native statement, like the draft preview, compares a temporal comparand
+  in the column's storage form, so their row sets move — in both directions —
+  onto the engine's answer. A host that builds `AnalyticsService` by hand passes
+  `sourceFieldMeta`, and a direct caller of `compileScopedFilterToSql` passes the
+  driver's coercion pair, to get those answers.
+- **Authoring a cube** (`39a912e`, #21416; `d70353f`, #21435). `os validate`,
+  `os build` and `os lint` refuse an `analyticsCubes` dimension over a
+  JSON-stored or multi-value column, a `count_distinct` over one, and a `sum`,
+  `avg`, `min` or `max` measure over a column type its aggregate does not take —
+  pairs the analytics door already refused at query time.
+
+#### Filters at the engine and in row-level security
+
+- **Boolean comparands** (`9f13c94`, #21372; `45efcfa`, #21404). Against a
+  declared `boolean` or `toggle` field, at `where`, a per-aggregation `filter`
+  and `having`, `"true"` / `"false"`, `"1"` / `"0"` and `1` / `0` narrow to the
+  boolean they name — so `?flag=true` now returns the `true` rows — and any other
+  string (`"TRUE"`, `"yes"`, a blank), a number other than `1` / `0`, a `Date`
+  or an array answers `400 INVALID_FILTER`. On PostgreSQL several of these
+  answered `500`; on SQLite and in memory they matched no row, or every row
+  under `$ne`. Write `true` or
+  `false`; to match either, use `$in`. A consumer that switches exhaustively over
+  the verdict's `form` gains three cases.
+- **A list under a scalar operator** (`100c394`, #21484) — `$gt`, `$gte`,
+  `$lt`, `$lte`, the text operators and the flags — answers
+  `400 INVALID_FILTER` at every face (`400 VALIDATION_FAILED` on the HTTP
+  routes that parse a filter in their body), and the save door refuses a
+  dataset, measure, widget or report filter that carries one. Write one value, `$in` for
+  "one of" or `$between` for a range.
+- **Cross-field references in `having` and a per-aggregation `filter`** follow
+  `where`: a `{ $field }` pair across two comparison classes (`c2cd651`,
+  #21297), or against a column with no class — a file field, a list, a formula
+  (`ceb4a93`, #21406) — is refused `400 INVALID_FILTER`, and
+  `applyInMemoryAggregation` applies the same rules when handed a field map.
+- **Bare-day upper bounds** (`7aab759`, #21336). `@objectstack/formula`'s own
+  whole-day reading is deleted; the shared `lowerFilterCondition` applies it
+  once, on declared `datetime` columns. The RLS write check now agrees with the
+  read on other columns, so a write the read would hide is refused `403`.
+- **Row-level policies that cannot be compiled are dropped.** A policy that
+  compares a numeric column (`7aab759`, #21336) or a boolean column (`8b123c0`,
+  #21424) with a comparand outside the accepted set is dropped through the
+  fail-closed route: its read returns no rows, its write is refused `403`, and a
+  WARN line names the policy. Numeric strings are read as numbers. A `check`
+  that aims a scalar, ordering or text operator at a JSON-stored or multi-valued
+  field is refused with the read's `400 INVALID_FILTER` (`97239c3`, #21317), and
+  `security/explain` answers the same (`ee75aae`, #21371). Test membership with
+  `contains`, and compare a numeric column with a number.
+
+#### Flows, hooks and jobs
+
+- **An `approval` node's `config` is judged whole at parse** (`866683f`,
+  #21893), against `ApprovalNodeConfigSchema`: an undeclared key, a refused
+  value (`escalation.timeoutHours: 0.5`, under its minimum of 1) and a missing
+  `approvers` are refused at `os validate`, `os compile`, `defineStack`, the
+  metadata save door and `registerFlow`. `registerFlow` already refused an
+  undeclared key; a refused value used to register there and fail every run
+  that reached the node. A stored flow carrying one is skipped at
+  boot with a warning. D3 `flow-approval-node-config-contract-refused`.
+- **A flow the `kernel:ready` bind refuses is withdrawn** (`54fb60a`, #21897).
+  It used to stay registered and `active` from the boot pull, with its trigger
+  bound; now `GET /automation/:name` answers `404` and the boot warning carries
+  the located refusal. Correct the config it names.
+- **A hook's string `handler` resolves inside its own package only**
+  (`98eb3b9`, #21653). A name the hook's package does not hold is refused at
+  registration with `INVALID_REFERENCE` / 400 and the hook is not bound; it used
+  to fall back to any package's function of that name. Give the hook a `body`,
+  or declare the function in its own package.
+- **`os package install` (install-local) refuses what it cannot run**, with
+  `422 VALIDATION_ERROR` and nothing installed: an enabled job with no `body`
+  (`6c5697d`, #21584), a hook with no `body` or a job `body` that does not bind
+  (`045b946`, #21615), and an enabled job whose `pull` does not bind (`83e2fee`,
+  #21683). A package installed by an earlier release keeps rehydrating; its
+  handler-only hooks are reported at `warn` and not bound. Boot such an artifact
+  with `os start --artifact`, which loads its runtime module, or give each hook
+  and job a `body`.
+- **Under `isolated` posture with package-authored scheduled work switched
+  on, a packaged job must declare `organization`** (`909229e`, #21668), or it is
+  not scheduled and the error log names it; an unrecognised
+  `OS_TENANCY_POSTURE` withholds every job.
+- **A refused flow resume answers the engine's code** (`309224d`, #21740) on
+  `POST /api/v1/automation/:name/runs/:runId/resume` and MCP `resume_run`:
+  `INVALID_SCREEN_INPUT`, `INVALID_SIGNAL`, `RUN_NOT_FOUND`,
+  `STORE_UNAVAILABLE` and `RESUME_IN_PROGRESS`, where `error.code` used to be
+  derived from the status. The statuses do not move.
+
+#### Approvals
+
+- **A position address has one spelling, `position:NAME`** (`c9c555a`, #21770,
+  ADR-0090 D3). The pre-rename spelling — the D3-retired word followed by a
+  colon — is no longer read as a position anywhere the service compares a slot
+  with the caller, and a caller that names it as `actorId` is refused
+  `403 FORBIDDEN`; the stock console already sends `position:NAME`. The
+  deprecated approver type with that name, whose membership-tier lookup finds
+  no one, now writes the canonical `org_membership_level:VALUE` slot. Two
+  classes of pending request are now decided only by an admin override: a
+  request a 15.x-era release opened with a slot in the old spelling, and a new
+  one opened from a flow that still authors the deprecated type over a position
+  name. **Fix:** author `{ type: 'position', value: '…' }`; an admin approves,
+  rejects or reassigns the stuck requests (`via_override: true`).
+- **`sys_approval_action.actor_id` holds the person who acted** (`6f17d1d`,
+  #21493): the slot an action was admitted under moves to a new `acted_as`
+  column, and the action log returns it beside `actor_id`. A boot-time repair
+  moves slot literals out of stored `actor_id` values, so those rows show the
+  slot and no person. The SLA and dead-run sweeps record no actor where they
+  wrote `system:sla` / `system:dead-run`, notifications name only a person, and
+  `reassign_from` / `reassign_to` become text columns of slot addresses
+  (`88fb5e8`, #21514). A report that read `actor_id` as the slot reads
+  `acted_as`; one that tested for the `system:` sentinels reads the `escalate` and
+  `recall` rows.
+- **Approval notifications carry their text in `payload.body`** (`255a777`,
+  #21888), the field the messaging service delivers; it was `payload.message`
+  and arrived empty. A tenant-authored `sys_notification_template` for an
+  `approval.*` topic that wrote `{{ message }}` writes `{{ body }}`.
+
+#### Public forms
+
+- **`sharing.enabled: true` is required** (`6dd99b8`, #21566). A form is served
+  on `GET /forms/:slug` and `POST /forms/:slug/submit` only when its `sharing`
+  declares `enabled: true`, `allowAnonymous: true` and a `publicLink` slug, one
+  rule shared by the endpoints and the organization-scoped save check. `enabled`
+  defaults to `false`, so a form that set only the other two now answers
+  `404 FORM_NOT_FOUND`. Add `enabled: true` to the form's `sharing`, and to any
+  stored overlay of it.
+- **A withdrawal holds at every layer** (`3c7785d`, #21864). An explicit
+  `enabled: false` or `allowAnonymous: false` at any layer closes the form, and
+  an organization-scoped save that would re-open a form the env-wide definition
+  withdraws is refused `403 NOT_OVERRIDABLE`. A package-shipped form that was
+  parsed by the strict stack schema and keeps its link without switching
+  `enabled` on is a withdrawal. Between 17.6.0 and this change an organization
+  overlay could re-open such a form; that never shipped in a release. Two
+  limits remain. The form doors may still serve an organization overlay's copy
+  of the form when that overlay was stored before the withdrawal, or restored by
+  a rollback or commit revert, which the save check does not gate: withdraw the
+  form in that overlay too. And a withdrawal closes the view's name in every
+  package that ships a view of that name (#21934).
+- **Walled postures** (`a7ab047`, #21580; `ce53218`, #21473). A form whose object
+  is walled by an organization column answers `404 FORM_NOT_FOUND` to anonymous
+  visitors (its submit used to answer `500`); the administrator's read explains
+  why, and declaring `tenancy: { enabled: false }` on the object is the remedy
+  when its rows belong to no organization. An organization-scoped withdraw or
+  publish there is refused `403 NOT_OVERRIDABLE`; save it env-wide.
+
+#### Fields and platform objects
+
+- **A `select` or `radio` field needs `options` or `picklist`** (`c52c49d`,
+  #21390), refused at parse; `Field.select()` with an empty list is refused too.
+  A stored row is still served with `_diagnostics.valid: false` and its next save
+  is refused; `GET /api/v1/meta/diagnostics` lists them. Use a `text` field if
+  any value is meant to be allowed.
+- **`sys_account` loses the `link_social` action** (`7665c54`, #21894), which
+  never completed a link. Link a provider through `POST /api/v1/auth/link-social`
+  (`auth.accounts.linkSocial` in `@objectstack/client`).
+- **A member no longer reads a colleague's `Admin` field group on `sys_user`**
+  (`1878ef9`, #21340): `member_default` and `viewer_readonly` declare it
+  unreadable, so a member's filter or sort on such a field answers `403`.
+  `banned` moves to the `Account` group and stays readable. A custom set meant
+  to show members those fields names them `readable: true`.
+
+#### Datasources and the boot store
+
+- **The in-memory (mingo) engine is no longer a boot store** (`9a4182a`,
+  #21598): a boot on it signed a user in and then answered `503` to every data
+  request. FROM
+  `--database-driver memory` / `OS_DATABASE_DRIVER=memory` TO `os dev --fresh`;
+  FROM a `memory://` URL TO `:memory:`; FROM a default datasource
+  `{ driver: 'memory' }` TO `{ driver: 'sqlite', config: { filename: ':memory:' } }`.
+  `DATABASE_DRIVER_SELECTION_ALIASES` and `…_IDS` drop the spellings, and
+  `ProjectDatabaseUrlSource` loses `'memory-driver'`.
+- **`objectstack start` validates federated objects at boot** (`bc7747c`,
+  #21887). The federation service now reads the metadata service when it uses
+  it, so on `start` the boot gate compares every federated object, and under
+  the default `onMismatch: 'fail'` real drift stops the boot with
+  `ExternalSchemaMismatchError`. Fix the drift, or set
+  `external.validation.onMismatch: 'warn'` on that datasource; run
+  `POST /api/v1/datasources/:name/external/validate` on `objectstack dev` first
+  to see it.
+- **"Import as Object" saves through the metadata door** (`07e933b`, #21837):
+  the imported object is durable and reads from its remote table. A re-import
+  that would drop or retype a field is refused `400 EXTERNAL_IMPORT_ERROR`
+  (it answered `201` with an in-memory overwrite); import under a new `name`,
+  or save the definition through `PUT /api/v1/meta/object/:name?force=true`
+  (`e864db5`, #21874). An import over a datasource whose package declares a
+  namespace must carry that prefix (`faf8dce`, #21906).
+- **Install-local runs the protocol handshake** (`75ddcd1`, #21805). A manifest
+  whose declared range excludes this runtime's protocol major is refused with
+  `422 OS_PROTOCOL_INCOMPATIBLE` (it used to install with a `200`), and on a
+  restart such a ledger entry is not loaded. `POST /api/v1/packages` answers the
+  same `422` where it answered `500` (`e83c9f6`, #21760).
+
+#### The CLI
+
+- **`os verify` runs the author-time rules first** (`f397608`, #21364): a stack
+  `os validate` and `os build` refuse now exits 1 there too, and `--json` carries
+  the findings under `errors`. `os verify --json` writes one JSON document to
+  stdout; the boot logs move to stderr (`5155093`, #21381).
+- **`objectstack generate` binds what you name** (`11905a4`, #21369): `flow`,
+  `action` and `app` take `--object`, and `action` takes `--flow`, or bind the
+  stack's only object or flow; anything ambiguous is refused with nothing
+  written. A `view` is still named after a declared object.
+- **One-shot commands write nothing they do not report** (`3b4efa7`, #21389;
+  `b206403`, #21432). `os migrate *`, `os meta resync`, `os secret orphans` and
+  `os storage orphans` no longer run the app's seed loader, and every no-write
+  mode boots read-only, so a preview no longer creates a missing table or file.
+  Pointed at a database that was never booted, these commands now answer empty
+  work, exit 0, and name the tables they did not read (`aa0d4b9`, #21550;
+  `1777a9b`, #21570); a table that exists but cannot be read still exits 1.
+  Point `--database-url` at the deployment's database.
+  `createStandaloneStack` gains `armLifecycleSweep`.
+- **`--artifact` and `OS_ARTIFACT_PATH` beside a config** (`e909aa0`, #21549).
+  `os dev -a PATH`, `os start --artifact PATH` and `OS_ARTIFACT_PATH` serve the
+  named artifact alone, without loading the `objectstack.config.ts` beside it,
+  unless the artifact is that config's own compiled output. Drop the override, or
+  point it at `./dist/objectstack.json`.
+- **Refusals print once, on stdout** (`bf36edd`, #21560): `os init` and
+  `os compile` (and so `os build`) no longer repeat a refusal as oclif's
+  `Error:` block on stderr; read the `✗` line on stdout.
+- **Plugin signatures are Ed25519 only** (`1ac7308`, #21534): `signPayload`,
+  `verifyPayload` and the publisher and platform verifiers refuse any other key
+  type, and `os plugin sign` exits 1 with no sidecar. Re-sign an artifact signed
+  with an RSA, EC or Ed448 key.
+
+#### Settings and host contracts
+
+- **Four Localization settings are retired** (`0d8ea5e`, #21970):
+  `date_format`, `time_format`, `number_format` and `first_day_of_week`, which
+  nothing read; dates, times, numbers and the week start follow `locale`. A
+  stored value is kept but not served, a `PUT /api/settings/localization` naming
+  one is refused `400 UNKNOWN_KEY` for the whole batch, `settings.get` rejects
+  with `SETTINGS_UNKNOWN_KEY`, and `OS_LOCALIZATION_*_FORMAT` /
+  `OS_LOCALIZATION_FIRST_DAY_OF_WEEK` are no longer read.
+- **Membership is settled at user creation** (`149153c`, #21813). Under the
+  `auto` policy a user is bound to the default organization when created, the
+  pre-existing-user backfill runs once per deployment (recorded as
+  `adr-0093-membership-backfill` in `sys_migration`), and the default
+  organization's owner is bound once (`adr-0093-default-org-owner-bind`). A
+  `sys_user` row inserted straight through the engine is not bound once the
+  backfill is recorded: code that writes users that way writes their membership
+  too. `backfillMemberships`' `limit` is now a page size, and the ungated
+  `ensureDefaultOrganization` is deprecated for
+  `createEnsureDefaultOrganizationOnce`.
+- **Turso's remote transport** takes a resolver that answers a column's
+  `JsonColumnFieldClass` or `undefined` in `setJsonColumnResolver`, in place of
+  a boolean (`30af17e`, #21282).
+
+#### Smaller breaking changes
+
+- `action-name-undefined` now reads a `record:related_list` block's
+  `properties.actions`: each id must name an action of the related object
+  (defined on it, or a `stack.actions` entry bound to it by `objectName`) that
+  declares a `list_toolbar`, `list_item` or `record_related` location, so a
+  stack that built clean can fail `os validate`, `os lint` and `os build`
+  (`0fc8087`, #21626). Such an id never drew a button; define the action on the
+  related object, or remove the id.
+- A file field's `accept` / `maxSize` refusal answers
+  `400 ERR_FILE_CONSTRAINT` naming the field (it was `500`), and
+  `FileConstraintError` is constructed as `(field, constraint, message)`
+  (`33f9791`, #21751).
+- Phone OTP with no deliverable SMS service answers
+  `400 SMS_SERVICE_REQUIRED` (it was a `500` with an empty body), and the code
+  joins `ErrorCode` (`a43d90a`, #21858).
+- `PermissionDeniedError` declares `status: 403`, so a door that read `status`
+  alone answers `403` where it answered `500` (`520f66f`, #21429).
+- On the `/ai/*` routes, a declared path under an undeclared method answers
+  `405` with an `Allow` header (it answered `404`), and `PATCH` to a declared
+  route is served (`088428f`, #21823).
+- Under an organization wall, install-local's reseed and purge answer `403` to a
+  session with no active organization (reseed answered `400 RESEED_SKIPPED`), and
+  an install records `seeded: { mode: 'refused' }` (`e09f1ac`, #21780).
+- A driver error that leaves the engine — including a raw statement's fault and
+  a lifecycle sweep's — carries a `[statement and bound values redacted]`
+  marker in place of the statement and its values (`04f0cc4`, #21335;
+  `d956910`, #21384); branch on the error's class and `code`.
+- Text that operators and log filters match changed: the audit failure line now
+  opens `Audit write FAILED on TABLE` and names the lost row (`69a12a0`, #21383),
+  and many refusals, warnings and field help texts stopped citing a tracker
+  number and state their decision in words. A filter keyed on the old text
+  needs the new spelling.
+
+#### Every ADR-0087 entry added in 17.7.0
+
+Each conversion and D3 semantic entry registered under protocol major 18 since
+17.6.0, and the entry above that carries its migration. One D3 id spells the
+ADR-0090 D3 word this site does not print; it is named by its subject, and
+`os migrate meta --from 17` prints it.
+
+| Kind | Id | Migration above |
+|:--|:--|:--|
+| D2 | `agent-lifecycle-removed` | [Agents](#agents-the-contract-is-what-the-cloud-ai-runtime-enforces) |
+| D2 | `agent-memory-long-term-store-removed` | [Agents](#agents-the-contract-is-what-the-cloud-ai-runtime-enforces) |
+| D2 | `agent-structured-output-refused-members-removed` | [Agents](#agents-the-contract-is-what-the-cloud-ai-runtime-enforces) |
+| D2 | `element-text-variant-heading-levels` | [Page blocks](#page-blocks-take-the-shape-their-renderers-read-21464) |
+| D2 | `object-grid-resizable-columns-removed` | [Page blocks](#page-blocks-take-the-shape-their-renderers-read-21464) |
+| D2 | `object-master-detail-form-detail-sort-field-removed` | [Page blocks](#page-blocks-take-the-shape-their-renderers-read-21464) |
+| D2 | `page-requires-non-compiled-kind-removed` | [Page blocks](#page-blocks-take-the-shape-their-renderers-read-21464) |
+| D2 | `translation-widget-sub-caption-removed` | [Reports, dashboards and translations](#reports-dashboards-and-translations) |
+| D3 | `agent-lifecycle-retired`, `agent-memory-store-retired-and-limits-required`, `agent-structured-output-refused-members-retired`, `ai-json-schema-untyped-subschema-refused` | [Agents](#agents-the-contract-is-what-the-cloud-ai-runtime-enforces) |
+| D3 | `analytics-query-window-non-negative-integer`, `analytics-row-wildcard-outside-count-refused`, `cube-metric-expression-types-retired` | [Analytics](#analytics-answers-only-what-it-can-compute) |
+| D3 | the approvals position-address entry | [Approvals](#approvals) |
+| D3 | `by-id-write-unreadable-row-not-found`, `predicate-write-unreadable-row-not-matched` | [Write doors](#on-the-write-doors-a-row-the-caller-cannot-read-is-not-there) |
+| D3 | `dashboard-widget-single-series-multi-measure-refused`, `translation-widget-sub-caption-retired`, `ui-report-joined-block-dataset-required` | [Reports, dashboards and translations](#reports-dashboards-and-translations) |
+| D3 | `flow-approval-node-config-contract-refused` | [Flows, hooks and jobs](#flows-hooks-and-jobs) |
+| D3 | `flow-trigger-record-credential-masked` | [Credentials](#credentials-leave-the-copies-they-were-made-into) |
+| D3 | `flow-write-node-stored-metadata-target-refused`, `hook-body-stored-metadata-target-refused` | [Stored metadata](#app-authored-code-reaches-stored-metadata-through-the-metadata-api-only) |
+| D3 | `element-text-variant-heading-subheading-retired`, `object-grid-resizable-columns-retired`, `object-master-detail-form-detail-sort-field-retired`, `page-requires-non-compiled-kind-refused`, `ui-ai-chat-window-retired` | [Page blocks](#page-blocks-take-the-shape-their-renderers-read-21464) |
+| D3 | the seventeen `ui-object-*` and two `ui-action-group-menu-*` entries in the page-block table | [Page blocks](#page-blocks-take-the-shape-their-renderers-read-21464) |
+
+The release also registers the retired keys `ai/Agent:lifecycle`,
+`ai/Agent:memory.longTerm.store`, `ui/ObjectGridProps:resizableColumns` and
+`ui/ObjectMasterDetailFormProps:details.sortField`, and the retired defs
+`automation/StateMachine`, `automation/StateNode`, `automation/Transition`,
+`automation/ActionRef`, `automation/GuardRef` and `ui/AIChatWindowProps`.
+
+### New capabilities in 17.7.0
+
+**Jobs carry their own code, and can pull a connector.** `JobSchema.body` is the
+sandboxed JavaScript body hooks and script actions carry — `ctx.api` under its
+declared `capabilities`, `ctx.log`, the job's own `timeoutMs` as its one limit
+(`f1e4ae5`, #21538) — and `handler` is deprecated beside it. Job bodies are
+scheduled on every door that brings an artifact in: the boot and install-local,
+on install and on every rehydrate (`6c5697d`, #21584); a package's jobs stop
+with it through the `runtime.package-jobs` uninstall cleanup, and two packages
+may declare a job of the same name (`6946f2f`, #21633). A third run form,
+`pull: { mapping }`, pulls a mapping's `connectorSource` through the import
+runner with no code, and `organization` names the organization a job runs as
+(`909229e`, #21668); `IAutomationService.pullConnectorSource` is the new
+contract behind it.
+
+**Install-local runs what it installs.** `os package install ARTIFACT` binds the
+app's script action bodies and body hooks (`1d0600b`, #21401) — closing 17.6.0's
+known issue — announces `metadata:reloaded` so the package's record-change flows
+fire and its permission sets are projected without a restart (`ab52182`,
+#21488), runs the registered uninstall cleanups so its permission sets and
+grants go with it (`74281a8`, #21512), withdraws the package from the running
+kernel on uninstall (`901e7cf`, #21581), and purges sample data through the
+engine — under an organization wall, only the caller's organization's rows
+(`d7fff21`, #21773). The listing
+reports sample data per organization and marks a package the runtime refused to
+load (`c4d5713`, #21820; `48297ad`, #21833). `bindAppArtifactHandlers` is the new
+runtime export behind the first.
+
+**Share links and attachments.** A record's owner, or an explicit Modify-All
+holder, may mint a share link on a record the data door refuses them, outside
+the walled postures (`4c8363f`, #21447), and a plain member's own share-link list
+answers instead of an error (`db3fee3`, #21403). A user who can edit a record
+may delete another user's attachment on it, as the attachment gate declares
+(`3eb38ae`, #21753), through a new `contributeOwnershipFloorAlternates` seam on
+the security service, which `ISecurityService` now declares together with
+`discardPermissionSetOverlay` (`045f764`, #21781).
+
+**Auditing and access.** A new capability, `view_all_audit_log`, exempts its
+holder from the compliance ledger's parent-record read gate; platform
+administrators hold it by default, so the deletion and sign-out trail is
+readable again by them (`7ebb543`, #21296). An action can declare
+`requiresMembershipReach`, lowered into its `visible` predicate from the new
+`MEMBERSHIP_REACH` table, and the organization's member, invitation and team
+actions now appear only for the grades the server admits (`607463d`, #21883).
+`ApprovalActionRow` declares `acted_as` (`72217cd`, #21479).
+
+**Operator commands.** `os secret rewrap` re-wraps older `sys_secret` ciphertext
+under the current AAD derivation (`0557c2f`, #21469). `os migrate unmapped-columns
+--object NAME` reads a retired field's leftover columns by record id
+(`759dbe9`, #21643). `os migrate resume` can resume an interrupted
+`os migrate recorded-by` run, and every `os serve` boot reports interrupted
+migration runs (`550f4cc`, #21527; `10454b3`, #21554). A plain `os dev` now
+self-heals safe schema drift on restart and provisions the telemetry sibling
+database (`025008a`, #21766). `objectstack generate picklist NAME` scaffolds a
+shared option list, and `init` and the blank starter wire `src/picklists`
+(`bcd68a2`, #21167). `os environments` runs on the `os cloud login` session
+(`4b20c84`, #21400).
+
+**Authoring.** A flow screen field's help text is translatable as
+`inlineHelpText` (`ecb6ca0`, #21386), and the `flows` translation group is live:
+the screen-flow runner names the flow by `flows.FLOW.label` (`aead296`,
+#21859). Studio's forms offer an agent's `structuredOutput` (`ca0dfb6`,
+#21398), an object's `imageField`, which the record header now draws
+(`2df3d13`, #21854; `07bf21f`, #21824), and an action's `onSuccess` and
+`outcomeMessages` (`8e35895`, #21901). `deriveInlineRowFormFields` and
+`isInlineRowFormOffered` (`@objectstack/spec/data`) state what an inline
+master-detail grid's row form draws (`dcc5ef4`, #21256), and the MCP server's
+`serverInfo.version` is the package version (`6cf1154`, #21548).
+
+### Notable fixes in 17.7.0
+
+These are the fixes an upgrading deployment is most likely to notice.
+Everything else is in the per-package `CHANGELOG.md` files.
+
+**Security.**
+
+- Driver errors no longer carry the failing statement or the caller's values
+  past the engine, in thrown errors, the driver's own refusal log lines or
+  operator-facing records (`04f0cc4`, #21335; `d956910`, #21384; `6d728b8`,
+  #21414; `85e29b8`, #21482). Any in-process logger of a caught error printed
+  them before.
+- Field-level reads are narrowed on more surfaces: the object-schema mask
+  removes a denied field's references from the whole served document
+  (`a6a7547`, #21743); an activity row whose every changed field the reader is
+  withheld is no longer served (`3bddd4a`, #21427); and a field-narrowed search
+  no longer matches through a field outside the set (`0728cbf`, #21930). The
+  mask also judges an `objectOverride` param against the object it names, so a
+  delegated admin is now served the invite action (`e6dc7a2`, #21904), and
+  global search skips the objects and fields the caller cannot read instead of
+  answering `403` (`87712ab`, #21879).
+- A write refusal on an attachment or a comment no longer names a parent record
+  the caller cannot read (`50b5e03`, #21769), and a by-id write of a hidden row
+  answers as a missing one ([above](#on-the-write-doors-a-row-the-caller-cannot-read-is-not-there)).
+- A withdrawn public form is refused on both anonymous form routes and creates
+  no record, and both routes refuse the request, instead of serving the form,
+  when a service they need to resolve it is registered but cannot be reached
+  (`49524f6`, #21420).
+- The stored-metadata family's credential material stays behind the door:
+  keyed content hashes, refused evaluate shapes, projected reads for host code
+  and flows, and no access for app-authored bodies
+  ([above](#app-authored-code-reaches-stored-metadata-through-the-metadata-api-only)).
+- Credentials leave the copies they were made into: the audit ledger, write
+  responses, events, webhooks, approval snapshots, flow trigger records and the
+  share-link password hash
+  ([above](#credentials-leave-the-copies-they-were-made-into)); the datasource
+  read redaction identifies a driver the way the write door does (`fb69825`,
+  #21963).
+- A hook's `handler` name can no longer bind to another package's function
+  (`98eb3b9`, #21653), an in-process verb can no longer address an
+  unregistered table by name (`eb9ef79`, #21545), and a plugin signature labelled
+  `ed25519` is one (`1ac7308`, #21534).
+- Discard Overlay no longer deletes the only stored row of a permission set
+  saved into a writable runtime package (`5e0b489`, #21873).
+
+**17.6.0's known issues.** Each one [listed on the 17.6.0
+page](/docs/releases/v17/17-6#known-issues-found-after-publish) is resolved or
+closed:
+
+- the `--stored` and `audit-metadata-bodies` previews no longer write to the
+  database (`3b4efa7`, #21389), nor does any one-shot command's boot
+  (`b206403`, #21432);
+- a locally installed package runs its script actions and body hooks
+  (`1d0600b`, #21401), and a hot install fires its flows and projects its
+  permission sets (`ab52182`, #21488);
+- `os verify` refuses what `os validate` refuses (`f397608`, #21364), and
+  `--json` writes clean JSON (`5155093`, #21381);
+- "My Pending" lists a request routed to a position, its holder sees `can_act`
+  and decides it from the console (`6d487d2`, #21378; `5e58193`, #21410);
+- a cloned packaged flow reaches Studio through objectui#11553, carried in the
+  `ab1879721595` pin (`1cbe165`, #21625);
+- anonymous endpoints: #21158 was closed as not planned on 2026-10-04, on the
+  maintainer's ruling that there is no demand, so an app-declared
+  `authRequired: false` endpoint still cannot read or write objects;
+- the four console issues are fixed in the first pin, `89cad75d5570` (`8963dbf`,
+  #21380).
+
+**Automation and approvals.**
+
+- A flow saved through `PUT /api/v1/meta/flow/:name` is armed on the running
+  engine at once (`73b2246`, #21746); it used to wait for a restart.
+- A pure reorder of an object's `fields` is a change: the content hash keeps the
+  field order, so publishing a drag-to-reorder now saves it (`e1790fd`, #21814;
+  `0fe0a59`, #21852).
+- A metadata publish promotes only the draft its gate judged; a draft saved in
+  between is refused `409 METADATA_CONFLICT` (`c9761cd`, #21962).
+- An email template edited through the metadata door keeps the admin's wording
+  across a restart (`08adfea`, #21818).
+
+**Data, drivers and seeds.**
+
+- On MySQL, `sys_packages` is created and written, so installed and edited
+  packages survive a restart, and a failed write answers the failure (`0e10be6`,
+  #21273); an uninstall whose `sys_packages` delete is refused removes nothing
+  (`1fd5664`, #21438).
+- Deleting an organization, a business unit or a user no longer fails on a
+  deployment with a federated object bound (`f243a29`, #21917; `13a22d0`,
+  #21937), and a runtime schema sync sends no DDL to one (`26d710e`, #21796).
+- A `Field.date` grouped by day, week, month, quarter or year buckets as its own
+  calendar day on PostgreSQL and MySQL (`440cd32`, #21611); SQLite groups `week`
+  in SQL (`5d095a0`, #21629).
+- A per-organization seed replay gives each organization its own row ids, so on
+  a walled deployment the organizations created after the first get the app's
+  fixed-id seed rows
+  (`ff16740`, #21688); a seed's authored `created_at` is kept on first insert
+  (`be55fd2`, #21661); replayed seed rows are handed to the platform admin on
+  every boot (`f9a8eb8`, #21503).
+- A SQLite connect no longer rewrites a file that is already
+  `auto_vacuum=INCREMENTAL` (`da40a5f`, #21744).
+
+**Analytics.** The ObjectQL strategy applies `order`, `offset` and `limit`, and the
+dataset door no longer applies `offset` twice (`fbe2deb`, #21363). The SQL echo
+prints a date bucket only in the expression the driver groups by, and answers
+`501 NOT_IMPLEMENTED` where none stands for it (`35dfb81`, #21587; `1968d5e`,
+#21645; `31e3e00`, #21664).
+
+**Auth and Setup.** A TOTP enrollment names the deployment, not the auth
+library, as its issuer (`1c3a4d9`, #21752). Setup → Users opens on "All Users"
+(`f76c622`, #21971). A cloned permission set no longer logs a false
+`permission_set_declaration_unowned` warning (`234d1d8`, #21692), an org-owned set,
+a clone and a runtime-package set edit again (`c9be1f1`, #21857), and the
+packaged-set lock tells the admin to clone (`833d57c`, #21902). A create no
+longer reports a middleware-filled `organization_id` in `droppedFields`
+(`5259a35`, #21701).
+
+**The CLI.** `os migrate recorded-by`, `resume` and `account-issuer` print one
+`--json` document and exit 0 on success (`2ee8383`, #21495); a refusal prints
+one error line (`5895119`, #21522; `24dc7c1`, #21541); a project whose database
+does not exist yet gets empty work and exit 0 (`aa0d4b9`, #21550; `1777a9b`,
+#21570); no one-shot command mints a data key file (`25797a1`, #21497;
+`2df621a`, #21507); `os migrate plan` boots a config whose connectors need a
+`requires` provider (`6afb1b5`, #21739); a narrowed `--object` run records no
+deployment-wide ADR-0104 flag, and an unknown `--object` is an error (`417443e`,
+#21662); `os verify` samples a multi-valued `select` as a list (`bee8d1c`,
+#21526).
+
+### New in Console (Studio) — objectui pins in 17.7.0
+
+Five pin moves carry the console half of this release:
+`31971ff1e28f → 89cad75d5570` (`8963dbf`, #21380),
+`89cad75d5570 → ab1879721595` (`1cbe165`, #21625),
+`ab1879721595 → 2e818d0b51ec` (`100f68b`, #21710),
+`2e818d0b51ec → 9dfaca654311` (`1354e7b`, #21800) and
+`9dfaca654311 → 0abd4f9f8769` (`8832655`, #21827). Together they carry 229
+releasing objectui changesets (74, 111, 17, 24 and 3) of the 254 added across
+173 objectui commits; 25 changesets release nothing, and 13 commits carry no
+changeset. The per-commit lists are in `packages/console/CHANGELOG.md` under
+`## 17.7.0`; the second pin's list stops at 100 of its 111 releasing
+changesets.
+
+- **17.6.0's console issues are fixed** in the first pin: the dataset designer
+  no longer writes `field: ''` (objectui `0858267e4`), an External or
+  Validate-only datasource saves without a credential (objectui `8001068b9`), a
+  published html page that gains a plugin component publishes again (objectui
+  `3ae919307`), and a region-tagged language code such as zh-CN reaches its base
+  language's catalogue (objectui `d0fba91aa`).
+- **Studio reaches what it could not.** The organization's own flows that belong
+  to no package, a cloned packaged flow among them (objectui#11553); a joined
+  report block's dataset through a `ref:dataset` picker (objectui#11601); and a
+  read-only flow canvas opens its inspector read-only again (objectui#11546).
+- **Saves say when they are refused.** A refused save, pin, reorder, view
+  setting, report save, publish or discard is shown to the user, and the Create
+  View dialog no longer closes as if the view were saved; "Save as view" saves a
+  Kanban view the platform accepts, and Create View makes chart views it accepts
+  (objectui#11578, objectui#11581, objectui#11576). A refused metadata save
+  shows the server's message and field path on every transport.
+- **Pages and forms.** The record header draws the record's picture from the
+  object's `imageField` (objectui#11383); create and edit no longer open a
+  container's first named form when it declares no default form; the default
+  `simple` `object-form` draws a self-describing inline section entry
+  (objectui#11615); `record:details` edits a `textarea` and a `markdown` field in
+  a multi-line editor; the record dialog draws a `form.sections[].group` section;
+  and an `object-grid` honours `keyboardNavigation`, `description` and
+  `emptyState`.
+- **Data entry and lists.** The import wizard's "Download template" downloads
+  the server's `.xlsx` template (objectui#9600); "Is empty" / "Is not empty" are
+  written as the spec's `$empty` operator in the filter builders, and sent as
+  `isempty` / `isnotempty` by the list view's live query (objectui#10813); the
+  action success toast is composed from
+  the action's `outcomeMessages`, then `successMessage`; a percentage is scaled
+  at the storage its field declares; and the screen-flow runner names the flow by
+  its translated label (objectui#11092).
+- **Approvals.** The console names a position approver in the
+  `position:NAME` spelling the server stores (objectui#11455), the spelling
+  17.7.0 now requires ([Approvals](#approvals)).
+
+⚠️ **Console hosts and authors: 65 of those entries are declared breaking
+upstream** (16, 43, 2, 4 and 0), and one more commit carries `!` with no
+annotation in its changeset (objectui `b403bb36f`, objectui#8347). They are
+objectui's own surfaces — they matter to a host that builds on `@object-ui/*`
+packages, runs the `objectui` CLI, or authors objectui page JSON directly. None
+registers an ADR-0087 migration on this side, and none of the node type keys
+they retire is a member of `@objectstack/spec`'s `PageComponentType` or a
+`ComponentPropsMap` row; where an entry mirrors an ObjectStack key, the
+ObjectStack retirement carries the ledger entry. How this repository answers
+each class:
+
+| objectui change (commit) | How ObjectStack answers |
+|:--|:--|
+| Node type keys retired: the bare `tree` and `view`, 28 bare field-widget fallbacks (`990a2d616`); `pie-chart`, `donut-chart`, `radar-chart`, `page-header` (`ad1785c1d`); `scatter-chart`, `dashboard-grid`, the bare `metric` / `metric-card`, four builder-chrome keys, `form-analytics`, `import-wizard`, `related-list`, `shared-view-link` (`37140f4f5`); `spec-report` (`9d9ed5495`); ten `sidebar-*` keys (`1c8403692`); `navigation-renderer`, `responsive-grid` (`9d1c0bff9`) | None is an ObjectStack component type; a stored page reaches one only through `PageComponentSchema.type`'s open string arm. Where a retirement names a replacement it is `object-tree`, `object-view`, `field:TYPE`, `chart` with `chartType`, `page:header`, `record:related_list` or `grid`. |
+| Authored props go in the `properties` bag, and the flat spelling is refused, for `flex` and `object-grid` (`138ad4554`, `6aa029b63`) | The shape `ComponentPropsMap` already declares. |
+| `conditionalFormatting` on `object-grid`, `list-view` and `object-kanban` takes only `{ condition, style }` (`6f5719e1c`, `c73cdb569`) | The list view's own rule; this release types the kanban member the same way (`ced3e1a`, #21711). |
+| A dataset-less `provider: 'object'` metric widget, and an `object-metric` in a widget's legacy `component` envelope, draw the retired-format prompt (`160c6c6ea`, `83e3f8377`) | ObjectStack's dashboard widget schema has required `dataset` since 9.0.0, and refuses a widget's `component` key by name; no stored ObjectStack dashboard carries either form. |
+| A dataset-bound widget stops reading `chartConfig.series` / `xAxis` / `yAxis`, and `chartConfig.type` and those three are TypeScript errors (`1a88ce22f`) | Mirrors keys ObjectStack retired and tombstoned on the dashboard widget before 17.7.0. |
+| Drill-down reports: the `{ name }` arm and the pre-9.0 object-bound report are retired; the drawer scopes a dataset-bound report by `runtimeFilter` (`9ed8d0f1c`, `8366accd1`) | `object-metric` `drillDown.report` is now `ReportSchema` (`4331a6b`, #21764): every report it admits is one the drawer draws. |
+| Layout value sets: `grid` breakpoint columns and counts, `stack` / `flex` / `grid` `gap`, `container` `padding` (`2d576e46e`, `aea682a31`, `4abc0aafa`, `3f6efd640`); a `page` refuses `maxWidth` / `padding` (`a1a44d621`) | objectui's own layout nodes; no ObjectStack page shape declares these keys. |
+| The `grid` form field's eight keys are camelCase, the snake_case spellings refused (`2abec3a96`, objectui#11614) | The runtime form field already refused the snake_case spellings; this release declares the camelCase ones (`6fb7115`, #21825). |
+| A form view's `subforms[].columns` entry is judged by `InlineGridColumnSchema`; `ObjectFormSection.fields` gains the form view's `{ field }` arm (`9db9ff3f9`, `9dfaca654`) | The shape ObjectStack has enforced on the form view; its accept set does not move. |
+| A percentage is scaled at the storage its field declares, through the spec's `percentScaleOf` (`f560ded15`) | The spec's own rule; nothing to author. |
+| `@object-ui/cli` retires `create`, `lint`, `test`, `studio` and `add`, `analyze`'s two flags, and `generate`'s `--from` and `--output` (`37268aae9`, `ea3914139`, `1fe05ff37`, `9de0b3483`) | objectui's own CLI; `os` is unaffected. |
+| TypeScript surfaces: designer node members and props (`063832222`, `5988b6b53`, `0e9058b95`, `c4ab6d09a`), `SidebarSchema` (`ca3de7272`), `ObjectGridSchema`'s zod mirror (`0d723a33f`), `app-schema-renderer` (`fcdc8ec91`), `mergeAuthoredPresentation` / `axisPresentation` (`f9c8c4e45`), `DeclaredNode` (`83e3f8377`), `PartialSchema` (`8b14aecbd`), and `BaseSchema`'s index signature (`b403bb36f`) | No code in this repository imports `@object-ui/types` or compiles against these node types. A designer relationship's `onDelete` is respelled `deleteBehavior`, the spelling ObjectStack's lookup fields already use. |
+| A declared gate that cannot be evaluated is a fault, not "no gate" (`063119f2b`); objectui's app document refuses `mobileNavMode` (`e100589f3`) | objectui's own gate evaluator; ObjectStack's app shape does not declare `mobileNavMode`. |
+
+### Shipped in 17.6.0 — listed again in 17.7.0's CHANGELOG
+
+One of the changesets in 17.7.0's `CHANGELOG.md` files describes code that was
+**already published in 17.6.0**: `748b240` (#21270) is an ancestor of the 17.6.0
+version commit `617f25f8`, which did not consume its changeset. The 17.6.0 notes
+already describe it under [Also shipped in
+17.6.0](/docs/releases/v17/17-6#also-shipped-in-1760--not-in-its-changelog). A
+deployment on 17.6.0 already runs it, and nothing changes when it moves to
+17.7.0.
+
+- `748b240` (#21270) — `ScheduledWorkPolicy.hostDisabledReason` and
+  `scheduledWorkDisabledReason(policy)` (`@objectstack/types`), so a kernel a host
+  turns off reports the host's own reason.
+
+### Also shipped in 17.7.0 — not in its CHANGELOG
+
+The publish ran from the version commit `4e4e8814` itself (Release run
+37458970237), so no commit after it shipped. Two commits landed on `main` after
+the Version Packages PR's last refresh and before it merged, between 10:34 and
+10:41 UTC on 2026-10-06. Both are ancestors of the version commit, so the
+17.7.0 npm packages carry them, but the version commit did not consume their
+changesets, and no 17.7.0 `CHANGELOG.md` entry names them. Their changesets are
+still in `.changeset/`, so the next release's `CHANGELOG.md` will list them
+again. This is the same window that produced the stragglers of 17.5.0 and
+17.6.0 (#21361). The release-integrity audit that card added (`7b21af8`,
+#21373) named both changesets in a warning on the publish run, which it never
+holds.
+
+- `8a399b2` (#21977, for #21923) — **the datasource admin door and the metadata
+  door agree on a runtime datasource** (`@objectstack/service-datasource`). The
+  admin door serves `origin: 'code'` only for a name the host registers from
+  code, and `runtime` for every other name, whatever the stored record says, so
+  a datasource saved through `/api/v1/meta/datasource/:name` is listed and
+  editable through `/api/v1/datasources` after a restart and gets its live pool.
+  A metadata-door write now reaches the admin door's registry in the same boot.
+  And the admin door stamps the checksum the metadata door's optimistic lock
+  compares, so an admin-created datasource can be edited and removed through
+  `/api/v1/meta/datasource/:name` instead of answering `409 METADATA_CONFLICT`;
+  a row stored before this release becomes editable there after one edit through
+  the admin door.
+- `04e776b` (#21976, for #21968) — `App.defaultAgent`'s docblock in
+  `@objectstack/spec` names the agent route, `POST /api/v1/ai/agents/:agentName/chat`,
+  as the one chat door, and says the console's chat dock is what reads the key.
+  No schema, type or accept-set change.
+
+---
+
+
+## Upgrade checklist
+
+⚠️ One checklist per release, for the release you are landing on **and** every
+release you cross to get there — and see [how far each list has actually been
+walked](/docs/releases/v17#upgrade-checklists).
+
+### 17.7.0
+
+⛔ **17.6.0 → 17.7.0 has not been exercised.** No upgrade of an application was
+run for this page. Every line below is derived from a **Migration** note in
+[Breaking changes & migration in 17.7.0](#breaking-changes--migration-in-1770)
+or from a changeset of this release, and is marked **not exercised**: accurate
+about what changed, unproven about what it costs to cross. A step nobody has
+run, presented beside steps that were, is how a reader finishes a checklist and
+believes they are done — so this list claims nothing it has not been given.
+
+**Before you upgrade**
+
+- **Run any conversion that reads a retired field's leftover column** — a hook,
+  flow, webhook receiver or script that copies an old column into its
+  replacement — while that field is still declared. After the upgrade no runtime
+  door returns the column; `os migrate unmapped-columns --object NAME` reads it.
+  *Not exercised.*
+- **Find app-authored bodies and flows that touch `sys_metadata` or
+  `sys_metadata_history`** — hook bodies bound to them, body reads and writes
+  through `ctx.api`, and flow write nodes aimed at them — and move each to the
+  metadata API. *Not exercised.*
+- **Add `sharing.enabled: true` to every public form that must stay public**,
+  in source and in stored overlays; without it the form answers
+  `404 FORM_NOT_FOUND`. *Not exercised.*
+- **List flows whose `approval` node config breaks `ApprovalNodeConfigSchema`**
+  (`os validate` names each), and approval steps authored with the deprecated
+  approver type over a position name; fix them first, because the stored flow is
+  skipped at boot and the new requests need an admin override. *Not exercised.*
+- **Note every pending approval request** whose slot is stored in the
+  pre-rename position spelling; after the upgrade only an admin override, or a
+  reassignment to the position's holder, decides it. *Not exercised.*
+- **Find code that addresses an object by a name the registry does not hold**
+  through the engine, and register the object. *Not exercised.*
+- **If you may need to roll back past 17.7.0**, keep a way to set again every
+  secret you set, rotate or re-wrap on it: an earlier release cannot open the
+  new `v2:` ciphertext. *Not exercised.*
+
+**Getting onto the release**
+
+- **Move all the `@objectstack/*` pins as one set and regenerate the
+  lockfile** — [Moving the dependency
+  pins](/docs/upgrading#moving-the-dependency-pins). *Not exercised.*
+- **Leave the protocol declarations on 17:** `engines.protocol: '^17'` and a
+  `^17.0.0` `specVersion`. 17.7.0 still implements protocol 17. *Not exercised.*
+- **Run `os migrate meta --from 17`, then `os migrate meta --stored --apply`**,
+  for the new conversions — agent `lifecycle`, `memory.longTerm.store` and the
+  retired `structuredOutput` members, `element:text` `heading` / `subheading`,
+  `object-grid` `resizableColumns`, master-detail `details[].sortField`, page
+  `requires` on non-compiled kinds and the widget translation `subCaption` — and
+  read the D3 entries it lists as manual changes. The previews no longer write to
+  the database. *Not exercised.*
+- **Run `os migrate audit-metadata-bodies`, then
+  `os migrate audit-metadata-bodies --apply`**, to drop the stored content hash
+  from the audit, activity and decision-audit copies. *Not exercised.*
+- **Replace an in-memory boot store** — `--database-driver memory`,
+  `OS_DATABASE_DRIVER=memory`, a `memory://` URL or a default datasource
+  `{ driver: 'memory' }` — with `os dev --fresh`, `:memory:` or a SQLite
+  datasource. *Not exercised.*
+
+**After the first boot**
+
+- **Rotate every inbound and outbound flow secret** once the boot log has moved
+  it into `sys_flow_credential`, and hand the new value to whoever signs posts to
+  the hook or verifies its deliveries. *Not exercised.*
+- **Rotate the JWT signing keys, and revoke and re-mint share links that must
+  stay private**; their earlier values may have copies in the audit ledger.
+  *Not exercised.*
+- **Resume, cancel or purge paused flow runs created before the upgrade**; they
+  still hold clear credential values. *Not exercised.*
+- **Optional, and only once you will not roll back past 17.7.0: run
+  `os secret rewrap`, then `os secret rewrap --apply`**, to re-seal older
+  `sys_secret` ciphertext. Nothing on the upgrade path runs it. Every row it
+  re-seals carries `v2:`, which an earlier release cannot open, so `--apply`
+  removes the rollback path for those secrets: a rollback past 17.7.0 needs
+  each of them set again. *Not exercised.*
+- **On `objectstack start` with federated objects**, expect the boot gate to
+  compare them; fix any drift it names or set `onMismatch: 'warn'`. *Not
+  exercised.*
+- **Check the boot log for a stored datasource row skipped under a code-defined
+  name**, and `DELETE /api/v1/meta/datasource/:name` it. *Not exercised.*
+
+**Metadata and build — run `os validate` before you ship**
+
+- **Fix the new parse refusals:** `select` / `radio` with neither `options` nor
+  `picklist`; agent `memory` without `maxEntries` / `reflectionInterval`, a
+  non-JSON `structuredOutput` and `lifecycle`; untyped JSON subschemas with a
+  type-scoped keyword; `ai:chat_window`; `requires` on a non-html page;
+  `joined` report blocks with no `dataset`; `pie` / `donut` / `funnel` / `treemap` / `sankey` widgets with a
+  dimension and two or more `values`; the widget `subCaption` translation key;
+  cube metric types `number` / `string` / `boolean`; `'*'` outside a `count`;
+  hooks with a `body` and flow write nodes on the stored-metadata tables; and
+  `approval` node configs. *Not exercised.*
+- **Fix the new author-time errors:** `resultDialog` translation keys under an
+  action with no `resultDialog`, cube members over JSON-stored or incompatible
+  columns, `record:related_list` action ids that name no drawable action of the
+  related object, and html-page literals of the wrong type. *Not exercised.*
+- **Read the new `component-props-*` advisories** on page blocks and rewrite each
+  member in the shape the [page-block
+  table](#page-blocks-take-the-shape-their-renderers-read-21464) names; rename
+  `resizableColumns` to `resizable`, delete `details[].sortField`, and write
+  `element:text` `variant` as `h2` / `h3` where it read `heading` /
+  `subheading`. *Not exercised.*
+- **Move a bound action's translation** from `globalActions.ACTION` to
+  `objects.OBJECT._actions.ACTION`, including translations stored at runtime.
+  *Not exercised.*
+- **Give a view container its default `form`** where it relied on the first
+  `formViews` entry, and re-point references from `OBJECT.edit` to `OBJECT.form`.
+  *Not exercised.*
+
+**Data, API clients and integrations**
+
+- **Read `404 RECORD_NOT_FOUND` from a by-id write as "no row you can see"**, and
+  expect predicate writes to skip hidden rows and to refuse a readable match above
+  10,000 rows. *Not exercised.*
+- **Stop sending an `organization_id` of another organization on create** under
+  a walled posture. *Not exercised.*
+- **Write boolean filters as `true` / `false` (or `1` / `0`)**, a list only under
+  `$in` / `$nin` / `$between`, and analytics `limit` / `offset` as non-negative
+  integers with `order` keys the query selects; review row-level policies that
+  compare a numeric or boolean column with a value outside the accepted
+  spellings (`'9999-12-31'` on a number, `'yes'` on a boolean). *Not exercised.*
+- **Stop reading credential columns from `GET /api/v1/data/...`**, and expect
+  `SECRET_MASK` in write responses, events and webhook bodies. *Not exercised.*
+- **Read `sys_approval_action.acted_as` for the slot**, and stop testing
+  `actor_id` for `system:sla` / `system:dead-run`; write `{{ body }}` in
+  `approval.*` notification templates. *Not exercised.*
+- **Drop `date_format`, `time_format`, `number_format` and
+  `first_day_of_week`** from any client that writes the Localization settings.
+  *Not exercised.*
+- **Take the next version token from a read** when a held one answers
+  `409 METADATA_CONFLICT` once after the upgrade. *Not exercised.*
+
+**Deployment, auth and the CLI**
+
+- **Expect external sign-ins to an unverified local email to be refused**
+  (`error=account_not_linked`), or set
+  `account.accountLinking.requireLocalEmailVerified: false` knowingly. *Not
+  exercised.*
+- **Add `X-Share-Password` to a custom CORS `allowHeaders`** if a cross-origin
+  client sends share-link passwords. *Not exercised.*
+- **Under `isolated` posture with package scheduled work on, declare
+  `organization` on each packaged job.** *Not exercised.*
+- **Re-sign plugin artifacts signed with a non-Ed25519 key.** *Not exercised.*
+- **Drop `os dev -a` / `os start --artifact` / `OS_ARTIFACT_PATH` overrides that
+  relied on the config beside them loading**, and pass `--object` / `--flow` to
+  `objectstack generate` in a stack with several objects or flows. *Not
+  exercised.*
+- **Give packages you install with `os package install` a `body` on every hook,
+  and a `body` or a binding `pull` on every enabled job**, or boot them with
+  `os start --artifact`. *Not exercised.*
+
+**Application code and custom hosts**
+
+- **Implement `ICryptoProvider.keyedDigest` and pass `CryptoContext.scope`** in a
+  custom crypto provider or a direct `encrypt` / `decrypt` / `rotateKey` caller.
+  *Not exercised.*
+- **Rename `checkDashboardWidgetDimensionlessMeasureArity`** to
+  `checkDashboardWidgetChartMeasureArity`; drop imports of `AIChatWindowProps` and
+  the `StateMachineSchema` family; return a `JsonColumnFieldClass` from a custom
+  Turso `setJsonColumnResolver`. *Not exercised.*
+- **Write membership yourself for users inserted straight through the engine**,
+  and call `createEnsureDefaultOrganizationOnce` instead of
+  `ensureDefaultOrganization`. *Not exercised.*
+- **Pass `sourceFieldMeta` to a hand-built `AnalyticsService`** to get the
+  engine's answer for bare-day bounds on the native face, and the driver's
+  temporal coercion pair to a direct `compileScopedFilterToSql` call. *Not
+  exercised.*

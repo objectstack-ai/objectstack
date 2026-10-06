@@ -2110,6 +2110,9 @@ importers:
         specifier: workspace:*
         version: link:../../verify
     devDependencies:
+      '@objectstack/account':
+        specifier: workspace:*
+        version: link:../../apps/account
       '@objectstack/cli':
         specifier: workspace:*
         version: link:../../cli
@@ -2128,6 +2131,9 @@ importers:
       '@objectstack/driver-turso':
         specifier: workspace:*
         version: link:../../drivers/driver-turso
+      '@objectstack/setup':
+        specifier: workspace:*
+        version: link:../../apps/setup
       '@objectstack/trigger-api':
         specifier: workspace:*
         version: link:../../triggers/trigger-api

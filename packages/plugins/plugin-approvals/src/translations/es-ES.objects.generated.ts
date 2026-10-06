@@ -104,6 +104,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_requests: {
+        label: "Todas"
+      },
       my_pending: {
         label: "Aprobaciones pendientes",
         emptyState: {
@@ -116,9 +119,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       completed: {
         label: "Completadas"
-      },
-      all_requests: {
-        label: "Todas"
       }
     },
     _actions: {

@@ -497,7 +497,7 @@ describe('MetricsConfigSchema', () => {
 // gate's mechanical `sizeSeconds`: `size` is byte/row-count vocabulary elsewhere
 // in this spec, and the parent key is already `window`, so `windowSeconds` would
 // read `window.windowSeconds`.
-describe('metrics window and period lengths carry their unit (#15679)', () => {
+describe('metrics window and period lengths carry their unit in the key name', () => {
   const sliBase = {
     name: 'api_availability',
     label: 'API Availability',
@@ -581,7 +581,7 @@ describe('metrics window and period lengths carry their unit (#15679)', () => {
 // Three of the five new names are not the mechanical suffix: see the tombstone
 // prose on each key for why `windowSeconds`, `periodSeconds` and a bare
 // `intervalSeconds` were rejected.
-describe('metrics JSDoc-only durations carry their unit (#15939, #14478)', () => {
+describe('metrics JSDoc-only durations carry their unit in the describe and the key name', () => {
   const sliBase = {
     name: 'api_availability',
     label: 'API Availability',
@@ -734,7 +734,7 @@ describe('metrics JSDoc-only durations carry their unit (#15939, #14478)', () =>
 //
 // Both keep the `.positive()` floor they already declared, so the accepted set
 // narrows only by the integer requirement `DurationSeconds` carries.
-describe('metrics duration rows declare seconds through the type (#18124)', () => {
+describe('metrics duration rows declare seconds through the type', () => {
   const window = { durationSeconds: 300, sliding: true };
 
   it('slideInterval refuses a fractional second count', () => {
@@ -821,7 +821,7 @@ describe('metrics duration rows declare seconds through the type (#18124)', () =
  *    delete it, because the day it silently stops being true is the day the
  *    retirement stops being audible in one of its two spellings.
  */
-describe('#18118 ServiceLevelIndicator.successCriteria — the retired CEL arm', () => {
+describe('ServiceLevelIndicator.successCriteria — the retired CEL arm', () => {
   const sli = (successCriteria: unknown) => ServiceLevelIndicatorSchema.safeParse({
     name: 'api_latency',
     label: 'API Latency',

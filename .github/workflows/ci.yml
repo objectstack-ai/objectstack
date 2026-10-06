@@ -412,12 +412,17 @@ jobs:
     # shard, because every shard gets its own runner.
     #
     # SIX specifically, and not four or five: sharding is BY PACKAGE, so no
-    # shard can finish faster than its single heaviest package.
-    # `@objectstack/spec` is that package — at five shards or fewer the
-    # partitioner must co-schedule it with others, and at six it very nearly
-    # fills a bin on its own. Six is therefore the smallest count that
-    # isolates the heaviest indivisible suite; past six, spec's shard cannot
-    # improve, only the others can.
+    # shard can finish faster than its single heaviest package. On the
+    # current dataset (scripts/test-shard-timings.json as #21826 refreshed it,
+    # provenance run 37262126122) that package is `@objectstack/cli` at
+    # 1702.69s, ahead of `@objectstack/spec` at 1134.86s. At five shards or
+    # fewer the partitioner must co-schedule it with others (heaviest bin
+    # 1957s at five); at six it fills bin 1 alone and the other five sit at
+    # 1615-1617s. Six is therefore the smallest count that isolates the
+    # heaviest indivisible suite; past six, the CLI's shard cannot improve,
+    # only the others can. (spec held that place until #21826 measured the
+    # CLI whole: the dataset before it recorded the CLI at 733.33s, summed
+    # from two file-level slices, and #21487 had already retired the slicing.)
     #
     # ⚠ THE ARGUMENT ABOVE USED TO BE MADE IN TEST-FILE COUNTS (bins
     # 415/389/389/389/389/388, spec carrying 415 of ~2360 files). It is now
@@ -428,21 +433,24 @@ jobs:
     # measurement; only the units it is argued in changed. Weights now come
     # from scripts/test-shard-timings.json — see partition-test-shards.mjs.
     #
-    # AND WHY NOT MORE THAN SIX, measured on that dataset (#10472 asked for
-    # 6 -> 8 to be considered). The floor is the heaviest single package, and
-    # it does not move when shards are added, while the mean falls with every
-    # shard — so max/mean, which is what the acceptance bound is written in,
-    # gets WORSE past the point where the floor becomes the max:
+    # AND WHY NOT MORE THAN SIX (#10472 asked for 6 -> 8 to be considered).
+    # The floor is the heaviest single package, and it does not move when
+    # shards are added, while the mean falls with every shard — so max/mean,
+    # which is what the acceptance bound is written in, gets WORSE past the
+    # point where the floor becomes the max. Re-derived on the current dataset
+    # with the partitioner's own partition() and balanceOf():
     #
-    #   6 shards -> max 650s  mean 649s  ratio 1.00x
-    #   7 shards -> max 571s  mean 556s  ratio 1.03x
-    #   8 shards -> max 571s  mean 487s  ratio 1.17x
-    #  10 shards -> max 571s  mean 389s  ratio 1.46x
+    #   6 shards -> max 1703s  mean 1630s  ratio 1.04x
+    #   7 shards -> max 1703s  mean 1397s  ratio 1.22x
+    #   8 shards -> max 1703s  mean 1223s  ratio 1.39x  (past the 1.3x bound)
+    #  10 shards -> max 1703s  mean  978s  ratio 1.74x
     #
-    # Eight shards would buy ~79s off the critical path for two more runners'
-    # fixed overhead and a worse balance ratio. The partitioner's self-test
-    # pins this arithmetic so the next person gets the answer from a failing
-    # assertion rather than from a CI run.
+    # Past six the critical path does not move at all — the CLI's 1703s is
+    # the maximum at every count — so more shards buy only more runners'
+    # fixed overhead and a worse ratio. The partitioner's self-test pins the
+    # half of this that can fail: at SHARD_COUNT the heaviest package must
+    # sit within 1.3x the mean, and when it stops fitting, slicing it below
+    # package granularity is the remedy that failure names.
     #
     # ⚠ THE COST, stated because it is real: per-shard fixed overhead
     # (checkout + pnpm/Turbo cache restore + install, ~60s measured on run
@@ -465,31 +473,33 @@ jobs:
     if: ${{ !cancelled() && (needs.filter.outputs.core != 'false' || needs.filter.outputs.crosspkg != 'false') }}
     runs-on: ubuntu-latest
     # Backstop only — the stall guard on the test steps is the primary
-    # detector for a #4250-style hang and fires well before this. 30 min is
-    # ~5× a normal sharded run (~4-6 min), with margin for a cold Turbo cache;
-    # the old 45 left a hung job "running" for half an hour past any plausible
-    # healthy finish.
+    # detector for a #4250-style hang and fires well before this. 30 min was
+    # chosen as ~5× a normal sharded run when a normal run was ~4-6 min, with
+    # margin for a cold Turbo cache; the old 45 left a hung job "running" for
+    # half an hour past any plausible healthy finish.
     #
-    # ⚠ TEMPORARY RAISE, 30 -> 45 (#16173). Shard 5/6 is being killed at the
-    # 30-minute wall — 12+ observations at 30:16-30:21 with every other job in
-    # every one of those runs green — so the paragraph above describes the
-    # value this line must RETURN to, not the value it currently carries.
+    # ⚠ RAISED 30 -> 45 (#16173), and the raise is still load-bearing. It was
+    # made because shard 5/6 was being killed at the 30-minute wall (12+
+    # observations at 30:16-30:21 with every other job green; the green band
+    # topped out at 28:56, a ~1 minute margin), and so the tail could be
+    # measured uncensored before anyone re-derived
+    # `scripts/test-shard-timings.json`. Both are done: the dataset was
+    # refreshed (#20388, then #21826) and the split now runs the whole CLI
+    # alone on shard 1/6 (#21487).
     #
-    # Two reasons, both #16173's:
-    #   1. Unblock. The only uncensored shard-5 readings are 25:32 and 27:36,
-    #      and shard 6/6 has been seen at 28:56 — a ~1 minute margin at the top
-    #      of the observed green band against a 30:00 wall.
-    #   2. Un-censor. Every tail observation is a reading of THIS number, not
-    #      of the shard: the true duration is >= 30:16, unbounded above. So the
-    #      shard timings cannot be re-derived from CI history while the wall
-    #      stands here. Raising it produces the durations #16173 needs before
-    #      anyone touches `scripts/test-shard-timings.json`.
-    #
-    # ⛔ REVERT CONDITION, explicit: back to `30` once #16173 lands its shard
-    # rebalance. This value is temporary and carries no other expiry — a raise
-    # with no revert condition written beside it becomes permanent by
-    # forgetting. The backstop stays loose only for that window; the stall
-    # guard named above remains the primary hang detector throughout.
+    # ⛔ REVERT CONDITION, restated against measured wall time, not a card:
+    # back to `30` only when the slowest shard's JOB wall time stays at or
+    # under 24 minutes (80% of 30, so the margin the old wall lacked is
+    # there) on every scheduled run for a week. It does not today. On the 16
+    # main runs after the #21826 refresh (37413386379 to 37467882762), shard
+    # 1/6 — the CLI alone — read 6m14s-35m43s of job wall time, over 30
+    # minutes on 9 of them (34m39s run 37415122516, 35m43s run 37453598388,
+    # 34m08s run 37460325624), so the condition as first written ("once
+    # #16173 lands") would now kill that shard; and its slowest reading is
+    # already 79% of this 45. Read the `Test Core (1/6)` job's started and
+    # completed times before touching this value. It carries no other expiry
+    # — a raise with no revert condition beside it becomes permanent by
+    # forgetting — and the stall guard stays the primary hang detector.
     timeout-minutes: 45
     permissions:
       contents: read
@@ -697,8 +707,11 @@ jobs:
       # and `pnpm check:stall-guard-headroom` both read this step, so it keeps
       # its own `--stall-minutes` and its own headroom row.
       #
-      # A shard with no slice runs zero iterations here; every shard still
-      # reaches the step, so its name is a stable site for those two gates.
+      # A shard with no slice runs zero iterations here, and since #21487
+      # emptied FILE_SHARDED_PACKAGES that is every shard: no package is sliced
+      # today, so the paragraphs above describe the mechanism a slice would
+      # use, not anything this job currently runs. Every shard still reaches
+      # the step, so its name is a stable site for those two gates.
       - name: Build the sliced package's dependency closure
         env:
           NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
@@ -805,7 +818,7 @@ jobs:
           # ⛔ A failing leg STOPS the remaining ones, the same way turbo stops
           # scheduling on the first failure inside one run. Carrying on would add
           # a second full suite to a job that is already red and already inside a
-          # 30-minute wall — turning an informative red into a killed job with no
+          # `timeout-minutes` wall — turning an informative red into a killed job with no
           # attestation at all, which is the #16173 failure mode itself.
           #
           # `test test:repo` (#16466): six heavy packages split their suite into
@@ -815,8 +828,11 @@ jobs:
           # and is a no-op for every package without a `test:repo` script. The
           # per-shard Turbo cache restored above (main-seeded) is what carries
           # an unmoved `PKG#test` across a change outside the package; the
-          # completeness guard below reads both tasks' summaries. The cli slice
-          # leg stays `test`-only: cli is not split.
+          # completeness guard below reads both tasks' summaries. A slice leg
+          # stays `test`-only: the CLI, the one package whose slice wiring is
+          # in the tree, is not split. No package is sliced today
+          # (FILE_SHARDED_PACKAGES is empty since #21487), so every shard runs
+          # the whole-package leg alone and the slice branch below is idle.
           STATUS=0
           LOGS=""
           for LEG in __whole__ $SLICES; do
@@ -956,30 +972,60 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
 
-      # ⛔ THE DRIFT STEP IS DELIBERATELY NOT WIRED HERE YET (#16173).
+      # ── Predicted vs measured: this shard's timing drift (#16173, #16465) ──
       #
-      # partition-test-shards.mjs carries a fully-tested `--check-drift` mode —
-      # it reads the summary uploaded above back and reds when a shard's MEASURED
-      # test total outruns its PREDICTED one past MAX_MEASURED_OVER_PREDICTED. The
-      # code, its self-tests and its ablation are all on this branch; only this
-      # invocation waits, and the wait is a SEQUENCING decision, not an oversight.
+      # partition-test-shards.mjs `--check-drift` reads back the summary the
+      # step above uploads and compares this shard's MEASURED test total with
+      # what the split PREDICTED for the same packages. One ratio,
+      # measured/predicted, and four verdicts on it:
       #
-      # Why: scripts/test-shard-timings.json is still stale for @objectstack/cli
-      # (458.15s recorded, 1231.52s measured), so wiring the step today would red
-      # the shard carrying a CLI slice on every single PR — a true reading, but one
-      # that blocks everything until the dataset is refreshed. The file-level split
-      # above already removes the urgent hazard on its own, taking the worst shard
-      # from ~1445s (80% of this job's 30-minute wall) to ~1059s (59%) with the
-      # dataset untouched, because the CLI is halved across two runners instead of
-      # falling on one.
+      #   OK            at or under 1.3x (WARN_MEASURED_OVER_PREDICTED)
+      #   WARN          past 1.3x, at or under 1.5x: a `::warning::` annotation
+      #                 naming the shard and its heaviest overshoot; green
+      #   DRIFT         past 1.5x (MAX_MEASURED_OVER_PREDICTED): red
+      #   NOT MEASURED  no executed test task carried a dataset entry; green
       #
-      # ⇒ The refresh and this step land TOGETHER in the follow-up, in that order.
-      # The refresh recipe is in PR #16220's body. When it lands, restore a step
-      # here that runs `--check-drift` over `.turbo/runs/*.json` with
-      # `--label "Test Core (${{ matrix.shard }}/6)"`, with NO `if:` and NO
-      # `continue-on-error` (the point is the red), placed ABOVE the attestation
-      # pair for the #6082 reason documented on the upload above — so a drift red
-      # also withholds the attestation, which is the fail-closed direction.
+      # ONE red rule and a warning under it, on the same ratio: triage ruled
+      # the in-tree 1.5x the red and the card's 1.3x a warning only, and took no
+      # second red on wall time against `timeout-minutes`. Both constants, their
+      # measured basis and a self-test battery each live in the script.
+      #
+      # EXECUTED WINDOWS ONLY. Measurements come from samplesFromSummary() in
+      # measure-test-shard-timings.mjs, which drops cache HITs and failed
+      # suites, and the prediction is summed over the same executed packages.
+      # A replay's near-zero window would read as a shard far FASTER than
+      # predicted and vouch for a rotted dataset, so a shard whose packages all
+      # replayed is NOT MEASURED, never "fast".
+      #
+      # NO `if:` and NO `continue-on-error` (the red is the point), and ABOVE
+      # the attestation pair for the #6082 reason documented on the upload
+      # above: a failed unguarded step skips that pair, so a drift red also
+      # withholds this shard's attestation, the fail-closed direction. A shard
+      # with no packages runs no turbo and writes no summary; that is NOT
+      # MEASURED here rather than a usage error from the script.
+      #
+      # The dataset it reads is scripts/test-shard-timings.json as #21826
+      # refreshed it (provenance run 37262126122): the whole CLI at 1702.69s,
+      # alone on shard 1/6 since FILE_SHARDED_PACKAGES went empty (#21487).
+      # The second sample taken before wiring this, executed windows only, from
+      # the `Test Core` timing tables of the main runs after that refresh:
+      # shard 1/6 read 0.61x-1.05x on all eight scheduled runs (37416453417 to
+      # 37467795959), and no package on any shard read 1.5x, the highest being
+      # @objectstack/spec at 1.39x-1.45x on the three runs that executed it
+      # (37433381795, 37453598388, 37467882762). spec carries 70% of shard
+      # 2/6's prediction, so that shard is the one nearest the warning. Those
+      # tables print ten packages, so shards 2-6 were bounded there rather
+      # than read whole; this step reads them whole. Per-shard detail: #16465.
+      - name: Check this shard's timing drift
+        run: |
+          shopt -s nullglob
+          SUMMARIES=(.turbo/runs/*.json)
+          if [ "${#SUMMARIES[@]}" -eq 0 ]; then
+            echo "shard-timing-drift: NOT MEASURED -- Test Core (${{ matrix.shard }}/6) wrote no turbo run summary (no packages on this shard)."
+            exit 0
+          fi
+          node scripts/partition-test-shards.mjs --check-drift "${SUMMARIES[@]}" \
+            --label "Test Core (${{ matrix.shard }}/6)"
 
       # Runs even when the suite failed — that is when it earns its keep. It
       # answers TWO questions about a red suite, and needs both to be able to
@@ -1062,7 +1108,7 @@ jobs:
       #                slowTestThreshold (which this repo never sets — it picks
       #                the colour, not the presence). So the stream is enough
       #                and no machine-readable reporter is added to the shard's
-      #                30-minute wall. The script's header carries the
+      #                `timeout-minutes` wall. The script's header carries the
       #                measurement and its control.
       #   per PACKAGE  `.turbo/runs/*.json`, the same `--summarize` output the
       #                step above already uploads — turbo's own execution

@@ -137,6 +137,13 @@ export class ApprovalsServicePlugin implements Plugin {
       // progress, drawer); the three object entries below stay as the
       // admin/diagnostic view of the engine's own tables — reachable only here,
       // behind `group_approvals`' `manage_platform_settings` gate.
+      //
+      // `nav_approval_requests` names `all_requests` explicitly: an entry that
+      // names no view opens the object's first declared list view, so an
+      // administrator's page would otherwise depend on `listViews` order (it
+      // opened the caller-scoped `my_pending` until that view moved off first
+      // place). The two other object entries' objects declare no caller-scoped
+      // view.
       navigationContributions: [
         {
           app: 'setup',
@@ -144,7 +151,7 @@ export class ApprovalsServicePlugin implements Plugin {
           priority: 100,
           items: [
             { id: 'nav_approvals_inbox', type: 'component', label: 'Approvals Inbox', componentRef: 'approvals:inbox', icon: 'list-checks' },
-            { id: 'nav_approval_requests', type: 'object', label: 'Requests', objectName: 'sys_approval_request', icon: 'inbox', requiresObject: 'sys_approval_request' },
+            { id: 'nav_approval_requests', type: 'object', label: 'Requests', objectName: 'sys_approval_request', viewName: 'all_requests', icon: 'inbox', requiresObject: 'sys_approval_request' },
             { id: 'nav_approval_actions', type: 'object', label: 'Action History', objectName: 'sys_approval_action', icon: 'history', requiresObject: 'sys_approval_action' },
             { id: 'nav_approval_delegations', type: 'object', label: 'Delegations (OOO)', objectName: 'sys_approval_delegation', icon: 'user-clock', requiresObject: 'sys_approval_delegation' },
           ],

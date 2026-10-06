@@ -558,7 +558,7 @@ describe('Worker Integration', () => {
 // ninety lines up, which is what made the bare `rateLimit.duration` a drift
 // rather than a convention. A silent strip here would have left a queue
 // unthrottled with no error.
-describe('QueueConfig.rateLimit.duration carries its unit (#15679)', () => {
+describe('QueueConfig.rateLimit.duration carries its unit in the key name', () => {
   it('REFUSES the retired `rateLimit.duration` with the rename in the message', () => {
     const result = QueueConfigSchema.safeParse({
       name: 'rate_limited_queue',

@@ -104,6 +104,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_requests: {
+        label: "すべて"
+      },
       my_pending: {
         label: "承認待ち",
         emptyState: {
@@ -116,9 +119,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       completed: {
         label: "完了済み"
-      },
-      all_requests: {
-        label: "すべて"
       }
     },
     _actions: {
