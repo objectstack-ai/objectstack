@@ -610,7 +610,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // predicates on 10 objects (examples: app-crm 3 on 2, app-showcase 6 on 4,
     // app-todo 2 on 1; platform: plugin-security 2 on 2, and one
     // predicate-less rule on `sys_user`) → 0 build errors and 0 warnings for
-    // the pass, against 2 refusals for the card's two bodies in the same
+    // the pass, and 0 door errors and 0 advisories at the door's own snapshot
+    // shape, against 2 refusals at each for the card's two bodies in the same
     // harness.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object'],
