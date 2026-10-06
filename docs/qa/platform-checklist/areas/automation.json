@@ -964,7 +964,8 @@
           "a member persona whose permission set grants read on sys_automation_run (and on the echo object) but is not a platform admin"
         ],
         "knownGaps": [
-          "Stock showcase has the credential-class object (showcase_field_zoo carries f_password and f_secret) but no ACTIVE record-change flow on it that pauses: showcase_approver_bindings is draft on purpose. Author the fixture flow at runtime (and the member's permission set) or score the item from its pin, recording which the verdict rests on."
+          "Stock showcase has the credential-class object (showcase_field_zoo carries f_password and f_secret) but no ACTIVE record-change flow on it that pauses: showcase_approver_bindings is draft on purpose. Author the fixture flow at runtime (and the member's permission set) or score the item from its pin, recording which the verdict rests on.",
+          "The pin reads every surface as the seeded admin. The mask is applied where the trigger record is built, so it does not depend on the reader, but the member-persona reads in steps 3 and 4 are this item's own clause: score them by hand, never from the pin."
         ]
       },
       "steps": [
