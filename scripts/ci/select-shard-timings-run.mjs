@@ -90,10 +90,20 @@
 // partitioner already estimated them and this refresh did not change that.
 
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 import { EXIT_FINDINGS, EXIT_PREREQUISITE_NOT_MET } from '../import-prerequisite.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
@@ -225,6 +235,14 @@ export function runIsEligible({ jobs, artifacts }, shardCount = SHARD_COUNT) {
 //              cannot be a regression — but it is NAMED rather than passed over
 //              in silence, because "estimated" must never be something a reader
 //              has to infer from an absence.
+//
+// ⛔ Coverage is NECESSARY, NOT SUFFICIENT, for the refresh to stop adding runs
+// (#22014). A carried weight counts as covered, so the newest run alone always
+// passes this check, and a loop that stopped here was one run deep on every
+// refresh. The regeneration step also waits for the dataset's `provisional`
+// list to empty -- every package executed by the generator's
+// MINIMUM_EXECUTED_RUNS -- and the 'accumulation depth' battery below drives
+// that step to prove it.
 export function coverageReport({ committed, refreshed, workspace, exclude = [] }) {
   const excluded = new Set(exclude);
   const inWorkspace = new Set(workspace);
@@ -452,6 +470,10 @@ export async function runCandidates({ repo, token, limit, event, workflow = 'ci.
 // this self-test.
 export const REFRESH_WORKFLOW = '.github/workflows/shard-timings-refresh.yml';
 
+// The regeneration step whose accumulation loop the depth battery drives
+// (#22014). Spelled once: the NOT MEASURED battery's YAML half names it too.
+export const GENERATE_STEP = 'Regenerate the dataset, accumulating runs until every package is measured enough times';
+
 // The `run:` script of one named step, de-indented, so the self-test can drive
 // the real branch instead of reading it. Text rather than a YAML parse: this
 // file is dependency-free by design, and one block scalar at a known indent is
@@ -499,8 +521,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // `run:` block, lifted out of the YAML and driven under `bash -e` against a
   // stub `node`. An exit code nothing reads is not a distinction.
   'shard-timings-refresh NOT MEASURED path': 18,
+  // #22014. The regeneration step's own loop, driven like the battery above:
+  // it must stop at the minimum depth rather than at the first covering run,
+  // count executed runs rather than runs, and keep a short refresh as
+  // PROVISIONAL rather than refusing it.
+  'shard-timings-refresh accumulation depth': 11,
 });
-const SELF_TEST_BATTERY_FLOOR = 4;
+const SELF_TEST_BATTERY_FLOOR = 5;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 // Returned by `selfTest()` only after its verdict is printed, so a `return` that
@@ -1169,7 +1196,7 @@ async function selfTest() {
   // carry the guard. Everything after `compare` is already gated on
   // `steps.compare.outputs.changed`, which is '' when `compare` is skipped.
   for (const stepName of [
-    'Regenerate the dataset, accumulating runs until the workspace is covered',
+    GENERATE_STEP,
     'Compare against the committed dataset',
   ]) {
     await check(() => {
@@ -1181,6 +1208,243 @@ async function selfTest() {
       }
     });
   }
+
+  // -------------------------------------------------------------------------
+  battery('shard-timings-refresh accumulation depth');
+  // -------------------------------------------------------------------------
+  // #22014. The loop in the regeneration step used to `break` at the first
+  // accumulation that COVERED the workspace, and coverage counts a carried
+  // weight as covered -- so the newest run always passed it, and every refresh
+  // was one run deep. What is pinned here is the LOOP, not a helper: the step's
+  // own `run:` block is lifted out of the YAML and driven under `bash -e`, with
+  // `curl` and `unzip` stubbed to serve fixture run summaries and the REAL
+  // generator and coverage check doing the rest. The tools are reached through
+  // symlinks from a scratch tree whose `scripts/test-shard-timings.json` is a
+  // two-package fixture, so nothing in the repository is read as the
+  // committed dataset or written.
+  //
+  // Four legs: depth reached (stops at three, not one), executed-not-replayed
+  // (a run that replayed a package does not count for it), PROVISIONAL when the
+  // runs run out (kept and named, not refused), and the coverage refusal left
+  // exactly as it was.
+  const generateScript = extractStepScript(REFRESH_YAML, GENERATE_STEP);
+  const SPEC = '@objectstack/spec';
+  const TYPES = '@objectstack/types';
+  const toolPath = (rel) => fileURLToPath(new URL(rel, import.meta.url));
+
+  // runs: newest first, each { id, tasks: [[package, seconds, cacheStatus]] }.
+  // Every task lands in shard 1's summary; shards 2-6 carry an empty task list,
+  // which is a valid summary that measures nothing.
+  const driveGenerate = (runs, committedPackages, workspace = Object.keys(committedPackages)) => {
+    const dir = mkdtempSync(join(tmpdir(), 'os-timings-generate-'));
+    try {
+      const runnerTemp = join(dir, 'runner-temp');
+      const bin = join(dir, 'bin');
+      const fixtures = join(dir, 'fixtures');
+      const tree = join(dir, 'tree');
+      for (const d of [runnerTemp, bin, fixtures, join(tree, 'scripts', 'ci')]) mkdirSync(d, { recursive: true });
+      symlinkSync(toolPath('../measure-test-shard-timings.mjs'), join(tree, 'scripts', 'measure-test-shard-timings.mjs'));
+      symlinkSync(toolPath('./select-shard-timings-run.mjs'), join(tree, 'scripts', 'ci', 'select-shard-timings-run.mjs'));
+      writeFileSync(join(tree, 'scripts', 'test-shard-timings.json'), JSON.stringify({ packages: committedPackages }));
+      writeFileSync(
+        join(runnerTemp, 'turbo-ls.json'),
+        JSON.stringify({ packages: { items: workspace.map((name) => ({ name })) } })
+      );
+      const candidatesList = runs.map((r) => ({
+        run_id: r.id,
+        head_sha: String(r.id).padStart(40, 'c'),
+        created_at: '2026-10-06T00:00:00Z',
+        artifact_ids: Object.fromEntries([1, 2, 3, 4, 5, 6].map((n) => [n, Number(`${r.id}${n}`)])),
+      }));
+      writeFileSync(join(runnerTemp, 'candidates.json'), JSON.stringify(candidatesList));
+      for (const r of runs) {
+        for (const n of [1, 2, 3, 4, 5, 6]) {
+          const tasks =
+            n !== 1
+              ? []
+              : r.tasks.map(([pkg, seconds, status = 'MISS']) => ({
+                  taskId: `${pkg}#test`,
+                  task: 'test',
+                  package: pkg,
+                  cache: { status },
+                  execution: { startTime: 0, endTime: status === 'MISS' ? seconds * 1000 : 90, exitCode: 0 },
+                }));
+          writeFileSync(join(fixtures, `${r.id}${n}.json`), JSON.stringify({ tasks }));
+        }
+      }
+      // curl: write the artifact id named in the URL into the `-o` file.
+      writeFileSync(
+        join(bin, 'curl'),
+        [
+          '#!/usr/bin/env bash',
+          "out=''; id=''",
+          'while [ $# -gt 0 ]; do',
+          '  case "$1" in',
+          '    -o) out="$2"; shift 2; continue ;;',
+          '    */actions/artifacts/*/zip) id="${1%/zip}"; id="${id##*/}" ;;',
+          '  esac',
+          '  shift',
+          'done',
+          '[ -n "$out" ] && [ -n "$id" ] || exit 22',
+          'printf %s "$id" > "$out"',
+        ].join('\n')
+      );
+      // unzip: the "zip" holds an artifact id; serve that artifact's fixture.
+      writeFileSync(
+        join(bin, 'unzip'),
+        [
+          '#!/usr/bin/env bash',
+          "zip=''; dest=''",
+          'while [ $# -gt 0 ]; do',
+          '  case "$1" in',
+          '    -d) dest="$2"; shift 2; continue ;;',
+          '    -*) ;;',
+          '    *) zip="$1" ;;',
+          '  esac',
+          '  shift',
+          'done',
+          'mkdir -p "$dest"',
+          `cp ${JSON.stringify(fixtures)}/"$(cat "$zip")".json "$dest/summary.json"`,
+        ].join('\n')
+      );
+      chmodSync(join(bin, 'curl'), 0o755);
+      chmodSync(join(bin, 'unzip'), 0o755);
+      const outputFile = join(dir, 'github-output');
+      writeFileSync(outputFile, '');
+      const run = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', generateScript], {
+        cwd: tree,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH}`,
+          RUNNER_TEMP: runnerTemp,
+          GITHUB_OUTPUT: outputFile,
+          GITHUB_TOKEN: 'stub-token',
+          GITHUB_REPOSITORY: 'o/r',
+        },
+      });
+      const refreshedPath = join(runnerTemp, 'refresh', 'refreshed.json');
+      const spreadPath = join(runnerTemp, 'refresh', 'spread.md');
+      const output = readFileSync(outputFile, 'utf8');
+      return {
+        status: run.status,
+        log: `${run.stdout ?? ''}${run.stderr ?? ''}`,
+        output,
+        runCount: /^run_count=(\d+)$/m.exec(output)?.[1] ?? null,
+        refreshed: existsSync(refreshedPath) ? JSON.parse(readFileSync(refreshedPath, 'utf8')) : null,
+        spread: existsSync(spreadPath) ? readFileSync(spreadPath, 'utf8') : null,
+      };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  const committedTwo = { [SPEC]: 1134.86, [TYPES]: 50 };
+  const both = (spec, types) => [
+    [SPEC, spec],
+    [TYPES, types],
+  ];
+
+  // LEG 1 -- DEPTH REACHED. Four eligible runs, each executing both packages.
+  // The first already covers the workspace, which is where the old loop
+  // stopped; the depth rule takes exactly three, and the weight is their median.
+  const deep = driveGenerate(
+    [
+      { id: 901, tasks: both(1600, 60) },
+      { id: 902, tasks: both(1500, 62) },
+      { id: 903, tasks: both(1700, 61) },
+      { id: 904, tasks: both(9999, 99) },
+    ],
+    committedTwo
+  );
+  await check(() => {
+    if (deep.status !== 0) throw new Error(`depth leg: the step failed (exit ${deep.status}):\n${deep.log}`);
+  });
+  await check(() => {
+    if (deep.runCount !== '3') {
+      throw new Error(`depth leg: expected the loop to stop at 3 runs, it fed ${deep.runCount} (1 is the coverage-only loop this replaced)`);
+    }
+  });
+  await check(() => {
+    if (deep.refreshed?.packages?.[SPEC] !== 1600 || deep.refreshed?.provenance?.runs?.join(',') !== '901,902,903') {
+      throw new Error(`depth leg: spec is not the median of the three newest runs (${JSON.stringify(deep.refreshed?.provenance?.runs)}, ${deep.refreshed?.packages?.[SPEC]})`);
+    }
+  });
+  await check(() => {
+    if (!Array.isArray(deep.refreshed?.provisional) || deep.refreshed.provisional.length !== 0) {
+      throw new Error(`depth leg: a dataset at full depth was marked provisional (${JSON.stringify(deep.refreshed?.provisional)})`);
+    }
+  });
+  await check(() => {
+    if (!deep.spread?.includes(`| \`${SPEC}\` | 3 | 1500.00 | 1600.00 | 1700.00 |`)) {
+      throw new Error(`depth leg: the spread table for the PR body is missing or wrong:\n${deep.spread}`);
+    }
+  });
+
+  // LEG 2 -- EXECUTED, NOT REPLAYED. Run 912 replayed spec, so three runs give
+  // spec only two samples and the loop has to take a fourth.
+  const replayed = driveGenerate(
+    [
+      { id: 911, tasks: both(1600, 60) },
+      { id: 912, tasks: [[SPEC, 0, 'HIT'], [TYPES, 62]] },
+      { id: 913, tasks: both(1500, 61) },
+      { id: 914, tasks: both(1700, 63) },
+      { id: 915, tasks: both(9999, 99) },
+    ],
+    committedTwo
+  );
+  await check(() => {
+    if (replayed.status !== 0 || replayed.runCount !== '4') {
+      throw new Error(`replay leg: expected 4 runs (spec replayed in one of the first three), got ${replayed.runCount} (exit ${replayed.status}):\n${replayed.log}`);
+    }
+  });
+  await check(() => {
+    if (replayed.refreshed?.provisional?.length !== 0 || replayed.refreshed?.packages?.[SPEC] !== 1600) {
+      throw new Error(`replay leg: spec is not the median of its three executions (${replayed.refreshed?.packages?.[SPEC]}, ${JSON.stringify(replayed.refreshed?.provisional)})`);
+    }
+  });
+
+  // LEG 3 -- PROVISIONAL, NOT REFUSED. Only two runs are retained. The step
+  // stays green, keeps the measurement, names both packages, and says so on
+  // the job with an annotation.
+  const shallow = driveGenerate(
+    [
+      { id: 921, tasks: both(1600, 60) },
+      { id: 922, tasks: both(1500, 62) },
+    ],
+    committedTwo
+  );
+  await check(() => {
+    if (shallow.status !== 0 || shallow.runCount !== '2') {
+      throw new Error(`provisional leg: two runs were refused or not fed (exit ${shallow.status}, runs ${shallow.runCount}):\n${shallow.log}`);
+    }
+  });
+  await check(() => {
+    if (shallow.refreshed?.provisional?.join(',') !== `${SPEC},${TYPES}` || shallow.refreshed?.packages?.[SPEC] !== 1550) {
+      throw new Error(`provisional leg: the shallow dataset was not kept and named (${JSON.stringify(shallow.refreshed?.provisional)}, ${shallow.refreshed?.packages?.[SPEC]})`);
+    }
+  });
+  await check(() => {
+    if (!shallow.log.includes('::warning::Shard timings PROVISIONAL')) {
+      throw new Error('provisional leg: no annotation, so a provisional refresh reads as an ordinary green job');
+    }
+  });
+
+  // LEG 4 -- CONTROL: the coverage refusal is untouched. A package that HAD a
+  // weight and that no run measured or replayed still refuses the refresh, so
+  // the depth rule cannot have turned every shortfall into "provisional".
+  const lost = driveGenerate(
+    [
+      { id: 931, tasks: both(1600, 60) },
+      { id: 932, tasks: both(1500, 62) },
+      { id: 933, tasks: both(1700, 61) },
+    ],
+    { ...committedTwo, '@objectstack/core': 300 }
+  );
+  await check(() => {
+    if (lost.status !== 1 || !lost.log.includes('::error::') || lost.runCount !== null) {
+      throw new Error(`coverage control: a lost package did not refuse the refresh (exit ${lost.status}, runs ${lost.runCount}):\n${lost.log}`);
+    }
+  });
 
   // -- The floor: every declared battery ran, and ran its cases. Evaluated
   //    before the verdict, so the success line can only be printed by a run in

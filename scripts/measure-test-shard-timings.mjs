@@ -746,11 +746,13 @@ export function renderSpread({ bySample, dataset }) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'measure-test-shard-timings self-test': 56,
   'env-carried slices (#19278)': 11,
+  // #22014: the per-package minimum of executed runs, and the spread table.
+  'minimum executed runs per package': 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 2;
+const SELF_TEST_BATTERY_FLOOR = 3;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1512,6 +1514,162 @@ function selfTest() {
     if (ds.packages.cli !== 1200) {
       throw new Error(`env slice: three env-carried slices summed to ${ds.packages.cli}, expected 1200`);
     }
+  });
+
+  // -- MINIMUM EXECUTED RUNS PER PACKAGE (#22014) ----------------------------
+  //
+  // The pin triage asked for: a refresh carrying fewer than the minimum runs is
+  // REPORTED AS PROVISIONAL, never refused and never passed off as a baseline.
+  // Every case below fails one of three ways if the rule is dropped -- a short
+  // weight not named, a full one named, or the measurement thrown away -- and
+  // the counting cases separate RUNS from EXECUTED RUNS, which is the whole
+  // defect: the dataset on `main` when this landed carried one run.
+  battery('minimum executed runs per package');
+  const runOf = (run, tasks) => ({ ...samplesFromSummary(summary(tasks), `${run}`), run });
+  const depthSet = (runs, extra = {}) =>
+    buildDataset({
+      perSummary: runs,
+      fileCounts: new Map([['a', 5], ['b', 5], ['cli', 300]]),
+      provenance: {},
+      ...extra,
+    });
+
+  check(() => {
+    // The ruled floor is "at least three". Lowering it is a ruling, not a tune.
+    if (!(MINIMUM_EXECUTED_RUNS >= 3)) throw new Error(`depth: MINIMUM_EXECUTED_RUNS is ${MINIMUM_EXECUTED_RUNS}, below the ruled three`);
+  });
+  check(() => {
+    // THE DEFECT'S OWN SHAPE: one run, everything executed. Kept, and named.
+    const one = depthSet([runOf('37262126122', [testTask('a', 0, 10_000), testTask('b', 0, 20_000)])]);
+    if (one.packages.a !== 10 || one.packages.b !== 20) throw new Error('depth: a one-run refresh lost its measurement');
+    if (one.provisional.join(',') !== 'a,b') {
+      throw new Error(`depth: a one-run refresh was not reported provisional (${JSON.stringify(one.provisional)})`);
+    }
+  });
+  check(() => {
+    // Two runs: still short, and the weight is still the median of what exists.
+    const two = depthSet([runOf('r1', [testTask('a', 0, 10_000)]), runOf('r2', [testTask('a', 0, 30_000)])]);
+    if (two.packages.a !== 20 || two.provisional.join(',') !== 'a') {
+      throw new Error(`depth: two runs read ${two.packages.a}, provisional ${JSON.stringify(two.provisional)}`);
+    }
+  });
+  check(() => {
+    // Three runs: the control leg. The list is EMPTY and present.
+    const three = depthSet([
+      runOf('r1', [testTask('a', 0, 10_000)]),
+      runOf('r2', [testTask('a', 0, 30_000)]),
+      runOf('r3', [testTask('a', 0, 20_000)]),
+    ]);
+    if (three.packages.a !== 20) throw new Error(`depth: three runs did not median to 20 (${three.packages.a})`);
+    if (!Array.isArray(three.provisional) || three.provisional.length !== 0) {
+      throw new Error(`depth: a package measured by three runs was reported provisional (${JSON.stringify(three.provisional)})`);
+    }
+  });
+  check(() => {
+    // RUNS ARE NOT EXECUTED RUNS. Three runs accumulated, `b` replayed in two
+    // of them: `a` has met the minimum, `b` has one reading and is named.
+    const mixed = depthSet([
+      runOf('r1', [testTask('a', 0, 10_000), testTask('b', 0, 50_000)]),
+      runOf('r2', [testTask('a', 0, 11_000), testTask('b', 0, 90, 'HIT')]),
+      runOf('r3', [testTask('a', 0, 12_000), testTask('b', 0, 90, 'HIT')]),
+    ]);
+    if (mixed.provisional.join(',') !== 'b') {
+      throw new Error(`depth: three runs were counted as three samples of a package two of them replayed (${JSON.stringify(mixed.provisional)})`);
+    }
+  });
+  check(() => {
+    // A failed suite is not an execution that counts either.
+    const red = depthSet([
+      runOf('r1', [testTask('a', 0, 10_000)]),
+      runOf('r2', [testTask('a', 0, 10_000)]),
+      runOf('r3', [testTask('a', 0, 500, 'MISS', 1)]),
+    ]);
+    if (red.provisional.join(',') !== 'a') throw new Error(`depth: a failed run counted toward the minimum (${JSON.stringify(red.provisional)})`);
+  });
+  check(() => {
+    // A sliced package counts a run only when THAT run assembled every slice:
+    // two complete runs plus one with a slice missing is two, not three.
+    const sliceDepth = depthSet([
+      runOf('r1', [slicedTask('cli', 0, 300_000, 1, 2)]),
+      runOf('r1', [slicedTask('cli', 0, 300_000, 2, 2)]),
+      runOf('r2', [slicedTask('cli', 0, 310_000, 1, 2)]),
+      runOf('r2', [slicedTask('cli', 0, 310_000, 2, 2)]),
+      runOf('r3', [slicedTask('cli', 0, 320_000, 1, 2), testTask('a', 0, 10_000)]),
+    ]);
+    if (sliceDepth.packages.cli !== 610 || sliceDepth.provisional[0] !== 'a' || !sliceDepth.provisional.includes('cli')) {
+      throw new Error(
+        `depth: an incomplete slice set counted toward the minimum (cli ${sliceDepth.packages.cli}, ` +
+          `provisional ${JSON.stringify(sliceDepth.provisional)})`
+      );
+    }
+  });
+  check(() => {
+    // The bar travels with the list, so a reader needs no knowledge of which
+    // version of this script wrote the file.
+    const withBar = depthSet([runOf('r1', [testTask('a', 0, 10_000)])], { provenance: { measuredAt: 'x' } });
+    if (withBar.provenance.minimumRuns !== MINIMUM_EXECUTED_RUNS || withBar.provenance.measuredAt !== 'x') {
+      throw new Error(`depth: provenance does not record the bar beside the caller's fields (${JSON.stringify(withBar.provenance)})`);
+    }
+  });
+  check(() => {
+    // The rule reads the bar it is given -- a minimum of one makes the same
+    // one-run set non-provisional, so the default is what is being pinned above.
+    const lax = depthSet([runOf('r1', [testTask('a', 0, 10_000)])], { minimumRuns: 1 });
+    if (lax.provisional.length !== 0) throw new Error(`depth: the minimum is not the one passed in (${JSON.stringify(lax.provisional)})`);
+  });
+  // The carry: a weight moved forward unchanged keeps the depth it was measured at.
+  const carryCase = (carryProvisional) =>
+    depthSet(
+      [
+        runOf('r1', [testTask('a', 0, 10_000), testTask('cached', 0, 90, 'HIT')]),
+        runOf('r2', [testTask('a', 0, 10_000), testTask('cached', 0, 90, 'HIT')]),
+        runOf('r3', [testTask('a', 0, 10_000), testTask('cached', 0, 90, 'HIT')]),
+      ],
+      { carryFrom: { a: 9, cached: 500 }, carryProvisional }
+    );
+  check(() => {
+    // A prior dataset with NO `provisional` key never recorded a depth (the one
+    // this landed on rested on a single run), so its carried weight is not shown
+    // to meet the minimum.
+    const legacy = carryCase(null);
+    if (legacy.packages.cached !== 500 || legacy.provisional.join(',') !== 'cached') {
+      throw new Error(`depth: a weight carried from a depth-less dataset was not provisional (${JSON.stringify(legacy.provisional)})`);
+    }
+  });
+  check(() => {
+    const met = carryCase([]);
+    if (met.provisional.length !== 0) {
+      throw new Error(`depth: a weight carried from a dataset that met the minimum was marked provisional (${JSON.stringify(met.provisional)})`);
+    }
+  });
+  check(() => {
+    const stillShort = carryCase(['cached']);
+    if (stillShort.provisional.join(',') !== 'cached') {
+      throw new Error(`depth: a provisional weight lost the mark by being carried (${JSON.stringify(stillShort.provisional)})`);
+    }
+  });
+  check(() => {
+    if (!threw(() => carryCase('cached'))) throw new Error('depth: a malformed prior `provisional` was guessed at instead of refused');
+  });
+  check(() => {
+    // The spread table: a measured row carries its run count and min/median/max,
+    // a carried row says so instead of inventing numbers, the provisional mark
+    // is in the row, and the noisiest package is the first row.
+    const runs = [
+      runOf('r1', [testTask('a', 0, 10_000), testTask('b', 0, 20_000), testTask('cached', 0, 90, 'HIT')]),
+      runOf('r2', [testTask('a', 0, 30_000), testTask('cached', 0, 90, 'HIT')]),
+      runOf('r3', [testTask('a', 0, 20_000), testTask('cached', 0, 90, 'HIT')]),
+    ];
+    const ds = depthSet(runs, { carryFrom: { cached: 500 }, carryProvisional: [] });
+    const table = renderSpread({ bySample: collectSamples(runs).bySample, dataset: ds });
+    const body = table.split('\n').filter((l) => l.startsWith('| `'));
+    if (body.length !== 3) throw new Error(`spread: expected one row per package, got ${body.length}:\n${table}`);
+    if (body[0] !== '| `a` | 3 | 10.00 | 20.00 | 30.00 | 3.00× |  |') throw new Error(`spread: the widest row is wrong: ${body[0]}`);
+    if (!body.some((l) => l.startsWith('| `b` | 1 | 20.00 | 20.00 | 20.00 | 1.00× | provisional |'))) {
+      throw new Error(`spread: the provisional row is wrong:\n${table}`);
+    }
+    if (!body.some((l) => l.startsWith('| `cached` | 0 | carried |'))) throw new Error(`spread: the carried row is wrong:\n${table}`);
+    if (!table.includes(`minimum ${MINIMUM_EXECUTED_RUNS}`)) throw new Error('spread: the table does not state the minimum');
   });
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) ----
