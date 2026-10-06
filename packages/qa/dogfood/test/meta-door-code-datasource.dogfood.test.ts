@@ -231,7 +231,10 @@ describe('[#21899] the metadata door answers a code-defined datasource as read-o
     // fix carries.
     await restart();
     expect(await storedRows(DATASOURCE)).toHaveLength(1);
-    expect((await servedBody()).label).toBe(SHADOW_LABEL);
+    // [#21922] The row is at rest, and the read declines it: a stored row under
+    // a code-defined name is residue, never a layer, so the door serves the
+    // code definition before any repair.
+    expect((await servedBody()).label).toBe(CODE_LABEL);
 
     const put = refusal(await call('PUT', `/meta/datasource/${DATASOURCE}`, { ...(await servedBody()), label: 'Meta Renamed 21899' }));
     expect({ status: put.status, code: put.code }).toEqual({ status: 403, code: 'NOT_OVERRIDABLE' });
