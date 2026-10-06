@@ -2717,6 +2717,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/auth-manager.org-slug-guard-system-context.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/auth-manager.test.ts",
       "verb": "delete",
       "pinned": 1

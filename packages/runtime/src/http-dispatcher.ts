@@ -7,6 +7,9 @@ import {
     // every seam between `resolveAuthzContext` and a door), and the tenancy
     // read is classified by the REGISTRY's own "never registered" brand.
     rethrowAuthzStoreUnavailable, isServiceNotRegisteredError,
+    // [#21941] The environment-membership gate raises the same loud outage
+    // when its own read cannot answer.
+    AuthzStoreUnavailableError,
 } from '@objectstack/core';
 import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode, declaredUserMessage } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
@@ -248,6 +251,9 @@ function isPathWithinPrefix(path: string, prefix: string): boolean {
     const next = path.charCodeAt(prefix.length);
     return Number.isNaN(next) || next === 47 /* '/' */ || next === 63 /* '?' */;
 }
+
+/** The object the environment-membership gate reads (control plane, cloud-provided). */
+const ENVIRONMENT_MEMBER_OBJECT = 'sys_environment_member';
 
 /**
  * The protocol-standard discovery route, and the canonical spelling of the API
@@ -1456,45 +1462,79 @@ export class HttpDispatcher {
         }
 
         // Query sys_environment_member (control plane).
-        try {
-            const qlService = await this.getObjectQLService(this.requestKernel(context));
-            const ql = qlService ?? await this.resolveService(this.requestKernel(context), 'objectql');
-            if (!ql) return null; // No QL — cannot enforce; fail open.
+        //
+        // [#21941] The gate FAILS CLOSED when its read cannot answer. It used to
+        // catch every fault here and return `null` — the caller admitted — so a
+        // signed-in non-member passed whenever the read faulted. A read that
+        // could not answer is not a verdict about the caller either way: it is
+        // refused as the outage it is, with the loud, retriable answer the
+        // identity step and the domain gates already give an authorization
+        // input they could not read — `AuthzStoreUnavailableError`, 503
+        // `SERVICE_UNAVAILABLE`, thrown out of `dispatch()` to the transport's
+        // envelope — never as allowed, and never as the membership 403.
+        //
+        // Three answers, told apart before and around the read:
+        //
+        //  - NO ENGINE ⇒ refused. The read cannot be made. Only a host
+        //    `KernelResolver` writes `context.environmentId`, and this point is
+        //    reached only for a caller the `auth` service signed in; this
+        //    repository's `auth` provider (`plugin-auth`) declares ObjectQL a
+        //    hard dependency, so no composition built from it reaches this line
+        //    without an engine. An absent one here is a fault, not a
+        //    composition.
+        //  - OBJECT NOT REGISTERED ⇒ the gate does not apply. A composition
+        //    whose engine registers no `sys_environment_member` (it is a
+        //    cloud-provided object, `CLOUD_PROVIDED_OBJECT_NAMES`) holds no
+        //    environment membership to judge. The question is the registry's own
+        //    `getObject` — the one the engine's verbs ask before refusing an
+        //    unregistered name — never a caught throw. An engine whose registry
+        //    cannot be asked reads as before: it is asked, and a fault refuses.
+        //  - THE READ THROWS ⇒ refused. Anything the registered read raises.
+        const qlService = await this.getObjectQLService(this.requestKernel(context));
+        const ql = qlService ?? await this.resolveService(this.requestKernel(context), 'objectql');
+        if (!ql) {
+            throw new AuthzStoreUnavailableError(
+                ENVIRONMENT_MEMBER_OBJECT,
+                new Error('no ObjectQL engine resolved on this request\'s kernel'),
+            );
+        }
+        if (typeof ql.registry?.getObject === 'function' && !ql.registry.getObject(ENVIRONMENT_MEMBER_OBJECT)) {
+            return null;
+        }
 
+        let rows: unknown;
+        try {
             // The membership read carries the explicit system opt-in. This
             // gate is the one asking the question — the caller's user id is
             // the `where`, not the reader — so the read runs as the platform,
             // never as a context with no principal and no opt-in (the
             // security middleware's principal-less hand-off, ADR-0096).
-            let rows = await ql.find('sys_environment_member', {
+            rows = await ql.find(ENVIRONMENT_MEMBER_OBJECT, {
                 where: { environment_id: environmentId, user_id: userId },
                 limit: 1,
                 context: { isSystem: true },
             } as any);
-            if (rows && (rows as any).value) rows = (rows as any).value;
-            const isMember = Array.isArray(rows) && rows.length > 0;
-
-            if (isMember) {
-                this.membershipCache.set(cacheKey, now);
-                return null;
-            }
-
-            // [#3842] `PROJECT_MEMBERSHIP_REQUIRED` was parked in `details.type`
-            // — the fourth site, and the only one to use that spelling — because
-            // `error.code` held the status. It travels as `details.code` now, the
-            // one carrier `buildApiError` promotes into `error.code`; the two
-            // genuine context fields stay in `details`.
-            return this.error(
-                `Forbidden: user ${userId} is not a member of project ${environmentId}`,
-                403,
-                { code: 'PROJECT_MEMBERSHIP_REQUIRED', environmentId, userId },
-            );
         } catch (err) {
-            // Control-plane lookup failure — log and fail open rather than
-            // break the request. Tightening this is deferred to Phase 4.
-            console.debug('[HttpDispatcher] Membership check failed:', err);
+            throw new AuthzStoreUnavailableError(ENVIRONMENT_MEMBER_OBJECT, err);
+        }
+        if (rows && (rows as any).value) rows = (rows as any).value;
+        const isMember = Array.isArray(rows) && rows.length > 0;
+
+        if (isMember) {
+            this.membershipCache.set(cacheKey, now);
             return null;
         }
+
+        // [#3842] `PROJECT_MEMBERSHIP_REQUIRED` was parked in `details.type`
+        // — the fourth site, and the only one to use that spelling — because
+        // `error.code` held the status. It travels as `details.code` now, the
+        // one carrier `buildApiError` promotes into `error.code`; the two
+        // genuine context fields stay in `details`.
+        return this.error(
+            `Forbidden: user ${userId} is not a member of project ${environmentId}`,
+            403,
+            { code: 'PROJECT_MEMBERSHIP_REQUIRED', environmentId, userId },
+        );
     }
 
     /**

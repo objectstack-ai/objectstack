@@ -18,13 +18,19 @@
  *  2. the guard KEEPS refusing on an engine that refuses a principal-less,
  *     non-system context — its reads are not one, so the catch below never
  *     turns the refusal into a skipped guard;
- *  3. the catches around the two reads are unchanged: a read that throws ends
- *     the hook without refusing, as it did before. That is pre-existing
- *     behaviour, pinned as it stands, not endorsed here.
+ *  3. the guard FAILS CLOSED when a read it makes cannot answer (#21941): a
+ *     read that throws is refused with better-auth's `SERVICE_UNAVAILABLE`
+ *     (503) — never the guard's own `FORBIDDEN` (403), and never "ends the hook
+ *     without refusing" — while an engine that does not register
+ *     `sys_environment` (the open-source composition) declares the guard
+ *     inapplicable without reading anything. The real ObjectQL registry
+ *     answers that question in the last section.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { ObjectQL, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
+import { authIdentityObjects } from './manifest';
 
 vi.mock('better-auth', () => ({
   betterAuth: vi.fn(() => ({ handler: vi.fn(), api: {} })),
@@ -172,8 +178,51 @@ describe('organization slug guard — on an engine that refuses a principal-less
   });
 });
 
-describe('organization slug guard — the catches around the reads are unchanged (pre-existing)', () => {
-  it('an organization read that throws ends the hook without refusing, as before', async () => {
+/**
+ * A read that could not answer, asserted on its envelope: better-auth's
+ * `SERVICE_UNAVAILABLE` / 503, naming the object whose read failed — and
+ * explicitly NOT the guard's `FORBIDDEN` / 403, which is a verdict about the
+ * slug change that the guard never reached.
+ */
+async function expectReadFaultRefusal(attempt: Promise<unknown>, object: string) {
+  const err = (await attempt.then(
+    () => undefined,
+    (e: unknown) => e,
+  )) as { status?: unknown; statusCode?: unknown; body?: { message?: unknown }; cause?: unknown } | undefined;
+  expect(err, 'the slug change was let through on a read that could not answer').toBeTruthy();
+  expect(err?.statusCode).toBe(503);
+  expect(err?.status).toBe('SERVICE_UNAVAILABLE');
+  expect(String(err?.body?.message)).toContain(`\`${object}\``);
+  return err;
+}
+
+/** The registration answer an ObjectQL engine gives through `getSchema`. */
+const schemaFor = (...registered: string[]) => vi.fn((object: string) => (registered.includes(object) ? { name: object } : undefined));
+
+/**
+ * An engine double that answers the registration question (`getSchema`) beside
+ * its two reads. Its `findOne` keeps ObjectQL's own predicate contract
+ * (`assertEngineFindOnePredicate`), so it is no looser than the engine it
+ * stands in for.
+ */
+function registeringEngine(
+  registered: string[],
+  answers: { findOne: () => Promise<unknown>; find: () => Promise<unknown> },
+) {
+  return {
+    getSchema: schemaFor(...registered),
+    findOne: vi.fn(async (object: string, q?: Query) => {
+      assertEngineFindOnePredicate(object, q as never);
+      return answers.findOne();
+    }),
+    find: vi.fn(answers.find),
+  };
+}
+
+describe('organization slug guard — fails closed when a read cannot answer (#21941)', () => {
+  it('an organization read that throws is refused (503), and the environment read is never made', async () => {
+    // SUPERSEDED PIN, quoted — what the guard answered before:
+    //     await expect(update('acme-new')).resolves.toBeUndefined();   // ends the hook without refusing
     const engine = {
       findOne: vi.fn(async () => {
         throw new Error('store unavailable');
@@ -181,11 +230,25 @@ describe('organization slug guard — the catches around the reads are unchanged
       find: vi.fn(async () => ENVS),
     };
     const update = await slugGuard(engine);
-    await expect(update('acme-new')).resolves.toBeUndefined();
+    const err = await expectReadFaultRefusal(update('acme-new'), 'sys_organization');
+    expect((err?.cause as Error | undefined)?.message).toBe('store unavailable');
     expect(engine.find).not.toHaveBeenCalled();
   });
 
-  it('an environment read that throws ends the hook without refusing, as before', async () => {
+  it('an environment read that throws is refused (503) — on an engine that registers the object', async () => {
+    // SUPERSEDED PIN, quoted — `find` threw and the hook resolved `undefined`.
+    const engine = registeringEngine(['sys_organization', 'sys_environment'], {
+      findOne: async () => ORG,
+      find: async () => {
+        throw new Error('connection reset');
+      },
+    });
+    const update = await slugGuard(engine);
+    await expectReadFaultRefusal(update('acme-new'), 'sys_environment');
+    expect(engine.find).toHaveBeenCalledTimes(1);
+  });
+
+  it('an environment read that throws on an engine whose registry cannot be asked is refused too — it is asked, and the fault refuses', async () => {
     const engine = {
       findOne: vi.fn(async () => ORG),
       find: vi.fn(async () => {
@@ -193,6 +256,71 @@ describe('organization slug guard — the catches around the reads are unchanged
       }),
     };
     const update = await slugGuard(engine);
+    await expectReadFaultRefusal(update('acme-new'), 'sys_environment');
+  });
+
+  it('a healthy read on a registered object still refuses the change while an active environment references the org, and allows it otherwise', async () => {
+    const refusing = registeringEngine(['sys_organization', 'sys_environment'], {
+      findOne: async () => ORG,
+      find: async () => ENVS,
+    });
+    await expectSlugRefusal((await slugGuard(refusing))('acme-new'));
+    const allowing = registeringEngine(['sys_organization', 'sys_environment'], {
+      findOne: async () => ORG,
+      find: async () => [{ id: 'e2', status: 'archived' }],
+    });
+    await expect((await slugGuard(allowing))('acme-new')).resolves.toBeUndefined();
+  });
+
+  it('an engine that does not register `sys_environment` declares the guard inapplicable — nothing is read', async () => {
+    const engine = registeringEngine(['sys_organization'], {
+      findOne: async () => {
+        throw new Error('must not be read');
+      },
+      find: async () => {
+        throw new Error('must not be read');
+      },
+    });
+    const update = await slugGuard(engine);
     await expect(update('acme-new')).resolves.toBeUndefined();
+    expect(engine.getSchema).toHaveBeenCalledWith('sys_environment');
+    expect(engine.findOne).not.toHaveBeenCalled();
+    expect(engine.find).not.toHaveBeenCalled();
+  });
+});
+
+describe('organization slug guard — the real ObjectQL registry answers the composition question', () => {
+  /** A real engine holding exactly the identity objects this package registers — no `sys_environment`. */
+  function engineWithAuthObjects(): ObjectQL {
+    const engine = new ObjectQL({ logger: { debug() {}, info() {}, warn() {}, error() {}, child() { return this; } } } as never);
+    for (const object of authIdentityObjects) {
+      engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
+    }
+    return engine;
+  }
+
+  it('this package registers no `sys_environment`, so on its own object set the guard does not apply and reads nothing', async () => {
+    const engine = engineWithAuthObjects();
+    expect(engine.getSchema('sys_organization'), 'POSITIVE CONTROL: the registry does answer for an object this package registers').toBeTruthy();
+    expect(engine.getSchema('sys_environment')).toBeUndefined();
+    const findOne = vi.spyOn(engine, 'findOne');
+    const find = vi.spyOn(engine, 'find');
+    const update = await slugGuard(engine);
+    await expect(update('acme-new')).resolves.toBeUndefined();
+    expect(findOne).not.toHaveBeenCalled();
+    expect(find).not.toHaveBeenCalled();
+  });
+
+  it('once `sys_environment` is registered the guard reads, and a real engine fault on that read refuses (503)', async () => {
+    // No driver is registered, so the engine itself cannot serve the read: a
+    // genuine fault of the real engine, not a double's.
+    const engine = engineWithAuthObjects();
+    engine.registry.registerObject(
+      { name: 'sys_environment', label: 'Environment', fields: { organization_id: { name: 'organization_id', type: 'text' } } } as never,
+      '@objectstack/test-cloud-objects',
+    );
+    expect(engine.getSchema('sys_environment')).toBeTruthy();
+    const update = await slugGuard(engine);
+    await expectReadFaultRefusal(update('acme-new'), 'sys_organization');
   });
 });
