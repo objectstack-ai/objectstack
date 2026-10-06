@@ -35,8 +35,9 @@ const ENTRY_ID = 'flow-builtin-node-config-values-refused';
 
 type Config = Record<string, unknown>;
 
-/** A one-node region body every container probe can hold. */
-const REGION = { nodes: [{ id: 'inner', type: 'assignment', label: 'Inner', config: { assignments: { x: 1 } } }], edges: [] };
+/** A one-node region body a container probe can hold — node ids are one space across the flow. */
+const region = (id: string) => ({ nodes: [{ id, type: 'assignment', label: 'Inner', config: { assignments: { x: 1 } } }], edges: [] });
+const REGION = region('inner');
 
 /** A config each builtin's contract accepts — the accept controls, and the base every probe edits. */
 const VALID: Readonly<Record<string, Config>> = {
@@ -55,7 +56,7 @@ const VALID: Readonly<Record<string, Config>> = {
   subflow: { flowName: 'child_flow', input: { id: '{record.id}' }, outputVariable: 'out' },
   map: { collection: '{rows}', flowName: 'per_item', iteratorVariable: 'item' },
   loop: { collection: '{rows}', iteratorVariable: 'row', maxIterations: 50, body: REGION },
-  parallel: { branches: [{ name: 'a', ...REGION }, { name: 'b', ...REGION }] },
+  parallel: { branches: [{ name: 'a', ...region('inner_a') }, { name: 'b', ...region('inner_b') }] },
   try_catch: { try: REGION, errorVariable: 'err', retry: { maxRetries: 2, backoffMs: 100 } },
 };
 
