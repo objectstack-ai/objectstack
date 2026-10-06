@@ -40,6 +40,7 @@ model: opus
    - 回退他人的操作(尤其 ready 翻转)永不轮到你;把意外写进 `summary`。
 3. **范围 = 这张 issue,别无其它。** 顺路发现 ⛔ 不在本 PR 修,只有三类立卡且不打标签:
    - (a) 可复现缺陷(复现或失败探针具名);(b) 违背已声明契约(引契约原文,带 `Seam:` 行);
+   - (a) 含用户可见的体验缺陷(截断、遮挡、白占首屏、误导文案),须复现且落点具名。
    - `Seam: spec:<键或符号> → runtime:<调用点> | renderer:<组件>`,无消费者写 `consumer: none`。
    - (c) 让 AI 写出运行时拒收或静默丢弃的元数据的陷阱;三类内 ⛔ 不因看着小揣着不报。
    - 三类同欠 `reach:`:公开入口(HTTP/界面/`os validate`/保存)一次实测错误,或具名真实生产者。
@@ -200,7 +201,6 @@ model: opus
 - `git worktree` 只隔离工作树与 HEAD;`.git/` 下其余一切全 worktree 共享。
 - 共享的含 refs(含 `refs/remotes/*`)、stash 栈、config、hooks;配方不点名共享态才 worktree-safe。
 - 失效同签名:操作看着本地、报成功,唯一症状是 `git status` 里出现他人文件。
-- ⛔ 永不 `git stash`;替代拼写(wip commit / patch)、机制与 hook 住每会话注入的 CLAUDE.md。
 - `git reset --soft origin/main` 会把你分支点之后他人已合并的文件整批 stage 成你的。
 - 起点在哪的 reset/diff/log/rebase 一律锚基本规则 1 记录的 `"$BASE"`。
 - `log -S/--follow/blame` 判日期或先后前,先 `git rev-parse --is-shallow-repository`,true 就加深申报。
