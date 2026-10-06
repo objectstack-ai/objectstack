@@ -1669,12 +1669,10 @@ describe('each package\'s copy of a view container expands into its own package\
             const envWide: any = await protocol.getMetaItems({ type: 'view' });
             return (envWide.items as any[]).filter((v) => v?.name === name && v._packageId === pkg).map(titleOf);
         }
-        /** Every name under which the env-wide list serves the copy's body for the copying package. */
-        async function namesOfTheCopy(protocol: any): Promise<string[]> {
+        /** Every item through which the env-wide list serves the copy's body for the copying package. */
+        async function itemsOfTheCopy(protocol: any): Promise<any[]> {
             const envWide: any = await protocol.getMetaItems({ type: 'view' });
-            return (envWide.items as any[])
-                .filter((v) => v?._packageId === COPYING && titleOf(v) === COPY_TITLE)
-                .map((v) => String(v.name));
+            return (envWide.items as any[]).filter((v) => v?._packageId === COPYING && titleOf(v) === COPY_TITLE);
         }
         async function byNameTitle(protocol: any, name: string, pkg: string): Promise<unknown> {
             return titleOf((await protocol.getMetaItem({ type: 'view', name, packageId: pkg })).item);
@@ -1696,7 +1694,13 @@ describe('each package\'s copy of a view container expands into its own package\
                     await saveCopyOf(protocol, p, false);
                     const name = servedName(p);
 
-                    expect(await namesOfTheCopy(protocol), 'the names the copy is served under').toEqual([name]);
+                    const copyItems = await itemsOfTheCopy(protocol);
+                    expect(copyItems.map((v) => v.name), 'the names the copy is served under').toEqual([name]);
+                    // The seat's answer on the own-name arm stands for every container on
+                    // another package's object, a copy included: it declares no default.
+                    const declaresDefault = expandViewContainer('task', p.m.body(COPY_TITLE, false, SLUG))[0]?.isDefault === true;
+                    expect(copyItems.map((v) => v.isDefault === true), 'the default it declares')
+                        .toEqual([p.owner !== OTHER && declaresDefault]);
                     expect(await slotTitles(protocol, name, COPYING), 'the copying package\'s slot').toEqual([COPY_TITLE]);
                     expect(await byNameTitle(protocol, name, COPYING), 'the by-name read naming the copying package').toBe(COPY_TITLE);
 
