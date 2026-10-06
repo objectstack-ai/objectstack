@@ -55,7 +55,7 @@ describe('ERROR_CODE_LEDGER', () => {
     expect([...REGISTERED_ERROR_CODES]).toEqual(union);
   });
 
-  it('no registered code is an unwaived semantic synonym of a standard member (#8211)', () => {
+  it('no registered code is an unwaived semantic synonym of a standard member', () => {
     // The ledger header's "use the standard catalog instead of registering a
     // synonym" was prose only, and four synonyms accumulated under it without
     // anyone deciding to allow them. This is its mechanical form (option C,
@@ -65,7 +65,7 @@ describe('ERROR_CODE_LEDGER', () => {
   });
 });
 
-describe('standard-synonym detection (#8211)', () => {
+describe('standard-synonym detection (ruled: refused unless waived)', () => {
   it('flags the grandfathered synonyms, each against the member it shadows', () => {
     expect(standardSynonymOf('CONFLICT')).toBe('RESOURCE_CONFLICT');
     expect(standardSynonymOf('NOT_FOUND')).toBe('RESOURCE_NOT_FOUND');
@@ -185,7 +185,7 @@ describe('ErrorCode (standard ∪ registered)', () => {
     expect(ErrorCode.parse('ROUTE_NOT_FOUND')).toBe('ROUTE_NOT_FOUND');
   });
 
-  it('accepts the #8087 dispatcher-gate batch, each under its measured owning package (#8846)', () => {
+  it('accepts the dispatcher-gate batch, each under its measured owning package', () => {
     // The seven codes the dispatcher-vocabulary gate's first derivation
     // reported as "merely unregistered" — live producer, real wire, no ledger
     // row (option B of the 2026-08-12 ruling, delivered as a gate;
@@ -217,7 +217,7 @@ describe('ErrorCode (standard ∪ registered)', () => {
     expect(() => ErrorCode.parse('DUPLICATE')).toThrow();
   });
 
-  it('accepts the #10025 definition-level input-schema refusal code (#11504)', () => {
+  it('accepts the definition-level input-schema refusal code (ruled non-retryable: a never-dispatched exit)', () => {
     // The ruled contract half of #10025's Option B (maintainer, 2026-08-20):
     // the definition-level input-schema refusal is a never-dispatched exit
     // with its own code. Registered AHEAD of its producer, deliberately — the
@@ -231,7 +231,7 @@ describe('ErrorCode (standard ∪ registered)', () => {
     expect(standardSynonymOf('FLOW_INPUT_SCHEMA_INVALID')).toBeUndefined();
   });
 
-  it('accepts the #16449 batch — every code that ships in dist, door or no door (#16404)', () => {
+  it('accepts the nine-code batch — every code that ships in dist, door or no door (ruled: the ledger is the published face)', () => {
     // The #16404 ruling (director seat, decision batch #62, 2026-09-07, option
     // D): the published face is this ledger, so a code that ships in `dist` is
     // registered whether or not an HTTP door can answer with it. The nine
@@ -260,7 +260,7 @@ describe('ErrorCode (standard ∪ registered)', () => {
     expect(ERROR_CODE_LEDGER['@objectstack/objectql']).toContain('NAMESPACE_CONFLICT');
   });
 
-  it('lists the plugin-security class-field stamps under their stamping package (#19441)', () => {
+  it('lists the plugin-security class-field stamps under their stamping package', () => {
     // Provenance, not identity: each of these codes was already registered by
     // another package, and `@objectstack/plugin-security` stamps it too, as a
     // class field (`readonly code = '…'`) — the spelling the provenance gate
@@ -305,7 +305,7 @@ describe('ErrorCode (standard ∪ registered)', () => {
     expect(REGISTERED_ERROR_CODES).not.toContain('OVERLAY_PERSISTENCE_FAILED');
   });
 
-  it('accepts the #16649 batch — the fourteen remaining door:none codes, each under its stamping package (#16404)', () => {
+  it('accepts the fourteen remaining door:none codes, each under its stamping package (ruled: the ledger is the published face)', () => {
     // The rest of the #16404 class after #16449: every `boot-refusal` row
     // `dispatcher-error-vocabulary.ts` still carried, each measured in its
     // package's built `dist/index.js` and absent from the union before this

@@ -91,7 +91,7 @@ describe('GET /ai/agents — the shapes a producer must NOT drift back into', ()
     expect(servesTheDeclaredShape(body)).toBe(false);
   });
 
-  it('the pre-#4053 bare body — no flag for `unwrapResponse` to key on', () => {
+  it('the bare body from before the envelope relocation — no flag for `unwrapResponse` to key on', () => {
     const body = { agents: [ASK] };
     expect(servesTheDeclaredShape(body)).toBe(false);
     expect(envelopeViolations(body)).toContain('success is missing, must be a boolean');

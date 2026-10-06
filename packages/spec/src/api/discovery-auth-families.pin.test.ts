@@ -40,7 +40,7 @@ const base: DiscoveryResponse = {
   ) as DiscoveryResponse['capabilities'],
 };
 
-describe('[#21046] DiscoverySchema.authFamilies — declared, closed, optional', () => {
+describe('DiscoverySchema.authFamilies — declared, closed, optional', () => {
   it('is kept by the canonical schema AND by the consumer parse', () => {
     for (const admin of [false, true]) {
       expect(DiscoverySchema.parse({ ...base, authFamilies: { admin } }).authFamilies).toEqual({ admin });
@@ -63,7 +63,7 @@ describe('[#21046] DiscoverySchema.authFamilies — declared, closed, optional',
   });
 });
 
-describe('[#21046] readAuthFamilies — the auth service\'s own public config, nothing else', () => {
+describe('readAuthFamilies — the auth service\'s own public config, nothing else', () => {
   const answering = (features: unknown) => ({ getPublicConfig: () => ({ features }) });
 
   it('reads features.admin off getPublicConfig(), in both directions', () => {

@@ -139,7 +139,7 @@ describe('DispatcherErrorCode', () => {
     expect(() => DispatcherErrorCode.parse('SOMETHING_ELSE')).toThrow();
   });
 
-  it('should reject the HTTP-status spellings it used to hold (#3842)', () => {
+  it('should reject the HTTP-status spellings it used to hold', () => {
     // The members were `'404' | '405' | '501' | '503'` while `error.code`
     // carried the numeric status. `code` is semantic now, so a status is not a
     // code — it belongs in `httpStatus`.
@@ -187,7 +187,7 @@ describe('DispatcherErrorResponseSchema', () => {
     })).not.toThrow();
   });
 
-  it('should reject the numeric `code` it used to declare (#3842)', () => {
+  it('should reject the numeric `code` it used to declare', () => {
     // The regression this whole change exists to prevent: a producer putting the
     // HTTP status back into the field callers branch on.
     expect(() => DispatcherErrorResponseSchema.parse({
