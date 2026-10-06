@@ -60,7 +60,7 @@ describe('PageHeaderProps', () => {
   // `page:header` with no `title` — the renderer falls through to the
   // record-derived heading. `PageHeaderProps.safeParse` on that exact
   // emission shape must succeed; it used to fail with `title: Invalid input`.
-  it('accepts a header without title — the synthesized shape (#7702)', () => {
+  it('accepts a header without title — the synthesized shape, headed from the record', () => {
     // objectui `buildDefaultHeader`'s real emission: `{ type: 'page:header',
     // recordChrome, ...(actions?) }` — no `title` key at all.
     const result = PageHeaderProps.parse({ recordChrome: true });
@@ -86,7 +86,7 @@ describe('PageHeaderProps', () => {
 // `validateComponentProps` (#5068) called them undeclared — two platform
 // authorities disagreeing about one key (#5435), with the renderer siding with
 // the author.
-describe('PageHeaderProps recordChrome / showStar / showCopyId (#6776)', () => {
+describe('PageHeaderProps recordChrome / showStar / showCopyId — declared because the header renderer reads them', () => {
   it('defaults all three ON — an unauthored header keeps the record chrome', () => {
     const result = PageHeaderProps.parse({ title: 'Lead' });
     expect(result.recordChrome).toBe(true);
@@ -119,7 +119,7 @@ describe('PageHeaderProps recordChrome / showStar / showCopyId (#6776)', () => {
 // (objectui#3829 route (c)). objectui resolves `icon` only per header ACTION;
 // the header's own bag is never asked for one, and the registration publishes
 // no `icon` input. Four in-repo pages authored it and none ever drew it.
-describe('PageHeaderProps icon is retired (#6946)', () => {
+describe('PageHeaderProps icon is retired — no renderer reads it', () => {
   it('rejects the retired `icon` with its prescription', () => {
     expect(() => PageHeaderProps.parse({ title: 'Connect an Agent', icon: 'bot' }))
       .toThrow(/`icon`.*removed.*`recordChrome`/s);
@@ -232,7 +232,7 @@ describe('PageTabsProps', () => {
 // which is why objectui's `SchemaRenderer.tsx:253,264` refuses to hoist
 // `properties.type` and why `sdui-parser`'s `BASE_PROPS` (`validate.ts:20-30`)
 // skips it before any validation runs.
-describe('PageTabsProps tabStyle — renamed from `type` (#6776)', () => {
+describe('PageTabsProps tabStyle — renamed from `type`, which collides with the component `type`', () => {
   it('accepts the three declared styles under the new key', () => {
     for (const tabStyle of ['line', 'card', 'pill'] as const) {
       expect(PageTabsProps.parse({ tabStyle, items: [] }).tabStyle).toBe(tabStyle);
@@ -259,7 +259,7 @@ describe('PageTabsProps tabStyle — renamed from `type` (#6776)', () => {
 // #6776 — `page:accordion.variant`, read at objectui `containers.tsx:734` and
 // visible on screen (`flush` draws the divider, `card` leaves the border to the
 // panel's own content), declared nowhere until now.
-describe('PageAccordionProps variant (#6776)', () => {
+describe('PageAccordionProps variant — declared because the accordion renderer reads it', () => {
   const accordion = ComponentPropsMap['page:accordion'];
 
   it('defaults to `flush` — the renderer default, now stated in the contract', () => {
@@ -360,7 +360,7 @@ describe('PageAccordionProps variant (#6776)', () => {
 // after the sweep proposed retiring the key. This block plus the `.describe()`
 // it pins are what stop the next sweep repeating it: the liveness verdict is
 // now readable from the spec side alone, with no cross-repo hunt.
-describe('PageAccordionProps items[].icon liveness (#9881)', () => {
+describe('PageAccordionProps items[].icon liveness', () => {
   const accordion = ComponentPropsMap['page:accordion'];
 
   it('accepts an icon on a panel item — the value objectui LazyIcon renders in the trigger', () => {
@@ -403,7 +403,7 @@ describe('PageAccordionProps items[].icon liveness (#9881)', () => {
 // index-derived fallback (`tab-<i>`) silently points at a different tab as soon
 // as the item list changes. Declaring it is what unblocks #5776, whose showcase
 // page authors this slot as `key` — neither spelling the renderer reads.
-describe('PageTabsProps items[].value / items[].count (#5775)', () => {
+describe('PageTabsProps items[].value / items[].count — declared because the tabs renderer reads them', () => {
   it('accepts a stable `value` token and an explicit `count`', () => {
     const result = PageTabsProps.parse({
       items: [
@@ -503,7 +503,7 @@ describe('PageTabsProps items[].value / items[].count (#5775)', () => {
 // after the sweep proposed retiring it. This block plus the `.describe()` it
 // pins are what stop that repeating one component over: the liveness verdict is
 // readable from the spec side alone, with no cross-repo hunt.
-describe('PageTabsProps items[].icon liveness (#9972)', () => {
+describe('PageTabsProps items[].icon liveness', () => {
   const tabs = ComponentPropsMap['page:tabs'];
 
   it('accepts an icon on a tab item — the value objectui LazyIcon renders in the trigger', () => {
@@ -600,7 +600,7 @@ describe('PageCardProps', () => {
   });
 });
 
-describe('pageComponentSlotPositions — the one slot list, derived from the rows (#20940)', () => {
+describe('pageComponentSlotPositions — the one slot list, derived from the rows', () => {
   // Every page walk reads this list: the ADR-0087 conversion walker (every
   // entry), the exported `walkAddressedPageComponents` and lint's
   // `walkPageComponents` (authorable entries). Before it each kept its own,
@@ -646,7 +646,7 @@ describe('pageComponentSlotPositions — the one slot list, derived from the row
   });
 });
 
-describe('PageContainerProps — page:section / page:footer / page:sidebar (#5775)', () => {
+describe('PageContainerProps — page:section / page:footer / page:sidebar compose through `children`', () => {
   // These three were declared `EmptyProps` ("zero props") while their renderers
   // have always rendered `schema.children || schema.body`. Declaring zero props
   // for a container that renders children is the ADR-0078 shape from the schema
@@ -765,7 +765,7 @@ describe('RecordDetailsProps', () => {
   // spelling that keeps a section's label skeleton on an all-empty record,
   // and before this declaration `objectstack validate` warned it "did
   // nothing".
-  it('preserves the section presentation keys verbatim (#11289)', () => {
+  it('preserves the section presentation keys the renderer honours, verbatim', () => {
     const result = RecordDetailsProps.parse({
       sections: [{
         label: 'Description',
@@ -829,7 +829,7 @@ describe('RecordDetailsProps', () => {
   // `defaultCollapsed` at `DetailSection.tsx:139`
   // (`useState(section.defaultCollapsed ?? false)`), `icon` at
   // `DetailSection.tsx:516/546`, `description` at `DetailSection.tsx:520/557`.
-  it('preserves the #11661 section keys verbatim', () => {
+  it('preserves `defaultCollapsed` / `icon` / `description` verbatim', () => {
     const result = RecordDetailsProps.parse({
       sections: [{
         label: 'Company',
@@ -845,7 +845,7 @@ describe('RecordDetailsProps', () => {
     expect(result.sections?.[0].description).toBe('Firmographics and reach');
   });
 
-  it('does not materialize the #11661 keys on a clean parse', () => {
+  it('does not materialize `defaultCollapsed` / `icon` / `description` on a clean parse', () => {
     // Same `maxVisible` principle as the #11289 trio: expanded / no icon / no
     // sub-heading are the RENDERER'S fallbacks; a schema default would turn
     // "the author said nothing" into "the author asked for the default".
@@ -857,7 +857,7 @@ describe('RecordDetailsProps', () => {
     expect('description' in section).toBe(false);
   });
 
-  it('rejects wrongly-typed values for the #11661 keys', () => {
+  it('rejects wrongly-typed values for `defaultCollapsed` / `icon` / `description`', () => {
     for (const [key, value] of [
       ['defaultCollapsed', 'yes'],
       ['icon', 7],
@@ -872,7 +872,7 @@ describe('RecordDetailsProps', () => {
     }
   });
 
-  it('still refuses unknown section keys after the #11661 widening', () => {
+  it('still refuses unknown section keys after `defaultCollapsed` / `icon` / `description` are declared', () => {
     // The strict face survives, and the new keys entered the "did you mean"
     // candidate list — the declaration reached the same error map the strict
     // shape reads.
@@ -886,7 +886,7 @@ describe('RecordDetailsProps', () => {
     expect(message).toContain('`defaultCollapse` → `defaultCollapsed`');
   });
 
-  it('still refuses the one key #11661 deliberately withholds (`title`)', () => {
+  it('still refuses `title`, deliberately withheld as a second spelling of `label`', () => {
     // Honoured by the renderer at the pin, and OUT of the accept set on
     // purpose: `title` is a second spelling of the heading slot `label`
     // declares (the `page:card` `body`-vs-`children` shape, which #5775
@@ -909,7 +909,7 @@ describe('RecordDetailsProps', () => {
     expect(message).toContain('`title`');
   });
 
-  it('accepts all six `headerColor` enum tokens verbatim, with no schema default (#12126)', () => {
+  it('accepts all six `headerColor` enum tokens verbatim, with no schema default', () => {
     // Ruling A: a closed z.enum over exactly the six tokens objectui#6294's
     // `plugin-detail/src/headerColor.ts` lookup ships — complete class
     // literals in a file every consuming app's Tailwind scan covers, so
@@ -931,7 +931,7 @@ describe('RecordDetailsProps', () => {
     expect('headerColor' in bare).toBe(false);
   });
 
-  it('refuses `headerColor` values outside the closed enum, by name (#12126)', () => {
+  it('refuses `headerColor` values outside the closed enum, by name', () => {
     // The boundary ruling A draws: everything outside the six tokens — an
     // arbitrary palette guess (the objectui#6178 silent-no-paint failure
     // mode), the renderer's `bg-*` pass-through spellings (which render only
@@ -1049,7 +1049,7 @@ describe('RecordRelatedListProps', () => {
  *   4. the prose↔schema agreement, so the two cannot drift apart silently;
  *   5. the ruling's two scope fences, held by measurement rather than intent.
  */
-describe('RecordRelatedListProps.columns — the saved-view ListColumn union (#18639)', () => {
+describe('RecordRelatedListProps.columns — the saved-view ListColumn union', () => {
   const base = { objectName: 'contact', relationshipField: 'account_id' };
   const parse = (columns: unknown) => RecordRelatedListProps.safeParse({ ...base, columns });
   /** Refuse `columns` and hand back the issues as a searchable string. */
@@ -1161,7 +1161,7 @@ describe('RecordRelatedListProps.columns — the saved-view ListColumn union (#1
   });
 });
 
-describe('#18639 scope fences — held by measurement, not by intent', () => {
+describe('scope fences of the `columns` widening — held by measurement, not by intent', () => {
   it('`field.relatedListColumns` is still strings-only — a ListColumn entry is refused at the field door', () => {
     const lookup = { name: 'project', label: 'Project', type: 'lookup', reference: 'showcase_project' };
     const field = (relatedListColumns: unknown) =>
@@ -1263,7 +1263,7 @@ describe('RecordHighlightsProps', () => {
   // Reverse-verified from the committed state: restoring the `icon` line turns
   // the refusal pin red (the parse succeeds) — the pin reads the live schema,
   // not a cached shape.
-  describe('retired icon on the RecordHighlightsField object arm (#10054)', () => {
+  describe('retired icon on the RecordHighlightsField object arm', () => {
     /**
      * Dig the object arm's own issues out of the zod-4 union collapse: the
      * union reports ONE `invalid_union` whose `errors` tucks each arm's real
@@ -1362,7 +1362,7 @@ describe('ComponentPropsMap', () => {
   // measured the zero with a positive control). The member is refused BY NAME
   // with one located prescription at every door; `code` + `path` + the first
   // sentence are the pin — never a bare `toThrow()`, which greens on any error.
-  describe('user:profile is not author-placeable (#14159, ruling B)', () => {
+  describe('user:profile is not author-placeable', () => {
     const FIRST_SENTENCE =
       /^`user:profile` is not a page-placeable element — it is shell chrome \(the signed-in user's avatar menu, which the app shell renders itself on every page\), no renderer for it exists anywhere by ruling, and there is nothing to put in its place: delete the component node and let the shell render the profile\./;
     // `check:doc-authoring` (maintainer ruling 2026-08-12): a prescription printed
@@ -1499,7 +1499,7 @@ describe('ComponentPropsMap', () => {
   // first sentence at each door, never a bare `toThrow()`, which greens on any
   // error. The control is `ai:suggestion`, the member of the same namespace the
   // ruling keeps (it has a placeholder renderer — a different class).
-  describe('ai:chat_window is retired, refused by name (#21504)', () => {
+  describe('ai:chat_window is retired, refused by name', () => {
     const FIRST_SENTENCE =
       /^`ai:chat_window` was removed in @objectstack\/spec 17 \(ADR-0049\) — no renderer for it ever shipped: the console leaves it unregistered on purpose, so a page that placed one validated clean and then drew "Unknown component type" in front of an end user, and its `mode`, `agentId`, `context` and `aria` props configured nothing\./;
     // The supported entry point is NAMED, and the fix is imperative.
@@ -1608,7 +1608,7 @@ describe('ComponentPropsMap', () => {
   // exist so the #5068 gate's dispatch reaches them; the accepted key set is
   // EMPTY, measured from the renderers' read points at the `.objectui-sha`
   // pin (both registrations discard the schema node — `() => <Widget />`).
-  describe('plugin console widgets (#11575)', () => {
+  describe('plugin console widgets', () => {
     it('declares rows for cloud-connection:panel and marketplace:installed-list', () => {
       expect(ComponentPropsMap['cloud-connection:panel']).toBeDefined();
       expect(ComponentPropsMap['marketplace:installed-list']).toBeDefined();
@@ -1648,7 +1648,7 @@ describe('ComponentPropsMap', () => {
   // from the renderer's read points at the `.objectui-sha` pin (the
   // registration discards the schema node — `() => <ConnectAgent />` — and
   // the component function takes no parameters).
-  describe('mcp console widget (#12344)', () => {
+  describe('mcp console widget', () => {
     it('declares a row for mcp:connect-agent', () => {
       expect(ComponentPropsMap['mcp:connect-agent']).toBeDefined();
     });
@@ -1708,7 +1708,7 @@ describe('Content Elements', () => {
 // ---------------------------------------------------------------------------
 // element:number `filter` — the ViewFilterRule ARRAY orthography (ui#6206-B)
 // ---------------------------------------------------------------------------
-describe("element:number `filter` — one filter orthography platform-wide (ui#6206 Option B)", () => {
+describe("element:number `filter` — one filter orthography platform-wide", () => {
   const number = ComponentPropsMap['element:number'];
   const relatedList = ComponentPropsMap['record:related_list'];
   const RULES = [{ field: 'status', operator: 'equals', value: 'won' }];
@@ -2075,7 +2075,7 @@ describe('Interactive Elements — element:button', () => {
 // ---------------------------------------------------------------------------
 // Interactive Elements — element:filter (RETIRED at element grain, #9220)
 // ---------------------------------------------------------------------------
-describe('Interactive Elements — element:filter (retired, #9220)', () => {
+describe('Interactive Elements — element:filter (retired, no renderer)', () => {
   // FLIPPED (#15110). This pin used to read "still parses at the node level —
   // the refusal lives at the props dispatch", and the docblock above
   // `ElementFilterPropsSchema` recorded why: "A bare node with empty
@@ -2139,7 +2139,7 @@ describe('Interactive Elements — element:filter (retired, #9220)', () => {
 // ---------------------------------------------------------------------------
 // Interactive Elements — element:form
 // ---------------------------------------------------------------------------
-describe('Interactive Elements — element:form (retired, #9249)', () => {
+describe('Interactive Elements — element:form (retired, no renderer)', () => {
   // FLIPPED (#15110). This pin used to read "accepts a bare element:form node
   // (the migrated shape)", on the reading the docblock recorded as structural:
   // "the open `type` union accepts any string, so a node-level refusal is not
@@ -2205,7 +2205,7 @@ describe('Interactive Elements — element:form (retired, #9249)', () => {
  * `path` + `params` + the prescription's text are the pin, never a bare
  * `toThrow()`, which greens on any error.
  */
-describe('element:filter / element:form are refused by name at the node (#15110)', () => {
+describe('element:filter / element:form are refused by name at the node', () => {
   // `check:doc-authoring` (maintainer ruling 2026-08-12): a prescription
   // printed at the customer carries no citation-shaped issue id.
   const ISSUE_ID = /#\d{3,}/;
@@ -2422,7 +2422,7 @@ describe('Interactive Elements — element:record_picker', () => {
   // declared and two were not. These pin the other two, in BOTH halves of what
   // a declaration buys: the key is retained (not stripped into silence) and the
   // VALUE is judged (a wrong shape is rejected by name rather than dropped).
-  it('retains the flat `sort` shorthand — declared, not stripped (#6276)', () => {
+  it('retains the flat `sort` shorthand — declared, not stripped', () => {
     const props = ElementRecordPickerPropsSchema.parse({
       object: 'showcase_project',
       sort: [{ field: 'created_at', order: 'desc' }],
@@ -2430,7 +2430,7 @@ describe('Interactive Elements — element:record_picker', () => {
     expect(props.sort).toEqual([{ field: 'created_at', order: 'desc' }]);
   });
 
-  it('retains the flat `limit` shorthand — declared, not stripped (#6276)', () => {
+  it('retains the flat `limit` shorthand — declared, not stripped', () => {
     const props = ElementRecordPickerPropsSchema.parse({ object: 'showcase_project', limit: 20 });
     expect(props.limit).toBe(20);
   });
@@ -2439,14 +2439,14 @@ describe('Interactive Elements — element:record_picker', () => {
   // `properties.limit: 20` from the declared `object`/`filter` spelling used to
   // get the renderer's default 50 with zero diagnostics, because the key was
   // stripped before anything could read it.
-  it('rejects a non-integer / non-positive `limit` by name (#6276)', () => {
+  it('rejects a non-integer / non-positive `limit` by name', () => {
     expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: 0 })).toThrow(/limit/);
     expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: -5 })).toThrow(/limit/);
     expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: 2.5 })).toThrow(/limit/);
     expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: 'ten' })).toThrow(/limit/);
   });
 
-  it('rejects a malformed `sort` by name (#6276)', () => {
+  it('rejects a malformed `sort` by name', () => {
     // A bare field name — the shape an author reaches for when the key is
     // undeclared and nothing has ever told them otherwise.
     expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', sort: 'created_at' }))
@@ -2464,7 +2464,7 @@ describe('Interactive Elements — element:record_picker', () => {
   // The shorthand IS the `dataSource` key, so one value must parse identically
   // through both doors. This is what stops the flat spelling drifting into a
   // third sort dialect (the ledger's `report.zod.ts` row records three already).
-  it('parses `sort` / `limit` identically to `dataSource` (one shape, two spellings) (#6276)', () => {
+  it('parses `sort` / `limit` identically to `dataSource` (one shape, two spellings)', () => {
     const sort = [{ field: 'name', order: 'asc' as const }];
     const viaProps = ElementRecordPickerPropsSchema.parse({ object: 'a', sort, limit: 25 });
     const viaDataSource = ElementDataSourceSchema.parse({ object: 'a', sort, limit: 25 });
@@ -2481,7 +2481,7 @@ describe('Interactive Elements — element:record_picker', () => {
   // default: `.default(50)` would materialize a limit on every parsed picker
   // and turn an unset key into an authored one (and would then have to be kept
   // in sync with objectui by hand).
-  it('does not default `limit` — the 50 is the renderer fallback (#6276)', () => {
+  it('does not default `limit` — the 50 is the renderer fallback', () => {
     const props = ElementRecordPickerPropsSchema.parse({ object: 'a' });
     expect(props.limit).toBeUndefined();
     expect(props.sort).toBeUndefined();
@@ -2491,7 +2491,7 @@ describe('Interactive Elements — element:record_picker', () => {
 // ---------------------------------------------------------------------------
 // element:record_picker `filter` — the ViewFilterRule ARRAY orthography (ui#6206-B, #14406)
 // ---------------------------------------------------------------------------
-describe("element:record_picker `filter` — one filter orthography platform-wide (ui#6206 Option B, #14406)", () => {
+describe("element:record_picker `filter` — one filter orthography platform-wide", () => {
   const picker = ComponentPropsMap['element:record_picker'];
   const number = ComponentPropsMap['element:number'];
   const relatedList = ComponentPropsMap['record:related_list'];
@@ -2605,7 +2605,7 @@ describe("element:record_picker `filter` — one filter orthography platform-wid
 // orthography from birth — the ruling is family-wide, so there is no
 // "measured before the ruling" arm left for a door that did not exist then.
 // ---------------------------------------------------------------------------
-describe('the seven `object-*` `filter` doors — one filter orthography platform-wide (ui#6206-B, #15449, #18305)', () => {
+describe('the seven `object-*` `filter` doors — one filter orthography platform-wide', () => {
   const OBJECT_DOORS = [
     'object-grid', 'object-metric', 'object-kanban', 'object-calendar',
     'object-map', 'object-gantt', 'object-tree',
@@ -2667,7 +2667,7 @@ describe('the seven `object-*` `filter` doors — one filter orthography platfor
     expect(issuesAtPath(r, 'filter.0').map((i) => i.code)).toEqual(['invalid_type']);
   });
 
-  it('every `filter` door in ComponentPropsMap refuses the record — the twin of the #14406 census pin', () => {
+  it('every `filter` door in ComponentPropsMap refuses the record — the twin of the census pin that no door refuses the rule array', () => {
     // The #14406 pin above asks "does any `filter` door refuse the ARRAY?" and
     // cannot see an accept-anything door by construction. This is the other
     // half of "one filter orthography": asked over the WHOLE map by shape, so
@@ -2689,7 +2689,7 @@ describe('the seven `object-*` `filter` doors — one filter orthography platfor
   });
 });
 
-describe('the four `object-*` `sort` doors — one sort orthography, the array (objectui#8221, decision batch #77, option B; #18305)', () => {
+describe('the four `object-*` `sort` doors — one sort orthography, the array', () => {
   // `object-map` and `object-gantt` joined at #18305: both hand `schema.sort`
   // to the SAME shared sink the grid and the calendar do
   // (`convertSortToQueryParams`, `core/src/utils/sort-query.ts`) —
@@ -2896,7 +2896,7 @@ describe('ComponentPropsMap interactive elements', () => {
   // Flip of "should parse element:filter props" (#9220): the row STAYS so the
   // #5068 props gate keeps dispatching on the type — and what it dispatches to
   // now refuses with the element-retirement prescription.
-  it('refuses element:filter props through the kept map row (retired, #9220)', () => {
+  it('refuses element:filter props through the kept map row (retired, no renderer)', () => {
     expect(() => ComponentPropsMap['element:filter'].parse({
       object: 'order',
       fields: ['status'],
@@ -2905,7 +2905,7 @@ describe('ComponentPropsMap interactive elements', () => {
 
   // Flip of "should parse element:form props" (#9249): same shape as
   // element:filter above — the kept row dispatches to tombstones.
-  it('refuses element:form props through the kept map row (retired, #9249)', () => {
+  it('refuses element:form props through the kept map row (retired, no renderer)', () => {
     expect(() => ComponentPropsMap['element:form'].parse({
       object: 'contact',
     })).toThrow(/`element:form` element is retired/s);
@@ -2929,7 +2929,7 @@ describe('ComponentPropsMap interactive elements', () => {
 // ahead of the token heuristic that guesses "won"/"lost" from the value/label.
 // The showcase's `done` stage is exactly the case the heuristic cannot read, so
 // without this key there is no way to declare the terminus at all.
-describe('RecordPathProps stages[].terminal (#5775)', () => {
+describe('RecordPathProps stages[].terminal — declared because the path renderer reads it', () => {
   it('accepts the showcase stage shape verbatim (task-detail.page.ts:40)', () => {
     const result = RecordPathProps.parse({
       statusField: 'status',
@@ -3022,7 +3022,7 @@ describe('RecordActivityProps (enhanced)', () => {
   // `types: ['invalid_type']` throwing) pinned exactly the branch the ruling
   // removed — it is replaced, not merely reworded, by the cases below.
   // -------------------------------------------------------------------------
-  it('accepts author-contributed activity kinds beyond the built-in set (#11507 ruling, #11658)', () => {
+  it('accepts author-contributed activity kinds beyond the built-in set', () => {
     // 'scheduled' is a real contributed value (hotcrm writes it today);
     // 'my_custom_kind' stands in for any future author vocabulary.
     const result = RecordActivityProps.safeParse({
@@ -3034,7 +3034,7 @@ describe('RecordActivityProps (enhanced)', () => {
     }
   });
 
-  it('does not reject a typo of a built-in kind by name — the ruling accepted this cost (#11658)', () => {
+  it('does not reject a typo of a built-in kind by name — the open-vocabulary ruling accepted this cost', () => {
     // Under the closed enum, 'commnet' got a named rejection. An open
     // vocabulary cannot distinguish a typo from a contributed kind, and the
     // ruling accepted that trade rather than re-close the vocabulary.
@@ -3042,7 +3042,7 @@ describe('RecordActivityProps (enhanced)', () => {
     expect(result.success).toBe(true);
   });
 
-  it('still rejects non-string and empty entries — open vocabulary, not untyped (#11658)', () => {
+  it('still rejects non-string and empty entries — open vocabulary, not untyped', () => {
     const nonString = RecordActivityProps.safeParse({ types: [42] });
     expect(nonString.success).toBe(false);
     if (!nonString.success) {
@@ -3060,7 +3060,7 @@ describe('RecordActivityProps (enhanced)', () => {
 // RecordChatterProps (replaces EmptyProps)
 // ---------------------------------------------------------------------------
 describe('RecordChatterProps', () => {
-  it('materializes NO defaults — an empty bag parses to an empty bag (#8762)', () => {
+  it('materializes NO defaults — an empty bag parses to an empty bag', () => {
     // The pre-#8762 state this pins against: `.default('sidebar')` wrote a
     // value NO renderer branch compared onto every parsed node that said
     // nothing, and `.default(true)` on `collapsible` INVERTED the renderer
@@ -3089,7 +3089,7 @@ describe('RecordChatterProps', () => {
     expect(result.width).toBe(400);
   });
 
-  it("should accept exactly the renderer's position vocabulary (#8762)", () => {
+  it("should accept exactly the renderer's position vocabulary", () => {
     // `RecordChatterPanel` branches on right/left (docked) vs bottom
     // (in-flow) — measured at objectui pin 665661ab0932. One vocabulary.
     const positions = ['bottom', 'right', 'left'] as const;
@@ -3136,7 +3136,7 @@ describe('RecordChatterProps', () => {
     }
   });
 
-  describe('the three retired spellings refuse with a per-value prescription (#8762)', () => {
+  describe('the three retired spellings refuse with a per-value prescription', () => {
     // Each old spelling gets its own "was removed" message naming the
     // replacement — the `view.exportOptions` `'pdf'` precedent: an
     // enum-VALUE narrowing has no `retiredKey()` tombstone to carry the
@@ -3167,7 +3167,7 @@ describe('RecordChatterProps', () => {
 // ComponentPropsMap — record:chatter is no longer empty
 // ---------------------------------------------------------------------------
 describe('ComponentPropsMap record:chatter', () => {
-  it('should parse record:chatter with no materialized defaults (#8762)', () => {
+  it('should parse record:chatter with no materialized defaults', () => {
     const result = ComponentPropsMap['record:chatter'].parse({});
     expect('position' in result).toBe(false);
     expect('collapsible' in result).toBe(false);
@@ -3215,7 +3215,7 @@ describe('ComponentPropsMap record:chatter', () => {
  * written to go RED the day the world changes underneath it — at which point the
  * correct response is to update all three places together, not to relax the test.
  */
-describe('批 17 / #5068 — the carrier stays an open bag; the gate is on the lint side', () => {
+describe('批 17 — the carrier stays an open bag; the gate is on the lint side', () => {
   it('the carrier is still an OPEN bag — direction B (a typed `properties`) was declined, so this stays green', () => {
     // `PageComponentSchema` is `.strict().transform(…)`, so unwrap the pipe to
     // reach the object shape.
@@ -3322,7 +3322,7 @@ describe('批 17 / #5068 — the carrier stays an open bag; the gate is on the l
  * assertions are that half: each one names a producer measured in the wild, so
  * deleting the entry is a decision about that producer rather than a cleanup.
  */
-describe('#4001 batch A — the prescriptions, each backed by a measured producer', () => {
+describe('batch A, unknown keys refused — the prescriptions, each backed by a measured producer', () => {
   const refuse = (schema: { safeParse(v: unknown): any }, value: unknown): string => {
     const r = schema.safeParse(value);
     expect(r.success).toBe(false);
@@ -3416,7 +3416,7 @@ describe('#4001 batch A — the prescriptions, each backed by a measured produce
  * pages' authored nodes (examples/app-showcase/src/ui/pages/*), not imports —
  * cross-package test inputs are their own failure class.
  */
-describe('#7751 — object-* block props schemas', () => {
+describe('object-* block props schemas — declared, so the props gate has a schema to dispatch', () => {
   const refuse = (schema: { safeParse(v: unknown): any }, value: unknown): string => {
     const r = schema.safeParse(value);
     expect(r.success).toBe(false);
@@ -3442,7 +3442,7 @@ describe('#7751 — object-* block props schemas', () => {
     expect((ComponentPropsMap as Record<string, unknown>)['object-chart']).toBeUndefined();
   });
 
-  it('the #7750 specimen shape is REJECTED, with the rename in the message: `filters` → `filter`', () => {
+  it('the my-work specimen shape is REJECTED, with the rename in the message: `filters` → `filter`', () => {
     const message = refuse(ComponentPropsMap['object-grid'], {
       objectName: 'showcase_task',
       columns: ['title', 'project', 'status', 'priority', 'due_date'],
@@ -3452,7 +3452,7 @@ describe('#7751 — object-* block props schemas', () => {
     expect(message).toContain('Did you mean `filters` → `filter`?');
   });
 
-  it('the corrected #7750 node (my-work.page.ts, post-fix) parses GREEN and retains its filter', () => {
+  it('the corrected node (my-work.page.ts, post-fix) parses GREEN and retains its filter', () => {
     // The node as the showcase authors it since #15442 / #15449: the
     // `ViewFilterRule` array (ui#6206-B). The AST tuple this pin carried
     // before is refused at `filter.0` now — pinned in the object-* filter
@@ -3465,7 +3465,7 @@ describe('#7751 — object-* block props schemas', () => {
     expect(parsed.filter).toEqual([{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }]);
   });
 
-  it("object-grid `data` takes the ViewDataSchema provider object — the ui#6207 convergence (Option A)", () => {
+  it("object-grid `data` takes the ViewDataSchema provider object — the two spec authorities converged", () => {
     // The #5090-pinned authority: static inline rows are `{ provider: 'value',
     // items }`. Before the 2026-08-25 ruling this exact value was REFUSED by
     // this entry ("expected array, received object") while being the
@@ -3515,7 +3515,7 @@ describe('#7751 — object-* block props schemas', () => {
     expect(parsed.defaultFilters).toEqual(rules);
   });
 
-  it('`defaultFilters` refuses the AST tuple array the `z.unknown()` door used to receipt (#19514)', () => {
+  it('`defaultFilters` refuses the AST tuple array the `z.unknown()` door used to receipt', () => {
     const r = ComponentPropsMap['object-grid'].safeParse({
       objectName: 'showcase_task',
       defaultFilters: [['status', '=', 'open']],
@@ -3531,7 +3531,7 @@ describe('#7751 — object-* block props schemas', () => {
   // the second spelling of `sort` (read only when `sort` was absent, and
   // wrapped `[schema.defaultSort]` by the renderer's own header-arrow path),
   // so the one-intent-two-spellings rule retires it at the producer.
-  describe('object-grid `defaultSort` is retired (#11805)', () => {
+  describe('object-grid `defaultSort` is retired', () => {
     it('rejects the retired `defaultSort` with the wrap-and-rename prescription', () => {
       expect(() => ComponentPropsMap['object-grid'].parse({
         objectName: 'showcase_task',
@@ -3600,7 +3600,7 @@ describe('#7751 — object-* block props schemas', () => {
     expect(r.success, JSON.stringify((r as any).error?.issues)).toBe(true);
   });
 
-  describe('`object-master-detail-form` `formType` speaks the measured vocabulary (#11873)', () => {
+  describe('`object-master-detail-form` `formType` speaks the measured vocabulary', () => {
     // Spec half of objectui#5939: the renderer honours exactly `simple` and
     // `tabbed` for the parent half; the old bare `z.string()` let any value
     // parse clean, match no branch, and render a silently sectionless parent
@@ -3676,7 +3676,7 @@ describe('#7751 — object-* block props schemas', () => {
     expect(message).toContain('startDateField');
   });
 
-  it('objectName is OPTIONAL on every entry — the dataSource binding can supply the object (#6953)', () => {
+  it('objectName is OPTIONAL on every entry — the dataSource binding can supply the object', () => {
     // A required `objectName` would false-flag every node bound through the
     // component-level `dataSource`; the lint's required-prop exemption only
     // covers the key spelled `object`. Measured, not assumed.
@@ -3806,7 +3806,7 @@ describe('#7751 — object-* block props schemas', () => {
 // teaches `limit: 250` with a Properties row. The strict map refused the key by
 // name — the same `unrecognized_keys` verdict as the `bogusProp` control — so an
 // author following the published docs wrote a node the save gate rejected.
-describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces already implement (#16503)', () => {
+describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces already implement', () => {
   const kanban = ComponentPropsMap['object-kanban'];
 
   it("accepts the documented shape `{ objectName: 'x', limit: 250 }` and carries the value through", () => {
@@ -3935,7 +3935,7 @@ describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces alre
 // (`ObjectKanban.tsx` names neither half in code: 0 each re-counted at this pin
 // outside the two comments that record objectui's cut, 2 each with them,
 // against 11 for the sibling `onCardClick` in the same file).
-describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
+describe('ObjectKanbanPropsSchema quickAdd is retired', () => {
   const kanban = ComponentPropsMap['object-kanban'];
 
   it('rejects the retired `quickAdd` with the prescription, not a bare unknown-key verdict', () => {
@@ -4104,7 +4104,7 @@ describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
 // moved the pin while the #9881 / commit 60e0f900a records still cited `82a94170c`, commit d1ba685ec re-measured
 // those four onto `9a3daf8d3`, and `button.tsx` was byte-identical at
 // `9a3daf8d3` and `190fbd01d`.
-describe('ElementButtonPropsSchema icon liveness (#10053)', () => {
+describe('ElementButtonPropsSchema icon liveness', () => {
   const button = ComponentPropsMap['element:button'];
 
   it('accepts an icon on a button — the value objectui resolves through the lucide `icons` map', () => {
@@ -4154,7 +4154,7 @@ describe('ElementButtonPropsSchema icon liveness (#10053)', () => {
   });
 });
 
-describe('ObjectMetricPropsSchema icon liveness (#10053)', () => {
+describe('ObjectMetricPropsSchema icon liveness', () => {
   const metric = ComponentPropsMap['object-metric'];
 
   it('accepts an icon on the metric tile — the value objectui resolves via getLazyIcon', () => {
@@ -4292,7 +4292,7 @@ describe('ObjectMetricPropsSchema icon liveness (#10053)', () => {
 // about a complete set, and only an equality can hold a later addition to
 // having been measured too.
 // ---------------------------------------------------------------------------
-describe('the three #18305 object blocks — key sets derived from the renderers read points', () => {
+describe('object-map / object-gantt / object-tree — key sets derived from the renderers read points', () => {
   type Shape = { shape: Record<string, unknown>; safeParse(v: unknown): any };
   const door = (type: string) => ComponentPropsMap[type as keyof typeof ComponentPropsMap] as unknown as Shape;
   const keysOf = (type: string) => Object.keys(door(type).shape).sort();
@@ -4496,7 +4496,7 @@ describe('the three #18305 object blocks — key sets derived from the renderers
 // #19228 — the react tier's own precedence sentence was narrower than the
 // guard it names. These pins hold the structural facts the repair rests on,
 // measured first-hand at the objectui pin `87af769e9` on 2026-09-21T06:30-06:40Z.
-describe('row caps on the object-bound blocks — what #19228 recorded', () => {
+describe('row caps on the object-bound blocks — a bound view fills `limit` only when the authored one is not a usable cap', () => {
   const timeline = ComponentPropsMap['object-timeline'];
   const kanban = ComponentPropsMap['object-kanban'];
 
