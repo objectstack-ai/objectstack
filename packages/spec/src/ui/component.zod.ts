@@ -3212,10 +3212,11 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * (+11/-18) changed for objectui#11638, which retires the two containers' read
  * of a member's `properties.params` (`readMemberStaticParamValues`, deleted
  * from `static-params.ts` with both calls) and the `useConfigBagEvaluator()`
- * call that served it, so every container anchor below that call MOVED with
- * its cited text byte-identical: by 3 down to the member forward, and from the
- * forward on by 8 in `action-group.tsx` and by 7 in `action-menu.tsx` (the
- * `objectName` forward `381` -> `373` and `327` -> `320`). `static-params.ts`
+ * call that served it, so every container anchor below that call MOVED: by 3
+ * down to the member forward, and from the forward on by 8 in
+ * `action-group.tsx` and by 7 in `action-menu.tsx` (the `objectName` forward
+ * `381` -> `373` and `327` -> `320`), each cited line byte-identical except the
+ * forward's `params` construction, which objectui#11638 rewrote. `static-params.ts`
  * gained 7 lines above `readStaticParamValues`, and
  * `data-objectstack/src/index.ts` changed only below both of its cited lines.
  * Each moved anchor is cited below at this pin.

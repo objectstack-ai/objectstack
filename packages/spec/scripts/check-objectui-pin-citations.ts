@@ -818,7 +818,7 @@ export function verifyAssertion(
  *
  * The next three are the same section's other three rows, quoted once their
  * records were re-measured at pin `a58626c88` (their cited lines had moved
- * under hop notes that recorded them as held): the member forward of
+ * without any hop note recording it): the member forward of
  * `action:group` and of `action:menu`, where the keys a member forwards to the
  * runner are enumerated, and the `readProps` call of `element:repeater`. 419
  * objectui anchors in `packages/spec/src` still carry none, read against
