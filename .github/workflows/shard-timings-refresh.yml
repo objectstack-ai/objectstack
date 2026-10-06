@@ -98,6 +98,28 @@
 # accumulated runs gets the median of three observations, which is the property
 # the dataset's own merge rule always claimed and could not previously deliver.
 #
+# ⚠ AND THE ACCUMULATION USED TO STOP AT ONE (#22014). The loop broke at the
+# first accumulation that COVERED the workspace — and coverage counts a carried
+# weight as covered, so the newest run always covered it. Every refresh since
+# the hourly run went live was therefore one run: the dataset on `main` named
+# `provenance.runs = ['37262126122']`, and recorded `@objectstack/spec` at
+# 1134.86s against 1573-1651s on the executed windows after it. The loop now
+# stops only when every package has been EXECUTED by at least the generator's
+# MINIMUM_EXECUTED_RUNS (three) of the accumulated runs — executed, not
+# replayed: an hourly run replays a different part of the workspace each time,
+# so three runs is not three samples of `spec`. Measured over the 20 eligible
+# hourly runs retained on 2026-10-06 (17:01 the day before to 15:01): every one
+# of the 72 packages was executed by at least three of them, the newest twelve
+# already sufficed, and `spec` was the tightest at 7 of 20.
+#
+# A refresh whose retained runs cannot give some package three executions is
+# NOT refused: it is opened PROVISIONAL, with those packages named in the
+# dataset's `provisional` list and in the PR body. Refusing would discard every
+# other package's measurement over one under-sampled one — the silent-rot
+# failure this lane exists to end — while the list keeps the shortfall
+# machine-readable for anything that needs a baseline rather than a balancing
+# input (a per-package ceiling must refuse a provisional weight).
+#
 # ⚠ AND ACCUMULATION ALONE STILL FALLS SHORT, so the pass MERGES rather than
 # replaces. Measured on the same live runs: the union of all seven retained runs
 # reaches 57 of 71 packages and converges there, because 14 packages are cache
@@ -266,11 +288,12 @@ jobs:
           # 24, not 15 (#16467). The window that matters is the artifact
           # retention window — 1 day — and the runs inside it are now the
           # hourly scheduled ones, so 24 is "everything still downloadable"
-          # rather than an arbitrary depth. Coverage is ACCUMULATED across
-          # runs (see the next step), so examining fewer than the window holds
-          # is coverage left on the table; the cost is two API reads per run
-          # examined and the loop below still stops at the first accumulation
-          # that covers the workspace.
+          # rather than an arbitrary depth. Coverage and sample depth are both
+          # ACCUMULATED across runs (see the next step), so examining fewer
+          # than the window holds is samples left on the table; the cost is two
+          # API reads per run examined, and the loop below stops at the first
+          # accumulation in which every package has been executed by the
+          # minimum number of runs (#22014).
           #
           # ⭐ THREE EXITS, THREE READINGS (#16467). The selector answers 0, 1
           # or 3, and this step must not flatten them:
@@ -369,9 +392,16 @@ jobs:
       # observations rather than whichever run happened to be read last. Feeding
       # several runs WITHOUT that grouping is refused by the generator by name.
       #
-      # The loop stops at the first accumulation that covers the workspace, so a
-      # quiet week costs one run's download and a busy one costs a few.
-      - name: Regenerate the dataset, accumulating runs until the workspace is covered
+      # WHEN IT STOPS (#22014). Not at the first accumulation that covers the
+      # workspace: coverage counts a carried weight as covered, so the newest
+      # run alone always passed it and every refresh was one run deep. The loop
+      # stops at the first accumulation that BOTH covers the workspace AND
+      # leaves the dataset's `provisional` list empty — every package executed
+      # by at least the generator's MINIMUM_EXECUTED_RUNS of the runs fed.
+      # When the candidates run out first, the last covering accumulation is
+      # kept and opened PROVISIONAL, its short packages named; only a coverage
+      # shortfall is still a refusal.
+      - name: Regenerate the dataset, accumulating runs until every package is measured enough times
         id: generate
         # Skipped on the NOT MEASURED reading: there is nothing to download.
         # Every step after `compare` is already gated on
@@ -384,7 +414,11 @@ jobs:
           set -euo pipefail
           WORK="$RUNNER_TEMP/refresh"
           mkdir -p "$WORK"
-          CHOSEN=''
+          # Both judged on the LAST accumulation the generator accepted, which
+          # is the one `refreshed.json` holds: a run the generator refuses is
+          # dropped and leaves the previous accumulation's file in place.
+          COVERED=''
+          SHORT=''
           ACCEPTED=()
 
           RUN_COUNT=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/candidates.json", "utf8")).length)')
@@ -445,9 +479,13 @@ jobs:
             # HIT witnesses that its inputs are unchanged; anything else is left
             # out for the coverage check below to name. The workflow still writes
             # no byte the generator did not emit — the merge happens inside it.
+            # `--spread-out`: every package's executed-run count and
+            # min/median/max, for the PR body. Written beside the dataset,
+            # never into it — nothing machine-reads a spread.
             if ! node scripts/measure-test-shard-timings.mjs "${ARGS[@]}" \
                  --merge-into scripts/test-shard-timings.json \
-                 --out "$WORK/refreshed.json"; then
+                 --out "$WORK/refreshed.json" \
+                 --spread-out "$WORK/spread.md"; then
               echo "::warning::The generator refused the set including run $RUN_ID; dropping that run and continuing."
               unset 'ACCEPTED[-1]'
               echo "::endgroup::"; continue
@@ -459,16 +497,40 @@ jobs:
                  --refreshed "$WORK/refreshed.json" \
                  --workspace "$RUNNER_TEMP/turbo-ls.json" \
                  --exclude @objectstack/dogfood; then
-              CHOSEN="$RUN_ID"
+              COVERED=1
+            else
+              COVERED=''
+            fi
+            # How many weights still rest on fewer than the minimum executed
+            # runs. Read from the generator's own `provisional` list rather than
+            # recounted here, and an absent list is an error, not a zero: a
+            # zero read from nothing would end the loop at one run again.
+            SHORT=$(node -e '
+              const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+              if (!Array.isArray(d.provisional)) throw new Error(process.argv[1] + " carries no `provisional` list");
+              console.log(d.provisional.length);
+            ' "$WORK/refreshed.json")
+            if [ -n "$COVERED" ] && [ "$SHORT" -eq 0 ]; then
+              echo "Every package is covered and executed by at least the minimum number of these runs; stopping."
               echo "::endgroup::"
               break
+            fi
+            if [ -n "$COVERED" ]; then
+              echo "Covered, but $SHORT package weight(s) rest on fewer than the minimum executed runs; adding the next older run."
             fi
             echo "::endgroup::"
           done
 
-          if [ -z "$CHOSEN" ]; then
+          if [ -z "$COVERED" ]; then
             echo "::error::The ${#ACCEPTED[@]} eligible run(s) on main, accumulated and merged with the committed dataset, still leave a package that HAD a measured weight with neither a fresh measurement nor a turbo cache HIT to witness that it is unchanged — the shortfall above names them. Each would drop to the test-file-count ESTIMATE, which is the silent degradation this lane exists to prevent. NOTHING was regenerated and no PR was opened: this is a refusal, not a quiet success. A package that merely went unmeasured is NOT this error — that case is carried on its cache-hit witness — so a shortfall here means a suite failed, a package was renamed or removed, or its slices could not be assembled in any run."
             exit 1
+          fi
+          # PROVISIONAL, not refused (#22014): the candidates ran out before
+          # every package reached the minimum. The measurement is kept, the
+          # short packages are named in the dataset and the PR body, and this
+          # annotation makes the reading visible on a green job.
+          if [ "$SHORT" -gt 0 ]; then
+            echo "::warning::Shard timings PROVISIONAL: $SHORT package weight(s) rest on fewer than the minimum executed runs across all ${#ACCEPTED[@]} retained run(s). They are named in the dataset's \`provisional\` list; read them as balancing inputs, not baselines."
           fi
           # Candidates arrive newest-first, so ACCEPTED[0] is the most recent run
           # in the set and its commit is the one the refresh is dated from. The
@@ -553,6 +615,25 @@ jobs:
             }
           ')
 
+          # Sample depth (#22014), read out of the dataset like the carry line
+          # above. An absent list is an error rather than "none provisional".
+          DEPTH_LINE=$(node -e '
+            const d = JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/refresh/refreshed.json", "utf8"));
+            if (!Array.isArray(d.provisional)) throw new Error("the refreshed dataset carries no `provisional` list");
+            const min = d.provenance.minimumRuns;
+            const total = Object.keys(d.packages).length;
+            if (d.provisional.length === 0) {
+              console.log(`Every one of the ${total} weights rests on at least ${min} executed runs; none is provisional.`);
+            } else {
+              console.log(
+                `⚠️ PROVISIONAL: ${d.provisional.length} of the ${total} weights rest on fewer than ${min} executed ` +
+                `runs, because the retained runs replayed them more often than they executed them. They are ` +
+                `named in the dataset \`provisional\` list and are fit to balance on, NOT to set a per-package ` +
+                `ceiling from: ${d.provisional.join(", ")}.`
+              );
+            }
+          ')
+
           SHARDS=$(node -e '
             const rs = JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/candidates.json", "utf8"));
             const r = rs.find((x) => String(x.run_id) === process.env.RUN_ID);
@@ -576,8 +657,8 @@ jobs:
             echo "per shard and only main pushes write it, so a"
             echo "package whose inputs have not changed is a HIT and the generator refuses hits rather"
             echo "than recording a replay as a duration. Runs are therefore accumulated, each fenced by"
-            echo "its own \`--run\` group, until every package the committed dataset holds is measured"
-            echo "again; a package seen in several of them gets the median of those observations."
+            echo "its own \`--run\` group, until every package has been EXECUTED by at least the"
+            echo "generator's minimum number of them, and each weight is the median of those executions."
             echo
             for R in $RUNS; do
               echo "- https://github.com/$GITHUB_REPOSITORY/actions/runs/$R"
@@ -593,6 +674,12 @@ jobs:
             echo "⚠️ This PR references #16173 and #16222 but does NOT carry a closing keyword for them,"
             echo "because a weekly lane cannot know which cards a given run ought to retire. If this is"
             echo "the first refresh to land, retire those two by hand as part of merging it."
+            echo
+            echo "## Sample depth and run-to-run spread"
+            echo
+            echo "$DEPTH_LINE"
+            echo
+            cat "$RUNNER_TEMP/refresh/spread.md"
             echo
             echo "## Measured per-shard suite time on the newest run in the set"
             echo
