@@ -392,12 +392,20 @@ export class SettingsServicePlugin implements Plugin {
    * `SettingsSecretStore`. The store bypasses the tenant audit
    * warning because secrets are scoped through their owning
    * `sys_setting` row (which already carries the tenant context).
+   *
+   * [#21908] Every call carries the explicit system opt-in, as `delete` below
+   * already did: `sys_secret` is a platform-owned cipher store, and each
+   * call is the settings service acting on its own row after its own
+   * capability and lock gates passed. Without it these calls reach the data
+   * engine with no principal and no opt-in — the principal-less hand-off
+   * ADR-0096 D5 closes — and every encrypted setting would stop reading back
+   * once that hand-off denies.
    */
   private buildSecretStore(engine: IDataEngine): SettingsSecretStore {
     const eng: any = engine;
     return {
       async insert(row) {
-        await eng.insert('sys_secret', row, { bypassTenantAudit: true });
+        await eng.insert('sys_secret', row, { bypassTenantAudit: true, context: { isSystem: true } });
         return { id: row.id };
       },
       async get(id) {
@@ -405,6 +413,7 @@ export class SettingsServicePlugin implements Plugin {
           where: { id },
           limit: 1,
           bypassTenantAudit: true,
+          context: { isSystem: true },
         });
         const row = Array.isArray(rows) ? rows[0] : rows?.data?.[0];
         return row ?? null;
@@ -415,10 +424,16 @@ export class SettingsServicePlugin implements Plugin {
         // `options.where.id`). Passing `{ where, data, ... }` as the
         // data argument left id=undefined and tripped
         // "Update requires an ID or options.multi=true".
+        //
+        // [#21908] Under the opt-in the engine's `readonly` strip no longer
+        // runs on this write, so a re-wrap's `ciphertext` (declared
+        // `readonly`) is written, which is what this member promises; without
+        // a context the strip took it. No caller in this repository reaches
+        // `update` today.
         await eng.update(
           'sys_secret',
           { id, ...patch },
-          { bypassTenantAudit: true },
+          { bypassTenantAudit: true, context: { isSystem: true } },
         );
       },
       async delete(id) {

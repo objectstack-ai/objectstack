@@ -131,6 +131,27 @@ function writeOptionsFor(
 }
 
 /**
+ * [#21908] The execution context {@link StorageMetadataStore.createFile}'s
+ * `sys_file` insert runs under: the explicit system opt-in, taken inside this
+ * store (maintainer ruling Q1), merged with the acting organization's
+ * `tenantId` when there is one.
+ *
+ * Before this the insert reached the data engine with a tenant-only context
+ * (or none), no principal and no opt-in, and passed the security middleware
+ * only through its principal-less hand-off (ADR-0096 E1), which D5 closes.
+ * Carrying the caller's principal instead is not open: no member grant exists
+ * on `sys_file`, so uploads would break.
+ *
+ * What it keeps is the door-derived scope, unchanged: the row is stamped
+ * `owner_id` with the uploading user the door resolved from the session, and
+ * `tenantId` still reaches `DriverOptions.tenantId`, where the driver's
+ * `injectTenantOnInsert` stamps the organization exactly as before
+ * ({@link StorageWriteContext}). ⛔ Never drop the `tenantId` from this
+ * context: under the opt-in no other layer stamps the organization.
+ */
+const CREATE_FILE_SYSTEM_CONTEXT = { isSystem: true } as const;
+
+/**
  * Persisted upload-session record (matches `sys_upload_session` object schema).
  */
 export interface UploadSessionRecord {
@@ -320,6 +341,11 @@ export class StorageMetadataStore {
     const now = new Date().toISOString();
     const full: FileRecord = { created_at: now, updated_at: now, ...rec };
     const options = writeOptionsFor(context);
+    // [#21908] The engine insert carries the explicit system opt-in, keeping the
+    // acting organization beside it — see CREATE_FILE_SYSTEM_CONTEXT.
+    const insertOptions = {
+      context: { ...(options?.context ?? {}), ...CREATE_FILE_SYSTEM_CONTEXT },
+    };
     if (!this.engine) {
       // The engine-absent stand-in has no schema to ask, so it records what it
       // was told rather than deriving a column: a no-engine deployment has no
@@ -334,7 +360,7 @@ export class StorageMetadataStore {
       return stamped;
     }
     await this.engineOp('sys_file', 'insert', FILE_INSERT_CONSEQUENCE, (engine) =>
-      engine.insert('sys_file', full, options),
+      engine.insert('sys_file', full, insertOptions),
     );
     return full;
   }
