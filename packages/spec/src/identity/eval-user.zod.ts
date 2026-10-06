@@ -222,8 +222,23 @@ export const EvalUserSchema = lazySchema(() =>
      * `sys_user.role` scalar, which stays published as `user.role`.
      */
     positions: z.array(z.string()).default([]).describe('Canonical position/identity names the user holds — built-in identity names plus sys_position assignments, scope-resolved (ADR-0068 D3). The security axis, the same set /auth/me/permissions reports; NOT the better-auth user.role scalar, which remains published as user.role'),
-    /** DERIVED alias of positions.includes(platform_admin) (ADR-0068 D2). Deprecated surface. */
-    isPlatformAdmin: z.boolean().optional().describe("DERIVED alias of 'platform_admin' in positions. Deprecated."),
+    /**
+     * The `PLATFORM_ADMIN` standing of ADR-0095 D3: true when the platform
+     * resolves the user, per request, to the `PLATFORM_ADMIN` posture rung —
+     * from the deployment's declared administrator list
+     * (`OS_PLATFORM_OWNER_EMAIL`) under every tenancy posture, or from an
+     * unscoped `admin_full_access` grant under the `single` posture. It is the
+     * predicate platform-operator gates read
+     * (`current_user.isPlatformAdmin == true`, ADR-0068 D4).
+     *
+     * The resolver projects the `platform_admin` name into `positions` from the
+     * same grant, so the name and this key agree for every genuine
+     * administrator. ⛔ Gate on this key, never on
+     * `'platform_admin' in positions`: the session payload emits this key from
+     * the rung, and the platform-admin route gate and `hasPlatformAdminStanding`
+     * judge by the rung too — none of them reads the array.
+     */
+    isPlatformAdmin: z.boolean().optional().describe("The PLATFORM_ADMIN standing of ADR-0095 D3: true when the platform resolves the user, per request, to the PLATFORM_ADMIN posture rung — from the deployment's declared administrator list (OS_PLATFORM_OWNER_EMAIL) under every tenancy posture, or from an unscoped admin_full_access grant under the single posture. The predicate platform-operator gates read (current_user.isPlatformAdmin == true, ADR-0068 D4). The resolver projects 'platform_admin' into positions from the same grant, so the two agree for every genuine administrator; gate on this key, never on the positions array."),
     organizationId: z.string().nullable().optional().describe('Active organization ID (null = platform/unscoped)'),
   })
 );
