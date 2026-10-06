@@ -83,3 +83,8 @@
 #
 # Verify locally:  node scripts/check-osv-exemptions.mjs
 # Prove the check: node scripts/check-osv-exemptions.mjs --self-test
+
+[[IgnoredVulns]]
+id = "GHSA-hp3w-g68c-fv3c"
+ignoreUntil = 2026-11-05
+reason = "https://github.com/advisories/GHSA-hp3w-g68c-fv3c — no fixed sprintf-js exists (1.1.3, the latest release, is the last affected version), and it arrives only transitively through tedious 18.6.2 (driver-sql's optional mssql peer) and fengari 0.1.5 (under ioredis-mock, a service-cluster-redis devDependency), whose latest releases (tedious 20.3.3, fengari 0.1.5) still require ^1.1.3; remove when sprintf-js publishes a fix or both parents drop it."
