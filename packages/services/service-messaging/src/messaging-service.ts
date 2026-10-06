@@ -22,6 +22,8 @@ import type {
 } from './http-outbox.js';
 import { INBOX_OBJECT, RECEIPT_OBJECT } from './inbox-channel.js';
 import { type InboxCaller, resolveInboxRecipient } from './inbox-caller.js';
+import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
+import { assertActorReferenceResolves } from './actor-reference.js';
 
 /** The L2 event object every `emit()` writes one row to (ADR-0030). */
 export const NOTIFICATION_EVENT_OBJECT = 'sys_notification';
@@ -1347,7 +1349,11 @@ export class MessagingService {
         if (suppressed.length > 0) {
             row.suppressed_channels = suppressed.map((s) => ({ ...s }));
         }
-        const created = await data.insert(NOTIFICATION_EVENT_OBJECT, row);
+        // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT. Under it the
+        // engine no longer checks that `actor_id` names a user, so the producer
+        // keeps that refusal (see assertActorReferenceResolves).
+        await assertActorReferenceResolves(data, NOTIFICATION_EVENT_OBJECT, row.actor_id);
+        const created = await data.insert(NOTIFICATION_EVENT_OBJECT, row, { context: FAN_OUT_SYSTEM_CONTEXT });
         const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
         return id != null ? String(id) : `evt_${Math.random().toString(36).slice(2)}`;
     }

@@ -409,8 +409,13 @@ describe('inbox channel', () => {
  * because four green legs do not prove a connected path.
  */
 describe('inbox channel — actor materialization (#16974)', () => {
+    /** Every `sys_user` id names a user — the actor-reference check's read. */
+    const knownUsers = (object: string, query: any) => (object === 'sys_user' ? { id: query?.where?.id } : null);
+
     it('writes the notification actor onto the row', async () => {
-        const data = fakeData();
+        // [#21913] The actor must name a user — the channel refuses one that
+        // does not, as the engine did — so the double answers its sys_user row.
+        const data = fakeData(undefined, knownUsers);
         const ch = createInboxChannel({ getData: () => data.engine, now: () => '2026-06-01T00:00:00.000Z' });
 
         await ch.send(silentCtx(), delivery({ actorId: 'user_9' }, 'user_42'));
@@ -431,7 +436,7 @@ describe('inbox channel — actor materialization (#16974)', () => {
     });
 
     it('carries the actor through emit → outbox snapshot → dispatcher → row (P1)', async () => {
-        const data = fakeData();
+        const data = fakeData(undefined, knownUsers);
         const outbox = new MemoryNotificationOutbox(1);
         const inbox = createInboxChannel({ getData: () => data.engine, now: () => '2026-06-01T00:00:00.000Z' });
 

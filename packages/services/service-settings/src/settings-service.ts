@@ -39,6 +39,7 @@ import {
 // hand-written sentence, unchanged.
 import { renderValidationMessage } from '@objectstack/spec/system';
 import { SETTINGS_SECRET_MASK } from './settings-secret-redaction.js';
+import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
 import {
   firstRejectedDomainMember,
   knownValueDomain,
@@ -54,7 +55,8 @@ import {
 const DEFAULT_OBJECT = 'sys_setting';
 
 /**
- * The execution context `SettingsService`'s own row writes run under (#8030).
+ * The execution context `SettingsService`'s own `sys_setting` reads and writes
+ * run under (#8030, #21913).
  *
  * `sys_setting` is a platform-owned table with platform-owned columns
  * (`value_enc`, `updated_by` are declared `readonly: true`), and this service
@@ -62,10 +64,18 @@ const DEFAULT_OBJECT = 'sys_setting';
  * gates. See {@link SettingsService.upsertRow} for the full argument and for
  * why the field stays `readonly` for everybody else.
  *
+ * The reads ({@link SettingsService.loadRows}, `upsertRow`'s existence probe)
+ * and `upsertRow`'s insert carry it too. They are plumbing: the door in front
+ * of them, when there is one, has already authorized the caller, and
+ * `loadRows` runs on every request's execution-context build. Without it they
+ * reach the data engine with no principal and no system opt-in — the
+ * principal-less hand-off ADR-0096 D5 closes — so the explicit opt-in is what
+ * keeps them working once that hand-off denies.
+ *
  * Frozen so a downstream engine adapter cannot mutate the service's posture by
  * writing into the bag it was handed.
  */
-const SETTINGS_SYSTEM_WRITE_CONTEXT = Object.freeze({ isSystem: true as const });
+const SETTINGS_SYSTEM_CONTEXT = Object.freeze({ isSystem: true as const });
 
 /**
  * Value-bearing specifier types — drives which entries we expect to
@@ -2321,9 +2331,11 @@ export class SettingsService {
       // uniformly across global/tenant/user without log noise. Per-tenant
       // isolation for `tenant`-scope rows is still enforced by the engine
       // once an ExecutionContext.tenantId is plumbed through (Phase 2+).
+      // The explicit system opt-in: see SETTINGS_SYSTEM_CONTEXT.
       const rows = await this.engine.find(this.objectName, {
         where,
         bypassTenantAudit: true,
+        context: SETTINGS_SYSTEM_CONTEXT,
       } as any);
       return rows.map((r) => ({
         namespace: r.namespace,
@@ -2449,22 +2461,41 @@ export class SettingsService {
   private async upsertRow(row: SettingsRow): Promise<string | null> {
     if (this.engine) {
       const { where, bypass } = this.rowIdentity(row);
+      // All three engine calls carry the explicit system opt-in
+      // (SETTINGS_SYSTEM_CONTEXT): the probe and the insert for the same
+      // reason as the update below, and none of them relies on a missing
+      // principal to pass the security middleware.
       const existing = await this.engine.find(this.objectName, {
         where,
         limit: 1,
         ...bypass,
+        context: SETTINGS_SYSTEM_CONTEXT,
       } as any);
       if (existing[0]) {
         const previousEnc = (existing[0] as { value_enc?: unknown }).value_enc;
         await this.engine.update(this.objectName, {
           where,
           data: { ...row },
-          context: SETTINGS_SYSTEM_WRITE_CONTEXT,
+          context: SETTINGS_SYSTEM_CONTEXT,
           ...bypass,
         } as any);
         return SettingsService.handleOf(previousEnc);
       }
-      await this.engine.insert(this.objectName, { ...row }, bypass as any);
+      // Under the opt-in the engine no longer checks that a user-scope row's
+      // `user_id` names a user, so the service keeps that refusal before the
+      // insert (see assertUserReferenceResolves). The update branch above was
+      // already a system write and is unchanged.
+      const engine = this.engine;
+      await assertUserReferenceResolves(
+        async (id) => (await engine.find(USER_OBJECT, { where: { id }, limit: 1, context: SETTINGS_SYSTEM_CONTEXT }))[0],
+        {
+          object: this.objectName,
+          field: 'user_id',
+          label: registeredLabel(engine, { object: this.objectName, field: 'user_id' }, 'User'),
+        },
+        row.user_id,
+      );
+      await this.engine.insert(this.objectName, { ...row }, { ...bypass, context: SETTINGS_SYSTEM_CONTEXT } as any);
       return null;
     }
     const idx = this.memoryIndexOf(row);

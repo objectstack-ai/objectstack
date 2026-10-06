@@ -75,6 +75,26 @@ export function dispatcherSweepOptions(
 
 
 /**
+ * [#21913] The execution context the dispatcher's CLAIM path runs under: the
+ * explicit system opt-in, carried by every read and write
+ * `SqlNotificationOutbox.claim` / `claimDigest` / `reapExpired` and
+ * `SqlHttpOutbox.claim` / `reapExpired` issue.
+ *
+ * The warrant is {@link dispatcherSweepOptions}'s, read for authorization
+ * instead of tenancy: no request, session or principal exists on the
+ * `setInterval` tick that reaches these sites, so no caller's grants could
+ * decide them — the tick is the platform acting for itself. Without it they
+ * reach the data engine with no principal and no system opt-in, which is the
+ * principal-less hand-off ADR-0096 D5 closes; a deny there would stall every
+ * queue.
+ *
+ * ⛔ Never on `redeliver`: it is request-reachable and threads the caller's
+ * tenant, the line this file draws for `bypassTenantAudit` too.
+ */
+export const DISPATCHER_SYSTEM_CONTEXT = { isSystem: true } as const;
+
+
+/**
  * The write options for a dispatcher **`ack`** — the single-record
  * (`multi: false`) write that records one delivery attempt's outcome on
  * `SqlHttpOutbox.ack`.

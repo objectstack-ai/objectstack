@@ -82,6 +82,17 @@ type DataEngineLike = Partial<
 const DS_META_TYPE = 'datasource';
 const SYS_METADATA = 'sys_metadata';
 
+/**
+ * [#21913] The execution context every `sys_metadata` read and write below runs
+ * under: the explicit system opt-in. These helpers are the platform persisting
+ * its own runtime-datasource records — at boot ({@link loadDatasourceRows}), on
+ * cluster convergence ({@link loadDatasourceRow}) and behind the datasource
+ * admin doors, which authorize the caller before any of them runs. None of them
+ * may rely on a missing principal to pass the security middleware's
+ * principal-less hand-off, which ADR-0096 D5 closes.
+ */
+const SYSTEM_CTX = { isSystem: true } as const;
+
 function newMetaId(): string {
   return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
@@ -91,14 +102,16 @@ function newMetaId(): string {
 async function persistDatasourceRow(engine: DataEngineLike | undefined, record: { name: string }): Promise<void> {
   if (!engine?.insert || !engine.findOne) return; // no durable store — in-memory only
   const now = new Date().toISOString();
-  const existing = await engine.findOne(SYS_METADATA, {
-    where: { type: DS_META_TYPE, name: record.name, state: 'active' },
-  });
+  const existing = await engine.findOne(
+    SYS_METADATA,
+    { where: { type: DS_META_TYPE, name: record.name, state: 'active' } },
+    { context: SYSTEM_CTX },
+  );
   if (existing) {
     await engine.update?.(
       SYS_METADATA,
       { metadata: JSON.stringify(record), updated_at: now, version: ((existing.version as number) || 0) + 1, state: 'active' },
-      { where: { id: existing.id } },
+      { where: { id: existing.id }, context: SYSTEM_CTX },
     );
   } else {
     await engine.insert(SYS_METADATA, {
@@ -111,21 +124,25 @@ async function persistDatasourceRow(engine: DataEngineLike | undefined, record: 
       version: 1,
       created_at: now,
       updated_at: now,
-    });
+    }, { context: SYSTEM_CTX });
   }
 }
 
 async function deleteDatasourceRow(engine: DataEngineLike | undefined, name: string): Promise<void> {
   if (!engine?.findOne) return;
-  const existing = await engine.findOne(SYS_METADATA, { where: { type: DS_META_TYPE, name, state: 'active' } });
+  const existing = await engine.findOne(
+    SYS_METADATA,
+    { where: { type: DS_META_TYPE, name, state: 'active' } },
+    { context: SYSTEM_CTX },
+  );
   if (!existing) return;
-  if (engine.delete) await engine.delete(SYS_METADATA, { where: { id: existing.id } });
-  else await engine.update?.(SYS_METADATA, { state: 'inactive' }, { where: { id: existing.id } });
+  if (engine.delete) await engine.delete(SYS_METADATA, { where: { id: existing.id }, context: SYSTEM_CTX });
+  else await engine.update?.(SYS_METADATA, { state: 'inactive' }, { where: { id: existing.id }, context: SYSTEM_CTX });
 }
 
 async function loadDatasourceRows(engine: DataEngineLike | undefined): Promise<Array<Record<string, unknown>>> {
   if (!engine?.find) return [];
-  const rows = await engine.find(SYS_METADATA, { where: { type: DS_META_TYPE, state: 'active' } });
+  const rows = await engine.find(SYS_METADATA, { where: { type: DS_META_TYPE, state: 'active' } }, { context: SYSTEM_CTX });
   const out: Array<Record<string, unknown>> = [];
   for (const r of rows ?? []) {
     const raw = (r as { metadata?: unknown }).metadata;
@@ -163,7 +180,11 @@ async function loadDatasourceRow(
   name: string,
 ): Promise<StoredDatasource | undefined> {
   if (!engine?.findOne) return undefined;
-  const row = await engine.findOne(SYS_METADATA, { where: { type: DS_META_TYPE, name, state: 'active' } });
+  const row = await engine.findOne(
+    SYS_METADATA,
+    { where: { type: DS_META_TYPE, name, state: 'active' } },
+    { context: SYSTEM_CTX },
+  );
   const raw = (row as { metadata?: unknown } | null | undefined)?.metadata;
   if (raw == null) return undefined;
   let parsed: Record<string, unknown>;
