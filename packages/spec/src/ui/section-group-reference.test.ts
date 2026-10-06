@@ -83,7 +83,7 @@ function at(issues: Issue[], path: Array<string | number>): Issue {
   return issue!;
 }
 
-describe('record:details section — the field-group reference form (#13855)', () => {
+describe('record:details section — the field-group reference form, members derived from the group', () => {
   it('accepts a group reference and CARRIES THE KEY THROUGH the parse', () => {
     const parsed = detailsAccept({ sections: [{ group: 'contact_info' }] });
     const sections = parsed.sections as Array<Record<string, unknown>>;
@@ -178,7 +178,7 @@ describe('record:details section — the field-group reference form (#13855)', (
   });
 });
 
-describe('form.sections — the field-group reference form (#13855)', () => {
+describe('form.sections — the field-group reference form, members derived from the group', () => {
   it('accepts a group reference and carries the key through transform AND fold', () => {
     // The value has to survive `FormSectionSchema`'s `.transform`, the form
     // view's `.superRefine`, and the `groups → sections` `.overwrite()` fold.

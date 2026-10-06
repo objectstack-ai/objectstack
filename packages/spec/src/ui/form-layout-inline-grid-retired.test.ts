@@ -58,7 +58,7 @@ const DOORS: readonly Door[] = [
     layoutPath: ['layout'],
   },
   {
-    name: "ComponentPropsMap['object-form'] (the #5068 props gate's dispatch)",
+    name: "ComponentPropsMap['object-form'] (the props gate's dispatch)",
     parse: (layout) => ComponentPropsMap['object-form'].safeParse({ objectName: 'crm_lead', layout }),
     layoutPath: ['layout'],
   },
@@ -86,7 +86,7 @@ const DOORS: readonly Door[] = [
   },
 ];
 
-describe('form `layout` — the retired arms are refused with the prescription (#20221)', () => {
+describe('form `layout` — the retired arms are refused with the prescription', () => {
   for (const door of DOORS) {
     describe(door.name, () => {
       it("'grid' → refused, prescribing 'vertical' and naming `columns` for multi-column", () => {
@@ -138,7 +138,7 @@ describe('form `layout` — the retired arms are refused with the prescription (
   });
 });
 
-describe(`D2 conversion \`${CONVERSION_ID}\` (#20221)`, () => {
+describe(`D2 conversion \`${CONVERSION_ID}\``, () => {
   const conversion = CONVERSIONS_BY_MAJOR[18]!.find((c) => c.id === CONVERSION_ID);
 
   it('is registered under protocol 18 and retired from the load path', () => {
@@ -217,7 +217,7 @@ describe(`D2 conversion \`${CONVERSION_ID}\` (#20221)`, () => {
   });
 });
 
-describe('D3: the family entry and the chain step are registered (#20221)', () => {
+describe('D3: the family entry and the chain step are registered', () => {
   const step = MIGRATIONS_BY_MAJOR[18]!;
 
   it(`the protocol-18 step wires \`${CONVERSION_ID}\``, () => {

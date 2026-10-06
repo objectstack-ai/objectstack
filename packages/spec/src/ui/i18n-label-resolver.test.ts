@@ -278,7 +278,7 @@ const PARITY_VECTORS: readonly ParityVector[] = [
   },
 ];
 
-describe('resolveI18nLabel — rule parity with objectui pickLocalized (#6765 / #6761 ruling B)', () => {
+describe('resolveI18nLabel — rule parity with objectui pickLocalized (ruled: one shared resolver, on the server)', () => {
   describe('the vector table really is the reference\'s behaviour', () => {
     it.each(PARITY_VECTORS)('$limb', ({ label, locale, pick }) => {
       // Asserted against the copied reference FIRST. If this row is wrong, the
@@ -326,7 +326,7 @@ describe('resolveI18nLabel — the producer-facing return shape', () => {
     expect(resolveI18nLabel({ en: '' }, 'en')).toBe('');
   });
 
-  it('composes with `??` into the producer call shape #6761 needs', () => {
+  it('composes with `??` into the producer call shape the dataset compiler needs', () => {
     // `dataset-compiler.ts:374/406` today: `typeof d.label === 'string' ? d.label : d.name`,
     // which publishes the MACHINE NAME as a display title for a map label.
     const dimension = { name: 'owner', label: { en: 'Owner', 'zh-CN': '负责人' } as I18nLabel };
@@ -337,7 +337,7 @@ describe('resolveI18nLabel — the producer-facing return shape', () => {
   });
 });
 
-describe('resolveI18nLabel — the rule departures converged with objectui#3907; one departure survives', () => {
+describe('resolveI18nLabel — the rule departures converged once objectui read only own, string-valued entries; one departure survives', () => {
   // Before objectui#3907 (landed as objectui PR #4359) this module's rule
   // documented two DELIBERATE narrowings of the reference. #4359 landed the
   // same two guards upstream, so the copied reference now answers identically
@@ -372,7 +372,7 @@ describe('resolveI18nLabel — the rule departures converged with objectui#3907;
     expect(resolveI18nLabel(offSpec, 'zh-CN')).toBe('Owner');
   });
 
-  it('refuses an off-contract scalar rather than stringifying it — the one departure objectui#3907 did NOT touch', () => {
+  it('refuses an off-contract scalar rather than stringifying it — the one departure the objectui map-limb fix did NOT touch', () => {
     // `pickLocalized` accepts `unknown` and stringifies numbers/booleans
     // (`pickLocalized(42, 'en')` is `'42'`). This resolver's parameter is the
     // declared `I18nLabel`, so the shapes below are type errors — the
@@ -388,7 +388,7 @@ describe('resolveI18nLabel — the rule departures converged with objectui#3907;
   });
 });
 
-describe('resolveI18nLabel — the type signature refuses the calls that caused #6761', () => {
+describe('resolveI18nLabel — the type signature refuses the calls behind the dropped dataset label', () => {
   // Reverse verification at the type level. `check:test-typecheck` compiles this
   // file (packages/spec/tsconfig.test.json), so each directive below is a REAL
   // check: delete the argument it guards and tsc goes red on the unused
