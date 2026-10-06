@@ -11,6 +11,7 @@ import type {
 import type { EmailSenderSurface } from './email-channel.js';
 import { RECIPIENT_LOCALE_FIELD, USER_OBJECT, resolveRecipientLocale } from './recipient-locale.js';
 import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
+import { assertActorReferenceResolves } from './actor-reference.js';
 
 /** The object the inbox channel writes rows to. */
 export const INBOX_OBJECT = 'sys_inbox_message';
@@ -215,6 +216,9 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
 
             let inboxId: string | undefined;
             try {
+                // Inside this `try` so an unknown actor answers the SendResult
+                // the engine's own refusal did — see assertActorReferenceResolves.
+                await assertActorReferenceResolves(data, objectName, row.actor_id);
                 const created = await data.insert(objectName, row, { context: FAN_OUT_SYSTEM_CONTEXT });
                 const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
                 inboxId = id != null ? String(id) : undefined;

@@ -39,6 +39,7 @@ import {
 // hand-written sentence, unchanged.
 import { renderValidationMessage } from '@objectstack/spec/system';
 import { SETTINGS_SECRET_MASK } from './settings-secret-redaction.js';
+import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
 import {
   firstRejectedDomainMember,
   knownValueDomain,
@@ -2480,6 +2481,20 @@ export class SettingsService {
         } as any);
         return SettingsService.handleOf(previousEnc);
       }
+      // Under the opt-in the engine no longer checks that a user-scope row's
+      // `user_id` names a user, so the service keeps that refusal before the
+      // insert (see assertUserReferenceResolves). The update branch above was
+      // already a system write and is unchanged.
+      const engine = this.engine;
+      await assertUserReferenceResolves(
+        async (id) => (await engine.find(USER_OBJECT, { where: { id }, limit: 1, context: SETTINGS_SYSTEM_CONTEXT }))[0],
+        {
+          object: this.objectName,
+          field: 'user_id',
+          label: registeredLabel(engine, { object: this.objectName, field: 'user_id' }, 'User'),
+        },
+        row.user_id,
+      );
       await this.engine.insert(this.objectName, { ...row }, { ...bypass, context: SETTINGS_SYSTEM_CONTEXT } as any);
       return null;
     }

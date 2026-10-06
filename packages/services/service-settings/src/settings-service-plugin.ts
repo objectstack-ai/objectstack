@@ -22,6 +22,7 @@ import type { SettingsAuditWriter, SettingsEngine, SettingsSecretStore } from '.
 import type { CryptoAdapter } from './crypto-adapter.js';
 import { LocalCryptoProvider } from './local-crypto-provider.js';
 import { buildConfigChangeAuditSink } from './config-change-audit.js';
+import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import {
   settingsObjects,
@@ -476,6 +477,18 @@ export function buildSettingAuditWriter(
   return {
     write: async (entry) => {
       try {
+        // Under the opt-in below the engine no longer checks that `actor_id`
+        // names a user, so the writer keeps that refusal; this `catch` reports
+        // it exactly as it reported the engine's (see assertUserReferenceResolves).
+        await assertUserReferenceResolves(
+          (id) => eng.findOne(USER_OBJECT, { where: { id }, fields: ['id'] }, { context: { isSystem: true } }),
+          {
+            object: 'sys_setting_audit',
+            field: 'actor_id',
+            label: registeredLabel(eng, { object: 'sys_setting_audit', field: 'actor_id' }, 'Actor'),
+          },
+          entry.actorId ?? null,
+        );
         await eng.insert('sys_setting_audit', {
           namespace: entry.namespace,
           key: entry.key,

@@ -47,6 +47,8 @@ function recordingEngine() {
   const engine = {
     async find(object: string, query: any, options?: any) {
       calls.push({ verb: 'find', object, context: readContext(query, options) });
+      // The user-scope insert first proves its `user_id` names a user (#21913).
+      if (object === 'sys_user') return [{ id: query?.where?.id }];
       const hits = rows.filter((r) => matches(r, query?.where ?? {}));
       return typeof query?.limit === 'number' ? hits.slice(0, query.limit) : hits;
     },
@@ -84,8 +86,10 @@ describe('[#21913] SettingsService engine calls carry the explicit system opt-in
     // the reads ran, and the write took the insert branch.
     expect(onSettings.filter((c) => c.verb === 'find').length).toBeGreaterThanOrEqual(3);
     expect(onSettings.filter((c) => c.verb === 'insert')).toHaveLength(1);
-    expect(onSettings).toHaveLength(calls.length);
-    for (const call of onSettings) {
+    // …and the insert's user-reference probe ran too, under the same opt-in.
+    expect(calls.filter((c) => c.object === 'sys_user')).toHaveLength(1);
+    expect(onSettings.length + 1).toBe(calls.length);
+    for (const call of calls) {
       expect(call.context, `${call.verb} on ${call.object}`).toEqual({ isSystem: true });
     }
   });
