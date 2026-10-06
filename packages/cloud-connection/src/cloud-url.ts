@@ -52,9 +52,12 @@ export function resolveCloudUrl(explicit?: string | null): string {
  *
  * That test conflates two opposite deployments, and the conflation is not
  * theoretical — it is what every CLI-served runtime looks like. `''` is also
- * how a host says **"this runtime IS the cloud"** (same origin), which
+ * how a host says **"keep requests on this origin"**, which
  * `RuntimeConfigPlugin`'s constructor special-cases before it ever calls the
- * resolver. Measured on `main`: `Serve.RUNTIME_CONFIG_OPTIONS` passes
+ * resolver. That says where requests go, not who serves them: the runtime may
+ * serve the catalog itself or proxy a control plane it does not name, so `''`
+ * reads neither as "this runtime is the cloud" nor as "there is no upstream".
+ * Measured on `main`: `Serve.RUNTIME_CONFIG_OPTIONS` passes
  * `controlPlaneUrl: ''` on **both** the cloud-connected arm and the air-gapped
  * arm of the CLI's marketplace wiring, so the resolved URL carries no posture
  * information whatsoever on the product path. A posture read built on it would
