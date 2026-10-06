@@ -2680,6 +2680,108 @@
           "ref": "#sweep-2026-08-30"
         }
       ]
+    },
+    {
+      "id": "platform-core.settings-audit-secret-fingerprint",
+      "title": "The settings audit trail keeps no fingerprint of a secret-valued setting that a reader can match offline: both ledgers record the platform's keyed digest or none, never the value or an unkeyed hash, so a caller who can only read the audit rows learns that the secret changed and nothing about its value",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): writes the secret and reads both audit ledgers",
+        "a caller who can READ the audit rows but holds no server key: the reader this rule protects against. The rows are the same bytes for every reader, so the run plays this reader by checking the captured rows OFFLINE, with nothing but the value it wrote"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the settings service wired with a crypto provider and the sys_secret store, which is the stock wiring: SettingsServicePlugin binds both on kernel:ready (the same requirement platform-core.settings-hub-roundtrip names)",
+          "an encrypted settings specifier to write: mail.api_key (type 'password', encrypted: true, mail.manifest.ts), written with provider 'resend' so the manifest's validator accepts the patch",
+          "plugin-audit mounted, so the generic ledger (sys_audit_log) exists. The per-key ledger (sys_setting_audit) is the settings service's own and is always there"
+        ],
+        "knownGaps": [
+          "the no-keyed-digest arm is not reachable on a stock boot. A host that builds the settings service with only a CryptoAdapter, or a crypto provider that refuses a keyed digest, records the write with NO fingerprint (sys_setting_audit.new_hash null, the bare encrypted marker in sys_audit_log) and warns once per key, and the write itself still lands. Score that arm from the unit pin (automated.ref); ⛔ never build a custom host to reach it",
+          "audit rows written before this rule landed keep their old fingerprint, and rotating the data key changes every later fingerprint of the same value. Judge only rows the run itself writes, against one key"
+        ]
+      },
+      "steps": [
+        "generate a fresh random value V1 for this run (never a value used anywhere else). As admin, PUT /api/settings/mail { provider: 'resend', api_key: V1, from_email: 'ops@example.com' }",
+        "read the per-key ledger: GET /api/v1/data/sys_setting_audit filtered to namespace=mail and key=api_key; capture the newest row (action set, encrypted true, new_hash)",
+        "read the generic ledger: GET /api/v1/data/sys_audit_log filtered to action=config_change; capture the newest row for mail.api_key (object_name 'sys_setting'; new_value is a JSON string carrying namespace, key, scope and digest; metadata carries encrypted: true)",
+        "OFFLINE, with no server key: compute the SHA-256 hex of V1 (bare, and with a 'sha256:' prefix) and search both captured rows, every field, for it and for V1 itself",
+        "write V1 again, then a different value V2, then V1 a third time; re-read both ledgers and compare the fingerprints of the three writes",
+        "reset the key: PUT /api/settings/mail { provider: 'log', api_key: null } (a null value is the reset; 'log' needs no api_key), then read the reset rows",
+        "control: write the NON-secret key mail.from_email and compute OFFLINE the SHA-256 of its canonical JSON (the quoted string). Its rows must carry that unkeyed digest. This proves step 4's offline search WOULD have found an unkeyed digest, and that the keyed rule is scoped to secret-valued keys"
+      ],
+      "acceptance": [
+        {
+          "clause": "a secret-valued setting's write records on BOTH ledgers a fingerprint of the keyed shape hmac-sha256 followed by 64 hex digits: sys_setting_audit.new_hash, and the digest inside sys_audit_log's config_change new_value (inside the encrypted marker). Neither row carries the value",
+          "oracle": "api",
+          "verify": "new_hash matches the shape 'hmac-sha256:' + 64 lowercase hex; the config_change row's new_value.digest is the encrypted marker wrapping that same keyed digest; neither row, in any field, contains V1",
+          "evidence": "both captured rows, quoted in full"
+        },
+        {
+          "clause": "a reader of the audit rows who holds no server key cannot confirm a guess: no fingerprint in either row can be reproduced from the value alone. The offline SHA-256 of V1, with or without the sha256 prefix, matches nothing in either row",
+          "oracle": "api",
+          "verify": "the step 4 offline search over both rows finds no hit, AND the step 7 control's offline digest DOES match the non-secret row. Without the control, a no-hit proves nothing about the search",
+          "evidence": "the offline digest values, the two secret rows, and the matching control row"
+        },
+        {
+          "clause": "the keyed fingerprint still answers 'did the value change, and back to what?': equal values carry equal fingerprints, different values different ones",
+          "oracle": "api",
+          "verify": "the fingerprints of writes 1 and 3 (both V1) are equal on each ledger, and differ from write 2's (V2)",
+          "evidence": "the three fingerprints per ledger"
+        },
+        {
+          "clause": "a reset records no fingerprint: the reset row carries new_hash null on sys_setting_audit, and the config_change row carries no new_value",
+          "oracle": "api",
+          "verify": "the reset rows: sys_setting_audit action 'reset' with new_hash null; sys_audit_log config_change new_value null",
+          "evidence": "the two reset rows"
+        },
+        {
+          "clause": "non-secret settings are unchanged: a non-encrypted key keeps the unkeyed digest of its canonical JSON on both ledgers. The keyed rule applies to secret-valued keys only",
+          "oracle": "api",
+          "verify": "mail.from_email's rows carry the SHA-256 of the quoted JSON string, computed offline in step 7",
+          "evidence": "the control rows and the offline digest"
+        },
+        {
+          "clause": "the no-keyed-digest arm records no fingerprint, warns once per key, and never refuses the write: never an unkeyed fallback, and a ledger never vetoes a settings save",
+          "oracle": "test",
+          "verify": "run pnpm --filter @objectstack/service-settings exec vitest run src/settings-audit-secret-digest.test.ts: the cases 'legacy inline-adapter path with no provider records no fingerprint and reports it once' and 'a provider that refuses a keyed digest leaves the write intact and records no fingerprint' pass (the stock boot cannot reach this arm, see knownGaps)",
+          "evidence": "the vitest output naming both cases"
+        }
+      ],
+      "negative": [
+        "an unkeyed digest of a secret-valued setting (a plain SHA-256 of the value, with or without a prefix) on EITHER ledger is a FAIL. Anyone who can read the audit rows could confirm a guessed value offline, and settings secrets are short, guessable values",
+        "the plaintext of a secret-valued setting in any field of either ledger is a FAIL",
+        "a host with no keyed digest falling back to an unkeyed one is a FAIL; the rule is to record no fingerprint",
+        "a secret write REFUSED because its audit fingerprint could not be computed is a FAIL: the audit trail never vetoes a settings save",
+        "a no-hit offline search with no positive control (step 7) is not a pass of acceptance[1]: it does not show that the search would have found an unkeyed digest"
+      ],
+      "traps": [
+        "seed-data-thin"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-settings/src/settings-audit-secret-digest.test.ts (7 cases: 'records the provider keyed digest on both ledgers, not the unkeyed hash of the value' · 'is stable for equal values and distinct for different ones' · 'records no fingerprint on a reset' · the two legacy inline-adapter cases · the refusing-provider case · 'keep the unkeyed adapter digest of the canonical JSON, unchanged' for non-secret settings)"
+      },
+      "source": [
+        "packages/services/service-settings/src/settings-service.ts#secretAuditDigest (one helper supplies a secret write's fingerprint on both write branches, the sys_secret path and the legacy inline-adapter path: the provider's keyedDigest, or null with a once-per-key warn; never the adapter's unkeyed digest)",
+        "packages/services/service-settings/src/config-change-audit.ts#CONFIG_CHANGE_ACTION (the sys_audit_log config_change row: object_name sys_setting, new_value carries namespace/key/scope/digest, never the value; null on a reset)",
+        "packages/spec/src/contracts/crypto-provider.ts#keyedDigest (the contract text: a secret's audit fingerprint comes from keyedDigest and never from digest; with no keyed digest the trail records none)",
+        "packages/services/service-settings/src/manifests/mail.manifest.ts (mail.api_key: type password, encrypted: true)",
+        "#21792 (the maintainer ruling: secret-valued settings are fingerprinted with the keyed digest, never an unkeyed one; non-secret settings unchanged) · PR #21809 (the fix)",
+        "sibling platform-core.settings-hub-roundtrip: its audit clause asserts that a row EXISTS with new_hash set; this item asserts what a secret row's fingerprint may and may not be. One defect is scored on one item"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-06",
+          "change": "new: the settings audit trail had no item. platform-core.settings-hub-roundtrip only asserts that an audit row exists, and #21792 was found outside its clauses. The rule PR #21809 landed under the #21792 ruling is now a stock-runnable item: both ledgers carry the keyed digest for a secret-valued setting, the offline check carries a positive control (the non-secret key's unkeyed digest IS found), equal/different values and the reset are asserted, and the no-keyed-digest arm is scored from the unit pin because a stock boot cannot reach it",
+          "ref": "#21932"
+        }
+      ]
     }
   ]
 }

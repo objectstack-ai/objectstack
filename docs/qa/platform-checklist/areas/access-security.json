@@ -1510,10 +1510,10 @@
     },
     {
       "id": "access-security.share-link-capability-tokens",
-      "title": "Share-link capability tokens: anon resolve renders the record minus redactFields, password/audience gates hold, revoke/expire refuse without leaking",
+      "title": "Share-link capability tokens: anon resolve renders the record minus redactFields, password/audience gates hold, revoke/expire refuse without leaking, the stored password hash never leaves the server, the password travels in the X-Share-Password header, and public answers are never cached",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1541,7 +1541,10 @@
         "mint audience:'signed_in'; anon resolve → 401 SIGN_IN_REQUIRED; mint audience:'email' and resolve with an email OFF the allowlist → refused",
         "DELETE /api/v1/share-links/<idOrToken> (revoke); anon resolve → 410 EXPIRED_OR_REVOKED; mint a short-expiry link and, after it expires, resolve → 410 — the record must never appear",
         "delete the shared record r, then anon resolve the still-live (un-passworded, link_only) token → 404 INVALID_OR_EXPIRED, byte-identical to the answer for an unknown token (fail-closed, #5190: \"that record is gone\" is itself information) — capture it beside an unknown-token resolve for the byte comparison",
-        "GET /api/v1/share-links?object=F&recordId=r as the minter vs a SECOND member — the list returns only the caller's own links"
+        "GET /api/v1/share-links?object=F&recordId=r as the minter vs a SECOND member — the list returns only the caller's own links",
+        "the stored hash never leaves: mint a password-gated link and capture the MINT response, the LIST (GET /api/v1/share-links?object=F&recordId=r as the minter) and a SUCCESSFUL resolve. Search every body for the key password_hash and for any hash-shaped value",
+        "the password travels in a header: resolve the password-gated link with the password ONLY in the X-Share-Password request header (no ?password=). Then send a wrong value in the header, then the right password as ?password= (the compatibility form). Send a CORS preflight for the resolve route from another origin, with Access-Control-Request-Headers: x-share-password",
+        "public answers are never cached: on every public resolve outcome above (200; 401 NEEDS_PASSWORD and WRONG_PASSWORD; 404 for an unknown token; 410 after revoke) and on GET /api/v1/share-links/<token>/messages (a refusal on open-framework showcase, see knownGaps; the refusal is the answer being scored here), read the response HEADERS. Then read the headers of the authenticated create, list and revoke responses"
       ],
       "acceptance": [
         {
@@ -1579,11 +1582,32 @@
           "oracle": "api",
           "verify": "minter's list contains the token; the second member's list for the same object/recordId excludes it (share-links.ts createdBy pin)",
           "evidence": "both list bodies"
+        },
+        {
+          "clause": "the stored password hash never leaves the server: no exit (the mint response, the list, the redemption result) carries password_hash or any form of the stored hash",
+          "oracle": "api",
+          "verify": "none of the captured bodies contains the key password_hash or a hash-shaped value of it (share-link-service.ts withoutPasswordHash is the one exit projection). A client reads a link's password state from the resolve route's NEEDS_PASSWORD answer, as before",
+          "evidence": "the mint, list and resolve bodies, searched in full"
+        },
+        {
+          "clause": "the password is accepted from the X-Share-Password request header, the preferred form because a header stays out of the request URL: header-only with the right password answers 200 and a wrong header value answers 401 WRONG_PASSWORD. The ?password= query form is still accepted. A cross-origin preflight allows the header by default",
+          "oracle": "api",
+          "verify": "the three resolve traces (header right → 200, header wrong → 401 WRONG_PASSWORD, query right → 200) and the preflight's Access-Control-Allow-Headers naming x-share-password (DEFAULT_CORS_ALLOW_HEADERS in plugin-hono-server; a deployment passing its own allowHeaders must add it itself)",
+          "evidence": "the three traces and the preflight response headers"
+        },
+        {
+          "clause": "public share-link answers are never cached: BOTH public routes (/:token/resolve and /:token/messages) answer Cache-Control: no-store and Vary: X-Share-Password on EVERY outcome, success and refusal alike. The authenticated create, list and revoke routes do not carry these headers",
+          "oracle": "api",
+          "verify": "each public response's headers carry exactly Cache-Control: no-store and Vary: X-Share-Password (200, 401 x2, 404, 410, and the messages refusal); the authenticated list response carries neither",
+          "evidence": "the header block of every public response and of the authenticated list response"
         }
       ],
       "negative": [
         "a resolve that returns the record after revoke/expiry, that includes a redactField, or that leaks another user's tokens in the list, is a FAIL",
-        "the /:token/messages branch is ai_conversations-only (Cloud/EE) — a knownGap, not a stock clause; do not tick it on open-framework showcase"
+        "the /:token/messages branch is ai_conversations-only (Cloud/EE) — a knownGap, not a stock clause; do not tick it on open-framework showcase",
+        "password_hash, or any stored form of the share-link password, in a mint, list or resolve body is a FAIL",
+        "a header-only correct password answering 401 NEEDS_PASSWORD is a FAIL: the route ignored the header, so a client is pushed back to putting the password in the URL",
+        "a public share-link response without Cache-Control: no-store, on ANY outcome including a refusal, is a FAIL. A cached answer can serve a password-released record to the next person on a shared browser or proxy"
       ],
       "variants": [
         "audience link_only",
@@ -1593,7 +1617,9 @@
         "redactFields stripped",
         "revoked",
         "expired",
-        "record-gone (fail-closed)"
+        "record-gone (fail-closed)",
+        "password in the X-Share-Password header",
+        "password in ?password= (compatibility)"
       ],
       "traps": [
         "wrong-persona"
@@ -1604,7 +1630,14 @@
         "packages/runtime/src/route-ledger.ts (share-links rows incl. public resolve/messages)",
         "packages/plugins/plugin-sharing/src/objects/sys-share-link.object.ts",
         "ADR-0047, ADR-0111 D8, #5190",
-        "cross-ref access-security.share-link-landing-page — the /s/:token console rendering of this surface (UI half): resolve/password/audience/revoke SEMANTICS are scored HERE, what the page renders of them is scored THERE (one defect, one count)"
+        "cross-ref access-security.share-link-landing-page — the /s/:token console rendering of this surface (UI half): resolve/password/audience/revoke SEMANTICS are scored HERE, what the page renders of them is scored THERE (one defect, one count)",
+        "packages/plugins/plugin-sharing/src/share-link-service.ts#withoutPasswordHash (the one exit projection: every copy of a link that leaves the service drops password_hash)",
+        "packages/plugins/plugin-sharing/src/share-link-routes.ts#SHARE_LINK_PUBLIC_RESPONSE_HEADERS (the plugin mount: no-store + Vary on both public routes; the x-share-password header read)",
+        "packages/runtime/src/domains/share-links.ts#PUBLIC_RESPONSE_HEADERS (the dispatcher mount: the same headers on every public outcome, including a throw outside the body try)",
+        "packages/plugins/plugin-hono-server/src/adapter.ts#DEFAULT_CORS_ALLOW_HEADERS (X-Share-Password in the default preflight allow-list)",
+        "packages/plugins/plugin-sharing/src/share-link-password.ts#hashShareLinkPassword (the stored form is the platform slow password hash; legacy forms still verify and are upgraded on the first successful redemption)",
+        "pins: packages/plugins/plugin-sharing/src/share-link-password.test.ts ('[#21839] the stored hash never leaves the server', '[#21839] how the password travels in', '[#21839] the public routes are never cached') · packages/runtime/src/domains/share-links-public-cache-headers.test.ts ('[#21839] dispatcher public share-link routes are never cached') · packages/plugins/plugin-hono-server/src/hono-plugin.test.ts ('should allow X-Share-Password by default')",
+        "content/docs/protocol/kernel/http-protocol.mdx (X-Share-Password in the allowed request headers) · #21839 · PR #21890"
       ],
       "history": [
         {
@@ -1630,6 +1663,12 @@
           "date": "2026-10-04",
           "change": "A5 record-gone leg and step 7 re-pointed to the measured answer: a deleted record's still-live link resolves 404 INVALID_OR_EXPIRED, byte-identical to an unknown token, never 410 RECORD_GONE (resolveToken's #5190 fail-closed record probe — share-link-service.ts loadRecordForServing — returns null, and the route's row probe in share-links.ts falls through to its one generic refusal, invalidOrExpired). Revoke/expiry legs unchanged (410 EXPIRED_OR_REVOKED). Stale clause found by the 17.7 pre-release runs",
           "ref": "#21735"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-06",
+          "change": "three clauses added for the rules PR #21890 landed (#21839), with a step and a negative each: the stored password hash leaves the server on no exit (mint, list, redemption); the password is accepted from the X-Share-Password header (the ?password= form is still accepted, and the default CORS allow-list carries the header); and both public routes answer Cache-Control: no-store and Vary: X-Share-Password on every outcome, while the authenticated routes do not. The messages route is scored on its refusal, since its success half stays the Cloud/EE knownGap. Existing clauses, steps and indices are unchanged",
+          "ref": "#21932"
         }
       ]
     },

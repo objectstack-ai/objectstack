@@ -666,6 +666,109 @@
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "new item (sweep 2026-08-30, angle 1), authored as a SIBLING of search.console-global-search rather than an extension — writer's call per the register: that item's identity is the GET /api/v1/search record path (hits, grouping, RLS, recents, /search page) and already carries seven clauses, while the palette's other half — the client-side nav corpus (objects/dashboards/pages/reports groups from the active app's navigation), per-type Enter navigation, app switching, theme dispatch, and the evaluateVisibility gate — was wholly uncovered and is a different mechanism (app metadata + client filter, no server search). Grounded in CommandPalette.tsx; the gate-hidden side is blocked(fixture) on stock seeds because no showcase nav item declares a visibility expression and app metadata is not runtime-writable", "ref": "#sweep-2026-08-30" }
       ]
+    },
+    {
+      "id": "search.global-search-skips-unreadable",
+      "title": "Global search (GET /api/v1/search) skips what the caller cannot read instead of failing: an unreadable object is never queried, named or counted; a readable object is searched only on fields the caller may query; row scope still narrows every searched object",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai): the negative control, who sees every object and field",
+        "signed-up member bound to the contributor position via the qa-contributor-bound-member recipe: a strict subset reader of showcase_invoice (invoice_own_rows), refused some objects outright, and refused the admin-only search columns of sys_user"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an object W the member is refused at its own door (GET /api/v1/data/W answers 403 for the member) that holds a row matching the run's term T. Pick W and T on the live boot as admin; ⛔ never assume them. A platform sys_* object is the likely W: an unscoped search sweeps every registered object, the platform's own included",
+          "seeded invoices INV-1001..INV-1012 with INV-1003 invisible to the member, plus one invoice the member creates (as in search.rls-both-personas)",
+          "a searchable field the member may NOT query that holds a value found in no field the member may query. On stock this is one of sys_user's admin-only search columns (role, ban_reason, last_login_ip, measured by #21879 on a fresh boot). A last_login_ip value is a candidate. Confirm the premise as admin before relying on it"
+        ],
+        "provisioning": {
+          "use": "qa-contributor-bound-member",
+          "why": "supplies the one persona every clause rests on: a non-admin whose read set excludes some objects (acceptance[0]-[2]), narrows showcase_invoice to its own rows (acceptance[3]) and excludes some sys_user search columns (acceptance[4]). Run as a seeded demo persona instead, the clauses fail the same way the recipe's own notes record: one is refused at the object gate and the other reads everything"
+        },
+        "knownGaps": [
+          "#21880 (open): a field-narrowed search is not fully governed by the narrowing when the optional pinyin search companion is on (OS_SEARCH_PINYIN_ENABLED). Run acceptance[4] with the flag OFF (the stock default). A hit seen with the flag ON is recorded against #21880, not filed as a new finding",
+          "the two #21880 cases (acceptance[3] row scope on a searched object, acceptance[4] a term only in a hidden field) have no end-to-end pin yet; #21879's dogfood pins object-level skipping only, and the hidden-field narrowing is unit-pinned. A run of this item is their only end-to-end reading until #21880 adds them",
+          "if no stock field satisfies acceptance[4]'s premise (the hidden column holds no value unique to it on this boot), record acceptance[4] blocked(fixture) and score the mechanism from the unit pin. Do not edit sys_user directly to plant one"
+        ]
+      },
+      "steps": [
+        "provision the member (provisioning.use). Premise guards as the member: GET /api/v1/data/W answers 403; GET /api/v1/data/showcase_invoice/<id of INV-1003> is invisible; GET /api/v1/data/sys_user answers 200 (sys_user is readable, only some of its search columns are not)",
+        "positive control as admin: GET /api/v1/search?q=T&objects=W,showcase_invoice hits in W. A W with no matching row proves nothing about skipping",
+        "as the member, an UNSCOPED search: GET /api/v1/search?q=T. Capture the status and the full body text",
+        "as the member, a mixed scope: GET /api/v1/search?q=T&objects=showcase_invoice,W. Then W alone: objects=W; then a name that matches no object: objects=qa_no_such_object. Capture all three bodies",
+        "row scope: as the member, GET /api/v1/search?q=INV&objects=showcase_invoice; as admin, the identical query. Compare the hit sets against each persona's readable rows",
+        "hidden field: as admin, read a sys_user row and pick a value V from an admin-only search column that appears in no column the member may query (premise guard). As admin, GET /api/v1/search?q=V&objects=sys_user must hit (positive control). Then as the member, the identical query",
+        "run the pins: the dogfood file and the metadata-protocol unit file in automated.ref"
+      ],
+      "acceptance": [
+        {
+          "clause": "a member's search over a scope that includes an object they cannot read answers 200 with the readable objects' hits, never a 403 for the whole request; the unreadable object is never named, never hit and never counted (totalObjects counts searched objects only, and no skipped-objects count exists)",
+          "oracle": "api",
+          "verify": "the unscoped member search answers 200; its body text contains neither W's name nor any id of W's rows; totalObjects is the number of objects actually searched",
+          "evidence": "the unscoped response, status and full body"
+        },
+        {
+          "clause": "an explicit objects= naming an unreadable object answers exactly as a name that matches no object: the mixed scope returns the readable object's hits only, and objects=W alone is byte-identical to objects=qa_no_such_object (empty hits, totalObjects 0)",
+          "oracle": "api",
+          "verify": "the mixed body names only showcase_invoice; the W-only body and the no-such-object body are equal",
+          "evidence": "the three bodies"
+        },
+        {
+          "clause": "skipping is not a way around the object gate: W stays refused to the member at its own door, and the administrator still gets W's hits from the identical search",
+          "oracle": "api",
+          "verify": "the member GET /api/v1/data/W is 403 and the admin search hits in W (steps 1 and 2)",
+          "evidence": "the 403 and the admin response"
+        },
+        {
+          "clause": "row scope still narrows a searched object: the member's hits on showcase_invoice are exactly the invoices they can read (their own), INV-1003 is absent, and no count reveals the hidden rows. The admin's identical search returns INV-1003 (#21880 case 1)",
+          "oracle": "api",
+          "verify": "the member's hit ids equal their readable invoice ids; the admin's include INV-1003; no total in the member's body exceeds their readable count",
+          "evidence": "the paired responses and the member's readable-row read"
+        },
+        {
+          "clause": "a term present only in a field hidden from the caller yields no hit: the member's search for V on sys_user answers 200 with no sys_user hit, while sys_user stays readable and searchable on the fields the member may query, and the admin's identical search hits (#21880 case 2)",
+          "oracle": "api",
+          "verify": "member: 200, no hit carrying the row V belongs to; admin: the hit; premise guard and positive control recorded first. Pinyin flag OFF (knownGaps)",
+          "evidence": "the premise read, both search responses, and the flag state"
+        }
+      ],
+      "negative": [
+        "a member's search answered 403 PERMISSION_DENIED for the whole request because one object in scope is unreadable is the defect #21836 fixed: a FAIL",
+        "W's name, a W row id, or a count that includes W anywhere in the member's response is a FAIL: it discloses an object the member cannot read",
+        "any difference between the objects=W answer and the no-such-object answer is a FAIL: it turns the search into an existence oracle",
+        "a hit for a term that appears only in a field hidden from the member is a FAIL (unless the pinyin flag is on, see knownGaps)",
+        "a member search that 403s because the server picked search fields the member may not query is a FAIL of the field-level half: the caller named no field",
+        "running the deny side as admin proves nothing (wrong-persona): every member clause runs as the provisioned member"
+      ],
+      "traps": [
+        "wrong-persona",
+        "seed-data-thin",
+        "auth-state-leak"
+      ],
+      "automated": {
+        "kind": "api",
+        "ref": "packages/qa/dogfood/test/search-skip-unreadable.dogfood.test.ts ('dogfood: global search skips the objects a member cannot read': the walled object refused at its own door, the unscoped search never names it, objects= with it answers the readable hits only and alone equals a no-such-object name, the admin control) + packages/metadata-protocol/src/protocol.search-skip-unreadable.test.ts (12 cases, incl. 'a partial queryable set is handed to the engine as searchFields' and 'an object with NO queryable search field is skipped, unqueried and uncounted'). Row scope (acceptance[3]) and the hidden-field case (acceptance[4]) have no end-to-end pin yet, see knownGaps"
+      },
+      "source": [
+        "packages/metadata-protocol/src/protocol.ts#searchAll (before an object is queried, the security service's canReadObject is asked with the caller's context and a refused object is skipped; each readable object is searched only on getQueryableFields, handed to the engine as searchFields; an object left with none is skipped; a read failure on a readable object, or an admission check that throws, still fails the search)",
+        "packages/rest/src/rest-route-ledger.ts (GET /api/v1/search, the route this item drives)",
+        "examples/app-showcase/src/security/permission-sets.ts#invoice_own_rows (the row scope acceptance[3] reads)",
+        "#21836 (the defect: one unreadable object failed the whole search) · PR #21879 (the fix) · #21880 (the two cases this item adds, and the open pinyin-companion finding)",
+        "siblings: search.console-global-search (the console UI over the same route, with an RLS-parity clause) and search.rls-both-personas (row scope on the /data $search path). This item owns what the global sweep does with objects and fields the caller cannot read"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-06",
+          "change": "new: PR #21879 made global search skip the objects and fields a caller cannot read instead of failing the whole request with 403, and no item asserted it. search.console-global-search drives the same route but only for row-level parity. This item adds the object-level skip (never queried, named or counted; an explicit objects= naming the object answers like no such object; the object still refused at its own door), plus the two cases #21880 lists: row scope still narrows a searched object, and a term only in a field hidden from the caller yields no hit. #21880's open pinyin-companion finding is recorded as a knownGap with the flag-off instruction. The persona reuses the area recipe qa-contributor-bound-member",
+          "ref": "#21932"
+        }
+      ]
     }
   ]
 }

@@ -1987,6 +1987,112 @@
         { "revision": 1, "date": "2026-08-30", "change": "authored in the 2026-08-30 coverage sweep (angle 1): the workspace-switch surface had no item. CORRECTED against source from the register's 'single membership → indicator' hypothesis: the indicator is posture-gated (postureHasOrgWall — group/isolated only), so the stock `single` boot renders NO org chrome at all and the whole matrix needs an OS_TENANCY_POSTURE boot; encoded the three-cell affordance matrix, the deliberate full-document reload, the #4486 cache-drop read-follow proof, group-posture labeling, and the forged-switch refusal", "ref": "#sweep-2026-08-30" },
         { "revision": 2, "date": "2026-10-05", "change": "clause 6 and step 8 re-pointed (assertion defect, #21784 VF4). The switch fails closed, and the defect is not of the authorization class. better-auth 1.7.3's setActiveOrganization (plugins/organization/routes/crud-org) calls adapter.setActiveOrganization(token, null) before it throws 403 USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION, and plugin-auth mounts the route unwrapped (auth-route-ledger 'sdk'). So the active org becomes none, never the foreign org, and 'unchanged' was the wrong assertion. The verifier's wording is used. The verifier's optional follow-up, wrapping the vendor call to keep the previous org, would be a product enhancement, not this item's concern", "ref": "#21797" }
       ]
+    },
+    {
+      "id": "identity-auth.implicit-account-linking-ownership",
+      "title": "Implicit account linking on external sign-in: no implicit link to an unverified local user; after an unlink, implicit sign-in does not re-link; an explicit, signed-in link still works and lifts the refusal; the platform identity provider's exception holds only on its OAuth path",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "anonymous: the external sign-in caller, before it is anyone",
+        "local user U, signed up with email + password and NOT verified. A stock boot never challenges a sign-up, so a fresh sign-up is unverified",
+        "the same user U after verifying their email (the verified-row case)",
+        "U signed in, linking a provider explicitly from account settings",
+        "seeded admin: reads sys_account and sys_user to confirm what was and was not written"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the local OIDC provider runtime fixture that identity-auth.linked-accounts-social carries in its fixtures.requires (proved by run #21845): a localhost authorization-code + PKCE OpenID provider, registered through the auth manager's applyConfigPatch from a scratch app plugin before the first auth request. ⛔ Never committed, never a product change",
+          "that provider's test identity answers with an email EQUAL to U's and email_verified: true. A provider that answers email_verified false is refused by the library's own provider-side check first, and the run then measures that gate, not this one",
+          "a way to verify U's email through the product: the captured-mail verification loop identity-auth.email-verification-loop drives. ⛔ Never by writing sys_user directly"
+        ],
+        "knownGaps": [
+          "the platform identity provider's exception (acceptance[4]) is scored from the unit pin. A live run would need the fixture provider registered under the id objectstack-cloud on the OAuth method, and no run has proved that registration yet",
+          "the operator override account.accountLinking.requireLocalEmailVerified (unset by default; true makes the check strict for every provider; false drops only the verification precondition and keeps the unlink rule) is boot configuration. It is pin-only here, like acceptance[4]",
+          "if the boot offers no drivable email-verification route, acceptance[1] is scored from the pin. Record which of the two the verdict rests on"
+        ]
+      },
+      "steps": [
+        "apply the local OIDC provider fixture (fixtures.requires). Sign up U with email + password (POST /api/v1/auth/sign-up/email). Premise guard: GET /api/v1/auth/get-session as U shows emailVerified false. A verified U makes acceptance[0] prove nothing",
+        "implicit sign-in, unverified: in a fresh browser context (no session), POST /api/v1/auth/sign-in/social { provider: '<the fixture provider id>', callbackURL, errorCallbackURL }, then navigate the browser to the returned URL (full-page navigation, not XHR) and complete the provider round-trip. Capture the final redirect URL",
+        "as admin, read sys_account filtered to user_id = U and provider_id = the fixture provider, and re-read U's emailVerified",
+        "verify U's email through the product (fixtures.requires), then repeat the implicit sign-in: it lands signed in as U, and a sys_account row for the provider exists",
+        "as U, signed in: unlink the provider (POST /api/v1/auth/unlink-account { accountId: the sys_account row id }) and confirm the row is gone. Sign out, then repeat the implicit sign-in from a fresh context",
+        "as U, signed in: link the provider EXPLICITLY (POST /api/v1/auth/link-social { provider, callbackURL } with U's session, then navigate to the returned URL). Confirm the sys_account row is back. Sign out and repeat the implicit sign-in once more",
+        "explicit link for an unverified user: sign up a second unverified local user W (same provider identity re-pointed to W's email), sign in as W and link the provider explicitly through link-social; then re-read W's emailVerified",
+        "run the pin: pnpm --filter @objectstack/plugin-auth exec vitest run src/implicit-account-linking.test.ts"
+      ],
+      "acceptance": [
+        {
+          "clause": "an external sign-in does NOT link implicitly to an existing local user whose email is unverified: the sign-in is refused with error=account_not_linked (the same code the library's own refusal produces), no sys_account row is written, and the local user stays unverified",
+          "oracle": "api",
+          "verify": "the final redirect carries error=account_not_linked; the admin's sys_account read for (U, provider) is empty; U's emailVerified is still false (implicit-account-linking.ts IMPLICIT_LINK_REFUSED)",
+          "evidence": "the final redirect URL, the empty sys_account read, and the emailVerified re-read"
+        },
+        {
+          "clause": "a VERIFIED local user still links implicitly and is signed in, so the rule narrows the unverified case only",
+          "oracle": "api",
+          "verify": "after verification, the implicit sign-in lands on the callbackURL with no error, the session is U's, and the sys_account row exists",
+          "evidence": "the redirect, the get-session read, and the sys_account row"
+        },
+        {
+          "clause": "an unlink is honoured: after U unlinks the provider, an implicit sign-in through it is refused with the same code and does NOT re-create the link, even though U's email is verified",
+          "oracle": "api",
+          "verify": "the post-unlink implicit sign-in redirects with error=account_not_linked and the sys_account read for (U, provider) stays empty",
+          "evidence": "the unlink response, the refused redirect, and the empty read"
+        },
+        {
+          "clause": "an explicit, signed-in link still works and lifts the unlink refusal: link-social with U's session links the provider again, and the next implicit sign-in succeeds. An explicit link is allowed for an unverified user too, and it does not mark that user's email verified",
+          "oracle": "api",
+          "verify": "U's explicit link writes the sys_account row and the following implicit sign-in has no error; W's explicit link writes W's row while W's emailVerified stays false",
+          "evidence": "both explicit-link traces, the following implicit sign-in, and the W emailVerified read"
+        },
+        {
+          "clause": "the platform identity provider (objectstack-cloud) keeps its exception, and only on its OAuth sign-in path: it links to an unverified local row (the environment owner the cloud seeds without a mailbox round-trip). An enterprise SSO provider (sso-oidc / sso-saml) registered under the same id gets no exception. The unlink rule applies to the platform provider too",
+          "oracle": "test",
+          "verify": "the pin passes the cases 'exempts the platform identity provider from the local-verification precondition', 'binds the platform exception to the OAuth sign-in method, not the provider id alone', 'keeps the platform identity provider exception for an unverified owner-seeded row' and 'honours an unlink for every provider, the platform identity provider included'",
+          "evidence": "the vitest output naming the four cases"
+        }
+      ],
+      "negative": [
+        "a sys_account row appearing for an unverified local user after an implicit sign-in, or the caller landing signed in as that user, is a FAIL: it hands the local account to whoever controls the external identity",
+        "a refused implicit link that still flips the local user to verified is a FAIL",
+        "an implicit sign-in that re-creates a link the user removed is a FAIL: it makes the unlink decorative",
+        "an explicit, signed-in link refused for a user whose provider vouches for the email is a FAIL in the other direction: the rule narrows implicit links only",
+        "the platform exception honoured for an SSO provider registered under the same id is a FAIL",
+        "a run whose fixture provider answers email_verified false has measured the provider-side gate; it is not a pass of acceptance[0]",
+        "running the sign-in steps while a session is still active (the previous persona's cookie) measures a link, not a sign-in: use a fresh context for every implicit sign-in"
+      ],
+      "traps": [
+        "auth-state-leak",
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-auth/src/implicit-account-linking.test.ts (the decision table under 'implicit link decision', the vendor configuration pins, and the end-to-end cases under 'implicit link on external sign-in, end to end': unverified refused with no link and no verification flip, verified links, platform exception, operator opt-out, unlink then explicit link, id-token path, generic OIDC by discovery, unlink record durability)"
+      },
+      "source": [
+        "packages/plugins/plugin-auth/src/implicit-account-linking.ts#decideImplicitLink (rule 1: the local row must be verified; rule 2: the platform IdP exception, bound to the provider id AND the oauth sign-in method; rule 3: an unlink is honoured for every provider; the operator override)",
+        "packages/plugins/plugin-auth/src/implicit-account-linking.ts#IMPLICIT_LINK_REFUSED (account_not_linked, byte-identical to the library's own refusal on the callback redirect)",
+        "packages/plugins/plugin-auth/src/implicit-account-linking.ts#PLATFORM_IDP_PROVIDER_ID (objectstack-cloud)",
+        "packages/plugins/plugin-auth/src/implicit-account-linking.ts#recordUnlinkTombstone (the unlink record: written before the unlink, failing it closed; cleared by an explicit link or the user's deletion)",
+        "packages/plugins/plugin-auth/src/implicit-account-linking.ts#refuseImplicitAccountLink (the validateUserInfo enforcement point; an explicit link is told apart by the server-written OAuth state)",
+        "content/docs/permissions/sso.mdx (Linking to an existing account: the three rules and the operator override as published) · content/docs/permissions/authentication.mdx",
+        "#21846 (the maintainer ruling that implicit linking to an unverified local user is a defect to close) · PR #21872 (the fix)",
+        "sibling identity-auth.linked-accounts-social: the EXPLICIT link round-trip and its mine-view; this item owns when a sign-in may link IMPLICITLY"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-06",
+          "change": "new: the checklist had only the explicit link round-trip (identity-auth.linked-accounts-social), which predates the rule. PR #21872 tightened implicit linking on external sign-in. This item asserts the four rules the published docs state: no implicit link to an unverified local user, an unlink honoured, the explicit signed-in link kept, and the platform IdP exception bound to its OAuth path. It reuses linked-accounts-social's local OIDC provider recipe rather than forking one. The platform-IdP clause and the operator override are pin-scored, and knownGaps says why",
+          "ref": "#21932"
+        }
+      ]
     }
   ]
 }
