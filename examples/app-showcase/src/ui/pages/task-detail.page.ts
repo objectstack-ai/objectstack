@@ -5,6 +5,9 @@ import { definePage } from '@objectstack/spec/ui';
 /**
  * Task Detail — a record page that exercises the record-layout component set
  * beyond the basics:
+ *   • `page:header`        — the record title bar: the task's `record_header`
+ *                            actions inline and its `record_more` actions
+ *                            under the ⋯ overflow (see the node below).
  *   • `record:path`        — Salesforce-style status stepper across the task
  *                            lifecycle (Backlog → … → Done).
  *   • `record:alert`       — a conditional banner shown only while the task is
@@ -29,6 +32,38 @@ export const TaskDetailPage = definePage({
       name: 'main',
       width: 'full',
       components: [
+        // The title bar, composed explicitly. A `kind: 'full'` page renders
+        // exactly the nodes it declares, and the header is one of them: with
+        // no `page:header` node the page has no title bar, so neither the
+        // `record_header` nor the `record_more` location has a surface here.
+        // The synthesized default page (and a `kind: 'slotted'` page that
+        // leaves the `header` slot alone) gets one automatically; this page
+        // does not.
+        //
+        // `actions` are action IDS, resolved against `showcase_task`'s own
+        // metadata, and the header still places each by its `locations`:
+        // `record_header` actions render as inline buttons, and an action
+        // declaring `record_more` without `record_header` always goes under
+        // the ⋯ overflow. The list is the object's whole `record_header` /
+        // `record_more` set, which is what the synthesized header would carry;
+        // `test/record-action-location-hosts.test.ts` holds the two equal.
+        // The host still appends its own Edit / Share / Delete after these.
+        // No `title`: the header derives it from the record.
+        {
+          type: 'page:header',
+          properties: {
+            actions: [
+              // record_header — inline buttons.
+              'showcase_mark_done',
+              'showcase_log_time',
+              'showcase_archive_task',
+              // record_more only — the ⋯ overflow (url, api, api).
+              'showcase_open_docs',
+              'showcase_recalc_estimate',
+              'showcase_recalc_selection',
+            ],
+          },
+        },
         {
           type: 'record:path',
           properties: {
