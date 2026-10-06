@@ -5165,19 +5165,57 @@ jobs:
   typecheck-source-gates:
     name: Type Check · source gates
     runs-on: ubuntu-latest
-    # JOB WALL — why every job here has one, the measurement window and the
-    # rule: the `lint` job's `timeout-minutes` comment.
-    # Measured: p50 3.2 / p99 3.5 / max 3.7 minutes (n = 94); 10 is 2.7×
-    # the maximum.
-    # A lane stopped by its wall ends `cancelled`, which the required
-    # `TypeScript Type Check` aggregate at the bottom of this file fails on.
-    timeout-minutes: 10
+    # JOB WALL — why every job here has one and the rule (about 2× the measured
+    # maximum, a 5-minute grain, never below 10, never above the queue's
+    # window): the `lint` job's `timeout-minutes` comment. The four Type Check
+    # lanes size their wall as TWO budgets added, argued here once:
+    #
+    #   wall = CHECKOUT BUDGET (20, on the checkout step) + BODY BUDGET
+    #
+    # The checkout is a full-history fetch (`fetch-depth: 0`, argued at the
+    # step) and its time has nothing to do with the change under test. Window
+    # for every number in the four lane comments: the 300 most recent completed
+    # runs of this workflow, 2026-10-05T15:32Z → 2026-10-06T18:41Z, every
+    # attempt, from the jobs API's step timestamps. Pooled with the same fetch
+    # in governed-surface-guard.yml and ci.yml's Test Core shards over the same
+    # hours, n = 3,459: p50 31 s / p90 119 s / p99 553 s / max 895 s, and 19
+    # more cut off by a 10-minute wall. The shallow checkouts in ci.yml over
+    # the same hours (n = 2,743) never passed 107 s.
+    #
+    # The old 10-minute wall was sized when the checkout took ~30 s, so a slow
+    # fetch spent the gates' budget: in that window 8 runs of this lane ended
+    # `cancelled` at the wall behind a 436–600 s checkout, and the required
+    # aggregate failed each one with no gate run.
+    #
+    # CHECKOUT BUDGET, 20 minutes: 1.3× that 895 s maximum. The rule's 2× would
+    # be 30, but the queue's window binds first: the workspace lane's body
+    # budget is 35, and 35 + 20 = 55 is the cap the `lint` job argues. One
+    # fetch, one budget, the same number on all four lanes.
+    #
+    # BODY BUDGET, 10 minutes: everything after the checkout, successful runs
+    # only (n = 278): p50 2.8 / p99 3.1 / max 3.2 minutes; 2 × 3.2 = 6.4, and
+    # never below 10. 20 + 10 = 30.
+    #
+    # What the required `TypeScript Type Check` aggregate reads; it fails on
+    # anything but `success`:
+    #   - a checkout that ends inside 20 minutes: nothing, the body still has
+    #     its 10;
+    #   - a checkout still running at 20: the step FAILS ("The action
+    #     'Checkout repository' has timed out after 20 minutes."; actions/runner
+    #     `StepsRunner.RunStepAsync` sets `TaskResult.Failed` on a step timeout),
+    #     the gates are skipped, the lane reads `failure`;
+    #   - a later step that hangs: the wall CANCELS the job, the lane reads
+    #     `cancelled`. Actions has no timeout over a group of steps, so after a
+    #     fast checkout a hung gate can run up to the full 30.
+    timeout-minutes: 30
     permissions:
       contents: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        # CHECKOUT BUDGET: the job's wall comment above sizes it.
+        timeout-minutes: 20
         with:
           # The authorable-surface deletion gate (#4650) below anchors on the
           # MERGE BASE of HEAD with origin/main — that is the only anchor under
@@ -5958,19 +5996,22 @@ jobs:
   typecheck-workspace:
     name: Type Check · workspace
     runs-on: ubuntu-latest
-    # JOB WALL — why every job here has one, the measurement window and the
-    # rule: the `lint` job's `timeout-minutes` comment.
-    # Measured: p50 13.0 / p99 16.0 / max 16.0 minutes (n = 86); 2 × 16.0 =
-    # 32, 30 on the grain.
-    # A lane stopped by its wall ends `cancelled`, which the required
-    # `TypeScript Type Check` aggregate at the bottom of this file fails on.
-    timeout-minutes: 30
+    # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET; the split, its window, the
+    # checkout numbers and what the aggregate reads: `typecheck-source-gates`.
+    # Body after the checkout, successful runs (n = 264): p50 11.0 / p99 17.1 /
+    # max 17.9 minutes; 2 × 17.9 = 35.8, 35 on the grain. 20 + 35 = 55, the
+    # cap the `lint` job argues, which is what holds the checkout budget at 20.
+    # No run of this lane hit the old 30 in the window, but 17.9 plus that
+    # 895 s checkout is 32.8: the same exposure, not yet drawn.
+    timeout-minutes: 55
     permissions:
       contents: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        # CHECKOUT BUDGET: `typecheck-source-gates` sizes it.
+        timeout-minutes: 20
         with:
           # The authorable-surface deletion gate (#4650) below anchors on the
           # MERGE BASE of HEAD with origin/main — that is the only anchor under
@@ -6172,18 +6213,21 @@ jobs:
   typecheck-debt:
     name: Type Check · debt ledger
     runs-on: ubuntu-latest
-    # JOB WALL — why every job here has one, the measurement window and the
-    # rule: the `lint` job's `timeout-minutes` comment.
-    # Measured: p50 5.8 / p99 7.4 / max 7.5 minutes (n = 92); 2 × 7.5 = 15.
-    # A lane stopped by its wall ends `cancelled`, which the required
-    # `TypeScript Type Check` aggregate at the bottom of this file fails on.
-    timeout-minutes: 15
+    # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET; the split, its window, the
+    # checkout numbers and what the aggregate reads: `typecheck-source-gates`.
+    # Body after the checkout, successful runs (n = 278): p50 4.4 / p99 7.2 /
+    # max 7.4 minutes; 2 × 7.4 = 14.8, 15 on the grain. 20 + 15 = 35. In the
+    # window the old 15 cancelled this lane twice, behind a 642 s and a 774 s
+    # checkout.
+    timeout-minutes: 35
     permissions:
       contents: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        # CHECKOUT BUDGET: `typecheck-source-gates` sizes it.
+        timeout-minutes: 20
         with:
           # The authorable-surface deletion gate (#4650) below anchors on the
           # MERGE BASE of HEAD with origin/main — that is the only anchor under
@@ -6408,19 +6452,21 @@ jobs:
   typecheck-consumers:
     name: Type Check · consumer gates
     runs-on: ubuntu-latest
-    # JOB WALL — why every job here has one, the measurement window and the
-    # rule: the `lint` job's `timeout-minutes` comment.
-    # Measured: p50 7.7 / p99 10.1 / max 10.1 minutes (n = 87); 2 × 10.1 =
-    # 20.2, 20 on the grain.
-    # A lane stopped by its wall ends `cancelled`, which the required
-    # `TypeScript Type Check` aggregate at the bottom of this file fails on.
-    timeout-minutes: 20
+    # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET; the split, its window, the
+    # checkout numbers and what the aggregate reads: `typecheck-source-gates`.
+    # Body after the checkout, successful runs (n = 271): p50 7.1 / p99 10.5 /
+    # max 11.5 minutes; 2 × 11.5 = 23, 25 on the grain. 20 + 25 = 45. In the
+    # window the old 20 cancelled this lane twice, both in a merge group,
+    # behind a 393 s and a 665 s checkout.
+    timeout-minutes: 45
     permissions:
       contents: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        # CHECKOUT BUDGET: `typecheck-source-gates` sizes it.
+        timeout-minutes: 20
         with:
           # The authorable-surface deletion gate (#4650) below anchors on the
           # MERGE BASE of HEAD with origin/main — that is the only anchor under
