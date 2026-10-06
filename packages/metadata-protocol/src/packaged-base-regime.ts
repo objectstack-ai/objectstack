@@ -77,6 +77,11 @@
  * remedy. The two doors keep their own codes (`NOT_OVERRIDABLE` / 403 here,
  * `DATASOURCE_ADMIN_ERROR` / 400 there); the verdict and the remedy agree.
  *
+ * [#21944] One code-defined datasource has no source file: the host's
+ * `default`, defined by the database the server starts with. The row lists it
+ * under `hostOwned`, and its sentence names that configuration instead of a
+ * `*.datasource.ts` nobody can find. Every other name keeps the source remedy.
+ *
  * The row is also what {@link isOriginGatedType} answers from, for the one
  * removal both the protocol's delete door and the repository's delete gate
  * allow on such a type: deleting a STORED row under a code-defined name. The
@@ -127,6 +132,13 @@ export type PackagedBaseRegimeRow =
         readonly source: string;
         /** The decision record the sentence cites. */
         readonly docs: string;
+        /**
+         * [#21944] Names the HOST defines from its own configuration rather than
+         * from a {@link source} file, each with what defines it. For such a name
+         * the source-file remedy is false — no such file exists, and an artifact
+         * may not declare the name at all — so its sentence names this instead.
+         */
+        readonly hostOwned?: Readonly<Record<string, string>>;
     };
 
 /** The table. Keyed by the canonical (singular) metadata type. */
@@ -159,6 +171,14 @@ export const PACKAGED_BASE_REGIME: Readonly<Record<string, PackagedBaseRegimeRow
         noun: 'Datasource',
         source: '*.datasource.ts',
         docs: 'docs/adr/0062-external-datasource-runtime.md',
+        // [#21944] `default` is the host's primary datasource: the runtime's
+        // DefaultDatasourcePlugin builds it from the database the server is
+        // started with (a URL flag or config, OS_DATABASE_URL, a default-routing
+        // rule, or the unified default file — `resolve-project-database.ts`).
+        // The name is reserved for it: AppPlugin refuses an artifact that
+        // declares `default`, and the datasource-admin service refuses to create
+        // one. So no `*.datasource.ts` declares it, and its remedy says so.
+        hostOwned: { default: "the host's database configuration (the database URL the server starts with)" },
     },
 };
 
@@ -197,12 +217,19 @@ function regimeCPrescription(routes: PackagedBaseRegimeCRoutes): string {
  * origin-gated row's owning source — the only remedy such a type has — and the
  * row's citation.
  */
-function rowPrescription(row: PackagedBaseRegimeRow): string {
+function rowPrescription(row: PackagedBaseRegimeRow, name?: string): string {
     switch (row.regime) {
         case 'C':
             return regimeCPrescription(row.routes);
-        case 'origin-gated':
-            return `Edit the ${row.source} source that declares it and redeploy. See ${row.docs}.`;
+        case 'origin-gated': {
+            const host = name !== undefined && row.hostOwned !== undefined
+                && Object.prototype.hasOwnProperty.call(row.hostOwned, name)
+                ? row.hostOwned[name]
+                : undefined;
+            return host !== undefined
+                ? `It is defined by ${host}: change that configuration and restart the server. See ${row.docs}.`
+                : `Edit the ${row.source} source that declares it and redeploy. See ${row.docs}.`;
+        }
     }
 }
 
@@ -247,7 +274,8 @@ export function isOriginGatedType(type: string): boolean {
  * `flow` 411 / 404, `action` 365 / 358, `permission` 317 / 310, `datasource`
  * 192 / 193 — so a name of up to 88 characters arrives whole for every row
  * (pinned). A `flow`'s sentence is byte-identical to the one the row table
- * replaced (pinned literally).
+ * replaced (pinned literally). [#21944] A row's `hostOwned` name is a fixed,
+ * short name with its own remedy (`default`: under 300 characters whole).
  */
 export function packagedBaseRegimeSentence(
     type: string, name: string, operation: 'save' | 'delete',
@@ -260,5 +288,5 @@ export function packagedBaseRegimeSentence(
             + (operation === 'delete' ? 'removed' : 'edited') + ' at runtime: it is read-only. '
         : `Metadata item '${singular}/${name}' is provided by a code package, and its packaged base is locked `
             + (operation === 'delete' ? `against removal. ` : `against in-place edits. `);
-    return lock + rowPrescription(row);
+    return lock + rowPrescription(row, name);
 }

@@ -1,12 +1,15 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import type { IDatasourceAdminService, IDatasourceDriverFactory } from '../contracts/index.js';
 import type { DatasourceAdminService } from '../datasource-admin-service.js';
 import {
   DatasourceAdminServicePlugin,
   type DatasourceAdminServicePluginOptions,
 } from '../datasource-admin-plugin.js';
+import { registerDatasourceAdminRoutes } from '../admin-routes.js';
+import { ENTITLED_CREDENTIAL, createSessionAuthService, createGrantsEngine } from './entitled-caller.fixture.js';
 
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
@@ -420,5 +423,136 @@ describe('DatasourceAdminServicePlugin: runtime datasource durability', () => {
     expect(data.rows.some((r) => r.name === 'gone')).toBe(true);
     await b.service.removeDatasource('gone');
     expect(data.rows.some((r) => r.name === 'gone')).toBe(false);
+  });
+
+  // [#21922 / #21944] Code wins on collision at the boot restore. The host's
+  // code-datasource set (the kernel service the runtime fills in Phase 1) is
+  // what decides "code" — never the stored row's own `origin`, which the shadow
+  // rows below deliberately assert as `runtime`, the shape an earlier
+  // `/meta` save could leave. That fixture choice is load-bearing: were the row
+  // registered, the slot would read `origin: 'runtime'` and the admin door would
+  // let the edit through, so the refusal below cannot be green by the admin
+  // read's own `origin ?? 'code'` default.
+  describe('[#21922] a stored row never displaces a code datasource at the restore', () => {
+    const CODE_NAMES = 'code-datasource-names';
+    const now = new Date().toISOString();
+    const storedRow = (name: string, body: Record<string, unknown>) => ({
+      id: `meta_${name}`,
+      name,
+      type: 'datasource',
+      scope: 'platform',
+      metadata: JSON.stringify({ name, ...body }),
+      state: 'active',
+      version: 1,
+      created_at: now,
+      updated_at: now,
+    });
+    /** The code twin's stored shadow: another label, another connection, `origin: 'runtime'`. */
+    const SHADOW = { label: 'Shadow', driver: 'postgres', origin: 'runtime', active: true, config: { host: 'shadow-host', database: 'shadow' } };
+    /** What the runtime registered from code, as `AppPlugin.start()` stamps it. */
+    const CODE = { name: 'crm_wh', label: 'Code warehouse', driver: 'postgres', origin: 'code', config: { host: 'code-host', database: 'wh' } };
+
+    /** `sys_metadata` plus a driver registry, and a factory recording each pool it builds. */
+    const harness = async (opts: { codeNames?: Set<string>; codeSlotFirst: boolean; withOptionsLogger?: boolean }) => {
+      const data = Object.assign(fakeSysMetadataEngine(), {
+        drivers: [] as any[],
+      });
+      (data as any).registerDriver = (d: any) => data.drivers.push(d);
+      (data as any).getDriverByName = (n: string) => data.drivers.find((d) => d.name === n);
+      data.rows.push(storedRow('crm_wh', SHADOW));
+      data.rows.push(storedRow('rt_wh', { label: 'Runtime', driver: 'postgres', origin: 'runtime', active: true, config: { host: 'rt-host', database: 'rt' } }));
+      const built: any[] = [];
+      const factory: IDatasourceDriverFactory = {
+        supports: (id: string) => id === 'postgres',
+        create: async (spec) => {
+          built.push(spec);
+          return { connect: async () => {}, disconnect: async () => {} };
+        },
+      };
+      const optionsWarn = vi.fn();
+      const b = await boot({
+        driverFactory: factory,
+        ...(opts.withOptionsLogger ? { logger: { warn: optionsWarn, info: () => {} } } : {}),
+        services: { data, ...(opts.codeNames ? { [CODE_NAMES]: opts.codeNames } : {}) },
+      });
+      const ctxWarn = vi.fn();
+      b.ctx.logger = { warn: ctxWarn, info: () => {} };
+      // `AppPlugin.start()` registering the code definition before this
+      // plugin's start(), or after it — the kernel orders the two by
+      // insertion alone, so both must hold.
+      if (opts.codeSlotFirst) await b.metadata.register('datasource', CODE.name, CODE);
+      await b.plugin.start(b.ctx);
+      return { ...b, data, built, optionsWarn, ctxWarn };
+    };
+
+    /** The admin door, mounted the way `os serve` mounts it, over this boot's service. */
+    const adminDoor = (service: unknown) => {
+      const server = new HonoHttpServer(0);
+      const authService = createSessionAuthService();
+      const grantsEngine = createGrantsEngine();
+      registerDatasourceAdminRoutes(server, {
+        getService: (name: string) =>
+          name === 'auth' ? authService : name === 'objectql' || name === 'data' ? grantsEngine : service,
+      } as any, '/api/v1');
+      return (method: string, path: string, body?: unknown) =>
+        server.getRawApp().fetch(new Request(`http://local/api/v1${path}`, {
+          method,
+          headers: { 'content-type': 'application/json', authorization: ENTITLED_CREDENTIAL },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        }));
+    };
+
+    it('keeps the code definition served, refuses the admin edit, keeps the row, names it, and opens no pool from it', async () => {
+      const b = await harness({ codeNames: new Set(['crm_wh']), codeSlotFirst: true });
+
+      expect(await b.metadata.get('datasource', 'crm_wh')).toEqual(CODE);
+      const listed = await b.service.listDatasources();
+      expect(listed.find((d) => d.name === 'crm_wh')).toMatchObject({ origin: 'code', label: 'Code warehouse' });
+
+      const patch = await adminDoor(b.service)('PATCH', '/datasources/crm_wh', { label: 'Edited at runtime' });
+      const answer = (await patch.json()) as { error?: { code?: string; message?: string } };
+      expect({ status: patch.status, code: answer.error?.code }).toEqual({ status: 400, code: 'DATASOURCE_ADMIN_ERROR' });
+      expect(String(answer.error?.message).startsWith("Datasource 'crm_wh' is code-defined"), answer.error?.message).toBe(true);
+
+      // Kept, not dropped: it is the repair target the `/meta` door removes.
+      expect(b.data.rows.filter((r) => r.name === 'crm_wh')).toHaveLength(1);
+      expect(b.ctxWarn).toHaveBeenCalledTimes(1);
+      expect(String(b.ctxWarn.mock.calls[0][0])).toContain("stored row for 'crm_wh'");
+      expect(String(b.ctxWarn.mock.calls[0][0])).toContain('DELETE /api/v1/meta/datasource/crm_wh');
+
+      // No pool was built from the shadow's connection; the runtime row's was.
+      expect(b.built.map((s) => s.name)).toEqual(['rt_wh']);
+      expect(b.data.drivers.map((d) => d.name)).toEqual(['rt_wh']);
+    });
+
+    it('holds when the code registration lands AFTER the restore: the row is still not registered and no pool opens from it', async () => {
+      const b = await harness({ codeNames: new Set(['crm_wh']), codeSlotFirst: false });
+
+      expect(await b.metadata.get('datasource', 'crm_wh')).toBeUndefined();
+      expect(b.built.map((s) => s.name)).toEqual(['rt_wh']);
+      expect(b.data.rows.filter((r) => r.name === 'crm_wh')).toHaveLength(1);
+    });
+
+    it('a runtime datasource with no code twin still restores, with its pool', async () => {
+      const b = await harness({ codeNames: new Set(['crm_wh']), codeSlotFirst: true });
+
+      expect(await b.metadata.get('datasource', 'rt_wh')).toMatchObject({ name: 'rt_wh', origin: 'runtime', label: 'Runtime' });
+      expect((await b.service.listDatasources()).find((d) => d.name === 'rt_wh')).toMatchObject({ origin: 'runtime' });
+      expect(b.data.drivers.map((d) => d.name)).toContain('rt_wh');
+    });
+
+    it('the warning goes to the host-passed logger when there is one', async () => {
+      const b = await harness({ codeNames: new Set(['crm_wh']), codeSlotFirst: true, withOptionsLogger: true });
+
+      expect(b.optionsWarn).toHaveBeenCalledWith(expect.stringContaining("stored row for 'crm_wh'"));
+      expect(b.ctxWarn).not.toHaveBeenCalled();
+    });
+
+    it('a host that registers no code-datasource set restores every stored row, as before', async () => {
+      const b = await harness({ codeSlotFirst: false });
+
+      expect(await b.metadata.get('datasource', 'crm_wh')).toMatchObject({ origin: 'runtime', label: 'Shadow' });
+      expect(b.ctxWarn).not.toHaveBeenCalled();
+    });
   });
 });

@@ -32,10 +32,13 @@ import {
   BUILTIN_DRIVER_IDS,
   CREDENTIAL_KEY_SPELLINGS,
   CREDENTIAL_URL_QUERY_PARAM_NAMES,
+  DRIVER_ID_ALIASES,
   getDriverConfigSchema,
+  resolveDriverId,
   urlCredentialQueryParams,
   urlUserinfoPassword,
   urlUserinfoUsername,
+  validateDriverConfig,
 } from './driver/index';
 import {
   passthroughSecretPaths,
@@ -614,6 +617,94 @@ describe('refusedCredentialPaths — the schema derivation, walked at depth', ()
     const fallback = new Set(redactableConfigKeys('a-driver-with-no-contract'));
     for (const name of CREDENTIAL_KEY_SPELLINGS) {
       expect(fallback.has(name), name).toBe(true);
+    }
+  });
+});
+
+// The per-driver half of `redactableConfigKeys` resolves a driver's identity
+// through `resolveDriverId`, the resolver its sibling helper
+// `passthroughSecretPaths` and the write door's contract lookup already use
+// (#21955). Every spelling below is DERIVED from the alias table and the
+// resolver's own folding (trim + lower-case), never listed by hand, so a
+// spelling added to the vocabulary is pinned the day it lands.
+describe('driver identity: every accepted spelling of a builtin driver is redacted as that driver', () => {
+  /** The spellings the resolver folds onto one alias: as-is, upper, capitalised, padded. */
+  const variantsOf = (spelling: string): string[] => [
+    spelling,
+    spelling.toUpperCase(),
+    `${spelling.charAt(0).toUpperCase()}${spelling.slice(1)}`,
+    ` ${spelling} `,
+  ];
+  const ACCEPTED = Object.entries(DRIVER_ID_ALIASES).flatMap(([spelling, id]) =>
+    variantsOf(spelling).map((variant) => [variant, id] as const),
+  );
+  /** The driver-specific keys beyond the contract derivation and the contract-less fallback. */
+  const stillWritableOf = (id: string): string[] => {
+    const fallback = new Set(redactableConfigKeys('a-driver-with-no-contract'));
+    const refused = new Set(refusedCredentialKeys(id));
+    return redactableConfigKeys(id).filter((key) => !fallback.has(key) && !refused.has(key));
+  };
+
+  it('each accepted spelling is judged by the write door against its builtin driver contract', () => {
+    // The premise of the pins below: the write door does not treat these as
+    // unknown plugin drivers, so the read door must not either.
+    expect(ACCEPTED.length).toBe(Object.keys(DRIVER_ID_ALIASES).length * 4);
+    for (const [variant, id] of ACCEPTED) {
+      expect(resolveDriverId(variant), JSON.stringify(variant)).toBe(id);
+      expect(validateDriverConfig(variant, {}).known, JSON.stringify(variant)).toBe(true);
+    }
+  });
+
+  it('each accepted spelling answers its canonical driver\'s redactable set, byte-equal', () => {
+    for (const [variant, id] of ACCEPTED) {
+      expect(redactableConfigKeys(variant), JSON.stringify(variant)).toEqual(redactableConfigKeys(id));
+    }
+  });
+
+  it('the still-writable credential key is withheld under each accepted spelling and named as withheld', () => {
+    let judged = 0;
+    for (const [variant, id] of ACCEPTED) {
+      for (const key of stillWritableOf(id)) {
+        const stored = { url: 'file:./fixture.db', [key]: 'fixture-secret' };
+        const { config, redactedKeys } = redactDatasourceConfig(variant, stored);
+        expect(config, JSON.stringify(variant)).toEqual({ url: 'file:./fixture.db' });
+        expect(redactedKeys, JSON.stringify(variant)).toEqual([key]);
+        judged += 1;
+      }
+    }
+    // Population floor: the still-writable class is not empty today, so a
+    // derivation that silently found nothing would fail here instead of
+    // passing over zero spellings.
+    expect(judged).toBeGreaterThan(0);
+  });
+
+  it('control: a canonical spelling withholds the still-writable credential key exactly as before', () => {
+    let judged = 0;
+    for (const id of BUILTIN_DRIVER_IDS as readonly string[]) {
+      for (const key of stillWritableOf(id)) {
+        const { config, redactedKeys } = redactDatasourceConfig(id, { url: 'file:./fixture.db', [key]: 'fixture-secret' });
+        expect(config, id).toEqual({ url: 'file:./fixture.db' });
+        expect(redactedKeys, id).toEqual([key]);
+        judged += 1;
+      }
+    }
+    expect(judged).toBeGreaterThan(0);
+  });
+
+  it('a crafted driver id answers as a driver with no shipped contract: credentials withheld, never a throw', () => {
+    // Every name an object literal inherits. None is a builtin spelling, so
+    // each must resolve to no driver and take the contract-less fallback, not
+    // index an inherited member of the still-writable table.
+    const crafted = Object.getOwnPropertyNames(Object.prototype);
+    expect(crafted.length).toBeGreaterThan(0);
+    const fallback = redactableConfigKeys('a-driver-with-no-contract');
+    for (const name of crafted) {
+      expect(resolveDriverId(name), name).toBeUndefined();
+      expect(() => redactableConfigKeys(name), name).not.toThrow();
+      expect(redactableConfigKeys(name), name).toEqual(fallback);
+      const { config, redactedKeys } = redactDatasourceConfig(name, { host: 'fixture-host', password: 'fixture-secret' });
+      expect(config, name).toEqual({ host: 'fixture-host' });
+      expect(redactedKeys, name).toEqual(['password']);
     }
   });
 });

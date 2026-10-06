@@ -127,6 +127,11 @@ import { getDriverConfigSchema, resolveDriverId } from './driver/config-registry
  * left it writable because the datasource secret binder injects exactly one
  * secret slot and `external.credentialsRef` resolution cannot target a second
  * one; giving it a slot is #8081 scope item 4 and is NOT decided here.
+ *
+ * Keyed by CANONICAL driver id and looked up through {@link resolveDriverId},
+ * exactly like {@link PASSTHROUGH_SECRET_PATHS} below: every spelling the
+ * write door judges against a driver's contract is redacted as that driver,
+ * and an id that resolves to no builtin indexes nothing (#21955).
  */
 const STILL_WRITABLE_CREDENTIAL_KEYS: Record<string, readonly string[]> = {
   turso: ['encryptionKey'],
@@ -370,7 +375,8 @@ export function refusedCredentialKeys(driver: unknown): string[] {
 export function redactableConfigKeys(driver: unknown): string[] {
   const derived = refusedCredentialKeys(driver);
   const canonical = derived.length > 0 ? derived : [...CANONICAL_CREDENTIAL_KEYS];
-  const stillWritable = typeof driver === 'string' ? (STILL_WRITABLE_CREDENTIAL_KEYS[driver] ?? []) : [];
+  const id = resolveDriverId(driver);
+  const stillWritable = id ? (STILL_WRITABLE_CREDENTIAL_KEYS[id] ?? []) : [];
   return [...new Set([...canonical, ...FORMER_CREDENTIAL_ALIASES, ...stillWritable])];
 }
 

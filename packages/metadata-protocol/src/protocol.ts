@@ -16263,28 +16263,35 @@ export class ObjectStackProtocolImplementation implements
      *    never filters package records, and a disabled package still ships the
      *    datasource the runtime registered for it — the artifact-only lookup
      *    answers for a disabled package's items the same way.
+     *  - [#21944] **The host's code-datasource set**, the kernel service
+     *    `'code-datasource-names'`: every datasource name the host registers
+     *    from code, filled by the runtime in Phase 1 (`AppPlugin` with what the
+     *    artifact declares, `DefaultDatasourcePlugin` with the host's own
+     *    `default`). It is how this predicate sees `default`, which no package
+     *    declares — `DefaultDatasourcePlugin` registers it from the host's
+     *    definition, and the datasource-admin service refuses to edit or remove
+     *    it as code-defined. The same set decides the datasource-admin plugin's
+     *    boot restore (#21922), so the two doors read one answer. Read per
+     *    call through the services registry, by name (its producer is
+     *    `@objectstack/runtime`'s `code-datasource-names.ts`, which this
+     *    package does not depend on); absent on a host that composes no
+     *    code-datasource producer, where nothing is added to the packages'
+     *    answer.
      *  - ⛔ **Never the MetadataService slot's `origin`**: a stored row the
-     *    datasource-admin plugin restores at boot overwrites that slot, `origin`
+     *    datasource-admin plugin restored at boot overwrote that slot, `origin`
      *    and all, so the slot answers what was stored last, not what a package
      *    ships. ⛔ **Never a request body's `origin`**: the caller sets it.
      *
      * ## What it does not see
      *
-     *  - **The host's `default` datasource.** No package declares it:
-     *    `DefaultDatasourcePlugin` registers it from the host's own definition,
-     *    in memory, as `origin: 'code'`, and the datasource-admin service
-     *    refuses to edit or remove it as code-defined. The host's code
-     *    datasource set is not readable from this package — the MetadataService
-     *    slot is the unsound source above, the connection service retains no
-     *    origin, and the engine's datasource definitions mix both origins — so
-     *    the `/meta` door still answers for `default` as it did. A named gap,
-     *    not a reading this predicate makes.
-     *  - **A name no package declares** answers false and keeps the
-     *    `runtime-only` intent: a runtime datasource stays creatable, editable
-     *    and removable through this door.
+     *  - **A name neither a package declares nor the host registers from
+     *    code** answers false and keeps the `runtime-only` intent: a runtime
+     *    datasource stays creatable, editable and removable through this door.
      */
     private isDeclaredCodeDatasource(type: string, name: string): boolean {
         if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'datasource') return false;
+        const hostCode = this.getServicesRegistry?.().get('code-datasource-names') as { has?: unknown } | undefined;
+        if (typeof hostCode?.has === 'function' && (hostCode as { has(n: string): boolean }).has(name)) return true;
         const registry = (this.engine as any)?.registry;
         if (typeof registry?.getAllPackages !== 'function') return false;
         for (const record of registry.getAllPackages() as unknown[]) {

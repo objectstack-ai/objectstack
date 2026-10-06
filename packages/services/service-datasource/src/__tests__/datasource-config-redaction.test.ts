@@ -39,7 +39,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { validateDriverConfig, getDriverConfigSchema, BUILTIN_DRIVER_IDS } from '@objectstack/spec/data';
+import { validateDriverConfig, getDriverConfigSchema, BUILTIN_DRIVER_IDS, DRIVER_ID_ALIASES } from '@objectstack/spec/data';
 import {
   redactDatasourceConfig,
   restoreRedactedConfig,
@@ -601,5 +601,79 @@ describe('nested credential positions OFF the passthrough table — the class co
     };
     await service.updateDatasource('vendor_ds', { config: edited });
     expect((records[0].config!.replication as any).url).toBe('postgresql://svc@other-replica/db');
+  });
+});
+
+// Lockstep with the spec fix that makes the per-driver half of
+// `redactableConfigKeys` resolve a driver's identity through `resolveDriverId`
+// (#21955). This door reaches it with no source change: `getDatasource()` and
+// `restoreRedactedConfig` both go through `redactDatasourceConfig`. Spellings
+// are DERIVED from the alias table and the resolver's own folding, never
+// listed by hand.
+describe('every accepted spelling of a builtin driver, at the service door', () => {
+  const variantsOf = (spelling: string): string[] => [
+    spelling,
+    spelling.toUpperCase(),
+    `${spelling.charAt(0).toUpperCase()}${spelling.slice(1)}`,
+    ` ${spelling} `,
+  ];
+  /** The driver-specific keys beyond the contract derivation and the contract-less fallback. */
+  const stillWritableOf = (id: string): string[] => {
+    const fallback = new Set(redactableConfigKeys('a-driver-with-no-contract'));
+    const refused = new Set(refusedCredentialKeys(id));
+    return redactableConfigKeys(id).filter((key) => !fallback.has(key) && !refused.has(key));
+  };
+  const CASES = Object.entries(DRIVER_ID_ALIASES).flatMap(([spelling, id]) =>
+    variantsOf(spelling).flatMap((variant) => stillWritableOf(id).map((key) => ({ variant, key }))),
+  );
+  const spelledRow = (variant: string, key: string): StoredDatasource => ({
+    name: 'spelled_ds',
+    driver: variant,
+    origin: 'runtime',
+    config: { url: 'file:./fixture.db', [key]: 'fixture-secret' },
+  });
+
+  it('getDatasource() withholds the still-writable credential key under each accepted spelling, and names it', async () => {
+    // Population floor: the class is not empty today, so a derivation that
+    // silently found nothing fails here instead of passing over zero rows.
+    expect(CASES.length).toBeGreaterThan(0);
+    for (const { variant, key } of CASES) {
+      const { service } = makeService([spelledRow(variant, key)]);
+      const ds = await service.getDatasource('spelled_ds');
+      expect(ds!.config, JSON.stringify(variant)).toEqual({ url: 'file:./fixture.db' });
+      expect(ds!.redactedConfigKeys, JSON.stringify(variant)).toEqual([key]);
+    }
+  });
+
+  it('an untouched Save restores the stored value under each accepted spelling, so redaction never turns a save into deletion', async () => {
+    for (const { variant, key } of CASES) {
+      const { service, records } = makeService([spelledRow(variant, key)]);
+      // Exactly what the edit form does: GET, then PATCH the config it was given.
+      const read = await service.getDatasource('spelled_ds');
+      expect(read!.config, JSON.stringify(variant)).not.toHaveProperty(key);
+      await service.updateDatasource('spelled_ds', { config: read!.config, label: 'Renamed' });
+      expect(records[0].label).toBe('Renamed');
+      expect(records[0].config, JSON.stringify(variant)).toEqual({ url: 'file:./fixture.db', [key]: 'fixture-secret' });
+    }
+  });
+
+  it('a crafted driver id is read with its credentials withheld, and an untouched Save keeps them', async () => {
+    // Every name an object literal inherits: none is a builtin spelling, so
+    // each answers as a driver with no shipped contract, never with a throw.
+    const crafted = Object.getOwnPropertyNames(Object.prototype);
+    expect(crafted.length).toBeGreaterThan(0);
+    for (const name of crafted) {
+      const { service, records } = makeService([{
+        name: 'crafted_ds',
+        driver: name,
+        origin: 'runtime',
+        config: { host: 'fixture-host', password: 'fixture-secret' },
+      }]);
+      const ds = await service.getDatasource('crafted_ds');
+      expect(ds!.config, name).toEqual({ host: 'fixture-host' });
+      expect(ds!.redactedConfigKeys, name).toEqual(['password']);
+      await service.updateDatasource('crafted_ds', { config: ds!.config });
+      expect(records[0].config, name).toEqual({ host: 'fixture-host', password: 'fixture-secret' });
+    }
   });
 });

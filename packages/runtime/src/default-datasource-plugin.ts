@@ -9,6 +9,7 @@ import {
   type IDatasourceDriverFactory,
 } from '@objectstack/service-datasource';
 import type { SqliteAbsentFileMode } from '@objectstack/driver-sql';
+import { contributeCodeDatasourceNames } from './code-datasource-names.js';
 
 /**
  * DefaultDatasourcePlugin — the `default` datasource as a DECLARATION
@@ -140,6 +141,14 @@ export class DefaultDatasourcePlugin implements Plugin {
   }
 
   init = async (ctx: PluginContext) => {
+    // [#21944] `default` is a code datasource of this host: it joins the
+    // host's code-datasource set here, in Phase 1, before any `start()` — so
+    // the datasource-admin plugin's boot restore never registers a stored row
+    // over it (or opens a pool from one), and the `/meta` door refuses to edit
+    // it as the admin door does. Before the connect, which may throw: whatever
+    // the connect's outcome, `start()` still lists `default` as code below.
+    contributeCodeDatasourceNames(ctx, ['default']);
+
     const connection = new DatasourceConnectionService({
       factory: () => this.factory ?? createDefaultDatasourceDriverFactory({
         dev: this.dev,
