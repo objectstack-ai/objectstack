@@ -46,10 +46,10 @@ export const entry: SemanticMigration = {
     + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
     + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
     + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-    + '`.objectui-sha` = `0abd4f9f8769fc4c19ad2f96707684876f74c09f`, re-read from this tree — '
+    + '`.objectui-sha` = `a58626c88dc85954bd0af24f16ebb69454c03eee`, re-read from this tree — '
     + 'spells resourceLimits.timeout 0 times across '
-    + '7650 tracked files, against lit controls timeout 1360, RuntimeConfig 293 and resourceLimits '
-    + '2 on the same corpus (0 across 7632, and 1360 / 293 / 2, at 9dfaca654; 0 across 7579, and 1351 / 276 / 2, at 2e818d0b5; 0 across 10267, and 1348 / 273 / 2, at ab1879721; 0 across 10071, and 1331 / 273 / 2, at 89cad75d5; 0 across 9912, and 1303 / 273 / 2, at 31971ff1e; 0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
+    + '7754 tracked files, against lit controls timeout 1431, RuntimeConfig 299 and resourceLimits '
+    + '2 on the same corpus (0 across 7650, and 1360 / 293 / 2, at 0abd4f9f8; 0 across 7632, and 1360 / 293 / 2, at 9dfaca654; 0 across 7579, and 1351 / 276 / 2, at 2e818d0b5; 0 across 10267, and 1348 / 273 / 2, at ab1879721; 0 across 10071, and 1331 / 273 / 2, at 89cad75d5; 0 across 9912, and 1303 / 273 / 2, at 31971ff1e; 0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
     + '1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
     + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
     + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. ADR-0087.',
