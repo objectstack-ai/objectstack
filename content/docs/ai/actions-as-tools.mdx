@@ -271,10 +271,9 @@ action into AI only when its logic is safe to run on behalf of anyone the
 capability gate admits.
 
 <Callout type="info">
-**ObjectOS** — the in-product chat routes
-(`/api/v1/ai/assistant/chat`, `/api/v1/ai/agents/:agentName/chat`) resolve the
-authenticated principal from `req.user` — both cookie session
-(`better-auth.session_token`) and Bearer token are handled — and forward it to
+**ObjectOS** — the in-product chat route, `/api/v1/ai/agents/:agentName/chat`,
+resolves the authenticated principal from `req.user` — both cookie session
+(`better-auth.session_token`) and Bearer token are handled — and forwards it to
 `aiService.chatWithTools(...)` as
 `toolExecutionContext: { actor, conversationId, environmentId }`. That threads the
 same RLS context through the runtime's built-in data tools and its
