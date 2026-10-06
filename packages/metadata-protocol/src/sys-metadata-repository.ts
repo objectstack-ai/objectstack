@@ -83,7 +83,7 @@ import type { IObjectQLEngine } from '@objectstack/core';
 // lifecycle gate read, so a third read-only signal added there reaches this
 // door too (that shared-rule argument is the module's whole reason to exist).
 import { isWritablePackage } from './package-writability.js';
-import { packagedBaseRegimePrescription, packagedBaseRegimeSentence } from './packaged-base-regime.js';
+import { isOriginGatedType, packagedBaseRegimePrescription, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 
 /**
  * Canonicalise a driver-materialised timestamp into the ISO-8601 string the
@@ -1891,6 +1891,21 @@ export class SysMetadataRepository implements MetadataRepository {
    *    this name", which the `allowRuntimeCreate` tier already governs — so
    *    the carve-out is scoped to the `override-artifact` intent, which is
    *    precisely the artifact-backed case the ruling names.
+   *
+   * ## [#21899] The origin-gated type, the same lift for a different reason
+   *
+   * An ORIGIN-GATED type (`isOriginGatedType`, `./packaged-base-regime.ts` —
+   * `datasource`: ADR-0126 §3, code-defined read-only, runtime-created free)
+   * does not declare `supportsOverlay`, so the carve-out above never reached
+   * it. It is lifted here on its own ground: the runtime never persists a
+   * code-defined item of the type, so a stored row under its name is never a
+   * layer of it — only residue a runtime write left — and removing it restores
+   * the code definition, the narrowing direction #6960's ruling names. This
+   * gate is reached only with a row (`delete` refuses a missing one with a
+   * conflict); the protocol's delete door answers the row-less removal with
+   * its own refusal before asking here (`originGatedRemovalRefusal`).
+   * `object`, with the same registry flags, is not origin-gated and keeps the
+   * refusal.
    */
   private assertDeleteAllowed(
     ref: { type: string; name: string },
@@ -1900,6 +1915,7 @@ export class SysMetadataRepository implements MetadataRepository {
     if (intent !== 'runtime-only') {
       const singular = PLURAL_TO_SINGULAR[type] ?? type;
       if (OVERLAY_CAPABLE_TYPES.has(singular) || OVERLAY_CAPABLE_TYPES.has(type)) return;
+      if (isOriginGatedType(singular)) return;
     }
     this.assertAllowed(ref, 'delete', intent);
   }

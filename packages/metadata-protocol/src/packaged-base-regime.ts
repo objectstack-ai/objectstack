@@ -63,17 +63,44 @@
  * `skill` / `position` — no sanctioned path is built for them, and a row with no
  * route does not compile ({@link PackagedBaseRegimeCRoutes}).
  *
+ * ## The one origin-gated row
+ *
+ * [#21899] ADR-0126 §3 places `datasource` OUTSIDE the three regimes, and says
+ * how: "origin-gated: code-defined read-only, runtime-created free". A
+ * code-defined datasource has no runtime route at all — no overlay, no clone,
+ * no switch: `DatasourceSchema.origin` (`@objectstack/spec`) declares it
+ * "authored as `*.datasource.ts`, GitOps-owned, read-only in the UI", ADR-0062
+ * ratifies it read-only, and the datasource-admin service refuses to edit or
+ * remove one ("… is code-defined and cannot be edited at runtime."). So its row
+ * carries no routes; it names the source that owns the datasource, and its
+ * sentence states the admin door's verdict in the admin door's words, then that
+ * remedy. The two doors keep their own codes (`NOT_OVERRIDABLE` / 403 here,
+ * `DATASOURCE_ADMIN_ERROR` / 400 there); the verdict and the remedy agree.
+ *
+ * The row is also what {@link isOriginGatedType} answers from, for the one
+ * removal both the protocol's delete door and the repository's delete gate
+ * allow on such a type: deleting a STORED row under a code-defined name. The
+ * runtime registers a code-defined datasource in memory only and never
+ * persists it, so a stored row under its name is never a layer of it — it is
+ * residue a runtime write left — and removing it restores the code definition.
+ *
  * ⛔ No sentence built here names the `OS_METADATA_WRITABLE` hatch. The hatch
  * still opens these locks exactly as before, so which writes are refused does
- * not move — only what the refusal prescribes. ⛔ Nor does any prescribe editing
- * the source and redeploying: the administrator of an installed package cannot
- * do that.
+ * not move — only what the refusal prescribes. ⛔ Nor does a Regime C sentence
+ * prescribe editing the source and redeploying: the administrator of an
+ * installed package cannot do that, and a Regime C type has a runtime route
+ * instead. The origin-gated row has none, so the source is the only remedy
+ * there is to name.
  */
 
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 
-/** An ADR-0126 customization regime a packaged-base refusal speaks for — only the ones it needs today. */
-export type PackagedBaseRegime = 'C';
+/**
+ * An ADR-0126 customization regime a packaged-base refusal speaks for — only the
+ * ones it needs today: Regime C, and the origin-gated posture §3 records for a
+ * type outside the regimes.
+ */
+export type PackagedBaseRegime = 'C' | 'origin-gated';
 
 /**
  * The sanctioned routes a Regime C type's row supplies to its refusal: how to
@@ -86,11 +113,21 @@ export type PackagedBaseRegimeCRoutes =
     | { readonly clone: string; readonly switchOff?: string }
     | { readonly clone?: string; readonly switchOff: string };
 
-/** One type's row: its regime, and the routes that regime names for it. */
-export interface PackagedBaseRegimeRow {
-    readonly regime: PackagedBaseRegime;
-    readonly routes: PackagedBaseRegimeCRoutes;
-}
+/**
+ * One type's row: its regime, and what that regime names for it — a Regime C
+ * type's sanctioned routes, or an origin-gated type's owning source.
+ */
+export type PackagedBaseRegimeRow =
+    | { readonly regime: 'C'; readonly routes: PackagedBaseRegimeCRoutes }
+    | {
+        readonly regime: 'origin-gated';
+        /** The type's noun, opening the sentence the way the type's own admin door opens it. */
+        readonly noun: string;
+        /** The source pattern a code-defined item of the type is authored in. */
+        readonly source: string;
+        /** The decision record the sentence cites. */
+        readonly docs: string;
+    };
 
 /** The table. Keyed by the canonical (singular) metadata type. */
 export const PACKAGED_BASE_REGIME: Readonly<Record<string, PackagedBaseRegimeRow>> = {
@@ -117,6 +154,12 @@ export const PACKAGED_BASE_REGIME: Readonly<Record<string, PackagedBaseRegimeRow
                 + 'or POST /api/v1/data/sys_permission_set with a new name',
         },
     },
+    datasource: {
+        regime: 'origin-gated',
+        noun: 'Datasource',
+        source: '*.datasource.ts',
+        docs: 'docs/adr/0062-external-datasource-runtime.md',
+    },
 };
 
 /** The type's row, read on the canonical type, or `undefined` when it declares no regime. */
@@ -128,37 +171,62 @@ export function packagedBaseRegimeRow(type: string): PackagedBaseRegimeRow | und
 }
 
 /**
- * The PRESCRIPTION half of a regime's refusal, built from the row: for Regime C
- * the row's sanctioned paths in one fixed order — clone first, then the switch —
- * and the citation of the ADR that decided them. Nothing in it reads the type:
- * a flow reads "Clone it …, or switch it off …" because its row has both, an
- * action reads only the switch and a permission set only the clone because
- * theirs have one.
+ * A Regime C row's prescription: its sanctioned paths in one fixed order —
+ * clone first, then the switch — and the citation of the ADR that decided them.
+ * Nothing in it reads the type: a flow reads "Clone it …, or switch it off …"
+ * because its row has both, an action reads only the switch and a permission set
+ * only the clone because theirs have one.
  */
-const PRESCRIPTION_BY_REGIME: Readonly<Record<PackagedBaseRegime, (routes: PackagedBaseRegimeCRoutes) => string>> = {
-    C: (routes) => {
-        // [verb opening the sentence, verb after "or", the rest of the path]
-        const paths: Array<readonly [string, string, string]> = [
-            ...(routes.clone
-                ? [['Clone', 'clone', ` it under a new name to customize it (${routes.clone})`] as const]
-                : []),
-            ...(routes.switchOff ? [['Switch', 'switch', ` it off (${routes.switchOff})`] as const] : []),
-        ];
-        const prescription = paths
-            .map(([opening, following, rest], i) => (i === 0 ? opening : following) + rest)
-            .join(', or ');
-        return `${prescription}. See docs/adr/0126-packaged-metadata-customization-model.md.`;
-    },
-};
+function regimeCPrescription(routes: PackagedBaseRegimeCRoutes): string {
+    // [verb opening the sentence, verb after "or", the rest of the path]
+    const paths: Array<readonly [string, string, string]> = [
+        ...(routes.clone
+            ? [['Clone', 'clone', ` it under a new name to customize it (${routes.clone})`] as const]
+            : []),
+        ...(routes.switchOff ? [['Switch', 'switch', ` it off (${routes.switchOff})`] as const] : []),
+    ];
+    const prescription = paths
+        .map(([opening, following, rest], i) => (i === 0 ? opening : following) + rest)
+        .join(', or ');
+    return `${prescription}. See docs/adr/0126-packaged-metadata-customization-model.md.`;
+}
 
 /**
- * The regime prescription for `type` — the row's sanctioned paths and the
- * ADR-0126 citation, one sentence pair, no opener — or `undefined` when the type
- * declares no regime and the emitter keeps its own remedy.
+ * The PRESCRIPTION half of a regime's refusal, built from the row alone: a
+ * Regime C row's sanctioned paths ({@link regimeCPrescription}), or an
+ * origin-gated row's owning source — the only remedy such a type has — and the
+ * row's citation.
+ */
+function rowPrescription(row: PackagedBaseRegimeRow): string {
+    switch (row.regime) {
+        case 'C':
+            return regimeCPrescription(row.routes);
+        case 'origin-gated':
+            return `Edit the ${row.source} source that declares it and redeploy. See ${row.docs}.`;
+    }
+}
+
+/**
+ * The regime prescription for `type` — the row's remedy and its citation, one
+ * sentence pair, no opener — or `undefined` when the type declares no regime and
+ * the emitter keeps its own remedy.
  */
 export function packagedBaseRegimePrescription(type: string): string | undefined {
     const row = packagedBaseRegimeRow(type);
-    return row ? PRESCRIPTION_BY_REGIME[row.regime](row.routes) : undefined;
+    return row ? rowPrescription(row) : undefined;
+}
+
+/**
+ * [#21899] Is `type` origin-gated (ADR-0126 §3: code-defined read-only,
+ * runtime-created free)? The one removal such a type allows on a code-defined
+ * name is deleting a STORED row under it: the runtime never persists a
+ * code-defined item of the type, so the row is residue a runtime write left,
+ * never a layer of the item, and removing it restores the code definition. Read
+ * by the protocol's delete door and by the repository's delete gate — one row,
+ * so the two cannot disagree about which types this is.
+ */
+export function isOriginGatedType(type: string): boolean {
+    return packagedBaseRegimeRow(type)?.regime === 'origin-gated';
 }
 
 /**
@@ -167,20 +235,30 @@ export function packagedBaseRegimePrescription(type: string): string | undefined
  * `undefined` when the type declares no regime and the emitter keeps its own
  * sentence. Read on the canonical type, and spoken with it.
  *
+ * The lock is the regime's: a Regime C item "is provided by a code package, and
+ * its packaged base is locked"; an origin-gated item "is code-defined and cannot
+ * be edited (removed) at runtime: it is read-only" — the datasource-admin
+ * service's own verdict on the same item, so the two doors onto one code-defined
+ * datasource state one verdict and one remedy.
+ *
  * Kept under the REST door's 500-character client-message bound
  * (`truncateClientMessage`, `packages/rest/src/error-response.ts`), past which
  * the tail is truncated. Characters before the item's name, save / removal:
- * `flow` 411 / 404, `action` 365 / 358, `permission` 317 / 310 — so a name of up
- * to 88 characters arrives whole for every row (pinned). A `flow`'s sentence is
- * byte-identical to the one the row table replaced (pinned literally).
+ * `flow` 411 / 404, `action` 365 / 358, `permission` 317 / 310, `datasource`
+ * 192 / 193 — so a name of up to 88 characters arrives whole for every row
+ * (pinned). A `flow`'s sentence is byte-identical to the one the row table
+ * replaced (pinned literally).
  */
 export function packagedBaseRegimeSentence(
     type: string, name: string, operation: 'save' | 'delete',
 ): string | undefined {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
-    const prescription = packagedBaseRegimePrescription(singular);
-    if (prescription === undefined) return undefined;
-    return `Metadata item '${singular}/${name}' is provided by a code package, and its packaged base is locked `
-        + (operation === 'delete' ? `against removal. ` : `against in-place edits. `)
-        + prescription;
+    const row = packagedBaseRegimeRow(singular);
+    if (row === undefined) return undefined;
+    const lock = row.regime === 'origin-gated'
+        ? `${row.noun} '${name}' is code-defined and cannot be `
+            + (operation === 'delete' ? 'removed' : 'edited') + ' at runtime: it is read-only. '
+        : `Metadata item '${singular}/${name}' is provided by a code package, and its packaged base is locked `
+            + (operation === 'delete' ? `against removal. ` : `against in-place edits. `);
+    return lock + rowPrescription(row);
 }

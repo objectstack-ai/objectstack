@@ -44,7 +44,7 @@ import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
-import { packagedBaseRegimeSentence } from './packaged-base-regime.js';
+import { isOriginGatedType, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 import {
     resolveArtifactLockLayer,
     resolveItemLock,
@@ -15988,8 +15988,9 @@ export class ObjectStackProtocolImplementation implements
      *
      * [#7743] …and it must answer that question about the artifact as SHIPPED,
      * not about how the registry happens to key it. See
-     * {@link isNestedArtifactField} for the one declared type whose artifacts
-     * are not standalone registry items at all.
+     * {@link isNestedArtifactField} and [#21899] {@link isDeclaredCodeDatasource}
+     * for the two declared types whose artifacts are not standalone registry
+     * items at all.
      */
     private isArtifactBacked(type: string, name: string): boolean {
         // `lookupArtifactItem` only returns items whose `_packageId` marks a
@@ -15997,7 +15998,7 @@ export class ObjectStackProtocolImplementation implements
         // excluded), and — via `SchemaRegistry.getArtifactItem` — is immune
         // to plain-key shadows hydrated from overlay rows.
         if (this.lookupArtifactItem(type, name) !== undefined) return true;
-        return this.isNestedArtifactField(type, name);
+        return this.isNestedArtifactField(type, name) || this.isDeclaredCodeDatasource(type, name);
     }
 
     /**
@@ -16041,6 +16042,19 @@ export class ObjectStackProtocolImplementation implements
      * artifact disagree, so widening this to a class would be widening it past
      * what was measured.
      *
+     * [#21899] The census missed one type, and it is a SECOND non-standalone
+     * shape rather than a second nesting: `datasource`. A code-defined
+     * datasource is registered neither standalone nor nested in the
+     * SchemaRegistry — the runtime registers it in the MetadataService, in
+     * memory only — so `getArtifactItem('datasource', 'showcase_external')`
+     * missed on the showcase's own `*.datasource.ts` (measured on a booted
+     * showcase) and `PUT /api/v1/meta/datasource/showcase_external` answered
+     * 200 on the `runtime-only` intent. Its resolver is
+     * {@link isDeclaredCodeDatasource}, beside this one and in this shape:
+     * a containment boolean, read from what the installed code packages
+     * ship. Two resolvers, each for the one type it measured — still not a
+     * nesting rule.
+     *
      * ## Shape decisions
      *
      *  - **Containment, not a synthetic envelope.** This returns a boolean
@@ -16074,6 +16088,78 @@ export class ObjectStackProtocolImplementation implements
         const fields = objectArtifact?.fields;
         if (!fields || typeof fields !== 'object') return false;
         return Object.prototype.hasOwnProperty.call(fields, name.slice(sep + 1));
+    }
+
+    /**
+     * [#21899] Is `(datasource, name)` a datasource an installed code package
+     * declares — a code-defined datasource?
+     *
+     * ## Why this predicate needs a resolver of its own
+     *
+     * The second non-standalone shape in {@link isNestedArtifactField}'s
+     * census. A code-defined datasource never reaches the SchemaRegistry as an
+     * item: `AppPlugin` registers it in the MetadataService, in memory only,
+     * stamped `origin: 'code'` (ADR-0062), so the artifact-only lookup misses
+     * every one. That miss was the whole defect: {@link isArtifactBacked}
+     * answered false, the save took the `runtime-only` intent, and
+     * `allowRuntimeCreate: true` let `PUT /api/v1/meta/datasource/:name`
+     * persist an edit of a datasource the published contract
+     * (`DatasourceSchema.origin`: "code — authored as `*.datasource.ts`,
+     * GitOps-owned, read-only in the UI") and the datasource-admin service both
+     * call read-only. Seen here, the package door and the repository's write
+     * intent refuse it the way they refuse every code-shipped item of a type
+     * with no overlay channel.
+     *
+     * ## What it reads
+     *
+     *  - **The installed package records** the engine registry holds
+     *    (`getAllPackages()`), each record's manifest `datasources`.
+     *    `registerApp` installs that record from the same manifest it indexes
+     *    the datasource definitions from, and `AppPlugin` registers what the
+     *    package bodies declare — so this is the set the runtime treats as
+     *    code-defined, read from where the package ships it.
+     *  - **In its one canonical form**: the array
+     *    `ObjectStackDefinitionSchema.datasources` declares. The name-keyed map
+     *    is authorable, but `defineStack` normalizes it to the array before any
+     *    artifact is built (`MAP_SUPPORTED_FIELDS`), and the showcase's
+     *    installed record carries the array (measured). No map fallback: Prime
+     *    Directive #12 keeps one contract.
+     *  - **Every installed package, a disabled one included**: the registry
+     *    never filters package records, and a disabled package still ships the
+     *    datasource the runtime registered for it — the artifact-only lookup
+     *    answers for a disabled package's items the same way.
+     *  - ⛔ **Never the MetadataService slot's `origin`**: a stored row the
+     *    datasource-admin plugin restores at boot overwrites that slot, `origin`
+     *    and all, so the slot answers what was stored last, not what a package
+     *    ships. ⛔ **Never a request body's `origin`**: the caller sets it.
+     *
+     * ## What it does not see
+     *
+     *  - **The host's `default` datasource.** No package declares it:
+     *    `DefaultDatasourcePlugin` registers it from the host's own definition,
+     *    in memory, as `origin: 'code'`, and the datasource-admin service
+     *    refuses to edit or remove it as code-defined. The host's code
+     *    datasource set is not readable from this package — the MetadataService
+     *    slot is the unsound source above, the connection service retains no
+     *    origin, and the engine's datasource definitions mix both origins — so
+     *    the `/meta` door still answers for `default` as it did. A named gap,
+     *    not a reading this predicate makes.
+     *  - **A name no package declares** answers false and keeps the
+     *    `runtime-only` intent: a runtime datasource stays creatable, editable
+     *    and removable through this door.
+     */
+    private isDeclaredCodeDatasource(type: string, name: string): boolean {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'datasource') return false;
+        const registry = (this.engine as any)?.registry;
+        if (typeof registry?.getAllPackages !== 'function') return false;
+        for (const record of registry.getAllPackages() as unknown[]) {
+            const declared = (record as { manifest?: { datasources?: unknown } } | null | undefined)
+                ?.manifest?.datasources;
+            if (Array.isArray(declared) && declared.some((ds) => (ds as { name?: unknown } | null)?.name === name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -16664,6 +16750,54 @@ export class ObjectStackProtocolImplementation implements
             (err as any).status = 403;
             throw err;
         }
+    }
+
+    /**
+     * [#21899, ADR-0126 §3] The removal verdict on an item of an ORIGIN-GATED
+     * type ({@link isOriginGatedType} — `datasource`: code-defined read-only,
+     * runtime-created free) when the item is code-defined: the package door's
+     * own refusal, {@link packagedBaseRefusal} for `delete`, held for
+     * {@link deleteMetaItem} to answer at its row probe. `null` for an item of
+     * any other type, for a runtime item of this one (nothing ships the name),
+     * and with `OS_METADATA_WRITABLE` open on the type — each keeps the verdict
+     * it had.
+     *
+     * ## The one removal it lifts, and the one it keeps
+     *
+     * `deleteMetaItem` throws it when NO stored row exists under the name: the
+     * delete would remove nothing, and a code-defined datasource is not
+     * removable at runtime — the datasource-admin service's verdict, now the
+     * `/meta` door's too, in the same `NOT_OVERRIDABLE` / 403 its save gets.
+     * When a stored row DOES exist, the delete goes ahead and removes it.
+     *
+     * That second half is not a new rule. It is the one {@link saveMetaItem}'s
+     * #5086 record states and #6960 extended, applied to the save refusal this
+     * card adds: "removing a code-only row that predates this refusal is
+     * repair, and must stay possible", because the removal restores the
+     * code-declared state — the narrowing direction, which cannot widen
+     * anything. Rows that predate it exist (#21899 measured them: a `/meta`
+     * save of a code-defined datasource persisted one, and at boot it shadows
+     * the code definition in both doors), and before this refusal the `/meta`
+     * door was the one door that could clear them; refusing every delete would
+     * leave them to database surgery.
+     *
+     * #6960's own carve-out ({@link mergesOverlayAtRead}) does not reach it,
+     * and is not widened to: it is keyed on `supportsOverlay`, which
+     * `datasource` does not declare — and `object`, which shares those flags,
+     * keeps refusing both verbs (ADR-0029 D9.6). What sets an origin-gated type
+     * apart is that its code-defined items are never persisted at all, so a
+     * stored row under one is never a layer of it, only residue. The
+     * repository's delete gate mirrors the lift for the same type
+     * ({@link SysMetadataRepository.assertDeleteAllowed}), because it is
+     * topology-independent and is the gate a host-config kernel asks.
+     *
+     * The read envelope keeps answering `deletable: false` (the item is not
+     * removable) and `resettable: true` (its stored row is, which is what this
+     * repair is), through the {@link packagedBaseRefusal} it already asks.
+     */
+    private originGatedRemovalRefusal(type: string, name: string): Error | null {
+        if (!isOriginGatedType(type)) return null;
+        return this.packagedBaseRefusal({ type, name, operation: 'delete' });
     }
 
     // ───────────────────────────────────────────────────────────────────
@@ -25415,6 +25549,12 @@ export class ObjectStackProtocolImplementation implements
         // spelling while the repository deletes under the singular — so a
         // DELETE could remove the row and leave the shadow it was meant to lift.
         request = canonicalizeMetaRequestType(request);
+        // [#21899] The removal verdict on an ORIGIN-GATED code-defined item
+        // (ADR-0126 §3: `datasource` — code-defined read-only, runtime-created
+        // free), held back until the row probe below. See
+        // {@link originGatedRemovalRefusal}: the item itself is never removed
+        // here, but a stored row under its name is, as repair.
+        const originGatedRefusal = this.originGatedRemovalRefusal(request.type, request.name);
         // Two-tier authorization for delete (mirrors saveMetaItem).
         //  • Artifact-backed item → delete becomes a tombstone overlay,
         //    requires `allowOrgOverride`…
@@ -25473,7 +25613,11 @@ export class ObjectStackProtocolImplementation implements
             // {@link refusePackagedBaseRemoval}, so a second removal door onto
             // the same packaged artifact asks this one through
             // {@link packagedBaseRefusal} instead of carrying a copy.
-            this.refusePackagedBaseRemoval(request);
+            //
+            // [#21899] An origin-gated code-defined item's verdict is that same
+            // refusal, answered at the row probe instead of here: thrown when
+            // no stored row exists, and lifted for the repair that deletes one.
+            if (originGatedRefusal === null) this.refusePackagedBaseRemoval(request);
             if (!artifactBacked && !overlayAllowed && !runtimeCreateAllowed) {
                 const err = new Error(
                     `Metadata type '${request.type}' does not allow runtime creation or deletion.`
@@ -25491,8 +25635,13 @@ export class ObjectStackProtocolImplementation implements
         // on a host-config kernel a packaged base it refuses keeps the answer
         // that kernel already gave it — the repository's delete gate when an
         // overlay row exists, a no-op that leaves the artifact standing when
-        // none does (see {@link packagedBaseRefusal}).
-        if (this.packagedBaseRefusal({ type: request.type, name: request.name, operation: 'delete' }) === null) {
+        // none does (see {@link packagedBaseRefusal}). [#21899] The
+        // origin-gated repair is a removal the doors allow, so the `_lock`
+        // gate asks about it as it asks about every other allowed removal.
+        if (
+            originGatedRefusal !== null
+            || this.packagedBaseRefusal({ type: request.type, name: request.name, operation: 'delete' }) === null
+        ) {
             const lockErr = await this.assertLockAllowsDelete({
                 type: request.type,
                 name: request.name,
@@ -25543,6 +25692,12 @@ export class ObjectStackProtocolImplementation implements
                 // Probe first — "no overlay exists" is a success/no-op, not
                 // a conflict. The repo would otherwise throw ConflictError.
                 const current = await repo.get(ref, { state: targetState });
+                // [#21899] An origin-gated code-defined item with NO stored row:
+                // the delete would remove nothing, and the item itself is not
+                // removable at runtime — refused with the package door's own
+                // verdict, the one its save gets. Rethrown as it is by the
+                // `catch` below.
+                if (!current && originGatedRefusal !== null) throw originGatedRefusal;
                 if (!current) {
                     // Self-heal: even with no overlay row, a stale runtime
                     // shadow may linger in the registry (e.g. pollution from
@@ -25688,6 +25843,10 @@ export class ObjectStackProtocolImplementation implements
                             : `Deleted ${singularTypeForRepo} '${request.name}' — it no longer exists. [seq=${result.seq}]`,
                 };
             } catch (err: any) {
+                // [#21899] The door's own verdict, not a store failure: it
+                // leaves with its envelope and sentence, never re-wrapped as an
+                // overlay delete that failed.
+                if (err === originGatedRefusal) throw err;
                 if (err instanceof ConflictError) {
                     // [#21207] Keyed values or none in the text and attributes.
                     const conflict = await this.metadataConflictRefusal(
