@@ -3764,6 +3764,22 @@ jobs:
       - name: Release version-commit selection self-test
         run: node scripts/release-pending-publish.mjs --self-test
 
+      # Publish-lane refs. The 17.x maintenance line (`release/17.x`, cut for
+      # cloud's pin at the v18 opening) publishes nothing, by ruling: a push to
+      # it must start no version PR and no publish. That holds at three layers
+      # of release.yml — `on: push: branches: [main]`, the `version-pr`
+      # predicate that never admits `push`, and the publish job's
+      # `refs/heads/main` refusal — and cut-rc.yml / docker-publish.yml are
+      # dispatch-only. A clean tree cannot demonstrate a NEGATIVE property, and
+      # the PR that adds `release/**` to `branches:` reads as one more trigger
+      # edit, so scripts/check-publish-lane-refs.mjs pins every layer and sweeps
+      # all workflows for a publish-capable command outside its roster. Its
+      # --self-test runs first: it mutates copies of the live files and proves
+      # each mutation reds, which is the only instrument on a rule whose
+      # production verdict is empty before and after it breaks.
+      - name: Publish-lane refs gate
+        run: pnpm check:publish-lane-refs
+
       # #3825 Node-version drift guard: a runtime pin is 18 separate string
       # literals across .github/workflows, so a split is invisible until someone
       # greps for it. One did open — every PR gate sat on Node 20 (EOL

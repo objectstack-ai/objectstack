@@ -480,6 +480,18 @@ Even inside your own worktree, operate defensively:
    pays a rebuild lap per landing; and a breaking changeset's ADR-0087 disposition is base-relative, so a stacked card's
    two bases demand contradictory markers. A multi-card change uses a **trunk branch**: correct the trunk's disposition
    to `registered` before it merges, and pay the rebase laps. ⛔ No gate or merge-policy change is made for it.
+
+   **`release/17.x` is the one other base a PR may target, and only a backport reaches it.** `main` is where every
+   fix lands first and the only branch that publishes; `release/17.x` is the maintenance line cloud's
+   `.objectstack-sha` pins until cloud's v18 ceremony is ready, cut from `main` on the maintainer's word at the v18
+   opening and ⛔ never cut, re-cut, force-pushed or deleted by a seat on its own. A PR into it carries a fix that is
+   already on `main` — a security fix or a release blocker cloud needs, nothing else — names the `main` commit it
+   backports in its body and closes no card (the card closed when `main` landed it), carries no changeset and the
+   `skip-changeset` label (nothing publishes from the branch, so a changeset there is a promise no lane keeps), and
+   ⛔ never a feature or any part of ADR-0131, whose D14 fences every arm of that record to the v18 line.
+   `release.yml` runs on pushes to `main` alone — `pnpm check:publish-lane-refs` pins that a push to the
+   maintenance branch starts no version PR and no publish — so npm's 17.x line ends at what `main` published before
+   the cut; the long form and the branch's repository settings are in `docs/releases-maintenance.md`.
 3. **Never force-push a *shared* branch, and never push `main`.** A force-push can
    clobber a parallel agent's work; `main` is shared — land all via PR. A branch is
    unshared, and `--force-with-lease` allowed, only while ALL FIVE hold: ① it is named

@@ -178,6 +178,14 @@ on:
   push:
     branches:
       - main
+      # ⛔ `main` alone, and the list stays that way on purpose. The 17.x
+      # maintenance line (`release/17.x`, cut for cloud's pin at the v18
+      # opening) publishes nothing by ruling — no version PR, no npm publish,
+      # no tag, no image — so it is deliberately ABSENT here, not forgotten.
+      # `pnpm check:publish-lane-refs` pins this list, the `version-pr`
+      # predicate below and the publish job's ref refusal, and reds the PR
+      # that adds any other branch; the backport rule lives in AGENTS.md and
+      # docs/releases-maintenance.md.
   # Version-PR bookkeeping only (#11233). GitHub runs `schedule` on the DEFAULT
   # BRANCH exclusively, which is the ref `version-pr` may ever regenerate from,
   # so the trigger cannot reach a ref the job is not meant to touch. Six-hourly

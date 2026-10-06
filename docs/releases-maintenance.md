@@ -449,6 +449,144 @@ is changed by where the refresh came from.
 
 **After a stable `@objectstack/spec` publish, refresh the retired-after census** (#20390): run `pnpm --filter @objectstack/spec exec tsx scripts/build-retired-after-census.ts` (prefix `NODE_USE_ENV_PROXY=1` behind a proxy) and commit the rewritten `packages/spec/src/conversions/retired-after.census.json` in an ordinary PR — until it lands, the census test holds an unpublished entry's `retiredAfter` only to the range from the last censused release to the label, not to the label exactly.
 
+## The `release/17.x` maintenance line — cut for cloud's pin at the v18 opening
+
+Ruled 2026-10-06 on #15193 — branch model **A**, verbatim 「同意分支模型」 — and narrowed
+the same day on #21993, verbatim 「不建议再建立一套 npm 发布流程，我运维太麻烦」:
+
+- **v18 develops on `main`.** `main`'s next release is 18.0.0, and its Version Packages
+  PR is not merged until the maintainer declares 18.0 ready. There is no 17.8.
+- **17.x continues only as a `release/17.x` branch that cloud pins by commit**
+  (`.objectstack-sha`), for security fixes and release blockers cloud needs.
+- **Nothing publishes from that branch.** No version PR, no npm publish, no tag, no
+  runtime image, no second release pipeline to operate. npm's 17.x line ends at
+  whatever `main` published before the cut, through the ordinary lanes above.
+
+The short form every contributor reads is AGENTS.md (Multi-agent discipline §2); this
+section is the long form, the cut procedure and the settings list.
+
+### The cut — the card holder's act, at the opening, on the maintainer's word
+
+Not before. When the maintainer says the line opens, the holder of #21993 cuts
+`release/17.x` from `main` **immediately before the first ADR-0131 merge**. That commit
+contains the 17.7.0 tag `4e4e881427` and every 17.x fix landed since — none of which then
+needs a backport — and #15193 closes once the branch exists. One push, one ref:
+
+```bash
+git fetch origin main
+git merge-base --is-ancestor 4e4e881427 origin/main   # exit 0: the 17.7.0 tag is in the cut
+git push origin origin/main:refs/heads/release/17.x   # never a force; never from a stale fetch
+git ls-remote --heads origin release/17.x              # read it back
+```
+
+Set the ruleset below **before** the push: a ruleset's `ref_name` condition may name a
+branch that does not exist yet, so the branch is protected from its first second. ⛔ No
+seat cuts, re-cuts, force-pushes or deletes it on its own.
+
+### Nothing publishes from it — three layers, one gate
+
+`release.yml` is reachable from `main` alone, and that holds at three independent layers,
+each sufficient by itself:
+
+| layer | where | what it holds |
+|---|---|---|
+| the trigger | `release.yml` `on: push: branches: [main]` | a push to `release/17.x` starts **no run at all** — not the bookkeeping lane, not the audit, not the publish lane. (`schedule` runs on the default branch only, by GitHub's rule.) |
+| the version-PR predicate | `version-pr` job `if:` | the job runs on `schedule` or on a `refresh_version_pr` dispatch, never on `push` — no event a push can raise regenerates a version PR, on any branch |
+| the ref refusal | `publish` job, step "Guard the approved release" | `[ "${GITHUB_REF}" != "refs/heads/main" ]` exits 1 before `changeset publish`, so even a `workflow_dispatch` pointed at `release/17.x` by hand refuses |
+
+`cut-rc.yml` is `workflow_dispatch`-only and carries the same refusal; `docker-publish.yml`
+is `workflow_call` + `workflow_dispatch` only. **`pnpm check:publish-lane-refs`**
+(`scripts/check-publish-lane-refs.mjs`, in `lint.yml`'s required job) pins all of it: the
+trigger key set and the `branches:` list of every publish-capable workflow, the
+`version-pr` predicate, the ref refusals, and — in both directions — a sweep that reds
+when a workflow outside its roster gains `changeset publish`, `npm publish`,
+`docker/build-push-action` or a call into `docker-publish.yml`, and when a roster row
+stops matching. Its `--self-test` mutates copies of the live files (`release/**` and
+`release/17.x` added to `branches:`, `branches:` rewritten as `branches-ignore:`, a
+`tags:` filter, the predicate admitting `push`, the refusal deleted, an unlisted
+publisher, …) and proves each mutation reds — the only instrument on a rule whose
+production verdict is empty before and after it breaks.
+
+What this leaves untouched: the `release` environment and its required reviewers, the
+version-PR lane and the repair dispatch. They never see the branch. ⛔ Do not dispatch
+`release.yml` or `cut-rc.yml` with `release/17.x` selected as the ref: the publish job
+refuses, but a `refresh_version_pr` dispatch on that ref would run `pnpm run version` over
+that tree and force-push a `changeset-release/release/17.x` branch — nothing it produces
+can publish, and nothing it produces is wanted.
+
+### The merge path — what runs by itself, and what the maintainer sets
+
+A PR whose base is `release/17.x` already receives every required context: `ci.yml`,
+`lint.yml` and `governed-surface-guard.yml` trigger on `pull_request` with no `branches:`
+filter, and `scripts/check-required-contexts.mjs` assertion 7 pins that for every enrolled
+workflow. Every one of them also carries `merge_group:`, so a merge queue on the branch
+works the day it is switched on. Three advisory workflows filter `pull_request` to `main`
+(`check-links`, `os-create-smoke`, `pack-smoke-optin`) and simply do not run there; none is
+required. `ci.yml`'s `push:` stays filtered to `main`, so a landing on the branch runs no
+post-merge push run and no hourly full run — the PR's own checks (and the queue build, if
+a queue is set) are the whole verification, which is the right size for a rare backport.
+
+Known distortion, stated rather than hidden: a few diff-scoped `lint.yml` steps anchor
+their base on `git merge-base origin/main HEAD` rather than on the PR's own base ref (the
+issue-citation check and the ratchet steps whose comments say "MERGE BASE of HEAD with
+origin/main"). On a PR into `release/17.x` that base is the cut point, so from the second
+backport on they judge the whole post-cut delta, not only the PR's. The changeset gate in
+`pr-automation.yml` reads `base.ref` and is exact. Backports are rare and small, so this is
+a nuisance to read past, not a reason to touch those steps from a backport PR; if it ever
+bites, the fix is one anchor (`base.ref` on `pull_request` events) in those steps, as a
+card of its own.
+
+**Repository settings are not in any PR's reach.** For the maintainer, exactly — read
+from the `main` ruleset (id 12119582) on 2026-10-06; `release/17.x` had no rules that day
+(`gh api repos/objectstack-ai/objectstack/rules/branches/release%2F17.x` answered `[]`):
+
+1. **Settings → Rules → Rulesets → New branch ruleset.** Name `release/17.x`, enforcement
+   **Active**, target branches: **include by pattern** `refs/heads/release/17.x`
+   (`release/**` if more maintenance lines are expected). Rules, mirroring `main`:
+   - **Restrict deletions** and **Block force pushes** (`deletion`, `non_fast_forward`);
+   - **Require a pull request before merging**, with `main`'s parameters (0 required
+     approvals today, "require approval of the most recent reviewable push" off,
+     allowed merge methods merge / squash / rebase);
+   - **Require status checks to pass** — the same seven contexts, each from GitHub Actions
+     (`integration_id` 15368): `Lint & Repo Gates`, `TypeScript Type Check`, `Test Core`,
+     `Dogfood Regression Gate`, `Build Core`, `Temporal Conformance (live PG + MySQL)`,
+     `Governed Surface Queue Guard`; "require branches to be up to date" off, as on `main`;
+   - **Require merge queue** with `main`'s parameters (squash, build up to 5, merge 1–5,
+     ALLGREEN, 60-minute check timeout) — recommended, so a backport lands exactly the way
+     a `main` PR does and nothing new has to be learned for a rare act; leave it out and
+     the PR's own checks decide instead.
+
+   A second ruleset rather than widening `main`'s `~DEFAULT_BRANCH` condition, so the
+   `main` ruleset's history stays its own and the two can diverge later.
+2. **Nothing in Settings → Environments changes.** The `release` environment keeps its
+   required reviewers; the branch never reaches it.
+3. **No workflow or `CODEOWNERS` change is needed** for the branch to receive its checks;
+   `check-required-contexts --verify-required-set` reads the `main` ruleset only and does
+   not judge the new one.
+
+### The backport rule — long form
+
+- A fix reaches `release/17.x` **only as a backport PR** into that branch, and only for a
+  **security fix** or a **release blocker cloud needs**. It lands on `main` first.
+- Cut the branch from `origin/release/17.x`, named `claude/issue-<n>-<slug>` as usual,
+  `git cherry-pick -x <main sha>`, and open the PR **against `release/17.x`**. The body
+  names the `main` commit it carries (`Backport of <sha>` plus the `main` PR) and closes
+  no card: the card closed when `main` landed it, so ⛔ no `Fixes` / `Closes` line.
+- It carries **no changeset** and the **`skip-changeset`** label: nothing publishes from
+  the branch, so a changeset there is a promise no lane keeps.
+- ⛔ **No feature, and no ADR-0131 change** — D14 fences every arm of that record to the
+  v18 line, and a backport that "narrows just the harmless half" is out of order whatever
+  its size.
+- The ordinary landing discipline applies unchanged (Multi-agent discipline §7 and §10):
+  green, accepted, then the queue — or the maintainer's merge where no queue is set.
+
+### cloud's pin
+
+cloud's `.objectstack-sha` follows `release/17.x` commits until cloud's v18 ceremony
+(cloud#1979) is ready; moving it is the `repo:cloud` seat's line, never this repo's. A
+backport that cloud needs is therefore two acts in two repositories: the PR here, then
+cloud's pin bump to the landed `release/17.x` commit.
+
 ## Drift guard
 
 `scripts/check-release-notes.mjs` (run in CI as `pnpm check:release-notes`) fails the
