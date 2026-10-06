@@ -30,11 +30,14 @@ export const entry: SemanticMigration = {
   replacement:
     'the value the contract declares, written at the key the refusal names: a string where it wants a '
     + 'string (`outputVariable: \'taskId\'`), a number where it wants a number (`min: 1`, `limit: 10`, '
-    + '`timeoutMs: 5000`), a boolean where it wants a boolean (`multi: true`, `durable: true`), one of the '
-    + 'declared values (`severity: \'warning\'`, `mode: \'edit\'`), or a value inside the declared range. '
-    + 'A value meant to be computed per run is written as a `{token}` template (`limit: \'{page.size}\'`) — '
-    + 'the build never judges a token\'s type. For a rule finding, follow the rule\'s own sentence (keep '
-    + '`template` or the inline `title` / `message`, not both)',
+    + '`maxIterations: 5`, `timeoutMs: 5000`), a boolean where it wants a boolean (`multi: true`, '
+    + '`durable: true`), one of the declared values (`severity: \'warning\'`, `mode: \'edit\'`), or a value '
+    + 'inside the declared range. Outside `http`, a number or boolean slot takes a LITERAL only: those '
+    + 'executors parse the config as authored, so a `{token}` template there (`limit: \'{page.size}\'`, '
+    + '`maxIterations: \'{cap}\'`) passes the build doors and still fails every run. Only `http` '
+    + 'interpolates its config before it parses, so only an `http` slot may also take a sole-token template '
+    + 'that resolves to the declared type (`timeoutMs: \'{timeout}\'`, `durable: \'{durable}\'`). For a rule '
+    + 'finding, follow the rule\'s own sentence (keep `template` or the inline `title` / `message`, not both)',
   reason:
     'Every builtin executor (`service-automation` `builtin/`) parses its node\'s `config` against the '
     + 'contract `getBuiltinNodeConfigContracts()` names before it acts, and refuses the node on any '
@@ -46,8 +49,11 @@ export const entry: SemanticMigration = {
     + '`AutomationEngine.registerFlow` (which parses first) and `objectstack validate` share '
     + '(`flowNodeConfigRefusals`) now refuses such a value as `node-config-refused-by-contract`, anchored '
     + 'at the key, in the contract\'s own words — the code the approval contract already uses. It judges '
-    + 'only what the build can know the run will parse: a value carrying a `{token}` is never refused for '
-    + 'its pre-interpolation type; `http` parses after interpolating its whole config, so only token-free '
+    + 'only what the build can know the run will parse, and holds one more class back by ruling: a value '
+    + 'carrying a `{token}` is never refused at the build doors for its pre-interpolation type — which is '
+    + 'no promise it runs, since every builtin but `http` parses its config as authored and so still '
+    + 'refuses a token in a number or boolean slot at its first run; `http` parses after interpolating its '
+    + 'whole config, so only token-free '
     + 'values are judged there and never `signingSecret`, which the credential channel may supply; a '
     + '`loop` with no `body` is not parsed by its executor and is judged for nothing; the region slots of '
     + '`loop`, `parallel` and `try_catch` are judged as graphs of their own and by `validateControlFlow`. '
@@ -67,6 +73,9 @@ export const entry: SemanticMigration = {
     + 'For each hit write the value the contract declares, per the replacement. Two proofs. (1) For a '
     + 'stack authored in config files, `objectstack validate` is clean. (2) Boot the stack and confirm '
     + 'each flow REGISTERS: no `failed to register flow` warn for it — that warn line is the locator for '
-    + 'a row that exists only in `sys_metadata`. A node whose values its contract accepts, and any value '
-    + 'written as a `{token}` template, parses and registers byte-identically to before.',
+    + 'a row that exists only in `sys_metadata`. A node whose values its contract accepts parses and '
+    + 'registers byte-identically to before. A `{token}` template parses and registers as before too, and '
+    + 'runs only where the run parses it after interpolation (`http`) or where the slot takes a string; in a '
+    + 'number or boolean slot of any other builtin it fails at its first run exactly as it did, so write a '
+    + 'literal there.',
 };
