@@ -397,6 +397,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
     expect(result.advisories, JSON.stringify(result.advisories)).toEqual([]);
     // "clean" and "nothing ran" must stay distinguishable.
     expect(result.rulesRun).toEqual([
+      'validateStackExpressions', // [#22019] — see the roster pin above
       'validateFunctionalCompleteness',
       'validateManagedApiMethods',
       'validatePresetComparands',
