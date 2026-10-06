@@ -15,7 +15,7 @@
  * `packages/qa/dogfood/test/flow-trigger-record-credential-mask.dogfood.test.ts`.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { HookContext } from '@objectstack/spec/data';
 import { SECRET_MASK } from '@objectstack/spec/data';
@@ -65,11 +65,15 @@ function updateCtx(): HookContext {
     } as unknown as HookContext;
 }
 
-async function fire(schema: Record<string, unknown> | undefined, ctx: HookContext): Promise<AutomationContext> {
+async function fire(
+    schema: Record<string, unknown> | undefined,
+    ctx: HookContext,
+    on: FlowTriggerBinding = binding,
+): Promise<AutomationContext> {
     const { engine, hooks } = engineWith(schema);
     const trigger = new RecordChangeTrigger(engine, logger);
     let seen: AutomationContext | undefined;
-    trigger.start(binding, async (c) => {
+    trigger.start(on, async (c) => {
         seen = c;
     });
     expect(hooks).toHaveLength(1);
@@ -148,5 +152,115 @@ describe('the trigger record a flow receives carries the credential mask (ADR-01
         const record = c.record as Record<string, unknown>;
         expect(record.f_password).toBe('new-plain');
         expect(record.f_secret).toBe(SECRET_MASK);
+    });
+
+    it('masks on an `afterDelete`, where `record` comes from the prior row', async () => {
+        const ctx = {
+            object: 'vault',
+            event: 'afterDelete',
+            input: { id: 'v1' },
+            previous: { id: 'v1', name: 'gone', f_password: 'old-plain', f_secret: 'sec_ref_0', f_internal: 'hidden-before' },
+            session: { userId: 'u1' },
+            ql: {},
+        } as unknown as HookContext;
+        const c = await fire({ name: 'vault', fields: VAULT_FIELDS }, ctx, {
+            flowName: 'vault_flow', object: 'vault', event: 'record-after-delete',
+        });
+        const record = c.record as Record<string, unknown>;
+        const previous = c.previous as Record<string, unknown>;
+        expect(record.name, 'the record is seeded from the prior row').toBe('gone');
+        for (const root of [record, previous]) {
+            expect(root.f_password).toBe(SECRET_MASK);
+            expect(root.f_secret).toBe(SECRET_MASK);
+            expect('f_internal' in root).toBe(false);
+        }
+        expect((ctx.previous as Record<string, unknown>).f_password).toBe('old-plain');
+    });
+
+    it('masks on a `beforeUpdate`, where `record` is the payload over the prior row', async () => {
+        const ctx = {
+            object: 'vault',
+            event: 'beforeUpdate',
+            input: { id: 'v1', data: { name: 'renamed', f_password: 'new-plain' } },
+            previous: { id: 'v1', name: 'original', f_password: 'old-plain', f_secret: 'sec_ref_0', f_internal: 'hidden-before' },
+            session: { userId: 'u1' },
+            ql: {},
+        } as unknown as HookContext;
+        const c = await fire({ name: 'vault', fields: VAULT_FIELDS }, ctx, {
+            flowName: 'vault_flow', object: 'vault', event: 'record-before-update',
+        });
+        const record = c.record as Record<string, unknown>;
+        const previous = c.previous as Record<string, unknown>;
+        expect(record.name).toBe('renamed');
+        expect(previous.name).toBe('original');
+        for (const root of [record, previous]) {
+            expect(root.f_password).toBe(SECRET_MASK);
+            expect(root.f_secret).toBe(SECRET_MASK);
+            expect('f_internal' in root).toBe(false);
+        }
+        expect((ctx.input as { data: Record<string, unknown> }).data.f_password).toBe('new-plain');
+    });
+});
+
+describe('an unresolvable trigger-object definition is logged at error and still dispatches', () => {
+    // No `previous` on this update, so the materialisation read (gated on
+    // ground truth) is skipped and the definition read for the mask is the
+    // only `getObject` call a dispatch makes.
+    function noPriorUpdate(): HookContext {
+        return {
+            object: 'vault',
+            event: 'afterUpdate',
+            input: { id: 'v1', data: { name: 'renamed' } },
+            result: { id: 'v1', name: 'renamed' },
+            session: { userId: 'u1' },
+            ql: {},
+        } as unknown as HookContext;
+    }
+
+    const cases: Array<[string, RecordChangeDataEngine['getObject']]> = [
+        ['getObject is absent', undefined],
+        ['getObject returns nothing', () => undefined],
+        [
+            'getObject throws',
+            () => {
+                throw new Error('registry offline');
+            },
+        ],
+    ];
+
+    for (const [label, getObject] of cases) {
+        it(`${label}: one error naming the object, the flow still runs on every write`, async () => {
+            const hooks: Hook[] = [];
+            const engine: RecordChangeDataEngine = {
+                registerHook(event, handler) {
+                    hooks.push({ event, handler });
+                },
+                unregisterHooksByPackage() {
+                    return 0;
+                },
+                ...(getObject ? { getObject } : {}),
+            };
+            const error = vi.fn();
+            const trigger = new RecordChangeTrigger(engine, { info: () => {}, warn: () => {}, debug: () => {}, error });
+            let runs = 0;
+            trigger.start(binding, async () => {
+                runs += 1;
+            });
+            await hooks[0].handler(noPriorUpdate());
+            await hooks[0].handler(noPriorUpdate());
+
+            expect(runs, 'dispatch is unchanged: the flow ran for both writes').toBe(2);
+            expect(error, 'said once per object, not once per write').toHaveBeenCalledTimes(1);
+            expect(String(error.mock.calls[0][0])).toContain("object 'vault'");
+        });
+    }
+
+    it('a resolved definition logs no error', async () => {
+        const { engine, hooks } = engineWith({ name: 'vault', fields: VAULT_FIELDS });
+        const error = vi.fn();
+        const trigger = new RecordChangeTrigger(engine, { info: () => {}, warn: () => {}, debug: () => {}, error });
+        trigger.start(binding, async () => {});
+        await hooks[0].handler(updateCtx());
+        expect(error).not.toHaveBeenCalled();
     });
 });
