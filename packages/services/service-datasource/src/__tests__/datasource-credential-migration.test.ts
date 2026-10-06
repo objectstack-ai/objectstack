@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { BUILTIN_DRIVER_IDS, refusedCredentialKeys } from '@objectstack/spec/data';
+import { BUILTIN_DRIVER_IDS, DRIVER_ID_ALIASES, redactableConfigKeys, refusedCredentialKeys } from '@objectstack/spec/data';
 import { planCredentialMigration, urlCredentialKeys } from '../datasource-credential-migration.js';
 import type { StoredDatasource } from '../datasource-admin-service.js';
 
@@ -287,5 +287,55 @@ describe('#9040 — the passthrough spelling at the planner door', () => {
       }),
     );
     expect(plan).toEqual({ action: 'none', status: 'nothing-to-migrate', remaining: [] });
+  });
+});
+
+// Lockstep with the spec fix that makes the per-driver half of
+// `redactableConfigKeys` resolve a driver's identity through `resolveDriverId`
+// (#21955): the planner's unbindable residue is derived from that same list,
+// so a row whose driver is written in any accepted spelling must be planned
+// exactly as the canonical spelling's row is. Spellings are DERIVED from the
+// alias table and the resolver's own folding, never listed by hand.
+describe('planCredentialMigration reads the same list under every accepted spelling of a builtin driver', () => {
+  const variantsOf = (spelling: string): string[] => [
+    spelling,
+    spelling.toUpperCase(),
+    `${spelling.charAt(0).toUpperCase()}${spelling.slice(1)}`,
+    ` ${spelling} `,
+  ];
+  /** The driver-specific keys beyond the contract derivation and the contract-less fallback. */
+  const stillWritableOf = (id: string): string[] => {
+    const fallback = new Set(redactableConfigKeys('a-driver-with-no-contract'));
+    const refused = new Set(refusedCredentialKeys(id));
+    return redactableConfigKeys(id).filter((key) => !fallback.has(key) && !refused.has(key));
+  };
+  const CASES = Object.entries(DRIVER_ID_ALIASES).flatMap(([spelling, id]) =>
+    variantsOf(spelling).flatMap((variant) => stillWritableOf(id).map((key) => ({ variant, id, key }))),
+  );
+
+  it('a bindable row names the still-writable credential key as its residue, byte-equal to the canonical spelling', () => {
+    // Population floor: the class is not empty today.
+    expect(CASES.length).toBeGreaterThan(0);
+    for (const { variant, id, key } of CASES) {
+      const [slot] = refusedCredentialKeys(id);
+      expect(slot, id).toBeDefined();
+      const config = { url: 'file:./fixture.db', [slot as string]: 'fixture-token', [key]: 'fixture-secret' };
+      const canonical = planCredentialMigration(row({ driver: id, config }));
+      expect(canonical).toEqual({ action: 'bind', key: slot, value: 'fixture-token', remaining: [key] });
+      expect(planCredentialMigration(row({ driver: variant, config })), JSON.stringify(variant)).toEqual(canonical);
+    }
+  });
+
+  it('a row holding only the still-writable credential key is refused with that key named, as under the canonical spelling', () => {
+    for (const { variant, id, key } of CASES) {
+      const config = { url: 'file:./fixture.db', [key]: 'fixture-secret' };
+      const canonical = planCredentialMigration(row({ driver: id, config }));
+      const spelled = planCredentialMigration(row({ driver: variant, config }));
+      expect(canonical.action).toBe('refuse');
+      expect(spelled.action, JSON.stringify(variant)).toBe('refuse');
+      if (spelled.action !== 'refuse') throw new Error('unreachable');
+      expect(spelled.reason, JSON.stringify(variant)).toContain(`config.${key}`);
+      expect(spelled.remedy.length).toBeGreaterThan(0);
+    }
   });
 });
