@@ -17,7 +17,9 @@ Clause-②: no
 - `{record.<password or secret field>}` and `{previous.<password or secret field>}` in a record-change flow: FROM the stored value (the plaintext password, or the secret's stored handle) → TO `SECRET_MASK` when set, `null` when unset.
 - `{record.<internal field>}` and `{previous.<internal field>}`: FROM the stored value → TO absent.
 
-**If you are affected.** A flow that needs a credential reads it through a privileged binder (the flow credential channel, or a privileged server-side read such as the engine's `resolveSecretField`), never off the trigger record. A start or edge condition that compared such a field with a literal tests whether it is set (`!= null`) instead.
+**If you are affected.** A flow that needs a credential reads it through a privileged binder (the flow credential channel, or a privileged server-side read such as the engine's `resolveSecretField`), never off the trigger record. A start or edge condition that compared such a field with a literal tests whether it is set (`!= null`) instead. A condition that compares `record.<credential field>` with `previous.<credential field>` now sees two equal masks whenever the field is set on both sides, so it can no longer detect a change; use a privileged binder to detect a credential change.
+
+**Runs stored before this release.** The mask applies to trigger records built after the upgrade. Paused runs, and terminal runs that keep a restorable snapshot, created before it still hold the clear values in `variables_json`, `context_json` and `steps_json`. After upgrading, resume, cancel or purge those runs.
 
 **Unchanged.**
 - Every ordinary field of the trigger record keeps its value, and every other flow variable is untouched.
