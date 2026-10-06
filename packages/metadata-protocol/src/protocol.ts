@@ -21632,9 +21632,18 @@ export class ObjectStackProtocolImplementation implements
         // once and then stated to the lock lookup, the read and the promotion.
         let draftKey: string | null | undefined = 'packageId' in request ? (request.packageId ?? null) : undefined;
         if (draftKey === undefined) {
-            const draftRow = await this.engine.findOne('sys_metadata', {
-                where: { type: singularType, name: request.name, organization_id: orgId, state: 'draft' },
-            });
+            // [#21934] Read ahead of the lock check, so a store that cannot be
+            // read is answered here as the lock read answers it (#5706): an
+            // unprovisioned `sys_metadata` holds no draft, and any other failure
+            // is the 503 the lock read raised before this read moved above it.
+            let draftRow: unknown;
+            try {
+                draftRow = await this.engine.findOne('sys_metadata', {
+                    where: { type: singularType, name: request.name, organization_id: orgId, state: 'draft' },
+                });
+            } catch (error) {
+                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            }
             if (draftRow) draftKey = (draftRow as { package_id?: string | null }).package_id ?? null;
         }
         // ADR-0010 L3 — lock blocks publish too (publishing is a write).

@@ -1274,3 +1274,23 @@ describe('the save check anchors each package\'s row on that package\'s env-wide
         })).success).toBe(true);
     });
 });
+
+// The draft-key read runs ahead of the lock check, so an unreadable store is
+// answered there as the lock read answers it: a 503, never a driver error.
+describe('a publish that states no package, over a store that cannot be read', () => {
+    it('answers 503 SERVICE_UNAVAILABLE, and promotes nothing', async () => {
+        const { protocol, rows } = makeProtocol();
+        await protocol.ensureOverlayIndex();
+        await protocol.getOverlayRepo(null).put(
+            { type: 'view', name: VIEW.name, org: 'env' },
+            VIEW,
+            { parentVersion: null, actor: null, source: 'test.seed', intent: 'runtime-only', state: 'draft', packageId: null },
+        );
+        const unreadable = () => { throw new Error('connection reset by peer'); };
+        protocol.engine.findOne = unreadable;
+        protocol.engine.find = unreadable;
+        await expect(protocol.publishMetaItem({ type: 'view', name: VIEW.name }))
+            .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+        expect(Array.from(rows.values()).filter((r) => r.state === 'active')).toEqual([]);
+    });
+});
