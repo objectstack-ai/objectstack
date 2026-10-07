@@ -271,6 +271,16 @@ describe('the first sign-up claims the seed without dispatching automation', () 
         // ⭐ …and still ran the code-registered hooks: one audit row per
         // claimed record, and the grants the owner change earns.
         expect(claim.auditUpdates, 'audit rows written for the claim').toBe(SEEDED.length);
+        const auditRows = (await ql.find(
+          'sys_audit_log',
+          { where: { object_name: OBJECT, action: 'update' } },
+          { context: SYS },
+        )) as any[];
+        expect(new Set(auditRows.map((r) => r.record_id))).toEqual(new Set(owned.map((r) => r.id)));
+        for (const row of auditRows) {
+          expect(row.created_at, 'an audit row carries its timestamp').toBeTruthy();
+          expect(String(row.new_value), 'the audit row records the new owner').toContain(adminId);
+        }
         expect(claim.ruleGrants, 'sharing grants materialised by the claim').toBe(SEEDED.length);
         const grants = (await ql.find(
           'sys_record_share',
