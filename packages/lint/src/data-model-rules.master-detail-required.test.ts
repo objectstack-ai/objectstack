@@ -136,7 +136,7 @@ describe('R2 outside controlled_by_parent — the verdict is unchanged', () => {
 // `system` — so the two flagged shapes leave the builder intact, and this rule
 // is the authoring-time refusal they meet.
 describe('R2 over objects built by ObjectSchema.create()', () => {
-  const build = (field: Record<string, unknown>) =>
+  const build = (field: ReturnType<typeof Field.masterDetail>) =>
     ObjectSchema.create({
       name: 'work_order_item',
       sharingModel: 'controlled_by_parent',
