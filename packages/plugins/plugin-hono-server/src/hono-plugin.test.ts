@@ -324,6 +324,19 @@ describe('HonoServerPlugin', () => {
             expect(corsConfigCapture.last.allowHeaders).toContain('X-Share-Password');
         });
 
+        it('should allow X-Share-Password-Encoding by default (the header declaring its encoding, #22049)', async () => {
+            corsConfigCapture.last = undefined;
+
+            const plugin = new HonoServerPlugin();
+            await plugin.init(context as PluginContext);
+
+            // A password with a character above U+00FF travels percent-encoded
+            // under `X-Share-Password-Encoding: utf-8`; a preflight that does not
+            // allow the companion leaves a cross-origin client only the passwords
+            // a raw header can carry.
+            expect(corsConfigCapture.last.allowHeaders).toContain('X-Share-Password-Encoding');
+        });
+
         it('should merge user-supplied exposeHeaders with set-auth-token default', async () => {
             corsConfigCapture.last = undefined;
 

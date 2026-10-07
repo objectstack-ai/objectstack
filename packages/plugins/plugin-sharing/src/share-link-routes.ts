@@ -33,6 +33,9 @@
 import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
+// [#22049] The one reading of the password header pair, shared with the
+// dispatcher twin — see `presentedPassword` below.
+import { readSharePasswordHeader, SHARE_PASSWORD_VARY, type SharePasswordHeaderReading } from '@objectstack/types';
 import type { ShareLinkExecutionContext } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 // [#14637 -> #14935] `isPublicSharingEnabled` is the CANONICAL reading of the
@@ -138,15 +141,31 @@ function isAuthenticated(ctx: ShareLinkExecutionContext): boolean {
  * query parameter alone until this helper; it now takes the header too, as
  * its twin always has.
  *
+ * [#22049] The header's encoding is SIGNALLED by a companion header,
+ * `X-Share-Password-Encoding`, and read through `readSharePasswordHeader`
+ * (`@objectstack/types`) — the same reading the dispatcher twin uses:
+ *
+ *  - absent, `X-Share-Password` is read raw, exactly as before — any value a
+ *    client sent until now resolves unchanged;
+ *  - `utf-8` (any case), `X-Share-Password` carries the password's UTF-8 bytes
+ *    percent-encoded (`encodeURIComponent(password)`), so a password with a
+ *    character above U+00FF, or one that begins or ends with a space, can be
+ *    sent from a browser, whose `Headers` refuses the first and strips the
+ *    second;
+ *  - any other encoding, or a value that does not decode under `utf-8`, is a
+ *    refusal both routes answer `400 VALIDATION_FAILED`, before the token is
+ *    looked up. ⛔ Never compared raw instead.
+ *
+ * The `?password=` query parameter is a URL and needs no declared encoding; when
+ * it wins, the header pair is not read at all.
+ *
  * Nothing on this path logs either form: the routes write no log line, and
  * the service's log lines name the link, never the presented password.
  */
-function presentedPassword(req: IHttpRequest): string | undefined {
+function presentedPassword(req: IHttpRequest): SharePasswordHeaderReading {
   const q: any = req.query ?? {};
-  if (typeof q.password === 'string') return q.password;
-  const v = req.headers?.['x-share-password'];
-  const header = Array.isArray(v) ? v[0] : v;
-  return typeof header === 'string' ? header : undefined;
+  if (typeof q.password === 'string') return { ok: true, password: q.password };
+  return readSharePasswordHeader(req.headers?.['x-share-password'], req.headers?.['x-share-password-encoding']);
 }
 
 /**
@@ -156,14 +175,16 @@ function presentedPassword(req: IHttpRequest): string | undefined {
  * `Cache-Control: no-store` — the body is a record released by a capability
  * token (and, for a protected link, by a password); no browser or shared cache
  * may keep a copy of it, nor of a refusal that would be replayed after the
- * link changes. `Vary: X-Share-Password` — the answer depends on that request
- * header, so any cache that does not honour `no-store` must at least never
+ * link changes. `Vary: X-Share-Password, X-Share-Password-Encoding` — the
+ * answer depends on that request header and on the one declaring its encoding
+ * (#22049), so any cache that does not honour `no-store` must at least never
  * serve one presenter's answer to another. The dispatcher twin
- * (`runtime/src/domains/share-links.ts`) sends the same pair.
+ * (`runtime/src/domains/share-links.ts`) sends the same pair, from the same
+ * `SHARE_PASSWORD_VARY` constant.
  */
 const SHARE_LINK_PUBLIC_RESPONSE_HEADERS: Readonly<Record<string, string>> = Object.freeze({
   'Cache-Control': 'no-store',
-  Vary: 'X-Share-Password',
+  Vary: SHARE_PASSWORD_VARY,
 });
 
 function setPublicResponseHeaders(res: IHttpResponse): void {
@@ -277,7 +298,9 @@ export function registerShareLinkRoutes(
       // the "must be signed in" check by inventing a user id.
       const signedInUserId = (await ctxOf(req)).userId;
       const recipientEmail = typeof q.email === 'string' ? q.email : undefined;
-      const providedPassword = presentedPassword(req);
+      const presented = presentedPassword(req);
+      if (!presented.ok) return sendError(res, 400, 'VALIDATION_FAILED', presented.message);
+      const providedPassword = presented.password;
 
       const resolved = await service.resolveToken(req.params.token, {
         signedInUserId,
@@ -405,8 +428,10 @@ export function registerShareLinkRoutes(
   http.get(`${base}/:token/messages`, (async (req, res) => {
     setPublicResponseHeaders(res);
     try {
+      const presented = presentedPassword(req);
+      if (!presented.ok) return sendError(res, 400, 'VALIDATION_FAILED', presented.message);
       const resolved = await service.resolveToken(req.params.token, {
-        providedPassword: presentedPassword(req),
+        providedPassword: presented.password,
       });
       if (!resolved) {
         sendError(res, 404, 'NOT_FOUND', 'Share link not found');
