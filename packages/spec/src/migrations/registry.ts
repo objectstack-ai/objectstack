@@ -5445,6 +5445,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'carries the rest.',
   },
   {
+    id: 'deployment-plumbing-organization-columns-retired',
+    order: 85,
+    text:
+      'It also takes the injected organization column off seven deployment-level platform tables — '
+      + '`sys_job`, `sys_job_run`, `sys_job_queue`, `sys_flow_dispatch`, `sys_migration`, '
+      + '`sys_migration_journal` and `sys_presence` (ADR-0131 D7). A writer census found no writer that '
+      + 'attributes a row of any of them to an organization, so the column only ever held NULL, and under '
+      + 'a walled posture the tenant wall hid every row from every reader. Each now declares '
+      + '`systemFields: { tenant: false }` and the object-level capability gate '
+      + '`requiredPermissions: [\'manage_platform_settings\']`: with no column there is no wall, so reads '
+      + 'are governed by object permission, and the gate keeps one organization\'s administrator off '
+      + 'another organization\'s rows. Nothing in stack metadata is rewritten; an existing database keeps '
+      + 'the column as an orphan the boot drift report names, and `os migrate apply --allow-destructive` '
+      + 'drops it. The D3 records are the seven `sys-*-organization-column-retired` semantic entries.',
+  },
+  {
     id: 'duration-keys-unit-in-key',
     order: 24,
     text:
@@ -18524,6 +18540,321 @@ const step18: MigrationStep = {
         + 'for a row, so the key cannot separate the old IdP\'s subjects from the new one\'s, and the '
         + '`sys_sso_provider` update door refuses an issuer change while accounts are still bound to '
         + 'that provider.',
+    },
+    // #15207 (ADR-0131 D7, C6) — one D3 entry per removed column, as the card
+    // requires. A platform-object COLUMN retirement, not a spec-key retirement: no
+    // authorable spec key moves, so nothing lands in RETIRED_KEYS_BY_MAJOR and no
+    // D2 conversion exists to pair with (the ups-delegated-from-column-retired
+    // shape). The writer census behind the verdict is cited in the reason.
+    {
+      id: 'sys-flow-dispatch-organization-column-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'sys_flow_dispatch.organization_id — the injected organization column left the flow trigger '
+        + 'dispatch claim ledger (packages/services/service-automation/src/sys-flow-dispatch.object.ts, '
+        + 'which now declares systemFields.tenant false), and reading the table now requires the '
+        + 'manage_platform_settings capability',
+      replacement:
+        'nothing on this table — `sys_flow_dispatch` is deployment-level state (ADR-0131 D7) and no '
+        + 'organization owns a row. Delete any authored filter, list-view column, report grouping, '
+        + 'formula or seed key that names `organization_id` on `sys_flow_dispatch`. A principal that '
+        + 'must read the table needs the `manage_platform_settings` capability, which platform '
+        + 'administrators hold',
+      reason:
+        'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
+        + 'and loses the column; the writer decides membership, not the name. Writer census on '
+        + 'objectstack main at commit e67ba80049: the sole writer is ObjectStoreFlowDispatchStore in '
+        + '@objectstack/service-automation: two write sites (the claim insert and the settle update), '
+        + 'each under a system context whose row is a dispatch key and its outcome, naming no '
+        + 'organization. So the injected column only ever held NULL. The census is the same procedure '
+        + 'that reports the organization-stamping writers of sys_http_delivery, sys_secret and '
+        + 'sys_email, so it can fire. Under a walled posture the tenant wall compared that NULL to the '
+        + 'caller organization and hid every row from every reader, platform administrators included; '
+        + 'with no column there is no wall, and the table is governed by object permission instead '
+        + '(D7). The capability gate is part of the same change, not a follow-up: the '
+        + 'organization_admin grant carries the superuser bits on every object, so without it a walled '
+        + 'deployment would hand each organization administrator every other organization\'s rows. '
+        + 'Existing databases: schema sync is additive, so the physical column stays and the boot drift '
+        + 'report names it orphaned; by the census it holds only NULL, so dropping it loses nothing. '
+        + 'The operator drops it with os migrate apply --allow-destructive, the remedy the drift report '
+        + 'names.',
+      acceptanceCriteria:
+        'No authored metadata names `organization_id` on `sys_flow_dispatch`: the field resolver '
+        + '(lint and the data door) now answers it as an unknown field. On every tenancy posture a '
+        + 'principal without `manage_platform_settings` is refused 403 PERMISSION_DENIED on a read of '
+        + '`sys_flow_dispatch`, and a platform administrator lists every row with no organization '
+        + 'filter. After os migrate apply --allow-destructive the boot no longer reports the orphaned '
+        + 'column.',
+    },
+    // #15207 (ADR-0131 D7, C6) — one D3 entry per removed column, as the card
+    // requires. A platform-object COLUMN retirement, not a spec-key retirement: no
+    // authorable spec key moves, so nothing lands in RETIRED_KEYS_BY_MAJOR and no
+    // D2 conversion exists to pair with (the ups-delegated-from-column-retired
+    // shape). The writer census behind the verdict is cited in the reason.
+    {
+      id: 'sys-job-organization-column-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'sys_job.organization_id — the injected organization column left the platform background-job '
+        + 'catalogue (packages/platform-objects/src/audit/sys-job.object.ts, which now declares '
+        + 'systemFields.tenant false), and reading the table now requires the manage_platform_settings '
+        + 'capability',
+      replacement:
+        'nothing on this table — `sys_job` is deployment-level state (ADR-0131 D7) and no '
+        + 'organization owns a row. Delete any authored filter, list-view column, report grouping, '
+        + 'formula or seed key that names `organization_id` on `sys_job`. A principal that must read '
+        + 'the table needs the `manage_platform_settings` capability, which platform administrators '
+        + 'hold',
+      reason:
+        'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
+        + 'and loses the column; the writer decides membership, not the name. Writer census on '
+        + 'objectstack main at commit e67ba80049: the sole writer is DbJobAdapter in '
+        + '@objectstack/service-job: four write sites (the update and insert arms of the schedule '
+        + 'upsert, the active toggle and the run summary bump), each under a system context whose row '
+        + 'literal names no organization. So the injected column only ever held NULL. The census is the '
+        + 'same procedure that reports the organization-stamping writers of sys_http_delivery, '
+        + 'sys_secret and sys_email, so it can fire. Under a walled posture the tenant wall compared '
+        + 'that NULL to the caller organization and hid every row from every reader, platform '
+        + 'administrators included; with no column there is no wall, and the table is governed by '
+        + 'object permission instead (D7). The capability gate is part of the same change, not a '
+        + 'follow-up: the organization_admin grant carries the superuser bits on every object, so '
+        + 'without it a walled deployment would hand each organization administrator every other '
+        + 'organization\'s rows. Existing databases: schema sync is additive, so the physical column '
+        + 'stays and the boot drift report names it orphaned; by the census it holds only NULL, so '
+        + 'dropping it loses nothing. The operator drops it with os migrate apply --allow-destructive, '
+        + 'the remedy the drift report names.',
+      acceptanceCriteria:
+        'No authored metadata names `organization_id` on `sys_job`: the field resolver (lint and the '
+        + 'data door) now answers it as an unknown field. On every tenancy posture a principal without '
+        + '`manage_platform_settings` is refused 403 PERMISSION_DENIED on a read of `sys_job`, and a '
+        + 'platform administrator lists every row with no organization filter. After os migrate apply '
+        + '--allow-destructive the boot no longer reports the orphaned column.',
+    },
+    // #15207 (ADR-0131 D7, C6) — one D3 entry per removed column, as the card
+    // requires. A platform-object COLUMN retirement, not a spec-key retirement: no
+    // authorable spec key moves, so nothing lands in RETIRED_KEYS_BY_MAJOR and no
+    // D2 conversion exists to pair with (the ups-delegated-from-column-retired
+    // shape). The writer census behind the verdict is cited in the reason.
+    {
+      id: 'sys-job-queue-organization-column-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'sys_job_queue.organization_id — the injected organization column left the durable job and '
+        + 'message queue (packages/platform-objects/src/audit/sys-job-queue.object.ts, which now '
+        + 'declares systemFields.tenant false), and reading the table now requires the '
+        + 'manage_platform_settings capability',
+      replacement:
+        'nothing on this table — `sys_job_queue` is deployment-level state (ADR-0131 D7) and no '
+        + 'organization owns a row. Delete any authored filter, list-view column, report grouping, '
+        + 'formula or seed key that names `organization_id` on `sys_job_queue`. A principal that must '
+        + 'read the table needs the `manage_platform_settings` capability, which platform '
+        + 'administrators hold',
+      reason:
+        'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
+        + 'and loses the column; the writer decides membership, not the name. Writer census on '
+        + 'objectstack main at commit e67ba80049: the sole writer is DbQueueAdapter in '
+        + '@objectstack/service-queue: nine write sites (the publish insert and the worker update and '
+        + 'delete paths), each under a system context whose row literal names no organization. So the '
+        + 'injected column only ever held NULL. The census is the same procedure that reports the '
+        + 'organization-stamping writers of sys_http_delivery, sys_secret and sys_email, so it can '
+        + 'fire. Under a walled posture the tenant wall compared that NULL to the caller organization '
+        + 'and hid every row from every reader, platform administrators included; with no column there '
+        + 'is no wall, and the table is governed by object permission instead (D7). The capability gate '
+        + 'is part of the same change, not a follow-up: the organization_admin grant carries the '
+        + 'superuser bits on every object, so without it a walled deployment would hand each '
+        + 'organization administrator every other organization\'s rows. Existing databases: schema sync '
+        + 'is additive, so the physical column stays and the boot drift report names it orphaned; by '
+        + 'the census it holds only NULL, so dropping it loses nothing. The operator drops it with os '
+        + 'migrate apply --allow-destructive, the remedy the drift report names.',
+      acceptanceCriteria:
+        'No authored metadata names `organization_id` on `sys_job_queue`: the field resolver (lint '
+        + 'and the data door) now answers it as an unknown field. On every tenancy posture a principal '
+        + 'without `manage_platform_settings` is refused 403 PERMISSION_DENIED on a read of '
+        + '`sys_job_queue`, and a platform administrator lists every row with no organization filter. '
+        + 'After os migrate apply --allow-destructive the boot no longer reports the orphaned column.',
+    },
+    // #15207 (ADR-0131 D7, C6) — one D3 entry per removed column, as the card
+    // requires. A platform-object COLUMN retirement, not a spec-key retirement: no
+    // authorable spec key moves, so nothing lands in RETIRED_KEYS_BY_MAJOR and no
+    // D2 conversion exists to pair with (the ups-delegated-from-column-retired
+    // shape). The writer census behind the verdict is cited in the reason.
+    {
+      id: 'sys-job-run-organization-column-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'sys_job_run.organization_id — the injected organization column left the platform job run '
+        + 'history (packages/platform-objects/src/audit/sys-job-run.object.ts, which now declares '
+        + 'systemFields.tenant false), and reading the table now requires the manage_platform_settings '
+        + 'capability',
+      replacement:
+        'nothing on this table — `sys_job_run` is deployment-level state (ADR-0131 D7) and no '
+        + 'organization owns a row. Delete any authored filter, list-view column, report grouping, '
+        + 'formula or seed key that names `organization_id` on `sys_job_run`. A principal that must '
+        + 'read the table needs the `manage_platform_settings` capability, which platform '
+        + 'administrators hold',
+      reason:
+        'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
+        + 'and loses the column; the writer decides membership, not the name. Writer census on '
+        + 'objectstack main at commit e67ba80049: the sole writer is DbJobAdapter in '
+        + '@objectstack/service-job: two write sites (the run start insert and the run finish update), '
+        + 'each under a system context whose row literal names no organization, including for a job '
+        + 'that declares the organization it runs as, whose stamp reaches the job data writes and never '
+        + 'this ledger. So the injected column only ever held NULL. The census is the same procedure '
+        + 'that reports the organization-stamping writers of sys_http_delivery, sys_secret and '
+        + 'sys_email, so it can fire. Under a walled posture the tenant wall compared that NULL to the '
+        + 'caller organization and hid every row from every reader, platform administrators included; '
+        + 'with no column there is no wall, and the table is governed by object permission instead '
+        + '(D7). The capability gate is part of the same change, not a follow-up: the '
+        + 'organization_admin grant carries the superuser bits on every object, so without it a walled '
+        + 'deployment would hand each organization administrator every other organization\'s rows. '
+        + 'Existing databases: schema sync is additive, so the physical column stays and the boot drift '
+        + 'report names it orphaned; by the census it holds only NULL, so dropping it loses nothing. '
+        + 'The operator drops it with os migrate apply --allow-destructive, the remedy the drift report '
+        + 'names.',
+      acceptanceCriteria:
+        'No authored metadata names `organization_id` on `sys_job_run`: the field resolver (lint and '
+        + 'the data door) now answers it as an unknown field. On every tenancy posture a principal '
+        + 'without `manage_platform_settings` is refused 403 PERMISSION_DENIED on a read of '
+        + '`sys_job_run`, and a platform administrator lists every row with no organization filter. '
+        + 'After os migrate apply --allow-destructive the boot no longer reports the orphaned column.',
+    },
+    // #15207 (ADR-0131 D7, C6) — one D3 entry per removed column, as the card
+    // requires. A platform-object COLUMN retirement, not a spec-key retirement: no
+    // authorable spec key moves, so nothing lands in RETIRED_KEYS_BY_MAJOR and no
+    // D2 conversion exists to pair with (the ups-delegated-from-column-retired
+    // shape). The writer census behind the verdict is cited in the reason.
+    {
+      id: 'sys-migration-journal-organization-column-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'sys_migration_journal.organization_id — the injected organization column left the migration '
+        + 'run journal (packages/platform-objects/src/system/sys-migration-journal.object.ts, which now '
+        + 'declares systemFields.tenant false), and reading the table now requires the '
+        + 'manage_platform_settings capability',
+      replacement:
+        'nothing on this table — `sys_migration_journal` is deployment-level state (ADR-0131 D7) and '
+        + 'no organization owns a row. Delete any authored filter, list-view column, report grouping, '
+        + 'formula or seed key that names `organization_id` on `sys_migration_journal`. A principal '
+        + 'that must read the table needs the `manage_platform_settings` capability, which platform '
+        + 'administrators hold',
+      reason:
+        'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
+        + 'and loses the column; the writer decides membership, not the name. Writer census on '
+        + 'objectstack main at commit e67ba80049: the sole writer is the @objectstack/core migration '
+        + 'runner: one append site, under a system context or under the transaction it opened with one, '
+        + 'and the row contract MigrationJournalEventSchema has no organization field to carry. So the '
+        + 'injected column only ever held NULL. The census is the same procedure that reports the '
+        + 'organization-stamping writers of sys_http_delivery, sys_secret and sys_email, so it can '
+        + 'fire. Under a walled posture the tenant wall compared that NULL to the caller organization '
+        + 'and hid every row from every reader, platform administrators included; with no column there '
+        + 'is no wall, and the table is governed by object permission instead (D7). The capability gate '
+        + 'is part of the same change, not a follow-up: the organization_admin grant carries the '
+        + 'superuser bits on every object, so without it a walled deployment would hand each '
+        + 'organization administrator every other organization\'s rows. Existing databases: schema sync '
+        + 'is additive, so the physical column stays and the boot drift report names it orphaned; by '
+        + 'the census it holds only NULL, so dropping it loses nothing. The operator drops it with os '
+        + 'migrate apply --allow-destructive, the remedy the drift report names.',
+      acceptanceCriteria:
+        'No authored metadata names `organization_id` on `sys_migration_journal`: the field resolver '
+        + '(lint and the data door) now answers it as an unknown field. On every tenancy posture a '
+        + 'principal without `manage_platform_settings` is refused 403 PERMISSION_DENIED on a read of '
+        + '`sys_migration_journal`, and a platform administrator lists every row with no organization '
+        + 'filter. After os migrate apply --allow-destructive the boot no longer reports the orphaned '
+        + 'column.',
+    },
+    // #15207 (ADR-0131 D7, C6) — one D3 entry per removed column, as the card
+    // requires. A platform-object COLUMN retirement, not a spec-key retirement: no
+    // authorable spec key moves, so nothing lands in RETIRED_KEYS_BY_MAJOR and no
+    // D2 conversion exists to pair with (the ups-delegated-from-column-retired
+    // shape). The writer census behind the verdict is cited in the reason.
+    {
+      id: 'sys-migration-organization-column-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'sys_migration.organization_id — the injected organization column left the deployment '
+        + 'data-migration flag ledger (packages/platform-objects/src/system/sys-migration.object.ts, '
+        + 'which now declares systemFields.tenant false), and reading the table now requires the '
+        + 'manage_platform_settings capability',
+      replacement:
+        'nothing on this table — `sys_migration` is deployment-level state (ADR-0131 D7) and no '
+        + 'organization owns a row. Delete any authored filter, list-view column, report grouping, '
+        + 'formula or seed key that names `organization_id` on `sys_migration`. A principal that must '
+        + 'read the table needs the `manage_platform_settings` capability, which platform '
+        + 'administrators hold',
+      reason:
+        'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
+        + 'and loses the column; the writer decides membership, not the name. Writer census on '
+        + 'objectstack main at commit e67ba80049: eleven write sites in six files (the platform-objects '
+        + 'migration flag helpers, the ObjectQL lax-deviation and boot-admission revocation writes, and '
+        + 'the seed-tenancy, membership-backfill and flow-credential receipts), each under a system '
+        + 'context, and the row contract DataMigrationFlagSchema has no organization field to carry. So '
+        + 'the injected column only ever held NULL. The census is the same procedure that reports the '
+        + 'organization-stamping writers of sys_http_delivery, sys_secret and sys_email, so it can '
+        + 'fire. Under a walled posture the tenant wall compared that NULL to the caller organization '
+        + 'and hid every row from every reader, platform administrators included; with no column there '
+        + 'is no wall, and the table is governed by object permission instead (D7). The capability gate '
+        + 'is part of the same change, not a follow-up: the organization_admin grant carries the '
+        + 'superuser bits on every object, so without it a walled deployment would hand each '
+        + 'organization administrator every other organization\'s rows. Existing databases: schema sync '
+        + 'is additive, so the physical column stays and the boot drift report names it orphaned; by '
+        + 'the census it holds only NULL, so dropping it loses nothing. The operator drops it with os '
+        + 'migrate apply --allow-destructive, the remedy the drift report names.',
+      acceptanceCriteria:
+        'No authored metadata names `organization_id` on `sys_migration`: the field resolver (lint '
+        + 'and the data door) now answers it as an unknown field. On every tenancy posture a principal '
+        + 'without `manage_platform_settings` is refused 403 PERMISSION_DENIED on a read of '
+        + '`sys_migration`, and a platform administrator lists every row with no organization filter. '
+        + 'After os migrate apply --allow-destructive the boot no longer reports the orphaned column.',
+    },
+    // #15207 (ADR-0131 D7, C6) — one D3 entry per removed column, as the card
+    // requires. A platform-object COLUMN retirement, not a spec-key retirement: no
+    // authorable spec key moves, so nothing lands in RETIRED_KEYS_BY_MAJOR and no
+    // D2 conversion exists to pair with (the ups-delegated-from-column-retired
+    // shape). The writer census behind the verdict is cited in the reason.
+    {
+      id: 'sys-presence-organization-column-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'sys_presence.organization_id — the injected organization column left the realtime presence '
+        + 'table (packages/services/service-realtime/src/objects/sys-presence.object.ts, which now '
+        + 'declares systemFields.tenant false), and reading the table now requires the '
+        + 'manage_platform_settings capability',
+      replacement:
+        'nothing on this table — `sys_presence` is deployment-level state (ADR-0131 D7) and no '
+        + 'organization owns a row. Delete any authored filter, list-view column, report grouping, '
+        + 'formula or seed key that names `organization_id` on `sys_presence`. A principal that must '
+        + 'read the table needs the `manage_platform_settings` capability, which platform '
+        + 'administrators hold',
+      reason:
+        'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
+        + 'and loses the column; the writer decides membership, not the name. Writer census on '
+        + 'objectstack main at commit e67ba80049: nothing writes the table through ObjectQL at all '
+        + '(presence travels the realtime path, and the generic data door exposes reads only), and a '
+        + 'person present in several organizations is one person. So the injected column only ever held '
+        + 'NULL. The census is the same procedure that reports the organization-stamping writers of '
+        + 'sys_http_delivery, sys_secret and sys_email, so it can fire. Under a walled posture the '
+        + 'tenant wall compared that NULL to the caller organization and hid every row from every '
+        + 'reader, platform administrators included; with no column there is no wall, and the table is '
+        + 'governed by object permission instead (D7). The capability gate is part of the same change, '
+        + 'not a follow-up: the organization_admin grant carries the superuser bits on every object, so '
+        + 'without it a walled deployment would hand each organization administrator every other '
+        + 'organization\'s rows. Existing databases: schema sync is additive, so the physical column '
+        + 'stays and the boot drift report names it orphaned; by the census it holds only NULL, so '
+        + 'dropping it loses nothing. The operator drops it with os migrate apply --allow-destructive, '
+        + 'the remedy the drift report names.',
+      acceptanceCriteria:
+        'No authored metadata names `organization_id` on `sys_presence`: the field resolver (lint and '
+        + 'the data door) now answers it as an unknown field. On every tenancy posture a principal '
+        + 'without `manage_platform_settings` is refused 403 PERMISSION_DENIED on a read of '
+        + '`sys_presence`, and a platform administrator lists every row with no organization filter. '
+        + 'After os migrate apply --allow-destructive the boot no longer reports the orphaned column.',
     },
     {
       id: 'system-cache-durations-unit-in-key',
