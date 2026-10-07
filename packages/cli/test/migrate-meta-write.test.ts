@@ -31,7 +31,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -42,8 +42,26 @@ import MigrateMeta from '../src/commands/migrate/meta.js';
 import {
   planAuthoredSourceWrite,
   verifyAuthoredSourceWrite,
+  type AuthoredSourceWritePlan,
   type CodemodRefusalKind,
 } from '../src/utils/authored-source-codemod.js';
+
+/**
+ * A seam between planning and writing, for the two failure exits: the command
+ * runs the real planner, and a test may act on the plan before the write.
+ */
+const hooks = vi.hoisted(() => ({ afterPlan: undefined as undefined | ((plan: AuthoredSourceWritePlan) => void) }));
+vi.mock('../src/utils/authored-source-codemod.js', async (importActual) => {
+  const actual = await importActual<typeof import('../src/utils/authored-source-codemod.js')>();
+  return {
+    ...actual,
+    planAuthoredSourceWrite: async (input: Parameters<typeof actual.planAuthoredSourceWrite>[0]) => {
+      const plan = await actual.planAuthoredSourceWrite(input);
+      hooks.afterPlan?.(plan);
+      return plan;
+    },
+  };
+});
 
 const CLI_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..');
 const CODEMOD_SOURCE = resolve(fileURLToPath(import.meta.url), '..', '..', 'src', 'utils', 'authored-source-codemod.ts');
@@ -352,12 +370,20 @@ describe('os migrate meta --write over per-artifact modules', () => {
     expect(at['views[0].list.bordered']).toBe('src/views/ticket.view.ts:10');
   });
 
-  it('never writes a semantic TODO: the manual list is the dry run\'s, unchanged', () => {
+  it('writes the applied set and nothing else: every site it reports is an applied entry', () => {
+    // What `--write` writes or leaves is exactly the chain's `applied` set —
+    // never a semantic TODO, which the planner is not even handed.
+    expect(sites([...firstJson.write.written, ...firstJson.write.manual])).toEqual(sites(firstJson.applied));
+  });
+
+  it('never writes a semantic TODO, and lists them as the dry run does', () => {
+    // Relative to the dry run of the same build, not a pinned listing: which
+    // notices the default list carries is the chain's business, not --write's.
     expect(firstJson.todos.map((t: any) => t.id)).toEqual(dry.todos.map((t: any) => t.id));
-    expect(firstJson.todos.length).toBeGreaterThan(0);
-    // The declined `compareTo` arm keeps its bytes and its schema refusal.
+    // The `compareTo` arm the conversion declines has no mechanical change, so
+    // its bytes stay — and the schema still refuses it, as before the write.
     expect(readFileSync(join(dir, 'src/dashboards/kpi.dashboard.ts'), 'utf8')).toContain("compareTo: { offset: '7d' }");
-    expect(firstJson.todos.map((t: any) => t.id)).toContain('dashboard-widget-compareto-offset');
+    expect(firstJson.schemaValid).toBe(false);
   });
 
   it('is idempotent: a second run applies nothing and writes nothing', async () => {
@@ -458,6 +484,49 @@ describe('os migrate meta --write adds a key where the conversion adds one', () 
       ),
     });
     expect(payload.write.verification.ok).toBe(true);
+  }, RUN_TIMEOUT);
+});
+
+// ── the two failure exits: nothing is left half-written ─────────────────────
+
+describe('os migrate meta --write fails closed', () => {
+  it('writes nothing, and exits 1, when a file changed after it was read', async () => {
+    const dir = writeProject(PROJECT);
+    let touched = '';
+    hooks.afterPlan = (plan) => {
+      touched = plan.rewrites[0]!.path;
+      writeFileSync(touched, `${readFileSync(touched, 'utf8')}// edited meanwhile\n`);
+    };
+    let run: Run;
+    try {
+      run = await runMeta(dir, ['--write', '--json']);
+    } finally {
+      hooks.afterPlan = undefined;
+    }
+    expect(run.exitCode).toBe(1);
+    const payload = json(run);
+    expect(payload.write.status).toBe('unwritten');
+    expect(payload.write.error).toMatch(/changed on disk/);
+    const rel = relative(realpathSync(dir), touched).split('\\').join('/');
+    expect(snapshot(dir)).toEqual({ ...PROJECT, [rel]: `${PROJECT[rel]}// edited meanwhile\n` });
+  }, RUN_TIMEOUT);
+
+  it('restores every file, and exits 1, when the re-run disagrees with its report', async () => {
+    const dir = writeProject(PROJECT);
+    // A report claiming one more site left by hand than the chain will find.
+    hooks.afterPlan = (plan) => {
+      plan.manual.push({ application: applied('nowhere.at.all', 'probe-phantom'), refusal: { kind: 'computed', reason: 'r' } });
+    };
+    let run: Run;
+    try {
+      run = await runMeta(dir, ['--write']);
+    } finally {
+      hooks.afterPlan = undefined;
+    }
+    expect(run.exitCode).toBe(1);
+    expect(run.stdout).toContain('every one was restored to its previous bytes');
+    expect(run.stdout).toContain('no longer converted: nowhere.at.all (probe-phantom)');
+    expect(snapshot(dir)).toEqual(PROJECT);
   }, RUN_TIMEOUT);
 });
 

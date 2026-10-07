@@ -741,7 +741,6 @@ export default class MigrateMeta extends Command {
 
     if (!flags.json) printHeader('Migrate · meta');
 
-    let exitCode = 0;
     try {
       if (!flags.json) printStep('Loading configuration…');
       // `authoredSource`: read the config as the author WROTE it, not as the
@@ -789,7 +788,6 @@ export default class MigrateMeta extends Command {
             json: Boolean(flags.json),
           })
         : undefined;
-      if (write && write.status !== 'written') exitCode = 1;
 
       if (flags.json) {
         await emitJson({
@@ -826,35 +824,41 @@ export default class MigrateMeta extends Command {
               duration: timer.elapsed(),
             });
         if (flags.out) writeFileSync(resolve(flags.out), JSON.stringify(result.stack, null, 2));
-      } else {
-        printInfo(`Config: ${chalk.white(absolutePath)}`);
-        // State this build's protocol major in the protocol's own units.
-        // `PROTOCOL_VERSION` is that major padded to a semver ('17.0.0'), never
-        // the installed package version -- printed as a bare semver under the
-        // word "runtime" it read as one, so on a 17.3.0 install the operator saw
-        // an apparent downgrade next to the real package versions of the same
-        // upgrade session. The fact itself is worth keeping: with `--to` below
-        // this build's major it is the only line saying where the runtime
-        // actually stands. So it is relabelled and de-padded, not dropped.
-        printInfo(`Chain:  protocol ${fromMajor} → ${toMajor} (this runtime implements protocol ${PROTOCOL_MAJOR})`);
-        console.log('');
-
-        // The verdict and the refusals lead, then the applied edits, then the
-        // semantic notices — see printMigrationReport for why, and for what it
-        // must never do to a notice.
-        printMigrationReport({
-          result,
-          normalized,
-          schemaValid: parsed.success,
-          refusals: parsed.success ? [] : parsed.error.issues,
-          dataMigrations,
-          step: flags.step,
-          ...(flags.out ? { out: resolve(flags.out) } : {}),
-          ...(write ? { write } : {}),
-          elapsed: timer.display(),
-        });
+        if (write && write.status !== 'written') this.exit(1);
+        return;
       }
+
+      printInfo(`Config: ${chalk.white(absolutePath)}`);
+      // State this build's protocol major in the protocol's own units.
+      // `PROTOCOL_VERSION` is that major padded to a semver ('17.0.0'), never
+      // the installed package version -- printed as a bare semver under the
+      // word "runtime" it read as one, so on a 17.3.0 install the operator saw
+      // an apparent downgrade next to the real package versions of the same
+      // upgrade session. The fact itself is worth keeping: with `--to` below
+      // this build's major it is the only line saying where the runtime
+      // actually stands. So it is relabelled and de-padded, not dropped.
+      printInfo(`Chain:  protocol ${fromMajor} → ${toMajor} (this runtime implements protocol ${PROTOCOL_MAJOR})`);
+      console.log('');
+
+      // The verdict and the refusals lead, then the applied edits, then the
+      // semantic notices — see printMigrationReport for why, and for what it
+      // must never do to a notice.
+      printMigrationReport({
+        result,
+        normalized,
+        schemaValid: parsed.success,
+        refusals: parsed.success ? [] : parsed.error.issues,
+        dataMigrations,
+        step: flags.step,
+        ...(flags.out ? { out: resolve(flags.out) } : {}),
+        ...(write ? { write } : {}),
+        elapsed: timer.display(),
+      });
+      // A write refused or undone is a failed run, reported above.
+      if (write && write.status !== 'written') this.exit(1);
     } catch (error: any) {
+      // `this.exit()` throws; a `--write` failure exits from inside the try.
+      if (typeof error?.oclif?.exit === 'number') throw error;
       if (error instanceof MigrationFloorError) {
         if (flags.json) {
           await emitJson({ error: 'unsupported_from_major', message: error.message }, 0, { compact: true });
@@ -874,9 +878,6 @@ export default class MigrateMeta extends Command {
       if (!isReportedError(error)) printError(error.message || String(error));
       this.exit(1);
     }
-    // Decided inside, exited outside: `this.exit()` throws, and the catch above
-    // would report that throw as a bare "EEXIT: 1".
-    if (exitCode !== 0) this.exit(exitCode);
   }
 
   /**
