@@ -6104,7 +6104,20 @@ jobs:
       # showcase imports were previously built only by accident — through
       # dogfood's dependency chain, which broke when dogfood moved to
       # packages/qa/ (#3037).
+      #
+      # Turbo remote cache (#22077): the four TURBO_* lines are ci.yml Build
+      # Core's, verbatim, and its "Turbo remote cache (#21186)" comment holds
+      # the write rule, the signing and the PINS. This plan is 70 `build` nodes
+      # with Build Core's hashes (measured). ⛔ Build steps only: the typecheck
+      # step below stays off the remote, and every build task its `^build`
+      # closure schedules is already in this plan (0 extra, measured), so it
+      # replays them from the local cache this step fills.
       - name: Build workspace packages
+        env:
+          TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
+          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...'
 
       # CLI transcripts in content/docs are bound to the registries they quote
@@ -6320,7 +6333,18 @@ jobs:
       # showcase imports were previously built only by accident — through
       # dogfood's dependency chain, which broke when dogfood moved to
       # packages/qa/ (#3037).
+      #
+      # Turbo remote cache (#22077), on both of this lane's build steps: the
+      # four TURBO_* lines are ci.yml Build Core's, verbatim, and its "Turbo
+      # remote cache (#21186)" comment holds the write rule, the signing and
+      # the PINS. The two plans are 70 and 77 `build` nodes with Build Core's
+      # hashes (measured). The gates after them carry no credentials.
       - name: Build workspace packages
+        env:
+          TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
+          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...'
 
       # The MEASURED half of the coverage gate (#5278). The cheap structural
@@ -6384,6 +6408,11 @@ jobs:
       # local run, which is what #8271 was. Cost of keeping it: 9.5s of turbo
       # cache hits (70/70) against this lane's ~249s.
       - name: Build the ledgered packages' dependencies
+        env:
+          TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
+          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'
 
       # [#15042] The closure-wide declaration re-check. `check-dts-emitted` runs
@@ -6559,7 +6588,18 @@ jobs:
       # showcase imports were previously built only by accident — through
       # dogfood's dependency chain, which broke when dogfood moved to
       # packages/qa/ (#3037).
+      #
+      # Turbo remote cache (#22077), on both of this lane's build steps: the
+      # four TURBO_* lines are ci.yml Build Core's, verbatim, and its "Turbo
+      # remote cache (#21186)" comment holds the write rule, the signing and
+      # the PINS. The two plans are 70 and 77 `build` nodes with Build Core's
+      # hashes (measured). The gates after them carry no credentials.
       - name: Build workspace packages
+        env:
+          TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
+          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...'
 
       # The nested-package build. ⚠️ NOT redundant with "Build workspace
@@ -6581,6 +6621,11 @@ jobs:
       # reporting "measured and clean" (#4690). It is a superset of the step
       # above, so in practice it is cache hits plus the remainder (~13s in CI).
       - name: Build the nested packages the consumer gates resolve through
+        env:
+          TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
+          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'
 
       # [#15042] The closure-wide declaration re-check. `check-dts-emitted` runs
