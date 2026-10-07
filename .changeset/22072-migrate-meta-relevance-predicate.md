@@ -21,5 +21,5 @@ Clause-②: yes
 - **`os migrate meta`** lists `todos` minus `absentTodos`. After the listed notices it prints one line that counts the entries proven absent and names `--all`. A second line says that the proof covers the stack this run loaded, and not metadata a deployment stores.
   - `--all` prints each of those entries in full, with the keys it was proven absent under.
   - `--json` keeps `todos` whole and adds `absentTodos`, plus `hops[].absentTodos` with `--step`.
-  - `--step` reports each hop's listed count and adds a `not listed` count to the hop line.
+  - `--step` reports each hop's listed count, and adds a `not listed` count to the hop line when that count is not zero.
   - A run whose only notices are proven absent still writes `--out`.
