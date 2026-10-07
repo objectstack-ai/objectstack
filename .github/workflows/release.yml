@@ -382,7 +382,9 @@ jobs:
       # the RC lane and agrees path-for-path.
       #
       # WHAT IS CHECKED, AND WHY EACH ONE (7 s total, measured on the rendered
-      # tree in this job's own state: install, NO build)
+      # tree in this job's own state: install, NO build. With the major-boundary
+      # gates below, the whole step held 44 s on a shared dev container,
+      # 2026-10-07, on a 17.8.0 train — every gate green)
       # ---------------------------------------------------------------------
       # Two halves, because the classes above fail in two different ways.
       #
