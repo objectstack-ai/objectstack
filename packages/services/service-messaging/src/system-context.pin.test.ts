@@ -420,3 +420,56 @@ describe('[#21908] rows 24 onward — the remaining fan-out and outbox calls car
         expectAllSystem(calls);
     });
 });
+
+describe('[#21908] SqlHttpOutbox.redeliver carries the explicit system opt-in beside its threaded tenant', () => {
+    /** A terminal, genuinely-attempted row on the first read; `pending` on the read-back. */
+    function redeliverEngine() {
+        let reads = 0;
+        return recordingEngine((verb) => {
+            if (verb !== 'findOne') return [];
+            reads += 1;
+            return {
+                id: 'h1', source: 'webhook', ref_id: 'wh1', dedup_key: 'k1', url: 'https://example.test/hook',
+                payload_json: '{}', signature: 'sig', organization_id: 'org_a', partition_key: 0,
+                status: reads === 1 ? 'dead' : 'pending', attempts: reads === 1 ? 2 : 0,
+                created_at: NOW, updated_at: NOW,
+            };
+        });
+    }
+
+    it('both reads and the reset write: isSystem, the caller’s tenantId on the bag, and the audit stated armed', async () => {
+        const { engine, calls } = redeliverEngine();
+        const outbox = new SqlHttpOutbox(engine, { partitionCount: 1 });
+
+        const row = await outbox.redeliver('h1', { tenantId: 'org_a' });
+        expect(row.status).toBe('pending');
+
+        expect(calls.map((c) => c.verb)).toEqual(['findOne', 'update', 'findOne']);
+        expect(calls.every((c) => c.object === 'sys_http_delivery')).toBe(true);
+        expectAllSystem(calls);
+        // The scope stays the driver-level tenant on every call, never moved
+        // into the context and never dropped.
+        expect(calls[0].query).toMatchObject({ where: { id: 'h1' }, tenantId: 'org_a' });
+        expect(calls[2].query).toMatchObject({ where: { id: 'h1' }, tenantId: 'org_a' });
+        expect(calls[1].options).toMatchObject({
+            where: { id: 'h1', status: { $in: ['success', 'failed', 'dead'] } },
+            multi: true,
+            tenantId: 'org_a',
+            bypassTenantAudit: false,
+        });
+    });
+
+    it('⛔ a caller with no tenant gets no tenant invented, and still no audit bypass', async () => {
+        const { engine, calls } = redeliverEngine();
+        const outbox = new SqlHttpOutbox(engine, { partitionCount: 1 });
+
+        await outbox.redeliver('h1', { tenantId: undefined });
+
+        expectAllSystem(calls);
+        for (const c of calls) {
+            const bag = c.verb === 'update' ? c.options : c.query;
+            expect(bag).toHaveProperty('tenantId', undefined);
+        }
+        expect(calls[1].options.bypassTenantAudit).toBe(false);
+    });
+});
