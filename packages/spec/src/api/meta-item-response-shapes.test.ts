@@ -23,8 +23,9 @@ import { describe, it, expect } from 'vitest';
 import {
   GetMetaItemResponseSchema,
   GetMetaItemLayeredResponseSchema,
+  MetadataConflictErrorSchema,
 } from './protocol.zod';
-import type { GetMetaItemResponse, GetMetaItemLayeredResponse } from './protocol.zod';
+import type { GetMetaItemResponse, GetMetaItemLayeredResponse, MetadataConflictError } from './protocol.zod';
 import type { MetadataLock } from '../kernel/metadata-protection.zod';
 
 /** Type-level identity / assignability helpers. */
@@ -57,6 +58,15 @@ export type LockIsTheAdr0010Union = Assert< Eq< GetMetaItemResponse['lock'], Met
  */
 export type LayeredCarriesNoItem = Assert< Eq< 'item' extends keyof GetMetaItemLayeredResponse ? true : false, false > >;
 export type PlainCarriesNoLayers = Assert< Eq< 'effective' extends keyof GetMetaItemResponse ? true : false, false > >;
+
+/**
+ * #22114 — the read half of the token chain is reachable and typed: a string
+ * to echo as `If-Match`, `null` for "no stored row here", absent where the
+ * branch publishes none. And the conflict's current version is data a client
+ * reads without a cast.
+ */
+export type ReadVersionIsTokenNullOrAbsent = Assert< Eq< GetMetaItemResponse['version'], string | null | undefined > >;
+export type ConflictCurrentVersionIsTokenOrNull = Assert< Eq< MetadataConflictError['currentVersion'], string | null > >;
 
 /** The document under `item` — irrelevant to these shapes, so kept trivial. */
 const CUSTOMER = { name: 'customer', label: 'Customer' };
@@ -210,5 +220,37 @@ describe('GetMetaItemLayeredResponseSchema — the three-layer projection', () =
     const throughPlain = GetMetaItemResponseSchema.safeParse(LAYERED_BODY);
     expect(throughPlain.success).toBe(false);
     expect(throughPlain.error?.issues.map((i) => i.path.join('.'))).toContain('item');
+  });
+});
+
+describe('[#22114] the read serves the version token; the conflict carries the current one as data', () => {
+  const TOKEN = 'hmac-sha256:' + 'a'.repeat(64);
+
+  it('GetMetaItemResponseSchema keeps `version` through a parse — a token, `null`, or absent', () => {
+    expect(GetMetaItemResponseSchema.parse({ type: 'view', name: 'grid', item: {}, version: TOKEN }).version).toBe(TOKEN);
+    expect(GetMetaItemResponseSchema.parse({ type: 'view', name: 'grid', item: {}, version: null }).version).toBeNull();
+    // The cached branch and a `?preview=draft` read publish none: absent is legal and stays absent.
+    const cached = GetMetaItemResponseSchema.parse({ type: 'view', name: 'grid', item: {} });
+    expect('version' in cached).toBe(false);
+  });
+
+  it('rejects a `version` that is not a token', () => {
+    expect(() => GetMetaItemResponseSchema.parse({ type: 'view', name: 'grid', item: {}, version: 3 })).toThrow();
+  });
+
+  it('MetadataConflictErrorSchema parses the door\'s 409 body with `currentVersion` intact — a token or `null`', () => {
+    const body = {
+      error: `view/grid has been modified since you loaded it. The version token sent is not the current version (current is ${TOKEN}).`,
+      code: 'METADATA_CONFLICT',
+      currentVersion: TOKEN,
+    };
+    expect(MetadataConflictErrorSchema.parse(body).currentVersion).toBe(TOKEN);
+    expect(MetadataConflictErrorSchema.parse({ ...body, currentVersion: null }).currentVersion).toBeNull();
+  });
+
+  it('REQUIRES `currentVersion` and the one code — absence is not "no row"', () => {
+    const body = { error: 'view/grid has been modified since you loaded it.', code: 'METADATA_CONFLICT' };
+    expect(MetadataConflictErrorSchema.safeParse(body).success).toBe(false);
+    expect(MetadataConflictErrorSchema.safeParse({ ...body, currentVersion: null, code: 'CONCURRENT_UPDATE' }).success).toBe(false);
   });
 });
