@@ -598,6 +598,19 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     note: 'EXPERIMENTAL, and the state is a deliberate split between two questions. `packages/spec/liveness/object.json` classifies the KEY `live` with the note "objectui ({{record.field}} interpolation)" — that ledger asks whether anything READS the key, and the answer is yes. THIS ledger asks what EVALUATES the expression and under which fail policy, and the only interpolation site named is in the sibling repo objectui, which is not in this checkout: ⛔ NOT measured here, so it is not written into `enforcement` as if it had been. Marking the row `enforced` on a second-hand reading is exactly the invented cell this ledger exists to prevent; marking it `removed` would contradict a governed ledger that measured more than I could. Re-state as `enforced` when someone measures the objectui site — or as `removed` when ADR-0079 retires the key.',
   },
   {
+    id: 'template-notify-content',
+    summary: 'flow `notify` node inline content (NotifyConfig.title, .message) — single-brace `{token}` interpolation per run',
+    dialect: 'template', mode: 'interpret', state: 'enforced', failPolicy: 'throw',
+    enforcement:
+      'service-automation/builtin/notify-node.ts `execute`: `parseNodeConfig` parses the RAW config against `NotifyConfigSchema` first, and the parse normalizes a bare string to `{dialect:"template",source}`; then `stringifyForTemplate(interpolate(cfg.title?.source ?? "", …))` and the same for `message` — builtin/template.ts `interpolate` → `interpolateString`, which substitutes single-brace `{token}` only (`/\\{([^{}]+)\\}/g` → `resolveToken`), so a `{{var}}` keeps its outer braces. The rendered text goes out as `payload.title` / `payload.body` through the messaging service `emit`. On a fault: a malformed value (not a string or a template envelope, a blank bare string, a foreign-dialect envelope, an envelope with no non-blank `source`) is refused by that parse as a guard (`refuseNode`), so the run fails at the node and no `fault` edge routes it; a function-shaped defect in a token (unknown function, wrong arity, argument out of domain) THROWS `FlowExpressionFunctionError`, a marked guard refusal, failing the run the same way; and a `title` that renders empty fails the node (`notify: title is required`). NOT a throw: a token whose path resolves to nothing, or whose arithmetic does not evaluate, renders as empty text with no log, so a `message` goes out with the gap. Neither `FlowSchema.parse` nor registration judges these values (the builtin config arm reports only an ABSENT required key); `os validate` warns on a `{{var}}` (lint `flow-double-brace-interpolation`) and on an unknown `{record.x}` head (`validate-flow-template-paths`)',
+    covers: [
+      'automation/io-node-config.zod.ts:NotifyConfigSchema.title',
+      'automation/io-node-config.zod.ts:NotifyConfigSchema.message',
+    ],
+    proof: 'packages/services/service-automation/src/builtin/notify-template-slots.test.ts',
+    note: 'The renderer is the flow template interpolator, not `@objectstack/formula` templateEngine: the `{{var}}` spelling that engine and the messaging/email renderers read is NOT a placeholder here. `throw` is the ADR-0058 D5 flow tier and describes the faults the cell names as refusals; the silent half (an unresolved token rendering empty) is stated in the cell rather than rounded into the tier.',
+  },
+  {
     id: 'cel-advanced-policy',
     summary: 'advanced security / versioning policy conditions',
     dialect: 'cel', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
