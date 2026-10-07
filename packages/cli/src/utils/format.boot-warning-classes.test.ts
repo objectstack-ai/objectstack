@@ -278,7 +278,16 @@ describe('one line per warning class (formatter)', () => {
 });
 
 describe('print-once: Boot diagnostics withholds what the banner restated (formatter)', () => {
-  const unrelated = record("[branding] app 'crm' logo '/runtime/assets/icon.svg' is not servable");
+  // A boot warning no banner section restates. Shaped as the runtime-assets
+  // plugin's branding warning (`describeUnservedBrandingAssets` in
+  // `console.ts`, #22071) renders it — the first new boot warning to land
+  // beside this rule, which must keep it single.
+  const unrelated = record(
+    "Branding asset not served: app 'crm' (branding.logo, branding.favicon) → /runtime/assets/icon.svg, but " +
+      'the directory searched, /srv/app/assets (the cwd/assets default, since OS_RUNTIME_ASSETS_DIR is unset), ' +
+      'does not exist, so /runtime/assets/ is not mounted this run; the console will draw a broken image. To fix, ' +
+      'put icon.svg in that directory and restart, or set OS_RUNTIME_ASSETS_DIR to the directory that holds it.',
+  );
 
   it('replays every other record exactly once, and counts the withheld ones', () => {
     const names = ['a_flow', 'b_flow', 'c_flow'];
@@ -289,9 +298,11 @@ describe('print-once: Boot diagnostics withholds what the banner restated (forma
     });
 
     for (const name of names) expect(linesWith(name), transcript.join('\n')).toHaveLength(1);
-    // A boot warning no banner section restates — a new one included — prints
-    // once, in Boot diagnostics: neither doubled nor dropped.
-    expect(linesWith("logo '/runtime/assets/icon.svg'")).toHaveLength(1);
+    // A boot warning no banner section restates — the branding warning #22071
+    // added included — prints once, in Boot diagnostics: neither doubled nor
+    // dropped.
+    expect(linesWith('Branding asset not served')).toHaveLength(1);
+    expect(linesWith('/runtime/assets/icon.svg')).toHaveLength(1);
     expect(linesWith('Boot diagnostics')).toEqual([
       '  ⚠ Boot diagnostics — 1 warning logged during startup (3 more already listed above):',
     ]);
