@@ -24,10 +24,9 @@
  * guard (not routable via `fault` edges). `notify` parses the RAW stored
  * config — its slots are string-typed or template-typed, so `{token}`
  * templates pass and the post-interpolation guards still own "resolved to
- * nothing". `http` parses
- * the INTERPOLATED config, because that is the shape its executor reads —
- * a `{token}` in a typed slot (`timeoutMs`, `durable`) resolves to its real
- * type first.
+ * nothing". `http` parses the INTERPOLATED config, because that is the shape
+ * its executor reads — a `{token}` in a typed slot (`timeoutMs`, `durable`)
+ * resolves to its real type first.
  *
  * ## Unknown keys — closed here too, as of #4001 批 9
  *
@@ -177,10 +176,9 @@ function notifyTemplateSourceRequired(key: 'title' | 'message'): string {
  *    Inline `title`/`message` are the NON-localizable path — one text for
  *    every recipient, interpolated per run (below), never translated. The two
  *    paths are mutually exclusive on one node (see the `superRefine` below):
- *    runtime precedence would silently
- *    ignore one of them, so the ambiguous combination is unrepresentable
- *    instead — the same posture as `objectNavTargetExclusivity`
- *    (`ui/app.zod.ts`).
+ *    runtime precedence would silently ignore one of them, so the ambiguous
+ *    combination is unrepresentable instead — the same posture as
+ *    `objectNavTargetExclusivity` (`ui/app.zod.ts`).
  *  - `recipients`, `title`, `message`, `actionUrl` and `payload` pass through
  *    `interpolate()`, so `{record.x}` templates are legal in them. So do
  *    `templateData` VALUES (they are per-run render inputs). `channels`,
