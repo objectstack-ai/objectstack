@@ -323,11 +323,11 @@ export const RELAY_WORKFLOW_ACTIVE_STATE = 'active';
 export const RELAY_LIVE_OVERRIDE_ENV = 'OS_FLEET_RELAY_LIVE';
 
 export const DEFAULT_START_MS = 90_000;
+export const DEFAULT_CEILING_MS = 5 * 60 * 1000;
+export const DEFAULT_POLL_MS = 5_000;
 
 /** The export every sender carries for the no-run conformance (the header's section of that name). */
 const RELAY_MISS_PROBE = 'relayMissProbe';
-export const DEFAULT_CEILING_MS = 5 * 60 * 1000;
-export const DEFAULT_POLL_MS = 5_000;
 
 // ---------------------------------------------------------------------------
 // Pure core
@@ -2048,7 +2048,8 @@ export async function selfTest() {
     `✓ fleet-write/dispatch self-test: ${cases.length} cases pass across ${declared.length} batteries — the transport selector that never guesses, ` +
       'the session on the envelope, one paced dispatch per stroke, a run found by its request id and waited to its conclusion, both ceilings answered UNCONFIRMED and never retried, ' +
       'and every body read back after a success run — the card\'s 41,699 bytes byte-exact across every 16 KiB boundary, a corrupted read-back NOT STORED (exit 4), an unfound one UNCONFIRMED (6) ' +
-      "only after a lagging issue list was re-read on its bounded schedule — unless the run's annotation named the new number, which is read at once and never listed — the create never re-sent.",
+      "only after a lagging issue list was re-read on its bounded schedule — unless the run's annotation named the new number, which is read at once and never listed — the create never re-sent; " +
+      'and every relay sender, discovered from the source, answering an accepted dispatch with no run, or none completed, UNCONFIRMED (6) with ZERO direct writes, under auto as under dispatch (the no-run conformance).',
   );
   selfTestReachedVerdict = true;
   return 0;

@@ -3421,7 +3421,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the shared rule: this tool and H56 cannot come to disagree': 6,
   'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 30,
   'the record line: a `## Contract review` record\'s `Local-runs:` value, judged when present — an absent line is not re-judged': 9,
-  'the relay transport: the same act as one op, the comment found on the board, the exit register kept apart': 12,
+  'the relay transport: the same act as one op, the comment found on the board, the exit register kept apart': 13,
   "the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes": 13,
 });
 const SELF_TEST_BATTERY_FLOOR = 17;
@@ -4546,6 +4546,23 @@ export function selfTest() {
     const ownSource = readFileSync(SELF_PATH, 'utf8');
     const mainSource = ownSource.slice(ownSource.indexOf('async function main(argv)'), ownSource.indexOf('// --self-test — offline'));
     t('structural: in main a dry run returns before the relay can be reached, and ONE read-back verdict serves both transports', mainSource.indexOf('if (options.dryRun) {') < mainSource.indexOf('await writeThroughRoute(') && (mainSource.match(/readBackVerdict\(\{/g) ?? []).length === 1);
+    // The behaviour is driven by fleet-write/dispatch.mjs's no-run conformance (through `relayMissProbe`); this is the
+    // half this file's own gate can hold synchronously: ONE write step, and its only direct write sits on the
+    // non-dispatch branch, ahead of the relay — so no outcome of an accepted dispatch can reach it.
+    const stepSource = ownSource.slice(ownSource.indexOf('export async function writeThroughRoute('), ownSource.indexOf('export async function relayMissProbe('));
+    const directAt = stepSource.indexOf('writeArtefact(');
+    const stepFacts = [
+      ['writeArtefact(', 'writeViaRelay(', 'sendFleetWrite('].filter((call) => mainSource.includes(call)),
+      (stepSource.match(/writeArtefact\(/g) ?? []).length,
+      directAt > 0 && stepSource.slice(stepSource.lastIndexOf('\n', directAt), directAt).includes("route.transport !== 'dispatch'"),
+      directAt > 0 && directAt < stepSource.indexOf('writeViaRelay('),
+      /state === 'no-run' \|\| relayed\.sent\.state === 'timeout'\) \{\s*log\(unconfirmedText\(relayed\.sent, 'post-stamped'\)\);\s*return \{ exit: EXIT_UNCONFIRMED \};/.test(stepSource),
+    ];
+    t(
+      'structural: main writes only through writeThroughRoute, whose ONE direct write is on the non-dispatch branch before the relay is reached — an accepted dispatch with no run, or none completed, returns UNCONFIRMED and never reaches it',
+      JSON.stringify(stepFacts) === JSON.stringify([[], 1, true, true, true]),
+      `got ${JSON.stringify(stepFacts)}, want [[],1,true,true,true] (main's own direct calls · direct writes in the step · on the non-dispatch line · ahead of the relay · no-run/timeout answer UNCONFIRMED)`,
+    );
   }
 
   // ── the size route ───────────────────────────────────────────────────────

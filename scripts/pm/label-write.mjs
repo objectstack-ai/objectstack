@@ -952,7 +952,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the fallback: one PATCH, and the assignee echo that makes it survivable': 7,
   'the remaining exits: refusal, mismatch, the ONE-OF block and the dry run': 5,
   'the CLI: what a typo must never be allowed to mean': 8,
-  'the relay transport: ONE dispatch carrying the whole stroke, the same read-back, and an accepted dispatch with no run UNCONFIRMED under auto too — never a direct write': 12,
+  'the relay transport: ONE dispatch carrying the whole stroke, the same read-back, and an accepted dispatch with no run UNCONFIRMED under auto too — never a direct write': 14,
 });
 const SELF_TEST_BATTERY_FLOOR = 10;
 const UNATTRIBUTED_BATTERY = '(unattributed)';

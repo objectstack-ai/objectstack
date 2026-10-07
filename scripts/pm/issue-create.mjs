@@ -424,7 +424,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the transport: a fake platform, and what each answer does to the exit code': 9,
   'dry-run: no request leaves, and the plan is printed': 3,
   'the wiring: both halves around the one POST, on the write verb only': 4,
-  'the relay transport: ONE dispatch carrying the create, the card found by title since the dispatch, and an accepted dispatch with no run UNCONFIRMED under auto too — never the direct POST': 8,
+  'the relay transport: ONE dispatch carrying the create, the card found by title since the dispatch, and an accepted dispatch with no run UNCONFIRMED under auto too — never the direct POST': 9,
   "the relay annotation: the number the relay run's annotation carries is read first — the card read back at it with NO list; absent, the title finds it as before; the read-back still judges the annotated card": 5,
 });
 const SELF_TEST_BATTERY_FLOOR = 7;

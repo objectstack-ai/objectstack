@@ -592,7 +592,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the pre-read: a pull request, a card already moved, or an unreadable card is refused before any write': 5,
   "the direct transport: the target's node id, then ONE paced mutation carrying both node ids — the relay row's own query": 7,
   'the read-back: the old URL answers 301 to the new card, which answers from the target with the same title': 9,
-  'the relay transport: ONE dispatch carrying ONE transfer, the new number read from the redirect, a failed run names the remedy, and no outcome of an accepted dispatch — a failure, no run under auto — is ever fallen back from': 8,
+  'the relay transport: ONE dispatch carrying ONE transfer, the new number read from the redirect, a failed run names the remedy, and no outcome of an accepted dispatch — a failure, no run under auto — is ever fallen back from': 9,
   'the target decides: a card the target answers is a transfer even while the old URL still serves it (a pending redirect: exit 0, the target URL); exit 4 only when the target still lacks it after the bounded re-read AND the old URL is unchanged; an unreadable or ambiguous target is UNCONFIRMED; the transfer is never re-sent': 16,
   "the relay annotation: the number the relay run's annotation carries is read first — the card confirmed on the target with no title search; a target that answers this session 403 is still exit 0, confirmed_by relay-annotation, the old URL its corroboration; a 404, another title or another number keeps exit 4 / 6; absent, the 301 and the title as before": 12,
   'dry-run: no request leaves, and the plan is printed': 3,
