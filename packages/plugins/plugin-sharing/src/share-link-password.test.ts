@@ -23,9 +23,15 @@
  *    `?password=` query parameter still is, and a wrong password is refused
  *    through either form;
  *  - no log line carries the presented password;
+ *  - [#22049] `X-Share-Password-Encoding: utf-8` declares the header
+ *    percent-encoded UTF-8, so a CJK and an emoji password resolve through it
+ *    on both public routes; without it a Latin-1 password and a raw one
+ *    containing `%` resolve unchanged; a declared encoding that does not hold
+ *    is refused `400 VALIDATION_FAILED` before the token is looked up, never
+ *    compared raw;
  *  - both public routes answer `Cache-Control: no-store` and
- *    `Vary: X-Share-Password` on every outcome, and the authenticated routes
- *    do not;
+ *    `Vary: X-Share-Password, X-Share-Password-Encoding` on every outcome, and
+ *    the authenticated routes do not;
  *  - the pure-JS scrypt the WebContainer path uses and `node:crypto`'s produce
  *    interchangeable hashes.
  */
@@ -478,10 +484,127 @@ describe('[#21839] how the password travels in', () => {
   });
 });
 
+describe('[#22049] the password header declares its encoding', () => {
+  const CJK = '分享密码二二零四九';
+  const EMOJI = 'open 🔐🦊 sesame';
+  const LATIN1 = 'Déjà vu ½ ÿ 22049';
+  const RAW_PERCENT = 'grade 100% %zz 22049';
+  const RAW_PERCENT_ESCAPE = '50%25 off 22049';
+  const UTF8 = { 'x-share-password-encoding': 'utf-8' };
+
+  async function protectedConversation(password: string) {
+    const booted = await boot();
+    const link = await booted.service.createLink(
+      { object: 'ai_conversations', recordId: 'conv_1', password },
+      CREATOR,
+    );
+    return { ...booted, link };
+  }
+
+  function expectServed(route: 'resolve' | 'messages', res: { status: number; body: any }, label: string) {
+    expect(res.status, label).toBe(200);
+    expect(res.body?.success, label).toBe(true);
+    if (route === 'messages') expect(res.body?.data?.map((m: Row) => m.id), label).toEqual(['msg_1']);
+    else expect(res.body?.data?.record?.id, label).toBe('conv_1');
+  }
+
+  it.each([
+    ['resolve', 'CJK', CJK],
+    ['resolve', 'emoji', EMOJI],
+    ['messages', 'CJK', CJK],
+    ['messages', 'emoji', EMOJI],
+  ] as const)('/%s serves a %s password sent percent-encoded under utf-8', async (route, label, password) => {
+    const { http, link } = await protectedConversation(password);
+    const res = await drive(http, `GET ${B}/:token/${route}`, {
+      params: { token: link.token },
+      headers: { 'x-share-password': encodeURIComponent(password), ...UTF8 },
+    });
+    expectServed(route, res, label);
+  });
+
+  it.each([
+    ['resolve', 401, 'WRONG_PASSWORD'],
+    ['messages', 404, 'NOT_FOUND'],
+  ] as const)('/%s does not guess: the same encoded value with no encoding header is compared raw', async (route, status, code) => {
+    const { http, link } = await protectedConversation(CJK);
+    const res = await drive(http, `GET ${B}/:token/${route}`, {
+      params: { token: link.token },
+      headers: { 'x-share-password': encodeURIComponent(CJK) },
+    });
+    expect(res.status).toBe(status);
+    expect(res.body?.error?.code).toBe(code);
+  });
+
+  it.each([
+    ['resolve', 'Latin-1', LATIN1],
+    ['resolve', 'raw with a stray %', RAW_PERCENT],
+    ['resolve', 'raw with a %-escape', RAW_PERCENT_ESCAPE],
+    ['messages', 'Latin-1', LATIN1],
+    ['messages', 'raw with a stray %', RAW_PERCENT],
+    ['messages', 'raw with a %-escape', RAW_PERCENT_ESCAPE],
+  ] as const)('/%s still serves a %s password sent raw, with no encoding header', async (route, label, password) => {
+    const { http, link } = await protectedConversation(password);
+    const res = await drive(http, `GET ${B}/:token/${route}`, {
+      params: { token: link.token },
+      headers: { 'x-share-password': password },
+    });
+    expectServed(route, res, label);
+  });
+
+  it.each([
+    ['resolve', 'a truncated UTF-8 sequence', { 'x-share-password': '%E5%88', ...UTF8 }],
+    ['resolve', 'an octet that is not UTF-8', { 'x-share-password': '%FF', ...UTF8 }],
+    ['resolve', 'an encoding the server does not read', { 'x-share-password': encodeURIComponent(CJK), 'x-share-password-encoding': 'latin1' }],
+    ['messages', 'a truncated UTF-8 sequence', { 'x-share-password': '%E5%88', ...UTF8 }],
+    ['messages', 'an octet that is not UTF-8', { 'x-share-password': '%FF', ...UTF8 }],
+    ['messages', 'an encoding the server does not read', { 'x-share-password': encodeURIComponent(CJK), 'x-share-password-encoding': 'latin1' }],
+  ] as const)('/%s refuses %s with 400 VALIDATION_FAILED, before the token is looked up', async (route, _label, headers) => {
+    const { http, link, service } = await protectedConversation(CJK);
+    const resolveToken = vi.spyOn(service, 'resolveToken');
+    const res = await drive(http, `GET ${B}/:token/${route}`, { params: { token: link.token }, headers });
+    expect(res.status).toBe(400);
+    expect(res.body?.success).toBe(false);
+    expect(res.body?.error?.code).toBe('VALIDATION_FAILED');
+    expect(res.body?.error?.message).toContain('X-Share-Password');
+    expect(JSON.stringify(res.body)).not.toContain(headers['x-share-password']);
+    expect(res.headers['Cache-Control']).toBe('no-store');
+    expect(resolveToken).not.toHaveBeenCalled();
+  });
+
+  it.each(['resolve', 'messages'] as const)(
+    '/%s never falls back to a raw compare: an undecodable value that IS the raw password is still refused',
+    async (route) => {
+      const rawPassword = '%E5%88 22049';
+      const { http, link } = await protectedConversation(rawPassword);
+      const raw = await drive(http, `GET ${B}/:token/${route}`, {
+        params: { token: link.token },
+        headers: { 'x-share-password': rawPassword },
+      });
+      expectServed(route, raw, 'the raw form, undeclared');
+      const declared = await drive(http, `GET ${B}/:token/${route}`, {
+        params: { token: link.token },
+        headers: { 'x-share-password': rawPassword, ...UTF8 },
+      });
+      expect(declared.status).toBe(400);
+      expect(declared.body?.error?.code).toBe('VALIDATION_FAILED');
+    },
+  );
+
+  it.each(['resolve', 'messages'] as const)('/%s: the ?password= form still wins, and the header pair is then not read', async (route) => {
+    const { http, link } = await protectedConversation(CJK);
+    const res = await drive(http, `GET ${B}/:token/${route}`, {
+      params: { token: link.token },
+      query: { password: CJK },
+      headers: { 'x-share-password': '%FF', 'x-share-password-encoding': 'latin1' },
+    });
+    expectServed(route, res, 'query wins');
+  });
+});
+
 describe('[#21839] the public routes are never cached', () => {
   function expectNoStore(res: { headers: Record<string, string | string[]> }, label: string) {
     expect(res.headers['Cache-Control'], label).toBe('no-store');
-    expect(res.headers.Vary, label).toBe('X-Share-Password');
+    expect(res.headers.Vary, label).toBe('X-Share-Password, X-Share-Password-Encoding');
   }
 
   it.each(['resolve', 'messages'] as const)('/%s sends no-store + Vary on success and on every refusal', async (route) => {

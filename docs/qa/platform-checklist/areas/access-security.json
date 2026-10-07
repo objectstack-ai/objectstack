@@ -1638,7 +1638,7 @@
       "title": "Share-link capability tokens: anon resolve renders the record minus redactFields, password/audience gates hold, revoke/expire refuse without leaking, the stored password hash never leaves the server, the password travels in the X-Share-Password header, and public answers are never cached",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1721,9 +1721,9 @@
           "evidence": "the three traces and the preflight response headers"
         },
         {
-          "clause": "public share-link answers are never cached: BOTH public routes (/:token/resolve and /:token/messages) answer Cache-Control: no-store and Vary: X-Share-Password on EVERY outcome, success and refusal alike. The authenticated create, list and revoke routes do not carry these headers",
+          "clause": "public share-link answers are never cached: BOTH public routes (/:token/resolve and /:token/messages) answer Cache-Control: no-store and Vary: X-Share-Password, X-Share-Password-Encoding on EVERY outcome, success and refusal alike. The authenticated create, list and revoke routes do not carry these headers",
           "oracle": "api",
-          "verify": "each public response's headers carry exactly Cache-Control: no-store and Vary: X-Share-Password (200, 401 x2, 404, 410, and the messages refusal); the authenticated list response carries neither",
+          "verify": "each public response's headers carry exactly Cache-Control: no-store and Vary: X-Share-Password, X-Share-Password-Encoding (200, 401 x2, 404, 410, and the messages refusal); the authenticated list response carries neither",
           "evidence": "the header block of every public response and of the authenticated list response"
         }
       ],
@@ -1759,7 +1759,8 @@
         "packages/plugins/plugin-sharing/src/share-link-service.ts#withoutPasswordHash (the one exit projection: every copy of a link that leaves the service drops password_hash)",
         "packages/plugins/plugin-sharing/src/share-link-routes.ts#SHARE_LINK_PUBLIC_RESPONSE_HEADERS (the plugin mount: no-store + Vary on both public routes; the x-share-password header read)",
         "packages/runtime/src/domains/share-links.ts#PUBLIC_RESPONSE_HEADERS (the dispatcher mount: the same headers on every public outcome, including a throw outside the body try)",
-        "packages/plugins/plugin-hono-server/src/adapter.ts#DEFAULT_CORS_ALLOW_HEADERS (X-Share-Password in the default preflight allow-list)",
+        "packages/plugins/plugin-hono-server/src/adapter.ts#DEFAULT_CORS_ALLOW_HEADERS (X-Share-Password and X-Share-Password-Encoding in the default preflight allow-list)",
+        "packages/types/src/share-password-header.ts#readSharePasswordHeader (the one reading of the X-Share-Password header pair both mounts decode through: raw without X-Share-Password-Encoding, percent-encoded UTF-8 under utf-8, 400 VALIDATION_FAILED for a declared encoding that does not hold)",
         "packages/plugins/plugin-sharing/src/share-link-password.ts#hashShareLinkPassword (the stored form is the platform slow password hash; legacy forms still verify and are upgraded on the first successful redemption)",
         "pins: packages/plugins/plugin-sharing/src/share-link-password.test.ts ('[#21839] the stored hash never leaves the server', '[#21839] how the password travels in', '[#21839] the public routes are never cached') · packages/runtime/src/domains/share-links-public-cache-headers.test.ts ('[#21839] dispatcher public share-link routes are never cached') · packages/plugins/plugin-hono-server/src/hono-plugin.test.ts ('should allow X-Share-Password by default')",
         "content/docs/protocol/kernel/http-protocol.mdx (X-Share-Password in the allowed request headers) · #21839 · PR #21890"
@@ -1794,6 +1795,12 @@
           "date": "2026-10-06",
           "change": "three clauses added for the rules PR #21890 landed (#21839), with a step and a negative each: the stored password hash leaves the server on no exit (mint, list, redemption); the password is accepted from the X-Share-Password header (the ?password= form is still accepted, and the default CORS allow-list carries the header); and both public routes answer Cache-Control: no-store and Vary: X-Share-Password on every outcome, while the authenticated routes do not. The messages route is scored on its refusal, since its success half stays the Cloud/EE knownGap. Existing clauses, steps and indices are unchanged",
           "ref": "#21932"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-07",
+          "change": "the Vary clause and its verify re-pointed to the measured answer: both public routes now answer Vary: X-Share-Password, X-Share-Password-Encoding, because the answer also depends on the companion header that declares the password header's encoding (utf-8: percent-encoded UTF-8). Sources name the shared header reading and the companion header in the default CORS allow-list. No clause, step, negative or variant added or removed; a clause scoring the encoded form is left to a checklist sweep",
+          "ref": "#22049"
         }
       ]
     },

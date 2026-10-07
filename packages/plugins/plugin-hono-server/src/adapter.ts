@@ -67,7 +67,11 @@ import {
  * `X-Share-Password` carries a share-link password to the public
  * `/share-links/:token/resolve` and `/messages` routes — the preferred form,
  * since a header stays out of URLs (#21839); without it here a cross-origin
- * client could only use the query-parameter form.
+ * client could only use the query-parameter form. `X-Share-Password-Encoding`
+ * declares that header's encoding (`utf-8`: percent-encoded UTF-8, #22049) —
+ * the only way a password with a character above U+00FF can be sent from a
+ * browser; without it here a cross-origin client could send only the
+ * passwords a raw header can carry.
  */
 export const DEFAULT_CORS_ALLOW_HEADERS: readonly string[] = Object.freeze([
     'Content-Type',
@@ -77,6 +81,7 @@ export const DEFAULT_CORS_ALLOW_HEADERS: readonly string[] = Object.freeze([
     'X-Environment-Id',
     'If-Match',
     'X-Share-Password',
+    'X-Share-Password-Encoding',
 ]);
 
 /**
