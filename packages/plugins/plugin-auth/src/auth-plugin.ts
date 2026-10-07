@@ -36,6 +36,7 @@ import {
   resolveOidcProviderEnabled,
   readMcpServerEnabledEnv,
   isOAuthEligibleBaseUrl,
+  ipMatchesRange,
   // [#16384] The one place `'/api/v1/auth'` is written — see its docblock in
   // auth-manager.ts. This file no longer carries an independent copy.
   DEFAULT_AUTH_BASE_PATH,
@@ -252,8 +253,34 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
 }
 
 /**
+ * Is this plain-HTTP issuer on a LOOPBACK host (#22073)? Asked only of an issuer
+ * the transport rule has already accepted (`isOAuthEligibleBaseUrl`), to pick
+ * the plain-HTTP notice's level: loopback ⇒ `info`, private / link-local ⇒
+ * `warn`.
+ *
+ * The loopback half of that rule's own allow-list, in its own terms: the
+ * `localhost` / `*.localhost` names it accepts, its `127.0.0.0/8` block judged
+ * by the same ADR-0069 D5 matcher (`ipMatchesRange`), and `::1`. The hostname
+ * is WHATWG-canonical, as the rule reads it — `127.1`, `0x7f.1` and
+ * `[0:0:0:0:0:0:0:1]` arrive here as `127.0.0.1` and `[::1]`. Every other
+ * accepted host — RFC 1918, link-local, unique-local — is not loopback and
+ * keeps the warning. `mcp-oauth-plaintext-notice.test.ts` pins both sides.
+ */
+function isLoopbackIssuer(issuer: string): boolean {
+  let host: string;
+  try {
+    host = new URL(issuer).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (host === '[::1]') return true;
+  return ipMatchesRange(host, '127.0.0.0/8');
+}
+
+/**
  * Authentication Plugin
- * 
+ *
  * Provides authentication and identity services for ObjectStack applications.
  * 
  * **Dual-Mode Operation:**
@@ -3386,14 +3413,24 @@ export class AuthPlugin implements Plugin {
     const authIssuer = manager.getAuthIssuer();
     const servedOverPlainHttp = /^http:\/\//i.test(authIssuer);
     if (servedOverPlainHttp && isOAuthEligibleBaseUrl(authIssuer)) {
-      ctx.logger.warn(
+      // [#22073] The LEVEL follows the host; the sentence does not. On a
+      // loopback issuer — every `os dev` / `os start` on localhost — nothing
+      // crosses a network at all, so the line is `info`: the same sentence,
+      // still emitted on every accepted plain-HTTP boot (D1 above holds), and
+      // no longer a warning about the expected local state on every boot. A
+      // private or link-local issuer is reachable from its network and keeps
+      // `warn`. Every OAuth origin this deployment publishes derives from the
+      // one canonical origin the issuer carries, so the issuer's host is the
+      // whole question.
+      const notice =
         'OAuth is served UNENCRYPTED: this deployment publishes its ' +
-          `authorization server over plain HTTP (${authIssuer}), so authorization codes, access tokens ` +
-          'and bearer headers cross the network in the clear and anything that can observe it can ' +
-          'replay them. The transport rule accepts this origin only because the host is loopback or a ' +
-          'private / link-local address; put TLS in front of any deployment reachable from a public ' +
-          'network, where the same origin is refused outright.',
-      );
+        `authorization server over plain HTTP (${authIssuer}), so authorization codes, access tokens ` +
+        'and bearer headers cross the network in the clear and anything that can observe it can ' +
+        'replay them. The transport rule accepts this origin only because the host is loopback or a ' +
+        'private / link-local address; put TLS in front of any deployment reachable from a public ' +
+        'network, where the same origin is refused outright.';
+      if (isLoopbackIssuer(authIssuer)) ctx.logger.info(notice);
+      else ctx.logger.warn(notice);
     } else if (servedOverPlainHttp) {
       ctx.logger.warn(
         'OAuth discovery is served over PUBLIC plain HTTP: this deployment publishes its ' +
