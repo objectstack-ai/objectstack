@@ -29,6 +29,7 @@ import {
   createTimer,
   emitJson,
   errorCodeFields,
+  isExitSignal,
   isReportedError,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
@@ -857,8 +858,7 @@ export default class MigrateMeta extends Command {
       // A write refused or undone is a failed run, reported above.
       if (write && write.status !== 'written') this.exit(1);
     } catch (error: any) {
-      // `this.exit()` throws; a `--write` failure exits from inside the try.
-      if (typeof error?.oclif?.exit === 'number') throw error;
+      if (isExitSignal(error)) throw error;
       if (error instanceof MigrationFloorError) {
         if (flags.json) {
           await emitJson({ error: 'unsupported_from_major', message: error.message }, 0, { compact: true });
