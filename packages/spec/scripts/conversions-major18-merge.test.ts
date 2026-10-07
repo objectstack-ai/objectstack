@@ -50,8 +50,8 @@ const BLANK = /[ \t]*\n/y;
 const DEFINITION = /^(?:export )?const ([A-Za-z_$][\w$]*): MetadataConversion = \{\n  id: '([^'\n]+)',$/gm;
 /** Where a conversion that sorts last is defined: directly above this declaration's doc comment. */
 const TAIL_ANCHOR = '\ninterface OrderedConversion {\n';
-/** How `CONVERSIONS_BY_MAJOR` reads the entries. */
-const WIRING = '  18: inApplicationOrder(MAJOR_18_CONVERSIONS),\n';
+/** How `CONVERSIONS_BY_MAJOR` reads the entries (the annotation: see that table's docblock). */
+const WIRING = '  18: /* @__PURE__ */ inApplicationOrder(MAJOR_18_CONVERSIONS),\n';
 
 /**
  * The entries that predate the placement rule: their definitions stay where
