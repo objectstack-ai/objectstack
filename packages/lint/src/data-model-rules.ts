@@ -282,8 +282,10 @@ const MASTER_DETAIL_REQUIRED = 'relationship/master-detail-required';
  * author-time fix. Under `controlled_by_parent` the security gate's refusal
  * stands behind every one of these shapes; outside it nothing at runtime refuses
  * a non-required `master_detail`, so there it stays a likely-wrong choice at
- * `warning`, unchanged. Maintainer ruling of 2026-08-16 on #8772, Direction 1,
- * scheduled for the v18 boundary; the runtime half of that ruling is untouched
+ * `warning`, unchanged. Maintainer ruling of 2026-08-16, Direction 1, scheduled
+ * for the v18 boundary — the card that carries it verbatim is #9139 (the thread
+ * the ruling was recorded on no longer resolves on the board); the runtime half
+ * of that ruling is untouched
  * (the security gate's fallbacks stay, so metadata already at rest keeps
  * loading and is still guarded).
  *
