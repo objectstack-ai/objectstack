@@ -1,0 +1,32 @@
+{
+  "number": 22075,
+  "kind": "issue",
+  "title": "ci(test-shards): the shard balance is derived on full-run sums while PR and merge_group runs use the affected set — the CLI shard (1/6) measures 34–36 min against 10–20 for the others and sets CI and queue wall time",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:blocked",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-07T12:39:23Z",
+  "updated_at": "2026-10-07T13:13:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22075",
+  "body": "Filing gate: ③ a maintainer-directed task — the maintainer, after this seat's CI assessment in this session, verbatim: 「CI 优化按照你的建议创建任务」 — carrying ① a measured defect with a named fix site: the test-shard balance is derived on full-run package sums, but PR and merge_group runs execute the affected set, and on those runs the CLI shard is about 1.9× the other five and sets CI and merge-queue wall time. Filed by `domain:skills` seat 2 (seat post #19287, `session_0181E4ZeZmWyknawnauxD2CE`). ⛔ Not a claim. The `tooling` entry rule (`triage-duties.md:34`) is met by the maintainer's instruction quoted here; the guarded surface is the required context `Test Core` and the merge queue's wall time.\nReader: triage first-touch → `domain:devx` (the lane of #16173, #16454, #16464, #22014); the devx seat dispatches it. Sequence it after #22014 (open, dispatched: the shard-timings dataset rests on one run; #22022 landed the 3-run refresh), so the re-derivation reads a measured dataset.\nDedupe: page-looped REST listings, closed included (`domain:devx` since 2026-09-07: 391; `ci/cd`: 63; every issue updated since 2026-10-01: 636; `tooling` since 2026-09-07: 417; `domain:skills` since 2026-09-23: 109; union 1,266) grepped for `shard|partition|@objectstack/cli|slowest` → 23 hits. The nearest: #16173 (closed `not_planned` under ruling 202 B — the stale CLI entry, 672 s predicted vs 28m46s measured), #16445 (the \"temporary\" `Test Core` wall 30 → 45 min while #16173 was unfixed; still 45 today), #16454 / #16464 / #16222 (closed: publish the slowest packages, scheduled dataset refresh), #21758 / #21826 (the two re-derivations recorded in `scripts/partition-test-shards.mjs`), #22014 (open) and #16468 (open, blocked on #22014). None measures the imbalance on affected-set runs, which is this card.\n\n## What is measured\n\n- Jobs API, step timestamps (CI research of this session, raw files kept in the seat's scratchpad):\n  - CI `pull_request` run 37567293616 (branch `claude/issue-22044-…`): wall 36.5 min, 169 job-min. `Test Core (1/6)` 35.7 min (the \"run shard tests\" step 34.2); shards 6/4/3/5/2: 18.0 / 17.9 / 15.4 / 14.6 / 11.8 min. The slowest shard is 1.9× the mean of the other five (15.5).\n  - CI `merge_group` run 37570577136 (queue entry for #22048): wall 37.1 min; `Test Core (1/6)` 36.2 min (tests 34.9); other shards 11.6–20.2.\n  - In every full run sampled, shard 1/6 took 34–36 min; no other shard exceeded 20.2.\n  - CI wall over the 100 most recent completed runs: p50 21.2 / p90 37.2 / max 44.5 min; queue build wall over 22 green builds: p50 35.0 / p90 38.1 min. Both are set by this shard.\n- The dataset: `scripts/test-shard-timings.json`, 72 packages, 9,781 s total; `@objectstack/cli` 1,702.69 s is the heaviest item; `@objectstack/spec` 1,134.86 s next.\n- The derivation (`scripts/partition-test-shards.mjs`, the comment block ending \"n = 1 is the derived answer\"): the bound is a RATIO, `MAX_SHARD_OVER_MEAN = 1.3`; on the committed dataset the CLI whole is 1.044× the mean (bins 2–6 at 1,614–1,617 s), so pin 3c refuses a `{ '@objectstack/cli': 2 }` slicing entry and the CLI stays whole. The arithmetic is right for a FULL run.\n- Why it fails on PRs: since #16453 / #16467, `pull_request` and `merge_group` runs execute the affected set against the base sha. The CLI is downstream of most packages, so it is in the affected set of most PRs and runs whole (about 1,700 s), while the other five bins run only their affected members and shrink to 700–1,200 s. The bound holds on paper and fails on nearly every PR and queue build.\n- Consequence: the one shard decides CI wall time and queue throughput (about 2 builds per hour, 60-minute queue check timeout); the `Test Core` wall is still the 45 minutes #16445 raised it to.\n\n## Done when\n\n- The partition, or the slicing refusal, is derived against affected-set runs, by one of two routes the dev measures on at least 3 `pull_request` and 2 `merge_group` runs before choosing:\n  - (a) per-run partition: the shard assignment is computed at run time from the affected package list, using the committed dataset as weights (the matrix stays 6 wide; the generator's slice reassembly and `OS_TEST_SHARD` wiring already exist);\n  - (b) static shards with an affected-set-aware slice: the CLI slices (`expandSlices`, the existing mechanism) when the affected set makes it the only heavy item, and runs whole on full runs.\n- Pin: the measured slowest-shard / mean-of-the-others ratio on affected-set runs is ≤ 1.3, read from the jobs API and quoted in the PR body with run ids; `--check-drift` keeps its meaning.\n- The `Test Core` shard wall is re-sized from the measured distribution (the #16445 raise was declared temporary), with the rationale comment carrying the window and numbers.\n- ⛔ No reduction of what the shards test (every affected package still runs); ⛔ the seven required contexts are unchanged; ⛔ dataset-quality work stays in #22014 / #22022 and is not duplicated here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

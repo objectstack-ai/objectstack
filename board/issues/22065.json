@@ -2,7 +2,7 @@
   "number": 22065,
   "kind": "pull_request",
   "title": "fix(plugin-email): the boot sweep reads stored templates in bulk and no longer rewrites an unchanged row",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-07T07:48:15Z",
-  "updated_at": "2026-10-07T08:20:58Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-07T08:57:51Z",
+  "closed_at": "2026-10-07T08:57:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-07T08:57:49Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/22065",
