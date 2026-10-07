@@ -309,8 +309,8 @@ export interface AuthoringRuleContext {
    *
    * [#22019] One other rule reads it, on that argument: `validateStackExpressions`
    * is one entry over several PASSES, and an `object` write is admitted for its
-   * field-formula pass and (#22032) its validation-rule pass alone
-   * (`runStackExpressionPasses`, `StackExpressionOptions`). The entry-level
+   * field-formula pass and (#22032) its validation-rule and field-rule-slot
+   * passes alone (`runStackExpressionPasses`, `StackExpressionOptions`). The entry-level
    * `runtimeTypes` can say that an object write reaches the rule; it cannot say
    * which of the rule's passes judge that write.
    */
@@ -613,6 +613,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // the pass, and 0 door errors and 0 advisories at the door's own snapshot
     // shape, against 2 refusals at each for the card's two bodies in the same
     // harness.
+    //
+    // [#22032, pass 2] The field-rule-slot pass joins the object door: every
+    // field's `requiredWhen` / `readonlyWhen` / `conditionalRequired` /
+    // `visibleWhen`, with the `parent` gate, the `requiredWhen` null guard and
+    // the reference-traversal refusal — the same sentence of `formulas.mdx`,
+    // and the gap the card measured (a bare `requiredWhen: 'amount > 1'` saved
+    // with a 200). The per-option `visibleWhen` stays fenced. No entry-level
+    // change. MEASURED first, at both the raw and the parsed shape: every
+    // field-rule slot the repository ships — 9 slots on 8 fields of 3 objects
+    // (examples: app-showcase 8 slots on 2 objects, three of them
+    // `parent`-scoped; platform: plugin-security 1 on `sys_permission_set`),
+    // over 118 objects → 0 build
+    // errors and 0 warnings for the pass, and 0 door errors and 0 advisories
+    // at the door's own snapshot shape, against a refusal at each for the
+    // card's body in the same harness.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object'],
     run: (stack, ctx) =>

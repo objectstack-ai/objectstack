@@ -22,6 +22,14 @@ export const SysPresence = ObjectSchema.create({
   icon: 'wifi',
   isSystem: true,
   managedBy: 'append-only',
+  // [ADR-0131 D7] Deployment-level state: NO tenant column. Nothing writes
+  // this table through ObjectQL (presence travels the realtime path), so no
+  // writer attributes a row to an organization — and a person present in
+  // several organizations is one person. Who may read is object permission
+  // (D7): the platform-only capability below, so the generic data door cannot
+  // hand one organization's admin another organization's presence rows.
+  systemFields: { tenant: false },
+  requiredPermissions: ['manage_platform_settings'],
   description: 'Real-time user presence and activity tracking',
   // [ADR-0079] The record title is `display_title`, a text formula over the
   // same two columns `titleFormat` names. With no pointer declared, the

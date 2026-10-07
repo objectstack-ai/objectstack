@@ -634,3 +634,101 @@ describe('[#21689] a hook with no `body` and no function in `handler` is refused
         expect(rows.size).toBe(0);
     });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 9. #22088 — the `flow` door refuses an edge that names no node, and a repeat
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The card's reach was this door: the Studio flow designer saved a flow whose
+// edges named a node it no longer held, and a flow holding one edge three
+// times; the save answered 2xx, publish then promoted it, and the repeated
+// edge ran its target once per copy. `FlowSchema` now refuses both, so THIS
+// gate — the one `PUT /api/v1/meta/flow/:name` reaches, built here as that
+// route builds it (`writeFace: 'meta-envelope'`, the actor named), and the
+// draft save the designer's save-then-publish loop starts with — refuses them
+// with the ADR-0112 envelope, each issue located at the edge, and stores
+// nothing, so there is no draft left for publish to promote. Rides this
+// file's pinned engine double, as sections 4 to 8 do. ⛔ No check of its own
+// lives in `protocol.ts`: the refusal is the registered type schema's.
+
+async function saveFlowAsAdministrator(protocol: any, item: Record<string, unknown>, mode?: 'draft'): Promise<any> {
+    try {
+        return await protocol.saveMetaItem({
+            type: 'flow',
+            name: item.name,
+            item,
+            writeFace: 'meta-envelope',
+            actor: 'usr_admin',
+            ...(mode ? { mode } : {}),
+        });
+    } catch (e: any) {
+        return e;
+    }
+}
+
+describe('[#22088] a flow edge that names no node, or repeats an earlier edge, is refused at the metadata door', () => {
+    const flowWith = (nodes: Array<Record<string, unknown>>, edges: Array<Record<string, unknown>>) => ({
+        name: 'repro_edges',
+        label: 'Repro edges',
+        type: 'autolaunched',
+        nodes,
+        edges,
+    });
+    const start = { id: 'start', type: 'start', label: 'Start' };
+    const end = { id: 'end', type: 'end', label: 'End' };
+    const node1 = { id: 'node_1', type: 'assignment', label: 'Node 1' };
+
+    it.each([
+        ['publish', undefined],
+        ['draft', 'draft'],
+    ] as const)('%s mode, the dangling flow — 422 INVALID_METADATA at each endpoint naming no node, nothing stored', async (_label, mode) => {
+        const { protocol, rows } = makeProtocol();
+        const err = await saveFlowAsAdministrator(protocol, flowWith([start, end], [
+            { id: 'e1', source: 'start', target: 'node_1' },
+            { id: 'e2', source: 'node_1', target: 'end' },
+        ]), mode);
+
+        expect(err).toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = err.issues as Array<{ code?: string; path?: string; message: string }>;
+        expect(issues.map((i) => [i.code, i.path])).toEqual([
+            ['custom', 'edges.0.target'],
+            ['custom', 'edges.1.source'],
+        ]);
+        expect(issues[0]!.message).toContain("`target: 'node_1'`");
+        expect(rows.size).toBe(0);
+    });
+
+    it.each([
+        ['publish', undefined],
+        ['draft', 'draft'],
+    ] as const)('%s mode, the repeated edge — 422 INVALID_METADATA at each later copy, nothing stored', async (_label, mode) => {
+        const { protocol, rows } = makeProtocol();
+        const err = await saveFlowAsAdministrator(protocol, flowWith([start, node1, end], [
+            { id: 'e1', source: 'start', target: 'node_1' },
+            { id: 'edge_1', source: 'start', target: 'node_1' },
+            { id: 'edge_3', source: 'start', target: 'node_1' },
+            { id: 'edge_2', source: 'node_1', target: 'end' },
+        ]), mode);
+
+        expect(err).toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = err.issues as Array<{ code?: string; path?: string; message: string }>;
+        expect(issues.map((i) => [i.code, i.path])).toEqual([
+            ['custom', 'edges.1'],
+            ['custom', 'edges.2'],
+        ]);
+        expect(rows.size).toBe(0);
+    });
+
+    it('CONTROL — the same flow with one edge per hop, each into a declared node, is stored', async () => {
+        const { protocol, rows } = makeProtocol();
+        const result = await saveFlowAsAdministrator(protocol, flowWith([start, node1, end], [
+            { id: 'e1', source: 'start', target: 'node_1' },
+            { id: 'edge_2', source: 'node_1', target: 'end' },
+        ]));
+
+        expect(result instanceof Error ? `${result.message} ${JSON.stringify((result as any).issues ?? [])}` : 'stored').toBe('stored');
+        expect([...rows.values()].map((r) => [r.type, r.name])).toEqual([['flow', 'repro_edges']]);
+    });
+});
