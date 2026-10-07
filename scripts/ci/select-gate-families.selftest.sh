@@ -20,6 +20,14 @@
 # edit, an added test, an added changeset) must skip every tooling self-test,
 # while the tool's own inputs must still run them.
 #
+# Since #22076 the same section pins the pm_dispatch_gates read-set to the
+# files the battery OPENS, as measured: a ratchet baseline, prose under
+# scripts/ and agent prose outside the pm-dispatch rulebook skip it, while
+# scripts/pm/** whole, the rulebook, a `.claude/**` shell script, a data file a
+# relative specifier names and a scripts/ file of an unlisted kind still run
+# it; a pull request touching only packages/*/src/** runs no PM self-test, and
+# `schedule` and `push` still run it over the very changes the PR path skips.
+#
 # Since #19753 it covers migration_registry, the one family that ADDS a gate
 # to the PR path: an entry, the generated registry, the generator and the two
 # package files that decide how it runs must each select it; a spec source
@@ -96,7 +104,20 @@ printf '#!/usr/bin/env bash\necho ci\n' > "$UP/scripts/ci/tool.sh"
 printf 'name: lint\n' > "$UP/.github/workflows/lint.yml"
 printf '# agent\n' > "$UP/.claude/agents/os-dev.md"
 printf '# skill\n' > "$UP/skills/x/SKILL.md"
+# The pm_dispatch_gates read-set as measured (#22076): the rulebook its live
+# cases open, a hook shell script the shell-mask census opens, and a data file
+# under scripts/ that a module imports through a relative specifier. The
+# specifier is assembled from an unquoted word on purpose, for the reason the
+# two repo paths at the top are spelled as they are.
+mkdir -p "$UP/.claude/skills/pm-dispatch/references" "$UP/.claude/hooks"
+printf '# rules\n' > "$UP/.claude/skills/pm-dispatch/references/rules.md"
+printf '#!/usr/bin/env bash\necho guard\n' > "$UP/.claude/hooks/guard.sh"
+printf '{}\n' > "$UP/.claude/settings.json"
+printf '{"rows":[]}\n' > "$UP/scripts/table.json"
+TABLE_SPECIFIER=./table.json
+printf "import table from '%s' with { type: 'json' };\nexport const rows = table.rows;\n" "$TABLE_SPECIFIER" > "$UP/scripts/reads-table.mjs"
 printf '# rules\n' > "$UP/AGENTS.md"
+printf '# claude\n' > "$UP/CLAUDE.md"
 printf '# readme\n' > "$UP/README.md"
 printf -- '---\n"a": patch\n---\nchange\n' > "$UP/.changeset/first.md"
 # The migration_registry read-set (#19753), and its nearest neighbours outside it.
@@ -296,6 +317,27 @@ expect_reason verify_lock "event '<none>' is not scoped"
 run_case 'push: the event decides, not the variables that happen to be set' "$REPO" push main "$C0"
 expect_rc 0
 expect_all_run
+
+# The backstop, held over the very change set the PR path now lets the PM
+# self-test skip (#22076): an unscoped event never reads the diff.
+S=$(scenario M:scripts/slot-lookup-baseline.json M:AGENTS.md M:skills/x/SKILL.md)
+run_case 'schedule: a change the PR path skips the PM self-test for still runs it -- the hourly full run is the backstop (#22076 control)' "$REPO" schedule '' ''
+expect_rc 0
+expect_warnings '' ''
+expect_all_run
+expect_reason pm_dispatch_gates "event 'schedule' is not scoped"
+
+run_case 'push: the same change on main still runs the PM self-test (#22076 control)' "$REPO" push main "$C0"
+expect_rc 0
+expect_warnings '' ''
+expect_all_run
+expect_reason pm_dispatch_gates "event 'push' is not scoped"
+
+run_case 'merge_group: the same change, scoped, skips the PM self-test -- so the two controls above are not vacuous' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_warnings '' ''
+expect_verdicts slot_lookup query_options_erasure entry_guard declared_population_live bare_root_worklist self_test_workflow_commands
+expect_reason pm_dispatch_gates 'no changed path is in its read-set'
 
 # ── merge_group: the card's four cases ──────────────────────────────────────
 S=$(scenario M:scripts/pm/tool.mjs)
@@ -516,9 +558,38 @@ expect_reason verify_lock scripts/helper.mjs
 expect_reason migration_registry 'no changed path is in its read-set'
 
 S=$(scenario M:scripts/slot-lookup-baseline.json)
-run_case 'merge_group: a ratchet baseline runs the ratchets and every family that reads scripts/' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: a ratchet baseline runs the ratchets and the families that walk scripts/, and not the PM self-test -- the battery opens no data file (#22076)' "$REPO" merge_group '' "$C0"
 expect_rc 0
+expect_warnings '' ''
+expect_verdicts slot_lookup query_options_erasure entry_guard declared_population_live bare_root_worklist self_test_workflow_commands
+expect_reason pm_dispatch_gates 'no changed path is in its read-set'
+expect_reason entry_guard '(M, scripts)'
+
+S=$(scenario M:scripts/table.json)
+run_case 'merge_group: a data file a relative import specifier names still runs the PM self-test -- the one edge by which the discovery opens a data file' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_warnings '' ''
 expect_verdicts slot_lookup query_options_erasure entry_guard pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
+expect_reason pm_dispatch_gates 'scripts/table.json (M, scripts)'
+
+S=$(scenario A:scripts/notes.md A:scripts/ci/fixtures/job-log.txt)
+run_case 'merge_group: prose and a fixture log under scripts/ run the families that walk scripts/, and not the PM self-test (#22076)' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_warnings '' ''
+expect_verdicts entry_guard declared_population_live bare_root_worklist self_test_workflow_commands
+expect_reason pm_dispatch_gates 'no changed path is in its read-set'
+
+S=$(scenario A:scripts/ci/matrix.yaml)
+run_case 'merge_group: a scripts/ file of a kind the arm does not list still runs the PM self-test -- fail-open on the extension' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_verdicts entry_guard pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
+expect_reason pm_dispatch_gates 'scripts/ci/matrix.yaml (A, scripts)'
+
+S=$(scenario A:scripts/pm/ledger.json)
+run_case 'merge_group: a data file under scripts/pm still runs the PM self-test -- scripts/pm is in its read-set whole' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_verdicts entry_guard pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
+expect_reason pm_dispatch_gates 'scripts/pm/ledger.json (A, scripts)'
 
 S=$(scenario M:scripts/ci/tool.sh)
 run_case 'merge_group: a scripts/ subdirectory script is a gate source only' "$REPO" merge_group '' "$C0"
@@ -526,9 +597,29 @@ expect_rc 0
 expect_verdicts entry_guard pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
 
 S=$(scenario M:.claude/agents/os-dev.md M:skills/x/SKILL.md M:AGENTS.md)
-run_case 'merge_group: agent configuration runs the PM self-test alone -- it is the only battery here that reads it' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: agent prose the battery never opens (an agent definition, a published skill, AGENTS.md) runs no family (#22076)' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_warnings '' ''
+expect_verdicts
+expect_reason pm_dispatch_gates 'no changed path is in its read-set'
+
+S=$(scenario M:CLAUDE.md M:.claude/settings.json)
+run_case 'merge_group: CLAUDE.md and the .claude settings JSON run no family (#22076)' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_verdicts
+
+S=$(scenario M:.claude/skills/pm-dispatch/references/rules.md)
+run_case 'merge_group: the pm-dispatch rulebook runs the PM self-test alone -- its live cases open it' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_warnings '' ''
+expect_verdicts pm_dispatch_gates
+expect_reason pm_dispatch_gates '(M, agent-config)'
+
+S=$(scenario M:.claude/hooks/guard.sh)
+run_case 'merge_group: a .claude hook shell script still runs the PM self-test alone -- only prose and JSON left the read-set' "$REPO" merge_group '' "$C0"
 expect_rc 0
 expect_verdicts pm_dispatch_gates
+expect_reason pm_dispatch_gates '.claude/hooks/guard.sh (M, agent-config)'
 
 S=$(scenario M:package.json)
 run_case 'merge_group: root configuration runs every family' "$REPO" merge_group '' "$C0"
@@ -649,6 +740,29 @@ expect_verdicts slot_lookup query_options_erasure comment_mask_corpus
 expect_reason pm_dispatch_gates 'no changed path is in its read-set'
 expect_line 'Gate families: 3 run, 7 skipped'
 
+# The card's pin and triage's (#22076): product code alone runs no PM
+# self-test; scripts/pm/** runs it, prose included.
+git_q -C "$REPO" checkout -q -B feature-22076-src "$C0"
+printf 'export const a = 3;\n' > "$REPO/packages/a/src/index.ts"
+printf 'export const index = 2;\n' > "$REPO/packages/spec/src/index.ts"
+git_q -C "$REPO" commit -q -am 'F4: product source in two packages, nothing else'
+run_case 'pull_request: a PR touching only packages/*/src/** runs no PM self-test (#22076 pin)' "$REPO" pull_request main ''
+expect_rc 0
+expect_warnings '' ''
+expect_verdicts slot_lookup query_options_erasure comment_mask_corpus
+expect_reason pm_dispatch_gates 'no changed path is in its read-set'
+expect_changed 'two package sources' "M packages/a/src/index.ts
+M packages/spec/src/index.ts"
+
+git_q -C "$REPO" checkout -q -B feature-22076-pm "$C0"
+printf '# pm, revised on a feature branch\n' > "$REPO/scripts/pm/README.md"
+git_q -C "$REPO" commit -q -am 'F5: prose under scripts/pm'
+run_case 'pull_request: a PR touching scripts/pm/** runs the PM self-test, prose included (#22076 pin)' "$REPO" pull_request main ''
+expect_rc 0
+expect_warnings '' ''
+expect_verdicts entry_guard pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
+expect_reason pm_dispatch_gates 'scripts/pm/README.md (M, scripts)'
+
 git_q -C "$REPO" checkout -q -B feature-19753 "$C0"
 printf 'export const entry = 2;\n' > "$REPO/packages/spec/src/migrations/entries/semantic/17.x.ts"
 git_q -C "$REPO" commit -q -am 'F3: an entry edited on a feature branch, registry not regenerated'
@@ -753,7 +867,7 @@ pin_step migration_registry 'pnpm --filter @objectstack/spec check:migration-reg
 
 # ── Verdict ─────────────────────────────────────────────────────────────────
 # #4690: a battery that ran nothing is a failure, never a pass.
-if [ "$cases" -lt 56 ] || [ "$checks" -lt 293 ]; then
+if [ "$cases" -lt 68 ] || [ "$checks" -lt 354 ]; then
   echo "SELFTEST FAILED: only $cases case(s) / $checks check(s) ran -- the battery is short"
   exit 1
 fi
