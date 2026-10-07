@@ -9,7 +9,7 @@
       "title": "Showcase boots clean: health + ready 200, no degraded startup banners, console + app metadata served",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P0",
       "surface": "mixed",
       "preconditions": [
@@ -40,7 +40,7 @@
         {
           "clause": "the `Flows:` startup banner carries no ⚠ line of a MISAUTHORED class — a flow name claimed by several definitions, a flow targeting an unknown object, a trigger NOT bound for any reason other than deployment policy, or flows declared while the automation engine is not enabled — and no ERROR-level lines appear IN THE BOOT WINDOW — the window is part of the clause, because ordinary caller-error 4xx traffic also logs at ERROR",
           "oracle": "log",
-          "verify": "read each ⚠ line under the Flows banner and classify it. ⚠️ A stock boot DOES print ⚠ lines that are not misauthoring: each package-authored scheduled flow is listed as `⚠ flow '<name>' declares a '<type>' trigger but is NOT bound — disabled by deployment policy …`, because package-authored scheduled work is off by default (QA run #21056 counted two on stock showcase). That is the posture working, so a bare grep for '⚠' reads a clean boot as a FAIL (the four misauthored classes are the four ⚠ shapes printAutomationSummary in packages/cli/src/utils/format.ts prints). Then grep for ERROR lines, SCOPED to the boot window — from process start to the first 200 on /api/v1/health (the same instant clause 0 records as time-to-healthy). ⚠️ A caller-error REFUSAL logs at ERROR level with a full stack BEFORE answering 4xx — measured on 17.1.0 with a `$fn` filter probe answering 400 INVALID_FILTER (#10257). So an unscoped grep over a log that also carries the run's own probe traffic reports ERROR lines for requests the platform refused CORRECTLY, and a clean boot reads as a boot failure. Cut the log at the health-green line before grepping, or capture the boot log to its own file before issuing the first request; seed rejections still count as failures (see #3415 — SeedLoader rejections were silent)",
+          "verify": "read each ⚠ line under the Flows banner and classify it. ⚠️ A stock boot DOES print ⚠ lines that are not misauthoring: package-authored scheduled flows are listed on ONE line per trigger type and reason, `⚠ <n> flow(s) declare a '<type>' trigger but are NOT bound — disabled by deployment policy …: <names>`, because package-authored scheduled work is off by default (QA run #21056 counted two such flows on stock showcase; since #22073 they share one line, and Boot diagnostics no longer repeats them). That is the posture working, so a bare grep for '⚠' reads a clean boot as a FAIL (the four misauthored classes are the four ⚠ shapes printAutomationSummary in packages/cli/src/utils/format.ts prints). Then grep for ERROR lines, SCOPED to the boot window — from process start to the first 200 on /api/v1/health (the same instant clause 0 records as time-to-healthy). ⚠️ A caller-error REFUSAL logs at ERROR level with a full stack BEFORE answering 4xx — measured on 17.1.0 with a `$fn` filter probe answering 400 INVALID_FILTER (#10257). So an unscoped grep over a log that also carries the run's own probe traffic reports ERROR lines for requests the platform refused CORRECTLY, and a clean boot reads as a boot failure. Cut the log at the health-green line before grepping, or capture the boot log to its own file before issuing the first request; seed rejections still count as failures (see #3415 — SeedLoader rejections were silent)",
           "evidence": "the grepped log excerpt"
         },
         {
@@ -90,6 +90,12 @@
           "date": "2026-10-01",
           "change": "checklist-accuracy findings of QA run #21056. steps[3] asked for every SeedLoader line, but at the default warn level a healthy boot prints none: it now names the level-immune `Seeds:` banner row and the --log-level info line. acceptance[2]'s 'no ⚠' collided with the stock `NOT bound — disabled by deployment policy` lines for package-authored scheduled flows: the clause now names the misauthored classes it fails on",
           "ref": "#21060"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-07",
+          "change": "acceptance[2].verify quoted the per-flow banner line `⚠ flow '<name>' declares a '<type>' trigger but is NOT bound — disabled by deployment policy …`. The banner now prints one line per (trigger type, reason) class with the flows listed, and Boot diagnostics no longer repeats the automation plugin's per-flow line, so the quoted shape moved with it. The clause is unchanged",
+          "ref": "#22073"
         }
       ]
     },

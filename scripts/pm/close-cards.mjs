@@ -1599,7 +1599,7 @@ async function driveOffline(options, initial = {}, stubs = {}) {
       log: (line) => out.push(line),
       now: clock,
       route: stubs.route ?? DIRECT_ROUTE,
-      send: stubs.relay ? fakeRelay(api, stubs.relay, sent, clock) : undefined,
+      send: stubs.send ?? (stubs.relay ? fakeRelay(api, stubs.relay, sent, clock) : undefined),
       postComment: async ({ issue, file }) => {
         const exit = commentExits.length ? commentExits.shift() : 0;
         posted.push({ issue, file, exit });
@@ -1622,6 +1622,25 @@ const memoryFiles = (tree) => (path) => {
 };
 
 const QUEUED = (number, extra = {}) => ({ [number]: { state: 'open', labels: ['pm:queue', 'tooling'], assignees: [], timeline: [], comments: [], ...extra } });
+/**
+ * The no-run conformance probe — `fleet-write/dispatch.mjs`'s header names the
+ * contract and its self-test drives it: ONE queued card through
+ * `runCloseCards`, the real write path, against the offline fake board, on the
+ * route and the sender the conformance hands in. Answers the exit, every
+ * request that left this process directly (`METHOD /path`) — the direct
+ * leg's comment and label writes are its two child tools, stubbed in-process
+ * and spelled as the requests they stand for — and what the tool printed.
+ */
+export async function relayMissProbe({ route, send }) {
+  const repo = 'objectstack-ai/objectstack';
+  const run = await driveOffline({ numbers: [88] }, { cards: QUEUED(88) }, { route, send });
+  const calls = [
+    ...run.api.calls.map((c) => `${c.method} ${c.path}`),
+    ...run.posted.map((p) => `POST /repos/${repo}/issues/${p.issue}/comments`),
+    ...run.labelled.map((l) => `DELETE /repos/${repo}/issues/${l.issue}/labels`),
+  ];
+  return { exit: run.res.exit, calls, text: run.text };
+}
 /** A record card that never carried a pm-state — the shape `--stateless` exists for. */
 const STATELESS = (number, extra = {}) => ({ [number]: { state: 'open', labels: ['tracking', 'domain:spec'], assignees: [], timeline: [], comments: [], ...extra } });
 /** The clock an EARLIER act posted this row's closing comment on — a day before the self-test's own. */

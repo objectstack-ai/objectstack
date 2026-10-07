@@ -108,12 +108,17 @@
 //   • An entry with no trailing parenthetical at all. There is no field to stamp, and
 //     inventing one means choosing between the two wordings above -- the same judgement.
 //   • An entry whose parenthetical is prose. Same reason.
+//   • A `current series:` field that already names the newest GA, whatever its date.
+//     The gate has no finding there, and the date belongs to the version commit that
+//     moved the field, which a run that moves nothing is not -- every prerelease cut
+//     is such a run (see `releaseDate`).
 //
 // An over-eager rewriter is not a lesser failure than an inert one: this file writes
 // into curated, reader-facing prose, so `--self-test` asserts a CURRENT index is left
 // BYTE-IDENTICAL with no write at all, and that each refused shape survives untouched.
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -175,6 +180,12 @@ export const STATUS_SHAPE =
  * version`. UTC, not local: a runner in any timezone must stamp the day the commit is
  * dated, and `git` dates the commit in UTC in CI.
  *
+ * ⛔ So the date is TRUE only for the version this run moves the field TO. A run that
+ * leaves the version where it is -- every prerelease cut, `18.0.0-next.N` and
+ * `X.Y.Z-rc.N` alike, because a prerelease heading never becomes the newest GA -- is
+ * not that version's version commit, and today is not its release date. That is why
+ * `rewriteStatusField` refuses a same-version field outright instead of re-dating it.
+ *
  * A clock this cannot read is a REFUSAL, never a silently wrong date written into
  * published prose.
  *
@@ -199,6 +210,15 @@ export function releaseDate(now = new Date()) {
  * verdict, which is where a refusal becomes loud. See "What it deliberately does NOT
  * rewrite".
  *
+ * A field that already names `newestVersion` is left alone, date included. The gate
+ * judges the VERSION only (`indexCurrencyFindings` has nothing to say about such a
+ * field), and the date this run holds is the release date of the version it moves the
+ * field to -- see `releaseDate`. Re-dating a field whose version did not move would
+ * write the day of an unrelated version pass into published prose: measured on the
+ * first `18.0.0-next.0` cut, `(current series: 17.7.0, released 2026-10-06)` became
+ * `released 2026-10-07`, while 17.7.0's version commit `4e4e881427` is dated
+ * 2026-10-06. In pre mode the newest GA never moves, so every prerelease cut did it.
+ *
  * @param {string} field the inner text of the entry's trailing parenthetical
  * @param {string} newestVersion
  * @param {string} date `YYYY-MM-DD`
@@ -207,8 +227,8 @@ export function releaseDate(now = new Date()) {
 export function rewriteStatusField(field, newestVersion, date) {
   const m = STATUS_SHAPE.exec(field);
   if (m === null) return null;
-  const rewritten = `${m[1]}${newestVersion}${m[3]}${date}`;
-  return rewritten === field ? null : rewritten;
+  if (m[2] === newestVersion) return null;
+  return `${m[1]}${newestVersion}${m[3]}${date}`;
 }
 
 /**
@@ -445,11 +465,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Control E: the verdict is the GATE\'s function, assertion 2 ONLY': 5,
   'Control F: the surface and the scope are the gate\'s, not copies': 4,
   'Control G: the date refuses an unusable clock': 3,
+  'Control H: a prerelease cut never re-dates the newest GA': 7,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as zeroing it,
 // so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 
 // The key an assertion is filed under when no battery is open. It is not a declared
 // battery, so it reds by the same set difference rather than silently inflating
@@ -549,9 +570,9 @@ export function selfTest() {
     expect('B — and is byte-identical, so main() never writes it', after.text === before);
     expect('B — re-stamping an already-current entry is not a rewrite (the date is not churned '
       + 'on every release either)', rewriteStatusField('current series: 17.3.0, released 2026-09-04', '17.3.0', '2026-09-04') === null);
-    expect('B — but a same-version entry with a DIFFERENT date still is one',
-      rewriteStatusField('current series: 17.3.0, released 2026-09-01', '17.3.0', '2026-09-04')
-        === 'current series: 17.3.0, released 2026-09-04');
+    expect('B — and neither is a same-version entry with a DIFFERENT date: the date belongs to the '
+      + 'version commit that moved the field, which a run that moves nothing is not',
+      rewriteStatusField('current series: 17.3.0, released 2026-09-01', '17.3.0', '2026-09-04') === null);
   }
 
   // ── Control C ─────────────────────────────────────────────────────────────
@@ -645,6 +666,59 @@ export function selfTest() {
     expect('G — and so does a value that is not a Date at all', threwOnNonDate);
   }
 
+  // ── Control H ─────────────────────────────────────────────────────────────
+  // The measured defect: the first `18.0.0-next.0` cut re-dated the v17 entry from its
+  // GA day to the cut's day. A prerelease heading never becomes the newest GA, so a
+  // prerelease cut leaves the version where it is -- and must leave the date too.
+  battery('Control H: a prerelease cut never re-dates the newest GA');
+  {
+    const CUT_DATE = '2026-10-07';
+    const withHeading = (heading) => CHANGELOG_FIXTURE.replace('## 17.3.0-rc.1', heading);
+    const nextCut = withHeading('## 18.0.0-next.0');
+    const rcCut = withHeading('## 17.4.0-rc.0');
+    const current = indexOf(CURRENT_V17, CURRENT_V16);
+
+    const afterNext = rewriteIndexText({ indexText: current, changelogText: nextCut, date: CUT_DATE });
+    expect('H — a `next` prerelease cut on a later day rewrites nothing',
+      afterNext.rewrites.length === 0 && afterNext.text === current);
+    expect('H — the newest GA keeps its own release date, not the cut\'s',
+      afterNext.text.includes('current series: 17.3.0, released 2026-09-04')
+        && !afterNext.text.includes(`released ${CUT_DATE}`));
+    expect('H — the prerelease major is not a judged major: no GA of 18 exists yet',
+      !afterNext.majors.includes(18) && afterNext.majors.includes(17));
+    expect('H — and refusing the re-date leaves the gate nothing to say',
+      currencyFindings({ indexText: afterNext.text, changelogText: nextCut }).length === 0);
+
+    const afterRc = rewriteIndexText({ indexText: current, changelogText: rcCut, date: CUT_DATE });
+    expect('H — an `rc` prerelease cut on a later day rewrites nothing either',
+      afterRc.rewrites.length === 0 && afterRc.text === current);
+
+    // Positive control on the same later day: the date still travels WITH a version that
+    // moves, so the refusal above is about the version standing still, not an inert date.
+    const staleAfterNext = rewriteIndexText({
+      indexText: indexOf(STALE_V17, CURRENT_V16), changelogText: nextCut, date: CUT_DATE,
+    });
+    expect('H — control: a STALE entry on the same cut is still stamped, version AND that day',
+      staleAfterNext.rewrites.length === 1
+        && staleAfterNext.text.includes(`current series: 17.3.0, released ${CUT_DATE}`));
+
+    // End to end through syncIndex, the function main() calls: on a checkout-shaped temp
+    // tree the index file is not written at all, not rewritten to identical bytes.
+    const tmp = mkdtempSync(join(tmpdir(), 'sync-release-index-currency-'));
+    try {
+      mkdirSync(dirname(join(tmp, INDEX_PATH)), { recursive: true });
+      mkdirSync(dirname(join(tmp, SPEC_CHANGELOG)), { recursive: true });
+      writeFileSync(join(tmp, INDEX_PATH), current);
+      writeFileSync(join(tmp, SPEC_CHANGELOG), nextCut);
+      const result = syncIndex({ root: tmp, date: CUT_DATE });
+      expect('H — syncIndex on a next-cut tree reports no write and leaves the index byte-identical',
+        result.wrote === false && result.rewrites.length === 0
+          && readFileSync(join(tmp, INDEX_PATH), 'utf8') === current && result.findings.length === 0);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
   // ── Floor ─────────────────────────────────────────────────────────────────
   const declared = Object.keys(SELF_TEST_BATTERIES);
   let floorBreached = false;
@@ -695,8 +769,9 @@ export function selfTest() {
     + 'GA of its major with the version AND the date, a current index is left byte-identical and '
     + 'unwritten, the shapes that need a human sentence ("final release:", a missing parenthetical, '
     + 'prose) are REFUSED and reach the gate\'s own verdict instead, prose parentheticals and '
-    + 'out-of-scope majors are never touched, and the surface, the scope floor and the verdict are '
-    + 'the gate\'s rather than copies of it.',
+    + 'out-of-scope majors are never touched, a prerelease cut (`next` or `rc`) leaves the newest '
+    + 'GA\'s release date alone, and the surface, the scope floor and the verdict are the gate\'s '
+    + 'rather than copies of it.',
   );
   selfTestReachedVerdict = true;
   return 0;

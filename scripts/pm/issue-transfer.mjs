@@ -44,8 +44,13 @@
  * makes — and gates the sender on both. `direct` reads the target's node id
  * and sends the relay row's own mutation with the token this process holds.
  * `auto` takes `dispatch` in a cloud seat container and `direct` elsewhere,
- * and says which; it falls back to `direct` only when NO run appeared, never
- * from a run that failed (issue-create's rule, and dispatch.mjs's reasons).
+ * and says which. ⛔ Once a dispatch is ACCEPTED, its run is the only answer:
+ * no run in the start window, or none completed, is exit 6 under `auto`
+ * exactly as under `dispatch`, and a run that failed is exit 5 — never the
+ * direct mutation after either. The relay may merely be queued, and the
+ * mutation would move the card as the seat's personal account instead of the
+ * fleet's (`fleet-write/dispatch.mjs`'s no-run conformance pins every sender
+ * to this).
  *
  * ## Read-back — the TARGET decides; the old URL only corroborates
  *
@@ -131,7 +136,7 @@ import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, resolveSweepRepo } from './check-half-states.mjs';
-import { EXIT_UNCONFIRMED, READ_BACK_SLACK_MS, exitForResult, fallbackText, matchRunAnnotations, packRequest, parseRelayAnnotation, relayAnnotationMessage, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { EXIT_UNCONFIRMED, READ_BACK_SLACK_MS, exitForResult, matchRunAnnotations, packRequest, parseRelayAnnotation, relayAnnotationMessage, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
 import { repoOfIssue, requestLanded } from './fleet-write/execute.mjs';
 import { OPS, TARGET_OWNER, TARGET_REPO_SHAPE, TRANSFER_TARGETS, transferRemedy } from './fleet-write/ops.mjs';
 import { refusalText as relayRefusalText, validateStroke } from './fleet-write/validate.mjs';
@@ -389,9 +394,9 @@ export async function transferIssue(plan, deps = {}) {
       } else {
         lines.push("  issue-transfer: no annotation on the relay run names this transfer — the number comes from the old URL's 301, else the title finds the card.");
       }
-    } else if (route.requested === 'auto' && sent.state === 'no-run') {
-      lines.push(`  ${fallbackText(sent, 'issue-transfer')}`);
     } else if (sent.state === 'no-run' || sent.state === 'timeout') {
+      // ⛔ Under EVERY transport request, `auto` included: the dispatch was accepted and may still run, so the direct
+      // mutation here would move the card as the seat's personal account instead of the fleet's.
       lines.push(unconfirmedText(sent, 'issue-transfer'));
       return done(EXIT_UNCONFIRMED, { relay: sent });
     } else {
@@ -543,6 +548,40 @@ export async function transferIssue(plan, deps = {}) {
   return done(EXIT_OK, { to, pendingRedirect: pending, confirmedBy: 'target' });
 }
 
+/**
+ * The no-run conformance probe — `fleet-write/dispatch.mjs`'s header names the
+ * contract and its self-test drives it: ONE transfer through `transferIssue`,
+ * the real write path, against an offline fake board, on the route, the sender
+ * and the throttle the conformance hands in. Answers the exit, every request
+ * that left this process directly (`METHOD /path`), and what the tool printed.
+ */
+export async function relayMissProbe({ route, send, pace }) {
+  const src = `${TARGET_OWNER}/objectstack`;
+  const to = `${TARGET_OWNER}/objectui`;
+  const plan = planFrom(parseArgs(['--repo', src, '--issue', '7', '--to', to]), { env: {} });
+  const card = (repo, number) => ({ number, node_id: `I_${number}`, title: 'relay-miss probe', html_url: `https://github.test/${repo}/issues/${number}`, repository_url: `${API}/repos/${repo}`, labels: [] });
+  // The card MOVES when the mutation lands, so the direct leg reads back the way a real transfer does.
+  let moved = false;
+  const answers = {
+    [`GET /repos/${src}/issues/7`]: () => ({ status: 200, json: moved ? card(to, 31) : card(src, 7) }),
+    [`GET /repos/${to}`]: () => ({ status: 200, json: { node_id: 'R_to', full_name: to } }),
+    'POST /graphql': () => {
+      moved = true;
+      return { status: 200, json: { data: { transferIssue: { issue: { number: 31, url: `https://github.test/${to}/issues/31`, repository: { nameWithOwner: to } } } } } };
+    },
+    [`GET /repos/${to}/issues/31`]: () => (moved ? { status: 200, json: card(to, 31) } : { status: 404, json: { message: 'Not Found' } }),
+  };
+  const calls = [];
+  const fetch = async (url, init = {}) => {
+    const call = `${init.method ?? 'GET'} ${new URL(url).pathname}`;
+    calls.push(call);
+    const a = answers[call]?.() ?? { status: 404, json: { message: 'Not Found' } };
+    return { status: a.status, headers: new Headers({ 'x-ratelimit-remaining': '4999' }), json: async () => a.json };
+  };
+  const r = await transferIssue(plan, { fetch, token: 'probe-token', pace, route, send, sleep: async () => {}, now: () => 0 });
+  return { exit: r.exitCode, calls, text: r.lines.join('\n') };
+}
+
 // ---------------------------------------------------------------------------
 // Self-test — offline: a fake board that moves the card when the mutation (or
 // the relay) lands, injected routes, no network.
@@ -553,7 +592,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the pre-read: a pull request, a card already moved, or an unreadable card is refused before any write': 5,
   "the direct transport: the target's node id, then ONE paced mutation carrying both node ids — the relay row's own query": 7,
   'the read-back: the old URL answers 301 to the new card, which answers from the target with the same title': 9,
-  'the relay transport: ONE dispatch carrying ONE transfer, the new number read from the redirect, a failed run names the remedy and is never fallen back from': 8,
+  'the relay transport: ONE dispatch carrying ONE transfer, the new number read from the redirect, a failed run names the remedy, and no outcome of an accepted dispatch — a failure, no run under auto — is ever fallen back from': 9,
   'the target decides: a card the target answers is a transfer even while the old URL still serves it (a pending redirect: exit 0, the target URL); exit 4 only when the target still lacks it after the bounded re-read AND the old URL is unchanged; an unreadable or ambiguous target is UNCONFIRMED; the transfer is never re-sent': 16,
   "the relay annotation: the number the relay run's annotation carries is read first — the card confirmed on the target with no title search; a target that answers this session 403 is still exit 0, confirmed_by relay-annotation, the old URL its corroboration; a 404, another title or another number keeps exit 4 / 6; absent, the 301 and the title as before": 12,
   'dry-run: no request leaves, and the plan is printed': 3,
@@ -774,7 +813,7 @@ export async function selfTest() {
     }
 
     // ── the relay transport ─────────────────────────────────────────────────
-    battery('the relay transport: ONE dispatch carrying ONE transfer, the new number read from the redirect, a failed run names the remedy and is never fallen back from');
+    battery('the relay transport: ONE dispatch carrying ONE transfer, the new number read from the redirect, a failed run names the remedy, and no outcome of an accepted dispatch — a failure, no run under auto — is ever fallen back from');
     {
       const sentPayloads = [];
       const b = board();
@@ -794,8 +833,9 @@ export async function selfTest() {
       const noRun = await drive(bn, { route: dispatchRoute('dispatch'), send: outcome('no-run', bn) });
       t('under an EXPLICIT dispatch, no run is exit 6 — no fall-back', [noRun.exitCode, posts(noRun.seen).length], [EXIT_UNCONFIRMED, 0]);
       const ba = board();
-      const fallback = await drive(ba, { route: dispatchRoute('auto'), send: outcome('no-run', ba) });
-      t('under AUTO, no run falls back to the direct mutation — said out loud — and the card is read back', [fallback.exitCode, fallback.text.includes('Falling back to DIRECT'), posts(fallback.seen).map((s) => s.call)], [EXIT_OK, true, ['POST /graphql']]);
+      const noRunAuto = await drive(ba, { route: dispatchRoute('auto'), send: outcome('no-run', ba) });
+      t('⛔ under AUTO, an accepted dispatch with no run is exit 6 UNCONFIRMED too — the pre-read alone, ZERO requests after it: no target read, no mutation', [noRunAuto.exitCode, noRunAuto.seen.map((s) => s.call)], [EXIT_UNCONFIRMED, [`GET /repos/${SRC}/issues/7`]]);
+      t('…the answer an EXPLICIT dispatch gives, in the shared UNCONFIRMED sentence (go READ, never re-run blind)', [noRunAuto.exitCode === noRun.exitCode, noRunAuto.relay ? noRunAuto.lines.includes(unconfirmedText(noRunAuto.relay, 'issue-transfer')) : false], [true, true]);
       // A run that reports success while the board never moved: the read-back, not the run, decides.
       const bs = board();
       const lied = await drive(bs, { route: dispatchRoute(), send: liar });
