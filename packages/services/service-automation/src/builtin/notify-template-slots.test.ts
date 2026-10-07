@@ -88,7 +88,7 @@ describe('notify — title / message are template slots', () => {
     async function deliveredFor(config: Record<string, unknown>) {
         engine.registerFlow('notify_template_flow', notifyFlow({ recipients: ['user_1'], ...config }));
         const result = await engine.execute('notify_template_flow', { params: PARAMS } as any);
-        return { result, payload: messaging.emitted.at(-1)?.payload };
+        return { result, payload: messaging.emitted[messaging.emitted.length - 1]?.payload };
     }
 
     it('renders the bare string exactly as before the slots were typed', async () => {
