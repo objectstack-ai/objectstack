@@ -48,6 +48,7 @@
  * | `label`            | `measure.label` / `dimension.label` + `ctx.locale` (#6761) |
  * | `format`           | `measure.format`                                 |
  * | `builtinAggregate` | `measure.aggregate` + `measure.label == null` (#14492) |
+ * | `aggregate`        | `measure.aggregate`, labelled or not; never on a `derived` measure |
  * | `currency`         | `measure.currency` → the source field's FIXED currency (`sourceFieldMeta().defaultCurrency`, relayed only under `currencyMode: 'fixed'`) → `ctx.currency` |
  * | `percentScale`     | `measure.derived.op === 'ratio'`, else `percentScaleOf(sourceFieldMeta())` (objectui#3136) |
  * | `type`             | `measureResultType(measure.aggregate, sourceFieldMeta().type)` (#16101) |
@@ -238,10 +239,10 @@ async function bothPaths() {
   return { live: by(live.fields), preview: by(preview.fields) };
 }
 
-/** The six keys the card tabulates, absent ones dropped so they read as absent. */
+/** The keys the table above lists, absent ones dropped so they read as absent. */
 function descriptor(f: Field | undefined): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const k of ['label', 'format', 'currency', 'percentScale', 'builtinAggregate', 'type'] as const) {
+  for (const k of ['label', 'format', 'currency', 'percentScale', 'builtinAggregate', 'aggregate', 'type'] as const) {
     const v = (f as Record<string, unknown> | undefined)?.[k];
     if (v != null) out[k] = v;
   }

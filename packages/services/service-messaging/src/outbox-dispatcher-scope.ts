@@ -95,7 +95,9 @@ export function dispatcherSweepOptions(
  * queue.
  *
  * ⛔ Never on `redeliver`: it is request-reachable and threads the caller's
- * tenant, the line this file draws for `bypassTenantAudit` too.
+ * tenant, the line this file draws for `bypassTenantAudit` too. [#21908] It
+ * takes its own opt-in, {@link REDELIVER_SYSTEM_CONTEXT}, on a different
+ * warrant — the door's — and keeps that tenant beside it.
  */
 export const DISPATCHER_SYSTEM_CONTEXT = { isSystem: true } as const;
 
@@ -117,8 +119,42 @@ export const DISPATCHER_SYSTEM_CONTEXT = { isSystem: true } as const;
  *
  * ⛔ Never on `redeliver`: it is the one request-reachable call on these
  * objects, and it threads the caller's tenant (see {@link DISPATCHER_SYSTEM_CONTEXT}).
+ * [#21908] Its opt-in is {@link REDELIVER_SYSTEM_CONTEXT}, whose warrant is not
+ * this one: a caller exists there, and the door authorizes it.
  */
 export const OUTBOX_SYSTEM_CONTEXT = { isSystem: true } as const;
+
+
+/**
+ * [#21908] The execution context `SqlHttpOutbox.redeliver` runs under — its
+ * two reads and its reset write: the explicit system opt-in.
+ *
+ * The one request-reachable call on `sys_http_delivery` used to be the one
+ * outbox call kept OFF the opt-ins above, because it threads the caller's
+ * tenant and their warrants rest on there being no caller. Both still hold.
+ * What changed is that the security middleware's principal-less hand-off,
+ * which this call passed through with no principal and no opt-in, closes
+ * (ADR-0096 D5), and the caller's own principal is no replacement: no member
+ * grant exists on `sys_http_delivery`, so every member's redelivery would be
+ * refused. The maintainer's ruling on this card puts the explicit opt-in on it
+ * inside this service, on a warrant of its own:
+ *
+ *  1. **The door authorizes.** `POST /api/v1/webhooks/redeliver` admits an
+ *     authenticated session only (else `401`), and the producer's veto
+ *     (`RedeliverGuard`) runs before the write.
+ *  2. **The tenant stays the scope.** The caller's `tenantId` rides every
+ *     call's options bag beside this context, as the driver-level scope it
+ *     always was, so a row in another organization is still not found.
+ *  3. **The audit stays armed.** The reset write states
+ *     `bypassTenantAudit: false` itself, because the engine fills in `true` for
+ *     an `isSystem` write on an object outside the tenant-audit inventory —
+ *     which would silence the line `RedeliverOptions` keeps for a caller with
+ *     no tenant.
+ *
+ * ⛔ Never borrowed by the dispatcher or producer sites, and never the other
+ * way round: the three contexts are equal in value and differ in warrant.
+ */
+export const REDELIVER_SYSTEM_CONTEXT = { isSystem: true } as const;
 
 
 /**

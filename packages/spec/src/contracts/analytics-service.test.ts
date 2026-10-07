@@ -88,6 +88,23 @@ describe('Analytics Service Contract', () => {
     expect(offEnum.name).toBe('count');
   });
 
+  // `fields[].aggregate` is optional and is the closed `AggregationFunction`
+  // vocabulary. Unlike `builtinAggregate` it rides beside an authored label:
+  // the first literal is the labelled `count` column the producer now emits;
+  // the second pins the closure at compile time.
+  it('carries aggregate on a labelled measure column and refuses a spelling outside the enum', () => {
+    const labelled: AnalyticsResult['fields'][number] = { name: 'task_count', type: 'number', label: 'Tasks', aggregate: 'count' };
+    expect(labelled.aggregate).toBe('count');
+    expect(labelled.builtinAggregate).toBeUndefined();
+    const offEnum: AnalyticsResult['fields'][number] = {
+      name: 'task_count',
+      type: 'number',
+      // @ts-expect-error — `total` is not an AggregationFunction; the member is closed
+      aggregate: 'total',
+    };
+    expect(offEnum.name).toBe('task_count');
+  });
+
   // `object` — the dataset's base object, declared on the answer itself and not
   // on a drill-through side type: a `queryDataset` implementation returns it on
   // a dimension-less, zero-row answer against the plain `AnalyticsResult`, and

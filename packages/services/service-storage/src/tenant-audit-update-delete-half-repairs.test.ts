@@ -111,13 +111,17 @@ function createRecordingEngine(seed: Array<{ object: string; data: any }> = []) 
   const rows = seed.map((s) => ({ ...s, data: { ...s.data } }));
   const updates: Array<{ object: string; data: any; options: any }> = [];
   const deletes: Array<{ object: string; options: any }> = [];
+  // [#21908] The by-id reads' trailing options bag, where the store now puts
+  // its explicit system opt-in.
+  const reads: Array<{ object: string; query: any; options: any }> = [];
   const engine: any = {
     async insert(object: string, data: any) {
       rows.push({ object, data: { ...data } });
       return { ...data };
     },
-    async findOne(object: string, query?: any) {
+    async findOne(object: string, query?: any, options?: any) {
       assertEngineFindOnePredicate(object, query);
+      reads.push({ object, query, options });
       const hit = rows.find(
         (r) => r.object === object && String(r.data.id) === String(query?.where?.id),
       );
@@ -144,6 +148,7 @@ function createRecordingEngine(seed: Array<{ object: string; data: any }> = []) 
     },
     _updates: updates,
     _deletes: deletes,
+    _reads: reads,
   };
   return engine;
 }
@@ -160,9 +165,10 @@ describe('[#13178] the store: the four half-repaired sites carry the acting orga
     // `where` keeps ONLY the id — the tenant term is `applyTenantScope`'s to
     // compose, not this store's (composing it here would re-decide whether the
     // object has a tenant column, one package away from the schema).
+    // [#21908] …beside the explicit system opt-in.
     expect(engine._updates[0].options).toEqual({
       where: { id: 'f1' },
-      context: { tenantId: 'org_A' },
+      context: { tenantId: 'org_A', isSystem: true },
     });
   });
 
@@ -173,7 +179,7 @@ describe('[#13178] the store: the four half-repaired sites carry the acting orga
     await store.deleteFile('f1', { organizationId: 'org_A' });
 
     expect(engine._deletes).toEqual([
-      { object: 'sys_file', options: { where: { id: 'f1' }, context: { tenantId: 'org_A' } } },
+      { object: 'sys_file', options: { where: { id: 'f1' }, context: { tenantId: 'org_A', isSystem: true } } },
     ]);
   });
 
@@ -189,7 +195,7 @@ describe('[#13178] the store: the four half-repaired sites carry the acting orga
     expect(engine._updates[0].object).toBe('sys_upload_session');
     expect(engine._updates[0].options).toEqual({
       where: { id: 's1' },
-      context: { tenantId: 'org_A' },
+      context: { tenantId: 'org_A', isSystem: true },
     });
   });
 
@@ -202,7 +208,7 @@ describe('[#13178] the store: the four half-repaired sites carry the acting orga
     expect(engine._deletes).toEqual([
       {
         object: 'sys_upload_session',
-        options: { where: { id: 's1' }, context: { tenantId: 'org_A' } },
+        options: { where: { id: 's1' }, context: { tenantId: 'org_A', isSystem: true } },
       },
     ]);
   });
@@ -221,7 +227,7 @@ describe('[#13178] the store: the four half-repaired sites carry the acting orga
     expect(engine._updates[0].data).not.toHaveProperty('organization_id');
   });
 
-  it('a caller with no organization produces the pre-#13178 call shape exactly', async () => {
+  it('a caller with no organization carries the opt-in and NO tenant — ⛔ none is invented', async () => {
     const engine = createRecordingEngine([
       { object: 'sys_file', data: fileRec('f1') },
       { object: 'sys_upload_session', data: sessionRec('s1') },
@@ -236,11 +242,11 @@ describe('[#13178] the store: the four half-repaired sites carry the acting orga
     await store.deleteFile('f1');
     await store.deleteSession('s1', { organizationId: '' });
 
-    // ⛔ No `context` key at all, not `context: {}`. An empty context is still a
-    // context and changes what every other option resolver on the call sees —
-    // the reason `writeOptionsFor` answers `undefined` rather than an empty bag.
-    for (const u of engine._updates) expect(u.options).not.toHaveProperty('context');
-    for (const d of engine._deletes) expect(d.options).not.toHaveProperty('context');
+    // [#21908] Every by-id write now carries the explicit system opt-in, and
+    // still no `tenantId` where the caller has no organization: the opt-in is
+    // the only key, never a guessed organization.
+    for (const u of engine._updates) expect(u.options.context).toEqual({ isSystem: true });
+    for (const d of engine._deletes) expect(d.options.context).toEqual({ isSystem: true });
     expect(engine._updates.map((u: any) => u.options.where)).toEqual([
       { id: 'f1' },
       { id: 'f1' },
@@ -248,9 +254,9 @@ describe('[#13178] the store: the four half-repaired sites carry the acting orga
       { id: 'f1' },
       { id: 's1' },
     ]);
-    expect(engine._deletes.map((d: any) => d.options)).toEqual([
-      { where: { id: 'f1' } },
-      { where: { id: 's1' } },
+    expect(engine._deletes.map((d: any) => d.options.where)).toEqual([
+      { id: 'f1' },
+      { id: 's1' },
     ]);
   });
 });
@@ -359,7 +365,7 @@ describe('[#13178] the routes: the upload doors pass the session organization on
 
     const update = engine._updates.find((u: any) => u.object === 'sys_file');
     expect(update).toBeTruthy();
-    expect(update.options).toEqual({ where: { id: 'f1' }, context: { tenantId: 'org_A' } });
+    expect(update.options).toEqual({ where: { id: 'f1' }, context: { tenantId: 'org_A', isSystem: true } });
   });
 
   it('the chunked completion scopes BOTH of its writes from the same session value', async () => {
@@ -398,8 +404,8 @@ describe('[#13178] the routes: the upload doors pass the session organization on
     // from ONE resolved organization.
     const file = engine._updates.find((u: any) => u.object === 'sys_file');
     const session = engine._updates.find((u: any) => u.object === 'sys_upload_session');
-    expect(file.options.context).toEqual({ tenantId: 'org_A' });
-    expect(session.options.context).toEqual({ tenantId: 'org_A' });
+    expect(file.options.context).toEqual({ tenantId: 'org_A', isSystem: true });
+    expect(session.options.context).toEqual({ tenantId: 'org_A', isSystem: true });
     expect(engine._updates.every((u: any) => u.options.context?.tenantId === 'org_A')).toBe(true);
   });
 
@@ -423,7 +429,7 @@ describe('[#13178] the routes: the upload doors pass the session organization on
 
     const update = engine._updates.find((u: any) => u.object === 'sys_upload_session');
     expect(update).toBeTruthy();
-    expect(update.options).toEqual({ where: { id: 's1' }, context: { tenantId: 'org_A' } });
+    expect(update.options).toEqual({ where: { id: 's1' }, context: { tenantId: 'org_A', isSystem: true } });
   });
 
   it('the progress door — which WRITES when it expires a row — scopes that write too', async () => {
@@ -451,7 +457,7 @@ describe('[#13178] the routes: the upload doors pass the session organization on
     const update = engine._updates.find((u: any) => u.object === 'sys_upload_session');
     expect(update).toBeTruthy();
     expect(update.data.status).toBe('expired');
-    expect(update.options.context).toEqual({ tenantId: 'org_A' });
+    expect(update.options.context).toEqual({ tenantId: 'org_A', isSystem: true });
   });
 
   it('a session with no active organization still stamps nothing — ⛔ no guess is substituted', async () => {
@@ -469,7 +475,8 @@ describe('[#13178] the routes: the upload doors pass the session organization on
     );
 
     const update = engine._updates.find((u: any) => u.object === 'sys_file');
-    expect(update.options).toEqual({ where: { id: 'f1' } });
+    // [#21908] The opt-in rides alone: no organization is substituted.
+    expect(update.options).toEqual({ where: { id: 'f1' }, context: { isSystem: true } });
   });
 });
 
@@ -721,5 +728,242 @@ describe('[#13178] the driver leg: what the threaded tenantId actually buys', ()
 
     await driver.delete('sys_file', 'legacy', { tenantId: 'org_A' });
     expect(await readStatus('legacy')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#21908] D. THE OPT-IN — the six by-id methods run under the explicit system
+//     opt-in, and the door's organization stays the write statement's reach.
+//
+// The maintainer's ruling on that card (letter A) put the opt-in on these six
+// INSIDE this store, the posture `createFile` already had: access by id, with
+// the door-derived tenant kept as the driver-level scope on update and delete.
+// Three facts are pinned, at the altitude each one lives at:
+//
+//   D1. the store: each by-id READ carries the opt-in and no tenant; each
+//       by-id WRITE carries the opt-in beside the door's tenant (above, in A
+//       and B) and sends the caller's patch alone;
+//   D2. ⛔ the negative, through the REAL ObjectQL over a REAL SqlDriver: under
+//       the opt-in a door's tenant still cannot update or delete a row stamped
+//       for another organization. The opt-in replaces the security
+//       middleware's principal-less hand-off; it must not replace the
+//       driver's scope, which is the only one these writes have.
+// ---------------------------------------------------------------------------
+
+describe('[#21908] D1. the store: the by-id reads carry the opt-in, and the writes send the patch alone', () => {
+  it('getFile and getSession read with { isSystem: true } and NO tenant — access stays by id', async () => {
+    const engine = createRecordingEngine([
+      { object: 'sys_file', data: fileRec('f1') },
+      { object: 'sys_upload_session', data: sessionRec('s1') },
+    ]);
+    const store = new StorageMetadataStore(engine);
+
+    expect((await store.getFile('f1'))?.id).toBe('f1');
+    expect((await store.getSession('s1'))?.id).toBe('s1');
+
+    expect(engine._reads.map((r: any) => [r.object, r.query, r.options])).toEqual([
+      ['sys_file', { where: { id: 'f1' } }, { context: { isSystem: true } }],
+      ['sys_upload_session', { where: { id: 's1' } }, { context: { isSystem: true } }],
+    ]);
+  });
+
+  it('the read behind an update is that same read; the write alone carries the door tenant', async () => {
+    const engine = createRecordingEngine([
+      { object: 'sys_file', data: fileRec('f1') },
+      { object: 'sys_upload_session', data: sessionRec('s1') },
+    ]);
+    const store = new StorageMetadataStore(engine);
+
+    await store.updateFile('f1', { status: 'committed' }, { organizationId: 'org_A' });
+    await store.updateSession('s1', { status: 'completed' }, { organizationId: 'org_A' });
+
+    for (const r of engine._reads) expect(r.options).toEqual({ context: { isSystem: true } });
+    for (const u of engine._updates) expect(u.options.context).toEqual({ tenantId: 'org_A', isSystem: true });
+  });
+
+  it('⛔ the provisioned columns of the row read back never reach an update payload', async () => {
+    // The row as a walled install stores it: stamped, audited, owned. Under the
+    // opt-in the engine's `readonly` strip no longer runs on this write, so the
+    // payload itself is what keeps these columns the platform's.
+    const provisioned = {
+      organization_id: 'org_B',
+      created_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-01T00:00:00.000Z',
+      created_by: 'u0',
+      updated_by: 'u0',
+    };
+    const engine = createRecordingEngine([
+      { object: 'sys_file', data: { ...fileRec('f1'), owner_id: 'u0', ...provisioned } },
+      { object: 'sys_upload_session', data: { ...sessionRec('s1'), ...provisioned } },
+    ]);
+    const store = new StorageMetadataStore(engine);
+
+    const file = await store.updateFile('f1', { status: 'committed', etag: 'e1' }, { organizationId: 'org_A' });
+    const session = await store.updateSession('s1', { status: 'completing' }, { organizationId: 'org_A' });
+
+    expect(engine._updates.map((u: any) => u.data)).toEqual([
+      { status: 'committed', etag: 'e1' },
+      { status: 'completing' },
+    ]);
+    // What the caller is handed back is unchanged: the row as read, patched.
+    expect(file).toMatchObject({ id: 'f1', status: 'committed', etag: 'e1', owner_id: 'u0', organization_id: 'org_B' });
+    expect(session).toMatchObject({ id: 's1', status: 'completing', organization_id: 'org_B' });
+  });
+});
+
+describe('[#21908] D1b. the opt-in leaves these writes audited — real ObjectQL, recording driver', () => {
+  it('with no organization: no tenantId reaches the driver, and no tenant-audit bypass is filled in', async () => {
+    // Both objects are tenant-scoped in the platform's tenancy inventory, so the
+    // engine fills in no `bypassTenantAudit` for an `isSystem` write on them: an
+    // unscoped by-id write is still reported on a walled deployment.
+    const { engine, calls } = await makeEngine();
+    const store = new StorageMetadataStore(engine as any);
+
+    await store.updateFile('f1', { status: 'committed' });
+    await store.deleteSession('s1');
+
+    const writes = calls.filter((x) => x.method === 'update' || x.method === 'delete');
+    expect(writes.map((w) => w.method)).toEqual(['update', 'delete']);
+    for (const w of writes) {
+      expect(w.options?.tenantId ?? undefined).toBeUndefined();
+      expect(w.options?.bypassTenantAudit ?? undefined).toBeUndefined();
+    }
+  });
+});
+
+describe('[#21908] D2. ⛔ under the opt-in, a door tenant still cannot reach another organization’s row', () => {
+  const OLD = process.env.OS_TENANCY_POSTURE;
+  let ql: ObjectQL;
+  let sql: SqlDriver;
+  let driverWrites: Array<{ verb: string; object: string; id: unknown; options: any }>;
+  let engineContexts: Array<{ verb: string; object: string; context: any }>;
+  let store: StorageMetadataStore;
+
+  const SYS = { isSystem: true } as const;
+  const stored = async (object: string, id: string) =>
+    (await ql.findOne(object, { where: { id } }, { context: SYS })) as Record<string, any> | null;
+
+  beforeEach(async () => {
+    // Seeded under the default posture: an organization-less row is exactly
+    // what the walled posture refuses to WRITE now, and exactly the legacy
+    // population the driver's `OR … IS NULL` arm keeps reachable. The doors
+    // then run walled.
+    delete process.env.OS_TENANCY_POSTURE;
+    sql = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+    driverWrites = [];
+    engineContexts = [];
+    const realUpdate = (sql as any).update.bind(sql);
+    (sql as any).update = async (object: string, id: unknown, data: any, options: any) => {
+      driverWrites.push({ verb: 'update', object, id, options });
+      return realUpdate(object, id, data, options);
+    };
+    const realDelete = (sql as any).delete.bind(sql);
+    (sql as any).delete = async (object: string, id: unknown, options: any) => {
+      driverWrites.push({ verb: 'delete', object, id, options });
+      return realDelete(object, id, options);
+    };
+    ql = new ObjectQL();
+    ql.registerDriver(sql, true);
+    await ql.init();
+    ql.registry.registerObject(SystemFile as any, 'com.objectstack.storage');
+    ql.registry.registerObject(SystemUploadSession as any, 'com.objectstack.storage');
+    await ql.syncSchemas();
+    for (const [id, org] of [['own', 'org_A'], ['other', 'org_B'], ['legacy', null]] as const) {
+      await ql.insert('sys_file', { ...fileRec(id), organization_id: org }, { context: SYS });
+      await ql.insert('sys_upload_session', { ...sessionRec(id), organization_id: org }, { context: SYS });
+    }
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    // The store reaches the REAL engine; this wrapper only records the context
+    // each call carried, so the pin is about the opt-in path and no other. Each
+    // verb still opens with the engine's own dispatch predicate, as the double
+    // above does, so the wrapper can never accept a shape the engine refuses.
+    const recorded: any = {
+      findOne: (o: string, q: any, opts: any) => {
+        assertEngineFindOnePredicate(o, q);
+        engineContexts.push({ verb: 'findOne', object: o, context: opts?.context ?? q?.context });
+        return ql.findOne(o, q, opts);
+      },
+      update: (o: string, d: any, opts: any) => {
+        assertEngineUpdateDispatch(d, opts);
+        engineContexts.push({ verb: 'update', object: o, context: opts?.context });
+        return ql.update(o, d, opts);
+      },
+      delete: (o: string, opts: any) => {
+        assertEngineDeleteDispatch(opts);
+        engineContexts.push({ verb: 'delete', object: o, context: opts?.context });
+        return ql.delete(o, opts);
+      },
+    };
+    store = new StorageMetadataStore(recorded);
+  });
+
+  afterEach(async () => {
+    try {
+      await ql?.destroy();
+    } catch {
+      /* noop */
+    }
+    if (OLD === undefined) delete process.env.OS_TENANCY_POSTURE;
+    else process.env.OS_TENANCY_POSTURE = OLD;
+  });
+
+  /** The refusal a foreign row gets: the engine finds no row in the door's reach. */
+  const notFound = (objectName: string, operation: 'update' | 'delete') => ({
+    name: 'StorageMetadataStoreError',
+    objectName,
+    operation,
+    cause: { code: 'RECORD_NOT_FOUND' },
+  });
+
+  it('updateFile and updateSession on a foreign row are refused, and change nothing', async () => {
+    await expect(
+      store.updateFile('other', { status: 'committed' }, { organizationId: 'org_A' }),
+    ).rejects.toMatchObject(notFound('sys_file', 'update'));
+    await expect(
+      store.updateSession('other', { status: 'completed' }, { organizationId: 'org_A' }),
+    ).rejects.toMatchObject(notFound('sys_upload_session', 'update'));
+
+    expect((await stored('sys_file', 'other'))?.status).toBe('pending');
+    expect((await stored('sys_upload_session', 'other'))?.status).toBe('in_progress');
+    // The writes really ran on the opt-in path, scoped by the door's tenant.
+    expect(engineContexts.filter((c) => c.verb === 'update').map((c) => c.context)).toEqual([
+      { tenantId: 'org_A', isSystem: true },
+      { tenantId: 'org_A', isSystem: true },
+    ]);
+    for (const w of driverWrites) expect(w.options?.tenantId).toBe('org_A');
+  });
+
+  it('deleteFile and deleteSession on a foreign row are refused, and delete nothing', async () => {
+    await expect(store.deleteFile('other', { organizationId: 'org_A' })).rejects.toMatchObject(
+      notFound('sys_file', 'delete'),
+    );
+    await expect(store.deleteSession('other', { organizationId: 'org_A' })).rejects.toMatchObject(
+      notFound('sys_upload_session', 'delete'),
+    );
+
+    expect(await stored('sys_file', 'other')).not.toBeNull();
+    expect(await stored('sys_upload_session', 'other')).not.toBeNull();
+    expect(engineContexts.filter((c) => c.verb === 'delete').map((c) => c.context)).toEqual([
+      { tenantId: 'org_A', isSystem: true },
+      { tenantId: 'org_A', isSystem: true },
+    ]);
+    for (const w of driverWrites) expect(w.options?.tenantId).toBe('org_A');
+  });
+
+  it('still works: the caller’s own row and an organization-less row are reached', async () => {
+    // A refusal that refused everything would score green above; this is the
+    // other half.
+    expect(await store.updateFile('own', { status: 'committed' }, { organizationId: 'org_A' })).toBeTruthy();
+    expect(await store.updateSession('legacy', { status: 'completed' }, { organizationId: 'org_A' })).toBeTruthy();
+    await store.deleteFile('legacy', { organizationId: 'org_A' });
+    await store.deleteSession('own', { organizationId: 'org_A' });
+
+    expect((await stored('sys_file', 'own'))?.status).toBe('committed');
+    expect((await stored('sys_upload_session', 'legacy'))?.status).toBe('completed');
+    expect(await stored('sys_file', 'legacy')).toBeNull();
+    expect(await stored('sys_upload_session', 'own')).toBeNull();
+    // …and the stored tenant column is the one the row already had.
+    expect((await stored('sys_file', 'own'))?.organization_id).toBe('org_A');
+    expect((await stored('sys_upload_session', 'legacy'))?.organization_id ?? null).toBeNull();
   });
 });

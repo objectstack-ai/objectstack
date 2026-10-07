@@ -358,8 +358,10 @@ export class MessagingService {
      * authenticated user, and `sys_http_delivery` is tenant-scoped. The
      * outbox applies it to the rows it reads and the row it writes, so a
      * caller can only replay deliveries in its own organization; a row
-     * elsewhere is `RESOURCE_NOT_FOUND`. ⛔ There is no `bypassTenantAudit`
+     * elsewhere is `RESOURCE_NOT_FOUND`. ⛔ There is no tenant-audit bypass
      * anywhere on this path and there must not be — see `RedeliverOptions`.
+     * [#21908] The outbox's write states `bypassTenantAudit: false` outright,
+     * so the explicit system opt-in it now carries cannot fill one in either.
      */
     async redeliverHttp(id: string, options: RedeliverOptions): Promise<HttpDelivery> {
         if (!this.httpOutbox) {

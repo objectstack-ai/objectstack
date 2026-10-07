@@ -461,7 +461,7 @@ is executed. `POST /analytics/sql` refuses the same keys. To order by a member, 
 <Callout type="info">
 **`fields[]` is the resolved presentation surface — read it first.** Each entry carries
 `name` and `type` and, when the producer declares them, `label`, `format`, `currency`,
-`percentScale` and `builtinAggregate`: the optional members
+`percentScale`, `builtinAggregate` and `aggregate`: the optional members
 `AnalyticsResultResponseSchema` declares (`packages/spec/src/api/analytics.zod.ts`),
 mirrored member for member by `IAnalyticsService.query`'s `AnalyticsResult` and bound to
 it at compile time. Optional means a given column may omit them — read them defensively,
@@ -485,6 +485,13 @@ tenant default currency (the `localization.currency` setting), if one is set. A
 `dynamic` field (the default mode) never lends its `defaultCurrency` — only `fixed` does —
 so its column shows the tenant default. The cube query on this page carries no column
 `currency`.
+
+The dataset query also states each measure column's `aggregate` (`count`, `sum`, `avg`,
+`min`, `max`, `count_distinct`), whether or not the author labelled the measure, so a
+chart can tell a count from a sum. `builtinAggregate` is narrower: it is present only
+when the measure has no `label`, to mark a header that is the server's default. Neither
+is set on a dimension column or a derived measure, and the cube query on this page
+carries neither.
 </Callout>
 
 ### `GET /analytics/meta`
