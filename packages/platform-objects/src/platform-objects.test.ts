@@ -590,7 +590,10 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysMember', SysMember, 'invite_user', `${INVITE} && ${ORG}`],
     // No grade term: add-member is gated on platform-admin standing, not on a
     // membership grade, so the action carries no `requiresMembershipReach`.
-    ['SysMember', SysMember, 'add_member', ORG],
+    // The standing term is the authored `visible` — the ADR-0095 D3
+    // PLATFORM_ADMIN rung the door's gate judges (ADR-0068 D4) — composed
+    // ahead of the feature gate. ⛔ Never a `current_user.positions` read.
+    ['SysMember', SysMember, 'add_member', `(current_user.isPlatformAdmin == true) && ${ORG}`],
     ['SysMember', SysMember, 'update_member_role', `${ADMINS} && ${ORG}`],
     ['SysMember', SysMember, 'remove_member', `${ADMINS} && ${ORG}`],
     ['SysMember', SysMember, 'transfer_ownership', `((has(record.role) && record.role != 'owner') && ${OWNER}) && ${ORG}`],
