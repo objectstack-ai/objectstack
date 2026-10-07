@@ -85,7 +85,7 @@ export function emailTemplateDoorRefusal(object: string, verb: DoorVerb): Error 
  */
 function isOrganizationWrite(session: unknown): boolean {
   if (!session || typeof session !== 'object') return false;
-  return (session as { isSystem?: unknown }).isSystem !== true;
+  return (session as Record<string, unknown>).isSystem !== true;
 }
 
 /**
