@@ -121,6 +121,12 @@ function protocolDouble() {
             const discarded = record('discardPackageDrafts', req).drafts.splice(0);
             return { success: true, discardedCount: discarded.length, discarded };
         },
+        // [#22090] The stored-member half of `POST /packages/:id/revert`: the
+        // partition's drafts are its stored rows, so it answers `stored: true`.
+        revertStoredPackage: async (req: any) => {
+            const discarded = record('revertStoredPackage', req).drafts.splice(0);
+            return { stored: true, discarded: discarded.map((name) => ({ type: 'view', name })) };
+        },
         listCommits: async (req: any) =>
             record('listCommits', req).commits.map((id) => ({ id, packageId: req.packageId })),
         revertCommit: async (req: any) => {
@@ -321,13 +327,16 @@ beforeEach(() => {
 });
 afterEach(() => { warnSpy.mockRestore(); });
 
-// ── The nine doors that read the organization source ──────────────────────────
+// ── The doors that read the organization source ───────────────────────────────
+// The nine of the defect, and `POST /packages/:id/revert`, which reads it since
+// #22090 asks the protocol for the package's stored members.
 
 interface Door { name: string; method: string; path: string; body?: unknown; verb: string }
 
 const DOORS: Door[] = [
     { name: 'POST /packages/:id/publish-drafts', method: 'POST', path: `/packages/${PKG}/publish-drafts`, body: {}, verb: 'publishPackageDrafts' },
     { name: 'POST /packages/:id/discard-drafts', method: 'POST', path: `/packages/${PKG}/discard-drafts`, body: {}, verb: 'discardPackageDrafts' },
+    { name: 'POST /packages/:id/revert', method: 'POST', path: `/packages/${PKG}/revert`, body: {}, verb: 'revertStoredPackage' },
     { name: 'GET /packages/:id/commits', method: 'GET', path: `/packages/${PKG}/commits`, verb: 'listCommits' },
     { name: 'POST /packages/:id/commits/:commitId/revert', method: 'POST', path: `/packages/${PKG}/commits/cmt_alpha/revert`, body: {}, verb: 'revertCommit' },
     { name: 'POST /packages/:id/rollback', method: 'POST', path: `/packages/${PKG}/rollback`, body: { commitId: 'cmt_alpha' }, verb: 'rollbackToPackageCommit' },

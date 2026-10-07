@@ -876,7 +876,7 @@ import { CONTRACT_REVIEW_TIER, CONTRACT_REVIEW_TIER_NAME, TIER_DEFAULT, TIER_FLO
 // The record's `Local-runs:` line is read by the file that owns the record's
 // every other line — judged when present, an absent line not re-judged.
 import { localRunsStand, readLocalRuns } from './record-recognisers.mjs';
-import { EXIT_UNCONFIRMED, fallbackText, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { EXIT_UNCONFIRMED, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
 import { MAX_BODY_BYTES, TRANSPORT_ENV } from './fleet-write/ops.mjs';
 import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
 import { isWriteMethod, noteResponse, paceWrite } from './write-pace.mjs';
@@ -2932,17 +2932,19 @@ export function sizeRoute(route, body) {
 // Live layer
 // ---------------------------------------------------------------------------
 
-async function rest(path, { method = 'GET', body = null } = {}) {
+// `deps` (`fetch`, `token`, `pace`) is `relayMissProbe`'s door and nothing else's; the live path passes none.
+async function rest(path, { method = 'GET', body = null } = {}, deps = {}) {
+  const token = deps.token ?? TOKEN;
   // ⏱ The throttle (#19572), on the write verbs only — the comment `POST` and
   // the body `PATCH`. A spent budget or a live stop marker refuses here, before
   // the request is made and therefore before anything can be half-written.
   const paced = isWriteMethod(method);
-  if (paced) await paceWrite({ token: TOKEN, kind: `post-stamped ${method}` });
-  const res = await fetch(`${API}${path}`, {
+  if (paced) await paceWrite({ token, kind: `post-stamped ${method}` }, deps.pace);
+  const res = await (deps.fetch ?? fetch)(`${API}${path}`, {
     method,
     headers: {
       accept: 'application/vnd.github+json',
-      ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(body ? { 'content-type': 'application/json' } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -2955,7 +2957,7 @@ async function rest(path, { method = 'GET', body = null } = {}) {
     const said = platformRefusalText(await res.text().catch(() => ''));
     // ⏱ …and the sentence is what names a SECONDARY rate limit, so the marker
     // is written from the failing answer BEFORE this throws past every caller.
-    if (paced) noteResponse({ token: TOKEN, status: res.status, headers: res.headers, body: said });
+    if (paced) noteResponse({ token, status: res.status, headers: res.headers, body: said }, deps.pace);
     const err = new Error(`${method} ${path} -> HTTP ${res.status}`);
     err.status = res.status;
     err.refusalText = said;
@@ -2963,7 +2965,7 @@ async function rest(path, { method = 'GET', body = null } = {}) {
   }
   // ⏱ A 2xx carries a signal too: `x-ratelimit-remaining: 0` on the answer that
   // spent the last unit is the one reading that precedes the first refusal.
-  if (paced) noteResponse({ token: TOKEN, status: res.status, headers: res.headers });
+  if (paced) noteResponse({ token, status: res.status, headers: res.headers }, deps.pace);
   if (res.status === 204) return null;
   return res.json();
 }
@@ -2974,26 +2976,26 @@ async function rest(path, { method = 'GET', body = null } = {}) {
  * superset of what `unreadComments` judges, so the pages fetched are the tail
  * and nothing the pure filter needs is left behind.
  */
-async function readCardTail(repo, number, sinceMs) {
-  const card = await rest(`/repos/${repo}/issues/${number}`);
+async function readCardTail(repo, number, sinceMs, deps = {}) {
+  const card = await rest(`/repos/${repo}/issues/${number}`, {}, deps);
   const since = Number.isFinite(sinceMs) ? `&since=${encodeURIComponent(new Date(sinceMs).toISOString())}` : '';
   const comments = [];
   for (let page = 1; ; page++) {
-    const rows = await rest(`/repos/${repo}/issues/${number}/comments?per_page=100&page=${page}${since}`);
+    const rows = await rest(`/repos/${repo}/issues/${number}/comments?per_page=100&page=${page}${since}`, {}, deps);
     comments.push(...(Array.isArray(rows) ? rows : []));
     if (!Array.isArray(rows) || rows.length < 100) break;
   }
   return { card, comments };
 }
 
-async function writeArtefact(repo, options, body) {
+async function writeArtefact(repo, options, body, deps = {}) {
   if (options.mode === 'comment') {
-    const created = await rest(`/repos/${repo}/issues/${options.number}/comments`, { method: 'POST', body: { body } });
-    const back = await rest(`/repos/${repo}/issues/comments/${created?.id}`);
+    const created = await rest(`/repos/${repo}/issues/${options.number}/comments`, { method: 'POST', body: { body } }, deps);
+    const back = await rest(`/repos/${repo}/issues/comments/${created?.id}`, {}, deps);
     return { id: created?.id ?? null, url: back?.html_url ?? created?.html_url ?? null, writtenAt: back?.created_at ?? created?.created_at ?? null, stored: back?.body };
   }
-  const patched = await rest(`/repos/${repo}/issues/${options.number}`, { method: 'PATCH', body: { body } });
-  const back = await rest(`/repos/${repo}/issues/${options.number}`);
+  const patched = await rest(`/repos/${repo}/issues/${options.number}`, { method: 'PATCH', body: { body } }, deps);
+  const back = await rest(`/repos/${repo}/issues/${options.number}`, {}, deps);
   return { id: options.number, url: back?.html_url ?? patched?.html_url ?? null, writtenAt: back?.updated_at ?? patched?.updated_at ?? null, stored: back?.body };
 }
 
@@ -3004,24 +3006,94 @@ async function writeArtefact(repo, options, body) {
  * `{ sent }` when the relay did not succeed; `{ sent, unfound }` when the run
  * succeeded and the board does not show the write.
  */
-async function writeViaRelay(repo, options, body, route) {
+async function writeViaRelay(repo, options, body, route, deps = {}) {
   const packed = packRequest({ repo, session: route.session, actions: [relayAction(options, body)] });
   if (!packed.ok) return { refused: packed.errors };
   const dispatchedAt = Date.now();
-  const sent = await sendFleetWrite(packed.payload, { token: TOKEN });
+  const sent = await (deps.send ?? sendFleetWrite)(packed.payload, { token: deps.token ?? TOKEN });
   if (!sent.ok) return { sent };
   try {
     if (options.mode === 'comment') {
-      const tail = await readCardTail(repo, options.number, dispatchedAt - 60_000);
+      const tail = await readCardTail(repo, options.number, dispatchedAt - 60_000, deps);
       const hit = pickRelayComment(tail.comments, body, dispatchedAt);
       if (!hit) return { sent, unfound: true };
       return { id: hit.id, url: hit.html_url ?? null, writtenAt: hit.created_at ?? null, stored: hit.body, sent };
     }
-    const back = await rest(`/repos/${repo}/issues/${options.number}`);
+    const back = await rest(`/repos/${repo}/issues/${options.number}`, {}, deps);
     return { id: options.number, url: back?.html_url ?? null, writtenAt: back?.updated_at ?? null, stored: back?.body, sent };
   } catch (err) {
     return { sent, unfound: true, error: err?.message ?? 'the read-back threw' };
   }
+}
+
+/**
+ * The write itself, through the transport `main` resolved: the relay's ONE
+ * dispatch, or the direct verb — never both. Returns `{ written, relayed }`
+ * (`relayed` null on the direct transport), or `{ exit }` once the reason it
+ * stopped is printed; a REST failure throws to `main`'s classifier as before.
+ *
+ * ⛔ A dispatch the platform ACCEPTED is answered by its run alone. No run in
+ * the start window, or none completed, is UNCONFIRMED (6) under EVERY
+ * transport request, `auto` included — never the direct verb after it: the
+ * relay may merely be queued, and a direct write would book this act against
+ * the seat's personal account instead of the fleet's, and may land it twice.
+ * `fleet-write/dispatch.mjs`'s no-run conformance pins every sender to this,
+ * this one through `relayMissProbe` below.
+ *
+ * `deps` (`fetch`, `token`, `pace`, `send`, `log`) is that probe's door and
+ * nothing else's; `main` passes none.
+ */
+export async function writeThroughRoute(repo, options, body, route, deps = {}) {
+  const log = deps.log ?? ((line) => console.error(line));
+  if (route.transport !== 'dispatch') return { written: await writeArtefact(repo, options, body, deps), relayed: null };
+  const relayed = await writeViaRelay(repo, options, body, route, deps);
+  if (relayed.refused) {
+    log(relayRefusalText(relayed.refused));
+    return { exit: EXIT_REFUSED };
+  }
+  if (relayed.sent && !relayed.sent.ok) {
+    if (relayed.sent.state === 'no-run' || relayed.sent.state === 'timeout') {
+      log(unconfirmedText(relayed.sent, 'post-stamped'));
+      return { exit: EXIT_UNCONFIRMED };
+    }
+    log(
+      `post-stamped: relay ${relayed.sent.state === 'refused' ? `REFUSED the dispatch (HTTP ${relayed.sent.status})` : 'run FAILED'} — ${relayed.sent.detail}` +
+        `${relayed.sent.run?.url ? ` ${relayed.sent.run.url}` : ''}. ⛔ Not retried and not fallen back: go READ the run and the card.`,
+    );
+    return { exit: relayExitFor(relayed.sent) };
+  }
+  if (relayed.unfound) {
+    log(
+      `post-stamped: UNCONFIRMED — the relay run ${relayed.sent.run?.url ?? relayed.sent.run?.id ?? ''} completed, but ` +
+        `${relayed.error ? `the read-back threw (${relayed.error})` : `no comment created since the dispatch on ${repo}#${options.number} stores the body this act sent`}. ` +
+        `Go READ the card; ⛔ do not re-run blind — a second dispatch is a second write. Exit ${EXIT_UNCONFIRMED}.`,
+    );
+    return { exit: EXIT_UNCONFIRMED };
+  }
+  return { written: relayed, relayed };
+}
+
+/**
+ * The no-run conformance probe — `fleet-write/dispatch.mjs`'s header names the
+ * contract and its self-test drives it: ONE comment through
+ * `writeThroughRoute`, the real write step, against an offline fake platform,
+ * on the route, the sender and the throttle the conformance hands in. Answers
+ * the exit (0 once a write landed), every request that left this process
+ * directly (`METHOD /path`), and what the tool printed.
+ */
+export async function relayMissProbe({ route, send, pace }) {
+  const repo = 'objectstack-ai/objectstack';
+  const body = 'A relay-miss probe comment, never sent anywhere real.\n';
+  const calls = [];
+  const out = [];
+  const fetch = async (url, init = {}) => {
+    const u = new URL(url);
+    calls.push(`${init.method ?? 'GET'} ${u.pathname}`);
+    const json = { id: 501, number: 7, body, html_url: `https://github.test/${repo}/issues/7#issuecomment-501`, created_at: '2026-10-05T00:00:00Z', updated_at: '2026-10-05T00:00:00Z' };
+    return new Response(JSON.stringify(json), { status: init.method === 'POST' ? 201 : 200, headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '4999' } });
+  };
+  const step = await writeThroughRoute(repo, { mode: 'comment', number: 7 }, body, route, { fetch, token: 'probe-token', pace, send, log: (line) => out.push(line) });
+  return { exit: step.exit ?? EXIT_OK, calls, text: out.join('\n') };
 }
 
 /**
@@ -3225,36 +3297,9 @@ async function main(argv) {
   let written;
   let relayed = null;
   try {
-    if (route.transport === 'dispatch') {
-      relayed = await writeViaRelay(repoRes.repo, options, rendered.body, route);
-      if (relayed.refused) {
-        console.error(relayRefusalText(relayed.refused));
-        return EXIT_REFUSED;
-      }
-      if (relayed.sent && !relayed.sent.ok) {
-        if (route.requested === 'auto' && relayed.sent.state === 'no-run') {
-          console.error(`post-stamped: ${fallbackText(relayed.sent, 'post-stamped')}`);
-          relayed = null;
-        } else if (relayed.sent.state === 'no-run' || relayed.sent.state === 'timeout') {
-          console.error(unconfirmedText(relayed.sent, 'post-stamped'));
-          return EXIT_UNCONFIRMED;
-        } else {
-          console.error(
-            `post-stamped: relay ${relayed.sent.state === 'refused' ? `REFUSED the dispatch (HTTP ${relayed.sent.status})` : 'run FAILED'} — ${relayed.sent.detail}` +
-              `${relayed.sent.run?.url ? ` ${relayed.sent.run.url}` : ''}. ⛔ Not retried and not fallen back: go READ the run and the card.`,
-          );
-          return relayExitFor(relayed.sent);
-        }
-      } else if (relayed.unfound) {
-        console.error(
-          `post-stamped: UNCONFIRMED — the relay run ${relayed.sent.run?.url ?? relayed.sent.run?.id ?? ''} completed, but ` +
-            `${relayed.error ? `the read-back threw (${relayed.error})` : `no comment created since the dispatch on ${repoRes.repo}#${options.number} stores the body this act sent`}. ` +
-            `Go READ the card; ⛔ do not re-run blind — a second dispatch is a second write. Exit ${EXIT_UNCONFIRMED}.`,
-        );
-        return EXIT_UNCONFIRMED;
-      }
-    }
-    written = relayed ?? (await writeArtefact(repoRes.repo, options, rendered.body));
+    const step = await writeThroughRoute(repoRes.repo, options, rendered.body, route);
+    if (step.exit !== undefined) return step.exit;
+    ({ written, relayed } = step);
   } catch (err) {
     // ⛔ Only the WRITE path is classified. A read sends no body, so a size
     // refusal cannot be what it was answered with, and the pre-read above keeps
@@ -3376,7 +3421,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the shared rule: this tool and H56 cannot come to disagree': 6,
   'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 30,
   'the record line: a `## Contract review` record\'s `Local-runs:` value, judged when present — an absent line is not re-judged': 9,
-  'the relay transport: the same act as one op, the comment found on the board, the exit register kept apart': 12,
+  'the relay transport: the same act as one op, the comment found on the board, the exit register kept apart': 13,
   "the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes": 13,
 });
 const SELF_TEST_BATTERY_FLOOR = 17;
@@ -4500,7 +4545,24 @@ export function selfTest() {
     t('no run, or no completion, is exit 6 UNCONFIRMED', relayExitFor({ state: 'no-run' }) === EXIT_UNCONFIRMED && relayExitFor({ state: 'timeout' }) === EXIT_UNCONFIRMED);
     const ownSource = readFileSync(SELF_PATH, 'utf8');
     const mainSource = ownSource.slice(ownSource.indexOf('async function main(argv)'), ownSource.indexOf('// --self-test — offline'));
-    t('structural: in main a dry run returns before the relay can be reached, and ONE read-back verdict serves both transports', mainSource.indexOf('if (options.dryRun) {') < mainSource.indexOf('await writeViaRelay(') && (mainSource.match(/readBackVerdict\(\{/g) ?? []).length === 1);
+    t('structural: in main a dry run returns before the relay can be reached, and ONE read-back verdict serves both transports', mainSource.indexOf('if (options.dryRun) {') < mainSource.indexOf('await writeThroughRoute(') && (mainSource.match(/readBackVerdict\(\{/g) ?? []).length === 1);
+    // The behaviour is driven by fleet-write/dispatch.mjs's no-run conformance (through `relayMissProbe`); this is the
+    // half this file's own gate can hold synchronously: ONE write step, and its only direct write sits on the
+    // non-dispatch branch, ahead of the relay — so no outcome of an accepted dispatch can reach it.
+    const stepSource = ownSource.slice(ownSource.indexOf('export async function writeThroughRoute('), ownSource.indexOf('export async function relayMissProbe('));
+    const directAt = stepSource.indexOf('writeArtefact(');
+    const stepFacts = [
+      ['writeArtefact(', 'writeViaRelay(', 'sendFleetWrite('].filter((call) => mainSource.includes(call)),
+      (stepSource.match(/writeArtefact\(/g) ?? []).length,
+      directAt > 0 && stepSource.slice(stepSource.lastIndexOf('\n', directAt), directAt).includes("route.transport !== 'dispatch'"),
+      directAt > 0 && directAt < stepSource.indexOf('writeViaRelay('),
+      /state === 'no-run' \|\| relayed\.sent\.state === 'timeout'\) \{\s*log\(unconfirmedText\(relayed\.sent, 'post-stamped'\)\);\s*return \{ exit: EXIT_UNCONFIRMED \};/.test(stepSource),
+    ];
+    t(
+      'structural: main writes only through writeThroughRoute, whose ONE direct write is on the non-dispatch branch before the relay is reached — an accepted dispatch with no run, or none completed, returns UNCONFIRMED and never reaches it',
+      JSON.stringify(stepFacts) === JSON.stringify([[], 1, true, true, true]),
+      `got ${JSON.stringify(stepFacts)}, want [[],1,true,true,true] (main's own direct calls · direct writes in the step · on the non-dispatch line · ahead of the relay · no-run/timeout answer UNCONFIRMED)`,
+    );
   }
 
   // ── the size route ───────────────────────────────────────────────────────

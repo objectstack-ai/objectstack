@@ -781,6 +781,9 @@ export async function reconcileOrgAdminGrant(
         id: genId('ups'),
         user_id: userId,
         permission_set_id: permSetId,
+        // [ADR-0131 D4] Both columns, agreeing: `permSetId` was resolved BY
+        // this name (`resolvePermissionSetId(ql, grantSetName, …)`).
+        permission_set: grantSetName,
         organization_id: orgId,
         // [#4586] The provenance the row already had a column for. `granted_by`
         // is a `sys_user` lookup: the human whose better-auth call triggered the

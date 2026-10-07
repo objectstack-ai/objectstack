@@ -102,12 +102,18 @@
  * separately, and the first live probe is what tunes them. On either ceiling
  * the answer is `UNCONFIRMED` with the run URL when there is one, exit
  * `EXIT_UNCONFIRMED` (6): ⛔ never silent, ⛔ never auto-retried — a retry of a
- * dispatch that may still run is a double write. The one fall-back that exists
- * is the caller's and only under `auto`: NO run appeared in the start window,
- * which is the shape a board without the listening workflow produces, so the
- * caller prints one line and takes `direct`. A run that appeared and FAILED is
- * never fallen back from — the relay refused or half-wrote, and a direct retry
- * would write twice.
+ * dispatch that may still run is a double write. ⛔ And never fallen back from,
+ * under ANY transport request, `auto` included: a run that has not appeared
+ * yet is evidence of the wait and of nothing else — the relay may be queued —
+ * so a direct write after an accepted dispatch exchanges the fleet identity
+ * for the seat's personal account without its say-so, and may land the same
+ * write twice when the run does execute. Whether the board LISTENS is
+ * condition ③'s question, answered before anything is sent (the workflow
+ * file's 404 turns `auto` direct, said out loud); once a dispatch is accepted
+ * the only answers are the run's. A run that appeared and FAILED is never
+ * fallen back from either — the relay refused or half-wrote, and a direct
+ * retry would write twice. Every sender is held to this in ONE place: the
+ * no-run conformance below.
  *
  * `write-pace.mjs` counts the dispatch as THE write — one POST, paced and
  * leased like any other; the runner's executor paces its own writes there.
@@ -193,10 +199,38 @@
  *     close-cards) get 4 from it — issue-create's `EXIT_READ_BACK_MISMATCH`.
  *   - `unverified` is a state no caller names, so each falls to its non-success
  *     branch: `exitForResult` answers 6, post-stamped's `relayExitFor` answers
- *     its default 6. Neither is ever a fall-back to direct (that is `no-run`'s
- *     alone) and neither is 0.
+ *     its default 6. Neither is ever a fall-back to direct — no outcome of an
+ *     accepted dispatch is (the no-run conformance below) — and neither is 0.
  *   - a stroke carrying no body (labels, assignees, state, a transfer, the
  *     GraphQL ops) reads nothing back and its outcome is unchanged.
+ *
+ * ## The no-run conformance — every sender, one answer
+ *
+ * The rule above lives in each caller's own control flow, where a later edit
+ * can quietly re-open a direct path after the dispatch, so it is pinned once,
+ * for all of them, in this file's self-test:
+ *
+ *   - a SENDER is any file under `scripts/` other than this one that names
+ *     `sendFleetWrite`, discovered from the source on every run — never a
+ *     hand-kept list, so a tool added later is held to this the day it lands;
+ *   - every sender exports `relayMissProbe({ route, send, pace })`: ONE write
+ *     through its real write path against its own offline fake platform, on
+ *     the route, the sender and the throttle the conformance hands in,
+ *     answering `{ exit, calls, text }` — the exit, every request that left
+ *     the process directly (`METHOD /path`), and what it printed;
+ *   - the conformance drives each with a dispatch the platform ACCEPTS (204)
+ *     and a run that never appears, under `auto` and under an explicit
+ *     `dispatch`, and with a run that never completes under `auto`, through
+ *     the real `sendFleetWrite` over a fake platform. Each must answer exit
+ *     `EXIT_UNCONFIRMED`, after exactly ONE dispatch, with ZERO direct writes
+ *     (any request but a GET), printing the shared `unconfirmedText` sentence;
+ *   - the control drives each under `direct`: at least one direct write and no
+ *     dispatch — so the empty list above is a measurement, never a recorder
+ *     that sees nothing;
+ *   - a sender without the probe fails the pin until it carries one and gives
+ *     the same answer. ⛔ There is no third, quieter answer to an accepted
+ *     dispatch with no run. This file's own CLI (`with-fleet.sh --actions`
+ *     execs it) has no direct path at all and is pinned beside them.
  *
  * ## The run's annotations — the numbers a seat CAN read
  *
@@ -291,6 +325,9 @@ export const RELAY_LIVE_OVERRIDE_ENV = 'OS_FLEET_RELAY_LIVE';
 export const DEFAULT_START_MS = 90_000;
 export const DEFAULT_CEILING_MS = 5 * 60 * 1000;
 export const DEFAULT_POLL_MS = 5_000;
+
+/** The export every sender carries for the no-run conformance (the header's section of that name). */
+const RELAY_MISS_PROBE = 'relayMissProbe';
 
 // ---------------------------------------------------------------------------
 // Pure core
@@ -511,15 +548,6 @@ export function unconfirmedText(result, tool = 'fleet-write') {
     `${tool}: UNCONFIRMED — ${what}.${where}\n` +
     `  The dispatch was ACCEPTED (HTTP ${result.status}) and may still run. Go READ the run and the target; ⛔ do not re-run this\n` +
     `  command blind — a second dispatch is a second write. Exit ${EXIT_UNCONFIRMED}.`
-  );
-}
-
-/** The one line `auto` prints when it falls back to `direct` because no run appeared. */
-export function fallbackText(result, tool = 'fleet-write') {
-  return (
-    `${tool}: transport auto — the dispatch was accepted (HTTP ${result.status}) but NO run named after request ${result.requestId} appeared within ` +
-    `${result.startMs} ms, the shape a board without the listening workflow produces. Falling back to DIRECT for this write. ` +
-    '⚠️ If the relay is live and merely slow, the direct write below is a second one.'
   );
 }
 
@@ -1112,8 +1140,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the run's annotations: after a success run carrying an op that creates or moves a card its check-run annotations are read first — an issue_create they name read back AT that number with NO re-list; absent, unreadable, ignored or past the cap, the re-list as before; a stroke with no such op reads none": 14,
   'the wiring: the POST is paced and on the roster, the reads are not, the token never reaches the log': 5,
   'the CLI: a dry run sends nothing, usage, the exit ladder, the session derived from the container, a route read behind a dead proxy refuses': 11,
+  'the no-run conformance: every sender — discovered from the source — answers an accepted dispatch with no run, or none completed, UNCONFIRMED (6) after ONE dispatch with ZERO direct writes, under auto and explicit dispatch alike; under direct its write is seen': 27,
 });
-const SELF_TEST_BATTERY_FLOOR = 17;
+const SELF_TEST_BATTERY_FLOOR = 18;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1479,7 +1508,7 @@ export async function selfTest() {
       const none = await drive({ runs: () => [] });
       t('no run within the start window is `no-run`, exit 6', [none.state, exitForResult(none)], ['no-run', EXIT_UNCONFIRMED]);
       t('…after ONE dispatch, and it says how long it waited', [none.seen.filter((s) => s.call === DISPATCH).length, unconfirmedText(none).includes('90000 ms')], [1, true]);
-      t('…and the fall-back line names the shape (no listening workflow) and the double-write risk', fallbackText(none).includes('listening workflow') && fallbackText(none).includes('second one'));
+      t('…the dispatch WAS accepted (HTTP 204) and no run is known — the state every sender answers UNCONFIRMED and none falls back from (the no-run conformance)', [none.status, none.ok, none.run], [204, false, null]);
       const stuck = await drive({ runs: () => [RUN('in_progress')], one: () => RUN('in_progress') });
       t('a run that never completes within the ceiling is `timeout`, exit 6, with the run url', [stuck.state, exitForResult(stuck), unconfirmedText(stuck).includes('https://github.test/run/42')], ['timeout', EXIT_UNCONFIRMED, true]);
       t('…and the sentence says not to retry blind', unconfirmedText(stuck).includes('do not re-run'));
@@ -1878,6 +1907,111 @@ export async function selfTest() {
       const deadOut = routeDeadProxy.stdout.trim() ? JSON.parse(routeDeadProxy.stdout.trim()) : null;
       t(`⭐ --route behind a proxy that answers nothing: the process re-execs with ${PROXY_FLAG}, the read gets no answer, and the verdict is exit 3 with the error naming it — never direct`, [routeDeadProxy.status, deadOut?.transport ?? null, (deadOut?.error ?? '').includes('no answer'), routeDeadProxy.stderr.includes(PROXY_FLAG)], [EXIT_PREREQUISITE, null, true, true], routeDeadProxy.stderr.slice(-300));
     }
+
+    // ── the no-run conformance ──────────────────────────────────────────────
+    battery('the no-run conformance: every sender — discovered from the source — answers an accepted dispatch with no run, or none completed, UNCONFIRMED (6) after ONE dispatch with ZERO direct writes, under auto and explicit dispatch alike; under direct its write is seen');
+    {
+      const { readdirSync } = await import('node:fs');
+      const { dirname, relative, resolve, sep } = await import('node:path');
+      const { pathToFileURL } = await import('node:url');
+      const REPO_ROOT = resolve(dirname(SELF_PATH), '../../..');
+      const own = relative(REPO_ROOT, SELF_PATH).split(sep).join('/');
+      // The senders, from the SOURCE: every code file under scripts/ but this one that names the sender function.
+      const senders = readdirSync(join(REPO_ROOT, 'scripts'), { recursive: true })
+        .map((f) => `scripts/${String(f).split(sep).join('/')}`)
+        .filter((f) => /\.(?:mjs|cjs|js|mts|ts)$/u.test(f) && !f.split('/').includes('node_modules') && f !== own)
+        .filter((f) => /\bsendFleetWrite\b/u.test(readReal(join(REPO_ROOT, f), 'utf8')))
+        .sort();
+      // The discovery's floor, BY NAME: a scan gone blind — a moved root, a renamed import — finds fewer and reds here.
+      const KNOWN = ['scripts/pm/close-cards.mjs', 'scripts/pm/issue-create.mjs', 'scripts/pm/issue-transfer.mjs', 'scripts/pm/label-write.mjs', 'scripts/pm/post-stamped.mjs'];
+      t('the discovery finds every sender known today — the scan is not blind', KNOWN.filter((k) => !senders.includes(k)), []);
+
+      const relayRoute = (requested) => ({ requested, transport: 'dispatch', reason: `conformance: ${requested} → dispatch`, error: null, session: SESSION });
+      const DIRECT_ROUTE = { requested: 'direct', transport: 'direct', reason: 'conformance: direct', error: null, session: null };
+      const isDirectWrite = (call) => !/^(?:GET|HEAD) /u.test(call);
+      // The tool-independent lines of the ONE sentence every sender prints — computed, so a sender's own copy of it cannot pass.
+      const shared = (result) => unconfirmedText(result, '').split('\n').slice(1).join('\n');
+      const freshPace = () => paceFor(join(dir, `pace-conformance-${paceCase++}.jsonl`));
+      // The REAL sender over a fake platform: the dispatch is accepted (204); its run never appears, or never completes.
+      const relayAnswering = (state, counter) => async (payload, opts = {}) => {
+        counter.dispatches += 1;
+        let nowMs = T0;
+        const clock = { now: () => nowMs, elapsed: () => nowMs - T0 };
+        const run = { id: 77, display_title: `fleet-write ${payload.request_id}`, name: 'Fleet Write', html_url: 'https://github.test/run/77', status: 'in_progress', conclusion: null };
+        const script = state === 'no-run' ? { runs: () => [] } : { runs: () => [run], one: () => run };
+        const r = await sendFleetWrite(payload, {
+          fetch: platform(script, [], clock),
+          token: TOKEN,
+          pace: freshPace(),
+          now: clock.now,
+          sleep: async (ms) => {
+            nowMs += ms;
+          },
+          log: opts.log ?? (() => {}),
+          ceilings: { startMs: 90_000, ceilingMs: 300_000, pollMs: 5_000, notes: [] },
+        });
+        counter.results.push(r);
+        return r;
+      };
+      const drive = async (probe, args) => {
+        try {
+          return await probe(args);
+        } catch (e) {
+          return { exit: `threw: ${e?.message ?? e}`, calls: [], text: '' };
+        }
+      };
+      for (const sender of senders) {
+        const probe = (await import(pathToFileURL(join(REPO_ROOT, sender)).href))[RELAY_MISS_PROBE];
+        t(`${sender} sends a relay dispatch and exports ${RELAY_MISS_PROBE} — a sender without it fails here until it answers like the rest`, typeof probe, 'function');
+        if (typeof probe !== 'function') continue;
+        for (const [requested, state] of [['auto', 'no-run'], ['dispatch', 'no-run'], ['auto', 'timeout']]) {
+          const counter = { dispatches: 0, results: [] };
+          const r = await drive(probe, { route: relayRoute(requested), send: relayAnswering(state, counter), pace: freshPace() });
+          const answered = counter.results[0] ?? null;
+          t(
+            `⭐ ${sender}: ${requested} + an ACCEPTED dispatch + ${state} ⇒ exit ${EXIT_UNCONFIRMED} after ONE dispatch, ZERO direct writes, the shared UNCONFIRMED sentence printed`,
+            [r.exit, counter.dispatches, answered?.status ?? null, answered?.state ?? null, r.calls.filter(isDirectWrite), answered ? r.text.includes(shared(answered)) : false],
+            [EXIT_UNCONFIRMED, 1, 204, state, [], true],
+            r.text.slice(-400),
+          );
+        }
+        // The control: the same probe under direct WRITES, and the recorder sees it — so the empty lists above are a measurement.
+        const control = { dispatches: 0 };
+        const c = await drive(probe, {
+          route: DIRECT_ROUTE,
+          send: async (payload) => {
+            control.dispatches += 1;
+            return { state: 'refused', ok: false, status: 0, verdict: 'refusal', run: null, requestId: payload.request_id, startMs: 0, ceilingMs: 0, detail: 'the conformance control: a direct route dispatched' };
+          },
+          pace: freshPace(),
+        });
+        t(`…the control: ${sender} under direct issues its write directly — the recorder sees it — and never dispatches`, [control.dispatches, c.calls.filter(isDirectWrite).length > 0], [0, true], `${c.exit} · ${c.calls.join(' | ')}`);
+      }
+
+      // This file's own CLI, the route `with-fleet.sh --actions` execs: it has no direct path, and it answers the same.
+      writeFileSync(join(dir, 'conformance-actions.json'), JSON.stringify(ACTIONS), 'utf8');
+      let nowMs = T0;
+      const clock = { now: () => nowMs, elapsed: () => nowMs - T0 };
+      const seen = [];
+      const printed = [];
+      const [keepLog, keepErr] = [console.log, console.error];
+      console.log = () => {};
+      console.error = (l) => printed.push(String(l));
+      let code;
+      try {
+        code = await main(['--repo', 'objectstack-ai/objectstack', '--actions-file', join(dir, 'conformance-actions.json')], {
+          env: { GITHUB_TOKEN: TOKEN, [SESSION_ENV]: SESSION },
+          send: { fetch: platform({ runs: () => [] }, seen, clock), pace: freshPace(), now: clock.now, sleep: async (ms) => { nowMs += ms; }, log: () => {}, ceilings: { startMs: 90_000, ceilingMs: 300_000, pollMs: 5_000, notes: [] } },
+        });
+      } finally {
+        [console.log, console.error] = [keepLog, keepErr];
+      }
+      t(
+        "this file's own CLI answers the same: exit 6 after ONE dispatch, no other write, the shared UNCONFIRMED sentence printed",
+        [code, seen.filter((x) => x.call === DISPATCH).length, seen.filter((x) => x.call !== DISPATCH && isDirectWrite(x.call)).length, printed.join('\n').includes(shared({ status: 204, state: 'no-run' }))],
+        [EXIT_UNCONFIRMED, 1, 0, true],
+      );
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1914,7 +2048,8 @@ export async function selfTest() {
     `✓ fleet-write/dispatch self-test: ${cases.length} cases pass across ${declared.length} batteries — the transport selector that never guesses, ` +
       'the session on the envelope, one paced dispatch per stroke, a run found by its request id and waited to its conclusion, both ceilings answered UNCONFIRMED and never retried, ' +
       'and every body read back after a success run — the card\'s 41,699 bytes byte-exact across every 16 KiB boundary, a corrupted read-back NOT STORED (exit 4), an unfound one UNCONFIRMED (6) ' +
-      "only after a lagging issue list was re-read on its bounded schedule — unless the run's annotation named the new number, which is read at once and never listed — the create never re-sent.",
+      "only after a lagging issue list was re-read on its bounded schedule — unless the run's annotation named the new number, which is read at once and never listed — the create never re-sent; " +
+      'and every relay sender, discovered from the source, answering an accepted dispatch with no run, or none completed, UNCONFIRMED (6) with ZERO direct writes, under auto as under dispatch (the no-run conformance).',
   );
   selfTestReachedVerdict = true;
   return 0;
