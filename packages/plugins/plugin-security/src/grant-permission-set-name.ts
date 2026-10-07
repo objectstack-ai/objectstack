@@ -200,7 +200,7 @@ const memoByWrite = new WeakMap<object, Map<string, string | undefined>>();
 interface GrantNameEngine {
   registerHook?: (
     event: string,
-    handler: (ctx: any) => unknown,
+    handler: (ctx: any) => void | Promise<void>,
     options?: { object?: string | string[]; priority?: number; packageId?: string },
   ) => void;
   unregisterHooksByPackage?: (packageId: string) => number;
@@ -248,53 +248,76 @@ async function catalogNameFor(engine: GrantNameEngine, ctx: any, id: unknown): P
   return name;
 }
 
+/** What the caller supplied for the name column, or `undefined` when it supplied nothing. */
+type Supplied = { value: unknown } | undefined;
+
 /**
  * Settle `permission_set` on one payload: `decidingId` is the id the name must
- * agree with (the payload's own, or the matched row's stored one).
+ * agree with (the payload's own, or the matched row's stored one), `supplied`
+ * the caller's own value for the column.
  */
 async function settle(
   engine: GrantNameEngine,
   ctx: any,
   data: Record<string, unknown>,
   decidingId: unknown,
+  supplied: Supplied,
 ): Promise<void> {
-  const supplied = hasOwn(data, GRANT_SET_NAME_FIELD) ? data[GRANT_SET_NAME_FIELD] : undefined;
-  const suppliedName = carriesName(supplied);
+  const suppliedName = supplied !== undefined && carriesName(supplied.value);
   const derived = await catalogNameFor(engine, ctx, decidingId);
   if (derived !== undefined) {
-    if (suppliedName && supplied !== derived) throw grantSetNameMismatchError(supplied);
+    if (suppliedName && supplied!.value !== derived) throw grantSetNameMismatchError(supplied!.value);
     data[GRANT_SET_NAME_FIELD] = derived;
     return;
   }
   // Unresolvable: a non-system caller's name cannot be shown to agree.
-  if (suppliedName && ctx?.session?.isSystem !== true) throw grantSetNameMismatchError(supplied);
+  if (suppliedName && ctx?.session?.isSystem !== true) throw grantSetNameMismatchError(supplied!.value);
 }
 
-/** `beforeInsert`: one dispatch per row. */
+/** `beforeInsert`: one dispatch per row, handed the caller's row as sent. */
 async function onInsert(engine: GrantNameEngine, ctx: any): Promise<void> {
   if (ctx?.object !== GRANT_OBJECT) return;
   const data = ctx?.input?.data;
   if (!isPlainRecord(data)) return;
-  await settle(engine, ctx, data, data[GRANT_SET_ID_FIELD]);
+  const supplied: Supplied = hasOwn(data, GRANT_SET_NAME_FIELD) ? { value: data[GRANT_SET_NAME_FIELD] } : undefined;
+  await settle(engine, ctx, data, data[GRANT_SET_ID_FIELD], supplied);
 }
 
-/** `beforeUpdate`: one dispatch per matched row, `previous` bound on both dispatch paths. */
+/**
+ * `beforeUpdate`: one dispatch per matched row, `previous` bound on both
+ * dispatch paths.
+ *
+ * The caller's value for this `readonly` column is read from `ctx.submitted`
+ * (the submission as sent), never from the payload alone: on a non-system
+ * update the engine HIDES a caller's read-only value from the hooks and hands
+ * it back after them for its own static strip, which would drop it silently.
+ * Judging the submission is what turns that silent drop into this refusal —
+ * and a stamp written here is a hook write, so the hand-back leaves it
+ * standing.
+ */
 async function onUpdate(engine: GrantNameEngine, ctx: any): Promise<void> {
   if (ctx?.object !== GRANT_OBJECT) return;
   const data = ctx?.input?.data;
   if (!isPlainRecord(data)) return;
+  const submitted = isPlainRecord(ctx?.submitted) ? ctx.submitted : undefined;
+  const supplied: Supplied =
+    submitted && hasOwn(submitted, GRANT_SET_NAME_FIELD)
+      ? { value: submitted[GRANT_SET_NAME_FIELD] }
+      : hasOwn(data, GRANT_SET_NAME_FIELD)
+        ? { value: data[GRANT_SET_NAME_FIELD] }
+        : undefined;
   if (hasOwn(data, GRANT_SET_ID_FIELD)) {
-    await settle(engine, ctx, data, data[GRANT_SET_ID_FIELD]);
+    await settle(engine, ctx, data, data[GRANT_SET_ID_FIELD], supplied);
     return;
   }
-  if (!hasOwn(data, GRANT_SET_NAME_FIELD)) return;
+  if (supplied === undefined) return;
   const previous = ctx?.previous;
   // No stored row is the engine's to answer (not found), never a name verdict.
   if (!isPlainRecord(previous)) return;
   // Judged against the stored id on every matched row, an echo included: the
   // stamp is then the same key on every row a predicate write matches, which
   // is what the engine's per-row key-set rule asks of a batch rewrite.
-  await settle(engine, ctx, data, previous[GRANT_SET_ID_FIELD]);
+  await settle(engine, ctx, data, previous[GRANT_SET_ID_FIELD], supplied);
 }
 
 /**
