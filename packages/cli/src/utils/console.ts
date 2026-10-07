@@ -489,8 +489,9 @@ async function resolveHttpServer(ctx: any): Promise<any> {
  *
  * It also answers the path an author writes as a public form's
  * `sharing.publicLink`: `GET /forms/<slug>` redirects (302) to the Console's
- * public form page, `/_console/f/<slug>`, when the anonymous form door serves
- * that slug, and otherwise gets the same not-found answer as before. Mounted
+ * public form page, `/_console/f/<slug>` with the request's query string, when
+ * the anonymous form door serves that slug, and otherwise gets the same
+ * not-found answer as before. Mounted
  * only with the Console, because without it there is no page to send anyone to.
  */
 export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: boolean; rootRedirect?: boolean }) {
@@ -567,10 +568,18 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
       // there only when the anonymous form door serves that slug to this
       // request; anything else falls through to the unmatched-request answer
       // every other unrouted path gets.
+      //
+      // The request's query string travels with it: the public form page reads
+      // `?prefill_<field>=` to seed its fields, so a link that carries one must
+      // land with it. The path is built from `CONSOLE_PATH` and the encoded
+      // slug alone; the query, as the URL parser holds it (it cannot carry a
+      // `#`, a control character or a path), is appended after it, so it can
+      // change nothing but the query of the page the visitor lands on.
       app.get('/forms/:slug', async (c: any, next: () => Promise<void>) => {
         const slug = String(c.req.param('slug') ?? '');
         if (slug && (await anonymousFormDoorServes(app, c, slug))) {
-          return c.redirect(`${CONSOLE_PATH}/f/${encodeURIComponent(slug)}`, 302);
+          const query = new URL(c.req.url).search;
+          return c.redirect(`${CONSOLE_PATH}/f/${encodeURIComponent(slug)}${query}`, 302);
         }
         await next();
       });

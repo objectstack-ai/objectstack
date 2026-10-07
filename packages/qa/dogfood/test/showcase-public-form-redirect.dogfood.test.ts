@@ -13,6 +13,8 @@
 //   - an anonymous `GET /forms/contact-us` answers 302 to `/_console/f/contact-us`,
 //     that page is the Console bundle, the door it reads serves the form, and
 //     the form accepts a submission that lands;
+//   - a `prefill_` query on the authored link (the page seeds fields from it)
+//     arrives on the redirect's `Location` unchanged;
 //   - a disabled form, a non-anonymous form and an unknown slug each answer
 //     exactly the unmatched-request 404 an unrouted path gets (compared byte for
 //     byte against a path nothing mounts, on the same boot), and the form comes
@@ -144,6 +146,23 @@ describe('showcase: the authored public form path redirects to the console form 
     expect(submit.status, await submit.clone().text()).toBe(201);
     const landed = await ql.find('showcase_inquiry', { where: { name: marker }, context: SYS });
     expect(landed).toHaveLength(1);
+  });
+
+  it('a prefill_ query on the authored link arrives on the page it redirects to', async () => {
+    // The page seeds a field from `?prefill_<field>=`; `company` is one of the
+    // fields the form declares, so this is a link an author would publish.
+    const spec = await stack.api(`/forms/${SLUG}`);
+    const fields = Object.keys(((await spec.json()) as { objectSchema: { fields: Record<string, unknown> } }).objectSchema.fields);
+    expect(fields).toContain('company');
+
+    const query = '?prefill_company=Analytical%20Engines&utm_source=website';
+    const redirect = await answerOf(await stack.raw(`${AUTHORED}${query}`));
+    expect(redirect.status).toBe(302);
+    expect(redirect.location).toBe(`${PAGE}${query}`);
+
+    const page = await stack.raw(redirect.location!);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain(BUNDLE_MARKER);
   });
 
   it('an unknown slug answers the unmatched-request 404, byte for byte', async () => {

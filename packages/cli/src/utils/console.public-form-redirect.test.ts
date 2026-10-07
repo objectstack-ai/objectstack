@@ -39,6 +39,7 @@ type DoorAnswer = 'serve' | 'not-found' | 'fail' | 'throw';
 interface DoorCall {
   method: string;
   slug: string;
+  query: unknown;
   host: unknown;
   cookie: unknown;
 }
@@ -74,7 +75,7 @@ async function mount(opts: {
 
   server.get('/api/v1/forms/:slug', async (req: any, res: any) => {
     const slug = String(req.params?.slug ?? '');
-    doorCalls.push({ method: req.method, slug, host: req.headers?.host, cookie: req.headers?.cookie });
+    doorCalls.push({ method: req.method, slug, query: req.query, host: req.headers?.host, cookie: req.headers?.cookie });
     const answer = door(slug);
     if (answer === 'throw') throw new Error('door exploded');
     if (answer === 'fail') {
@@ -187,10 +188,75 @@ describe('GET /forms/:slug — the Location cannot be steered off the console pa
     });
   }
 
-  it('the query string of the request is not carried', async () => {
+  it('a query string cannot steer it either: origin and path stay the console page', async () => {
+    const app = await mount({ console: true, door: servesEverything });
+    for (const query of ['?next=https://evil.example', '?x=%0D%0ASet-Cookie:%20a=b', '?/..//evil.example']) {
+      const res = await app.request(`/forms/${OPEN}${query}`);
+      expect(res.status).toBe(302);
+      expect(res.headers.get('set-cookie')).toBeNull();
+      const location = res.headers.get('location')!;
+      expect(location).toBe(`/_console/f/${OPEN}${query}`);
+      const resolved = new URL(location, ORIGIN);
+      expect(resolved.origin).toBe(ORIGIN);
+      expect(resolved.pathname).toBe(`/_console/f/${OPEN}`);
+    }
+  });
+});
+
+describe('GET /forms/:slug — the request\'s query string travels to the page', () => {
+  // The public form page seeds its fields from `?prefill_<field>=`, so a link
+  // that carries one must land with it, byte for byte.
+  for (const query of [
+    '?prefill_source=website&utm_campaign=spring',
+    '?prefill_name=Ada%20Lovelace&prefill_email=ada%40example.com&ref=a+b',
+    '?prefill_message=line%0Aone&prefill_message=dup',
+  ]) {
+    it(`${query} arrives on Location unchanged`, async () => {
+      const app = await mount({ console: true });
+      const res = await app.request(`/forms/${OPEN}${query}`);
+      expect(res.status).toBe(302);
+      expect(res.headers.get('location')).toBe(`/_console/f/${OPEN}${query}`);
+    });
+  }
+
+  it('a slug that needs encoding, together with a query: the path is re-encoded, the query is untouched', async () => {
+    const app = await mount({ console: true, door: () => 'serve' });
+    const query = '?prefill_source=website&lang=fr';
+    const res = await app.request(`/forms/caf%C3%A9%20form${query}`);
+    expect(app.doorCalls.map((d) => d.slug)).toEqual(['café form']);
+    expect(res.status).toBe(302);
+    const location = res.headers.get('location')!;
+    expect(location).toBe(`/_console/f/caf%C3%A9%20form${query}`);
+    const resolved = new URL(location, ORIGIN);
+    expect(resolved.pathname).toBe('/_console/f/caf%C3%A9%20form');
+    expect(resolved.searchParams.get('prefill_source')).toBe('website');
+    expect(resolved.searchParams.get('lang')).toBe('fr');
+  });
+
+  it('the door is asked without the query', async () => {
     const app = await mount({ console: true });
-    const res = await app.request(`/forms/${OPEN}?next=https://evil.example`);
-    expect(res.headers.get('location')).toBe(`/_console/f/${OPEN}`);
+    await app.request(`/forms/${OPEN}?prefill_source=website&utm_campaign=spring`);
+    expect(app.doorCalls).toHaveLength(1);
+    expect(app.doorCalls[0].query).toEqual({});
+  });
+
+  it('HEAD carries it too', async () => {
+    const app = await mount({ console: true });
+    const res = await app.request(`/forms/${OPEN}?prefill_source=website`, { method: 'HEAD' });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(`/_console/f/${OPEN}?prefill_source=website`);
+  });
+
+  it('an empty query or a fragment adds nothing', async () => {
+    const app = await mount({ console: true });
+    expect((await app.request(`/forms/${OPEN}?`)).headers.get('location')).toBe(`/_console/f/${OPEN}`);
+    expect((await app.request(`/forms/${OPEN}?a=1#frag`)).headers.get('location')).toBe(`/_console/f/${OPEN}?a=1`);
+  });
+
+  it('a slug the door does not serve keeps the same 404 with a query, byte for byte', async () => {
+    const { answer, before } = await withAndWithout('/forms/unknown-slug?prefill_source=website');
+    expect(before.status).toBe(404);
+    expect(answer).toEqual(before);
   });
 });
 
