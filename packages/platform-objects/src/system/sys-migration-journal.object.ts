@@ -69,6 +69,14 @@ export const SysMigrationJournal = ObjectSchema.create({
   icon: 'clipboard-list',
   isSystem: true,
   managedBy: 'engine-owned',
+  // [ADR-0131 D7] Deployment-level state: NO tenant column. The sole writer,
+  // `@objectstack/core`'s migration runner, appends under a system context —
+  // or under the transaction it opened with one — and the row contract
+  // (`MigrationJournalEventSchema`) has no organization field to carry. Who
+  // may read is object permission (D7): the platform-only capability below,
+  // since a failure `detail` is error text about rows of any organization.
+  systemFields: { tenant: false },
+  requiredPermissions: ['manage_platform_settings'],
   description:
     'Append-only trace of migration runs: which chunks committed, which were compensated, and where a killed run stopped.',
   nameField: 'run_id', // [ADR-0079] canonical primary-title pointer

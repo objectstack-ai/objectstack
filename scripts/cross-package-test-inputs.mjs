@@ -1128,6 +1128,11 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // compile pipeline and the metadata plugin produce.
       'examples/app-showcase/**',
       'packages/cli/src/commands/**',
+      // test/showcase-public-form-redirect.dogfood.test.ts IMPORTS the console
+      // static plugin from source and mounts it on a real showcase boot, so the
+      // plugin is the pin's subject. Per-file, matching what the import names:
+      // the module imports nothing but Node built-ins.
+      'packages/cli/src/utils/console.ts',
       'packages/metadata/src/**',
       // `realtime-protocol.mdx` is named in a comment rather than read, the
       // same shape as `check-nul-bytes.mjs` on the @objectstack/cli entry

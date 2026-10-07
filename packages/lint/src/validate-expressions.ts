@@ -1182,22 +1182,41 @@ export interface StackExpressionOptions {
    * through by this rule's registry entry). ABSENT on `os build`, `os lint`
    * and `os validate`, which run every pass below.
    *
-   * On an `object` write exactly ONE pass judges: the field-formula pass over
-   * `fields[].expression` — the build's own `validateExpression('value', …)`
-   * call, with its warnings and the unprovisioned-anchor warning on the same
-   * key. That is the verdict `formulas.mdx` says backs both `os build` and
-   * metadata registration, and the save door gave none of it: a formula
-   * calling an unregistered function (`sqrt(record.amount)`) saved with a 200
-   * and read `null` on every row.
+   * On an `object` write exactly THREE passes judge, each the build's own call
+   * at the build's own position in the walk:
+   *
+   *  - the field-formula pass over `fields[].expression` — the build's
+   *    `validateExpression('value', …)` call, with its warnings and the
+   *    unprovisioned-anchor warning on the same key. That is the verdict
+   *    `formulas.mdx` says backs both `os build` and metadata registration,
+   *    and the save door gave none of it: a formula calling an unregistered
+   *    function (`sqrt(record.amount)`) saved with a 200 and read `null` on
+   *    every row (#22019);
+   *  - [#22032, pass 1] the validation-rule pass over `validations[]` — the
+   *    `condition` (with the relationship-traversal checks the rule validator
+   *    serves) and the `conditional` rule's `when`, plus the #4763 null-guard
+   *    gate over every predicate the rule carries, its nested `then` /
+   *    `otherwise` branches included. The same sentence of `formulas.mdx`
+   *    covers it, and the door gave none of it either: a rule whose
+   *    `condition` called `sqrt` or read a bare `amount` saved with a 200 and
+   *    then faulted on every write the rule judged;
+   *  - [#22032, pass 2] the field-rule-slot pass over `fields[]` — each of
+   *    `requiredWhen` / `readonlyWhen` / `conditionalRequired` / `visibleWhen`
+   *    as a `record`-scoped predicate with its root verdict, plus the `parent`
+   *    gate (a `readonlyWhen` / `requiredWhen` reading `parent` on an object
+   *    without exactly one `master_detail`), the #4811 null-guard gate over
+   *    `requiredWhen`, and the #20078 refusal of a `requiredWhen` /
+   *    `readonlyWhen` read through a reference field. The same sentence of
+   *    `formulas.mdx` covers it, and the door gave none of it either: a
+   *    `requiredWhen` reading a bare `amount` saved with a 200, and the server
+   *    refuses a write whose requirement it cannot evaluate (ADR-0137 D2).
    *
    * Every other pass is fenced off an object write, deliberately and by name:
-   * the validation-rule predicates, the field-rule slots (`requiredWhen` /
-   * `readonlyWhen` / `conditionalRequired` / `visibleWhen`) with their
-   * `parent` and null-guard gates, the per-option `visibleWhen`, and the
-   * object's own `actions[]` predicates. Each is a build verdict the save
+   * the per-option `visibleWhen` (inside the field walk, by its own guard) and
+   * the object's own `actions[]` predicates. Each is a build verdict the save
    * door still does not give, and each would narrow the accept set further
-   * than this crossing does — a crossing of its own, measured over the stored
-   * corpus first, not a rider on this one.
+   * than the crossings above — a crossing of its own, measured over the stored
+   * corpus first, not a rider on any of them.
    */
   runtimeWriteType?: string;
 }
@@ -1222,10 +1241,12 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
 export function runStackExpressionPasses(stack: AnyRec, options: StackExpressionOptions): ExprIssue[] {
   const issues: ExprIssue[] = [];
   // [#22019] See {@link StackExpressionOptions.runtimeWriteType}: on an object
-  // write only the field-formula pass judges. Every other loop below reads an
-  // empty list under it, so the claim holds by construction rather than by the
-  // shape of the snapshot the gate happens to build today.
-  const fieldFormulasOnly = options.runtimeWriteType === 'object';
+  // write only the field-formula pass and (#22032) the validation-rule and
+  // field-rule-slot passes judge. Every other loop below — the per-option
+  // `visibleWhen` loop inside the field walk included — reads an empty list
+  // under it, so the claim holds by construction rather than by the shape of
+  // the snapshot the gate happens to build today.
+  const objectWrite = options.runtimeWriteType === 'object';
   const objects = recordsOf(stack.objects);
   const fieldIndex = buildFieldIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(objects);
@@ -1511,7 +1532,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   };
 
   // ── Flows ──────────────────────────────────────────────────────────
-  for (const flow of fieldFormulasOnly ? [] : recordsOf(stack.flows)) {
+  for (const flow of objectWrite ? [] : recordsOf(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
     // `Array.isArray` proves the LIST, never its MEMBERS — the sentence #15742
     // removed from one reader below in this same file. A YAML `nodes:` item
@@ -1856,7 +1877,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // `validations` is the key `ObjectSchema` declares; `validationRules` is a
     // rejected alias of it (#5017) — see the `## Scope` table above.
     const validations = obj.validations;
-    for (const rule of fieldFormulasOnly ? [] : recordsOf(validations)) {
+    // [#22032, pass 1] NOT fenced on an object write: this loop is the
+    // validation-rule pass the object save door runs, at the build's own
+    // position, so the door's findings and their order are the build's.
+    for (const rule of recordsOf(validations)) {
       const where = `object '${objectName}' · validation '${(rule.name as string) ?? '?'}'`;
       // The declared predicate key is `condition` (see `rulePredicates`).
       // Validation predicates are `record`-scoped — no field flattening — so
@@ -1925,10 +1949,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
 
     /**
      * The field-formula pass — one computed field's `expression`. A closure
-     * rather than inline only so the runtime publish gate's object door
-     * (#22019) runs exactly this pass and nothing beside it; on the three CLI
-     * commands it is called at the same point of the field walk it always ran
-     * at, so the build's findings and their order are unchanged.
+     * since #22019, whose object door ran this pass and no other slot of the
+     * field walk; since #22032's pass 2 the door runs the field-rule slots as
+     * well, and this is called at one point only — the same point of the field
+     * walk it always ran at — so the build's findings and their order are
+     * unchanged.
      */
     const judgeFieldFormula = (fname: string, f: AnyRec): void => {
       if (f.expression) {
@@ -1969,11 +1994,14 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     };
 
     for (const [fname, f] of fieldList) {
-      // [#22019] The object write door: this field's formula, and no other slot.
-      if (fieldFormulasOnly) {
-        judgeFieldFormula(fname, f);
-        continue;
-      }
+      // [#22032, pass 2] NOT fenced on an object write: the field-rule slots
+      // below — the four slots' root verdict, the `parent` gate, the
+      // `requiredWhen` null guard and the traversal refusal — are the pass the
+      // object save door runs, at the build's own position in this walk, so
+      // the door's findings and their order are the build's. The per-option
+      // `visibleWhen` loop between them is the one slot of this walk still
+      // fenced (pass 3), by its own guard.
+      //
       // Field-level conditional rules are server-enforced (rule-validator) and
       // record-scoped — a bare ref silently fails the rule (required/readonly
       // not enforced = data-integrity hole). #1928 class, same as actions.
@@ -2007,7 +2035,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // `checkFieldRuleRoot` above rejects it one level up, where nothing
       // binds it. Same helper, two verdicts, because the two surfaces have two
       // evaluators; neither verdict is a side effect of a shared root list.
-      for (const [oi, opt] of recordsOf(f.options).entries()) {
+      //
+      // [#22032] FENCED on an object write (pass 3 of that card, not lifted
+      // yet): see {@link StackExpressionOptions.runtimeWriteType}.
+      for (const [oi, opt] of (objectWrite ? [] : recordsOf(f.options)).entries()) {
         const label = typeof opt.value === 'string' ? `'${opt.value}'` : `#${oi}`;
         const optionWhere = `object '${objectName}' · field '${fname}' option ${label} visibleWhen`;
         check(optionWhere, opt.visibleWhen, objectName, 'record');
@@ -2163,10 +2194,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // `$select` projection (and, through `&&` short-circuiting, on row data),
     // neither of which this pass can see. Full reasoning in the ledger.
   };
-  for (const action of fieldFormulasOnly ? [] : recordsOf(stack.actions)) {
+  for (const action of objectWrite ? [] : recordsOf(stack.actions)) {
     checkAction('stack', action);
   }
-  for (const obj of fieldFormulasOnly ? [] : objects) {
+  for (const obj of objectWrite ? [] : objects) {
     const objectName = typeof obj.name === 'string' ? obj.name : undefined;
     for (const action of recordsOf(obj.actions)) {
       checkAction(`object '${objectName}'`, action, objectName);
@@ -2180,7 +2211,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // test can tell this receiver apart from the VALIDATION rule one — the two
   // are governed by different schemas, and a scan that merged them would let a
   // key declared by either schema pass on both (#5017).
-  for (const sharingRule of fieldFormulasOnly ? [] : recordsOf(stack.sharingRules)) {
+  for (const sharingRule of objectWrite ? [] : recordsOf(stack.sharingRules)) {
     const ruleObj = typeof sharingRule.object === 'string' ? sharingRule.object : undefined;
     const where = `sharingRule '${(sharingRule.name as string) ?? '?'}'${ruleObj ? ` (${ruleObj})` : ''} condition`;
     // `condition` is the authored key `SharingRuleSchema` declares. `criteria`
@@ -2195,7 +2226,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // A lifecycle hook's `condition` skips the handler when false; it is
   // evaluated against the record, so a bare ref silently makes the hook
   // run on every record (or never) instead of the intended subset.
-  for (const hook of fieldFormulasOnly ? [] : recordsOf(stack.hooks)) {
+  for (const hook of objectWrite ? [] : recordsOf(stack.hooks)) {
     const hookName = (hook.name as string) ?? '?';
     if (typeof hook.object === 'string') {
       check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record');

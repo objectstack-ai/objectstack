@@ -215,7 +215,8 @@ Useful flags:
 | Flag | What it does |
 | :--- | :--- |
 | `--step` | Report each major's hop separately, so a failure bisects to the exact major |
-| `--out migrated.stack.json` | Also write the migrated stack as a JSON snapshot — the only file the command writes |
+| `--out migrated.stack.json` | Also write the migrated stack as a JSON snapshot |
+| `--write` | Write the mechanical changes into your source files, where each can be traced to one literal; list the rest with the reason (see below) |
 | `--to 17` | Stop at an intermediate major instead of this runtime's |
 | `--json` | Machine-readable output, for CI or an agent |
 
@@ -226,11 +227,22 @@ stored metadata rows and reads no config. The two are mutually exclusive.)
 ### What it does not do — read the output
 
 <Callout type="warn">
-**`os migrate meta` does not rewrite your source files.** It replays the chain
-over the loaded stack *in memory* and reports the diff; the only file it writes
-is `--out`, a JSON snapshot. Porting the listed edits into your own `.ts`
-sources is your work — use `--out` as the oracle you diff against, never as the
-file you ship.
+**Without `--write`, `os migrate meta` does not rewrite your source files.** It
+replays the chain over the loaded stack *in memory* and reports the diff; the
+only file it writes is `--out`, a JSON snapshot — use it as the oracle you diff
+against, never as the file you ship.
+
+**`--write` writes the mechanical changes into your `.ts` sources — only where
+it can prove the site.** A change is written when it traces to one object or
+array literal in one project file: through `define*` calls and `.create`
+factories, `const` bindings, relative imports and re-exports, and
+`Object.values()` over a namespace import. Only that site's bytes change; a
+renamed key keeps its value and its comments. Every other change — a value
+built by a function call or an expression, a key a spread supplies, a binding
+something else also uses, a file in a package — is listed with the reason it was
+not written, for you to port by hand. The command then re-runs the chain over
+the written files and restores them all unless it comes back with exactly the
+changes it left. Commit first, and review the diff like any other change.
 </Callout>
 
 <Callout type="warn">
@@ -274,7 +286,8 @@ has already done.
 
 ```bash
 os migrate meta --from 16     # 1. read the mechanical change list and the to-dos
-                              # 2. apply the edits by hand; resolve the to-dos
+                              # 2. apply the edits (--write writes the ones it can
+                              #    trace and lists the rest); resolve the to-dos
                               #    and the checklist items below
 os validate                   # 3. the gate — schema, CEL predicates, widget bindings
 os build                      # 4. compile to dist/objectstack.json

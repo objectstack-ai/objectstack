@@ -202,7 +202,7 @@ const advisoryFlow = (name: string) => ({
 /** The same flow with the bulk write bounded — no finding of any severity. */
 const cleanFlow = (name: string) => {
     const flow = advisoryFlow(name);
-    (flow.nodes[1] as any).config.filter = [{ field: 'created_at', operator: 'lt', value: '2020-01-01' }];
+    (flow.nodes[1] as any).config.filter = { created_at: { $lt: '2020-01-01' } };
     return flow;
 };
 

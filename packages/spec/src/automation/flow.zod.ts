@@ -167,7 +167,9 @@ export const FLOW_PAUSE_CAPABLE_NODE_TYPES: readonly string[] = [
  * rule reaches in beside it, still without closing the key set (#20316): a
  * key the node's executor contract requires, left out, and a `decision`
  * branch list the executor cannot read — `flowNodeConfigRefusals`, in the
- * same superRefine.
+ * same superRefine — and (#21898) a VALUE rule with it, again without closing
+ * the key set: a value a builtin node's executor contract refuses, where the
+ * build can know what the run will parse.
  */
 
 /**
@@ -1474,19 +1476,23 @@ export const FlowSchema = lazySchema(() => strictObject(
   //    node against at run time, so a flow carrying one used to register and
   //    then fail every run that reached the node (`loop` with a `body` and no
   //    `collection`, `map` with no `collection`, a CRUD node with no
-  //    `objectName`, …). For a builtin only ABSENCE is judged: a present value
-  //    of the wrong type, or an undeclared key, stays where it is judged today.
-  //    The one plugin node contract the spec declares, `approval` (#21850), is
-  //    judged WHOLE — its executor refuses the node on any contract finding —
-  //    so its undeclared keys and refused values are refused here too;
+  //    `objectName`, …). For a builtin (#21898) a present VALUE its contract
+  //    refuses is refused too (`create_record` `outputVariable: 42`, a screen
+  //    field `min: '1'`), where the build can know what the run parses — never
+  //    a value carrying a `{token}`, a region slot, a ledger predicate or
+  //    value slot, or `http`'s run-resolved `signingSecret`; an undeclared key
+  //    stays where it is judged today. The one plugin node contract the spec
+  //    declares, `approval` (#21850), is judged WHOLE — its executor refuses
+  //    the node on any contract finding — so its undeclared keys are refused
+  //    here too;
   //  - a `decision` branch list the executor cannot read — `conditions` not an
   //    array, a branch that is not an object, and a branch whose `label` is
   //    absent, blank or not text. The last one never failed a run at all: the
   //    matched branch reported no label, and traversal took EVERY out-edge.
   //
-  // A PRESENCE rule for a builtin, never a key-set closure: the node `config`
-  // stays the open record the header of this module describes, and only the
-  // approval node's declared contract closes its key set. Walked with
+  // A PRESENCE and VALUE rule for a builtin, never a key-set closure: the node
+  // `config` stays the open record the header of this module describes, and
+  // only the approval node's declared contract closes its key set. Walked with
   // `collectFlowGraphs`, so a node inside an ADR-0031 region body is judged at
   // the path the author wrote; a container's own judgement skips its regions'
   // insides, which this same walk reaches as graphs of their own.
@@ -1542,7 +1548,147 @@ export const FlowSchema = lazySchema(() => strictObject(
         'is silently wrong there rather than loudly broken.',
     });
   });
+
+  // An edge resolves inside the graph that declares it, and is followed once
+  // (#22088). Two refusals over one walk, both anchored on the edge to fix:
+  //
+  //  - ENDPOINTS. `source` and `target` name nodes of the graph the edge is
+  //    declared in — the flow's own `nodes[]` for a top-level edge, the region
+  //    body's for an edge inside an ADR-0031 region. The engine resolves both
+  //    there and nowhere else: traversal looks the target up in the graph it is
+  //    walking, and a region runs against a view of its own nodes and edges.
+  //    So an endpoint naming no node of that graph — a typo, a node since
+  //    removed, a node of another region — carries the run nowhere, silently.
+  //    `analyzeRegion` refused the region half at `registerFlow`; the top-level
+  //    half had no refusal anywhere, and a draft holding `start → node_1` with
+  //    no `node_1` published 200 with `_diagnostics.valid: true`. The node-id
+  //    space is ONE for uniqueness (above) but not for resolution, so a
+  //    top-level edge into a region node is refused here as well.
+  //
+  //  - REPEATED EDGES. The engine runs a target once per out-edge it selects
+  //    (`traverseNext`), so two edges it cannot tell apart run the target
+  //    twice — measured: three `start → node_1` edges ran one `create_record`
+  //    three times per trigger. "Cannot tell apart" is the key the engine
+  //    selects on, and nothing wider: the same `source` and `target`, the same
+  //    `type` (a `fault` edge is followed only on failure), the same
+  //    `condition` (its dialect and source, the two parts the evaluator reads)
+  //    and the same branch `label` (a `decision` or `approval` narrows its
+  //    out-edges to the label it selected, so `approve` and `reject` may both
+  //    reach one node). The later copy is refused, naming the earlier one.
+  //
+  // Judged per graph at every depth `collectFlowGraphs` reaches; past
+  // `MAX_REGION_DEPTH` a region stays `validateControlFlow`'s, whose
+  // `analyzeRegion` still refuses an endpoint there (a repeat there is not
+  // judged). A repeat is judged only between edges whose endpoints both
+  // resolve: the endpoint refusal already names a dangling edge, and "runs the
+  // target again" is false for an edge that runs nothing. Indexed over the
+  // AUTHORED edge list, never `graph.edges`, which drops a non-record member
+  // of a raw region and would shift the anchor.
+  const graphs = collectFlowGraphs(flow);
+  const scopeByNodeId = new Map<string, string>();
+  for (const graph of graphs) {
+    for (const node of graph.nodes) {
+      const id: unknown = (node as { id?: unknown }).id;
+      if (typeof id === 'string' && !scopeByNodeId.has(id)) scopeByNodeId.set(id, graph.scope);
+    }
+  }
+  for (const graph of graphs) {
+    const nodeIds = new Set<string>();
+    for (const node of graph.nodes) {
+      const id: unknown = (node as { id?: unknown }).id;
+      if (typeof id === 'string') nodeIds.add(id);
+    }
+    const graphName = graph.scope ? `\`${graph.scope}\`` : "the flow's top-level graph";
+    const at = (index: number) => (graph.scope ? `${graph.scope} → edges[${index}]` : `edges[${index}]`);
+    const firstIndexBySelection = new Map<string, number>();
+    const edges = authoredEdgesAt(flow, graph.path);
+    const idAt = (index: number): string => {
+      const id: unknown = (edges[index] as { id?: unknown }).id;
+      return typeof id === 'string' ? ` \`${id}\`` : '';
+    };
+    edges.forEach((edge, index) => {
+      if (typeof edge !== 'object' || edge === null || Array.isArray(edge)) return;
+      const { id, source, target, type, condition, label } = edge as Record<string, unknown>;
+      const named = typeof id === 'string' ? `Edge \`${id}\`` : 'An edge';
+      let resolves = true;
+      for (const [endpoint, value] of [['source', source], ['target', target]] as const) {
+        if (typeof value !== 'string') {
+          resolves = false;
+          continue;
+        }
+        if (nodeIds.has(value)) continue;
+        resolves = false;
+        const elsewhere = scopeByNodeId.get(value);
+        ctx.addIssue({
+          code: 'custom',
+          path: [...graph.path, 'edges', index, endpoint],
+          message:
+            `${named} (\`${at(index)}\`) has \`${endpoint}: '${value}'\`, which is not a node of ${graphName}. ` +
+            'An edge connects two nodes of the graph that declares it — a top-level edge two top-level ' +
+            'nodes, a region edge two nodes of that region body — and the engine resolves the endpoint ' +
+            'there alone, so this edge carries the run nowhere, silently. ' +
+            (elsewhere === undefined
+              ? `No node in this flow has the id \`${value}\`. `
+              : `\`${value}\` is a node of ${elsewhere ? `\`${elsewhere}\`` : "the flow's top-level graph"}, ` +
+                'a different graph: a node inside a region is reached through its container node, never by ' +
+                'an edge from outside it. ') +
+            `Point \`${endpoint}\` at a node declared in that graph, or delete the edge — removing a node ` +
+            'removes the edges that name it.',
+        });
+      }
+      if (!resolves) return;
+      const selection = JSON.stringify([source, target, type ?? 'default', edgeConditionKey(condition), label ?? null]);
+      const first = firstIndexBySelection.get(selection);
+      if (first === undefined) {
+        firstIndexBySelection.set(selection, index);
+        return;
+      }
+      ctx.addIssue({
+        code: 'custom',
+        path: [...graph.path, 'edges', index],
+        message:
+          `Repeated edge${idAt(index)} — \`${at(index)}\` connects \`${String(source)}\` → \`${String(target)}\` ` +
+          `exactly as \`${at(first)}\`${idAt(first)} does, with the same \`type\`, \`condition\` and \`label\`. ` +
+          'The engine follows every out-edge it selects, so the copy runs ' +
+          `\`${String(target)}\` a second time — a node that writes a record writes it once per copy — or, ` +
+          'where only one out-edge may be taken, the copy is never taken at all. Delete the repeated edge; ' +
+          'an edge meant to take its own route needs its own `condition` or branch `label`.',
+      });
+    });
+  }
 }));
+
+/**
+ * The edge list a `FlowGraph` was read from, as the author wrote it —
+ * `graph.path` is the key path from the flow root to the object holding it.
+ * `FlowGraph.edges` drops a non-record member of a raw region, so its indices
+ * can differ from the author's, and a Zod issue is anchored at the author's
+ * index (#22088). A hoisted `function` for the same reason
+ * {@link ledgerPathSegments} is one.
+ */
+function authoredEdgesAt(flow: unknown, path: readonly (string | number)[]): readonly unknown[] {
+  let holder: unknown = flow;
+  for (const key of path) {
+    if (typeof holder !== 'object' || holder === null) return [];
+    holder = (holder as Record<string | number, unknown>)[key];
+  }
+  const edges = typeof holder === 'object' && holder !== null ? (holder as { edges?: unknown }).edges : undefined;
+  return Array.isArray(edges) ? edges : [];
+}
+
+/**
+ * The part of an edge `condition` the engine's evaluator reads — its dialect
+ * and its `source` — so two edges are told apart exactly where traversal tells
+ * them apart (#22088). A parsed condition is already the envelope; a raw
+ * region's bare string is the `cel` shorthand it would have normalized to.
+ */
+function edgeConditionKey(condition: unknown): unknown {
+  if (condition == null) return null;
+  if (typeof condition === 'string') return ['cel', condition];
+  if (typeof condition !== 'object') return condition;
+  const { dialect, source } = condition as { dialect?: unknown; source?: unknown };
+  return [dialect ?? null, source ?? null];
+}
 
 /**
  * A ledger path as the resolver fills it in (`conditions[0].expression`,

@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Lifecycle } from '@objectstack/spec/data';
+import { resolveInjectedColumnProvenance, type Lifecycle } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { redactPropagatedDriverFault } from '@objectstack/types';
@@ -1559,12 +1559,20 @@ export class LifecycleService {
    * pass spells for them. A tenant override naming such an object has no row
    * to select either way. An `organization_id` the author declared on a
    * federated object maps a real remote column and keeps its partition.
+   *
+   * [#15207] An object that has no `organization_id` at all answers the same
+   * way: the registry injected none (`systemFields: { tenant: false }`, the
+   * ADR-0131 D7 deployment-level tables, or any other opt-out the injection
+   * plan honours) and the author declared none, so the provenance answers
+   * `'absent'`. Its table has no such column, so a partitioned pass is the
+   * same unknown-column refusal, and no row of it belongs to an organization.
    */
   private tenantWindowsFor(
     obj: LifecycleObjectLike,
     overrideKey: 'maxAge' | 'expireAfter',
   ): Array<{ tenantId: string; maxAge?: string; expireAfter?: string }> {
     if (isFederatedUnprovisionedInjectedColumn(obj, 'organization_id')) return [];
+    if (resolveInjectedColumnProvenance(obj, 'organization_id') === 'absent') return [];
     return (this.governance.tenantOverrides.get(obj.name) ?? []).filter(
       (t) => typeof t[overrideKey] === 'string',
     );

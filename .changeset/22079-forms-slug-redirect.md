@@ -1,0 +1,13 @@
+---
+'@objectstack/cli': minor
+---
+
+The path an author writes as a public form's `sharing.publicLink` now answers: `GET /forms/SLUG` redirects to the Console's public form page, `/_console/f/SLUG`, when the anonymous form door serves that slug
+
+Clause-②: yes (widening)
+
+- **What was wrong.** An app declares a public form as `sharing: { enabled: true, allowAnonymous: true, publicLink: '/forms/contact-us' }`, the spelling the platform's own examples use. The Console serves that form to an anonymous visitor at `/_console/f/contact-us`, but the path as written answered `404 ENDPOINT_NOT_FOUND`, so the link an author put on a website reached nothing.
+- **What it does now.** Wherever the Console is mounted (`os serve` / `os dev` with the Console, or any host that mounts `createConsoleStaticPlugin` from `@objectstack/cli/console`), `GET /forms/SLUG` answers `302` with `Location: /_console/f/SLUG`, followed by the request's query string. It does so only when the anonymous form door, `GET /api/v1/forms/SLUG`, serves the form to the same request: the form's `sharing` has `enabled` and `allowAnonymous` set and names the slug, no other metadata layer withdraws it, and the deployment's tenancy posture lets it take an anonymous submission. The redirect asks that door in-process with the visitor's own request, so it decides nothing the door does not, and it reveals nothing the door does not.
+- **Unchanged.** Every other request under `/forms/` answers exactly as before: a disabled form, a form not open to anonymous visitors, an unknown slug, a form the posture withholds, any method other than `GET` / `HEAD`, a trailing slash or a deeper path all get the same `404 ENDPOINT_NOT_FOUND`. Nothing is mounted at the root for a bare slug. The signed-in Console route `/_console/forms/NAME` is untouched. A deployment without the Console (`--no-ui`, `--no-console`, `OS_DISABLE_CONSOLE=1`, or no built Console) mounts no redirect.
+- **Status and target.** The redirect is a `302`, never a permanent one, because whether a form is served can change with its sharing. The `Location` path is built from the Console path and the slug, encoded as one path segment, so no request can point it anywhere else. The request's query string is carried verbatim after that path, because the public form page seeds its fields from `?prefill_FIELD=` parameters: `/forms/contact-us?prefill_source=website` lands on `/_console/f/contact-us?prefill_source=website`. A query string can change only the query of the page the visitor lands on, never its origin or path.
+- **Nothing to migrate.** No key, export or signature changes. `sharing.publicLink` keeps its meaning and its accepted spellings (`/forms/x`, `forms/x` and `x` name one slug).

@@ -29,6 +29,7 @@ import {
   createTimer,
   emitJson,
   errorCodeFields,
+  isExitSignal,
   isReportedError,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
@@ -37,6 +38,14 @@ import { absentTableReads } from '../../utils/absent-table-reads.js';
 import type { StoredMigrationReport } from '@objectstack/metadata-protocol';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import {
+  planAuthoredSourceWrite,
+  restoreAuthoredSources,
+  verifyAuthoredSourceWrite,
+  writeAuthoredSources,
+  type AuthoredSourceWritePlan,
+  type WriteVerification,
+} from '../../utils/authored-source-codemod.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -245,6 +254,110 @@ function printPendingDataMigrations(pending: readonly PendingDataMigration[]): v
 /** One schema refusal of the migrated stack, in the shape `formatZodIssue` renders. */
 export type MigrationRefusal = Parameters<typeof formatZodIssue>[0];
 
+/** What `--write` did with the authored sources (#9591). */
+export interface WriteOutcome {
+  plan: AuthoredSourceWritePlan;
+  /**
+   * `written` — the plan's files were written and the re-run agreed with it;
+   * `restored` — they were written, the re-run disagreed, and every one was
+   * put back; `unwritten` — writing was refused before any file changed.
+   * A plan with no file to write is `written` with an empty `rewrites`.
+   */
+  status: 'written' | 'restored' | 'unwritten';
+  /** The re-run's verdict, when files were written. */
+  verification?: WriteVerification;
+  /** Why the write was refused or undone. */
+  error?: string;
+}
+
+/** The `--json` face of a {@link WriteOutcome}. */
+export function writeOutcomeJson(outcome: WriteOutcome) {
+  const { plan } = outcome;
+  return {
+    status: outcome.status,
+    files: plan.rewrites.map((r) => ({
+      file: r.file,
+      sites: plan.written.filter((w) => w.file === r.file).length,
+    })),
+    written: plan.written.map((w) => ({
+      conversionId: w.application.conversionId,
+      path: w.application.path,
+      file: w.file,
+      line: w.line,
+    })),
+    manual: plan.manual.map((m) => ({
+      conversionId: m.application.conversionId,
+      path: m.application.path,
+      kind: m.refusal.kind,
+      reason: m.refusal.reason,
+    })),
+    unexplained: plan.unexplained,
+    ...(outcome.verification ? { verification: outcome.verification } : {}),
+    ...(outcome.error ? { error: outcome.error } : {}),
+  };
+}
+
+/**
+ * The `--write` group: what was written where, what was left and why, and
+ * whether the re-run over the written sources agreed. Printed after the
+ * semantic notices and before the data-migration advice, which stays last.
+ */
+function printWriteOutcome(outcome: WriteOutcome, appliedCount: number): void {
+  const { plan } = outcome;
+  if (appliedCount === 0) {
+    printInfo('--write: the chain made no mechanical change here, so no file was written.');
+    console.log('');
+    return;
+  }
+  if (outcome.status === 'unwritten') {
+    printError(`--write wrote nothing: ${outcome.error}`);
+    console.log('');
+    return;
+  }
+  const files = plan.rewrites.length;
+  if (outcome.status === 'restored') {
+    printError(
+      `--write wrote ${files} file(s), but re-running the chain over them did not match this report, so `
+      + `every one was restored to its previous bytes: ${outcome.error}`,
+    );
+    console.log('');
+    return;
+  }
+  console.log(chalk.bold(
+    `  Wrote ${plan.written.length} of ${appliedCount} mechanical change(s) into ${files} file(s):`,
+  ));
+  for (const r of plan.rewrites) {
+    console.log(`    ${chalk.white(r.file)}`);
+    for (const w of plan.written.filter((x) => x.file === r.file)) {
+      console.log(`      ${chalk.dim(`:${w.line}`)} ${w.application.path} ${chalk.dim(`(${w.application.conversionId})`)}`);
+    }
+  }
+  console.log('');
+  if (plan.manual.length > 0) {
+    console.log(chalk.bold(chalk.yellow(`  ${plan.manual.length} mechanical change(s) left for you to apply by hand:`)));
+    for (const m of plan.manual) {
+      const a = m.application;
+      console.log(`    ${chalk.yellow('•')} ${a.path}: ${a.from} → ${a.to} ${chalk.dim(`(${a.conversionId})`)}`);
+      console.log(chalk.dim(`        not written [${m.refusal.kind}]: ${m.refusal.reason}`));
+    }
+    console.log('');
+  }
+  if (plan.unexplained.length > 0) {
+    printWarning(
+      `${plan.unexplained.length} change(s) in the migrated stack are named by no applied entry and were not `
+      + `written: ${plan.unexplained.join(', ')}`,
+    );
+  }
+  if (files > 0) {
+    printSuccess(
+      `Re-ran the chain over the written sources: ${plan.manual.length === 0
+        ? 'no mechanical change remains.'
+        : `only the ${plan.manual.length} change(s) left above remain.`}`,
+    );
+    console.log('');
+  }
+}
+
 /** Everything the human report prints after the `Config:` / `Chain:` preamble. */
 export interface MigrationReport {
   /** The chain's result. Every group prints in chain order — never re-sorted, filtered or merged. */
@@ -260,6 +373,8 @@ export interface MigrationReport {
   step: boolean;
   /** `--out`, resolved — the snapshot is written here so its line keeps its place. */
   out?: string;
+  /** `--write`: what was written into the authored sources (absent without the flag). */
+  write?: WriteOutcome;
   /** Printed beside a schema-valid verdict. */
   elapsed: string;
 }
@@ -413,6 +528,7 @@ export function printMigrationReport(report: MigrationReport): void {
     // Still advertise: metadata needing no rewrite says nothing about whether
     // this deployment's DATA has been migrated.
     console.log('');
+    if (report.write) printWriteOutcome(report.write, 0);
     printPendingDataMigrations(report.dataMigrations);
     // Returning is safe only because ① has already printed: the schema verdict
     // is the one line that can contradict a "nothing to do" answer, and
@@ -451,6 +567,9 @@ export function printMigrationReport(report: MigrationReport): void {
     printInfo(`Wrote migrated stack snapshot → ${chalk.white(report.out)}`);
   }
 
+  // ④ `--write`: the mechanical changes written into the sources, and the rest.
+  if (report.write) printWriteOutcome(report.write, result.applied.length);
+
   printPendingDataMigrations(report.dataMigrations);
 }
 
@@ -466,10 +585,14 @@ export function printMigrationReport(report: MigrationReport): void {
  * TODOs for the semantic changes the chain cannot apply, so the consumer agent
  * reviews a provably-valid change instead of hand-porting from prose.
  *
- * The command does not silently rewrite TS config source (that AST rewrite is
- * unsafe and lossy); `--out` writes the canonicalized stack as a JSON snapshot
- * the agent can diff and adopt. `--step` prints a per-hop checkpoint so a failure
- * can be bisected to the exact major.
+ * By default it writes no source file: `--out` writes the canonicalized stack as
+ * a JSON snapshot the agent can diff and adopt. `--write` (#9591) writes the
+ * mechanical changes into the authored sources in place — only at sites it can
+ * trace to one literal in one project file, every other byte left as it was —
+ * and lists each change it could not trace, with the reason; it never writes a
+ * semantic TODO. See `utils/authored-source-codemod.ts` for what it proves
+ * before writing and the closed set of reasons it refuses. `--step` prints a
+ * per-hop checkpoint so a failure can be bisected to the exact major.
  *
  * ## `--stored`: the same chain, over data at rest (#4327)
  *
@@ -500,6 +623,7 @@ export default class MigrateMeta extends Command {
     `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --step`,
     `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --to ${MIGRATION_SUPPORT_FLOOR + 1} --json`,
     `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --out migrated.stack.json`,
+    `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --write`,
     '$ os migrate meta --stored',
     '$ os migrate meta --stored --apply',
     '$ os migrate meta --stored --apply --yes --json',
@@ -528,6 +652,14 @@ export default class MigrateMeta extends Command {
     }),
     out: Flags.string({
       description: 'Write the migrated stack as a JSON snapshot to this path.',
+      exclusive: ['stored'],
+    }),
+    write: Flags.boolean({
+      description:
+        'Rewrite the authored source files in place for each mechanical change traced to one literal in one '
+        + 'project file; every other change is listed with the reason it was not written. Never writes the '
+        + 'manual (semantic) changes.',
+      default: false,
       exclusive: ['stored'],
     }),
     stored: Flags.boolean({
@@ -577,7 +709,8 @@ export default class MigrateMeta extends Command {
       const message =
         `${typed.map((f) => `--${f}`).join(', ')} only appl${typed.length > 1 ? 'y' : 'ies'} to `
         + '`os migrate meta --stored` (the pass over a deployment\'s sys_metadata rows). '
-        + 'The authored-source chain reads a config file and writes nothing but --out.';
+        + 'The authored-source chain reads a config file and writes only the --out snapshot and, '
+        + 'with --write, the authored sources.';
       if (flags.json) {
         await emitJson({ error: 'stored_only_flag', flags: typed, message }, 0, { compact: true });
         this.exit(1);
@@ -626,7 +759,7 @@ export default class MigrateMeta extends Command {
       // has no validation step of its own to move: the load is tolerant, and
       // the schema verdict is taken below on the MIGRATED stack instead
       // (`schemaValid`), which is the stack the author is being asked to adopt.
-      const { config, absolutePath } = await loadConfig(args.config, { authoredSource: true });
+      const { config, absolutePath, namedExports } = await loadConfig(args.config, { authoredSource: true });
 
       // Map→array normalization ONLY (convert:false): the chain must replay the
       // conversions itself against the raw authored source so each rewrite is
@@ -642,6 +775,20 @@ export default class MigrateMeta extends Command {
       const parsed = ObjectStackDefinitionSchema.safeParse(result.stack);
       const specChanges = composeSpecChanges(fromMajor, toMajor);
       const dataMigrations = pendingDataMigrations(result.stack, result.fromMajor, result.toMajor);
+
+      // `--write` (#9591): the mechanical changes go into the authored sources
+      // where they can be proved, and the write is held to a re-run of the chain.
+      const write = flags.write
+        ? await this.writeSources({
+            configArg: args.config,
+            configPath: absolutePath,
+            config: config as Record<string, unknown>,
+            namedExports,
+            normalized,
+            result,
+            json: Boolean(flags.json),
+          })
+        : undefined;
 
       if (flags.json) {
         await emitJson({
@@ -673,9 +820,12 @@ export default class MigrateMeta extends Command {
               // Per-deployment data migrations this chain leaves to the
               // operator — the metadata is only half of a crossing upgrade.
               dataMigrations,
+              // Only with `--write`: without it the payload is what it always was.
+              ...(write ? { write: writeOutcomeJson(write) } : {}),
               duration: timer.elapsed(),
             });
         if (flags.out) writeFileSync(resolve(flags.out), JSON.stringify(result.stack, null, 2));
+        if (write && write.status !== 'written') this.exit(1);
         return;
       }
 
@@ -702,9 +852,13 @@ export default class MigrateMeta extends Command {
         dataMigrations,
         step: flags.step,
         ...(flags.out ? { out: resolve(flags.out) } : {}),
+        ...(write ? { write } : {}),
         elapsed: timer.display(),
       });
+      // A write refused or undone is a failed run, reported above.
+      if (write && write.status !== 'written') this.exit(1);
     } catch (error: any) {
+      if (isExitSignal(error)) throw error;
       if (error instanceof MigrationFloorError) {
         if (flags.json) {
           await emitJson({ error: 'unsupported_from_major', message: error.message }, 0, { compact: true });
@@ -724,6 +878,69 @@ export default class MigrateMeta extends Command {
       if (!isReportedError(error)) printError(error.message || String(error));
       this.exit(1);
     }
+  }
+
+  /**
+   * `--write`: plan the source edits, write them, re-run the chain over the
+   * written sources, and restore every file when the re-run disagrees with
+   * the plan (#9591). Writes nothing when the chain applied nothing.
+   */
+  private async writeSources(input: {
+    configArg: string | undefined;
+    configPath: string;
+    config: Record<string, unknown>;
+    namedExports: readonly string[];
+    normalized: Record<string, unknown>;
+    result: MigrationChainResult;
+    json: boolean;
+  }): Promise<WriteOutcome> {
+    const { result } = input;
+    if (!input.json && result.applied.length > 0) printStep('Writing the mechanical changes into the authored sources…');
+    const plan = await planAuthoredSourceWrite({
+      configPath: input.configPath,
+      config: input.config,
+      namedExports: input.namedExports,
+      normalized: input.normalized,
+      migrated: result.stack,
+      applied: result.applied,
+    });
+    if (plan.rewrites.length === 0) return { plan, status: 'written' };
+    try {
+      writeAuthoredSources(plan);
+    } catch (error: any) {
+      return { plan, status: 'unwritten', error: error.message || String(error) };
+    }
+
+    let verification: WriteVerification;
+    // The re-load hands the remaining refused artifacts through the
+    // authored-source shim again, and it would announce each of them a second
+    // time; the first load already said so, and the verdict below is the one
+    // thing this load is for.
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      const reloaded = await loadConfig(input.configArg, { authoredSource: true });
+      const rerun = applyMetaMigrations(
+        normalizeStackInput(reloaded.config as Record<string, unknown>, { convert: false }),
+        result.fromMajor,
+        result.toMajor,
+      );
+      verification = verifyAuthoredSourceWrite(plan, rerun.applied);
+    } catch (error: any) {
+      restoreAuthoredSources(plan);
+      return { plan, status: 'restored', error: `the re-run over the written sources failed: ${error.message || String(error)}` };
+    } finally {
+      console.warn = warn;
+    }
+    if (!verification.ok) {
+      restoreAuthoredSources(plan);
+      const parts = [
+        ...(verification.stillApplied.length > 0 ? [`still converted: ${verification.stillApplied.join(', ')}`] : []),
+        ...(verification.vanished.length > 0 ? [`no longer converted: ${verification.vanished.join(', ')}`] : []),
+      ];
+      return { plan, status: 'restored', verification, error: parts.join('; ') };
+    }
+    return { plan, status: 'written', verification };
   }
 
   /**

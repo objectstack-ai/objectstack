@@ -219,6 +219,21 @@ export { isGrantActive, isGrantExpired, type GrantValidityWindow } from './grant
 // enforces it and the break-glass guard that simulates a write to it.
 export { isRowActive, type ActivatableRow } from './row-active.js';
 
+// ADR-0131 D2–D4 — the ONE by-name read of the security catalog (positions,
+// permission sets, capabilities) over the engine registry and the metadata
+// service. It says a definition EXISTS under a name, never that it is in
+// effect: the row `active` flag above stays the authority for that.
+export {
+  createSecurityCatalogReader,
+  type SecurityCatalogType,
+  type SecurityCatalogSourceName,
+  type SecurityCatalogRegistry,
+  type SecurityCatalogMetadataService,
+  type SecurityCatalogSources,
+  type SecurityCatalogEntry,
+  type SecurityCatalogReader,
+} from './security-catalog.js';
+
 // [commit f8eb73601] The measured read surface of the administrator derivation — the
 // single source `plugin-auth`'s break-glass standing-key lists correspond to.
 export {

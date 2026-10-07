@@ -25,11 +25,11 @@ these are **live execute-time contracts**: each executor `parse()`s its
 config against its schema before running (`service-automation`'s
 `parse-config.ts`), so type and `required` violations refuse the node as a
 guard (not routable via `fault` edges). `notify` parses the RAW stored
-config — its slots are string-typed, so `{token}` templates pass and the
-post-interpolation guards still own "resolved to nothing". `http` parses
-the INTERPOLATED config, because that is the shape its executor reads —
-a `{token}` in a typed slot (`timeoutMs`, `durable`) resolves to its real
-type first.
+config — its slots are string-typed or template-typed, so `{token}`
+templates pass and the post-interpolation guards still own "resolved to
+nothing". `http` parses the INTERPOLATED config, because that is the shape
+its executor reads — a `{token}` in a typed slot (`timeoutMs`, `durable`)
+resolves to its real type first.
 
 ## Unknown keys — closed here too, as of #4001 批 9
 
@@ -95,8 +95,8 @@ const result = HttpConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **recipients** | `string \| string[]` | ✅ | Recipient user id(s) / audience selector(s); `{token}` templates resolve per run |
-| **title** | `string` | optional | Notification title, sent to every recipient verbatim (not localizable — use `template` for per-locale content). Either this or `template` is required; the two are mutually exclusive. |
-| **message** | `string` | optional | Notification body, sent verbatim like `title` (not localizable). Only valid with inline `title`, never with `template`. |
+| **title** | `string \| { dialect: 'template'; source?: string; ast?: any; meta?: object }` | optional | Notification title — a template: a bare string, or a `{ dialect: 'template', source }` envelope (the `tmpl` helper) carrying the same text. It is interpolated per run with the flow's single-brace `{token}` placeholders (`{record.name}`); a `{{var}}` is not a placeholder here — its inner `{var}` resolves and the outer braces stay in the text. One text for every recipient (not localizable — use `template` for per-locale content). Either this or `template` is required; the two are mutually exclusive. |
+| **message** | `string \| { dialect: 'template'; source?: string; ast?: any; meta?: object }` | optional | Notification body — the same template input as `title` (a bare string or a `{ dialect: 'template', source }` envelope), interpolated per run with single-brace `{token}` placeholders; not localizable. Only valid with inline `title`, never with `template`. |
 | **template** | `string` | optional | Email template name (`sys_email_template.name`, e.g. `crm.large_deal_won`) — the localizable content path: the delivery path resolves `(name, locale)` against sys_email_template at delivery time and renders subject/body from that row. The locale is resolved per recipient, after fan-out: the recipient's own `sys_user.locale` when set, else the deployment default (`II18nService.getDefaultLocale()`) — so recipients whose personal languages differ receive different rows of the same bundle (maintainer ruling 2026-09-01). A producer-set `payload.locale` is not consulted. Mutually exclusive with inline `title`/`message`, which are the non-localizable path. Read raw — no `{token}` interpolation. |
 | **templateData** | `Record<string, any>` | optional | Render context for the referenced template's `{{var}}` placeholders; values interpolate `{token}` templates per run. Only valid together with `template`. |
 | **channels** | `string \| string[]` | optional | Channels to fan out to (default: inbox) |

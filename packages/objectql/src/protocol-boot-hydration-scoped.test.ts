@@ -21,6 +21,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { MetadataManager } from '@objectstack/metadata';
+import { createSecurityCatalogReader } from '@objectstack/core';
 import { SchemaRegistry } from './registry.js';
 import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
 import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
@@ -196,5 +198,106 @@ describe('loadMetaFromDb — ADR-0048 package-scoped protection graft at boot (#
         // (legacy behaviour, unchanged by #4624 — do not over-pin which).
         expect([PKG_A, PKG_B]).toContain(direct._packageId);
         expect(direct._lock).toBe('full');
+    });
+});
+
+/**
+ * ADR-0131 D4 — which body the security catalog read
+ * (`createSecurityCatalogReader`, `@objectstack/core`) resolves for a name two
+ * installed packages both ship. TODAY'S answer, pinned until the maintainer
+ * rules on shared catalog names: a change here is that ruling landing, never a
+ * refactor.
+ *
+ * It lives beside the #4624 cases because it is their consequence: the row a
+ * package stored for itself is hydrated into the bare slot, and the catalog
+ * read asks the registry's by-name precedence first. An assignment carries
+ * only the NAME (ADR-0131 D4), so there is no package context to prefer one
+ * package's body over another's:
+ *
+ *  - no stored override: the FIRST-registered package's body;
+ *  - an override one package stored, bound to itself and hydrated at boot:
+ *    that override, for every caller.
+ *
+ * The metadata door's by-name read (`getMetaItem`) is asserted beside each
+ * answer, so the pin cannot drift from what the door serves. A name the
+ * registry does not hold falls to the metadata service, where two stacks
+ * declaring one position name share ONE in-memory slot: the later
+ * registration holds it.
+ */
+describe('security catalog read — a name two packages ship (ADR-0131 D4, today\'s answer)', () => {
+    /** The package whose stored override the second case hydrates. */
+    const OVERRIDE_PACKAGE = PKG_B;
+
+    /** A body each catalog type's schema accepts, so hydration reports it valid. */
+    const catalogBody = (type: 'permission' | 'position', name: string, label: string) =>
+        type === 'permission' ? { name, label, objects: {} } : { name, label };
+
+    function bootWithSharedName(type: 'permission' | 'position', name: string, rows: Row[]) {
+        const registry = new SchemaRegistry({ multiTenant: false });
+        registry.logLevel = 'silent';
+        // Package A registers FIRST.
+        registry.registerItem(type, catalogBody(type, name, `${PKG_A} body`), 'name', PKG_A);
+        registry.registerItem(type, catalogBody(type, name, `${PKG_B} body`), 'name', PKG_B);
+        const protocol = new ObjectStackProtocolImplementation(makeEngine(registry, rows));
+        const reader = createSecurityCatalogReader({
+            registry,
+            metadata: new MetadataManager({ formats: ['json'], loaders: [] }),
+        });
+        return { protocol, reader };
+    }
+
+    describe.each(['permission', 'position'] as const)('%s', (type) => {
+        const name = `shared_${type}`;
+
+        it('no stored override: the first-registered package\'s body', async () => {
+            const { protocol, reader } = bootWithSharedName(type, name, []);
+            expect(await protocol.loadMetaFromDb()).toMatchObject({ loaded: 0, errors: 0, invalid: 0 });
+
+            const entry = await reader.resolve(type, name);
+            expect(entry).toMatchObject({ name, source: 'registry', packageId: PKG_A });
+            expect(entry?.definition.label).toBe(`${PKG_A} body`);
+            // One entry for the name, and it is the by-name answer.
+            expect((await reader.list(type)).filter((e) => e.name === name)).toEqual([entry]);
+
+            const door: any = await protocol.getMetaItem({ type, name });
+            expect(door.item?.label).toBe(`${PKG_A} body`);
+        });
+
+        it('an override one package stored for itself: that override, for every caller', async () => {
+            const rows = [
+                overlayRow({
+                    type,
+                    name,
+                    package_id: OVERRIDE_PACKAGE,
+                    metadata: JSON.stringify(catalogBody(type, name, 'stored override')),
+                }),
+            ];
+            const { protocol, reader } = bootWithSharedName(type, name, rows);
+            expect(await protocol.loadMetaFromDb()).toMatchObject({ loaded: 1, errors: 0, invalid: 0 });
+
+            const entry = await reader.resolve(type, name);
+            expect(entry).toMatchObject({ name, source: 'registry', packageId: PKG_B });
+            expect(entry?.definition.label).toBe('stored override');
+            expect((await reader.list(type)).filter((e) => e.name === name)).toEqual([entry]);
+
+            const door: any = await protocol.getMetaItem({ type, name });
+            expect(door.item?.label).toBe('stored override');
+            expect(door.item?._packageId).toBe(PKG_B);
+        });
+    });
+
+    it('a position name two stacks declare: one metadata-service slot, the later registration holds it', async () => {
+        const registry = new SchemaRegistry({ multiTenant: false });
+        registry.logLevel = 'silent';
+        const metadata = new MetadataManager({ formats: ['json'], loaders: [] });
+        // What two app stacks declaring the same position name do at boot.
+        metadata.registerInMemory('position', 'regional_manager', { name: 'regional_manager', label: 'first stack' });
+        metadata.registerInMemory('position', 'regional_manager', { name: 'regional_manager', label: 'second stack' });
+        const reader = createSecurityCatalogReader({ registry, metadata });
+
+        const entry = await reader.resolve('position', 'regional_manager');
+        expect(entry).toMatchObject({ name: 'regional_manager', source: 'metadata' });
+        expect(entry?.definition.label).toBe('second stack');
+        expect(await reader.list('position')).toEqual([entry]);
     });
 });
