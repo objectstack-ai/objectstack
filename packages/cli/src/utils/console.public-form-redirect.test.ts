@@ -94,7 +94,7 @@ async function mount(opts: {
   }
   const app = server.getRawApp();
   return {
-    request: (p: string, init?: RequestInit) => app.request(`${ORIGIN}${p}`, init),
+    request: async (p: string, init?: RequestInit) => app.request(`${ORIGIN}${p}`, init),
     doorCalls,
   };
 }

@@ -175,7 +175,8 @@ describe('showcase: the authored public form path redirects to the console form 
   });
 
   it('control: the signed-in console route /_console/forms/<name> is the console bundle, with or without a session', async () => {
-    for (const headers of [{}, { authorization: `Bearer ${admin}` }]) {
+    const sessions: Array<Record<string, string>> = [{}, { authorization: `Bearer ${admin}` }];
+    for (const headers of sessions) {
       const res = await answerOf(await stack.raw('/_console/forms/showcase_inquiry.contact', { headers }));
       expect(res.status).toBe(200);
       expect(res.location).toBeNull();
