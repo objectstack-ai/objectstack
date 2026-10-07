@@ -15,20 +15,24 @@
 //
 // The engine keys the skip on `entry.meta`, the metadata binding the hook
 // binder stamps on every registration it makes. ObjectQL's builtin audit stamps
-// (`sys_stamp_audit_insert` / `sys_stamp_audit_update`) are registered THROUGH
-// the binder, so they carry `meta` and the opt-out skips them: a data import
-// with "run automations & triggers" unchecked — a real user in the session —
-// stores rows with no `created_by` / `updated_by` and no declared `tenant_id`,
-// and, on a driver that does not stamp its own timestamps, no `created_at` /
-// `updated_at` either. The organization column is not the hook's: the driver
-// stamps it from the engine's `DriverOptions.tenantId`, flag or no flag.
+// (`sys_stamp_audit_insert` / `sys_stamp_audit_update`) were registered THROUGH
+// the binder, so they carried `meta` and the opt-out skipped them: a data
+// import with "run automations & triggers" unchecked — a real user in the
+// session — stored rows with no `created_by` / `updated_by` and no declared
+// `tenant_id`, and, on a driver that does not stamp its own timestamps, no
+// `created_at` / `updated_at` either. The organization column was never the
+// hook's: the driver stamps it from the engine's `DriverOptions.tenantId`,
+// flag or no flag, so the tenancy wall held throughout.
 //
-// ## Status: measurement pins, RED at base by design
+// ## The fix
 //
-// Committed as the card's first measurement. At base `3d9188502e` (a), (c) and
-// (d) are red and (b) is green; the fix is withheld while triage re-grades the
-// card on that measurement (the declared `tenant_id` column is left unset under
-// the flag). Whoever lands the fix rewrites this section to describe it.
+// `ObjectQLPlugin.registerAuditHooks` registers the builtins IN CODE
+// (`engine.registerHook`, no `meta`), which is what the contract already says
+// audit is. The engine's rule stays one bit — `meta` means "bound from
+// metadata" — so no dispatch site gains a second criterion. The builtins keep
+// the binder's wrapper and the unregister-by-package, so the opt-out is the
+// only thing that changes for them. (a), (c) and (d) were red before it and (b)
+// was green.
 //
 // ## Pins
 //
