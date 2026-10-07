@@ -77,6 +77,17 @@ export const SysOauthApplication = ObjectSchema.create({
   // The equality form also keeps the intended meaning of a null column —
   // never disabled, so Disable is offered and Enable is not. See
   // `materializeDeclaredFields` in `@objectstack/objectql` for the rule.
+  //
+  // Both toggle predicates also LEAD with the platform-admin standing
+  // (ADR-0068 D4): `toggle-disabled` runs the platform-admin gate and answers
+  // every other caller 403 `PERMISSION_DENIED`, so the pair is offered only to
+  // `current_user.isPlatformAdmin == true`, the ADR-0095 D3 PLATFORM_ADMIN
+  // rung that the session payload emits and the gate judges (⛔ never a
+  // `current_user.positions` read). The other three actions carry no such
+  // term, deliberately: `register` is a session-only self-service mount, and
+  // `rotate-secret` / `delete-client` are better-auth's own routes, which
+  // authorize the application's OWNER — gating them on the standing would
+  // hide a working affordance from the developer who registered the app.
   actions: [
     {
       name: 'disable_oauth_application',
@@ -97,7 +108,7 @@ export const SysOauthApplication = ObjectSchema.create({
       description: 'Disable this OAuth application? Active access/refresh tokens issued to it will continue to be rejected at the token, authorize, and introspect endpoints. Existing integrations will stop working immediately.',
       successMessage: 'OAuth application disabled',
       refreshAfter: true,
-      visible: 'has(record.disabled) && record.disabled != true',
+      visible: 'current_user.isPlatformAdmin == true && has(record.disabled) && record.disabled != true',
       bodyExtra: { disabled: true },
       params: [
         { name: 'client_id', field: 'client_id', defaultFromRow: true, required: true },
@@ -118,7 +129,7 @@ export const SysOauthApplication = ObjectSchema.create({
       description: 'Re-enable this OAuth application? Token issuance, authorization, and introspection will resume immediately.',
       successMessage: 'OAuth application enabled',
       refreshAfter: true,
-      visible: 'has(record.disabled) && record.disabled == true',
+      visible: 'current_user.isPlatformAdmin == true && has(record.disabled) && record.disabled == true',
       bodyExtra: { disabled: false },
       params: [
         { name: 'client_id', field: 'client_id', defaultFromRow: true, required: true },

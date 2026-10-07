@@ -191,13 +191,14 @@ describe('@objectstack/platform-objects', () => {
       // body schema (`dist/authorize-Crqw4_bR.mjs:2862-2889`) still does
       // not accept `disabled`, so the bridge route stays warranted. They
       // differ only in the static `disabled` body field and the
-      // visibility predicate, so exactly one is active at any time.
+      // visibility predicate, so exactly one is active at any time. Both lead
+      // with the platform-admin standing the bridge's gate judges.
       expect(disable?.target).toBe('/api/v1/auth/admin/oauth2/toggle-disabled');
       expect(disable?.bodyExtra).toEqual({ disabled: true });
-      expect((disable?.visible as any)?.source).toBe('(has(record.disabled) && record.disabled != true) && features.oidcProvider != false');
+      expect((disable?.visible as any)?.source).toBe('(current_user.isPlatformAdmin == true && has(record.disabled) && record.disabled != true) && features.oidcProvider != false');
       expect(enable?.target).toBe('/api/v1/auth/admin/oauth2/toggle-disabled');
       expect(enable?.bodyExtra).toEqual({ disabled: false });
-      expect((enable?.visible as any)?.source).toBe('(has(record.disabled) && record.disabled == true) && features.oidcProvider != false');
+      expect((enable?.visible as any)?.source).toBe('(current_user.isPlatformAdmin == true && has(record.disabled) && record.disabled == true) && features.oidcProvider != false');
 
       // Generic CRUD must NOT expose mutating methods — all writes are
       // reserved for better-auth wrappers above so OAuth-specific
@@ -575,6 +576,12 @@ describe('feature-gate lowering matrix (#2874)', () => {
   const INVITE = "('org_owner' in current_user.positions || 'org_admin' in current_user.positions || 'delegated_admin' in current_user.positions)";
   const ADMINS = "('org_owner' in current_user.positions || 'org_admin' in current_user.positions)";
   const OWNER = "'org_owner' in current_user.positions";
+  // The platform-admin standing: the authored `visible` of every action whose
+  // door runs the platform-admin gate — the ADR-0095 D3 PLATFORM_ADMIN rung the
+  // gate judges (ADR-0068 D4). Composed ahead of any feature gate. ⛔ Never a
+  // `current_user.positions` read. The repo-wide enumeration of that family is
+  // `platform-admin-affordance-standing.test.ts`; these rows pin the bytes.
+  const STANDING = 'current_user.isPlatformAdmin == true';
 
   const rows: Array<[string, { actions?: readonly { name?: string; visible?: unknown; params?: readonly unknown[] }[] }, string, string]> = [
     ['SysOrganization', SysOrganization, 'create_organization', MULTI_ORG],
@@ -584,7 +591,7 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysOrganization', SysOrganization, 'leave_organization', MULTI_ORG],
     ['SysOrganization', SysOrganization, 'change_slug', MULTI_ORG],
     ['SysUser', SysUser, 'invite_user', `${INVITE} && ${ORG}`],
-    ['SysUser', SysUser, 'create_user', 'features.admin == true'],
+    ['SysUser', SysUser, 'create_user', `(${STANDING}) && features.admin == true`],
     // [#11544] Third mirror of `invite_user` — the Members tab's own copy of
     // the email-invite entry. Same gate as the sys_user / sys_invitation rows.
     ['SysMember', SysMember, 'invite_user', `${INVITE} && ${ORG}`],
@@ -593,7 +600,15 @@ describe('feature-gate lowering matrix (#2874)', () => {
     // The standing term is the authored `visible` — the ADR-0095 D3
     // PLATFORM_ADMIN rung the door's gate judges (ADR-0068 D4) — composed
     // ahead of the feature gate. ⛔ Never a `current_user.positions` read.
-    ['SysMember', SysMember, 'add_member', `(current_user.isPlatformAdmin == true) && ${ORG}`],
+    ['SysMember', SysMember, 'add_member', `(${STANDING}) && ${ORG}`],
+    // The rest of the platform-admin family. Three carry no feature gate, so
+    // the authored predicate is served as written — no lowering — and is
+    // pinned here anyway, beside add_member, so every member has its row.
+    ['SysUser', SysUser, 'set_user_manager', `${STANDING} && has(record.source) && record.source != "idp_provisioned"`],
+    ['SysSsoProvider', SysSsoProvider, 'register_sso_provider', STANDING],
+    ['SysSsoProvider', SysSsoProvider, 'register_saml_provider', STANDING],
+    ['SysSsoProvider', SysSsoProvider, 'request_domain_verification', STANDING],
+    ['SysSsoProvider', SysSsoProvider, 'verify_domain', STANDING],
     ['SysMember', SysMember, 'update_member_role', `${ADMINS} && ${ORG}`],
     ['SysMember', SysMember, 'remove_member', `${ADMINS} && ${ORG}`],
     ['SysMember', SysMember, 'transfer_ownership', `((has(record.role) && record.role != 'owner') && ${OWNER}) && ${ORG}`],
@@ -607,11 +622,12 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysTeamMember', SysTeamMember, 'remove_team_member', `${ADMINS} && ${ORG}`],
     // #2874 P2b — audit gates: capability-dependent actions that previously
     // shipped UNGATED (rendered even with the backing plugin off, then 404'd).
-    ['SysUser', SysUser, 'ban_user', 'features.admin == true'],
-    ['SysUser', SysUser, 'unban_user', 'features.admin == true'],
-    ['SysUser', SysUser, 'unlock_user', 'features.admin == true'],
-    ['SysUser', SysUser, 'set_user_password', 'features.admin == true'],
-    ['SysUser', SysUser, 'impersonate_user', 'features.admin == true'],
+    // Their doors are platform-admin gated, so the standing leads.
+    ['SysUser', SysUser, 'ban_user', `(${STANDING}) && features.admin == true`],
+    ['SysUser', SysUser, 'unban_user', `(${STANDING}) && features.admin == true`],
+    ['SysUser', SysUser, 'unlock_user', `(${STANDING}) && features.admin == true`],
+    ['SysUser', SysUser, 'set_user_password', `(${STANDING}) && features.admin == true`],
+    ['SysUser', SysUser, 'impersonate_user', `(${STANDING}) && features.admin == true`],
     ['SysUser', SysUser, 'enable_two_factor', '(has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled != true) && features.twoFactor == true'],
     ['SysUser', SysUser, 'disable_two_factor', '(has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled == true) && features.twoFactor == true'],
     ['SysUser', SysUser, 'generate_backup_codes', '(has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled == true) && features.twoFactor == true'],
@@ -620,8 +636,8 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysTwoFactor', SysTwoFactor, 'regenerate_backup_codes', 'features.twoFactor == true'],
     ['SysOauthApplication', SysOauthApplication, 'create_oauth_application', 'features.oidcProvider != false'],
     ['SysOauthApplication', SysOauthApplication, 'delete_oauth_application', 'features.oidcProvider != false'],
-    ['SysOauthApplication', SysOauthApplication, 'disable_oauth_application', '(has(record.disabled) && record.disabled != true) && features.oidcProvider != false'],
-    ['SysOauthApplication', SysOauthApplication, 'enable_oauth_application', '(has(record.disabled) && record.disabled == true) && features.oidcProvider != false'],
+    ['SysOauthApplication', SysOauthApplication, 'disable_oauth_application', `(${STANDING} && has(record.disabled) && record.disabled != true) && features.oidcProvider != false`],
+    ['SysOauthApplication', SysOauthApplication, 'enable_oauth_application', `(${STANDING} && has(record.disabled) && record.disabled == true) && features.oidcProvider != false`],
     ['SysOauthApplication', SysOauthApplication, 'rotate_client_secret', 'features.oidcProvider != false'],
   ];
 

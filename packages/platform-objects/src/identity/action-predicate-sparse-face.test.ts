@@ -65,8 +65,18 @@ import { SysBusinessUnitMember } from './sys-business-unit-member.object.js';
  * same reasoning as the all-on {@link FEATURES} below: a grade term that
  * answered false would short-circuit the composed `&&` and hide the record half
  * this sweep exists to test.
+ *
+ * For the same reason the principal also holds the platform-admin standing:
+ * the actions whose door runs the platform-admin gate lead with
+ * `current_user.isPlatformAdmin == true`, and a principal without it would
+ * short-circuit their record half just the same. It is bound the way the
+ * console binds it — the whole scope handed to the engine as `extra`, one
+ * subject under every alias — because under `user:` `@objectstack/formula`
+ * re-derives `isPlatformAdmin` from `positions`, and the only way to make that
+ * answer true there is the `'platform_admin'` position spelling the standing
+ * must never be read from.
  */
-const USER = { id: 'u1', email: 'me@example.com', positions: ['org_owner'] };
+const USER = { id: 'u1', email: 'me@example.com', positions: ['org_owner'], isPlatformAdmin: true };
 
 /**
  * `defineObject` normalizes a CEL shorthand string into a `{dialect, source}`
@@ -100,7 +110,10 @@ const FEATURES = {
 
 /** Evaluate through the canonical engine; a fault is reported, never thrown. */
 function evaluate(source: string, record: Record<string, unknown>): boolean | string {
-  const r = celEngine.evaluate({ dialect: 'cel', source }, { record, user: USER, extra: { features: FEATURES } });
+  const r = celEngine.evaluate(
+    { dialect: 'cel', source },
+    { record, extra: { current_user: USER, user: USER, ctx: { user: USER }, os: { user: USER }, features: FEATURES } },
+  );
   if (!r.ok) return `FAULT ${r.error.message.split('\n')[0].trim()}`;
   return typeof r.value === 'boolean' ? r.value : `NON-BOOLEAN ${JSON.stringify(r.value)}`;
 }
