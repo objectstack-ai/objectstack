@@ -647,13 +647,18 @@ function runtimeAssetIsServable(assetsDir: string, filename: string): boolean {
 function runtimeAssetRequest(value: unknown): { url: string; filename: string | null } | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
-  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) return undefined;
-  let pathname: string;
+  // A root path only: a relative one resolves against the console page, not `/`.
+  if (!trimmed.startsWith('/')) return undefined;
+  const thisOrigin = 'http://runtime-assets.invalid';
+  let resolved: URL;
   try {
-    pathname = new URL(trimmed, 'http://runtime-assets.invalid').pathname;
+    resolved = new URL(trimmed, thisOrigin);
   } catch {
     return undefined;
   }
+  // `//host/…`, and `/\host/…` which a browser reads the same way, name another host.
+  if (resolved.origin !== thisOrigin) return undefined;
+  const pathname = resolved.pathname;
   if (!pathname.startsWith(RUNTIME_ASSETS_URL_PREFIX)) return undefined;
   const segment = pathname.slice(RUNTIME_ASSETS_URL_PREFIX.length);
   if (segment === '') return undefined;
