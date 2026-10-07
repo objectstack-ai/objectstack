@@ -63,12 +63,17 @@
  *    — and therefore opens no approval and sends no notification on the claim's
  *    account.
  *
- * Code-registered hooks carry no metadata binding and still run on every
- * claimed row: the audit writer, the engine's audit stamp, capability gates and
+ * Hooks that plugins register in code carry no metadata binding and still run
+ * on every claimed row: plugin-audit's writer, capability gates and
  * plugin-sharing's rule projection. The opt-out can never bypass audit or
- * sharing (#2922). Measured before this on hotcrm `56d98f7e` (17.7.0, a
- * 354-row seed): the first sign-up waited ~45 s while the claim fired 1 254 app
- * hooks, ran 8 flows, opened 2 approvals and handed 8 emails to the transport.
+ * sharing (#2922). ObjectQL's own `sys_stamp_audit_*` builtins are bound
+ * through the hook binder, so they carry metadata and are skipped as well; for
+ * this write that changes nothing — the claim has no user to stamp into
+ * `updated_by`, and the drivers stamp `updated_at` themselves.
+ *
+ * Measured before this on hotcrm `56d98f7e` (17.7.0, a 354-row seed): the
+ * first sign-up waited ~45 s while the claim fired 1 254 app hooks, ran 8 flows,
+ * opened 2 approvals and handed 8 emails to the transport.
  *
  * It reaches every caller, because they all write through this function: the
  * promotion pass inside the first sign-up and the `app:seeded` settle pass on
@@ -171,9 +176,9 @@ const SYSTEM_CTX = { isSystem: true };
  * metadata hooks firing on every claimed row.
  *
  * It does NOT move the per-row hook ceiling, so {@link CLAIM_PAGE_ROWS} needs no
- * change: the engine asks whether ANY hook covers the object before it counts
- * the matched rows against the ceiling, and the code-registered hooks (the audit
- * stamp is registered on `'*'`) still do.
+ * change: the engine counts the matched rows against the ceiling whenever ANY
+ * hook covers the object, without consulting the flag — and code-registered
+ * hooks still run per row under it, so the bound still means what it did.
  */
 const CLAIM_WRITE_CTX = { isSystem: true, skipAutomations: true } as const satisfies ExecutionContext;
 
