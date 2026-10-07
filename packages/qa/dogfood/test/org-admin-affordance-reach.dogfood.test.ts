@@ -406,9 +406,10 @@ describe('org-admin affordances follow the membership grade (served metadata × 
     // verdict is about standing and not about a missing grade.
     expect(standingOwner.session.positions as string[]).toContain('org_owner');
 
-    for (const [who, session, own, platformAdmin] of principals) {
-      expect(consoleOffers(session, own), `${who} is offered Add Member`).toBe(platformAdmin);
-    }
+    // Both halves at once, every principal named: who IS offered it, and so
+    // who is not.
+    const offeredTo = principals.filter(([, session, own]) => consoleOffers(session, own)).map(([who]) => who);
+    expect(offeredTo).toEqual(['platform admin (the seeded admin)']);
 
     // The door's own verdicts on the same boot: the owner and the plain member
     // are refused before anything is written; the platform admin is admitted.
