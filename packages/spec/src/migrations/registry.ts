@@ -5446,7 +5446,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
   },
   {
     id: 'deployment-plumbing-organization-columns-retired',
-    order: 85,
+    order: 86,
     text:
       'It also takes the injected organization column off seven deployment-level platform tables — '
       + '`sys_job`, `sys_job_run`, `sys_job_queue`, `sys_flow_dispatch`, `sys_migration`, '
