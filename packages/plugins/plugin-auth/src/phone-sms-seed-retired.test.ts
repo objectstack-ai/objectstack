@@ -189,7 +189,9 @@ describe('a fresh boot with phone sign-in on', () => {
     const ctx = {
       registerService: vi.fn(),
       getService: vi.fn((name: string) => {
-        if (name === 'objectql') return engine;
+        // `data` is the engine AuthManager is handed (`getDataEngine()`), the
+        // one the retired seed wrote through; `objectql` the hooks resolve.
+        if (name === 'objectql' || name === 'data') return engine;
         if (name === 'manifest') return { register: vi.fn() };
         return undefined;
       }),
