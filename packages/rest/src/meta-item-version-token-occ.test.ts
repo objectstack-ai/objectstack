@@ -142,10 +142,7 @@ async function boot(opts: { enableCache?: boolean } = {}) {
 
     /** The stored rows of the item, by lifecycle — the store, not the door's word for it. */
     const stored = async (state: 'active' | 'draft') => {
-        const rows = await engine.find('sys_metadata', {
-            where: { type: 'view', name: 'case_grid', state },
-            context: { isSystem: true },
-        } as any);
+        const rows = await engine.find('sys_metadata', { where: { type: 'view', name: 'case_grid', state } });
         return (rows ?? []).map((r: any) => JSON.parse(String(r.metadata)).label as string);
     };
 

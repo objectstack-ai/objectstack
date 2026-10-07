@@ -3367,6 +3367,8 @@ export type SaveMetaItemRequest = z.input<typeof SaveMetaItemRequestSchema>;
 export type SaveMetaItemResponse = z.input<typeof SaveMetaItemResponseSchema>;
 /** The 409 `METADATA_CONFLICT` body of the `/meta/:type/:name` write doors (#22114). */
 export type MetadataConflictError = z.input<typeof MetadataConflictErrorSchema>;
+/** Post-parse shape of {@link MetadataConflictError} — defaults applied, transforms run (ADR-0122). */
+export type MetadataConflictErrorParsed = z.infer<typeof MetadataConflictErrorSchema>;
 export type PublishMetaItemRequest = z.input<typeof PublishMetaItemRequestSchema>;
 export type PublishMetaItemResponse = z.input<typeof PublishMetaItemResponseSchema>;
 /**
