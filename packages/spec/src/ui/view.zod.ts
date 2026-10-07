@@ -4472,9 +4472,15 @@ export const FormViewSchema = lazySchema(() => strictObject({
   // the generated JSON Schema: the references page renders a union as one type
   // expression, so a member's inner key gets no row of its own. The headline
   // therefore rides HERE, where the reference table does have a row (#7496).
+  //
+  // ⚠️ This describe still carries its ruling date, deliberately left for a
+  // separate change (#22093): its text is projected into the published skill
+  // `skills/objectstack-ui/references/react-blocks.md` (`gen:react-blocks`), a
+  // governed surface, so editing it here would make this wording sweep land
+  // the way a governed PR does.
   ]).optional().describe(
     "Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates "
-    + 'only declared record fields as `{{record.field_name}}`, URL-escaped.',
+    + 'only declared record fields as `{{record.field_name}}`, URL-escaped (ruled 2026-08-11).',
   ),
 
   /**
