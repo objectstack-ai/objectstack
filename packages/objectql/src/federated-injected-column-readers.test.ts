@@ -151,6 +151,12 @@ const READERS: Record<string, Row> = {
     disposition: 'skips',
     why: 'the column the partition predicates name, asked about before any partition is built',
   },
+  'lifecycle/lifecycle-service.ts#tenantWindowsFor :: resolveInjectedColumnProvenance()': {
+    disposition: 'skips',
+    why:
+      "an object with no organization_id at all (provenance 'absent': no injection, no declaration), " +
+      'federated or local, has no tenant partition either',
+  },
   'lifecycle/lifecycle-service.ts#reap :: organization_id': {
     disposition: 'skips',
     via: 'tenantWindowsFor',

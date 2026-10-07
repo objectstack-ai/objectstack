@@ -3,6 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { SysPresence } from './sys-presence.object.js';
 import { StorageNameMapping } from '@objectstack/spec/system';
+import { resolveInjectedSystemColumns } from '@objectstack/spec/data';
 
 describe('SysPresence object definition', () => {
   it('should use the literal sys_presence short name', () => {
@@ -75,6 +76,32 @@ describe('SysPresence object definition', () => {
 
   it('should have API enabled', () => {
     expect(SysPresence.enable?.apiEnabled).toBe(true);
+  });
+
+  // [ADR-0131 D7] Deployment-level: nothing writes this table through ObjectQL,
+  // so no writer attributes a row to an organization. The column is asserted
+  // through `resolveInjectedSystemColumns` because it is INJECTED at
+  // registration — a `fields` check alone would pass on an object that merely
+  // omits it. The capability is the same decision: with no column there is no
+  // tenant wall, so the gate is what keeps one organization's admin off
+  // another organization's presence rows on a walled deployment.
+  it('carries no tenant column — neither injected nor declared (ADR-0131 D7)', () => {
+    const plan = resolveInjectedSystemColumns(SysPresence);
+    expect(plan.tenant).toBe(false);
+    expect([...plan.names]).not.toContain('organization_id');
+    expect(Object.keys(SysPresence.fields)).not.toContain('organization_id');
+    expect((SysPresence as { systemFields?: unknown }).systemFields).toEqual({ tenant: false });
+    expect((SysPresence as { tenancy?: unknown }).tenancy).toBeUndefined();
+    // Control: the same object WITHOUT the opt-out gets the column, so the
+    // predicate above can answer `true` and its `false` is a measurement.
+    const { systemFields: _optOut, ...withoutOptOut } = SysPresence as Record<string, unknown>;
+    expect(resolveInjectedSystemColumns(withoutOptOut).tenant).toBe(true);
+  });
+
+  it('gates every read on the platform-only capability (ADR-0131 D7)', () => {
+    expect((SysPresence as { requiredPermissions?: unknown }).requiredPermissions).toEqual([
+      'manage_platform_settings',
+    ]);
   });
 
   it('exposes reads only — append-only, written over the realtime path, never /data (#3220)', () => {
