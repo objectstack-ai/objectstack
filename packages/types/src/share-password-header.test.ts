@@ -26,7 +26,8 @@ import {
 const CJK = '分享密码二二零四九';
 const EMOJI = 'open 🔐🦊 sesame';
 const LATIN1 = 'Déjà vu ½ ÿ';
-const RAW_PERCENT = '100%25 sure %zz %';
+const RAW_PERCENT = 'grade 100% %zz 22049';
+const RAW_PERCENT_ESCAPE = '50%25 off 22049';
 
 describe('[#22049] the header names', () => {
   it('names the password header, its companion and the Vary value both doors send', () => {
@@ -41,7 +42,8 @@ describe('[#22049] without the encoding header the value is read raw, unchanged'
   it.each([
     ['ASCII', 'correct horse battery'],
     ['Latin-1', LATIN1],
-    ['raw with %', RAW_PERCENT],
+    ['raw with a stray %', RAW_PERCENT],
+    ['raw with a %-escape', RAW_PERCENT_ESCAPE],
     ['raw that looks percent-encoded', '%E5%88%86'],
     ['raw that looks RFC 8187-prefixed', "UTF-8''%E5%88%86"],
     ['empty', ''],
@@ -62,7 +64,8 @@ describe('[#22049] X-Share-Password-Encoding: utf-8 decodes percent-encoded UTF-
     ['CJK', CJK],
     ['emoji', EMOJI],
     ['Latin-1', LATIN1],
-    ['raw with %', RAW_PERCENT],
+    ['raw with a stray %', RAW_PERCENT],
+    ['raw with a %-escape', RAW_PERCENT_ESCAPE],
     ['space-edged', '  spaced out  '],
     ['ASCII', 'correct horse battery'],
   ])('%s round-trips through encodeURIComponent', (_label, password) => {

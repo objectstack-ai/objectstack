@@ -33,7 +33,8 @@ import { handleShareLinksRequest } from './share-links.js';
 const CJK = '分享密码二二零四九';
 const EMOJI = 'open 🔐🦊 sesame';
 const LATIN1 = 'Déjà vu ½ ÿ 22049';
-const RAW_PERCENT = '100%25 sure %zz %';
+const RAW_PERCENT = 'grade 100% %zz 22049';
+const RAW_PERCENT_ESCAPE = '50%25 off 22049';
 
 const CONVERSATIONS = {
   name: 'ai_conversations',
@@ -167,9 +168,11 @@ describe('[#22049] dispatcher: X-Share-Password-Encoding: utf-8 carries any pass
 describe('[#22049] dispatcher: without the encoding header the value is read raw, unchanged', () => {
   it.each([
     ['resolve', 'Latin-1', LATIN1],
-    ['resolve', 'raw with %', RAW_PERCENT],
+    ['resolve', 'raw with a stray %', RAW_PERCENT],
+    ['resolve', 'raw with a %-escape', RAW_PERCENT_ESCAPE],
     ['messages', 'Latin-1', LATIN1],
-    ['messages', 'raw with %', RAW_PERCENT],
+    ['messages', 'raw with a stray %', RAW_PERCENT],
+    ['messages', 'raw with a %-escape', RAW_PERCENT_ESCAPE],
   ] as const)('/%s serves a %s password sent raw', async (route, label, password) => {
     const { call } = await harness(password);
     expectServed(route, await call(route, { 'x-share-password': password }), label);

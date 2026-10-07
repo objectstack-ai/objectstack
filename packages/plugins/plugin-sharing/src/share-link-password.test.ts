@@ -488,7 +488,8 @@ describe('[#22049] the password header declares its encoding', () => {
   const CJK = '分享密码二二零四九';
   const EMOJI = 'open 🔐🦊 sesame';
   const LATIN1 = 'Déjà vu ½ ÿ 22049';
-  const RAW_PERCENT = '100%25 sure %zz %';
+  const RAW_PERCENT = 'grade 100% %zz 22049';
+  const RAW_PERCENT_ESCAPE = '50%25 off 22049';
   const UTF8 = { 'x-share-password-encoding': 'utf-8' };
 
   async function protectedConversation(password: string) {
@@ -536,9 +537,11 @@ describe('[#22049] the password header declares its encoding', () => {
 
   it.each([
     ['resolve', 'Latin-1', LATIN1],
-    ['resolve', 'raw with %', RAW_PERCENT],
+    ['resolve', 'raw with a stray %', RAW_PERCENT],
+    ['resolve', 'raw with a %-escape', RAW_PERCENT_ESCAPE],
     ['messages', 'Latin-1', LATIN1],
-    ['messages', 'raw with %', RAW_PERCENT],
+    ['messages', 'raw with a stray %', RAW_PERCENT],
+    ['messages', 'raw with a %-escape', RAW_PERCENT_ESCAPE],
   ] as const)('/%s still serves a %s password sent raw, with no encoding header', async (route, label, password) => {
     const { http, link } = await protectedConversation(password);
     const res = await drive(http, `GET ${B}/:token/${route}`, {
