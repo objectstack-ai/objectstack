@@ -1,0 +1,8 @@
+{
+  "file": "packages/spec/src/conversions/registry.ts",
+  "adrs": [
+    "ADR-0120",
+    "ADR-0087"
+  ],
+  "invariant": "`declared-index-unique-scope` (ADR-0120 D2, toMajor 18) rewrites a DECLARED index's bare `unique: true` to `'global'` — and nothing else: field-level `unique: true` is never converted (D1: it means per-organization and stays valid), and `false` / `'global'` / `'organization'` pass through untouched. It is lossless only because `'global'` IS the verbatim column list bare `true` built — the S4/S5 nine-key corpus is pinned byte-identical before and after in driver-sql's `sql-driver-unique-tenancy.test.ts`. ⛔ Never re-target it at `'organization'` (the #4986 trap in mirror image, a silent physical change) and never take it off `retiredFromLoadPath`: the authoring funnel must REFUSE the bare spelling so the author states the scope, while data-at-rest seams replay it."
+}
