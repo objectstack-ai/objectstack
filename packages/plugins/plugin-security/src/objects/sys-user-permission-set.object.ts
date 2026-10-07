@@ -75,6 +75,27 @@ export const SysUserPermissionSet = ObjectSchema.create({
       description: 'Foreign key to sys_permission_set.',
     }),
 
+    // [ADR-0131 D4] The permission set this grant holds, BY NAME — the
+    // reference the grant keeps once the id column above is dropped (D10).
+    // System-written: `grant-permission-set-name.ts` derives it from
+    // `permission_set_id` on every write that carries the id, for every caller,
+    // and refuses a supplied value that names any other set (400
+    // VALIDATION_FAILED, `invalid_value` here). Same width and shape as the
+    // sibling assignment's `sys_user_position.position` (a `sys_*.name`, 100).
+    // Not required: a grant written before this column existed carries NULL
+    // until the backfill stage rewrites it, and no reader consults the column
+    // yet — readers keep reading the id until they are switched.
+    permission_set: Field.text({
+      label: 'Permission Set Name',
+      required: false,
+      readonly: true,
+      maxLength: 100,
+      description:
+        '[ADR-0131 D4] Machine name of the permission set this grant holds (sys_permission_set.name). ' +
+        'Written by the platform from permission_set_id on every write that carries it; a supplied value ' +
+        'must equal that name or the write is refused. NULL on a grant written before the column existed.',
+    }),
+
     organization_id: Field.lookup('sys_organization', {
       label: 'Organization',
       required: false,

@@ -90,6 +90,9 @@ const sysUserPermissionSet = {
     id: { name: 'id', type: 'text' as const, primaryKey: true },
     user_id: { name: 'user_id', type: 'text' as const },
     permission_set_id: { name: 'permission_set_id', type: 'text' as const },
+    // [ADR-0131 D4] The grant's set by NAME, which `settleSelfRegistrationGrant`
+    // writes beside the id; undeclared, the engine refuses that insert.
+    permission_set: { name: 'permission_set', type: 'text' as const },
     organization_id: { name: 'organization_id', type: 'text' as const },
   },
 };

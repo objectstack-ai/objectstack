@@ -271,11 +271,15 @@ describe('notify (baseline node)', () => {
         });
 
         it('refuses a node carrying BOTH template and inline title (the contract superRefine, at the parse seam)', async () => {
-            engine.registerFlow('notify_flow', notifyFlow({
+            // #21898 — refused at registration now, at the key the rule names…
+            expect(() => engine.registerFlow('notify_flow', notifyFlow({
                 recipients: ['user_1'],
                 title: 'Deal won',
                 template: 'crm.large_deal_won',
-            }));
+            }))).toThrow(/refused at `template`/);
+            // …and the executor still refuses one that reaches it past the doors.
+            const stored = engine.registerFlow('notify_flow', notifyFlow({ recipients: ['user_1'], title: 'Deal won' }));
+            (stored.nodes.find((n) => n.id === 'notify')!.config as Record<string, unknown>).template = 'crm.large_deal_won';
             const result = await engine.execute('notify_flow');
             expect(result.success).toBe(false);
             expect(result.error).toContain('`template`');

@@ -109,15 +109,33 @@ async function runStripped(
   return engine.execute('f');
 }
 
+/**
+ * #21898 — a VALUE the executor contract refuses is refused at the build doors
+ * too now ({@link doorRefusal} pins that half, at the key). The execute-time
+ * parse is met the same way as above: {@link runPatched} registers the node
+ * with a value the contract accepts and writes the refused one into the stored
+ * flow before the run.
+ */
+async function runPatched(
+  engine: AutomationEngine,
+  type: string,
+  whole: Record<string, unknown>,
+  patch: Record<string, unknown>,
+  extra?: { nodes?: any[]; edges?: any[]; variables?: any[] },
+) {
+  const stored = engine.registerFlow('f', flowWith(type, whole, extra));
+  Object.assign(stored.nodes.find((n) => n.id === 'n1')!.config as Record<string, unknown>, patch);
+  return engine.execute('f');
+}
+
 describe('execute-time config parse (#4277)', () => {
   it('refuses a wrong-typed declared key, naming the exact path', async () => {
+    // `limit` must be a number — the executor never honored a string here, so
+    // this was dead config that now fails loudly instead of silently doing
+    // nothing: at registration, at the key, and at the run.
+    expect(doorRefusal('get_record', { objectName: 'crm_lead', limit: 'ten' })).toContain('refused at `limit`');
     const engine = engineWith();
-    // `limit` is declared (so registration accepts it) but must be a number —
-    // the executor never honored a string here, so this was dead config that
-    // now fails loudly instead of silently doing nothing.
-    engine.registerFlow('f', flowWith('get_record', { objectName: 'crm_lead', limit: 'ten' }));
-
-    const result = await engine.execute('f');
+    const result = await runPatched(engine, 'get_record', { objectName: 'crm_lead', limit: 10 }, { limit: 'ten' });
     expect(result.success).toBe(false);
     expect(result.error).toContain('get_record');
     expect(result.error).toContain('config.limit');
@@ -126,16 +144,16 @@ describe('execute-time config parse (#4277)', () => {
 
   it('a parse refusal is a guard — a fault edge does NOT route it', async () => {
     const engine = engineWith();
-    engine.registerFlow('f', flowWith(
+    const result = await runPatched(
+      engine,
       'get_record',
-      { objectName: 'crm_lead', limit: 'ten' },
+      { objectName: 'crm_lead', limit: 10 },
+      { limit: 'ten' },
       {
         nodes: [{ id: 'recover', type: 'assignment', label: 'R', config: { recovered: true } }],
         edges: [{ id: 'e3', source: 'n1', target: 'recover', type: 'fault' }],
       },
-    ));
-
-    const result = await engine.execute('f');
+    );
     // Routable would mean success-via-recovery; a guard stays fatal (#3863).
     expect(result.success).toBe(false);
     expect(result.error).toContain('does not satisfy the get_record contract');
@@ -180,19 +198,17 @@ describe('execute-time config parse (#4277)', () => {
   });
 
   it('http still refuses a statically wrong-typed slot', async () => {
+    expect(doorRefusal('http', { url: 'https://example.test', timeoutMs: 'soon' })).toContain('refused at `timeoutMs`');
     const engine = engineWith();
-    engine.registerFlow('f', flowWith('http', { url: 'https://example.test', timeoutMs: 'soon' }));
-
-    const result = await engine.execute('f');
+    const result = await runPatched(engine, 'http', { url: 'https://example.test', timeoutMs: 1000 }, { timeoutMs: 'soon' });
     expect(result.success).toBe(false);
     expect(result.error).toContain('config.timeoutMs');
   });
 
   it('screen refuses an out-of-enum mode instead of silently treating it as create', async () => {
+    expect(doorRefusal('screen', { objectName: 'crm_lead', mode: 'view' })).toContain('refused at `mode`');
     const engine = engineWith();
-    engine.registerFlow('f', flowWith('screen', { objectName: 'crm_lead', mode: 'view' }));
-
-    const result = await engine.execute('f');
+    const result = await runPatched(engine, 'screen', { objectName: 'crm_lead', mode: 'edit' }, { mode: 'view' });
     expect(result.success).toBe(false);
     expect(result.error).toContain('config.mode');
   });
@@ -313,10 +329,9 @@ describe('execute-time config parse (#4277)', () => {
   });
 
   it('subflow refuses an empty flowName — declared is not the same as named', async () => {
+    expect(doorRefusal('subflow', { flowName: '' })).toContain('refused at `flowName`');
     const engine = engineWith();
-    engine.registerFlow('f', flowWith('subflow', { flowName: '' }));
-
-    const result = await engine.execute('f');
+    const result = await runPatched(engine, 'subflow', { flowName: 'child' }, { flowName: '' });
     expect(result.success).toBe(false);
     expect(result.error).toContain('config.flowName');
   });

@@ -5281,6 +5281,11 @@ export class AuthManager {
         id,
         user_id: userId,
         permission_set_id: row.id,
+        // [ADR-0131 D4] Both columns, agreeing: the row's own name, never the
+        // declared spelling — the read above is by name, but a case-folding
+        // collation may answer with a differently-cased row, and the name the
+        // grant stores is the one its id resolves to.
+        permission_set: row.name,
         ...(organizationId ? { organization_id: organizationId } : {}),
       });
       this.config.logger?.info?.('[audience] granted the declared self-registration permission set', {
