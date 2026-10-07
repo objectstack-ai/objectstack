@@ -293,28 +293,30 @@ export function diffStacks(before: unknown, after: unknown, path: Segment[] = []
 // ── attribution: which applied entries explain which changes ────────────────
 
 /**
- * Whether an applied entry's path explains a change at `change`: the change is
- * the site or inside it, the change replaced the container holding it, or the
- * change is a sibling key of the site (a rename's old key).
+ * The rules that tie a change to the applied entries explaining it, tried in
+ * order; a change takes the entries of the FIRST rule that finds any, so a
+ * looser rule never widens an entry that already has its own edits:
+ *
+ *  1. the change is the site, inside it, or a container replaced around it;
+ *  2. the change is a sibling key of the site — a rename's old key, where the
+ *     entry names the new one;
+ *  3. a MOVE between two containers of one subject (`node.config.x` →
+ *     `node.waitEventConfig.y`): the entry names the destination, the change is
+ *     the source, and both sit under the subject two steps above the entry.
  */
-function explainsTight(applied: readonly Segment[], change: readonly Segment[]): boolean {
-  return isPrefix(applied, change) || isPrefix(change, applied) || sameParent(applied, change);
-}
+const ATTRIBUTION_RULES: ReadonlyArray<(applied: readonly Segment[], change: readonly Segment[]) => boolean> = [
+  (applied, change) => isPrefix(applied, change) || isPrefix(change, applied),
+  (applied, change) => sameParent(applied, change),
+  (applied, change) => applied.length >= 3 && isPrefix(applied.slice(0, -2), change),
+];
 
-/**
- * The fallback for a change no entry explains tightly: a MOVE between two
- * containers of the same subject (`node.config.x` → `node.waitEventConfig.y`),
- * where the entry names the destination and the change is the source. Only
- * tried for changes the tight rule leaves unexplained, so it can never widen an
- * entry that already has its own edits.
- */
-function explainsLoose(applied: readonly Segment[], change: readonly Segment[]): boolean {
-  if (applied.length < 3) return false;
-  return isPrefix(applied.slice(0, -2), change);
-}
-
-function changeAnchor(change: StackChange): Segment[] {
-  return change.path;
+/** The applied entries (by index) that explain a change at `change`, by {@link ATTRIBUTION_RULES}. */
+function explainingEntries(appliedPaths: readonly (readonly Segment[])[], change: readonly Segment[]): number[] {
+  for (const rule of ATTRIBUTION_RULES) {
+    const hits = appliedPaths.flatMap((p, i) => (rule(p, change) ? [i] : []));
+    if (hits.length > 0) return hits;
+  }
+  return [];
 }
 
 // ── the authored module graph, read statically ──────────────────────────────
@@ -1559,14 +1561,10 @@ export async function planAuthoredSourceWrite(input: AuthoredSourceWriteInput): 
   const locator = new Locator(ts, graph, input.config, input.namedExports, configPath);
   const planner = new Planner(ts, graph, locator);
 
-  // Attribution: each change to the entries that explain it, tight rule first.
+  // Attribution: each change to the entries that explain it.
   const changes = diffStacks(input.normalized, input.migrated);
   const appliedPaths = input.applied.map((a) => parsePath(a.path));
-  const entriesOf = changes.map((c) => {
-    const anchor = changeAnchor(c);
-    const tight = appliedPaths.flatMap((p, i) => (explainsTight(p, anchor) ? [i] : []));
-    return tight.length > 0 ? tight : appliedPaths.flatMap((p, i) => (explainsLoose(p, anchor) ? [i] : []));
-  });
+  const entriesOf = changes.map((c) => explainingEntries(appliedPaths, c.path));
 
   // Components: entries that share a change are written together or not at all.
   const parent = input.applied.map((_, i) => i);
@@ -1678,7 +1676,10 @@ export async function planAuthoredSourceWrite(input: AuthoredSourceWriteInput): 
       });
       return;
     }
-    const r = resolved.get(mine[0]!)!;
+    // The line of a member that was there (a rename's old key, a removed or
+    // rewritten value) over the line of the literal a new key went into.
+    const site = mine.find((ci) => changes[ci]!.op !== 'add') ?? mine[0]!;
+    const r = resolved.get(site)!;
     written.push({ application, file: graph.rel(r.container.node.file), line: r.line });
   });
 
