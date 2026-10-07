@@ -2180,7 +2180,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       identity: {
         label: "Identidad",
-        description: "Identificador de plantilla que resuelve IEmailService.sendTemplate({ template: name, locale, ... })."
+        description: "Los remitentes hacen referencia a esta plantilla por su nombre; la configuración regional determina qué versión de idioma se envía."
       },
       subject: {
         label: "Asunto",

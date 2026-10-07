@@ -198,9 +198,16 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // mutual exclusion with title/message lives in the Zod
                     // contract's superRefine (executed at parse time), matching
                     // how requiredness is owned there rather than by the form.
+                    //
+                    // This description is the Studio notify inspector's Template
+                    // help (served at `GET /api/v1/automation/actions`), so it
+                    // reads as product guidance (#22093): the deployment-default
+                    // rung is `II18nService.getDefaultLocale()`, and per-recipient
+                    // resolution is the maintainer ruling of 2026-09-01 (#13881) —
+                    // both recorded here, neither in the help text.
                     template: {
                         type: 'string',
-                        description: 'Email template name (sys_email_template.name) — the localizable content path: resolved by (name, locale) at delivery time, rendering subject/body from that row. The locale is resolved per recipient, after fan-out: the recipient\'s own sys_user.locale when set, else the deployment default (II18nService.getDefaultLocale()) — so recipients whose personal languages differ receive different rows of the same bundle (maintainer ruling 2026-09-01). A producer-set payload.locale is not consulted. Mutually exclusive with inline title/message.',
+                        description: 'Email template name (sys_email_template.name) — the localizable content path: resolved by (name, locale) at delivery time, rendering subject/body from that row. The locale is resolved per recipient, after fan-out: the recipient\'s own sys_user.locale when set, else the deployment default locale — so recipients whose personal languages differ receive different rows of the same bundle. The node\'s payload.locale is not consulted. Mutually exclusive with inline title/message.',
                     },
                     templateData: {
                         type: 'object',

@@ -279,12 +279,27 @@ export const MANIFEST_ID_PATTERN = /^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$/
  * reject: `manifest.test.ts` asserts every entry here matches
  * {@link MANIFEST_ID_PATTERN}. An example that fails its own rule teaches the
  * exact wrong thing to the author who is already stuck.
+ *
+ * Both are neutral reverse-domain ids (#22093): `com.acme.crm` is the id the
+ * Studio package dialog already offers, and `org.example.help-desk` shows the
+ * other common prefix and an inner hyphen. They used to be two real products'
+ * ids (`com.steedos.crm`, `org.apache.superset`), which put another vendor's
+ * namespace in front of every author refused at the package door.
  */
-export const MANIFEST_ID_EXAMPLES = ['com.steedos.crm', 'org.apache.superset'] as const;
+export const MANIFEST_ID_EXAMPLES = ['com.acme.crm', 'org.example.help-desk'] as const;
 
 /**
  * The remedy a rejected package id carries (#4001: a refusal names the key,
  * echoes the value, and prescribes the fix).
+ *
+ * The headline sentence names the thing in product words — "Invalid package
+ * id '<value>'." — and the authoring key rides in the second sentence as a
+ * parenthetical locator (#22093). The key stays in the text because some
+ * doors that answer with this sentence return it as a bare message with no
+ * separate location field (`POST /api/v1/packages` answers
+ * `deps.error(message, 400)`, no details), and the key is what tells a caller
+ * which of several id-shaped inputs was refused. It no longer leads, so a
+ * surface that shows the headline alone shows no JSON path.
  *
  * The suggestion arm is deliberately conditional. A bare word — the shape the
  * scaffolder and `os init` used to produce, and what an author reaches for
@@ -300,11 +315,11 @@ export const MANIFEST_ID_EXAMPLES = ['com.steedos.crm', 'org.apache.superset'] a
  */
 export function manifestIdRefusal(key: string, input: unknown): string {
   const received = typeof input === 'string' ? input : String(input ?? '');
-  const examples = MANIFEST_ID_EXAMPLES.map((e) => `'${e}'`).join(', ');
+  const examples = MANIFEST_ID_EXAMPLES.map((e) => `'${e}'`).join(' or ');
   const base =
-    `Invalid package id '${received}' on \`${key}\`. Expected reverse-domain notation `
-    + `(${examples}) — lowercase dot-separated segments of letters, digits and inner hyphens; `
-    + 'a segment may not open with a hyphen; underscores are not admitted.';
+    `Invalid package id '${received}'. A package id (\`${key}\`) is written in reverse-domain `
+    + `notation, like ${examples} — lowercase dot-separated segments of letters, digits and `
+    + 'inner hyphens; a segment may not open with a hyphen; underscores are not admitted.';
 
   // Two mechanical repairs, tried in order, and only ever OFFERED once the
   // candidate has been checked against the pattern itself:
@@ -357,8 +372,8 @@ export const ManifestSchema = strictObject({
    * Both examples below are held against the pattern by `manifest.test.ts` via
    * {@link MANIFEST_ID_EXAMPLES}.
    *
-   * @example "com.steedos.crm"
-   * @example "org.apache.superset"
+   * @example "com.acme.crm"
+   * @example "org.example.help-desk"
    */
   id: z.string()
     .regex(MANIFEST_ID_PATTERN, { error: (iss) => manifestIdRefusal('manifest.id', iss.input) })

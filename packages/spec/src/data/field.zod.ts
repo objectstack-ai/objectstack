@@ -1137,9 +1137,11 @@ export const FieldSchema = lazySchema(() => {
    * array: an emptied required set fails validation loudly — `[]` does not
    * satisfy `required` (#9447, maintainer ruling 2026-08-18). The empty set is
    * always representable (it reads back as `[]`, never `null` — see
-   * `multiple`), so the required check judges emptiness, not absence.
+   * `multiple`), so the required check judges emptiness, not absence. The
+   * describe is form help in Studio and carries the rule, not the ruling date
+   * (#22093).
    */
-  required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it (maintainer ruling 2026-08-18). NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
+  required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
 
   /**
    * Physical storage constraints (ADR-0113). Deliberately separate from the
@@ -1166,8 +1168,13 @@ export const FieldSchema = lazySchema(() => {
    * readers (generated code, formula/filter predicates) never need a null
    * branch. Same ruling: `required` on a multi-value lookup means non-empty
    * array (see `required` above).
+   *
+   * Declarability: `multiple: true` outside the multi-capable types is refused
+   * at parse (maintainer ruling 2026-09-13), and on `radio` by the narrower
+   * 2026-08-22 ruling. The rulings and their dates live in these comments; the
+   * describe is form help in Studio and carries only the rule (#22093).
    */
-  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Declarable ONLY on the multi-capable types — select, lookup, user, file, image — and redundantly on the inherently-multi option types (multiselect, checkboxes, tags); `multiple: true` on any other type is REFUSED at parse (maintainer ruling 2026-09-13), and on `radio` by the narrower 2026-08-22 ruling. An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every writer (cascade repair, form clears, API writes), not just cascade repair (maintainer ruling 2026-08-18).'),
+  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Declarable ONLY on the multi-capable types — select, lookup, user, file, image — and redundantly on the inherently-multi option types (multiselect, checkboxes, tags); `multiple: true` on any other type, `radio` included, is REFUSED at parse. An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every writer (cascade repair, form clears, API writes), not just cascade repair.'),
   // `true` = unique WITHIN the tenant on a tenant-scoped object (composite
   // `(tenantField, field)` index); `'global'` = platform-wide single-column
   // unique. See {@link UniqueScopeSchema} for the scope vocabulary (ADR-0120).
