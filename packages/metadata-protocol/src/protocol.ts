@@ -1791,6 +1791,35 @@ function mergeArtifactProtection(
 }
 
 /**
+ * [#22024, ADR-0048, ADR-0010 §3.3] The package whose artifact envelope
+ * ({@link mergeArtifactProtection}: `_packageId`, `_packageVersion`,
+ * `_provenance`) a served item wears: the package the read names, else the
+ * package the served item itself is bound to, as the step that served it
+ * stamped it (a stored row's `package_id`, a container expansion's own
+ * package, the MetadataService's or the registry's item's `_packageId`).
+ *
+ * The one rule both read doors take: the list
+ * ({@link ObjectStackProtocolImplementation.readFlattenedMetaItems}) for each
+ * item it serves, and the by-name read
+ * ({@link ObjectStackProtocolImplementation.getMetaItem}) for the item it
+ * serves. So one served body wears one envelope on both doors.
+ *
+ * A read naming no package used to take the envelope of the first composite
+ * the registry holds under the name, which is the first-registered package's.
+ * Where two packages ship the name and the body served is another package's
+ * (its stored row, or its stored copy of a container they both ship), the
+ * answer served that package's body under the first-registered package's
+ * `_packageId`. A served item bound to no package (a package-less stored row,
+ * a registry entry with no package) names none, so its lookup is the
+ * package-less one it always was. ⛔ The lock is not chosen here: it is the
+ * one item-lock resolution's ({@link resolveItemLock}), from the read's own
+ * address.
+ */
+function envelopePackageId(requestedPackageId: string | undefined, served: unknown): string | undefined {
+    return requestedPackageId ?? (served as { _packageId?: string } | null | undefined)?._packageId;
+}
+
+/**
  * [#16702] ADR-0010 §3.3 — the three protection keys that are READ-SIDE
  * DERIVED, and therefore must never be persisted from a caller's body.
  *
@@ -9545,12 +9574,13 @@ export class ObjectStackProtocolImplementation implements
         const governed: any[] = [];
         for (const it of items as any[]) {
             const itemName = (it as any)?.name;
-            const itemPackageId = packageId ?? ((it as any)?._packageId as string | undefined);
             // ADR-0048 — scope the artifact lookup to THIS item's owning
             // package so a same-name collision grafts each item's own
             // provenance envelope, not the first-registered package's.
             // (`requested` packageId, when the whole list is scoped,
-            // takes priority; else the item's own `_packageId`.)
+            // takes priority; else the item's own `_packageId`.) [#22024]
+            // The by-name read takes the same rule ({@link envelopePackageId}).
+            const itemPackageId = envelopePackageId(packageId, it);
             const a = this.lookupArtifactItem(request.type, itemName, itemPackageId);
             let itemLock: ItemLock | undefined;
             if (typeof itemName === 'string' && (it as any)?._draft !== true) {
@@ -10428,7 +10458,15 @@ export class ObjectStackProtocolImplementation implements
         // ADR-0048 — scope the artifact lookup to the requested package so a
         // same-name collision grafts the OWNING package's provenance envelope
         // (`_packageId`), not whichever package registered first.
-        const artifactItem = this.lookupArtifactItem(request.type, request.name, request.packageId);
+        // [#22024] …and, naming no package, to the package of the item served
+        // above ({@link envelopePackageId}, the list's own rule), so the answer
+        // wears the envelope of the package whose row, expansion or item it
+        // serves. Before, a read naming no package took the first-registered
+        // package's envelope, so a name two packages ship answered one
+        // package's stored copy under the other package's `_packageId`.
+        const artifactItem = this.lookupArtifactItem(
+            request.type, request.name, envelopePackageId(request.packageId, item),
+        );
         // [#21738] The lock is the one item-lock resolution's, over the layers
         // this read resolved from its address: [#21803] every installed
         // package that ships the name ({@link artifactLockLayerAt}), never the
