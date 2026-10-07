@@ -811,6 +811,26 @@ describe('[#21908] D1. the store: the by-id reads carry the opt-in, and the writ
   });
 });
 
+describe('[#21908] D1b. the opt-in leaves these writes audited — real ObjectQL, recording driver', () => {
+  it('with no organization: no tenantId reaches the driver, and no tenant-audit bypass is filled in', async () => {
+    // Both objects are tenant-scoped in the platform's tenancy inventory, so the
+    // engine fills in no `bypassTenantAudit` for an `isSystem` write on them: an
+    // unscoped by-id write is still reported on a walled deployment.
+    const { engine, calls } = await makeEngine();
+    const store = new StorageMetadataStore(engine as any);
+
+    await store.updateFile('f1', { status: 'committed' });
+    await store.deleteSession('s1');
+
+    const writes = calls.filter((x) => x.method === 'update' || x.method === 'delete');
+    expect(writes.map((w) => w.method)).toEqual(['update', 'delete']);
+    for (const w of writes) {
+      expect(w.options?.tenantId ?? undefined).toBeUndefined();
+      expect(w.options?.bypassTenantAudit ?? undefined).toBeUndefined();
+    }
+  });
+});
+
 describe('[#21908] D2. ⛔ under the opt-in, a door tenant still cannot reach another organization’s row', () => {
   const OLD = process.env.OS_TENANCY_POSTURE;
   let ql: ObjectQL;
