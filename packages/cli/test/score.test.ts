@@ -87,15 +87,21 @@ describe('scoreMetadata', () => {
         { name: 'invoice_line', label: 'Line', sharingModel: 'controlled_by_parent', fields: { invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true, inlineEdit: true } } },
       ],
     });
-    // A warning: master_detail not required.
+    // A warning: master_detail not required — on an object that is NOT
+    // `controlled_by_parent`. Under `controlled_by_parent` the same shape is an
+    // error (`relationship/master-detail-required`'s v18 tier), so a fixture
+    // kept there would still pass the comparison below while measuring the
+    // error weight, not the warning one.
     const withWarning = scoreMetadata({
       objects: [
         { name: 'invoice', label: 'Invoice', sharingModel: 'private', fields: { name: { type: 'text', label: 'Name', required: true } } },
-        { name: 'invoice_line', label: 'Line', sharingModel: 'controlled_by_parent', fields: { invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', deleteBehavior: 'cascade' } } },
+        { name: 'invoice_line', label: 'Line', sharingModel: 'private', fields: { invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', deleteBehavior: 'cascade' } } },
       ],
     });
     expect(onlySuggestions.score).toBeGreaterThan(withWarning.score);
     expect(onlySuggestions.counts.errors).toBe(0);
+    expect(withWarning.counts.errors).toBe(0);
+    expect(withWarning.counts.warnings).toBeGreaterThan(0);
   });
 
   it('reports the schema error messages', () => {
