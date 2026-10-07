@@ -65,7 +65,11 @@ class FakeEngine {
     const all = this.rows[name] ?? [];
     const cond = q?.filter ?? q?.where;
     const out = all.filter((r) => this.matches(r, cond));
-    return typeof q?.limit === 'number' ? out.slice(0, q.limit) : out;
+    // [#22062] Rows leave as COPIES, as a real driver's do. Handing out the
+    // stored objects let a later write reach into a row the caller had
+    // already read, which no real read does — and it hid a stale copy in the
+    // sweep's bulk read from every pin here.
+    return (typeof q?.limit === 'number' ? out.slice(0, q.limit) : out).map((r) => ({ ...r }));
   }
   async insert(name: string, data: any): Promise<any> {
     const arr = (this.rows[name] = this.rows[name] ?? []);
