@@ -278,6 +278,7 @@ describe('printMigrationReport on a run with nothing to migrate', () => {
       refusals: parsed.success ? [] : parsed.error.issues,
       dataMigrations: [PROBE_DATA_MIGRATION],
       step: false,
+      all: false,
       out,
       write: EMPTY_WRITE,
       elapsed: '1ms',
