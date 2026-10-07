@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { hashSpec } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { registerMetadataTypeActions } from '@objectstack/spec/kernel';
 import type {
@@ -71,6 +72,17 @@ type DataEngineLike = Partial<
 >;
 
 /**
+ * [#21923] The slice of the `/meta` door's post-persistence mutation event
+ * (`MetadataMutationEvent` in `@objectstack/metadata-protocol`) the datasource
+ * projector reads — the row's address and resulting state, read structurally:
+ * this package does not depend on the protocol.
+ */
+interface MetadataDoorMutation {
+  name?: unknown;
+  state?: unknown;
+}
+
+/**
  * Durable persistence for runtime datasource records via the `sys_metadata`
  * table — the same store runtime objects use (the protocol writes objects there
  * directly). `MetadataManager.register()` alone is in-memory unless a writable
@@ -82,23 +94,48 @@ type DataEngineLike = Partial<
 const DS_META_TYPE = 'datasource';
 const SYS_METADATA = 'sys_metadata';
 
+/**
+ * [#21913] The execution context every `sys_metadata` read and write below runs
+ * under: the explicit system opt-in. These helpers are the platform persisting
+ * its own runtime-datasource records — at boot ({@link loadDatasourceRows}), on
+ * cluster convergence ({@link loadDatasourceRow}) and behind the datasource
+ * admin doors, which authorize the caller before any of them runs. None of them
+ * may rely on a missing principal to pass the security middleware's
+ * principal-less hand-off, which ADR-0096 D5 closes.
+ */
+const SYSTEM_CTX = { isSystem: true } as const;
+
 function newMetaId(): string {
   return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `meta_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
+/**
+ * [#21923] Write a runtime datasource's durable row — WITH the `checksum` the
+ * metadata door's repository stamps on every row it writes
+ * (`SysMetadataRepository.put`: `hashSpec(body, ref.type)`, the one
+ * computation, imported rather than re-spelled). That column is the `/meta`
+ * door's optimistic lock: its reads hand out the row's checksum as the version
+ * a `PUT` / `DELETE` names as its parent, and its writes compare that parent
+ * against the stored column. A row written here without one could never be
+ * matched, so every `/meta` edit or removal of an admin-created datasource
+ * answered `409 METADATA_CONFLICT` — the two doors disagreeing on one record.
+ */
 async function persistDatasourceRow(engine: DataEngineLike | undefined, record: { name: string }): Promise<void> {
   if (!engine?.insert || !engine.findOne) return; // no durable store — in-memory only
   const now = new Date().toISOString();
-  const existing = await engine.findOne(SYS_METADATA, {
-    where: { type: DS_META_TYPE, name: record.name, state: 'active' },
-  });
+  const checksum = hashSpec(record, DS_META_TYPE);
+  const existing = await engine.findOne(
+    SYS_METADATA,
+    { where: { type: DS_META_TYPE, name: record.name, state: 'active' } },
+    { context: SYSTEM_CTX },
+  );
   if (existing) {
     await engine.update?.(
       SYS_METADATA,
-      { metadata: JSON.stringify(record), updated_at: now, version: ((existing.version as number) || 0) + 1, state: 'active' },
-      { where: { id: existing.id } },
+      { metadata: JSON.stringify(record), checksum, updated_at: now, version: ((existing.version as number) || 0) + 1, state: 'active' },
+      { where: { id: existing.id }, context: SYSTEM_CTX },
     );
   } else {
     await engine.insert(SYS_METADATA, {
@@ -107,25 +144,30 @@ async function persistDatasourceRow(engine: DataEngineLike | undefined, record: 
       type: DS_META_TYPE,
       scope: 'platform',
       metadata: JSON.stringify(record),
+      checksum,
       state: 'active',
       version: 1,
       created_at: now,
       updated_at: now,
-    });
+    }, { context: SYSTEM_CTX });
   }
 }
 
 async function deleteDatasourceRow(engine: DataEngineLike | undefined, name: string): Promise<void> {
   if (!engine?.findOne) return;
-  const existing = await engine.findOne(SYS_METADATA, { where: { type: DS_META_TYPE, name, state: 'active' } });
+  const existing = await engine.findOne(
+    SYS_METADATA,
+    { where: { type: DS_META_TYPE, name, state: 'active' } },
+    { context: SYSTEM_CTX },
+  );
   if (!existing) return;
-  if (engine.delete) await engine.delete(SYS_METADATA, { where: { id: existing.id } });
-  else await engine.update?.(SYS_METADATA, { state: 'inactive' }, { where: { id: existing.id } });
+  if (engine.delete) await engine.delete(SYS_METADATA, { where: { id: existing.id }, context: SYSTEM_CTX });
+  else await engine.update?.(SYS_METADATA, { state: 'inactive' }, { where: { id: existing.id }, context: SYSTEM_CTX });
 }
 
 async function loadDatasourceRows(engine: DataEngineLike | undefined): Promise<Array<Record<string, unknown>>> {
   if (!engine?.find) return [];
-  const rows = await engine.find(SYS_METADATA, { where: { type: DS_META_TYPE, state: 'active' } });
+  const rows = await engine.find(SYS_METADATA, { where: { type: DS_META_TYPE, state: 'active' } }, { context: SYSTEM_CTX });
   const out: Array<Record<string, unknown>> = [];
   for (const r of rows ?? []) {
     const raw = (r as { metadata?: unknown }).metadata;
@@ -163,7 +205,11 @@ async function loadDatasourceRow(
   name: string,
 ): Promise<StoredDatasource | undefined> {
   if (!engine?.findOne) return undefined;
-  const row = await engine.findOne(SYS_METADATA, { where: { type: DS_META_TYPE, name, state: 'active' } });
+  const row = await engine.findOne(
+    SYS_METADATA,
+    { where: { type: DS_META_TYPE, name, state: 'active' } },
+    { context: SYSTEM_CTX },
+  );
   const raw = (row as { metadata?: unknown } | null | undefined)?.metadata;
   if (raw == null) return undefined;
   let parsed: Record<string, unknown>;
@@ -345,15 +391,16 @@ export class DatasourceAdminServicePlugin implements Plugin {
     const config: DatasourceAdminServiceConfig = {
       probe: (input) => this.probe(factory(), input),
 
+      // [#21923] Every record this door serves carries the origin its
+      // PROVENANCE gives — `servedOrigin` — whatever the record says.
       listDatasourceRecords: async () => {
         const rows = ((await metadataOf()?.list('datasource')) ?? []) as StoredDatasource[];
-        // Artefact-loaded rows may omit `origin`; treat them as code-defined.
-        return rows.map((r) => ({ ...r, origin: r.origin ?? 'code' }));
+        return rows.map((r) => ({ ...r, origin: servedOrigin(ctx, r.name) }));
       },
 
       getDatasourceRecord: async (name) => {
         const row = (await metadataOf()?.get('datasource', name)) as StoredDatasource | undefined;
-        return row ? { ...row, origin: row.origin ?? 'code' } : undefined;
+        return row ? { ...row, origin: servedOrigin(ctx, name) } : undefined;
       },
 
       putDatasourceRecord: async (record) => {
@@ -477,7 +524,7 @@ export class DatasourceAdminServicePlugin implements Plugin {
       // [#13805] The receive half of the datasource cluster bridge — see
       // `convergePool` below for the decision table. The engine is resolved
       // per call for the same reason every other seam here resolves lazily.
-      convergePool: (name) => this.convergePool(name, engineOf),
+      convergePool: (name) => this.convergePool(ctx, name, engineOf),
 
       // The admin list's `status` reads the connection service's retained
       // verdicts (framework#3827). Resolved lazily per call: the service exists
@@ -537,14 +584,95 @@ export class DatasourceAdminServicePlugin implements Plugin {
     // store back into the in-memory registry, THEN rebuild their live pools.
     // `register()` is in-memory only in standalone serve (no writable
     // `datasource:` loader), so without this a node restart drops every
-    // UI-created datasource. Code-defined datasources come from the artifact and
-    // are unaffected.
+    // UI-created datasource. Code-defined datasources come from the artifact,
+    // and a stored row under one of their names is skipped, never registered
+    // over it (#21922, see restoreRuntimeDatasources).
     await this.restoreRuntimeDatasources(ctx);
     await this.rehydratePools();
+    this.projectMetadataDoorWrites(ctx);
     if (this.service) await ctx.trigger('datasource-admin:ready', this.service);
   }
 
-  /** Reload persisted runtime datasource rows (sys_metadata) into the registry. */
+  /**
+   * [#21923] Make a datasource the `/meta` door writes reach THIS door in the
+   * same boot, as a restart would make it: the door's save, publish, revert,
+   * rollback and delete persist to `sys_metadata` (and the SchemaRegistry)
+   * but never touch the MetadataService slot this door lists, so a datasource
+   * saved there was missing here until the next boot restore registered it.
+   *
+   * The seam is the protocol's awaited per-type mutation projector (ADR-0094),
+   * not its fire-and-forget `onMetadataMutation` listener: the projection runs
+   * inside the write, so the `/meta` answer is returned only once this door
+   * lists the datasource, and a projection that fails is reported on that
+   * answer (`projectionApplied`) as well as logged by the protocol.
+   *
+   * Resolved at `start()`, once every plugin has inited. No protocol, no
+   * metadata door: nothing writes a datasource this plugin does not already
+   * see.
+   */
+  private projectMetadataDoorWrites(ctx: PluginContext): void {
+    const protocol = safeGetService<{
+      registerMutationProjector?(type: string, projector: (evt: MetadataDoorMutation) => Promise<void>): void;
+    }>(ctx, 'protocol');
+    if (typeof protocol?.registerMutationProjector !== 'function') return;
+    protocol.registerMutationProjector(DS_META_TYPE, (evt) => this.applyMetadataDoorWrite(ctx, evt));
+  }
+
+  /**
+   * [#21923] One `/meta` door write of a datasource, applied to this door's
+   * two derived states — boot's {@link restoreRuntimeDatasources} and
+   * {@link rehydratePools}, narrowed to one name and re-run on demand:
+   *
+   *  - the MetadataService slot follows the durable row: registered from it
+   *    when an active row exists, unregistered when none does (a delete);
+   *  - the live pool converges on the same row through
+   *    {@link convergePool}, so a saved datasource gets the pool an admin
+   *    create gets, an edit rebuilds it, and a delete evicts it.
+   *
+   * Read from `sys_metadata`, the single source of truth, never from the
+   * event (a delete carries no body). A `draft` save leaves the active row as
+   * it was, so it changes nothing here. ⛔ A name the host defines in code is
+   * never registered, unregistered or pooled from a stored row — code wins on
+   * a collision, as at the boot restore; the `/meta` door's `DELETE` of such a
+   * row is the repair, and must leave the code definition served.
+   */
+  private async applyMetadataDoorWrite(ctx: PluginContext, evt: MetadataDoorMutation): Promise<void> {
+    if (evt?.state === 'draft' || typeof evt?.name !== 'string' || evt.name === '') return;
+    const name = evt.name;
+    if (servedOrigin(ctx, name) === 'code') return;
+    const engineOf = (): DataEngineLike | undefined => safeGetService<DataEngineLike>(ctx, 'data');
+    const metadata = safeGetService<MetadataServiceLike>(ctx, 'metadata');
+    if (metadata?.register && metadata.unregister) {
+      const row = await loadDatasourceRow(engineOf(), name);
+      if (row) await metadata.register(DS_META_TYPE, name, row);
+      else await metadata.unregister(DS_META_TYPE, name);
+    }
+    await this.convergePool(ctx, name, engineOf);
+  }
+
+  /**
+   * Reload persisted runtime datasource rows (sys_metadata) into the registry.
+   *
+   * [#21922] **Code wins on collision** — the invariant this service states in
+   * its own header ("A runtime datasource never shadows a code one"). A stored
+   * row whose name the host registers from code is NOT registered over the
+   * code definition: `register` is last-write-wins on the MetadataService
+   * slot, so registering it would make both doors serve the row, let the admin
+   * door edit a code-defined datasource (the row's `origin` is whatever its
+   * writer said), and hand {@link rehydratePools} a "runtime" record to open a
+   * live pool from under the code datasource's name.
+   *
+   * "Code" is read from the host's code-datasource set — the kernel service
+   * {@link CODE_DATASOURCE_NAMES_SERVICE}, which the runtime fills from code in
+   * Phase 1, before this `start()` runs. ⛔ Never from the stored row's own
+   * `origin` (its writer set it freely) nor from the MetadataService slot
+   * (whether a code registration reached it yet depends on composition order).
+   *
+   * The skipped row is KEPT, and named in a warning: it is the residue an
+   * earlier runtime write left, and the `/meta` door's `DELETE` removes it as
+   * repair. A host that composes no code-datasource producer registers no set,
+   * and then nothing is code — every stored row restores as it always has.
+   */
   private async restoreRuntimeDatasources(ctx: PluginContext): Promise<void> {
     const engine = safeGetService<DataEngineLike>(ctx, 'data');
     const metadata = safeGetService<MetadataServiceLike>(ctx, 'metadata');
@@ -556,10 +684,22 @@ export class DatasourceAdminServicePlugin implements Plugin {
       this.options.logger?.warn?.('datasource restore: reading sys_metadata failed', err);
       return;
     }
+    const codeNames = codeDatasourceNamesOf(ctx);
     let restored = 0;
     for (const rec of rows) {
       const name = (rec as { name?: string }).name;
       if (!name) continue;
+      if (codeNames?.has(name)) {
+        // Loud whatever the host passed as `options.logger` — `os serve`
+        // passes none, and a collision nobody sees is a shadow nobody repairs.
+        (this.options.logger ?? ctx.logger).warn(
+          `datasource restore: sys_metadata holds a stored row for '${name}', a datasource this host ` +
+            `defines in code. The row was NOT restored over the code definition (code wins on a name ` +
+            `collision) and is kept. Remove it with DELETE /api/v1/meta/datasource/${name} once nothing ` +
+            `needs it; edit the code definition to change the datasource.`,
+        );
+        continue;
+      }
       try {
         await metadata.register('datasource', name, rec);
         restored += 1;
@@ -617,11 +757,15 @@ export class DatasourceAdminServicePlugin implements Plugin {
    * metadata registry (which, on the host-config boot, is per-replica state
    * with no cluster seam — the read a peer must not converge from):
    *
-   *  - **no active runtime row** (deleted, disabled, or a name this plugin
-   *    never pooled) → evict the pool THIS plugin built, if any — through
-   *    `unregisterPool` → `disconnect`, the #13578 eviction door. A name it
-   *    never pooled is left alone, so a stray signal can never reach a
-   *    code-defined pool the host stack owns.
+   *  - **no active runtime row** (deleted, disabled, a name this plugin
+   *    never pooled, or — [#21923] — a name the host defines in code, read
+   *    from the code-datasource set and never from the row's own `origin`)
+   *    → evict the pool THIS plugin built, if any — through `unregisterPool`
+   *    → `disconnect`, the #13578 eviction door. A name it never pooled is
+   *    left alone, so a stray signal can never reach a code-defined pool the
+   *    host stack owns, nor open one from a stored row under a code name.
+   *    Every other row is runtime by provenance, and is pooled as one
+   *    whatever its body says — a `/meta` save carries no `origin`.
    *  - **a row this replica has no pool for** → build it (the create case, and
    *    re-enabling after `active: false`).
    *  - **a row whose connectivity-bearing fields differ from what the live
@@ -640,16 +784,18 @@ export class DatasourceAdminServicePlugin implements Plugin {
    * This method converges the DRIVER registry only.
    */
   private async convergePool(
+    ctx: PluginContext,
     name: string,
     engineOf: () => DataEngineLike | undefined,
   ): Promise<void> {
     const cfg = this.config;
     if (!cfg?.registerPool || !cfg.unregisterPool) return;
 
-    const row = await loadDatasourceRow(engineOf(), name);
+    const stored = servedOrigin(ctx, name) === 'code' ? undefined : await loadDatasourceRow(engineOf(), name);
+    const row: StoredDatasource | undefined = stored ? { ...stored, origin: 'runtime' } : undefined;
     const live = this.livePoolRecords.get(name);
 
-    if (!row || row.origin !== 'runtime' || row.active === false) {
+    if (!row || row.active === false) {
       if (live) await cfg.unregisterPool(name);
       return;
     }
@@ -741,6 +887,43 @@ function safeGetService<T>(ctx: PluginContext, name: string): T | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * [#21922] The kernel service the host's code-datasource set is registered
+ * under. Its producer is `@objectstack/runtime` (`code-datasource-names.ts`),
+ * which this package does not depend on, so the name is spelled here and the
+ * value read structurally — the way `'datasource-connection'` is read in the
+ * other direction. Keep the two spellings equal.
+ */
+const CODE_DATASOURCE_NAMES_SERVICE = 'code-datasource-names';
+
+/** The host's code-datasource set, or `undefined` when no producer registered one. */
+function codeDatasourceNamesOf(ctx: PluginContext): { has(name: string): boolean } | undefined {
+  const names = safeGetService<{ has?: unknown }>(ctx, CODE_DATASOURCE_NAMES_SERVICE);
+  return typeof names?.has === 'function' ? (names as { has(name: string): boolean }) : undefined;
+}
+
+/**
+ * [#21923] The origin the admin door serves for a datasource, from its
+ * PROVENANCE: `code` when the host registers that name from code (the
+ * {@link CODE_DATASOURCE_NAMES_SERVICE} set the runtime fills in Phase 1, the
+ * one answer the boot restore and the `/meta` door's refusal read too), and
+ * `runtime` for every other name — a row the boot restore registered from
+ * `sys_metadata`, one the `/meta` door saved, one this door created.
+ *
+ * ⛔ Never the record's own `origin`, and never a default for its absence:
+ * the MetadataService slot holds whatever was registered last, and a stored
+ * row's body says whatever its writer put there — a `/meta` save carries no
+ * `origin`, or asserts `origin: 'code'`. Reading the record turned a datasource
+ * an operator created at runtime into a read-only "code-defined" one after a
+ * restart (`origin ?? 'code'`).
+ *
+ * A host that composes no code-datasource producer registers no set, and then
+ * nothing is code, as for the boot restore.
+ */
+function servedOrigin(ctx: PluginContext, name: string): 'code' | 'runtime' {
+  return codeDatasourceNamesOf(ctx)?.has(name) ? 'code' : 'runtime';
 }
 
 function errMsg(err: unknown): string {

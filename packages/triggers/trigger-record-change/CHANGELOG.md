@@ -1,5 +1,160 @@
 # @objectstack/plugin-trigger-record-change
 
+## 17.7.0
+
+### Minor Changes
+
+- 1f04696: fix(trigger-record-change)!: a record-change flow's trigger record carries the credential mask and omits internal fields
+  
+  Clause-②: no
+  
+  <!-- adr-0087: registered flow-trigger-record-credential-masked -->
+  
+  **BREAKING**: the `record` and `previous` a record-change flow receives are now served on the generic read path's terms (ADR-0100). A credential-class field — every `secret` field, and every `password` field outside the exempt `managedBy` buckets — reads as the mask `SECRET_MASK` when set and `null` when unset, and a field declared `internal: true` is absent. It ships as `minor` under the launch-window convention for a changed answer. No export, schema key or error code is added or removed.
+  
+  **What changed.** The trigger built both roots from the engine's own write result, which keeps the stored row whole for privileged in-process callers. A credential's stored value and an internal field's value therefore reached the flow, and from there its variables map, a paused run's persisted state and the read doors over that state. The trigger now projects both roots through `omitInternalFieldsFromWriteResponse` from `@objectstack/core`, the helper every external write response already uses, with the trigger object's definition. Everything downstream inherits the projection: the variables map, a paused run's persisted state and its read doors, and the run a resume rehydrates, in the same process and after a restart.
+  
+  **FROM → TO.**
+  - `{record.<password or secret field>}` and `{previous.<password or secret field>}` in a record-change flow: FROM the stored value (the plaintext password, or the secret's stored handle) → TO `SECRET_MASK` when set, `null` when unset.
+  - `{record.<internal field>}` and `{previous.<internal field>}`: FROM the stored value → TO absent.
+  
+  **If you are affected.** A flow that needs a credential reads it through a privileged binder (the flow credential channel, or a privileged server-side read such as the engine's `resolveSecretField`), never off the trigger record. A start or edge condition that compared such a field with a literal tests whether it is set (`!= null`) instead. A condition that compares `record.<credential field>` with `previous.<credential field>` now sees two equal masks whenever the field is set on both sides, so it can no longer detect a change; use a privileged binder to detect a credential change.
+  
+  **Runs stored before this release.** The mask applies to trigger records built after the upgrade. Paused runs, and terminal runs that keep a restorable snapshot, created before it still hold the clear values in `variables_json`, `context_json` and `steps_json`. After upgrading, resume, cancel or purge those runs.
+  
+  **Unchanged.**
+  - Every ordinary field of the trigger record keeps its value, and every other flow variable is untouched.
+  - The engine's own write result, the stored row and the privileged read paths (`resolveSecret`, `resolveSecretField`) are unchanged.
+  - Records a flow reads later through its data nodes already came through the generic read path, which masks them.
+
+### Patch Changes
+
+- 6091136: MCP stdio, email, knowledge, queue, SMS, storage and record-trigger refusals, warnings and template descriptions no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  Some strings these seven packages show to operators, administrators and flow authors pointed at an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - `@objectstack/connector-mcp`: the declarative stdio refusals say a stdio transport launches a local process, so stack metadata may only name a command the host's own code allows, and that an http transport is not gated by this policy.
+  - `@objectstack/plugin-email`: the built-in change-email notice template's description, in all four locales, says the notice goes to the previous address so a hijacked session cannot move the account identity unannounced; the internal-headers refusal says a missing header does not announce itself, so the send would succeed while silently deviating from what was authored; the over-limit attachments line says the storage capability holds large content outside the row while the row keeps a reference and the attachment's audit metadata.
+  - `@objectstack/service-knowledge`: the no-identity retrieval warning says a missing identity is not a grant of authority, so retrieval fails closed rather than searching the whole corpus unscoped; the predicate-write warning says the lifecycle reap guard de-indexes retention-swept rows before they are deleted.
+  - `@objectstack/service-queue`: the missing-retention refusal says the one platform reaper sweeps completed rows by that declaration, so the adapter does not sweep the table itself; the rejected-floor error says the floor is what makes the lifecycle service refuse an override below the idempotency window.
+  - `@objectstack/service-sms`: the unreadable-counter warning says a quota the platform cannot count must not refuse the one-time codes users sign in with; the counter store's lines name the daily SMS send quota without a number.
+  - `@objectstack/service-storage`: the reclamation-gate line says deleting bytes cannot be undone, so it waits for a verified migration with no deviation on record, while reversible work carries on.
+  - `@objectstack/trigger-record-change`: the array-trigger warning says multi-event arrays are deferred until two independent projects need a combination other than created-or-updated.
+  
+  Text only: no status, error code, field, route or control flow moves. A client or log filter that matches the old text (for example a tracker-number suffix) needs the new spelling.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [a2aadab]
+- Updated dependencies [fe10172]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [045f764]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [a0176ef]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [cab6396]
+- Updated dependencies [e864db5]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/core@17.7.0
+
 ## 17.6.0
 
 ### Patch Changes

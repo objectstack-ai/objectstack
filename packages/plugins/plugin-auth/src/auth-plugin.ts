@@ -44,6 +44,7 @@ import {
 import { isDefaultOrganizationBootstrapTrigger } from './ensure-default-organization.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
+import { withSystemContext } from './objectql-adapter.js';
 import type { AuthEventAuditSurface } from './auth-session-audit.js';
 import { createTenancyService, type TenancyService } from './tenancy-service.js';
 import {
@@ -2379,10 +2380,18 @@ export class AuthPlugin implements Plugin {
         // better-auth's own endpoint invocation context. This is the same
         // physical row the better-auth runtime reads at introspect / token
         // / authorize time, so the toggle is fully honoured.
-        const dataEngine: any = this.authManager!.getDataEngine();
-        if (!dataEngine) {
+        //
+        // And through the same WRAPPER: `withSystemContext`, so the read and
+        // the write both carry the explicit system opt-in (`isSystem: true`).
+        // The platform-admin judge above is this route's authorization; the
+        // raw engine would have handed the security middleware a context with
+        // no principal and no opt-in — the principal-less hand-off (ADR-0096),
+        // which is not an authorization at all.
+        const rawEngine = this.authManager!.getDataEngine();
+        if (!rawEngine) {
           return c.json({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'Data engine unavailable' } }, 503);
         }
+        const dataEngine: any = withSystemContext(rawEngine);
 
         const existing = await dataEngine.findOne('sys_oauth_application', {
           where: { client_id: clientId },

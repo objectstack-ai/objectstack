@@ -95,7 +95,7 @@ function topLevelRows(form: unknown): FormEntry[] {
 const rowsFor = (type: string) => topLevelRows(METADATA_FORM_REGISTRY[type]);
 const rowFor = (type: string, key: string) => rowsFor(type).filter((r) => r.field === key);
 
-describe('declared keys that now have a form row (#19085)', () => {
+describe('declared keys that now have a form row', () => {
   // The probe is only a reading if it can also report a zero. Both controls
   // run against the SAME helper the assertions use, so a helper that stopped
   // finding rows would fail here rather than passing everything vacuously.
@@ -233,7 +233,7 @@ describe('object.imageField is offered as a plain text row beside nameField, wit
  * fix) cannot otherwise tell this row apart from a real script row
  * (`body.source`, `action.source`, both genuinely `'javascript'`).
  */
-describe('hook.condition declares the CEL predicate language it edits (#20439)', () => {
+describe('hook.condition declares the CEL predicate language it edits', () => {
   it('hook.condition is a `code` row declaring language: expression, not javascript', () => {
     const [row, ...extra] = rowFor('hook', 'condition');
     expect(row, '`condition` is declared by HookSchema; the hook form must offer it').toBeDefined();

@@ -34,7 +34,7 @@ import {
 // was a no-op until #5286 (tsconfig excluded `**/*.test.ts`; vitest never enables
 // `typecheck`), so the load-bearing pin is the export-origins test below, with
 // anti-vacuity guards.
-describe('[#4739 / #16325] the system-side provisioning family stays retired, and `TenantPlan` has left the package', () => {
+describe('the system-side provisioning family stays retired, and `TenantPlan` has left the package', () => {
   it('resolves the export surface: ./system and ./contracts name none of the retired family', () => {
     // Anti-vacuity: the baseline must cover the real surface (`export-origins/`
     // IS the resolution, computed at build time and checked in — #4796).

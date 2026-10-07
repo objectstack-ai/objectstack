@@ -42,6 +42,10 @@ import {
 // (the gate itself may only reach the registry through `@objectstack/lint/runtime`,
 // which the wiring guard enforces on the gate's own source).
 import { validateSemanticRoles } from '@objectstack/lint';
+// [#22019] The build's own entry — the call `os build` makes
+// (`runAuthoringRules('build', …)`) — so the formula block compares the door's
+// verdict against the build's real output, never a restatement of it.
+import { EXPRESSION_INVALID, runAuthoringRules } from '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
 import { SDUI_MANIFEST_SERVICE } from './index.js';
@@ -70,7 +74,6 @@ const validApprovalFlow = () => {
     const flow = brokenApprovalFlow();
     flow.nodes[1]!.config = {
         approvers: [{ type: 'expression', value: 'current.owner' }],
-        emptyApproverPolicy: 'reject',
     } as any;
     return flow;
 };
@@ -1586,5 +1589,272 @@ describe('public-form intake advisory on save and publish (#21476)', () => {
         const published = await publish(protocol);
         expect(published.success).toBe(true);
         expect(intake(published)).toEqual([]);
+    });
+});
+
+/**
+ * [#22019] The object save door gives the build's verdict on a formula field.
+ *
+ * `content/docs/data-modeling/formulas.mdx` says "the same `validateExpression`
+ * validator backs `os build` and metadata registration". At this door it did
+ * not: an object whose formula field calls an unregistered function
+ * (`sqrt(record.amount)`) saved with a 200 and read `null` on every row, while
+ * `os build` refused the same expression as an unknown function.
+ *
+ * The cause was one registry declaration, not this door's code: the build's
+ * expression rule (`validateStackExpressions`) declared `runtimeTypes` for
+ * flows, actions and hooks and never `object`, so `runtimeAuthoringRulesFor`
+ * never dispatched it on an object write. The fix is in `@objectstack/lint`,
+ * narrowed to the field-formula pass; this block pins it here, through the
+ * REAL `saveMetaItem` / `publishMetaItem`:
+ *
+ *  (a) the door refuses `sqrt(record.amount)` — a 422 carrying the build's
+ *      located finding — on an active save AND on a draft's promotion, and
+ *      nothing lands;
+ *  (b) a registered call (`floor(record.amount)`) still saves;
+ *  (d) the door's issue and the build's finding for the same expression are
+ *      the same finding: rule, location, message and hint.
+ *
+ * The read-path half — a row stored before the gate still reads `null`, and
+ * the engine says so once per (object, field) — is `@objectstack/objectql`'s
+ * `engine-formula-fault-log.test.ts`. The fence that keeps every OTHER
+ * object-borne expression pass off this door is pinned in `@objectstack/lint`'s
+ * `runtime-gate.object-formula-writes.test.ts`.
+ *
+ * ⚠️ This package's tests reach `@objectstack/lint` through its `exports`, i.e.
+ * its built `dist/` (no vitest alias pulls it back to source — the pair is on
+ * `KNOWN_UNALIASED_TEST_IMPORTS`). An edit to the rule registry is invisible
+ * here until `pnpm --filter @objectstack/lint build` has run.
+ */
+describe('runtime authoring gate on OBJECT writes — the formula field verdict (#22019)', () => {
+    /** `sharingModel` is authored so `security-owd-unset` stays quiet and the refusal is the formula's. */
+    const fxSqrt = (expression: string) => ({
+        name: 'fx_sqrt',
+        label: 'Formula Probe',
+        sharingModel: 'private',
+        fields: {
+            name: { type: 'text', label: 'Name' },
+            amount: { type: 'number', label: 'Amount' },
+            score: { type: 'formula', label: 'Score', expression },
+        },
+    });
+    const UNREGISTERED = 'sqrt(record.amount)';
+    const REGISTERED = 'floor(record.amount)';
+    /** Where the build locates a formula finding — the KEY the author edits. */
+    const WHERE = "object 'fx_sqrt' · field 'score' expression";
+
+    const fxRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'object' && r.name === 'fx_sqrt');
+
+    /** The build's findings for one object, through the build's own entry. */
+    const buildFindings = (obj: unknown) => {
+        const stack = { objects: [obj] };
+        return runAuthoringRules('build', { normalized: stack, parsed: stack })
+            .filter((f) => f.rule === EXPRESSION_INVALID && f.where === WHERE);
+    };
+
+    it("(a) REFUSES an active save of `sqrt(record.amount)` with a 422 carrying the build's located finding", async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const err = await protocol
+            .saveMetaItem({ type: 'object', name: 'fx_sqrt', item: fxSqrt(UNREGISTERED) })
+            .catch((e: any) => e);
+
+        expect(err, 'the save resolved — the door still accepts an unregistered function').toBeInstanceOf(Error);
+        expect(err.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(err.rulesRun).toContain('validateStackExpressions');
+        const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID);
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(issue.path).toBe(WHERE);
+        expect(issue.where).toBe(WHERE);
+        expect(issue.severity).toBe('error');
+        // The named subject: the function the author typed, as the build names it.
+        expect(issue.message).toContain('`sqrt` is not a callable name here');
+        // And nothing landed — a gate that refuses after persisting is a log line.
+        expect(fxRows(rows)).toEqual([]);
+    });
+
+    it("(a) REFUSES the same body on a draft's PROMOTION — the draft door is not a bypass", async () => {
+        const { protocol } = makeProtocol();
+        // A draft save is never gated (#4463 D1): the author may keep a half-finished object.
+        await expect(
+            protocol.saveMetaItem({ type: 'object', name: 'fx_sqrt', item: fxSqrt(UNREGISTERED), mode: 'draft' }),
+        ).resolves.toMatchObject({ success: true });
+
+        const err = await protocol.publishMetaItem({ type: 'object', name: 'fx_sqrt' }).catch((e: any) => e);
+
+        expect(err?.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID);
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(issue.path).toBe(WHERE);
+    });
+
+    it('(b) a registered call — `floor(record.amount)` — still saves, and the row lands', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const result = await protocol.saveMetaItem({ type: 'object', name: 'fx_sqrt', item: fxSqrt(REGISTERED) });
+
+        expect(result.success).toBe(true);
+        expect(fxRows(rows).map((r) => r.state)).toEqual(['active']);
+    });
+
+    it('(d) the door and `os build` give the SAME finding for the same expression', async () => {
+        const { protocol } = makeProtocol();
+        const err = await protocol
+            .saveMetaItem({ type: 'object', name: 'fx_sqrt', item: fxSqrt(UNREGISTERED) })
+            .catch((e: any) => e);
+        const atDoor = (err.issues ?? []).filter((i: any) => i.rule === EXPRESSION_INVALID);
+
+        const atBuild = buildFindings(fxSqrt(UNREGISTERED));
+
+        // Non-vacuous on both sides: one finding each, and an error at the build.
+        expect(atBuild).toHaveLength(1);
+        expect(atBuild[0]!.severity).toBe('error');
+        expect(atDoor).toHaveLength(1);
+        // Compared key by key — the door reuses the build's call, so a reworded
+        // or relocated door verdict is a second dialect, and red.
+        for (const key of ['rule', 'where', 'path', 'message', 'hint'] as const) {
+            expect(atDoor[0][key], `door and build disagree on '${key}'`).toBe(atBuild[0]![key]);
+        }
+        // And the registered call is clean at the build too, not just at the door.
+        expect(buildFindings(fxSqrt(REGISTERED))).toEqual([]);
+    });
+});
+
+/**
+ * [#22032, pass 1] The object save door gives the build's verdict on a
+ * validation rule's predicates.
+ *
+ * The same `formulas.mdx` sentence covers a validation rule's `condition`:
+ * the shared validator backs `os build` and metadata registration. #22019's
+ * crossing put the build's expression rule on this door for formula fields
+ * alone, so a rule whose `condition` called an unregistered function
+ * (`sqrt(record.amount) > 1`) or read a bare field (`amount > 1`) still saved
+ * with a 200, while `os build` refused both at `error`.
+ *
+ * The lift is in `@objectstack/lint` (the rule's object-write fence admits its
+ * validation-rule pass); no code here moves. Pinned through the REAL
+ * `saveMetaItem` / `publishMetaItem`:
+ *
+ *  (a) the door refuses both card bodies — a 422 `INVALID_METADATA` carrying
+ *      the build's located finding — on an active save AND on a draft's
+ *      promotion, and nothing lands;
+ *  (b) a valid, guarded `condition` still saves;
+ *  (d) for each refused body the door's issues and the build's findings are
+ *      the same findings: rule, location, message and hint.
+ *
+ * The `when` / nested `then` / `otherwise` reach and the fence over the other
+ * object-borne passes are pinned in `@objectstack/lint`'s
+ * `runtime-gate.object-validation-writes.test.ts` and
+ * `runtime-gate.object-formula-writes.test.ts`.
+ *
+ * ⚠️ As in the #22019 block above: this package reaches `@objectstack/lint`
+ * through its built `dist/`, so an edit to the rule is invisible here until
+ * `pnpm --filter @objectstack/lint build` has run.
+ */
+describe('runtime authoring gate on OBJECT writes — the validation-rule verdict (#22032)', () => {
+    /** `sharingModel` is authored so `security-owd-unset` stays quiet and the refusal is the rule's. */
+    const fxRule = (condition: string) => ({
+        name: 'fx_rule',
+        label: 'Rule Probe',
+        sharingModel: 'private',
+        fields: {
+            name: { type: 'text', label: 'Name' },
+            amount: { type: 'number', label: 'Amount' },
+        },
+        validations: [{ name: 'amount_rule', type: 'script', condition, message: 'Amount rule' }],
+    });
+    /** The card's two bodies, each refused by `os build` at `error`. */
+    const REFUSED = [
+        { condition: 'sqrt(record.amount) > 1', subject: '`sqrt` is not a callable name here' },
+        { condition: 'amount > 1', subject: 'bare reference `amount`' },
+    ] as const;
+    const VALID = 'record.amount != null && record.amount > 100';
+    /** Where the build locates a validation-rule finding — the rule the author edits. */
+    const WHERE = "object 'fx_rule' · validation 'amount_rule'";
+
+    const ruleRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'object' && r.name === 'fx_rule');
+
+    /** The build's findings for one object, through the build's own entry. */
+    const buildFindings = (obj: unknown) => {
+        const stack = { objects: [obj] };
+        return runAuthoringRules('build', { normalized: stack, parsed: stack })
+            .filter((f) => f.rule === EXPRESSION_INVALID);
+    };
+
+    for (const { condition, subject } of REFUSED) {
+        it(`(a) REFUSES an active save of \`${condition}\` with a 422 carrying the build's located finding`, async () => {
+            const { protocol, rows } = makeProtocol();
+
+            const err = await protocol
+                .saveMetaItem({ type: 'object', name: 'fx_rule', item: fxRule(condition) })
+                .catch((e: any) => e);
+
+            expect(err, 'the save resolved — the door still accepts the rule').toBeInstanceOf(Error);
+            expect(err.status).toBe(422);
+            expect(err.code).toBe('INVALID_METADATA');
+            expect(err.rulesRun).toContain('validateStackExpressions');
+            const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID);
+            expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+            expect(issue.path).toBe(WHERE);
+            expect(issue.where).toBe(WHERE);
+            expect(issue.severity).toBe('error');
+            // The named subject: what the author typed, as the build names it.
+            expect(issue.message).toContain(subject);
+            // And nothing landed — a gate that refuses after persisting is a log line.
+            expect(ruleRows(rows)).toEqual([]);
+        });
+    }
+
+    it("(a) REFUSES the same body on a draft's PROMOTION — the draft door is not a bypass", async () => {
+        const { protocol } = makeProtocol();
+        // A draft save is never gated (#4463 D1): the author may keep a half-finished object.
+        await expect(
+            protocol.saveMetaItem({ type: 'object', name: 'fx_rule', item: fxRule(REFUSED[0].condition), mode: 'draft' }),
+        ).resolves.toMatchObject({ success: true });
+
+        const err = await protocol.publishMetaItem({ type: 'object', name: 'fx_rule' }).catch((e: any) => e);
+
+        expect(err?.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID);
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(issue.path).toBe(WHERE);
+    });
+
+    it('(b) a valid, guarded `condition` still saves, and the row lands', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const result = await protocol.saveMetaItem({ type: 'object', name: 'fx_rule', item: fxRule(VALID) });
+
+        expect(result.success).toBe(true);
+        expect(ruleRows(rows).map((r) => r.state)).toEqual(['active']);
+    });
+
+    it('(d) the door and `os build` give the SAME findings for each refused body', async () => {
+        for (const { condition } of REFUSED) {
+            const { protocol } = makeProtocol();
+            const err = await protocol
+                .saveMetaItem({ type: 'object', name: 'fx_rule', item: fxRule(condition) })
+                .catch((e: any) => e);
+            const atDoor = (err.issues ?? []).filter((i: any) => i.rule === EXPRESSION_INVALID);
+
+            const atBuild = buildFindings(fxRule(condition));
+
+            // Non-vacuous on both sides: one finding each, and an error at the build.
+            expect(atBuild, condition).toHaveLength(1);
+            expect(atBuild[0]!.severity).toBe('error');
+            expect(atDoor, condition).toHaveLength(1);
+            // Compared key by key — the door reuses the build's call, so a reworded
+            // or relocated door verdict is a second dialect, and red.
+            for (const key of ['rule', 'where', 'path', 'message', 'hint'] as const) {
+                expect(atDoor[0][key], `door and build disagree on '${key}' for ${condition}`).toBe(atBuild[0]![key]);
+            }
+        }
+        // And the valid rule is clean at the build too, not just at the door.
+        expect(buildFindings(fxRule(VALID))).toEqual([]);
     });
 });

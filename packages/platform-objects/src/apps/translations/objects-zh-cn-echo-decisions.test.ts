@@ -36,6 +36,11 @@
 // table holds nothing BEYOND the echoes is not asserted, for the reason the
 // next section gives.
 //
+// Since that walk, the seven `sys_account._actions.link_social` provider-brand
+// rows (Google through Discord) left this ledger together with the action,
+// retired under ADR-0049 enforce-or-remove (#21849): the bundle no longer
+// carries those leaves, so the ledger below holds 35 echoes.
+//
 // ## What this file deliberately does NOT assert
 //
 // That no OTHER zh-CN objects leaf reads its `en` source. A new field's label
@@ -80,8 +85,6 @@ interface Decision {
   departure?: string;
 }
 
-const BRAND =
-  'A sign-in provider brand, shown as the name a user recognises on the link button. The bundle renders no brand name: the authored SSO empty state keeps Okta, Entra and Auth0 verbatim.';
 const BARE_ID =
   'The bare initialism ID. This bundle keeps ID verbatim inside every label that carries it (用户 ID, 团队 ID, 客户端 ID); a bare en ID has no noun to render, and adding one would invent content.';
 const JWKS =
@@ -132,15 +135,7 @@ const DECISIONS: readonly Decision[] = [
     reason: 'Reproduced on the team record page as MEMBER COUNT: an ordinary field label an admin reads, an unauthored fill.',
   },
 
-  // ── Kept in English by design (42) ───────────────────────────────────────
-  echo('sys_account._actions.link_social.params.provider.options.google', 'Google', BRAND),
-  echo('sys_account._actions.link_social.params.provider.options.github', 'GitHub', BRAND),
-  echo('sys_account._actions.link_social.params.provider.options.microsoft', 'Microsoft', BRAND),
-  echo('sys_account._actions.link_social.params.provider.options.apple', 'Apple', BRAND),
-  echo('sys_account._actions.link_social.params.provider.options.facebook', 'Facebook', BRAND),
-  echo('sys_account._actions.link_social.params.provider.options.gitlab', 'GitLab', BRAND),
-  echo('sys_account._actions.link_social.params.provider.options.discord', 'Discord', BRAND),
-
+  // ── Kept in English by design (35) ───────────────────────────────────────
   echo('sys_oauth_application.fields.jwks.label', 'JWKS', JWKS),
   echo('sys_oauth_application.fields.jwks_uri.label', 'JWKS URI', JWKS),
   echo(
@@ -217,10 +212,10 @@ function undeclaredEchoes(rows: readonly Decision[]): string[] {
 }
 
 describe('#20462 — the ledger itself (controls before verdicts)', () => {
-  it('is the size it claims: 3 pinned translations and 42 declared echoes, no path twice', () => {
-    expect(DECISIONS.length).toBe(45);
+  it('is the size it claims: 3 pinned translations and 35 declared echoes, no path twice', () => {
+    expect(DECISIONS.length).toBe(38);
     expect(DECISIONS.filter((d) => d.verdict === 'translate').length).toBe(3);
-    expect(DECISIONS.filter((d) => d.verdict === 'echo').length).toBe(42);
+    expect(DECISIONS.filter((d) => d.verdict === 'echo').length).toBe(35);
     expect(new Set(DECISIONS.map((d) => d.path)).size).toBe(DECISIONS.length);
   });
 

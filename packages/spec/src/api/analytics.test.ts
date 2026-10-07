@@ -63,7 +63,7 @@ describe('AnalyticsEndpoint', () => {
   });
 });
 
-describe('AnalyticsQueryRequestSchema — the BARE AnalyticsQuery shape (#3878)', () => {
+describe('AnalyticsQueryRequestSchema — the BARE AnalyticsQuery shape', () => {
   it('should accept a minimal bare query', () => {
     const req = AnalyticsQueryRequestSchema.parse({
       cube: 'orders',
@@ -104,7 +104,7 @@ describe('AnalyticsQueryRequestSchema — the BARE AnalyticsQuery shape (#3878)'
     ).toThrow();
   });
 
-  it('should reject the retired {cube, query: {...}} envelope (#3891 shim dialect)', () => {
+  it('should reject the retired {cube, query: {...}} envelope (the degraded shim dialect)', () => {
     expect(() =>
       AnalyticsQueryRequestSchema.parse({
         cube: 'orders',
@@ -228,6 +228,39 @@ describe('AnalyticsResultResponseSchema', () => {
     });
     expect(bad.success).toBe(false);
     expect(bad.success ? [] : bad.error.issues.map((i) => i.path.join('.'))).toContain('data.fields.0.builtinAggregate');
+  });
+
+  // `fields[].aggregate` — the measure's aggregate, stated whether or not the
+  // author labelled the column, so it rides beside a `label` where
+  // `builtinAggregate` never does. Same closed `AggregationFunction`
+  // vocabulary: a spelling outside it is refused at the member, not stripped.
+  it('should preserve fields[].aggregate beside a label and refuse a spelling outside the closed enum', () => {
+    const resp = AnalyticsResultResponseSchema.parse({
+      success: true,
+      data: {
+        rows: [{ status: 'open', task_count: 7, count: 7 }],
+        fields: [
+          { name: 'status', type: 'string', label: 'Status' },
+          { name: 'task_count', type: 'number', label: 'Tasks', aggregate: 'count' },
+          { name: 'count', type: 'number', builtinAggregate: 'count', aggregate: 'count' },
+        ],
+      },
+    });
+    expect(resp.data.fields[1].aggregate).toBe('count');
+    expect(resp.data.fields[1].label).toBe('Tasks');
+    expect(resp.data.fields[1].builtinAggregate).toBeUndefined();
+    expect(resp.data.fields[2].aggregate).toBe('count');
+    expect(resp.data.fields[2].builtinAggregate).toBe('count');
+    expect(resp.data.fields[0].aggregate).toBeUndefined();
+
+    const bad = AnalyticsResultResponseSchema.safeParse({
+      success: true,
+      data: { rows: [], fields: [{ name: 'task_count', type: 'number', label: 'Tasks', aggregate: 'total' }] },
+    });
+    expect(bad.success).toBe(false);
+    const issues = bad.success ? [] : bad.error.issues;
+    expect(issues.map((i) => i.path.join('.'))).toContain('data.fields.0.aggregate');
+    expect(issues.find((i) => i.path.join('.') === 'data.fields.0.aggregate')?.code).toBe('invalid_value');
   });
 
   it('should preserve totals — the marginal-aggregate channel, grand total included', () => {
@@ -384,7 +417,7 @@ describe('GetAnalyticsMetaRequestSchema', () => {
  * replaced by the assertion that carries the actual load of this change: the
  * previously-declared shape is now rejected.
  */
-describe('AnalyticsMetadataResponseSchema — the CubeMeta[] projection (#6442)', () => {
+describe('AnalyticsMetadataResponseSchema — the CubeMeta[] projection', () => {
   /**
    * A real `GET /analytics/meta` body: what `AnalyticsService.getMeta` builds —
    * measure/dimension names CUBE-QUALIFIED, `title` projected from the

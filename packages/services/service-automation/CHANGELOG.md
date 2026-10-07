@@ -1,5 +1,333 @@
 # @objectstack/service-automation
 
+## 17.7.0
+
+### Minor Changes
+
+- 909229e: A job pulls a mapping's connector source by declaration — `pull: { mapping }` — and every job runs as the `organization` it declares (#20281).
+  
+  Clause-②: yes (widening)
+  
+  - **`JobSchema.pull`** (`@objectstack/spec/system`). A third run form beside `body` and `handler`: `{ mapping: '<mapping name>' }`. On each run the platform pulls that mapping's `connectorSource` and writes the rows through the import runner. It carries no code. The key is refused beside `body` or `handler`, because one of the two run forms would never run. `body` with `handler` stays legal, and the body still wins. A job must now declare one of `body`, `handler` or `pull`. `pull` is closed: an unknown key inside it is refused.
+  - **`JobSchema.organization`**. The organization a job runs as. It applies to the body's `ctx.api`, to the handler's new `executionContext`, and to the pull's reads and writes. The value shape is the scheduled flow's: a non-empty `sys_organization.id`. A near-miss spelling (`organizationId`, `orgId`, `tenantId`, …) is refused at parse and pointed at the key.
+  - **`defineStack`, and so `os validate`**, refuses a job whose `pull` names a mapping the stack does not declare, or a mapping with no `connectorSource`. The refusal is the existing `STACK_CROSS_REFERENCE_INVALID` envelope.
+  - **`IAutomationService.pullConnectorSource`** (`@objectstack/spec/contracts`, with `ConnectorSourcePullRequest`, `ConnectorSourcePullResult` and `ConnectorSourcePullSummary`). The connector sync executor is now on the `automation` service. `@objectstack/service-automation`'s engine serves it from the executor `AutomationServicePlugin` attaches at init (`AutomationEngine.setConnectorPullSource`). A bare engine refuses with `SERVICE_UNAVAILABLE` (503).
+  - **The job binder** (`@objectstack/runtime`, `scheduleAppArtifactJobs`) schedules a `pull` job on every door: the boot, and `os package install` on install and rehydrate. Each run calls `pullConnectorSource` through the service registry. A refused pull fails the run, and `retryPolicy` applies. A pull whose rows the import runner refused records the run `degraded`, with the counts. A pull naming a mapping the artifact does not carry is not scheduled, and neither is one whose mapping has no `connectorSource`, nor one on a kernel whose `automation` service cannot pull. Each case is logged at `warn` with the reason. `collectJobsWithoutBody` does not name a `pull` job that binds, so `os package install` installs one. The result gains `pulls` and `missingOrganization`.
+  - **The organization, judged at bind** by the posture rule scheduled flows use (`resolveScheduledWorkPolicy`). Every run carries `{ isSystem: true, tenantId: <organization> }`, or `{ isSystem: true }` for a job that declares none. Under `single` the key is not required. Under `group` it is optional; an undeclared job is scheduled and named once at `warn`, because a tenant-scoped row it writes is refused. Under `isolated`, with package-authored scheduled work switched on, it is **required**. **Action on such a deployment:** declare `organization` on each packaged job, or the job is not scheduled; the error log names the job. Until now such a job was scheduled, and every tenant-scoped write it made was refused at the write. An unrecognized `OS_TENANCY_POSTURE` withholds every job (`scheduled-work-policy-unreadable`) instead of guessing whether a declaration is required.
+  - **Texts this makes true.** The `mapping.connectorSource` description, the `connector.syncConfig` tombstone prescription and the `connector-sync-keys-retired` upgrade entry said "nothing schedules a pull yet". They now name the `job` `pull` that drives it.
+  
+  Nothing that parsed before is refused now. Every new refusal falls on a key that did not exist before this change.
+- 96a9719: feat(automation): a flow's credentials live in a write-only channel, not in its stored definition (#20790)
+  
+  Clause-②: yes (widening)
+  
+  A flow's two credentials, an inbound hook's `secret` on its start node and an `http` node's `signingSecret`, are no longer stored in the flow definition. The metadata save door moves each explicit value into a new platform object, `sys_flow_credential`, owned by `@objectstack/service-automation`. Its one field is `type: 'secret'`, so the engine encrypts it through the host crypto provider, masks it on every read, and dereferences it only through `resolveSecretField`. This is the same seam the webhook signing secret uses. The stored row, every new version-history row and the row's content hash carry no credential. The engine reads the value only when it verifies an inbound post or signs an outbound request. Authoring does not change: you still write the literal, a save that leaves the key out (the form every read serves) keeps the stored secret, `''` clears it, and only an explicit new value rotates it.
+  
+  **⚠️ Rotate every inbound and outbound flow secret that existed before this release.** On the first boot with a crypto provider, or when a provider registers after a boot without one, each stored flow that still carries a credential is moved into the channel once, and the log prints one notice per flow: `[Automation] flow '<name>' (<state>): … was stored in cleartext … ROTATE: …`. The move guarantees no new copy, but the version-history rows and audit snapshots written before it stay as they were (both are append-only), so an administrator could have read those values. To rotate, save the flow with a new `config.secret` / `config.signingSecret`, then give the new value to whoever signs posts to the hook or verifies its deliveries. The run is recorded in `sys_migration` as `flow-credential-channel` (flow names only, never values). Packaged flows are not moved: a packaged flow's literal stays its source of truth, and where the channel holds a row for it, the row wins at verification.
+  
+  What else changes:
+  
+  - **`@objectstack/spec`**: `PLATFORM_OBJECTS_BY_PACKAGE['service-automation']` lists `sys_flow_credential`.
+  - **`@objectstack/metadata-protocol`**: `registerCredentialChannel(type, channel)` registers a type's write-only credential channel (exported type `MetadataCredentialChannel`). `saveMetaItem` stores the body the channel returns, after the carry-forward and before the put. The runtime authoring gate reads the channel's held positions as present, on an active save and when a draft is published. `SysMetadataRepository.restoreVersion` takes `deriveRestoredBody`, shaped like `promoteDraft`'s `deriveActiveBody`. Rollback and revert pass the channel's strip, so restoring a version written before the move never puts its credential back at rest, and the channel keeps its current credential.
+  - **`@objectstack/service-automation`**: exports `SysFlowCredential`, `FlowCredentialChannel` and `migrateFlowCredentialsIntoChannel`. `AutomationEngine` gains `setFlowCredentialSource`, `holdsFlowCredential`, `resolveFlowCredential` and `flowCredentialHoldings`. An `api` binding carries `resolveSecret()`, which reads the secret at verification time, so a rotation applies to the next post. A draft save never rotates the live secret; publishing the draft promotes it. Deleting a flow's stored row drops its credentials.
+  - **`@objectstack/trigger-api`**: `FlowTriggerBinding.resolveSecret` arms a hook without a literal. A post whose secret cannot be read is answered `503 SERVICE_UNAVAILABLE` and is never verified against nothing.
+  - **Refused now, loudly**:
+    - With no crypto provider, a save that carries a flow credential is refused with `503 SERVICE_UNAVAILABLE` before anything is written. Register a provider (`setCryptoProvider`) and save again.
+    - The clone door (`POST /api/v1/automation/:name/clone`) refuses a source that holds a credential, as a literal or in the channel, with `409 RESOURCE_CONFLICT`, because a copy would share it. ⚠️ Accepted cost: a packaged inbound flow can no longer be cloned in one step. Author the copy as a new flow under a new name, with its own secret.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the one-time move rewrites stored flow rows through the metadata save door itself, at boot; no authorable key, spelling, export or stored shape is retired, so an author or an upgrading agent has nothing to rewrite. The operator's action is the rotation stated above, which is not a FROM to TO mapping. The gate reads this changeset as non-breaking; the disposition is stated for the migration the ruling named. -->
+- 748b240: feat(types,automation): a host's per-kernel scheduled-work OFF reports the host's own reason (#21110)
+  
+  Clause-②: yes (widening)
+  
+  `ScheduledWorkPolicy` (`@objectstack/types`) gains an optional
+  `hostDisabledReason`: the host's own sentence for why scheduled work is off on
+  this kernel, such as a plan that does not include scheduled flows. A new
+  export, `scheduledWorkDisabledReason(policy)`, gives the one answer for why
+  scheduled work is not armed under a policy. It returns the host's reason when
+  the policy carries one, and `SCHEDULED_WORK_DISABLED_REASON` otherwise.
+  
+  Every refusal site now reports that answer, read from the same policy reading
+  that refused:
+  
+  - the automation engine's bind log;
+  - the reason it records for `getTriggerBindingAudit()` and for the
+    `FlowRuntimeState.reason` that `GET /automation/_status` serves;
+  - the refusal of `ScheduleTrigger` and `TimeRelativeTrigger` when a host drives
+    them directly.
+  
+  Before this, a kernel that a host turned off through `scheduledWorkPolicy`
+  was reported with the deployment sentence. That sentence tells the reader to
+  set `OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true`, even on a process where the
+  variable is already set, and to a tenant who cannot set it.
+  
+  Nothing changes without the new field. A policy with no `hostDisabledReason`,
+  and the zero-argument deployment resolver `resolveScheduledWorkPolicy()`, which
+  never sets it, report `SCHEDULED_WORK_DISABLED_REASON` byte for byte. The field
+  is read only when `enabled` is `false`.
+  
+  To use it, a host that turns one kernel off for its own reason sets
+  `hostDisabledReason` on the `enabled: false` policy it already hands to that
+  kernel's `AutomationServicePlugin`, `ScheduleTriggerPlugin` and
+  `TimeRelativeTriggerPlugin`. Give the same policy to all three, as before, and
+  make the reason a whole sentence that names the cause and the remedy. It is
+  shown verbatim.
+- 54fb60a: fix(service-automation)!: a flow the `kernel:ready` cold-boot bind refuses is no longer left registered and `active` from the boot pull
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a narrowing of what stays loaded at boot: a flow whose registration the kernel:ready cold-boot bind refuses is now withdrawn instead of staying registered from the boot pull. What is refused is unchanged, it is the same refusal registerFlow already made; only its outcome at boot changes. No authorable key, spelling, export or stored shape moves: FlowSchema and every node schema parse exactly what they parsed, the package exports the same names with the same types, no stored row is read or rewritten, and which value an author meant is not something a ledger entry can rewrite. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered or already-registered); and the change narrows what boot keeps registered, not a runtime interface or a type surface alone (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING**: a flow that loaded `active` before can now be absent after boot. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **What was kept before.** A boot registers a package's flows twice. The boot pull runs before a plugin that contributes a node type has registered its executor from its own `start()`, so it cannot check that node's config keys against the descriptor's `configSchema`, and it registers the flow and arms its trigger. The `kernel:ready` bind then re-registers every flow once the executor exists. When it refused one, for an undeclared config key for instance, it logged `[Automation] cold-boot flow bind: failed to register flow` and nothing else: the boot pull's registration stayed, `active` and bound to its trigger, so every run reached the node the refusal located.
+  
+  **What happens now.** A flow the `kernel:ready` bind refuses is withdrawn: it is not registered, its trigger is unbound, and the same warning names the flow and the refusal. Only that flow is withdrawn; the rest of the package loads, as it already did for a flow the boot pull refuses. A failed or empty read of the flow list still tears nothing down.
+  
+  **What an author sees now.** The flow is absent (`GET /automation/:name` answers `404`), and the boot warning carries the located refusal. The handling is to correct the config the warning locates; the flow then registers as before.
+  
+  **Unchanged.** What `registerFlow` refuses, at any door. A flow refused through the `/automation` write doors keeps the definition the engine already held, and a runtime reload that brings a refused body keeps the registered one.
+
+### Patch Changes
+
+- cc07862: Automation refusals, prescriptions, log lines and run-object field help, and the activity type help, no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  Some strings these two packages show to flow authors, operators and administrators pointed at an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - `@objectstack/service-automation`: the refusal for a `fieldValues` write map says a runtime alias for it was rejected by design, so the node keeps one strict `fields` key; the refusal for a screen field's `visibleIf` says a predicate under any other key is never read, so the field always shows, and a `required` field meant to stay hidden then blocks the screen from ever being submitted; the undeclared-config-key refusal says the built-in node types were reconciled so that every key their executors read is declared; the unknown-function error in a flow value expression says such a name is refused rather than evaluated to null, which would write the field as undefined; the inert-connector warning says entries without a `provider` are catalog descriptors, while an entry that names a `provider` is a connector instance that provider's installed executor materializes; the `sys_automation_run` field help says the paused node's type decides who may continue a run (an approval pause only through its owning service), that rows written before run history recorded its trigger were not backfilled, and that a finished run's bounded step log keeps its per-node detail across a restart; three bridge debug lines say what each bridge provides. The bulk-intent guidance, the degraded-connector dispatch error and retry lines, the user-less `runAs` warning and refusal, the unclaimed-branch warning, the script-function and node-config refusals and the `sys_flow_dispatch` description drop their citations.
+  - `@objectstack/plugin-audit`: the `sys_activity` `type` help, whose English text all four shipped locale bundles carry, says the vocabulary is open by decision, not a gap awaiting enforcement.
+  
+  Text only: no status, error code, field, route or control flow moves. A client or log filter that matches the old text (for example a tracker-number suffix) needs the new spelling.
+- a4f0cb0: fix(service-automation): a flow's `get_record` node that reads the stored-metadata tables is served what the generic data door serves (#21519)
+  
+  Clause-②: no
+  
+  The two stored-metadata tables (the current metadata bodies and their version history) hold each body as stored, credential material included, and a content hash computed over it. The generic data door serves such a row with the body as its type's read projection, with the stored credential material withheld, and the hash in keyed form. A flow's `get_record` node read the same rows and served them as stored, under either run identity (`runAs: 'system'` and `runAs: 'user'`). What it read went into the run's declared output, which the flow's caller is handed back, and into any record the flow wrote from it.
+  
+  **What changes.** When the node reads either table, its answer now takes the data door's form, for one row (`findOne`, no `limit`) and for a row list (`find`, `limit` above 1). The body is projected, and the content hash is keyed under the same key the data door uses. That key is the crypto provider's, read from the data engine when the node runs, or the process-scoped ephemeral key when no provider is registered. So the hash a flow is served equals the hash the data door serves for the same row. A record the flow writes from what it read can therefore carry only the projected body and the keyed hash. A `fields` projection that names the body column without the type column reads the type beside it and drops it again, as on the data door.
+  
+  **What does not change.** Every other object is read exactly as before. The node's other config keys (`filter`, `limit`, `outputVariable`) and the write nodes behave as before. The node consumes the data door's own functions from `@objectstack/metadata-protocol` (`storedMetadataBodyProjection`, `redactStoredMetadataRows`, `serveStoredMetadataHashColumnRows`, `ephemeralStoredHashDigest`) and keeps no copy of them. `@objectstack/service-automation` now depends on `@objectstack/metadata-protocol`. A composition that runs flows on `ObjectQLPlugin`, as `os dev` and `os serve` do, already loaded that package.
+- 96b0e31: fix(service-automation): a flow's `get_record` node refuses a filter that evaluates the stored-metadata tables' body or content hash, as the generic data door does (#21623)
+  
+  Clause-②: no
+  
+  The two stored-metadata tables (the current metadata bodies and their version history) hold each body as stored, credential material included, and content-hash columns computed over it. A flow's `get_record` node now serves those rows projected and keyed, but it still ran its `filter` against the stored values as written, under either run identity (`runAs: 'system'` and `runAs: 'user'`). A filter over the body column or a content-hash column was evaluated row by row, so whether a row came back answered the filter: a predicate over the withheld values. The generic data door refuses those filters before its query runs.
+  
+  **What changes.** When the node reads either table, it judges its filter the way the data door judges the same filter, before the data engine is asked, on both branches (one row, and a row list when `limit` is above 1). The columns the filter reads are collected after interpolation, so a condition that a `{token}` supplies is judged too. A filter that reads the body column, or a content-hash column (the history table's parent hash and change note included), refuses the node with the data door's own message and error code, `INVALID_FIELD`. The refusal is a guard failure: the run fails, nothing downstream of the node runs, and a `fault` edge does not route it. A `try_catch` catch region reads the code on `{$error.code}`. To read a stored-metadata row from a flow, filter by `name`, `type`, `state` or another scalar column.
+  
+  **What does not change.** A filter over scalar columns is served as before: the body projected and the hash keyed. Every other object is filtered and read exactly as before, including columns that share these names. The write nodes are unchanged. The node consumes the data door's own functions from `@objectstack/metadata-protocol` (`collectStoredMetadataFilterFields`, `storedMetadataBodyPredicateRefusal`, `storedMetadataHashEvaluateRefusal`) and keeps no copy of them.
+- f40bb32: fix(service-automation): a flow's `create_record`, `update_record` and `delete_record` nodes refuse a stored-metadata table as their target (#21624)
+  
+  Clause-②: no
+  
+  The two stored-metadata tables (the current metadata bodies and their version history) have one writer for app-authored work: the metadata protocol, where a change is validated and its provenance is recorded. A flow's write nodes wrote those tables directly, outside it. Under `runAs: 'system'` the write ran elevated, so the security middleware never judged it; under `runAs: 'user'` only a composition with the security plugin refused it, as a routable runtime failure with no code. A write node's `filter` was also evaluated against the stored rows, so whether the write acted answered a predicate over the stored body.
+  
+  **What changes.** A `create_record`, `update_record` or `delete_record` node whose `objectName` is either table is refused before it resolves its filter or its field values and before any engine write, under either run identity. The refusal names the metadata API as the way to change metadata and carries the standard `PERMISSION_DENIED` code, the code the data door answers a non-platform principal's write to these tables with. It is a guard failure: the run fails, nothing downstream of the node runs, and a `fault` edge does not route it. A `try_catch` catch region reads the code on `{$error.code}`. Metadata is changed through the metadata API (`PUT /api/v1/meta/:type/:name`), never through a flow's data nodes.
+  
+  **What does not change.** Every other object is created, updated and deleted exactly as before. `get_record` keeps serving these tables projected and keyed.
+- 5ac2ba1: fix(service-automation): a flow write node's refusal of a stored-metadata table ends on the same prescription sentence as the save-time refusal (#21624)
+  
+  Clause-②: no
+  
+  A flow `create_record`, `update_record` or `delete_record` node aimed at a stored-metadata table is refused twice: at save by `FlowSchema`, and at run time by the node itself, for a definition the parse never judged. Both refusals tell the author where a metadata change goes instead, and until now they said it in two spellings of one sentence: the run-time refusal named the elevation as `runAs: 'system'`, the save-time one as `runAs`, a system context.
+  
+  **What changes.** The run-time refusal's message keeps its lead (the node type, what it would have done and the table, and that the write was not run) and now ends on `STORED_METADATA_BODY_PRESCRIPTION`, imported from `@objectstack/spec/kernel`: the one sentence the save-time refusal and the hook refusal also end on. Its elevation clause now reads "Elevation (`runAs`, a system context) does not change this."
+  
+  **What does not change.** Which writes are refused, the refusal's `PERMISSION_DENIED` code, its guard classification (a `fault` edge does not route it) and every other object's writes are exactly as before.
+- 73b2246: A flow saved through the metadata API is armed on the running engine at once, as hooks and actions saved through the same door already are
+  
+  Clause-②: no
+  
+  `PUT /api/v1/meta/flow/:name` answered `200 "Saved flow … (env-wide, state=active)"` and `GET /api/v1/meta/flow/:name` served the row, but the automation engine registered nothing until the process restarted: `GET /api/v1/automation/:name` and `POST /api/v1/automation/:name/trigger` answered `404 Flow not found`, and a record-triggered flow never fired. The engine armed flows only at boot, at `kernel:ready` and on `metadata:reloaded`, and only the publish doors announce that event.
+  
+  The automation service now listens to the metadata protocol's post-write signal (`onMetadataMutation`), the one ObjectQL already re-binds authored hooks and actions on, and makes the engine follow the stored row of each flow it names:
+  
+  - an active save or a publish registers the flow, or re-registers it over the definition the engine held;
+  - a save whose `status` is `'obsolete'` or `'invalid'` keeps it registered and unbound, as a boot does;
+  - a delete unregisters it;
+  - a draft save changes nothing until it is published.
+  
+  The flow is re-read through the same execution view, precedence and env-wide scope the boot reads, so a save never arms a flow beyond the reach a restart would give it. The save answers first, and the registration follows it by one read of the stored metadata.
+  
+  A publish raises this signal and `metadata:reloaded` together, and the published flow is still registered once, not twice. `PUT /api/v1/automation/:name`, which registers the flow before it saves it, is not registered a second time either.
+  
+  A run already executing keeps the definition it started with. A suspended run resumes against the definition registered when it resumes, and answers `RUN_NOT_FOUND` once its flow is deleted. Both already held for a re-registration through a publish or `PUT /api/v1/automation/:name`.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [0a0debb]
+- Updated dependencies [c98a72d]
+- Updated dependencies [48fa7a3]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [713b0fa]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1878ef9]
+- Updated dependencies [7aab759]
+- Updated dependencies [0e10be6]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [1fd5664]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [535d1d2]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [e9dec3d]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [2f837a5]
+- Updated dependencies [abe8f28]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [ce53218]
+- Updated dependencies [44defd4]
+- Updated dependencies [83b3d32]
+- Updated dependencies [6c5697d]
+- Updated dependencies [74281a8]
+- Updated dependencies [9a4182a]
+- Updated dependencies [550f4cc]
+- Updated dependencies [41b1333]
+- Updated dependencies [5dbcee8]
+- Updated dependencies [ec390ec]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [5d0e4e2]
+- Updated dependencies [e367002]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [7b07749]
+- Updated dependencies [eea82af]
+- Updated dependencies [a2aadab]
+- Updated dependencies [ced217c]
+- Updated dependencies [ff16740]
+- Updated dependencies [fe10172]
+- Updated dependencies [7fd2c34]
+- Updated dependencies [c43a8ae]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [cf60dbc]
+- Updated dependencies [a6a7547]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [b7a13c7]
+- Updated dependencies [045f764]
+- Updated dependencies [18c2ddc]
+- Updated dependencies [75ddcd1]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [a0176ef]
+- Updated dependencies [e1790fd]
+- Updated dependencies [e1790fd]
+- Updated dependencies [149153c]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [607463d]
+- Updated dependencies [18fe681]
+- Updated dependencies [3237b4a]
+- Updated dependencies [2e78046]
+- Updated dependencies [cab6396]
+- Updated dependencies [87712ab]
+- Updated dependencies [e864db5]
+- Updated dependencies [7665c54]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [e6dc7a2]
+- Updated dependencies [9cc2c79]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [753e7a1]
+- Updated dependencies [c9761cd]
+- Updated dependencies [c9761cd]
+- Updated dependencies [c9761cd]
+- Updated dependencies [c9761cd]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [f76c622]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [3c7785d]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/platform-objects@17.7.0
+  - @objectstack/metadata-protocol@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/formula@17.7.0
+  - @objectstack/metadata-core@17.7.0
+  - @objectstack/types@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

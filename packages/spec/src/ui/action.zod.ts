@@ -1033,8 +1033,6 @@ const actionObject = () => strictObject({
    * - `${param.X}` — value collected from the action's params dialog.
    * - `${ctx.X}` — values from the action context: `ctx.origin`
    *   (window.origin), `ctx.recordId`, `ctx.user.id`, `ctx.org.id`, etc.
-   * Used by redirect-style actions like `link_social`, where the target is
-   * e.g. `/api/v1/auth/sign-in/social?provider=${param.provider}&callbackURL=${ctx.origin}/_console/apps/account/sys_account`.
    * Renderers MUST `encodeURIComponent` interpolated values before
    * substituting them into URL query positions.
    */
@@ -1365,7 +1363,10 @@ const actionObject = () => strictObject({
    *
    * Liveness: the ledger row was `planned` until the console reader landed,
    * and it is `live` from the pin this repo builds against (`.objectui-sha` =
-   * `0abd4f9f8`, re-read there 2026-10-05:
+   * `a58626c88`, re-read there 2026-10-06:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
+   * At `0abd4f9f8`, re-read there 2026-10-05:
    * every objectui file this record cites is byte-identical across the hop from
    * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
    * At `9dfaca654`, re-read 2026-10-05: `core/src/actions/ActionRunner.ts` is

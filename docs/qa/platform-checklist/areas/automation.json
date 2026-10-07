@@ -945,6 +945,98 @@
       ]
     },
     {
+      "id": "automation.paused-run-trigger-record-masked",
+      "title": "A paused record-change run's stored state serves its trigger record masked — credential-class fields as the mask, internal fields absent — to a run-state reader, hot and after a cold boot",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin",
+        "a member granted read on sys_automation_run and nothing elevated"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a FILE-backed database (the cold-boot clause is structurally unreachable on the in-memory store — record the db path in the run env)",
+          "an object declaring one ordinary field, one password field, one secret field and one internal: true field, and an ACTIVE record-change flow on it (record-after-update) that pauses at a screen node and, after the resume, copies {record.<each field>} and {previous.<password field>} into a second object",
+          "a member persona whose permission set grants read on sys_automation_run (and on the echo object) but is not a platform admin"
+        ],
+        "knownGaps": [
+          "Stock showcase has the credential-class object (showcase_field_zoo carries f_password and f_secret) but no ACTIVE record-change flow on it that pauses: showcase_approver_bindings is draft on purpose. Author the fixture flow at runtime (and the member's permission set) or score the item from its pin, recording which the verdict rests on.",
+          "The pin reads every surface as the seeded admin. The mask is applied where the trigger record is built, so it does not depend on the reader, but the member-persona reads in steps 3 and 4 are this item's own clause: score them by hand, never from the pin."
+        ]
+      },
+      "steps": [
+        "boot showcase isolated against a file DB (dogfood §0); sign in as the dev admin",
+        "create a row of the fixture object with all three non-ordinary fields set (a password, a secret, an internal value), then PATCH its ordinary field and its password so the record-change flow fires and pauses",
+        "as the member persona, read the paused sys_automation_run row by id over GET /data/sys_automation_run/:id and parse variables_json and context_json",
+        "as the member persona, read GET /automation/:name/runs/:runId",
+        "resume the run (POST /automation/:name/runs/:runId/resume with the screen's required input) and read the echo row the post-pause node wrote",
+        "repeat the pause on a second row, stop the server process entirely, cold-boot a second server over the SAME database file, resume there, and read the echo row"
+      ],
+      "acceptance": [
+        {
+          "clause": "the paused row's variables_json and context_json serve record, $record and previous with the password and secret fields as the mask and the internal field absent, while the ordinary field reads its value",
+          "oracle": "api",
+          "verify": "parse both columns: record/previous password and secret = the SECRET_MASK constant (null where unset), the internal key absent, name = the written value; and no stored credential spelling (the plaintext password, a secret: handle, the internal value) appears anywhere in either column",
+          "evidence": "row read + parsed columns"
+        },
+        {
+          "clause": "GET /automation/:name/runs/:runId serves the same masked roots",
+          "oracle": "api",
+          "verify": "the run's variables.record and variables.previous carry the mask for both credential fields, omit the internal field, and keep the ordinary field's value; no stored credential spelling in the body",
+          "evidence": "response body"
+        },
+        {
+          "clause": "a node after the pause reads the mask off record and previous, and an ordinary field reads its value",
+          "oracle": "api",
+          "verify": "the echo row: seen_name = the written name; seen_password, seen_token and seen_previous_password = the mask",
+          "evidence": "echo row read"
+        },
+        {
+          "clause": "after a cold boot the rehydrated run resumes with the same masked record",
+          "oracle": "api",
+          "verify": "the echo row written by the SECOND process carries the mask for both credential fields and the ordinary field's value",
+          "evidence": "pre-restart run id + post-restart echo row read"
+        },
+        {
+          "clause": "the privileged read path is unchanged: the stored row still holds the credential and resolveSecretField still returns the secret's plaintext",
+          "oracle": "test",
+          "verify": "run the pin; its armed case reads the engine's write result (plaintext password, secret: handle, internal value) and its last case resolves the secret field to its plaintext",
+          "evidence": "pin output naming the revision"
+        }
+      ],
+      "negative": [
+        "a stored credential spelling anywhere in variables_json, context_json or the run read door — whichever persona reads it — is a FAIL: the run's trigger record is served on the generic read path's terms, so no run-state reader holds more than a read of the record would give it",
+        "a mask on an ORDINARY field, or on a variable that is not the trigger record, is a FAIL in the other direction: only the trigger record's credential-class and internal fields change"
+      ],
+      "traps": [
+        "wrong-persona",
+        "stale-dist",
+        "seed-data-thin"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "packages/qa/dogfood/test/flow-trigger-record-credential-mask.dogfood.test.ts"
+      },
+      "source": [
+        "packages/qa/dogfood/test/flow-trigger-record-credential-mask.dogfood.test.ts (the pin, hot and cold boot)",
+        "packages/triggers/trigger-record-change/src/record-change-trigger.ts#RecordChangeTrigger (buildContext projects record and previous through the write-response helper)",
+        "packages/core/src/utils/internal-write-response.ts#omitInternalFieldsFromWriteResponse (the one mask-and-omit helper)",
+        "docs/adr/0100-credential-field-channels.md (masked on every generic channel; plaintext only through a privileged dereference)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-06",
+          "change": "initial — the run-state path had no item reading a paused run's stored state as a non-privileged holder; adds it with the hot, cold-boot and privileged-path clauses",
+          "ref": "#21867"
+        }
+      ]
+    },
+    {
       "id": "automation.connector-dispatch-matrix",
       "title": "connector_action dispatches through every registered connector kind, and the registry feeds the designer pickers",
       "since": "v16",

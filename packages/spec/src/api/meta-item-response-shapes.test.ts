@@ -61,7 +61,7 @@ export type PlainCarriesNoLayers = Assert< Eq< 'effective' extends keyof GetMeta
 /** The document under `item` — irrelevant to these shapes, so kept trivial. */
 const CUSTOMER = { name: 'customer', label: 'Customer' };
 
-describe('#5950 GetMetaItemResponseSchema — the ADR-0010 protection envelope is declared', () => {
+describe('GetMetaItemResponseSchema — the ADR-0010 protection envelope is declared', () => {
   /**
    * The uncached branch's real body: `metadata-protocol`'s `getMetaItem`
    * return, spread onto the wire verbatim by `translateMetaEnvelope`.
@@ -132,7 +132,7 @@ describe('#5950 GetMetaItemResponseSchema — the ADR-0010 protection envelope i
   });
 });
 
-describe('#5882 GetMetaItemLayeredResponseSchema — the three-layer projection', () => {
+describe('GetMetaItemLayeredResponseSchema — the three-layer projection', () => {
   /** What `getMetaItemLayered` returns, and `GET /meta/:type/:name/layers` serves. */
   const LAYERED_BODY = {
     type: 'object',

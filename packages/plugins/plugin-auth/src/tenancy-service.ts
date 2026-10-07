@@ -139,8 +139,10 @@ export interface TenancyService {
    * (ADR-0093 D3). Returns `null` whenever a walled posture was REQUESTED — the
    * framework never guesses a target org there; invite / add-member / SSO JIT
    * own membership. Also `null` before an org exists (e.g. before the
-   * default-org bootstrap runs). Positive resolutions are memoized (the id is
-   * stable).
+   * default-org bootstrap runs). A positive resolution is memoized and checked
+   * against the store on every later call, one read by primary key: an
+   * organization deleted since is resolved again by the same rule, so a user
+   * is never bound to an organization that no longer exists.
    *
    * [#17010] The first ANSWERED call under a non-walled posture also takes the
    * organization census and reports at `error` when this deployment holds more
@@ -226,6 +228,31 @@ export async function resolveDefaultOrgId(engine: any): Promise<string | null> {
   const any = await findRows(engine, 'sys_organization', {}, 2);
   if (any.length === 1 && any[0]?.id) return String(any[0].id);
   return null;
+}
+
+/**
+ * Does the organization `id` still exist? One read of `sys_organization` by
+ * primary key.
+ *
+ * Answers `true` / `false` only when the store answered, and `null` when it
+ * did not: no engine, no `find`, a failed read, or a reply that is not a row
+ * list. Unlike {@link findRows}, a failed read is NOT folded into "no rows":
+ * the caller drops its memoized id on `false` alone, and a store that could not
+ * be asked has not said the organization is gone.
+ *
+ * A row counts only when its own `id` is the one asked about, so an engine
+ * that ignored the `where` cannot vouch for an organization it never returned.
+ */
+async function organizationExists(engine: any, id: string): Promise<boolean | null> {
+  if (!engine || typeof engine.find !== 'function') return null;
+  let rows: unknown;
+  try {
+    rows = await engine.find('sys_organization', { where: { id }, limit: 1 }, { context: SYSTEM_CTX });
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(rows)) return null;
+  return rows.some((row: any) => row?.id != null && String(row.id) === id);
 }
 
 /**
@@ -482,11 +509,31 @@ export function createTenancyService(deps: TenancyServiceDeps): TenancyService {
       // The census below is downstream of this line on purpose: a walled
       // deployment DECLARED its organizations and pays nothing here.
       if (postureEnforcesWall(requestedPosture)) return null;
-      if (cachedDefaultOrgId) return cachedDefaultOrgId;
       const engine = deps.getEngine?.();
+      if (cachedDefaultOrgId) {
+        // The memo is checked against the store on every call, never trusted
+        // for the life of the process. The default organization can be deleted
+        // and recreated under a new id in this process (the single-org
+        // bootstrap recreates a missing `slug='default'` organization on the
+        // next `sys_user` write), and under the `auto` policy a user's
+        // membership is decided once, at creation (ADR-0093 D7): a user bound
+        // to the deleted id is never repaired. One read by primary key; an
+        // existing organization returns here with no re-resolution.
+        //
+        // Only a `false` drops the memo. An unanswered read (`null`) is not
+        // evidence that the organization is gone, and dropping the memo on it
+        // would turn a store hiccup into a user bound to no organization at
+        // all, which nothing repairs either; the memo is then the last answer
+        // the store gave.
+        const stillExists = await organizationExists(engine, cachedDefaultOrgId);
+        if (stillExists !== false) return cachedDefaultOrgId;
+        // Gone: resolve again by the same rule that set the memo, so the
+        // replacement is the organization a fresh boot would pick.
+        cachedDefaultOrgId = null;
+      }
       const resolved = await resolveDefaultOrgId(engine);
-      // Memoize only a positive resolution — a null (org not bootstrapped yet)
-      // must re-resolve on the next call.
+      // Memoize only a positive resolution — a null (org not bootstrapped yet,
+      // or deleted and not yet recreated) must re-resolve on the next call.
       if (resolved) cachedDefaultOrgId = resolved;
       // [#17010] The organization census — one `count(sys_organization)`, once
       // per process, on the seam that was already reading this object.

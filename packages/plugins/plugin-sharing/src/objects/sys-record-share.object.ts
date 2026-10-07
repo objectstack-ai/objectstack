@@ -44,6 +44,19 @@ export const SysRecordShare = ObjectSchema.create({
   highlightFields: ['object_name', 'record_id', 'recipient_id', 'access_level', 'source'],
 
   listViews: {
+    // [#21972] Declared FIRST on purpose: a route that names no view opens the
+    // first declared list view, so a caller-scoped view (`granted_to_me`,
+    // `granted_by_me`) is never first. Setup's `nav_record_shares` names this
+    // view.
+    all_shares: {
+      type: 'grid',
+      name: 'all_shares',
+      label: 'All',
+      data: { provider: 'object', object: 'sys_record_share' },
+      columns: ['object_name', 'record_id', 'recipient_type', 'recipient_id', 'access_level', 'source', 'created_at'],
+      sort: [{ field: 'created_at', order: 'desc' }],
+      pagination: { pageSize: 100 },
+    },
     granted_to_me: {
       type: 'grid',
       name: 'granted_to_me',
@@ -98,15 +111,6 @@ export const SysRecordShare = ObjectSchema.create({
       filter: [{ field: 'source', operator: 'in', value: ['rule', 'team', 'inherited'] }],
       sort: [{ field: 'source_id', order: 'asc' }, { field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
-    },
-    all_shares: {
-      type: 'grid',
-      name: 'all_shares',
-      label: 'All',
-      data: { provider: 'object', object: 'sys_record_share' },
-      columns: ['object_name', 'record_id', 'recipient_type', 'recipient_id', 'access_level', 'source', 'created_at'],
-      sort: [{ field: 'created_at', order: 'desc' }],
-      pagination: { pageSize: 100 },
     },
   },
 

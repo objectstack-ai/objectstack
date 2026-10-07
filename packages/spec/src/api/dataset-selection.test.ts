@@ -83,7 +83,7 @@ const SHARED_WITH_ANALYTICS_QUERY = [
 
 const DATASET_ONLY = ['runtimeFilter', 'dateGranularity', 'compareTo', 'totals'] as const;
 
-describe('#17551 §1 — a transcription of published text, not a new contract', () => {
+describe('§1 — a transcription of published text, not a new contract', () => {
   it('the seven shared members ARE `AnalyticsQuery`’s declarations, by identity', () => {
     const selection = DatasetSelectionSchema.shape as Record<string, unknown>;
     const query = AnalyticsQuerySchema.shape as Record<string, unknown>;
@@ -126,7 +126,7 @@ describe('#17551 §1 — a transcription of published text, not a new contract',
 // §2 — ⭐ #17550's case: an unrecognised `compareTo.kind`
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('#17550 §2 — `compareTo: { kind: … }` outside the closed pair is refused, with a remedy', () => {
+describe('§2 — `compareTo: { kind: … }` outside the closed pair is refused, with a remedy', () => {
   it('the card’s own specimen is refused', () => {
     const text = refusalText({ measures: ['revenue'], compareTo: { kind: 'nonsense' } });
     // ① what arrived — so the caller can find it in the body they sent.
@@ -191,7 +191,7 @@ describe('#17550 §2 — `compareTo: { kind: … }` outside the closed pair is r
 // §3 — the other three undoored members, both directions each
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('#17551 §3 — `runtimeFilter` / `dateGranularity` / `totals`', () => {
+describe('§3 — `runtimeFilter` / `dateGranularity` / `totals`', () => {
   it('`dateGranularity` outside the closed vocabulary is refused; every member of it passes', () => {
     expect(refusalText({ measures: ['revenue'], dateGranularity: 'fortnight' }))
       .toMatch(/fortnight|Invalid option/);
@@ -240,7 +240,7 @@ describe('#17551 §3 — `runtimeFilter` / `dateGranularity` / `totals`', () => 
 // §4 — an unknown key is named, echoed and pointed somewhere
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('#17551 §4 — the selection is `.strict()`, like every other analytics door', () => {
+describe('§4 — the selection is `.strict()`, like every other analytics door', () => {
   it('names the surface, echoes the key, and carries the history', () => {
     const text = refusalText({ measures: ['revenue'], totaIs: { groupings: [[]] } });
     expect(text).toContain('Unrecognized key(s) on this dataset selection');
@@ -264,7 +264,7 @@ describe('#17551 §4 — the selection is `.strict()`, like every other analytic
 // §5 — ⭐ the negative side: the whole shape still passes, unchanged
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('#17551 §5 — a valid selection still passes, and the parse adds nothing', () => {
+describe('§5 — a valid selection still passes, and the parse adds nothing', () => {
   it('the fully-loaded eleven-member selection parses', () => {
     const parsed = DatasetSelectionSchema.safeParse(FULLY_LOADED);
     expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues)).toBe(true);

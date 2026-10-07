@@ -72,14 +72,15 @@ const allPages = (Object.values(pages) as unknown[]).filter(
 ) as Record<string, unknown>[];
 
 describe('Project detail — tab tokens are authored under the declared `value` (#5776)', () => {
-  it('gives both tabs a stable `?tab=` token under `value`', () => {
+  it('gives every tab a stable `?tab=` token under `value`', () => {
     const [tabs, ...rest] = tabsComponents(ProjectDetailPage as unknown as Record<string, unknown>);
     expect(tabs, 'the project-detail page must carry a page:tabs component').toBeTruthy();
     expect(rest, 'exactly one tab strip on this page').toHaveLength(0);
 
     const items = tabItems(tabs);
-    expect(items).toHaveLength(2);
-    expect(items.map((it) => it.value)).toEqual(['details', 'tasks']);
+    // `related` hosts the Tasks related list (record-action-location-hosts.test.ts).
+    expect(items).toHaveLength(3);
+    expect(items.map((it) => it.value)).toEqual(['details', 'tasks', 'related']);
     for (const item of items) {
       expect(item, `tab "${String(item.label)}" must not carry the undeclared \`key\``).not.toHaveProperty('key');
     }
@@ -92,7 +93,7 @@ describe('Project detail — tab tokens are authored under the declared `value` 
     // `value`.
     const tabs = tabsComponents(ProjectDetailPage as unknown as Record<string, unknown>)[0]!;
     const parsed = PageTabsProps.parse(tabs.properties);
-    expect(parsed.items.map((it) => it.value)).toEqual(['details', 'tasks']);
+    expect(parsed.items.map((it) => it.value)).toEqual(['details', 'tasks', 'related']);
   });
 
   it('leaves no near-miss token spelling on any tab item in the showcase corpus', () => {

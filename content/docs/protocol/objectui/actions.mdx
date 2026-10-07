@@ -94,10 +94,15 @@ label: View Dashboard
 type: url
 target: /_console/dashboards/sales_overview
 
-name: link_social
-label: Connect Account
+name: open_in_maps
+label: Open in Maps
 type: url
-target: '/api/v1/auth/sign-in/social?provider=${param.provider}&callbackURL=${ctx.origin}/_console/apps/account/sys_account'
+target: 'https://www.google.com/maps/search/?api=1&query=${param.address}'
+params:
+  - name: address
+    label: Address
+    type: text
+    required: true
 ```
 
 For a **static** url, `openIn: 'new-tab'` opens `target` in a new tab and `openIn: 'self'` navigates in place; omitted, absolute URLs open in a new tab and relative ones navigate in place. For an **async handler that redirects**, set `opensInNewTab: true` instead (the renderer pre-opens the tab synchronously so popup blockers don't fire); `newTabUrl` provides a zero-roundtrip new-tab target template supporting the `{recordId}` placeholder.

@@ -64,7 +64,7 @@ const reportWithScalarBlock: Report = { name: 'r', label: 'R', type: 'joined', b
 const parsedScalarBlock: ParsedBlock = 42;
 void [fromUnknown, scalar, undeclaredKey, retiredChart, nestedJoined, reportWithScalarBlock, parsedScalarBlock];
 
-describe('[#19920] JoinedReportBlock is a joined-report block, not unknown', () => {
+describe('JoinedReportBlock is a joined-report block, not unknown', () => {
   it('each block typed as JoinedReportBlock parses at the block door', () => {
     for (const block of [openBlock, listBlock]) {
       expect(JoinedReportBlockSchema.safeParse(block).success).toBe(true);

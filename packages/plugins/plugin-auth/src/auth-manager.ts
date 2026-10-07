@@ -30,6 +30,14 @@ import {
   type VerificationDeclarant,
 } from './audience-posture.js';
 import { shouldStampOwnerVerifiedAtCreation } from './walled-owner-operator-stamp.js';
+import {
+  PLATFORM_IDP_PROVIDER_ID,
+  clearUnlinkTombstone,
+  clearUserUnlinkTombstones,
+  recordUnlinkTombstone,
+  type LinkingAuthContext,
+  refuseImplicitAccountLink,
+} from './implicit-account-linking.js';
 import type { IDataEngine } from '@objectstack/core';
 // [#10348] The ONE id-shaped platform-admin predicate (ADR-0068 D2).
 // `auth-manager` used to re-derive that standing itself, in two spellings
@@ -49,7 +57,7 @@ import {
 } from '@objectstack/spec';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
-import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
+import { createObjectQLAdapterFactory, withSystemContext, withSystemReadContext } from './objectql-adapter.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
 import {
@@ -1267,6 +1275,28 @@ async function smsQuotaExceededApiError(message: string): Promise<Error> {
   return new APIError(SMS_QUOTA_EXCEEDED_CODE, { message });
 }
 
+/**
+ * [#21941] The organization slug guard's answer when one of its own reads
+ * cannot answer: `503 SERVICE_UNAVAILABLE`, the existing ADR-0112 code for a
+ * store that is temporarily down.
+ *
+ * Not the guard's `403 FORBIDDEN`: a read that could not answer is not a
+ * verdict about the slug change, so it must not wear the refusal's words — and
+ * never "allowed", which is what swallowing the fault used to answer. The
+ * driver's own failure rides `cause`, so its diagnostic is not lost.
+ */
+async function slugGuardReadFaultApiError(object: string, cause: unknown): Promise<Error> {
+  const { APIError } = await import('better-auth/api');
+  const err = new APIError('SERVICE_UNAVAILABLE', {
+    message:
+      `The organization slug guard could not read \`${object}\`, so whether an active environment ` +
+      `still references this organization was never determined, and the slug was not changed. ` +
+      `This is a server-side outage, not a refusal of the new slug: retry once the data store is reachable.`,
+  });
+  (err as { cause?: unknown }).cause = cause;
+  return err;
+}
+
 export class AuthManager {
   private auth: Auth<any> | null = null;
   /**
@@ -1590,47 +1620,64 @@ export class AuthManager {
         // by vendor construction. One seam, one owner — see
         // `audience-posture.ts` for the decision semantics, the pinned
         // domain-matching rules, and the creation-class table.
-        validateUserInfo: (data: any, ctx: any) => this.validateAudienceAdmission(data, ctx),
+        //
+        // The same seam also carries the implicit-account-linking gate: the
+        // vendor calls it with `action: 'link-account'` right before an
+        // implicit link is written — see `implicit-account-linking.ts`. The
+        // audience gate judges only `create-user`, so the two never answer
+        // the same call.
+        validateUserInfo: async (data: any, ctx: any) =>
+          (await refuseImplicitAccountLink(data, ctx, {
+            requireLocalEmailVerified: this.implicitLinkRequiresLocalEmailVerified(),
+            resolveContext: () => this.linkingContext(),
+            logInfo: (m, meta) => this.config.logger?.info?.(m, meta),
+          })) ?? this.validateAudienceAdmission(data, ctx),
       },
       account: {
         ...AUTH_ACCOUNT_CONFIG,
-        // Allow OIDC/OAuth callbacks to implicitly link the incoming
-        // identity to a pre-existing local user when the emails match.
-        //
-        // ObjectStack's platform SSO ("objectstack-cloud" provider) is the
-        // canonical case: cloud is the IdP for every project, so a user
-        // arriving via SSO is — by construction — the same person who was
-        // auto-seeded as the project owner when the project was created.
-        // Without trusting the provider, better-auth's safety check rejects
-        // the link with `error=account_not_linked` because the seeded user
-        // row has `emailVerified=false` (no actual verification ever runs
-        // in the IdP-mediated flow). See packages/plugins/plugin-auth/
-        // node_modules/better-auth/dist/oauth2/link-account.mjs:22.
+        // Implicit account linking: an OAuth / OIDC / SSO sign-in whose
+        // identity is not linked yet, but whose email matches an existing
+        // local user, links to that user. The rules — every provider needs a
+        // VERIFIED local row, except the platform's own cloud IdP
+        // (`PLATFORM_IDP_PROVIDER_ID`, whose owner-seeded rows are born
+        // `emailVerified=false`), and a user's unlink is honoured — are
+        // enforced in `refuseImplicitAccountLink` (the `validateUserInfo`
+        // seam above). Why there, and why the vendor flag below is pinned
+        // `false` by default: `implicit-account-linking.ts`, module header.
         //
         // Custom-deployment consumers can extend the trusted set via
         // `config.account.accountLinking.trustedProviders`; we always
         // include `objectstack-cloud` because it is the platform IdP.
+        // Trust relaxes only the IdP-side `email_verified` clause; it never
+        // relaxes the local-verification requirement.
         accountLinking: {
           enabled: true,
-          // better-auth's account-linking gate has TWO independent clauses
-          // (see link-account.mjs:22). Trusting the provider only satisfies
-          // the first clause; the second — `requireLocalEmailVerified &&
-          // !dbUser.user.emailVerified` — still blocks linking when the
-          // pre-existing local user row has `emailVerified=false` (the
-          // default for owner-seeded rows). Disabling the local-email gate
-          // is safe here because the OAuth side is what we actually trust:
-          // the incoming identity was verified by the IdP. Consumers who
-          // need the stricter behavior can override via config.
-          requireLocalEmailVerified: false,
           ...((this.config as any)?.account?.accountLinking ?? {}),
+          // better-auth's flag is ONE global boolean with no per-provider
+          // form, so it cannot carry the cloud exception: `true` would refuse
+          // the cloud owner row before our gate runs. It is therefore `false`
+          // unless the operator explicitly asked for the strict form for
+          // EVERY provider (`true`), and the requirement itself is enforced
+          // by our gate (`implicitLinkRequiresLocalEmailVerified`).
+          requireLocalEmailVerified:
+            (this.config as any)?.account?.accountLinking?.requireLocalEmailVerified === true,
           trustedProviders: Array.from(new Set([
-            'objectstack-cloud',
+            PLATFORM_IDP_PROVIDER_ID,
             ...((this.config as any)?.account?.accountLinking?.trustedProviders ?? []),
           ])),
         },
       },
       verification: {
         ...AUTH_VERIFICATION_CONFIG,
+        // A host `secondaryStorage` would otherwise make the cache the ONLY
+        // home of every verification value (better-auth drops the
+        // `verification` model from the schema), and the implicit-linking
+        // unlink records (`implicit-account-linking.ts`) must be durable: an
+        // evicted record re-opens implicit re-linking without a sound. With
+        // `storeInDatabase` every verification value is a `sys_verification`
+        // row — exactly what it is when no `secondaryStorage` is configured,
+        // ObjectStack's default — and the cache only fronts it.
+        ...(this.config.secondaryStorage ? { storeInDatabase: true } : {}),
       },
 
       // Social / OAuth providers
@@ -3309,8 +3356,36 @@ export class AuthManager {
             const orgId = member?.organizationId;
             if (!newSlug || !orgId) return;
 
-            const dataEngine = this.config.dataEngine as any;
-            if (!dataEngine) return;
+            // [#21941] The guard reads only what this composition registers,
+            // and FAILS CLOSED when a registered read cannot answer.
+            //
+            //  - NO DATA ENGINE ⇒ the guard does not apply. Only a standalone
+            //    `AuthManager` lacks one (`AuthPlugin` declares ObjectQL a hard
+            //    dependency), and it then runs on better-auth's in-memory store:
+            //    no engine registers `sys_environment`, so no environment can
+            //    reference the organization.
+            //  - `sys_environment` NOT REGISTERED ⇒ the guard does not apply,
+            //    for the same reason, and nothing is read. It is a cloud-provided
+            //    object (`CLOUD_PROVIDED_OBJECT_NAMES`), so this is the
+            //    open-source composition's answer. The question is the
+            //    registry's own (`getSchema`), never a caught throw; an engine
+            //    that cannot be asked reads as before — it is asked, and a fault
+            //    refuses.
+            //  - A REGISTERED READ THAT THROWS ⇒ refused, `503
+            //    SERVICE_UNAVAILABLE` (`slugGuardReadFaultApiError`). It used to
+            //    end the hook without refusing, which let the slug change through
+            //    whenever either read faulted.
+            const rawEngine = this.config.dataEngine;
+            if (!rawEngine) return;
+            const schemaOf = (rawEngine as { getSchema?: (object: string) => unknown }).getSchema;
+            if (typeof schemaOf === 'function' && !schemaOf.call(rawEngine, 'sys_environment')) return;
+
+            // Both reads run as the platform (`withSystemContext`): this hook
+            // IS the slug guard — the organization id is the `where`, not the
+            // reader — so neither read reaches the engine with no principal
+            // and no opt-in (the security middleware's principal-less
+            // hand-off, ADR-0096).
+            const dataEngine = withSystemContext(rawEngine) as any;
 
             let currentSlug: string | undefined;
             try {
@@ -3318,8 +3393,8 @@ export class AuthManager {
                 where: { id: orgId },
               });
               currentSlug = current?.slug;
-            } catch {
-              return;
+            } catch (err) {
+              throw await slugGuardReadFaultApiError('sys_organization', err);
             }
             if (!currentSlug || currentSlug === newSlug) return;
 
@@ -3331,8 +3406,8 @@ export class AuthManager {
               activeEnvs = (envs ?? []).filter(
                 (e: any) => e?.status !== 'archived' && e?.status !== 'failed',
               ).length;
-            } catch {
-              return;
+            } catch (err) {
+              throw await slugGuardReadFaultApiError('sys_environment', err);
             }
 
             if (activeEnvs > 0) {
@@ -4522,6 +4597,31 @@ export class AuthManager {
       | undefined;
     if (logger?.error) logger.error(message, meta);
     else logger?.warn?.(message, meta);
+  }
+
+  /**
+   * The effective local-verification requirement for an implicit account
+   * link — `true` unless the operator explicitly set
+   * `account.accountLinking.requireLocalEmailVerified: false`. See
+   * `implicit-account-linking.ts` for the rules and the operator override.
+   */
+  private implicitLinkRequiresLocalEmailVerified(): boolean {
+    return (this.config as any)?.account?.accountLinking?.requireLocalEmailVerified !== false;
+  }
+
+  /**
+   * better-auth's auth context read off the auth instance — the store for the
+   * implicit-linking hooks when a call carries no endpoint context (a
+   * server-side `auth.api.*` call or an internal-adapter write).
+   */
+  private async linkingContext(): Promise<LinkingAuthContext | undefined> {
+    try {
+      const auth: any = await this.getOrCreateAuth();
+      const context = await auth?.$context;
+      return context?.adapter && context?.internalAdapter ? (context as LinkingAuthContext) : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /** OAuth providerIds that are OPERATOR-REGISTERED identity authorities (enterprise `oidcProviders`, incl. the cloud platform IdP). */
@@ -7376,7 +7476,27 @@ export class AuthManager {
   private composeDatabaseHooks(
     host?: BetterAuthOptions['databaseHooks'],
   ): BetterAuthOptions['databaseHooks'] {
-    const stamp = (account: any, ctx: any) => this.stampIdentitySource(account, ctx);
+    // A landed link ends a standing unlink record (implicit-account-linking.ts,
+    // rule 3). While the record stands an implicit link is refused, so a link
+    // that lands here is an explicit one. Failure to clear is functional (the
+    // user sees a refusal on their next implicit sign-in and can re-link), so
+    // it is reported at `warn` and never fails the link. It runs FIRST, ahead
+    // of the identity-source stamp, so a stamp failure can never leave a
+    // landed link still refused.
+    const resolveLinkingAdapter = () => this.linkingContext();
+    const clearUnlink = async (account: any, ctx: any) => {
+      try {
+        await clearUnlinkTombstone(account, ctx, resolveLinkingAdapter);
+      } catch (e) {
+        this.config.logger?.warn?.('[auth] could not clear the unlink record after a link', {
+          error: (e as Error)?.message,
+        });
+      }
+    };
+    const stamp = async (account: any, ctx: any) => {
+      await clearUnlink(account, ctx);
+      await this.stampIdentitySource(account, ctx);
+    };
     const hostAccountAfter = (host as any)?.account?.create?.after;
     const after = hostAccountAfter
       ? async (account: any, ctx: any) => {
@@ -7384,6 +7504,53 @@ export class AuthManager {
           return hostAccountAfter(account, ctx);
         }
       : stamp;
+
+    // A user's unlink is recorded so the provider cannot re-link implicitly
+    // (implicit-account-linking.ts, rule 3) — BEFORE the account row goes, so
+    // that a record which cannot be written aborts the unlink: a throw from a
+    // `delete.before` hook propagates out of better-auth's delete, the unlink
+    // answers an error and the identity stays linked. Fail closed: an unlink
+    // that answered success without its record would leave the provider free
+    // to re-link on the next sign-in. Reported at `error`, once per refusal.
+    // A host `delete.before` runs first; its `false` (abort) is honoured
+    // before anything is recorded.
+    const hostAccountDeleteBefore = (host as any)?.account?.delete?.before;
+    const accountDeleteBefore = async (account: any, ctx: any) => {
+      const result = hostAccountDeleteBefore ? await hostAccountDeleteBefore(account, ctx) : undefined;
+      if (result === false) return false;
+      try {
+        await recordUnlinkTombstone(account, ctx, resolveLinkingAdapter);
+      } catch (e) {
+        this.audienceLogError(
+          '[auth] unlink refused: its record could not be written, so the provider stays linked. ' +
+            'Without the record the provider could re-link this account implicitly on its next sign-in. ' +
+            'Check the auth store (sys_verification) is writable, then unlink again.',
+          { providerId: account?.providerId, error: (e as Error)?.message },
+        );
+        throw e;
+      }
+      return result;
+    };
+
+    // A deleted user leaves no unlink record behind (implicit-account-linking.ts).
+    // A record that outlives its user is inert — a new user never has the
+    // deleted user's id — so a failure is reported at `warn` and never fails
+    // the deletion.
+    const clearUserUnlinks = async (user: any, ctx: any) => {
+      try {
+        await clearUserUnlinkTombstones(user, ctx, resolveLinkingAdapter);
+      } catch (e) {
+        this.config.logger?.warn?.('[auth] could not clear the unlink record of a deleted user', {
+          error: (e as Error)?.message,
+        });
+      }
+    };
+    const hostUserDeleteAfter = (host as any)?.user?.delete?.after;
+    const userDeleteAfter = async (user: any, ctx: any) => {
+      const result = hostUserDeleteAfter ? await hostUserDeleteAfter(user, ctx) : undefined;
+      await clearUserUnlinks(user, ctx);
+      return result;
+    };
 
     // ADR-0093 D9 — default active-org on session create. Without it, a user
     // with memberships logs in with `activeOrganizationId = null`: better-auth
@@ -7599,6 +7766,10 @@ export class AuthManager {
           ...((host as any)?.account?.create ?? {}),
           after,
         },
+        delete: {
+          ...((host as any)?.account?.delete ?? {}),
+          before: accountDeleteBefore,
+        },
       },
       user: {
         ...((host as any)?.user ?? {}),
@@ -7606,6 +7777,10 @@ export class AuthManager {
           ...((host as any)?.user?.create ?? {}),
           before: userBefore,
           after: userAfter,
+        },
+        delete: {
+          ...((host as any)?.user?.delete ?? {}),
+          after: userDeleteAfter,
         },
       },
       session: {

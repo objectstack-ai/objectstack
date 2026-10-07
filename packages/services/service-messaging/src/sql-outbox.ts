@@ -14,7 +14,12 @@ import type {
 } from './outbox.js';
 import { hashPartition } from './backoff.js';
 import { toEpochMs } from './audit-timestamp.js';
-import { dispatcherAckCasOptions, dispatcherSweepOptions } from './outbox-dispatcher-scope.js';
+import {
+    DISPATCHER_SYSTEM_CONTEXT,
+    OUTBOX_SYSTEM_CONTEXT,
+    dispatcherAckCasOptions,
+    dispatcherSweepOptions,
+} from './outbox-dispatcher-scope.js';
 import {
     NotificationAckError,
     notificationAckLostClaimMessage,
@@ -92,7 +97,13 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             recipient_id: input.recipientId,
             channel: input.channel,
         };
-        const existing = await this.engine.findOne(this.objectName, { where: dedup, fields: ['id'] });
+        // The explicit system opt-in on every call of the producer side — see
+        // OUTBOX_SYSTEM_CONTEXT.
+        const existing = await this.engine.findOne(
+            this.objectName,
+            { where: dedup, fields: ['id'] },
+            { context: OUTBOX_SYSTEM_CONTEXT },
+        );
         if (existing?.id) return String(existing.id);
 
         const id = randomUUID();
@@ -120,11 +131,15 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             updated_at: now,
         };
         try {
-            await this.engine.insert(this.objectName, row);
+            await this.engine.insert(this.objectName, row, { context: OUTBOX_SYSTEM_CONTEXT });
             return id;
         } catch (err) {
             // Unique-index collision (dedup race) → return the winner.
-            const winner = await this.engine.findOne(this.objectName, { where: dedup, fields: ['id'] });
+            const winner = await this.engine.findOne(
+                this.objectName,
+                { where: dedup, fields: ['id'] },
+                { context: OUTBOX_SYSTEM_CONTEXT },
+            );
             if (winner?.id) return String(winner.id);
             throw err;
         }
@@ -153,7 +168,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             },
             fields: ['id'],
             limit: opts.limit,
-        });
+        }, { context: DISPATCHER_SYSTEM_CONTEXT });
         if (!candidates.length) return [];
         const ids = (candidates as Array<{ id: string }>).map((c) => c.id);
 
@@ -163,7 +178,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             { status: 'in_flight', claimed_by: opts.nodeId, claimed_at: now },
             // Environment-wide by design: the dispatcher drains every
             // organization's queue. Warrant in `outbox-dispatcher-scope.ts`.
-            dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }),
+            { ...dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }), context: DISPATCHER_SYSTEM_CONTEXT },
         );
 
         // 4. Read back only the rows we own. [commit d9cf78eaa] The read-back WHERE just
@@ -172,7 +187,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         //    cast, and states nothing the query did not already establish.
         const claimed = (await this.engine.find(this.objectName, {
             where: { id: { $in: ids }, claimed_by: opts.nodeId, claimed_at: now, status: 'in_flight' },
-        })) as DeliveryRow[];
+        }, { context: DISPATCHER_SYSTEM_CONTEXT })) as DeliveryRow[];
         return claimed.map((r) => ({ ...this.toRecord(r), claimedBy: opts.nodeId, claimedAt: now }));
     }
 
@@ -194,7 +209,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             },
             fields: ['id'],
             limit: 10000,
-        });
+        }, { context: DISPATCHER_SYSTEM_CONTEXT });
         if (!candidates.length) return [];
         const ids = (candidates as Array<{ id: string }>).map((c) => c.id);
 
@@ -204,13 +219,13 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             { status: 'in_flight', claimed_by: opts.nodeId, claimed_at: now },
             // Environment-wide by design: the dispatcher drains every
             // organization's queue. Warrant in `outbox-dispatcher-scope.ts`.
-            dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }),
+            { ...dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }), context: DISPATCHER_SYSTEM_CONTEXT },
         );
 
         // 4. Read back the rows we own — same credential stamp as claim().
         const claimed = (await this.engine.find(this.objectName, {
             where: { id: { $in: ids }, claimed_by: opts.nodeId, claimed_at: now, status: 'in_flight' },
-        })) as DeliveryRow[];
+        }, { context: DISPATCHER_SYSTEM_CONTEXT })) as DeliveryRow[];
         return claimed.map((r) => ({ ...this.toRecord(r), claimedBy: opts.nodeId, claimedAt: now }));
     }
 
@@ -222,10 +237,12 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         if (typeof claimed.claimedBy !== 'string' || typeof claimed.claimedAt !== 'number') {
             throw new NotificationAckError(notificationAckNoCredentialMessage(id), 'DELIVERY_NOT_ELIGIBLE');
         }
+        // Every call of the ack carries the dispatcher's opt-in — see
+        // DISPATCHER_SYSTEM_CONTEXT.
         const current = (await this.engine.findOne(this.objectName, {
             where: { id },
             fields: ['status', 'attempts', 'claimed_by', 'claimed_at'],
-        })) as {
+        }, { context: DISPATCHER_SYSTEM_CONTEXT })) as {
             status?: DeliveryStatus;
             attempts?: number;
             claimed_by?: string | null;
@@ -306,7 +323,10 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             // Predicate write (`updateMany`), audited under that op. Declared a
             // global-sweep site — no request context exists on the tick that
             // reaches here. Warrant in `outbox-dispatcher-scope.ts`.
-            dispatcherAckCasOptions(id, 'in_flight', claimed.claimedBy, claimed.claimedAt) as any,
+            {
+                ...dispatcherAckCasOptions(id, 'in_flight', claimed.claimedBy, claimed.claimedAt),
+                context: DISPATCHER_SYSTEM_CONTEXT,
+            } as any,
         );
 
         // Did the conditional write land? `IDataEngine.update` declares its
@@ -322,7 +342,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         const after = (await this.engine.findOne(this.objectName, {
             where: { id },
             fields: ['status', 'attempts'],
-        })) as { status?: DeliveryStatus; attempts?: number } | null;
+        }, { context: DISPATCHER_SYSTEM_CONTEXT })) as { status?: DeliveryStatus; attempts?: number } | null;
         if (!after || after.status !== status || (after.attempts ?? 0) !== attempts) {
             throw new NotificationAckError(
                 notificationAckLostClaimMessage(id, after?.status ?? 'unknown'),
@@ -342,7 +362,10 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             { status: 'pending', claimed_by: null, claimed_at: null },
             // Environment-wide by design: recovers rows a crashed node abandoned,
             // for every organization. Warrant in `outbox-dispatcher-scope.ts`.
-            dispatcherSweepOptions({ status: 'in_flight', claimed_at: { $lt: now - claimTtlMs } }),
+            {
+                ...dispatcherSweepOptions({ status: 'in_flight', claimed_at: { $lt: now - claimTtlMs } }),
+                context: DISPATCHER_SYSTEM_CONTEXT,
+            },
         );
     }
 
@@ -350,7 +373,11 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         const where: Record<string, unknown> = {};
         if (filter?.status) where.status = filter.status;
         if (filter?.notificationId) where.notification_id = filter.notificationId;
-        const rows = (await this.engine.find(this.objectName, { where })) as DeliveryRow[];
+        const rows = (await this.engine.find(
+            this.objectName,
+            { where },
+            { context: OUTBOX_SYSTEM_CONTEXT },
+        )) as DeliveryRow[];
         return rows.map((r) => this.toRecord(r));
     }
 

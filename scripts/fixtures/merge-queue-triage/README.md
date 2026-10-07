@@ -13,6 +13,9 @@ extractor.
 | `plugin-dev-timeout.job-log.txt` | Real vitest 4.1.10 output, captured 2026-08-20 in this repo. `packages/plugins/plugin-dev/src/dev-plugin-security-enforcement-warning.test.ts` at revision `7552e03375` (pre-#10120), unbuilt dependency closure, `vitest run --testTimeout=1`. |
 | `plugin-dev-assertion.job-log.txt` | The same file, same revision, same unbuilt closure, no timeout override -- the exact condition #10112 measured, reproducing `AssertionError: start() published the service: expected false to be true` verbatim. |
 | `incident-32333709633-published-excerpt.job-log.txt` | Verbatim from the triage comment the bot **posted** on PR #10008 for queue build `32333709633` (comment `5351634659`), read back through the API. This is what a human actually saw during the 2026-08-20 incident. |
+| `run-37374282440.jobs.json` | The CI queue build that ejected PR #21872 on 2026-10-05 with nothing failing, read back through `GET /repos/{owner}/{repo}/actions/runs/37374282440/jobs?filter=all` on 2026-10-06 and trimmed to the fields the script reads (id, names, urls, status, conclusion, runner id/name, step name/status/conclusion/number). `Test Core (5/6)` is `cancelled` with `runner_name: ""` and no steps; `Test Core` fails only in `Verify test shard results`. |
+| `run-37371558473.jobs.json` | The same PR's earlier CI queue build that day, read and trimmed the same way: eight jobs `cancelled` with no runner (`Build Core`, five `Test Core` shards, two `Dogfood Regression Gate` shards), and two aggregates failing only in their `Verify … results` steps. |
+| `check-run-111979038621.annotations.json` | The annotations of `Test Core (5/6)` above, read through `GET /repos/{owner}/{repo}/check-runs/111979038621/annotations`, trimmed to path, lines, level, title and message. The `failure` entry is the platform's own "The job was not acquired by Runner of type hosted even after multiple attempts". |
 
 The first two are a **pair**, and the pairing is the point: their `FAIL` lines
 are byte-identical and their reason lines are opposite diagnoses. Scenario `E3`
@@ -29,3 +32,8 @@ worktree with no `packages/plugins/plugin-security/dist`, run
 `packages/plugins/plugin-dev/node_modules/.bin/vitest run <file>` (add
 `--testTimeout=1` for the timeout leg), then replace every ESC byte with
 `\u001b` before writing the file back here.
+
+The three limb (3) files are the records of a runner outage, not of a test
+failure: scenarios `N1`/`N2` run the shipped script over them unchanged, and
+`N7` uses the annotation with the job's `runner_name` filled in, so the
+annotation leg is exercised on its own.

@@ -109,7 +109,7 @@ describe('ApiEndpointSchema', () => {
   // forced to write a dead string. The per-type requirement for `type: 'flow'`
   // lives in the publish gate (`apis-publish-gates.test.ts` pins it), not
   // here — the vocabulary parses both types without the key.
-  it('parses an object_operation endpoint that omits `target` (#10338)', () => {
+  it('parses an object_operation endpoint that omits `target`', () => {
     const endpoint = ApiEndpointSchema.parse({
       name: 'get_customers',
       path: '/api/v1/customers',
@@ -502,7 +502,7 @@ function unknownKeyIssues(result: ReturnType<typeof ApiEndpointSchema.safeParse>
   );
 }
 
-describe('#5384 — ApiEndpointSchema REJECTS undeclared keys', () => {
+describe('ApiEndpointSchema REJECTS undeclared keys', () => {
   it('CONTROL — the authored endpoint parses, and the omitted `authRequired` defaults to true', () => {
     // Without this the rejection cases below would also pass if the fixture
     // were simply invalid, which proves nothing about strictness.
@@ -586,7 +586,7 @@ describe('#5384 — ApiEndpointSchema REJECTS undeclared keys', () => {
   });
 });
 
-describe('#5227 — the author state is what `ApiEndpoint` denotes', () => {
+describe('the author state is what `ApiEndpoint` denotes', () => {
   it('omitting `authRequired` type-checks on the AUTHOR state and is the safe shape', () => {
     // The compile-time half of this file's #5227 claim. `packages/spec` type
     // checks its tests (`tsconfig.test.json`, AGENTS.md), so the annotation
@@ -613,7 +613,7 @@ describe('#5227 — the author state is what `ApiEndpoint` denotes', () => {
 // than a bare unrecognized-key error, and the value survives at the same
 // magnitude. Asserting the message, not just `.toThrow()`: a bare throw stays
 // green when the schema throws for some unrelated reason.
-describe('ApiEndpoint.cacheTtl \u2192 cacheTtlSeconds (#15677, ADR-0087 `api-endpoint-cache-ttl-to-cache-ttl-seconds`)', () => {
+describe('ApiEndpoint.cacheTtl \u2192 cacheTtlSeconds (ADR-0087 `api-endpoint-cache-ttl-to-cache-ttl-seconds`)', () => {
   const base = {
     name: 'get_customers',
     path: '/api/v1/customers',

@@ -2216,13 +2216,19 @@ export class ObjectQLPlugin implements Plugin {
       // only ever holds its own rows (saveMetaItem no longer stamps
       // environment_id). Rows across ALL organizations are taken — engine
       // hooks fire process-wide, matching flow-trigger semantics.
+      //
+      // [#21911, ADR-0096] The explicit system opt-in: a boot / resync read
+      // of the platform store with no caller behind it, never a principal-less
+      // engine context.
       let rows: any[] = (await this.ql.find('sys_metadata', {
         where: { type: 'hook', state: 'active' },
+        context: { isSystem: true },
       })) ?? [];
       if (rows.length === 0) {
         // Legacy plural rows — mirrors getMetaItems' singular/plural fallback.
         rows = (await this.ql.find('sys_metadata', {
           where: { type: 'hooks', state: 'active' },
+          context: { isSystem: true },
         })) ?? [];
       }
       const hooks: any[] = [];
@@ -2399,12 +2405,16 @@ export class ObjectQLPlugin implements Plugin {
       }
     };
     try {
+      // [#21911, ADR-0096] The explicit system opt-in on all three reads — see
+      // readAuthoredHookRows.
       let rows: any[] = (await this.ql.find('sys_metadata', {
         where: { type: 'action', state: 'active' },
+        context: { isSystem: true },
       })) ?? [];
       if (rows.length === 0) {
         rows = (await this.ql.find('sys_metadata', {
           where: { type: 'actions', state: 'active' },
+          context: { isSystem: true },
         })) ?? [];
       }
       const actions: any[] = [];
@@ -2418,6 +2428,7 @@ export class ObjectQLPlugin implements Plugin {
       // the chain's action walker covers `objects[].actions[]`.
       const objectRows: any[] = (await this.ql.find('sys_metadata', {
         where: { type: 'object', state: 'active' },
+        context: { isSystem: true },
       })) ?? [];
       for (const row of objectRows) {
         const obj = parseRow(row, 'object');

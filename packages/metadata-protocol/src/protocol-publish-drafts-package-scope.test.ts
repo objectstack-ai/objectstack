@@ -621,10 +621,10 @@ describe('publishMetaItem — the scope probes ask the promote\'s question (#110
         // must not come from `saveMetaItem(mode:'draft')` while PR #11139 is
         // changing that path's binding resolution. The shape mirrors what the
         // repository's `put` writes for a package-less org draft — `checksum`
-        // included: the post-promotion drain is an optimistic-lock delete
-        // keyed on it, and a checksum-less row makes the drain read as the
-        // benign "newer draft saved" race and survive (measured on this
-        // fixture's first run).
+        // included. (On this fixture's first run a checksum-less row made the
+        // post-promotion drain read as the benign "newer draft saved" race and
+        // survive; since #21978 the drain's lock accepts such a row's served
+        // version, and the stamp stays only so the row is the one `put` writes.)
         const noPackageBody = objectBody('shared_ticket', 'NO_PACKAGE');
         await engine.insert('sys_metadata', {
             type: 'object',

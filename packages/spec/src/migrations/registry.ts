@@ -5580,6 +5580,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'and the semantic entry tells the author to re-declare the count they meant.',
   },
   {
+    id: 'flow-approval-node-config-contract-refused',
+    order: 84,
+    text:
+      'It also judges an `approval` flow node\'s `config` at parse against the contract the spec '
+      + 'declares for it, `ApprovalNodeConfigSchema`, WHOLE. The approval executor fails the node on any '
+      + 'issue of that contract, while `objectstack validate` and `objectstack compile` exited 0 on an '
+      + 'undeclared `escalation.bogusKey` or a `timeoutHours: 0.5` and compile copied it into the '
+      + 'artifact. The approval node now joins a declared contract map beside the builtin executor '
+      + 'contracts, read by the one judge `registerFlow` and `objectstack validate` share, with no plugin '
+      + 'loaded: an undeclared key or a refused value is refused at `nodes.N.config.<key>` in the '
+      + 'contract\'s own words, its did-you-mean included, and a key left out as before. The builtin arm '
+      + 'stays presence-only. No key is removed, so there is no tombstone, and no D2 conversion exists: '
+      + 'the platform cannot know what the author meant. Its D3 record is the semantic entry '
+      + '`flow-approval-node-config-contract-refused`.',
+  },
+  {
     id: 'flow-decision-edge-branching-first-match',
     order: 45,
     text:
@@ -13057,6 +13073,72 @@ const step18: MigrationStep = {
         + 'the media-column move (the column step of `objectstack migrate files-to-references '
         + '--apply`).',
     },
+    // #21850 — the D3 entry for the build doors judging an `approval` node's config
+    // against the contract the spec declares for it (`ApprovalNodeConfigSchema`),
+    // whole: the declared contract map in `flow-node-config-refusals.ts`, read by
+    // the one judge `flowNodeConfigRefusals`. It narrows a flow's accept set; no key
+    // is removed, so there is no tombstone and no RETIRED_KEYS_BY_MAJOR row. There
+    // is no D2 conversion either: the platform cannot know the approvers, the key
+    // or the value the author meant, and the runtime never ran such a node.
+    //
+    // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+    // inside a code span and a table cell.
+    {
+      id: 'flow-approval-node-config-contract-refused',
+      surface:
+        'an approval flow node whose config the approval node contract (ApprovalNodeConfigSchema) refuses — '
+        + 'a key it does not declare (escalation.bogusKey, a top-level key such as steps or onApprove, an '
+        + 'alias such as escalation.timeout), a value it refuses (escalation.timeoutHours below 1, an '
+        + 'unknown behavior or escalation.action, an empty approvers list, a fallbackApprovers list under any '
+        + 'policy but fallback), or a key it requires left out (approvers; escalation.timeoutHours inside an '
+        + 'escalation block). Reachable wherever a flow is authored or stored: defineStack({ flows }) sources, '
+        + 'defineFlow(), an exported stack passed to objectstack validate or objectstack compile, a flow saved '
+        + 'from the Studio flow designer, and a flow row already sitting in sys_metadata',
+      replacement:
+        'the shape the approval contract declares, written on the node\'s `config`: `approvers` with at least '
+        + 'one approver, and inside an `escalation` block a `timeoutHours` of at least 1 (wall-clock hours; '
+        + '`timeoutHours: 1` is the shortest SLA the contract accepts). An undeclared key is renamed to the key '
+        + 'the refusal\'s did-you-mean names (`timeout` → `timeoutHours`, `mode` → `behavior`, `quorum` → '
+        + '`minApprovals`) or deleted; a process-level key (`steps`, `entryCriteria`, `onApprove`, `onReject`, '
+        + '`rejectionBehavior`) moves onto the flow graph as the refusal\'s guidance says. To turn an SLA off, '
+        + 'delete the whole `escalation` block — an `escalation: { enabled: false }` with no `timeoutHours` '
+        + 'is refused like any block missing it',
+      reason:
+        'An approval node\'s executor (`plugin-approvals`) parses `node.config` against '
+        + '`ApprovalNodeConfigSchema` before it does anything else and fails the node on ANY issue. '
+        + 'Registration already refused an undeclared key, against the descriptor\'s published `configSchema`, '
+        + 'but a refused value (`timeoutHours: 0.5`) registered and then failed every run that reached the node '
+        + '— the config is metadata, and no rerun could succeed. The build doors asked about neither: '
+        + '`FlowSchema.parse` judged only the builtin node types\' '
+        + 'executor contracts, and only for a key left out, so `objectstack validate` and `objectstack compile` '
+        + 'exited 0 on an `escalation.bogusKey` or a `timeoutHours: 0.5` and compile copied it into the '
+        + 'artifact. The contract is the spec\'s own, so the build can judge it with no plugin loaded: the '
+        + 'approval node joins a declared contract map beside the builtin executor contracts, read by the one '
+        + 'judge `FlowSchema.parse`, `AutomationEngine.registerFlow` (which parses first) and '
+        + '`objectstack validate` share (`flowNodeConfigRefusals`), and is judged WHOLE — every issue the '
+        + 'contract raises is refused, because the executor refuses on every one. An undeclared key or a '
+        + 'refused value is `node-config-refused-by-contract`, anchored at the key, in the contract\'s own '
+        + 'sentence (its did-you-mean included); a key left out keeps `node-config-key-missing` or '
+        + '`node-config-key-required-by-rule`. The builtin arm is unchanged and stays presence-only. '
+        + 'A plugin node type whose contract the spec does not declare stays outside the build doors, as '
+        + 'before. ⚠️ No D2 conversion: the platform cannot know the approvers, the key or the value the '
+        + 'author meant, and no value it could write would keep what the flow did. ⚠️ Where such a node '
+        + 'already sits the whole flow is refused: registered from the metadata registry or `sys_metadata` '
+        + 'at boot it is skipped with a `warn` naming it, its trigger not armed, while the flows beside it '
+        + 'register; a `defineStack({ flows })` source throws `StackSchemaInvalidError` for the whole stack; '
+        + 'an artifact file is refused whole at load. ADR-0087, ADR-0019.',
+      acceptanceCriteria:
+        'Run `objectstack validate` over every stack authored in config files, and boot every deployed '
+        + 'stack. Each refusal names the node and the key: `FlowSchema.parse` anchors a `custom` issue at '
+        + '`nodes.N.config.<key>` (`nodes.N.config.escalation.bogusKey`, `nodes.N.config.escalation.'
+        + 'timeoutHours`, `nodes.N.config.approvers`), `objectstack validate` prints the same path, and '
+        + '`validateStackExpressions` phrases it as `node \'gate\' (approval) config.escalation.bogusKey`. '
+        + 'For each hit write what the contract accepts, per the replacement. Two proofs. (1) For a stack '
+        + 'authored in config files, `objectstack validate` is clean. (2) Boot the stack and confirm each '
+        + 'flow REGISTERS: no `failed to register flow` warn for it — that warn line is the locator for a '
+        + 'row that exists only in `sys_metadata`. An approval node the contract accepts parses and '
+        + 'registers byte-identically to before.',
+    },
     // The absent half of the decision-branch predicate rule. A SEPARATE entry from
     // `flow-predicate-slot-blank-string-refused` on purpose: that one keeps the
     // run a blank predicate made (it evaluated `false`, so `'false'` runs the same
@@ -13422,6 +13504,42 @@ const step18: MigrationStep = {
         + 'warn line is the locator for a row that exists only in `sys_metadata`. A non-blank '
         + 'predicate parses and registers byte-identically to before, and a non-string in these '
         + 'slots keeps its own earlier refusal (at `registerFlow` and `objectstack validate`).',
+    },
+    // A value a flow reads, not an authorable key: there is no D2 conversion and
+    // nothing for `objectstack migrate meta` to rewrite. The sibling of
+    // `18.by-id-write-unreadable-row-not-found` in kind — the entry carries the
+    // changed answer to the one reader the ledger serves here, the upgrade guide,
+    // because a flow that read a credential off its trigger record has no schema
+    // error to find it by. No backticks in `surface`: the upgrade guide renders it
+    // inside a code span and a table cell.
+    {
+      id: 'flow-trigger-record-credential-masked',
+      surface:
+        'the record and previous roots a record-change flow receives — a password or secret field, '
+        + 'and an internal field, of the triggering record, on every object',
+      replacement:
+        'read a credential through a privileged binder — the flow credential channel for an http node\'s '
+        + 'signing secret, or a privileged server-side read such as the engine\'s resolveSecretField — '
+        + 'never off `record` or `previous`; on those roots '
+        + 'a set credential-class field now reads as the mask `SECRET_MASK`, an unset one as null, and an '
+        + '`internal: true` field is absent',
+      reason:
+        'ADR-0100: a credential-class value leaves the engine only through a privileged dereference, and '
+        + 'every generic channel serves the mask. The record-change trigger built a flow\'s record and '
+        + 'previous from the engine\'s own write result, which keeps the stored row whole for privileged '
+        + 'in-process callers, so a password field\'s plaintext, a secret field\'s stored handle and an '
+        + 'internal field\'s value reached the flow — and from there its variables, a paused run\'s '
+        + 'persisted state and that state\'s read doors. The trigger now projects both roots through the '
+        + 'same helper every external write response uses: a credential-class field (secret, and '
+        + 'password outside the exempt managedBy buckets) carries the mask, or null when unset, and an '
+        + 'internal field is omitted. Every other field keeps its value, every other variable is '
+        + 'untouched, and the engine\'s own write result, the stored row and the privileged read paths '
+        + 'are unchanged.',
+      acceptanceCriteria:
+        'No flow reads a password, secret or internal field off its trigger record or previous values '
+        + 'expecting the stored value; a flow that needs a credential obtains it through a privileged '
+        + 'binder; a start or edge condition that compared such a field against a literal is rewritten to '
+        + 'test whether it is set (not null).',
     },
     // #21654 — the D3 entry for `FlowSchema`'s refusal of a write node aimed at a
     // stored-metadata table: the save-time half of #21624, which applies #21520's
@@ -14330,13 +14448,13 @@ const step18: MigrationStep = {
         + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
         + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
         + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-        + 'against, `.objectui-sha` = `0abd4f9f8769fc4c19ad2f96707684876f74c09f` — names '
+        + 'against, `.objectui-sha` = `a58626c88dc85954bd0af24f16ebb69454c03eee` — names '
         + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-        + 'the string debounceDelay each occur 0 times across its 7650 tracked files (0 across the 7632 at 9dfaca654, the 7579 at 2e818d0b5, the 10267 at ab1879721, the 10071 at 89cad75d5, the 9912 at 31971ff1e, the 9800 at e420df310, the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
+        + 'the string debounceDelay each occur 0 times across its 7754 tracked files (0 across the 7650 at 0abd4f9f8, the 7632 at 9dfaca654, the 7579 at 2e818d0b5, the 10267 at ab1879721, the 10071 at 89cad75d5, the 9912 at 31971ff1e, the 9800 at e420df310, the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
         + '8512 at f8a9d0fb0 and the 8303 at 62597c588 too), against lit '
         + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
         + 'which re-count to 13125 and 5043 respectively at 62597c588, to 13347 and 5123 at '
-        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49, to 15352 and 6024 at e420df310, to 15691 and 6206 at 31971ff1e, to 16044 and 6461 at 89cad75d5, to 16377 and 6665 at ab1879721, to 17227 and 7134 at 2e818d0b5, to 17313 and 7186 at 9dfaca654 and to 17390 and 7209 at this pin (git grep -o -F, the method that reproduces '
+        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49, to 15352 and 6024 at e420df310, to 15691 and 6206 at 31971ff1e, to 16044 and 6461 at 89cad75d5, to 16377 and 6665 at ab1879721, to 17227 and 7134 at 2e818d0b5, to 17313 and 7186 at 9dfaca654, to 17390 and 7209 at 0abd4f9f8 and to 17468 and 7246 at this pin (git grep -o -F, the method that reproduces '
         + 'every earlier count).',
       acceptanceCriteria:
         'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
@@ -14541,10 +14659,10 @@ const step18: MigrationStep = {
         + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
         + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
         + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-        + '`.objectui-sha` = `0abd4f9f8769fc4c19ad2f96707684876f74c09f`, re-read from this tree — '
+        + '`.objectui-sha` = `a58626c88dc85954bd0af24f16ebb69454c03eee`, re-read from this tree — '
         + 'spells resourceLimits.timeout 0 times across '
-        + '7650 tracked files, against lit controls timeout 1360, RuntimeConfig 293 and resourceLimits '
-        + '2 on the same corpus (0 across 7632, and 1360 / 293 / 2, at 9dfaca654; 0 across 7579, and 1351 / 276 / 2, at 2e818d0b5; 0 across 10267, and 1348 / 273 / 2, at ab1879721; 0 across 10071, and 1331 / 273 / 2, at 89cad75d5; 0 across 9912, and 1303 / 273 / 2, at 31971ff1e; 0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
+        + '7754 tracked files, against lit controls timeout 1431, RuntimeConfig 299 and resourceLimits '
+        + '2 on the same corpus (0 across 7650, and 1360 / 293 / 2, at 0abd4f9f8; 0 across 7632, and 1360 / 293 / 2, at 9dfaca654; 0 across 7579, and 1351 / 276 / 2, at 2e818d0b5; 0 across 10267, and 1348 / 273 / 2, at ab1879721; 0 across 10071, and 1331 / 273 / 2, at 89cad75d5; 0 across 9912, and 1303 / 273 / 2, at 31971ff1e; 0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
         + '1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
         + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
         + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. ADR-0087.',
@@ -14780,10 +14898,10 @@ const step18: MigrationStep = {
         + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
         + 'and its test the only occurrences are the generated rows in '
         + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `0abd4f9f8769fc4c19ad2f96707684876f74c09f` — spells '
+        + 'objectui checkout — `.objectui-sha` = `a58626c88dc85954bd0af24f16ebb69454c03eee` — spells '
         + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-        + 'across its 7650 tracked files, against lit controls `useState` 2478 and `timeout` 1360 on '
-        + 'the same corpus (all four 0 across 7632, against 2477 and 1360, at 9dfaca654, 0 across 7579, against 2477 and 1351, at 2e818d0b5, 0 across 10267, against 2476 and 1348, at ab1879721, 0 across 10071, against 2470 and 1331, at 89cad75d5, 0 across 9912, against 2469 and 1303, at 31971ff1e, 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
+        + 'across its 7754 tracked files, against lit controls `useState` 2491 and `timeout` 1431 on '
+        + 'the same corpus (all four 0 across 7650, against 2478 and 1360, at 0abd4f9f8, 0 across 7632, against 2477 and 1360, at 9dfaca654, 0 across 7579, against 2477 and 1351, at 2e818d0b5, 0 across 10267, against 2476 and 1348, at ab1879721, 0 across 10071, against 2470 and 1331, at 89cad75d5, 0 across 9912, against 2469 and 1303, at 31971ff1e, 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
         + 'against 2391 and 1096, at f8a9d0fb0, and 0 across '
         + '8303, against 2389 and 1086, at 62597c588).',
       acceptanceCriteria:
@@ -16841,6 +16959,43 @@ const step18: MigrationStep = {
         + 'row, no lockfile pin. ⛔ Do not repair one by widening the check back — the grammar '
         + 'is the contract now, on nine carriers at once.',
     },
+    // A write-door answer, not an authorable key: there is no D2 conversion and
+    // nothing for `objectstack migrate meta` to rewrite. The sibling of
+    // `18.by-id-write-unreadable-row-not-found`, for the predicate door. The entry
+    // carries the changed answer to the one reader the ledger serves here — the
+    // upgrade guide — because a caller that branched on the old answer has no
+    // schema error to find it by. No backticks in `surface`: the upgrade guide
+    // renders it inside a code span and a table cell.
+    {
+      id: 'predicate-write-unreadable-row-not-matched',
+      surface:
+        'the data write doors — a predicate-scoped (multi) update or delete, on every object and for '
+        + 'every principal',
+      replacement:
+        'read a predicate update or delete as reaching only the rows the caller can read: the result '
+        + 'counts those rows alone, a predicate that reaches only hidden rows succeeds with zero rows, '
+        + 'and a predicate whose readable match exceeds one write\'s row ceiling is refused with 400 '
+        + '`INVALID_FILTER` — narrow it and write in batches',
+      reason:
+        'A WRITE-DOOR ANSWER, made one with the read door\'s, on the predicate door as on the by-id '
+        + 'door. The rows a predicate update or delete matched came from its write scope alone, so a '
+        + 'row the caller cannot read was matched whenever that scope reached it: a per-row gate then '
+        + 'refused the write with a 403, or the row was written and counted. Either answer told a '
+        + 'hidden row apart from no row. The write middleware now asks the read door which rows the '
+        + 'caller\'s own predicate returns — a read in the caller\'s context that every data '
+        + 'middleware\'s visibility applies to — and narrows the matched set to them, so a row the '
+        + 'caller cannot read is not written, not counted and not refused. A read the read door '
+        + 'refuses keeps the write\'s previous answer, and a readable match larger than one predicate '
+        + 'write\'s row ceiling is refused rather than cut off. A caller who can read a matched row but '
+        + 'may not write it keeps its answer. Writes the platform issues under the caller\'s context — '
+        + 'a cascade, a hook\'s own write, the referential clear of a lookup — keep their previous '
+        + 'answer, and by-id writes are unchanged.',
+      acceptanceCriteria:
+        'Every caller that issues a predicate update or delete reads its count as the rows it can see '
+        + 'and no longer reads a 403 there as proof a hidden row matched; an operator who needs a user '
+        + 'to change rows grants that user read access to them first; a predicate whose readable match '
+        + 'exceeds the row ceiling is narrowed and written in batches.',
+    },
     // #20289 (family `qa-runner`, verdict ENFORCE; the `requires` key ruled B) — the
     // D3 entry of the family (one D3 entry per retirement family). Registered key:
     // `qa/TestScenario:requires.plugins`. No D2 conversion: a QA suite is a loose
@@ -18546,10 +18701,11 @@ const step18: MigrationStep = {
         + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
         + '(1195 again at 9b62f54671); and the objectui '
         + 'checkout this repo builds against — this is the pin, '
-        + '`.objectui-sha` = `0abd4f9f8769fc4c19ad2f96707684876f74c09f`, re-read from this tree — '
-        + 'spells all six metrics def names and both distinctive keys 0 times across 7650 tracked '
-        + 'files at that sha, against lit controls window 4194, timeout 1360, period 238, '
-        + 'interval 195 and metrics 401 on that same corpus and sha (0 across 7632, against 4193 / '
+        + '`.objectui-sha` = `a58626c88dc85954bd0af24f16ebb69454c03eee`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 7754 tracked '
+        + 'files at that sha, against lit controls window 4255, timeout 1431, period 247, '
+        + 'interval 200 and metrics 401 on that same corpus and sha (0 across 7650, against 4194 / '
+        + '1360 / 238 / 195 / 401, at 0abd4f9f8, 0 across 7632, against 4193 / '
         + '1360 / 238 / 195 / 401, at 9dfaca654, 0 across 7579, against 4175 / '
         + '1351 / 238 / 195 / 374, at 2e818d0b5, 0 across 10267, against 4044 / '
         + '1348 / 231 / 196 / 354, at ab1879721, 0 across 10071, against 4002 / '
@@ -18769,12 +18925,13 @@ const step18: MigrationStep = {
         + 'dark control of 0; inside packages/spec the '
         + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
         + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-        + 'pinned objectui checkout — `.objectui-sha` = `0abd4f9f8769fc4c19ad2f96707684876f74c09f` — names none of it: all 37 exports of '
-        + 'tracing.zod.ts and each of the four key names occur 0 times across the 7650 files '
-        + 'tracked at that sha (the 508 Span and 57 SpanSchema hits are objectui\'s own HTML '
+        + 'pinned objectui checkout — `.objectui-sha` = `a58626c88dc85954bd0af24f16ebb69454c03eee` — names none of it: all 37 exports of '
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 7754 files '
+        + 'tracked at that sha (the 509 Span and 57 SpanSchema hits are objectui\'s own HTML '
         + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
-        + 'two lit controls on that same corpus and sha: 17390 hits for the bare token objectstack, '
-        + 'and 7209 for the package specifier @objectstack/spec (at 9dfaca654: 0 across 7632, Span 508, '
+        + 'two lit controls on that same corpus and sha: 17468 hits for the bare token objectstack, '
+        + 'and 7246 for the package specifier @objectstack/spec (at 0abd4f9f8: 0 across 7650, Span 508, '
+        + '17390 and 7209; at 9dfaca654: 0 across 7632, Span 508, '
         + '17313 and 7186; at 2e818d0b5: 0 across 7579, Span 505, '
         + '17227 and 7134; at ab1879721: 0 across 10267, Span 491, '
         + '16377 and 6665; at 89cad75d5: 0 across 10071, Span 489, '
@@ -18888,9 +19045,9 @@ const step18: MigrationStep = {
         + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
         + 'and its test the only occurrences are the four generated rows in '
         + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `0abd4f9f8769fc4c19ad2f96707684876f74c09f` — spells it 0 '
-        + 'times across 7650 tracked files, against lit controls `TTL` 182 and `tenant` 1318 on the '
-        + 'same corpus (0 across 7632, against 182 and 1318, at 9dfaca654; 0 across 7579, against 182 and 1317, at 2e818d0b5; 0 across 10267, against 180 and 1238, at ab1879721; 0 across 10071, against 181 and 1237, at 89cad75d5; 0 across 9912, against 181 and 1237, at 31971ff1e; 0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
+        + 'objectui checkout — `.objectui-sha` = `a58626c88dc85954bd0af24f16ebb69454c03eee` — spells it 0 '
+        + 'times across 7754 tracked files, against lit controls `TTL` 184 and `tenant` 1319 on the '
+        + 'same corpus (0 across 7650, against 182 and 1318, at 0abd4f9f8; 0 across 7632, against 182 and 1318, at 9dfaca654; 0 across 7579, against 182 and 1317, at 2e818d0b5; 0 across 10267, against 180 and 1238, at ab1879721; 0 across 10071, against 181 and 1237, at 89cad75d5; 0 across 9912, against 181 and 1237, at 31971ff1e; 0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
         + 'and 987, at 62597c588).',
       acceptanceCriteria:
         'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '

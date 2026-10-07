@@ -501,8 +501,16 @@ export interface RuntimeConfigPluginConfig {
     /**
      * Upstream cloud base URL. Falls back to `resolveCloudUrl()` (reads
      * `OS_CLOUD_URL` / built-in default) when omitted. Pass an explicit
-     * empty string to declare "this runtime IS the cloud" (same-origin
-     * for marketplace + install).
+     * empty string to keep marketplace and install requests on this origin:
+     * the constructor serves `cloudUrl: ''` without calling the resolver, and
+     * that is all `''` says. The runtime may serve the catalog itself or
+     * proxy a control plane it does not name — the CLI's cloud-connected
+     * `os serve` passes `''` while its marketplace proxy forwards to the
+     * control plane `resolveCloudUrl()` answers (objectui#11726) — so read
+     * `''` neither as "this runtime is the cloud" nor as "there is no
+     * upstream". A runtime with no control plane says so with a decline
+     * spelling (`'off'` / `'none'` / `'local'` / `'disabled'`), here or in
+     * `OS_CLOUD_URL`.
      */
     controlPlaneUrl?: string;
     /**

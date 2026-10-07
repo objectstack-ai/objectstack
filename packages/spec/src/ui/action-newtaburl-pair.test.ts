@@ -23,7 +23,7 @@ import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 
 const base = { name: 'open_sso_portal', label: 'Open SSO portal' };
 
-describe('ActionSchema — newTabUrl requires opensInNewTab: true (#11842)', () => {
+describe('ActionSchema — newTabUrl requires opensInNewTab: true', () => {
   describe('refusal pins — the lone key, on every shape that can carry it', () => {
     const lone = {
       ...base,

@@ -17,6 +17,7 @@ import { build } from 'tsup';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { annotatePureCalls, mainConfig, pureSchemaConstruction } from '../tsup.config';
+import { ALL_CONVERSIONS } from '../src/conversions/registry';
 import * as sourceMigrations from '../src/migrations/index';
 
 /** This package's root — every read and write below stays inside it. */
@@ -111,6 +112,35 @@ describe('a fixture quoting every marked name survives the build byte-identical'
     expect(text).toContain(`${PURE}strictObject({ a: 1 })`);
     expect(text).toContain(`${PURE}z.strictObject({ b: 1 })`);
     expect(text).toContain(`\${${PURE}lazySchema(`);
+  });
+});
+
+// `./shared` reaches the conversion table only through `normalizeStackInput`,
+// and its two load-time calls are marked pure in the source
+// (`src/conversions/registry.ts`, the `CONVERSIONS_BY_MAJOR` docblock), so a
+// consumer that keeps no reader of the table keeps no conversion (#22044).
+// The consumer below imports what objectui's console imports from `./shared`;
+// the second one imports the reader, and is the control that the instrument
+// sees the table whenever a bundle keeps it.
+describe('a consumer of the built ./shared entry keeps the conversion table only when it reads it', () => {
+  it('drops every conversion for the console names, keeps them all for normalizeStackInput', async () => {
+    const { file } = await buildEntry(path.join(PKG_DIR, 'src', 'shared', 'index.ts'), 'shared');
+    const ids = ALL_CONVERSIONS.map((c) => c.id);
+    const kept = async (names: string, outName: string): Promise<string[]> => {
+      const consumer = path.join(WORK_DIR, `${outName}.ts`);
+      writeFileSync(consumer, `export { ${names} } from ${JSON.stringify(file)};\n`);
+      const { text } = await buildEntry(consumer, outName);
+      return ids.filter((id) => text.includes(`'${id}'`) || text.includes(`"${id}"`));
+    };
+
+    expect(ids.length).toBeGreaterThan(100);
+    expect(await kept('normalizeStackInput', 'shared-reader')).toEqual(ids);
+    expect(
+      await kept(
+        'EVALUATED_EXPRESSION_SOURCE_REQUIRED, EvaluatedExpressionInputSchema, EvaluatedExpressionSchema, ValueDomainSchema, canonicalMetaUrlType',
+        'shared-console',
+      ),
+    ).toEqual([]);
   });
 });
 

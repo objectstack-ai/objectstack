@@ -5,6 +5,7 @@ import type { DriverQuery } from '@objectstack/spec/contracts';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { redactPropagatedDriverFault } from '@objectstack/types';
 import { parseLifecycleDuration } from './duration.js';
+import { isFederatedUnprovisionedInjectedColumn } from '../federated-object.js';
 import type {
   DanglingReferenceAuditOptions,
   DanglingReferenceReport,
@@ -1079,7 +1080,7 @@ export class LifecycleService {
       );
       // [commit 801296050] `ttl.onlyWhen` rides the same argument `retention.onlyWhen`
       // does below — one reap path, one scope spread (see `reap()`'s `scope`).
-      outcomes.push(await this.reap(engine, object, lc, 'ttl', lc.ttl.field, windowMs, report, lc.ttl.onlyWhen));
+      outcomes.push(await this.reap(engine, obj, lc, 'ttl', lc.ttl.field, windowMs, report, lc.ttl.onlyWhen));
     }
 
     // Rotation (P2): physical time-sharding when the driver supports it —
@@ -1143,7 +1144,7 @@ export class LifecycleService {
         report,
       );
       outcomes.push(
-        await this.reap(engine, object, lc, 'retention', 'created_at', windowMs, report, lc.retention.onlyWhen),
+        await this.reap(engine, obj, lc, 'retention', 'created_at', windowMs, report, lc.retention.onlyWhen),
       );
     } else if (lc.storage?.strategy === 'rotation' && !rotated && !lc.ttl) {
       // Rotation declared but the driver can't shard physically: the shard
@@ -1157,7 +1158,7 @@ export class LifecycleService {
         'global',
         report,
       );
-      outcomes.push(await this.reap(engine, object, lc, 'rotation-fallback', 'created_at', windowMs, report));
+      outcomes.push(await this.reap(engine, obj, lc, 'rotation-fallback', 'created_at', windowMs, report));
     }
 
     return outcomes;
@@ -1474,9 +1475,10 @@ export class LifecycleService {
     // a `stop()` observed mid-sweep ends the passes not yet begun as well as
     // the batches: the leg boundary widens with the loop instead of leaving a
     // new unchecked seam between passes.
-    const tenantWindows = (this.governance.tenantOverrides.get(object) ?? []).filter(
-      (t) => typeof t[overrideKey] === 'string',
-    );
+    //
+    // [#21918] Which tenants get a pass of their own is {@link tenantWindowsFor},
+    // the one decision `reap()` asks too.
+    const tenantWindows = this.tenantWindowsFor(obj, overrideKey);
     let archived = 0;
     if (tenantWindows.length === 0) {
       archived += await archivePass({ [dueField]: { $lt: cutoff } });
@@ -1538,9 +1540,39 @@ export class LifecycleService {
     return [archived];
   }
 
+  /**
+   * [#21918] The per-tenant windows (ADR-0057 §3.2) that partition `obj`'s
+   * rows: each tenant with a genuinely tenant-scoped override for this object
+   * and this policy's key. The ONE decision `reap()` and `archiveObject()`
+   * both ask, so the two cannot partition the same object differently.
+   *
+   * A partition is a predicate on the row's `organization_id`, the column the
+   * passes below name. On a federated (ADR-0015 `external`) object that column
+   * is the registry's injection and the remote does not provision it
+   * ({@link isFederatedUnprovisionedInjectedColumn}, which reads the #7865
+   * provenance), so every partitioned pass was refused by the driver as an
+   * unknown column (`INVALID_FILTER`) and the object's sweep failed before
+   * its global pass ran. No row of such an object carries an organization, so
+   * it has no tenant partition: it answers no windows, and the caller runs its
+   * one global pass. That is the window a provisioned object's
+   * no-organization rows get, by the same `$or` arm the partitioned global
+   * pass spells for them. A tenant override naming such an object has no row
+   * to select either way. An `organization_id` the author declared on a
+   * federated object maps a real remote column and keeps its partition.
+   */
+  private tenantWindowsFor(
+    obj: LifecycleObjectLike,
+    overrideKey: 'maxAge' | 'expireAfter',
+  ): Array<{ tenantId: string; maxAge?: string; expireAfter?: string }> {
+    if (isFederatedUnprovisionedInjectedColumn(obj, 'organization_id')) return [];
+    return (this.governance.tenantOverrides.get(obj.name) ?? []).filter(
+      (t) => typeof t[overrideKey] === 'string',
+    );
+  }
+
   private async reap(
     engine: LifecycleEngineLike,
-    object: string,
+    obj: LifecycleObjectLike,
     lc: Lifecycle,
     policy: LifecycleSweepEntry['policy'],
     field: string,
@@ -1548,11 +1580,10 @@ export class LifecycleService {
     report: LifecycleSweepReport,
     onlyWhen?: Record<string, unknown>,
   ): Promise<number | undefined> {
+    const object = obj.name;
     const cutoff = new Date(this.now() - windowMs).toISOString();
     const overrideKey = policy === 'ttl' ? 'expireAfter' : 'maxAge';
-    const tenantWindows = (this.governance.tenantOverrides.get(object) ?? []).filter(
-      (t) => typeof t[overrideKey] === 'string',
-    );
+    const tenantWindows = this.tenantWindowsFor(obj, overrideKey);
     // `retention.onlyWhen` / `ttl.onlyWhen` [commit 801296050] narrow every delete to
     // the declared row filter — rows outside it (live workflow state, audit
     // tombstones) are retained regardless of age/expiry.

@@ -420,7 +420,7 @@ describe('AuthConfigSchema – new passthrough fields', () => {
   });
 });
 
-describe('AudienceConfigSchema (#11739)', () => {
+describe('AudienceConfigSchema — one closed audience posture, invite_only when undeclared', () => {
   it('defaults an undeclared posture to invite_only (the ruled safe default)', () => {
     const parsed = AudienceConfigSchema.parse({});
     expect(parsed.posture).toBe('invite_only');
@@ -517,7 +517,7 @@ describe('AudienceConfigSchema (#11739)', () => {
 // `updateAge: this.config.session?.updateAge || 60 * 60 * 24` straight into
 // better-auth's `session.updateAge`, whose unit is seconds. Only `expiresIn`
 // carried the marker; this closes the pair.
-describe('AuthConfig.session.updateAge declares seconds by mirror (#18124)', () => {
+describe('AuthConfig.session.updateAge declares seconds by mirror', () => {
   it('keeps the bare name, the default and the value it always accepted', () => {
     expect(AuthConfigSchema.parse({}).session).toBeUndefined();
     const parsed = AuthConfigSchema.parse({ session: { updateAge: 3 * 86_400 } });

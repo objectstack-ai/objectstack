@@ -10,6 +10,8 @@ import type {
 } from './channel.js';
 import type { EmailSenderSurface } from './email-channel.js';
 import { RECIPIENT_LOCALE_FIELD, USER_OBJECT, resolveRecipientLocale } from './recipient-locale.js';
+import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
+import { assertActorReferenceResolves } from './actor-reference.js';
 
 /** The object the inbox channel writes rows to. */
 export const INBOX_OBJECT = 'sys_inbox_message';
@@ -85,7 +87,11 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
         userId: string,
     ): Promise<unknown> {
         try {
-            const user = await data.findOne(userObject, { where: { id: userId }, fields: [RECIPIENT_LOCALE_FIELD] });
+            const user = await data.findOne(
+                userObject,
+                { where: { id: userId }, fields: [RECIPIENT_LOCALE_FIELD] },
+                { context: FAN_OUT_SYSTEM_CONTEXT },
+            );
             return user?.[RECIPIENT_LOCALE_FIELD];
         } catch (err) {
             ctx.logger.warn(
@@ -118,7 +124,7 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
                 at: r.at,
                 organization_id: r.organizationId ?? null,
                 created_at: r.at,
-            });
+            }, { context: FAN_OUT_SYSTEM_CONTEXT });
         } catch (err) {
             ctx.logger.warn(
                 `[inbox] delivered receipt write failed for '${r.userId}' (${(err as Error).message}); inbox row stands`,
@@ -210,7 +216,10 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
 
             let inboxId: string | undefined;
             try {
-                const created = await data.insert(objectName, row);
+                // Inside this `try` so an unknown actor answers the SendResult
+                // the engine's own refusal did — see assertActorReferenceResolves.
+                await assertActorReferenceResolves(data, objectName, row.actor_id);
+                const created = await data.insert(objectName, row, { context: FAN_OUT_SYSTEM_CONTEXT });
                 const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
                 inboxId = id != null ? String(id) : undefined;
             } catch (err) {

@@ -47,7 +47,7 @@ import { DiscoveryEnvironmentSchema, EnvironmentTypeSchema } from './discovery.z
 const discoveryMembers = DiscoveryEnvironmentSchema.options as readonly string[];
 const environmentMembers = EnvironmentTypeSchema.options as readonly string[];
 
-describe('[#5676] DiscoveryEnvironment ⊂ EnvironmentType', () => {
+describe('DiscoveryEnvironment ⊂ EnvironmentType', () => {
   it('reads a non-empty membership off both enums (anti-vacuity)', () => {
     // Without this, every `every()` below passes against a broken import.
     expect(Array.isArray(discoveryMembers)).toBe(true);
@@ -62,7 +62,7 @@ describe('[#5676] DiscoveryEnvironment ⊂ EnvironmentType', () => {
       missing,
       `${missing.join(', ')} is advertised by DiscoverySchema.environment but is no longer an `
       + 'EnvironmentTypeSchema member. The two describe one concept and discovery is the coarse '
-      + 'view of it (#5676) — if a bucket was renamed on the cloud side, rename it here and in '
+      + 'view of it — if a bucket was renamed on the cloud side, rename it here and in '
       + "`NODE_ENV_TO_DISCOVERY_ENVIRONMENT`'s values too, or the fold points at a dead value.",
     ).toEqual([]);
   });

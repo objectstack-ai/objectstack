@@ -275,6 +275,21 @@ describe('ObjectQLPlugin.resyncAuthoredActions (#2605)', () => {
     expect(ql.registerAction).toHaveBeenCalledTimes(1);
     expect(ql.registerAction.mock.calls[0][1]).toBe('good_action');
   });
+
+  // [#21911, ADR-0096] The boot / resync read is platform plumbing with no
+  // caller behind it: it carries the explicit system opt-in rather than
+  // reaching the engine as a principal-less context. No singular rows, so all
+  // three reads issue — the singular one, the legacy plural fallback and the
+  // embedded-object read.
+  it('reads sys_metadata with the explicit system opt-in on every read (#21911)', async () => {
+    ql.find.mockResolvedValue([]);
+
+    await (makePlugin(ql) as any).resyncAuthoredActions(makeCtx());
+
+    const reads = ql.find.mock.calls.filter(([obj]: [string]) => obj === 'sys_metadata');
+    expect(reads.map(([, q]: [string, AnyRecord]) => q?.where?.type)).toEqual(['action', 'actions', 'object']);
+    for (const [, q] of reads) expect(q?.context).toEqual({ isSystem: true });
+  });
 });
 
 describe('ObjectQLPlugin protocol-mutation subscription (#2605)', () => {

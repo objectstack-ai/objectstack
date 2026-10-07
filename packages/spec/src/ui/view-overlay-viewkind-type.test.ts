@@ -109,7 +109,7 @@ type IsOptionalKey<T, K extends keyof T> = {} extends Pick<T, K> ? true : false;
 const typeIsOptionalOnListOverlayOutput: IsOptionalKey<ListOverlayOut, 'type'> = true;
 void [typeIsOptionalOnListOverlayOutput];
 
-describe('[#19920] the flattened overlay members keep their own viewKind literal', () => {
+describe('the flattened overlay members keep their own viewKind literal', () => {
   it('the list-shaped `viewKind: "form"` body is refused by every door that judges it', () => {
     const body = { type: 'grid', columns: ['name'], object: 'crm_lead', viewKind: 'form' };
     expect(VIEW_METADATA_MEMBERS.listOverlay.safeParse(body).success).toBe(false);

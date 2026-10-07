@@ -16,6 +16,8 @@ import {
   upsertDeclaredEmailTemplate,
   deactivateDeclaredEmailTemplate,
   mapTemplateToRow,
+  SWEEP_NAMES_PER_READ,
+  SWEEP_ROWS_PER_READ,
 } from './bootstrap-declared-email-templates.js';
 import { bindEmailTemplateProvenanceStamp } from './email-template-provenance.js';
 
@@ -54,14 +56,20 @@ class FakeEngine {
 
   private matches(row: any, cond?: Record<string, any>): boolean {
     if (!cond) return true;
-    return Object.entries(cond).every(([k, v]) => row[k] === v);
+    // [#22062] `$in` as the real engine reads it: the boot sweep's bulk read.
+    return Object.entries(cond).every(([k, v]) =>
+      v && typeof v === 'object' && Array.isArray(v.$in) ? v.$in.includes(row[k]) : row[k] === v);
   }
 
   async find(name: string, q?: any): Promise<any[]> {
     const all = this.rows[name] ?? [];
     const cond = q?.filter ?? q?.where;
     const out = all.filter((r) => this.matches(r, cond));
-    return typeof q?.limit === 'number' ? out.slice(0, q.limit) : out;
+    // [#22062] Rows leave as COPIES, as a real driver's do. Handing out the
+    // stored objects let a later write reach into a row the caller had
+    // already read, which no real read does — and it hid a stale copy in the
+    // sweep's bulk read from every pin here.
+    return (typeof q?.limit === 'number' ? out.slice(0, q.limit) : out).map((r) => ({ ...r }));
   }
   async insert(name: string, data: any): Promise<any> {
     const arr = (this.rows[name] = this.rows[name] ?? []);
@@ -571,5 +579,208 @@ describe('bootstrapDeclaredEmailTemplates — the effective template (#21785)', 
     expect(result).toEqual({ seeded: 0, skipped: 2 });
     expect(rowsOf(engine).map((r) => r.subject)).toEqual(['Admin original', 'Data-door wording']);
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#22062] What a boot costs: a bulk read, and no write for an unchanged row
+// ---------------------------------------------------------------------------
+
+/**
+ * Before, the sweep looked every template up on its own and rewrote its row
+ * unconditionally: on a steady boot, one lookup, one UPDATE and the engine's two
+ * read-backs per template. These pin the three halves of the fix: the bulk read
+ * (and what happens to a key it does not answer), the compare before the write
+ * (and the controls that must still be written), and the provenance rules the
+ * compare must not touch. The row-choice pin over several organizations runs on
+ * the real engine and SQL driver, in `packages/qa/dogfood`
+ * (`email-template-boot-sweep.test.ts`): this package cannot import a driver.
+ */
+describe('[#22062] the boot sweep reads stored rows in bulk and rewrites only what changed', () => {
+  const isBulkRead = (q: any) => Array.isArray(q?.where?.name?.$in);
+
+  /** One template carrying a string, a boolean, an optional column and `variables_json`. */
+  const fullTemplate = () => declaredTemplate({ bodyText: 'Plain body', description: 'Reset mail' });
+
+  /** Boot once, then change the stored row the way a case says. `before` is the row as the boot left it. */
+  async function steadyWith(mutate: (row: any) => void) {
+    const engine = new FakeEngine({ declared: { email_template: [fullTemplate()] } });
+    await bootstrapDeclaredEmailTemplates(engine as any, undefined);
+    const before = { ...rowsOf(engine)[0] };
+    mutate(rowsOf(engine)[0]);
+    return { engine, before };
+  }
+
+  it('a boot over unchanged templates writes nothing and reads once per 200 names', async () => {
+    const declared = Array.from({ length: 450 }, (_, i) => declaredTemplate({ name: `tpl.n${i}` }));
+    const engine = new FakeEngine({ declared: { email_template: declared } });
+    await bootstrapDeclaredEmailTemplates(engine as any, undefined);
+
+    const find = vi.spyOn(engine, 'find');
+    const update = vi.spyOn(engine, 'update');
+    const insert = vi.spyOn(engine, 'insert');
+    const result = await bootstrapDeclaredEmailTemplates(engine as any, undefined);
+
+    expect(result).toEqual({ seeded: 0, skipped: 450 });
+    expect(update).not.toHaveBeenCalled();
+    expect(insert).not.toHaveBeenCalled();
+    // ceil(450 / 200): the bulk reads only. A steady boot has no key the bulk
+    // read leaves unanswered, so no per-template lookup is added.
+    expect(SWEEP_NAMES_PER_READ).toBe(200);
+    expect(find).toHaveBeenCalledTimes(3);
+    expect(find.mock.calls.every(([, q]) => isBulkRead(q))).toBe(true);
+    expect(rowsOf(engine)).toHaveLength(450);
+  });
+
+  it.each([
+    ['a string column (`subject`)', (r: any) => { r.subject = 'Stale wording'; }, 'subject'],
+    ['a boolean column holding the other boolean (`active`)', (r: any) => { r.active = false; }, 'active'],
+    ['a boolean column holding the other 0/1 (`active`)', (r: any) => { r.active = 0; }, 'active'],
+    ['an optional column that is null (`body_text`)', (r: any) => { r.body_text = null; }, 'body_text'],
+    ['an optional column that is absent (`body_text`)', (r: any) => { delete r.body_text; }, 'body_text'],
+    ['`variables_json` holding other text', (r: any) => { r.variables_json = '[]'; }, 'variables_json'],
+    [
+      '`variables_json` handed back parsed, and different',
+      (r: any) => { r.variables_json = [{ name: 'other', type: 'string', required: false }]; },
+      'variables_json',
+    ],
+  ] as const)('control: rewrites a package row whose projected column differs: %s', async (_case, mutate, column) => {
+    const { engine, before } = await steadyWith(mutate);
+    const update = vi.spyOn(engine, 'update');
+
+    const result = await bootstrapDeclaredEmailTemplates(engine as any, undefined);
+
+    expect(result).toEqual({ seeded: 1, skipped: 0 });
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(rowsOf(engine)[0][column]).toEqual(before[column]);
+  });
+
+  it.each([
+    ['a boolean stored as 1 (`active: true`)', (r: any) => { r.active = 1; }],
+    ['a boolean stored as 0 (`is_system: false`)', (r: any) => { r.is_system = 0; }],
+    ['`variables_json` handed back parsed', (r: any) => { r.variables_json = JSON.parse(r.variables_json); }],
+    ['a column the projection omits, holding a value (`from_address`)', (r: any) => { r.from_address = 'ops@example.com'; }],
+  ] as const)('leaves a package row that already holds the projection unwritten: %s', async (_case, mutate) => {
+    const { engine } = await steadyWith(mutate);
+    const update = vi.spyOn(engine, 'update');
+
+    const result = await bootstrapDeclaredEmailTemplates(engine as any, undefined);
+
+    expect(result).toEqual({ seeded: 0, skipped: 1 });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('still adopts a legacy row with no `managed_by`, even one that already holds the projection', async () => {
+    const { engine } = await steadyWith((r) => { delete r.managed_by; });
+    const update = vi.spyOn(engine, 'update');
+
+    const result = await bootstrapDeclaredEmailTemplates(engine as any, undefined);
+
+    expect(result).toEqual({ seeded: 1, skipped: 0 });
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(rowsOf(engine)[0].managed_by).toBe('package');
+  });
+
+  it('keeps the first row a key meets in the bulk read: the row the per-template lookup returns', async () => {
+    const stale = (id: string, organization_id: string) => ({
+      id, organization_id, name: 'auth.password_reset', locale: 'en-US', subject: `stale ${id}`, managed_by: 'package',
+    });
+    const engine = new FakeEngine({
+      rows: { [TABLE]: [stale('etpl_first', 'org_b'), stale('etpl_second', 'org_a')] },
+      declared: { email_template: [declaredTemplate()] },
+    });
+    const [chosen] = await engine.find(TABLE, { where: { name: 'auth.password_reset', locale: 'en-US' }, limit: 1 });
+    expect(chosen.id).toBe('etpl_first');
+
+    await bootstrapDeclaredEmailTemplates(engine as any, undefined);
+
+    expect(rowsOf(engine).map((r) => [r.id, r.subject])).toEqual([
+      ['etpl_first', PACKAGE_WORDING],
+      ['etpl_second', 'stale etpl_second'],
+    ]);
+  });
+
+  it('looks a key the bulk read did not answer up on its own BEFORE inserting anything', async () => {
+    const engine = new FakeEngine({ declared: { email_template: [declaredTemplate({ name: 'ops.new' })] } });
+    const find = vi.spyOn(engine, 'find');
+    const insert = vi.spyOn(engine, 'insert');
+
+    const result = await bootstrapDeclaredEmailTemplates(engine as any, undefined);
+
+    expect(result).toEqual({ seeded: 1, skipped: 0 });
+    expect(find).toHaveBeenCalledTimes(2);
+    expect(isBulkRead(find.mock.calls[0][1])).toBe(true);
+    expect(find.mock.calls[1][1]).toMatchObject({ where: { name: 'ops.new', locale: 'en-US' }, limit: 1 });
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(find.mock.invocationCallOrder[1]).toBeLessThan(insert.mock.invocationCallOrder[0]);
+  });
+
+  it('never inserts a row twice when a bulk read is cut short at its bound', async () => {
+    // Other locales of the same name fill the bound, stored BEFORE the declared
+    // slot's own row, so the bulk read stops exactly where that row would come.
+    const filler = Array.from({ length: SWEEP_ROWS_PER_READ }, (_, i) => ({
+      id: `etpl_fill_${i}`, name: 'auth.password_reset', locale: `x-${i}`, subject: 'Other locale', managed_by: 'package',
+    }));
+    const engine = new FakeEngine({ rows: { [TABLE]: filler }, declared: { email_template: [declaredTemplate()] } });
+    expect(await bootstrapDeclaredEmailTemplates(engine as any, undefined)).toEqual({ seeded: 1, skipped: 0 });
+    // ANTI-VACUITY: the bulk read really does not reach the slot's row.
+    const page = await engine.find(TABLE, {
+      where: { name: { $in: ['auth.password_reset'] } },
+      limit: SWEEP_ROWS_PER_READ,
+    });
+    expect(page.some((r) => r.locale === 'en-US')).toBe(false);
+
+    const result = await bootstrapDeclaredEmailTemplates(engine as any, undefined);
+
+    expect(result).toEqual({ seeded: 0, skipped: 1 });
+    expect(rowsOf(engine).filter((r) => r.locale === 'en-US')).toHaveLength(1);
+    expect(rowsOf(engine)).toHaveLength(SWEEP_ROWS_PER_READ + 1);
+  });
+
+  it('looks every template up on its own when the bulk read fails, inserting nothing twice', async () => {
+    class FailingBulkRead extends FakeEngine {
+      override async find(name: string, q?: any): Promise<any[]> {
+        if (Array.isArray(q?.where?.name?.$in)) throw new Error('bulk read failed');
+        return super.find(name, q);
+      }
+    }
+    const declared = [declaredTemplate(), declaredTemplate({ name: 'ops.digest', category: 'notification' })];
+    const engine = new FailingBulkRead({ declared: { email_template: declared } });
+    const warn = vi.fn();
+    expect(await bootstrapDeclaredEmailTemplates(engine as any, undefined, { warn })).toEqual({ seeded: 2, skipped: 0 });
+
+    const result = await bootstrapDeclaredEmailTemplates(engine as any, undefined, { warn });
+
+    expect(result).toEqual({ seeded: 0, skipped: 2 });
+    expect(rowsOf(engine)).toHaveLength(2);
+    // Said once per boot, never once per template.
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn.mock.calls[1][1]).toEqual({ error: 'bulk read failed' });
+  });
+
+  it('meets the row as it now is when the list names one slot twice (a package entry, then its env-wide overlay)', async () => {
+    const overlay = declaredTemplate({ subject: OVERLAY_WORDING });
+    const engine = new FakeEngine({ declared: { email_template: [overlay] } });
+    await bootstrapDeclaredEmailTemplates(engine as any, undefined);
+    // The registry lists an env-wide overlay AFTER the package entry it overrides.
+    (engine as any).declared = { email_template: [declaredTemplate(), overlay] };
+
+    await bootstrapDeclaredEmailTemplates(engine as any, undefined);
+
+    expect(rowsOf(engine)).toHaveLength(1);
+    expect(rowsOf(engine)[0].subject).toBe(OVERLAY_WORDING);
+  });
+
+  it('the live door shares the write step: an unchanged save writes nothing, a changed one writes', async () => {
+    const engine = new FakeEngine();
+    expect(await upsertDeclaredEmailTemplate(engine as any, declaredTemplate())).toBe(true);
+    const update = vi.spyOn(engine, 'update');
+
+    expect(await upsertDeclaredEmailTemplate(engine as any, declaredTemplate())).toBe(false);
+    expect(update).not.toHaveBeenCalled();
+
+    expect(await upsertDeclaredEmailTemplate(engine as any, declaredTemplate({ subject: 'Saved again' }))).toBe(true);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(rowsOf(engine)[0].subject).toBe('Saved again');
   });
 });

@@ -557,8 +557,7 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
     '@objectstack/spec', '@objectstack/types',
   ],
   '@objectstack/trigger-record-change': [
-    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/objectql',
-    '@objectstack/service-automation',
+    '@objectstack/driver-sql', '@objectstack/objectql', '@objectstack/service-automation',
   ],
   '@objectstack/trigger-schedule': ['@objectstack/service-automation', '@objectstack/spec'],
   '@objectstack/types': ['@objectstack/spec'],

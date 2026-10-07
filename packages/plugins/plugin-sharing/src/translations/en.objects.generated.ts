@@ -84,6 +84,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_shares: {
+        label: "All"
+      },
       granted_to_me: {
         label: "Granted to Me"
       },
@@ -98,9 +101,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       rule_grants: {
         label: "Rule Grants"
-      },
-      all_shares: {
-        label: "All"
       }
     }
   },

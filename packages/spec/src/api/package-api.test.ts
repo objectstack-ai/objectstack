@@ -123,7 +123,7 @@ describe('ListInstalledPackagesRequestSchema', () => {
 // [#17667] Executed-but-undeclared query parameters, now declared
 // ==========================================
 
-describe('the /packages doors declare the query parameters they execute (#17667)', () => {
+describe('the /packages doors declare the query parameters they execute', () => {
   it('GET /packages/:id declares the `?version=` scope it honours', () => {
     const parsed = GetInstalledPackageRequestSchema.parse({ packageId: 'com.acme.crm', version: '1.2.3' });
     expect(parsed.packageId).toBe('com.acme.crm');
@@ -545,7 +545,7 @@ describe('PackageApiContracts', () => {
 // Unmounted contract-map entries removed (#19116)
 // ==========================================
 
-describe('the three unmounted `PackageApiContracts` entries are removed (#19116)', () => {
+describe('the three unmounted `PackageApiContracts` entries are removed', () => {
   // The paths the removed entries bound. Nothing in the composed runtime
   // mounts any of them, and no serving door existed to rebind them onto.
   const UNMOUNTED_PATHS = [
@@ -600,7 +600,7 @@ describe('the three unmounted `PackageApiContracts` entries are removed (#19116)
 // package-rollback-response retirement (#12038 3A)
 // ==========================================
 
-describe('package-rollback-response retirement (#12038 3A)', () => {
+describe('package-rollback-response retirement (ruled: it described the wrong operation on the live path)', () => {
   // Runtime namespace probes, the registry-retirement.test.ts pattern: a
   // removed export cannot be imported by name (would not compile), so the pin
   // asks the namespace object. Anti-vacuity guard: a neighbour that stayed.
@@ -740,7 +740,7 @@ describe('the set the record stage must RE-DECLARE is MEASURED, never hand-picke
   });
 });
 
-describe('#17518 the row\'s manifest is the RECORD stage — a declaration, ⛔ not `z.unknown()`', () => {
+describe('the row\'s manifest is the RECORD stage — a declaration, ⛔ not `z.unknown()`', () => {
   /**
    * What `toRecordManifest` really leaves on a `GET /packages` row: each
    * `functions` declaration MINUS its callable, and a hook whose inline handler
@@ -797,7 +797,7 @@ describe('#17518 the row\'s manifest is the RECORD stage — a declaration, ⛔ 
   });
 });
 
-describe('the read-API responses are declared at both stages (#17431)', () => {
+describe('the read-API responses are declared at both stages', () => {
   const envelope = (data: unknown) => ({ success: true, data });
 
   it('`ListInstalledPackagesResponseSchema` parses a list of either stage', () => {
@@ -842,7 +842,7 @@ describe('the read-API responses are declared at both stages (#17431)', () => {
  * edited until it parses is the failure mode this block exists to prevent:
  * it reports agreement between a declaration and traffic that never met.
  */
-describe('#18058 — install contract bound to the live door', () => {
+describe('install contract bound to the live door', () => {
   /** The client SDK's pinned manifest — `packages/client/src/client.test.ts`. */
   const SDK_MANIFEST = { id: 'com.acme.crm', name: 'Acme CRM', version: '1.0.0', type: 'app' };
 
@@ -1057,11 +1057,11 @@ describe('#18058 — install contract bound to the live door', () => {
     /** The body each drive posted before PR #20218: the same manifest, no `type`. */
     const untyped = ({ type: _type, ...rest }: Record<string, unknown>) => rest;
 
-    it('the namespace-conflict drive parses green — it carries `type` since PR #20218', () => {
+    it('the namespace-conflict drive parses green — it carries `type` since the door parses its whole body', () => {
       expect(PackageInstallBodySchema.safeParse(DOOR_DRIVE_CONFLICT).success).toBe(true);
     });
 
-    it('the domain-handler-registry drive parses green — it carries `type` since PR #20218', () => {
+    it('the domain-handler-registry drive parses green — it carries `type` since the door parses its whole body', () => {
       expect(PackageInstallBodySchema.safeParse(DOOR_DRIVE_REGISTRY).success).toBe(true);
     });
 
@@ -1096,7 +1096,7 @@ describe('#18058 — install contract bound to the live door', () => {
       { manifest: SDK_MANIFEST, overwrite: 'true' },
     ];
 
-    it('the declaration refuses every one — and, since PR #20218, so does the door: no residual is left', () => {
+    it('the declaration refuses every one — and so does the door, which parses the whole body: no residual is left', () => {
       // Pinned as prose-with-a-parse rather than a live HTTP drive: the door
       // lives in `@objectstack/runtime`, which this package cannot import.
       // `packages/runtime/src/domains/packages-install-body-contract.test.ts`
@@ -1128,7 +1128,7 @@ describe('#18058 — install contract bound to the live door', () => {
       expect(ManifestSchema.shape.version.safeParse(undefined).success).toBe(false);
     });
 
-    it('⭐ #17534 closed the one spelling that ran the OTHER way — a whitespace-only `id` is refused HERE now, not only by the door', () => {
+    it('⭐ the reverse-domain id rule closed the one spelling that ran the OTHER way — a whitespace-only `id` is refused HERE now, not only by the door', () => {
       // What this pinned before: `handlePackages` trims before keying and
       // refuses an empty id, while this declaration ADMITTED `'   '` — the one
       // measured class where the declaration was WIDER than the door.

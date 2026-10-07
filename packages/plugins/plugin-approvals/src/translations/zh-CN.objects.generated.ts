@@ -104,6 +104,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_requests: {
+        label: "全部"
+      },
       my_pending: {
         label: "待我审批",
         emptyState: {
@@ -116,9 +119,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       completed: {
         label: "已完成"
-      },
-      all_requests: {
-        label: "全部"
       }
     },
     _actions: {

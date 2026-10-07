@@ -48,6 +48,7 @@ import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { SysMetadataRepository, resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
+import { isOriginGatedType } from './packaged-base-regime.js';
 
 const PACKAGE_ID = 'com.example.pkg';
 const ENV_ID = 'env_1';
@@ -216,6 +217,21 @@ async function hostConfigDoor(type: string, name: string, operation: 'save' | 'd
     return 'admitted';
 }
 
+/**
+ * [#21899] The host-config kernel's REMOVAL door for a packaged item of an
+ * origin-gated type (`datasource`): the protocol's own delete. The repository
+ * gate that {@link hostConfigDoor} measures is reached only with a stored row
+ * (whose removal is repair, and admitted); with none, the protocol answers the
+ * removal at its row probe, before the repository is asked — on this kernel as
+ * on an environment one. Refused ⇔ that answer is a lock refusal.
+ */
+async function hostConfigOriginGatedRemoval(type: string, name: string, rows: StoredRow[]): Promise<Verdict> {
+    const outcome = await settle(harness(undefined, rows).deleteMetaItem({ type, name }));
+    if (isLockRefusal(outcome)) return 'refused';
+    expect(outcome, `${type}/${name} delete: neither refused nor answered`).toBeNull();
+    return 'admitted';
+}
+
 async function readFlags(protocol: ObjectStackProtocolImplementation, type: string, name: string): Promise<{ layered: Flags; byName: Flags }> {
     const pick = (r: any): Flags => ({ lock: r.lock, editable: r.editable, deletable: r.deletable });
     return {
@@ -251,7 +267,9 @@ async function measure(kernel: Kernel, arm: Arm, type: string): Promise<Row> {
         del = await environmentDoor(harness(ENV_ID, rows), type, name, 'delete');
     } else {
         save = await hostConfigDoor(type, name, 'save', arm === 'packaged');
-        del = await hostConfigDoor(type, name, 'delete', arm === 'packaged');
+        del = arm === 'packaged' && isOriginGatedType(type)
+            ? await hostConfigOriginGatedRemoval(type, name, rows)
+            : await hostConfigDoor(type, name, 'delete', arm === 'packaged');
     }
     return { kernel, arm, type, name, read: layered, byName, save, del };
 }

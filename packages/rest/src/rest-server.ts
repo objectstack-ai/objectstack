@@ -57,6 +57,7 @@ import {
     isObjectSchemaMaskExempt,
     isObjectSchemaMaskingEnabled,
     normalizeIfNoneMatch,
+    relateObjectSchemaMaskPosture,
     resolveObjectSchemaMaskPosture,
     OBJECT_SCHEMA_MASK_NOT_APPLICABLE,
     type ObjectSchemaMaskPosture,
@@ -77,6 +78,7 @@ import {
     // Which form candidates the anonymous form doors serve — the one rule the
     // metadata protocol also judges organization-scoped `view` writes by.
     anonymousFormIntakeCandidates,
+    anonymousFormIntakeWithdrawnIn,
     // [#21476] Whether such a form can take intake on this posture, and why not
     // — the one predicate the runtime authoring gate's advisory reads too.
     anonymousFormIntakePosture,
@@ -4014,6 +4016,11 @@ export class RestServer {
      * schema with no fields at all — `getReadableFields` answers `[]` only where
      * its own posture read failed closed (#3545), and D6 rules an empty-fields
      * `200` out ("silently wrong UI **and** cacheable poison").
+     *
+     * [#21884] Hand it the posture related to `document`
+     * (`relateObjectSchemaMaskPosture`) wherever the document can carry
+     * actions: an action param reading another object through `objectOverride`
+     * is judged against that object, and an unrelated posture withholds it.
      */
     private maskObjectDocument<T>(
         res: any,
@@ -6704,7 +6711,9 @@ export class RestServer {
                             let cachedDocument: any = result.data;
                             let visibilityFingerprint = '';
                             if (maskPosture.kind === 'project') {
-                                const masked = this.maskObjectDocument(res, maskPosture, req.params.name, cachedDocument);
+                                // [#21884] Related to the fetched document: its `objectOverride` params name other objects.
+                                const related = await relateObjectSchemaMaskPosture(maskPosture, cachedDocument);
+                                const masked = this.maskObjectDocument(res, related, req.params.name, cachedDocument);
                                 if (!masked) return;
                                 cachedDocument = masked.document;
                                 visibilityFingerprint = masked.fingerprint;
@@ -8585,7 +8594,8 @@ export class RestServer {
                             }
                             let served = verdict.document;
                             if (publishedMaskPosture.kind === 'project') {
-                                const masked = this.maskObjectDocument(res, publishedMaskPosture, name, served);
+                                const related = await relateObjectSchemaMaskPosture(publishedMaskPosture, served); // [#21884]
+                                const masked = this.maskObjectDocument(res, related, name, served);
                                 if (!masked) return;
                                 served = masked.document;
                             } else if (publishedMaskPosture.kind === 'undetermined') {
@@ -8611,24 +8621,30 @@ export class RestServer {
                                         : {}),
                                 });
                                 if (layered?.overlay !== undefined && layered?.overlay !== null) {
-                                    // [#21002, ADR-0126 §2] When the layered
-                                    // read put the LOADER's body over this stored
-                                    // row — a shipped flow name, decided by the
-                                    // protocol's `isShippedFlowName` — this door
-                                    // serves that effective layer, not the row:
-                                    // `flow` is Regime C, "never an overlay read
-                                    // path". The predicate is ASKED of its owner
-                                    // with the answer's own `type` / `name`,
-                                    // never re-derived here, so this door and
+                                    // [#21002, #21986, ADR-0126 §2, ADR-0062 D4]
+                                    // When the layered read put a code layer
+                                    // over this stored row, this door serves
+                                    // that effective layer, not the row. The
+                                    // protocol decides it with one predicate,
+                                    // `declinesStoredRow`, for both name
+                                    // classes: a shipped flow name (the
+                                    // loader's body; `flow` is Regime C,
+                                    // "never an overlay read path") and a
+                                    // code-defined datasource name (the code
+                                    // definition; "code wins on collision").
+                                    // The predicate is ASKED of its owner with
+                                    // the answer's own `type` / `name`, never
+                                    // re-derived here, so this door, the
+                                    // by-name read, the list and
                                     // `getMetaItemLayered` read one rule. Every
                                     // other stored row is served exactly as
                                     // before — an `object` too, whose effective
                                     // layer differs from its row by folding, not
                                     // by this decision — and so is every row of a
                                     // protocol that brings no such predicate.
-                                    const shippedFlow: { isShippedFlowName?(type: string, name: unknown): boolean } = publishedProtocol;
-                                    publishedOverlay = typeof shippedFlow.isShippedFlowName === 'function'
-                                        && shippedFlow.isShippedFlowName(layered.type, layered.name)
+                                    const decliner: { declinesStoredRow?(type: string, name: unknown): boolean } = publishedProtocol;
+                                    publishedOverlay = typeof decliner.declinesStoredRow === 'function'
+                                        && decliner.declinesStoredRow(layered.type, layered.name)
                                         ? layered.effective
                                         : layered.overlay;
                                 }
@@ -10714,11 +10730,24 @@ export class RestServer {
         // shared with the write-time judgement in `@objectstack/metadata-protocol`
         // (`anonymousFormIntakeCandidates`): `sharing.enabled === true`,
         // `sharing.allowAnonymous === true` and a `publicLink` naming the slug.
-        const findPublicFormView = (views: any[], slug: string): { view: any; form: any; object: string } | null => {
+        //
+        // A withdrawal is a kill switch: layering may only narrow anonymous
+        // intake, never re-open it. A candidate is served only when no layer
+        // beneath the read it is found in explicitly withdraws the same form
+        // (`anonymousFormIntakeWithdrawnIn`: the same view name, matched by
+        // slot or by slug, the link kept with a switch set to `false`).
+        // Another view publishing the same slug is a different form and closes
+        // nothing.
+        const findPublicFormView = (
+            views: any[],
+            slug: string,
+            layers: ReadonlyArray<ReadonlyArray<unknown>>,
+        ): { view: any; form: any; object: string } | null => {
             for (const view of views ?? []) {
                 if (!view || typeof view !== 'object') continue;
                 for (const c of anonymousFormIntakeCandidates(view)) {
                     if (c.slug !== slug) continue;
+                    if (layers.some((layer) => anonymousFormIntakeWithdrawnIn(layer, view, c))) continue;
                     const objectName = anonymousFormObjectName(view, c.form);
                     if (!objectName) continue;
                     return { view, form: c.form, object: objectName };
@@ -10772,13 +10801,28 @@ export class RestServer {
                 ...(environmentId ? { environmentId } : {}),
                 ...(organizationId ? { organizationId } : {}),
             };
-            const result: any = await p.getMetaItems(viewsRequest);
-            const items: any[] = Array.isArray(result?.items)
+            const listOf = (result: any): any[] => (Array.isArray(result?.items)
                 ? result.items
                 : Array.isArray(result)
                     ? result
-                    : [];
-            const match = findPublicFormView(items, slug);
+                    : []);
+            const items = listOf(await p.getMetaItems(viewsRequest));
+            // The organization read prefers the organization's overlay of a
+            // view over the env-wide one, so on its own it cannot see an
+            // env-wide withdrawal that overlay disagrees with. Read the
+            // env-wide layer too, and let its withdrawal of the same form close
+            // it: an organization overlay can narrow intake, never re-open it.
+            // (The read the form is found in holds only that view's own body,
+            // which is open, so it withdraws nothing of its own.)
+            const layers: any[][] = [];
+            if (organizationId) {
+                const envWideRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
+                    type: 'view',
+                    ...(environmentId ? { environmentId } : {}),
+                };
+                layers.push(listOf(await p.getMetaItems(envWideRequest)));
+            }
+            const match = findPublicFormView(items, slug, layers);
             if (!match) return null;
             // [#21476] A form that cannot take intake on this posture is not
             // offered: `null` here IS the withdrawn form's answer on both
@@ -12148,9 +12192,11 @@ export class RestServer {
                 // derivation and one reason with two copies is this lane's own
                 // recurring defect). `userMessage` has NO invariant left for a
                 // caller to re-derive. `declaredUserMessage` already decided
-                // PRESENCE — the field exists on an error only because an
-                // author deliberately wrote caller-facing text onto it, and
-                // platform and driver code never set it — and
+                // PRESENCE — the field exists on an error only because its
+                // producer deliberately wrote end-user text with no host state
+                // onto it (an application hook, or a platform refusal carrying
+                // static guidance such as the packaged-permission-set lock's;
+                // platform and driver diagnostics never set it) — and
                 // `truncateClientMessage` already applied #5423's bound to the
                 // value. Reading `refusal.body.userMessage` IS the rule; there
                 // is no second function to run it through, and running one

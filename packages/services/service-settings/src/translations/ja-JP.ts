@@ -290,20 +290,15 @@ export const jaJP: PlatformTranslationData = {
 
     localization: {
       title: 'ローカリゼーション',
-      description: '既定のタイムゾーン、言語、通貨、日付/数値フォーマット。',
+      description: '既定のタイムゾーン、言語、国、通貨、会計年度。',
       groups: {
         region: { title: '地域' },
-        formats: { title: 'フォーマット' },
         finance: { title: '財務' },
       },
       keys: {
         timezone: { label: '既定のタイムゾーン', help: 'today()/daysFromNow の解決、分析の日付バケット、日時レンダリングに使う IANA タイムゾーン。' },
         locale: { label: '既定の言語', help: 'メッセージカタログと数値/日付フォーマットに使う BCP-47 ロケール。' },
         default_country: { label: '既定の国', help: 'ISO 3166-1 alpha-2 コード（例:US、GB、CN）。住所と電話の既定に使用します。' },
-        date_format: { label: '日付フォーマット' },
-        time_format: { label: '時刻フォーマット' },
-        number_format: { label: '数値フォーマット', help: '表示する数値の桁区切りと小数点の記号。' },
-        first_day_of_week: { label: '週の開始日', help: '週次分析のバケットとカレンダーグリッドの基準になります。' },
         currency: { label: '既定の通貨', help: '通貨フィールドが独自の通貨を指定しない場合に適用される ISO 4217 コード。' },
         fiscal_year_start: { label: '会計年度の開始月', help: '会計年度の最初の月 — レポートの「今四半期 / 会計年度」を決定します。' },
       },

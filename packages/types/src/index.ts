@@ -89,6 +89,13 @@ export * from './unique-scope-install-gate.js';
 // judges a failed row with the same table the HTTP door answers with. `rest`
 // keeps the emission half and re-exports the public names.
 export * from './data-error-classification.js';
+// [#22049] The one reading of a share-link password's request header pair
+// (`X-Share-Password` + the `X-Share-Password-Encoding` that declares it), for
+// the two mounts of the public share-link routes: `plugin-sharing`'s routes and
+// the runtime dispatcher's `/share-links` domain. The runtime has the plugin as
+// a dev dependency only, so the plugin cannot be the home; both already depend
+// on this package, so adopting the reading adds no edge.
+export * from './share-password-header.js';
 
 // Placeholder for Kernel interface to avoid circular dependency
 // The actual Kernel implementation will satisfy this interface.

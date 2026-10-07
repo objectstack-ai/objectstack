@@ -131,11 +131,30 @@ runProjectCliOverridePreflight({
 // task. `shard` is typed through `TestUserConfig` because vitest declares it on
 // its CLI options and not on `InlineConfig`; it sits on the ROOT `test` block
 // (the projects below do not carry it), where vitest resolves it for all of them.
+//
+// #21914 -- EVERY TEST FILE RUNS IN ITS OWN TEMPORARY WORKING DIRECTORY.
+// Showcase boots write `.objectstack/data/showcase_external.db` relative to the
+// cwd. From the package directory that file outlived the run, and a later boot's
+// federated state depended on which files ran before it. Two halves:
+//   - `PER_FILE_CWD` is a `setupFiles` entry named in EACH project below, because
+//     inline projects inherit nothing from this root block (the same measured gap
+//     as `disableConsoleIntercept`). It `chdir`s into a fresh directory before the
+//     test file's imports, restores the cwd in `afterAll`, and THROWS there when
+//     `.objectstack/data` exists in the package directory: that throw is the guard.
+//   - The `globalSetup` below is ROOT-level: one run, one call, covering both
+//     projects and each `OS_TEST_SHARD` slice (measured). It clears a stale
+//     `.objectstack` at the start and removes the run's per-file directories at the end.
+//     Its teardown judges nothing, because a throw there exits 0 on vitest 4.1.11.
+// Both modules' headers carry the rest, including what a dogfood author owes.
+const PER_FILE_CWD = './test/per-file-cwd.setup.ts';
+
 export default defineConfig({
   test: {
     // The file-level slice, when the dogfood gate runs one (#20820) -- see the
     // section above `export default` for why it is spread and typed this way.
     ...({ shard: process.env.OS_TEST_SHARD } satisfies Pick<TestUserConfig, 'shard'>),
+    // #21914: the run-level half of the per-file working directory (section above).
+    globalSetup: ['./test/per-file-cwd.global-setup.ts'],
     projects: [
       {
         test: {
@@ -152,6 +171,9 @@ export default defineConfig({
           name: 'shared-showcase',
           include: SHARED_SHOWCASE,
           isolate: false,
+          // #21914: PER PROJECT, like the two settings above. With `isolate: false`
+          // the module still runs once per file, so each file gets its own cwd.
+          setupFiles: [PER_FILE_CWD],
         },
       },
       {
@@ -273,6 +295,36 @@ export default defineConfig({
               find: /^@objectstack\/service-datasource$/,
               replacement: path.resolve(__dirname, '../../services/service-datasource/src/index.ts'),
             },
+            // [#21880] `search-companion-field-scope.dogfood.test.ts` mounts
+            // `PinyinSearchPlugin` on a real boot, and the companion values it
+            // writes are what every search in that file matches through. The
+            // plugin's fill path is part of the pin's subject, so the verdict
+            // is aliased to THIS checkout's source, not to the last `pnpm build`.
+            {
+              find: /^@objectstack\/plugin-pinyin-search$/,
+              replacement: path.resolve(__dirname, '../../plugins/plugin-pinyin-search/src/index.ts'),
+            },
+            // `platform-app-object-entry-views.test.ts` boots the Setup and
+            // Account app shells and every plugin that contributes navigation
+            // into them, then judges each object entry against the object's
+            // declared list views. The shells and the sharing plugin are part
+            // of that subject — their entries and view order ARE the verdict —
+            // so they are aliased to THIS checkout's source, not to the last
+            // `pnpm build`. The other contributors it boots are either aliased
+            // above or resolve through `dist/` as this package's
+            // `check:test-source-alias` row already records.
+            {
+              find: /^@objectstack\/setup$/,
+              replacement: path.resolve(__dirname, '../../apps/setup/src/index.ts'),
+            },
+            {
+              find: /^@objectstack\/account$/,
+              replacement: path.resolve(__dirname, '../../apps/account/src/index.ts'),
+            },
+            {
+              find: /^@objectstack\/plugin-sharing$/,
+              replacement: path.resolve(__dirname, '../../plugins/plugin-sharing/src/index.ts'),
+            },
           ],
         },
         test: {
@@ -289,6 +341,8 @@ export default defineConfig({
           name: 'isolated',
           include: ['test/**/*.test.ts'],
           exclude: SHARED_SHOWCASE,
+          // #21914: PER PROJECT, as in `shared-showcase` above.
+          setupFiles: [PER_FILE_CWD],
         },
       },
     ],

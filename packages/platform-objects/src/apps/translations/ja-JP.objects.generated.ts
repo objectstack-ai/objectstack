@@ -122,11 +122,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
-      me: {
-        label: "マイプロフィール"
-      },
       all_users: {
         label: "すべてのユーザー"
+      },
+      me: {
+        label: "マイプロフィール"
       },
       unverified: {
         label: "未確認"
@@ -376,11 +376,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
-      mine: {
-        label: "自分のセッション"
-      },
       all_sessions: {
         label: "すべて"
+      },
+      mine: {
+        label: "自分のセッション"
       },
       revoked: {
         label: "取り消し済み"
@@ -460,37 +460,20 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_links: {
+        label: "すべて"
+      },
       mine: {
         label: "自分の連携"
       },
       by_provider: {
         label: "プロバイダー別"
-      },
-      all_links: {
-        label: "すべて"
       }
     },
     _actions: {
-      link_social: {
-        label: "ソーシャルアカウント連携",
-        params: {
-          provider: {
-            label: "プロバイダー",
-            options: {
-              google: "Google",
-              github: "GitHub",
-              microsoft: "Microsoft",
-              apple: "Apple",
-              facebook: "Facebook",
-              gitlab: "GitLab",
-              discord: "Discord"
-            }
-          }
-        }
-      },
       unlink_account: {
         label: "連携解除",
-        description: "このID連携を解除しますか？ユーザーがアカウント設定から再度連携するまで、このプロバイダーでサインインできなくなります。",
+        description: "このID連携を解除しますか？ユーザーが再度連携するまで、このプロバイダーでサインインできなくなります。",
         successMessage: "アイデンティティ連携を解除しました"
       }
     }
@@ -1039,6 +1022,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_keys: {
+        label: "すべて"
+      },
       mine: {
         label: "自分のキー"
       },
@@ -1047,9 +1033,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked: {
         label: "失効済み"
-      },
-      all_keys: {
-        label: "すべて"
       }
     },
     _actions: {
@@ -1242,14 +1225,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_preferences: {
+        label: "すべて"
+      },
       mine: {
         label: "自分の設定"
       },
       by_user: {
         label: "ユーザー別"
-      },
-      all_preferences: {
-        label: "すべて"
       }
     }
   },
@@ -1403,6 +1386,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_apps: {
+        label: "すべて"
+      },
       mine: {
         label: "自分のアプリケーション"
       },
@@ -1411,9 +1397,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       disabled_apps: {
         label: "無効"
-      },
-      all_apps: {
-        label: "すべて"
       }
     },
     _actions: {

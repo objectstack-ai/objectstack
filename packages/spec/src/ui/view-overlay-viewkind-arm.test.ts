@@ -80,7 +80,7 @@ function acceptance(body: unknown) {
   return { data: parsed.data as Record<string, unknown>, branch: diagnosis.branch };
 }
 
-describe('#20186 a column-less list PATCH is judged by the list member', () => {
+describe('a column-less list PATCH is judged by the list member', () => {
   it('the headline `{ name, object, viewKind: list, sort }` is ACCEPTED on listOverlay and parses to a LIST', () => {
     const { data, branch } = acceptance({ ...LIST, sort: [{ field: 'name', order: 'asc' }] });
     expect(branch).toBe('listOverlay');
@@ -99,14 +99,14 @@ describe('#20186 a column-less list PATCH is judged by the list member', () => {
     ['inlineEdit', { inlineEdit: true }],
     ['columnState', { columnState: { widths: { name: 120 } } }],
     ['rowHeight', { rowHeight: 'compact' }],
-  ])('the console %s toggle (patch only, ruled on #7494) is ACCEPTED on listOverlay', (_label, patch) => {
+  ])('the console %s toggle (a patch-only write, as ruled) is ACCEPTED on listOverlay', (_label, patch) => {
     const { branch, data } = acceptance({ ...patch, viewKind: 'list', ...ID, _isOverride: true });
     expect(branch).toBe('listOverlay');
     expect(data.type).toBe('grid');
   });
 });
 
-describe('#20186 …and its list keys are JUDGED, not stripped', () => {
+describe('…and its list keys are JUDGED, not stripped', () => {
   it('a retired bare-string `sort` is REFUSED at `sort`, with the 17.5.0 retirement prescription', () => {
     const r = refusal({ ...LIST, sort: 'name desc' });
     expect(r.topCodes).toEqual(['invalid_union']);
@@ -141,7 +141,7 @@ describe('#20186 …and its list keys are JUDGED, not stripped', () => {
   });
 });
 
-describe('#20186 a column-less list overlay that NAMES a `type` stays refused — at `columns`', () => {
+describe('a column-less list overlay that NAMES a `type` stays refused — at `columns`', () => {
   // `overlay.list.identity` in `view-union-diagnostics.test.ts`: refused before,
   // refused now, and still wrapped as `invalid_union` (the refusal is an
   // ABORTING issue, so the list member is not the union's lone survivor).
@@ -161,7 +161,7 @@ describe('#20186 a column-less list overlay that NAMES a `type` stays refused �
   });
 });
 
-describe('#20186 the mirror: a `viewKind: form` body is judged by the form member', () => {
+describe('the mirror: a `viewKind: form` body is judged by the form member', () => {
   it('list `columns` on a form overlay is REFUSED under formOverlay, at `columns`, with the count prescription', () => {
     const r = refusal({ ...FORM, columns: ['name'] });
     expect(r.topCodes).toEqual(['invalid_union']);
@@ -179,7 +179,7 @@ describe('#20186 the mirror: a `viewKind: form` body is judged by the form membe
   });
 });
 
-describe('#20186 W2 — a list-legal value under a key both arms declare differently is ACCEPTED', () => {
+describe('W2 — a list-legal value under a key both arms declare differently is ACCEPTED', () => {
   // Refused before: the form member judged these keys by FORM rules (a retired
   // `aria` tombstone, a string-only `description`, a public-link `sharing`).
   // Declared as a widening: `Clause-②: yes (narrowing)`.
@@ -193,7 +193,7 @@ describe('#20186 W2 — a list-legal value under a key both arms declare differe
   });
 });
 
-describe('#20186 controls — byte-identical parse output (measured on origin/main ce70876e)', () => {
+describe('controls — byte-identical parse output (measured on origin/main ce70876e)', () => {
   it('a real form overlay', () => {
     const { data, branch } = acceptance({
       name: 'acct.f', object: 'account', viewKind: 'form', type: 'simple', sections: [{ label: 'Main', fields: ['name'] }],
@@ -216,7 +216,7 @@ describe('#20186 controls — byte-identical parse output (measured on origin/ma
   });
 });
 
-describe('#20186 each member judges ONE viewKind — read off the members themselves', () => {
+describe('each member judges ONE viewKind — read off the members themselves', () => {
   it('a direct parse of the form member names where a list body is judged', () => {
     const r = VIEW_METADATA_MEMBERS.formOverlay.safeParse({ ...LIST, sort: [{ field: 'name', order: 'asc' }] });
     expect(r.success).toBe(false);
@@ -232,7 +232,7 @@ describe('#20186 each member judges ONE viewKind — read off the members themse
     expect(issue?.message).toMatch(/^This is the flattened LIST overlay member, which judges `viewKind: "list"` only\./);
   });
 
-  it('an ABSENT viewKind keeps the binding prescription (#7741), on both members', () => {
+  it('an ABSENT viewKind keeps the binding prescription, on both members', () => {
     for (const member of [VIEW_METADATA_MEMBERS.listOverlay, VIEW_METADATA_MEMBERS.formOverlay]) {
       const r = member.safeParse({ object: 'crm_lead', hidden: true });
       const issue = r.error!.issues.find((i) => i.path[0] === 'viewKind');
@@ -241,7 +241,7 @@ describe('#20186 each member judges ONE viewKind — read off the members themse
   });
 });
 
-describe('#20186 the premise: no pipe, and the served JSON Schema moves only by the contract', () => {
+describe('the premise: no pipe, and the served JSON Schema moves only by the contract', () => {
   it('both overlay members are still plain object schemas', () => {
     // A pipe serves its INPUT side to `/api/v1/meta/types/view`, and for a
     // transform that is `{}` (the `assertViewIdentity` docblock). The input-side

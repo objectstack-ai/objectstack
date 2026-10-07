@@ -472,7 +472,7 @@ describe('MetadataBulkRegisterRequestSchema', () => {
   // `namespace` that no enforced write path reads). The exported type is the
   // authoring-side shape (z.input): the defaulted flags stay optional, and a
   // per-item `namespace` is NOT part of the contract.
-  it('exports the authoring-side MetadataBulkRegisterRequest type (#4587)', () => {
+  it('exports the authoring-side MetadataBulkRegisterRequest type', () => {
     const minimal: MetadataBulkRegisterRequest = {
       items: [{ type: 'object', name: 'account', data: { label: 'Account' } }],
     };

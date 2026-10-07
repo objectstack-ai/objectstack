@@ -212,9 +212,9 @@ import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 // ⛔ Not copied. The board resolver and the proxy-rearm plan are ONE source in
-// `check-half-states.mjs` — the same import `check-widening-tells.mjs` takes —
-// so this reader and the patrol cannot come to disagree about which board is
-// being read or whether this container's fetch reaches it.
+// `check-half-states.mjs`, so this reader and the patrol cannot come to
+// disagree about which board is being read or whether this container's fetch
+// reaches it.
 import { DEFAULT_SWEEP_REPO, resolveSweepRepo, proxyRearmPlan, PROXY_FLAG, PROXY_REARM_GUARD } from './check-half-states.mjs';
 
 export const EXIT_OK = 0;

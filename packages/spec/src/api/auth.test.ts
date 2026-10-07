@@ -85,7 +85,7 @@ describe('SessionUserSchema', () => {
   });
 });
 
-describe('SessionUser.language retirement (#14788, ADR-0049 — maintainer ruling D, 2026-09-03)', () => {
+describe('SessionUser.language retirement (ADR-0049 — ruled: gone, with no replacement field)', () => {
   const base = { id: 'usr_1', email: 'a@b.com', name: 'A' };
 
   it('REJECTS a `language` value, with the prescription in the message', () => {
@@ -152,7 +152,7 @@ describe('SessionUser.language retirement (#14788, ADR-0049 — maintainer rulin
     // and the excluded ledger really is where the key's record lives.
     expect(fs.existsSync(tombstone)).toBe(true);
     expect(fs.existsSync(path.join(ledger, 'entries', 'retired-keys', '18.api__SessionUser__language.ts'))).toBe(true);
-    expect(readers, 'a reader of SessionUser.language reappeared — the key is retired (#14788)').toEqual([]);
+    expect(readers, 'a reader of SessionUser.language reappeared — the key is retired').toEqual([]);
   });
 });
 

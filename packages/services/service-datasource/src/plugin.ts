@@ -2,7 +2,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { MetadataProtocol } from '@objectstack/spec/api';
-import type { IDataEngine, IntrospectedSchema } from '@objectstack/spec/contracts';
+import type { IDataEngine, IObjectQLEngine, IntrospectedSchema } from '@objectstack/spec/contracts';
 import {
   ExternalDatasourceService,
   type ExternalDatasourceServiceConfig,
@@ -23,16 +23,21 @@ import {
 // (`getDriverByName?`, [#4251]), which makes the degradation reachable for
 // the first time instead of silently dead.
 
+/**
+ * The `'metadata'` service members this plugin reads: datasource
+ * definitions, and the catalog write. Objects are not read here — see
+ * `objectRegistry` in {@link ExternalDatasourceServicePlugin.init}.
+ */
 interface MetadataServiceLike {
   get: (type: string, name: string) => Promise<unknown>;
-  getObject?: (name: string) => Promise<unknown>;
-  listObjects?: () => Promise<unknown[]>;
-  list?: (type: string) => Promise<unknown[]>;
   register?: (type: string, name: string, data: unknown) => Promise<void> | void;
 }
 
 /** The metadata door's save, as the `'protocol'` service declares it. */
 type MetadataSaveDoor = Pick<MetadataProtocol, 'saveMetaItem'>;
+
+/** The two reads the federation service makes of the engine's object registry. */
+type ObjectRegistryReads = Pick<IObjectQLEngine['registry'], 'getObject' | 'getAllObjects'>;
 
 export interface ExternalDatasourceServicePluginOptions {
   /** Override the introspection function (mainly for tests). */
@@ -45,8 +50,8 @@ export interface ExternalDatasourceServicePluginOptions {
  * into the kernel as the `'external-datasource'` service (ADR-0015 §6.1).
  *
  * It bridges the decoupled {@link ExternalDatasourceService} to the live
- * `IDataEngine` (for driver introspection) and `IMetadataService` (for object
- * + datasource reads).
+ * `IDataEngine` (for driver introspection), the engine's object registry (for
+ * object reads) and `IMetadataService` (for datasource reads).
  */
 export class ExternalDatasourceServicePlugin implements Plugin {
   name = 'com.objectstack.service-external-datasource';
@@ -70,8 +75,9 @@ export class ExternalDatasourceServicePlugin implements Plugin {
     const engine = safeGetService<IDataEngine>(ctx, 'data');
 
     /**
-     * [#21876] The `'metadata'` service: every datasource, package and object
-     * read below, and the catalog write, go through it.
+     * [#21876] The `'metadata'` service: every datasource read
+     * below, and the catalog write, go through it. Objects are read from the
+     * engine's registry instead ([#21842], `objectRegistry` below).
      *
      * Resolved where it is used, never at `init()`, like `metadataSaveDoor`.
      * `objectstack start` composes no metadata plugin: its `'metadata'`
@@ -109,20 +115,37 @@ export class ExternalDatasourceServicePlugin implements Plugin {
       return typeof protocol?.saveMetaItem === 'function' ? (protocol as MetadataSaveDoor) : undefined;
     };
 
+    /**
+     * [#21842] Where the federation service reads objects: the engine's object
+     * registry, on the `'objectql'` service (`IObjectQLEngine.registry`).
+     *
+     * It is the registry that save writes through to (`applyRegistryWriteThrough`
+     * in `@objectstack/metadata-protocol`), so an object saved at runtime through
+     * `PUT /api/v1/meta/object/:name`, or by the import (`persistObject` below),
+     * is validated the moment it is saved. The objects used to come from the `'metadata'`
+     * service, which holds a copy of this registry taken once at boot
+     * (`ObjectQLPlugin`'s startup bridge): a runtime save never reached that
+     * copy, so `POST …/external/validate` did not see the object until the next
+     * restart. ⛔ Never a second copy kept here and refreshed by hand: this
+     * registry is the one source.
+     *
+     * Resolved where it is used, never at `init()`, for the reason
+     * `metadataSaveDoor` is (AGENTS.md, "Startup registry reads").
+     */
+    const objectRegistry = (): ObjectRegistryReads | undefined => {
+      const registry = safeGetService<Partial<Pick<IObjectQLEngine, 'registry'>>>(ctx, 'objectql')?.registry;
+      return typeof registry?.getObject === 'function' && typeof registry.getAllObjects === 'function'
+        ? registry
+        : undefined;
+    };
+
     const config: ExternalDatasourceServiceConfig = {
       introspect,
       getDatasource: async (n) => (await metadata()?.get('datasource', n)) as DatasourceLike | undefined,
-      getObject: async (n) => {
-        const service = metadata();
-        return (service?.getObject ? await service.getObject(n) : await service?.get('object', n)) as
-          | ObjectLike
-          | undefined;
-      },
-      listObjects: async () => {
-        const service = metadata();
-        return ((service?.listObjects ? await service.listObjects() : await service?.list?.('object')) ??
-          []) as ObjectLike[];
-      },
+      // [#21842] Both object reads come from the one registry, so the sweep
+      // judges the very definitions it listed. See `objectRegistry`.
+      getObject: async (n) => objectRegistry()?.getObject(n) as ObjectLike | undefined,
+      listObjects: async () => (objectRegistry()?.getAllObjects() ?? []) as ObjectLike[],
       // Persist the refreshed snapshot as an `external_catalog` metadata record
       // so the boot gate + Studio's schema browser can read it without
       // re-introspecting. No-op when the metadata service can't write.
@@ -195,13 +218,22 @@ export class ExternalDatasourceServicePlugin implements Plugin {
        * Both links are read, not assumed:
        *  - `_packageId` is stamped onto every registered metadata item that has
        *    package coords (`applyProtection`, `@objectstack/spec/shared`), by
-       *    both load paths — the artifact loader and `registry.registerItem`.
+       *    every load path — the artifact loader, `registry.registerItem`, and
+       *    `AppPlugin`'s registration of a code-defined datasource, which
+       *    stamps the package body that declares it ([#21889]).
        *    `'sys_metadata'` is the rehydration sentinel, not a real package, so
        *    it is excluded exactly as the registry's own `isCodeArtifactBody`
        *    excludes it.
        *  - the package record is what `installPackage` stored under
-       *    `manifest.id`, i.e. the same `{ manifest }` shape the runtime publish
-       *    gate reads for this identical check.
+       *    `manifest.id` in the engine registry (`registry.getPackage` on the
+       *    `'objectql'` service), the store the runtime publish gate reads for
+       *    this identical check (`publishPackageDrafts`,
+       *    `@objectstack/metadata-protocol`). [#21889] It used to be asked of
+       *    the `'metadata'` service, which no composition writes package
+       *    records into, so no datasource ever resolved a namespace. ⛔ One
+       *    store, one id: the id comes only from `_packageId`, never guessed,
+       *    and no second store is consulted when the registry has no record.
+       *    The engine is resolved where it is used, like `metadata()` above.
        *
        * Every step is allowed to come up empty (a DB-only datasource, a
        * GitOps deployment with no package registry, a legacy package that
@@ -210,15 +242,16 @@ export class ExternalDatasourceServicePlugin implements Plugin {
        */
       getNamespace: async (datasource: string) => {
         try {
-          const service = metadata();
-          const ds = (await service?.get('datasource', datasource)) as
+          const ds = (await metadata()?.get('datasource', datasource)) as
             | { _packageId?: unknown }
             | undefined;
           const pkgId = typeof ds?._packageId === 'string' ? ds._packageId : undefined;
           if (!pkgId || pkgId === 'sys_metadata') return undefined;
-          const pkg = (await service?.get('package', pkgId)) as
-            | { manifest?: { namespace?: unknown } }
-            | undefined;
+          const registry = safeGetService<{ registry?: { getPackage?: (id: string) => unknown } }>(
+            ctx,
+            'objectql',
+          )?.registry;
+          const pkg = registry?.getPackage?.(pkgId) as { manifest?: { namespace?: unknown } } | undefined;
           const ns = pkg?.manifest?.namespace;
           return typeof ns === 'string' ? ns : undefined;
         } catch {

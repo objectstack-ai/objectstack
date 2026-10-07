@@ -118,3 +118,22 @@ describe('authored-translation sync replays the conversion chain over stored row
     expect(warn).toHaveBeenCalledTimes(1);
   });
 });
+
+// [#21911, ADR-0096] The boot / resync read is platform plumbing with no caller
+// behind it: it carries the explicit system opt-in rather than reaching the
+// engine as a principal-less context. No singular rows, so the legacy plural
+// fallback issues too.
+describe('authored-translation read carries the explicit system opt-in (#21911)', () => {
+  it('passes isSystem on the singular read and on the plural fallback', async () => {
+    const engine = engineOf([]);
+
+    const layer = await readAuthoredTranslationLayer(engine);
+
+    expect(layer).toEqual({});
+    expect(engine.find.mock.calls.map(([obj, q]) => [obj, q?.where?.type])).toEqual([
+      ['sys_metadata', 'translation'],
+      ['sys_metadata', 'translations'],
+    ]);
+    for (const [, q] of engine.find.mock.calls) expect(q?.context).toEqual({ isSystem: true });
+  });
+});

@@ -30,6 +30,11 @@
  * own read and write shapes (the `protocol.lifecycle-audit-rows.test.ts` double,
  * plus the engine's `getKeyedDigest` accessor), so the stored values compared
  * against are the ones the real repository writes.
+ *
+ * [#21978] The last two blocks pin the same doors on a stored row with NO
+ * `checksum`: it is saved, deleted and published over through the version its
+ * read serves, a stale version is still refused, a `null` parent still matches
+ * it, the write stamps it, and a row WITH a `checksum` is judged as before.
  */
 
 import { createHmac } from 'node:crypto';
@@ -38,9 +43,11 @@ import {
     assertEngineDeleteDispatch,
     assertEngineFindOnePredicate,
     assertEngineUpdateDispatch,
+    ConflictError,
     hashSpec,
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { SysMetadataRepository } from './sys-metadata-repository.js';
 
 const TEST_KEY = 'served-content-hash-test-key';
 /** A keyed digest with the provider contract's output shape, under a key this file holds. */
@@ -460,5 +467,229 @@ describe('[#21207] a change note that quotes a stored hash', () => {
             }
             expectNoStoredHash(JSON.stringify(events), storedHashes(h));
         }
+    });
+});
+
+// ---------------------------------------------------------------------------
+// [#21978] A stored row with no `checksum`
+// ---------------------------------------------------------------------------
+//
+// The datasource admin door stored its rows with no `checksum` before it
+// stamped them, and such rows stay at rest (no backfill). The repository serves
+// a row like that as the hash of its stored body; its `put` / `delete` used to
+// judge the caller's parent against the raw column (`null`) instead, so every
+// save and delete of such a row through the metadata door answered 409 — the
+// unpinned (last-write-wins) ones included, since the door takes the parent
+// from the same read. The lock is type-agnostic, so this file's `view` row
+// stands in for the datasource one.
+
+const VIEW_REF = { type: 'view', name: 'case_grid', org: ORG } as const;
+
+/** Store the active row the way a writer that stamps no `checksum` did. */
+async function seedUnstamped(h: ReturnType<typeof makeEngine>, label = 'legacy', state = 'active'): Promise<void> {
+    await h.engine.insert('sys_metadata', {
+        type: 'view',
+        name: 'case_grid',
+        organization_id: ORG,
+        package_id: null,
+        state,
+        metadata: JSON.stringify(viewBody(label)),
+        version: 1,
+    });
+}
+
+function caseGridRow(h: ReturnType<typeof makeEngine>, state = 'active'): Row | undefined {
+    return [...h.rows.values()].find((r) => r.name === 'case_grid' && r.state === state);
+}
+
+function repoFor(h: ReturnType<typeof makeEngine>): SysMetadataRepository {
+    return new SysMetadataRepository({ engine: h.engine, organizationId: ORG, orgLabel: ORG });
+}
+
+/** The version the repository's own read serves for the row, keyed as a door hands it out. */
+async function servedToken(h: ReturnType<typeof makeEngine>): Promise<string> {
+    const item = await repoFor(h).get(VIEW_REF as any);
+    expect(item).not.toBeNull();
+    return keyedDigest(item!.hash);
+}
+
+describe('[#21978] a stored row with no checksum is written through the version its read serves', () => {
+    it('save door: the served version is accepted as the parent, and the write stamps the row', async () => {
+        const h = makeEngine();
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        await seedUnstamped(h);
+        expect(caseGridRow(h)?.checksum).toBeUndefined();
+
+        const token = await servedToken(h);
+        // The read serves the hash of the stored body, as `put` would stamp it.
+        expect(token).toBe(await keyedDigest(hashSpec(viewBody('legacy'), 'view')));
+
+        const saved: any = await p.saveMetaItem({ ...ref, item: viewBody('edited'), parentVersion: token } as any);
+        expect(saved.success).toBe(true);
+        expect(JSON.parse(caseGridRow(h)!.metadata).label).toBe('edited');
+        // The write stamped the row: it now carries the checksum of its new body.
+        expect(caseGridRow(h)!.checksum).toBe(hashSpec(viewBody('edited'), 'view'));
+        expect(saved.version).toBe(await keyedDigest(caseGridRow(h)!.checksum!));
+    });
+
+    it('reset door: the served version is accepted as the parent, and the row is removed', async () => {
+        const h = makeEngine();
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        await seedUnstamped(h);
+
+        const reset: any = await p.deleteMetaItem({ ...ref, parentVersion: await servedToken(h) } as any);
+        expect(reset.success).toBe(true);
+        expect(caseGridRow(h)).toBeUndefined();
+    });
+
+    it('unpinned save and delete (last-write-wins) succeed; an identical re-save stamps the row too', async () => {
+        const saveSide = makeEngine();
+        const p = new ObjectStackProtocolImplementation(saveSide.engine);
+        await seedUnstamped(saveSide);
+        const saved: any = await p.saveMetaItem({ ...ref, item: viewBody('legacy') } as any);
+        expect(saved.success).toBe(true);
+        expect(caseGridRow(saveSide)!.checksum).toBe(hashSpec(viewBody('legacy'), 'view'));
+
+        const deleteSide = makeEngine();
+        const q = new ObjectStackProtocolImplementation(deleteSide.engine);
+        await seedUnstamped(deleteSide);
+        const reset: any = await q.deleteMetaItem({ ...ref } as any);
+        expect(reset.success).toBe(true);
+        expect(caseGridRow(deleteSide)).toBeUndefined();
+    });
+
+    it('a stale version is still refused (METADATA_CONFLICT / 409), the refusal names the served version, and that version is then accepted', async () => {
+        const h = makeEngine();
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        await seedUnstamped(h);
+        const served = await servedToken(h);
+
+        const staleTokens = [
+            await keyedDigest(hashSpec(viewBody('someone else'), 'view')),
+            // The served hash in stored (unkeyed) form stays refused at the door.
+            hashSpec(viewBody('legacy'), 'view'),
+        ];
+        let saveRefusal: any;
+        for (const token of staleTokens) {
+            for (const [door, run] of [
+                ['save', () => p.saveMetaItem({ ...ref, item: viewBody('lost'), parentVersion: token } as any)],
+                ['delete', () => p.deleteMetaItem({ ...ref, parentVersion: token } as any)],
+            ] as const) {
+                const refused = await rejection(run);
+                expect(refused.code, `${door} with ${token}`).toBe('METADATA_CONFLICT');
+                expect(refused.status, `${door} with ${token}`).toBe(409);
+                expect(refused.actualHead, `${door} with ${token}`).toBe(served);
+                if (door === 'save') saveRefusal = refused;
+            }
+        }
+        // Nothing was written: the row is the one stored, still unstamped.
+        expect(JSON.parse(caseGridRow(h)!.metadata).label).toBe('legacy');
+        expect(caseGridRow(h)!.checksum).toBeUndefined();
+
+        const after: any = await p.saveMetaItem({ ...ref, item: viewBody('edited'), parentVersion: saveRefusal.actualHead } as any);
+        expect(after.success).toBe(true);
+        expect(caseGridRow(h)!.checksum).toBe(hashSpec(viewBody('edited'), 'view'));
+    });
+
+    it('a writer passing null for such a row still succeeds (the stored-row migration hands the raw column on)', async () => {
+        const h = makeEngine();
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        await seedUnstamped(h);
+
+        // `migrateStoredMetadata`'s in-process spelling: `row.checksum ?? null`.
+        const saved: any = await p.saveMetaItem({
+            ...ref,
+            item: viewBody('migrated'),
+            storedParentVersion: caseGridRow(h)!.checksum ?? null,
+        } as any);
+        expect(saved.success).toBe(true);
+        expect(caseGridRow(h)!.checksum).toBe(hashSpec(viewBody('migrated'), 'view'));
+    });
+
+    it('publish over such a row: the promotion takes the active row\'s served version as its parent', async () => {
+        const h = makeEngine();
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        await seedUnstamped(h);
+        await p.saveMetaItem({ ...ref, item: viewBody('staged'), mode: 'draft' } as any);
+
+        const published: any = await p.publishMetaItem({ ...ref } as any);
+        expect(published.version).toBe(await keyedDigest(hashSpec(viewBody('staged'), 'view')));
+        expect(JSON.parse(caseGridRow(h)!.metadata).label).toBe('staged');
+        expect(caseGridRow(h)!.checksum).toBe(hashSpec(viewBody('staged'), 'view'));
+        expect(caseGridRow(h, 'draft')).toBeUndefined();
+    });
+
+    it('the post-promotion drain removes a draft row stored with no checksum', async () => {
+        const h = makeEngine();
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        await seedUnstamped(h, 'staged', 'draft');
+
+        await p.publishMetaItem({ ...ref } as any);
+        expect(JSON.parse(caseGridRow(h)!.metadata).label).toBe('staged');
+        // The drain deletes by the draft's served version; judged against the raw
+        // column it read as the benign "newer draft saved" race and survived.
+        expect(caseGridRow(h, 'draft')).toBeUndefined();
+    });
+});
+
+describe('[#21978] the repository lock: a row with a checksum is judged exactly as before', () => {
+    it('its stamp is its head: the hash of its body and a null parent are refused when the stamp differs', async () => {
+        const h = makeEngine();
+        const repo = repoFor(h);
+        // A stamp that is not the hash of the bytes beside it (a row stamped
+        // before its type's canonical form changed): the stamp, not the body,
+        // is the version that row is served as.
+        const stamp = hashSpec(viewBody('stamped earlier'), 'view');
+        await h.engine.insert('sys_metadata', {
+            type: 'view',
+            name: 'case_grid',
+            organization_id: ORG,
+            package_id: null,
+            state: 'active',
+            metadata: JSON.stringify(viewBody('stamped')),
+            checksum: stamp,
+        });
+        expect((await repo.get(VIEW_REF as any))!.hash).toBe(stamp);
+
+        for (const parent of [hashSpec(viewBody('stamped'), 'view'), null]) {
+            const refused = await rejection(() =>
+                repo.put(VIEW_REF as any, viewBody('next'), { parentVersion: parent, actor: null }));
+            expect(refused).toBeInstanceOf(ConflictError);
+            expect(refused.code).toBe('METADATA_CONFLICT');
+            expect(refused.actualHead).toBe(stamp);
+        }
+        const refusedDelete = await rejection(() =>
+            repo.delete(VIEW_REF as any, { parentVersion: hashSpec(viewBody('stamped'), 'view'), actor: null }));
+        expect(refusedDelete).toBeInstanceOf(ConflictError);
+        expect(refusedDelete.actualHead).toBe(stamp);
+        expect(caseGridRow(h)!.checksum).toBe(stamp);
+
+        const written = await repo.put(VIEW_REF as any, viewBody('next'), { parentVersion: stamp, actor: null });
+        expect(written.version).toBe(hashSpec(viewBody('next'), 'view'));
+    });
+
+    it('a row with no checksum: null and its served version are accepted, anything else is refused with the served version as head', async () => {
+        const h = makeEngine();
+        const repo = repoFor(h);
+        await seedUnstamped(h);
+        const served = hashSpec(viewBody('legacy'), 'view');
+
+        const refused = await rejection(() =>
+            repo.put(VIEW_REF as any, viewBody('next'), { parentVersion: hashSpec(viewBody('other'), 'view'), actor: null }));
+        expect(refused).toBeInstanceOf(ConflictError);
+        expect(refused.code).toBe('METADATA_CONFLICT');
+        expect(refused.actualHead).toBe(served);
+
+        const viaNull = await repo.put(VIEW_REF as any, viewBody('legacy'), { parentVersion: null, actor: null });
+        // An identical body still writes: the row had no stamp, and now has one.
+        expect(viaNull.version).toBe(served);
+        expect(caseGridRow(h)!.checksum).toBe(served);
+        expect(h.historyRows).toHaveLength(1);
+
+        const again = makeEngine();
+        await seedUnstamped(again);
+        const removed = await repoFor(again).delete(VIEW_REF as any, { parentVersion: served, actor: null });
+        expect(removed).toBeDefined();
+        expect(caseGridRow(again)).toBeUndefined();
     });
 });

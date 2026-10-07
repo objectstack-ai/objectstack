@@ -11,7 +11,12 @@
 import { describe, it, expect } from 'vitest';
 import { FieldSchema, InlineGridColumnSchema, ObjectSchema } from '@objectstack/spec/data';
 import { ColumnPrefixSchema, ColumnSummaryConfigSchema, ListColumnSchema } from '@objectstack/spec/ui';
-import { applyObjectSchemaMask, type ObjectSchemaMaskPosture } from './object-schema-fls.js';
+import {
+    applyObjectSchemaMask,
+    relateObjectSchemaMaskPosture,
+    resolveObjectSchemaMaskPosture,
+    type ObjectSchemaMaskPosture,
+} from './object-schema-fls.js';
 import {
     COLUMN_PREFIX_POSITIONS,
     COLUMN_SUMMARY_POSITIONS,
@@ -458,6 +463,146 @@ describe('mentionsDenied is an identifier-token test', () => {
     });
 });
 
+describe('[ADR-0106 D1] an action param under `objectOverride` is judged against the object it names', () => {
+    // The shape of `sys_user.invite_user`: `role` is a field of BOTH objects,
+    // and the param names the member's — not the user's.
+    const SYS_USER = {
+        name: 'sys_user',
+        fields: { id: { type: 'text' }, email: { type: 'email' }, role: { type: 'text' } },
+        actions: [
+            {
+                name: 'invite_user',
+                label: 'Invite User',
+                type: 'api',
+                params: [
+                    { field: 'email', required: true },
+                    { field: 'role', objectOverride: 'sys_member', required: true },
+                ],
+            },
+            { name: 'set_role', label: 'Set Role', type: 'api', params: [{ field: 'role', required: true }] },
+            { name: 'mail', label: 'Mail', type: 'api', params: [{ field: 'email' }] },
+        ],
+    };
+
+    /** A security service answering per object, as plugin-security does. */
+    const securityFor = (answers: Record<string, string[] | undefined | 'throw'>) => ({
+        getMetadataReadableFields: async (object: string) => {
+            const answer = answers[object];
+            if (answer === 'throw') throw new Error(`security unhealthy for ${object} (test)`);
+            return answer === undefined ? undefined : [...answer];
+        },
+    });
+
+    /** The exit's sequence: resolve before the fetch, relate after it, mask. */
+    const serve = async (
+        answers: Record<string, string[] | undefined | 'throw'>,
+        document: Record<string, unknown> = SYS_USER,
+        context: Record<string, unknown> = { userId: 'u_delegate', systemPermissions: [] },
+    ) => {
+        const posture = await resolveObjectSchemaMaskPosture({
+            objectName: String(document.name), context, security: securityFor(answers), enabled: true,
+        });
+        return applyObjectSchemaMask(document, await relateObjectSchemaMaskPosture(posture, document));
+    };
+    const actionNames = (result: { document: unknown }) => ((result.document as any).actions ?? []).map((a: any) => a.name);
+
+    it('serves `invite_user` to a caller denied THIS object\'s `role` who may read the named object\'s `role` (the delegated_admin shape)', async () => {
+        const result = await serve({ sys_user: ['id', 'email'], sys_member: ['id', 'role', 'user_id'] });
+        expect(result.denied).toEqual(['role']);
+        expect(actionNames(result)).toEqual(['invite_user', 'mail']);
+        // Served as authored — the param still names the member's `role`.
+        expect((result.document as any).actions[0].params[1]).toEqual({ field: 'role', objectOverride: 'sys_member', required: true });
+    });
+
+    it('still drops an action whose param names a denied field of THIS object', async () => {
+        const result = await serve({ sys_user: ['id', 'email'], sys_member: ['id', 'role'] });
+        expect(actionNames(result)).not.toContain('set_role');
+        // An override naming this object IS this object: the same reading.
+        const self = await serve({ sys_user: ['id', 'email'], sys_member: ['id', 'role'] }, {
+            ...SYS_USER,
+            actions: [{ name: 'self_role', type: 'api', params: [{ field: 'role', objectOverride: 'sys_user' }] }],
+        });
+        expect(actionNames(self)).toEqual([]);
+    });
+
+    it('still drops the action when the caller is denied the field on the object the override names', async () => {
+        const denied = await serve({ sys_user: ['id', 'email'], sys_member: ['id', 'user_id'] });
+        expect(actionNames(denied)).toEqual(['mail']);
+        // Even when nothing of THIS object is denied: the read is the other object's.
+        const thisWhole = await serve({ sys_user: ['id', 'email', 'role'], sys_member: ['id', 'user_id'] });
+        expect(thisWhole.denied).toEqual([]);
+        expect(actionNames(thisWhole)).toEqual(['set_role', 'mail']);
+    });
+
+    it('fails closed when the named object\'s readable set cannot be determined — undetermined, throwing, or unknown', async () => {
+        for (const sysMember of [undefined, 'throw'] as const) {
+            expect(actionNames(await serve({ sys_user: ['id', 'email', 'role'], sys_member: sysMember }))).toEqual(['set_role', 'mail']);
+        }
+        const unknown = await serve({ sys_user: ['id', 'email', 'role'] }, {
+            ...SYS_USER,
+            actions: [{ name: 'ghost', type: 'api', params: [{ field: 'role', objectOverride: 'no_such_object' }] }],
+        });
+        expect(actionNames(unknown)).toEqual([]);
+        // A posture nobody related (an exit that skipped the step) relates nothing: closed too.
+        const unrelated = applyObjectSchemaMask(SYS_USER, { kind: 'project', readable: new Set(['id', 'email', 'role']) });
+        expect(actionNames(unrelated)).toEqual(['set_role', 'mail']);
+    });
+
+    it('leaves an exempt caller\'s schema whole, and never asks about the related object', async () => {
+        let asked = 0;
+        const posture = await resolveObjectSchemaMaskPosture({
+            objectName: 'sys_user',
+            context: { userId: 'u_admin', systemPermissions: ['setup.access'] },
+            security: { getMetadataReadableFields: async () => { asked++; return []; } },
+            enabled: true,
+        });
+        const related = await relateObjectSchemaMaskPosture(posture, SYS_USER);
+        expect(related).toBe(posture);
+        expect(applyObjectSchemaMask(SYS_USER, related).document).toBe(SYS_USER);
+        expect(asked).toBe(0);
+    });
+
+    it('reads a `name` restating `field` as that field; an explicit other `name`, and a `defaultFromRow` seed, as THIS object\'s', async () => {
+        const answers = { sys_user: ['id', 'email'], sys_member: ['id', 'role', 'title'] };
+        const withParam = (param: Record<string, unknown>) => ({ ...SYS_USER, actions: [{ name: 'act', type: 'api', params: [param] }] });
+        // The default body key, spelled out, is the same read.
+        expect(actionNames(await serve(answers, withParam({ name: 'role', field: 'role', objectOverride: 'sys_member' })))).toEqual(['act']);
+        // A body key that differs from the field keeps the existing reading: it
+        // spells a denied field of this object, so the action goes.
+        expect(actionNames(await serve(answers, withParam({ name: 'role', field: 'title', objectOverride: 'sys_member' })))).toEqual([]);
+        expect(actionNames(await serve(answers, withParam({ name: 'member_role', field: 'role', objectOverride: 'sys_member' })))).toEqual(['act']);
+        // `defaultFromRow` seeds the value from THIS object's row — a read here too.
+        expect(actionNames(await serve(answers, withParam({ field: 'role', objectOverride: 'sys_member', defaultFromRow: true })))).toEqual([]);
+        // The rest of the param is still this object's: a predicate over a denied field drops it.
+        expect(actionNames(await serve(answers, withParam({ field: 'role', objectOverride: 'sys_member', visible: 'record.role != null' })))).toEqual([]);
+    });
+
+    it('folds a withheld related read into the fingerprint, so two cohorts never share a validator for different bodies', async () => {
+        const reads = await serve({ sys_user: ['id', 'email'], sys_member: ['id', 'role'] });
+        const cannot = await serve({ sys_user: ['id', 'email'], sys_member: ['id'] });
+        expect(reads.denied).toEqual(cannot.denied);
+        expect(reads.fingerprint).not.toBe(cannot.fingerprint);
+        // An unrestricted caller on both objects keeps the empty fingerprint and the same reference.
+        const whole = await serve({ sys_user: ['id', 'email', 'role'], sys_member: ['id', 'role'] });
+        expect(whole.fingerprint).toBe('');
+        expect(whole.document).toBe(SYS_USER);
+    });
+
+    it('relates each named object once, across documents, and leaves a document with no such read alone', async () => {
+        const asked: string[] = [];
+        const posture = await resolveObjectSchemaMaskPosture({
+            objectName: 'sys_user',
+            context: { userId: 'u' },
+            security: { getMetadataReadableFields: async (object: string) => { asked.push(object); return ['id', 'role']; } },
+            enabled: true,
+        });
+        expect(await relateObjectSchemaMaskPosture(posture, { name: 'sys_user', actions: [] })).toBe(posture);
+        const related = await relateObjectSchemaMaskPosture(posture, SYS_USER, SYS_USER);
+        expect(await relateObjectSchemaMaskPosture(related, SYS_USER)).toBe(related);
+        expect(asked).toEqual(['sys_user', 'sys_member']);
+    });
+});
+
 /** The keys a Zod object schema declares. */
 function declaredKeys(schema: unknown): string[] {
     const shape = (schema as { shape?: Record<string, unknown> }).shape;
@@ -509,7 +654,12 @@ describe('[ADR-0106] the shared contract table, driven through the bare projecti
     for (const testCase of OBJECT_SCHEMA_MASK_CASES.filter((c) => c.expect.kind === 'fields')) {
         it(testCase.id, () => {
             const readable = testCase.readable as readonly string[];
-            const { document } = applyObjectSchemaMask(FLS_CONTRACT_OBJECT, project([...readable]));
+            // Related as an exit relates it: the contract's double answers the
+            // same set for every object, `contact` included (#21884).
+            const posture: ObjectSchemaMaskPosture = {
+                kind: 'project', readable: new Set(readable), related: new Map([['contact', new Set(readable)]]),
+            };
+            const { document } = applyObjectSchemaMask(FLS_CONTRACT_OBJECT, posture);
             assertObjectSchemaMaskCase('applyObjectSchemaMask', testCase, { kind: 'document', document });
         });
     }

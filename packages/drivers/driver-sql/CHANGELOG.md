@@ -1,5 +1,193 @@
 # @objectstack/driver-sql
 
+## 17.7.0
+
+### Minor Changes
+
+- 35dfb81: fix(service-analytics): the ObjectQL face echoes a date-bucketed dimension in the bucket expression the driver itself groups by, so SQLite runs the statement it prints
+  
+  Clause-②: yes (widening)
+  
+  **Before**, the ObjectQL strategy printed every date-bucketed dimension as `date_trunc('<granularity>', col)` in the `sql` it echoes and in the `POST /analytics/sql` body, on every dialect. The native strategy declines a granularity, so every bucketed query lands on this face. Measured through `POST /api/v1/analytics/query` and `POST /api/v1/analytics/sql` in the default composition: the rows were right. On SQLite the echo failed with `no such function: date_trunc` (month, quarter and week). On PostgreSQL 16.14 it ran but answered `2026-01-01T00:00:00.000Z` where the face answers `2026-01`. The driver groups by `strftime('%Y-%m', …)` on SQLite and `to_char((…)::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM')` on PostgreSQL.
+  
+  **Now** the echo prints the driver's own expression, so it runs on that dialect and answers the face's bucket keys.
+  
+  - **`@objectstack/driver-sql`**: `SqlDriver.dateBucketSql(objectName, field, granularity)` returns the expression `aggregate` groups by, rendered as SQL text: the existing `buildDateBucketExpr`, unchanged, with each identifier quoted by the dialect. It returns `null` for a granularity the dialect buckets in memory (`week` on SQLite). The MySQL arm (`date_format(convert_tz(…))`) is checked by code read only, because no MySQL server was available.
+  - **`@objectstack/service-analytics`**: the new optional `AnalyticsServiceConfig.dateBucketSql` hook carries the expression to the ObjectQL strategy. `AnalyticsServicePlugin` wires it from the driver that serves the object, as it wires `sqlDialect`.
+  - **`@objectstack/driver-turso`**: a comment that said `SqlDriver` buckets with `date_trunc` now names the SQLite `strftime` expression it emits. The inherited `dateBucketSql` answers on the remote face too: it renders the same SQLite expression with no connection, and libSQL runs it.
+  
+  **Unchanged.** The rows every face answers. The echo keeps `date_trunc(…)` where nothing answers: a host that wires no hook, a driver with no bucket expression (memory, MongoDB), a granularity the driver buckets in memory, and a query with a non-UTC `timezone`, which the engine buckets in memory on that zone's calendar.
+
+### Patch Changes
+
+- 13a24ec: Provenance comments in `@objectstack/driver-sql` cite the commits and ADR that decided them, not tracker numbers that no longer resolve
+  
+  Clause-②: no
+  
+  Docblocks and comments across the package cited issue-tracker numbers that now answer 404 on GitHub.
+  Each one now cites the commit in this repository's history that made the decision it describes, or the
+  ADR that records it (ADR-0104's 2026-09-05 addendum). Some of these docblocks sit on exported members,
+  so the reworded text appears in the published `index.d.ts` / `index.d.mts`, and comments that esbuild
+  keeps appear in the JavaScript output.
+  
+  Comment only: no export, type, error code, status, message text or runtime behaviour changes.
+- 30af17e: On a deployment whose media columns have not moved, the JSON-column filter refusal on a single-value file-class field (`file`, `image`, `avatar`, `video`, `audio`) now names the repair that works there: the media-column move, not `$contains`.
+  
+  Clause-②: no
+  
+  The filter is still refused with `INVALID_FILTER` / 400, for the same operators as before (`$eq`, `$in`, `$startsWith`, `$icontains`, the orderings and the rest of that set, and the bare `{ field: value }` spelling). Before, the refusal told the caller to use `$contains`, the membership repair for a multi-valued field. On a single-value file-class field `$contains` with the field's exact id answers no rows. The refusal now says that the field answers these operators again once the deployment finishes the media-column move (the column step of `objectstack migrate files-to-references --apply`), and it still names `$null` / `$empty`, which answer there. A multi-valued field keeps the `$contains` words, byte for byte. Once the media columns have moved, these filters are not refused, as before.
+- 6d728b8: fix(driver-sql): the driver's own refusal log lines no longer write the statement or the values bound into it
+  
+  Clause-②: no
+  
+  Five warning lines wrote the dialect's message to the server log as it came back. That message opens with the statement, with its bound values inlined on SQLite and MySQL, and on PostgreSQL a value-bearing diagnostic carries the value itself. The lines are the read terminal, the raw-statement terminal, and the refusals for a WHERE, a groupBy or aggregation, and a listed-distinct column the backend could not resolve. Each line now writes the dialect's text through the driver-fault redaction in `@objectstack/types`, the cut the engine applies at its boundary.
+  
+  - **What stays on each line.** Its code, the class of fault it reports, the object and column it names, the dialect's error code where the line printed one, and the dialect's own diagnostic.
+  - **What goes.** The statement and the values bound or inlined into it, replaced by `[statement and bound values redacted]`, and the value slot of each diagnostic the redaction's templates own, replaced by `[value redacted]`. The raw-statement line no longer writes the statement it was sent, which also holds for `@objectstack/driver-turso`'s remote transport, whose refusals reach the same line. The two debug lines the read terminal writes inside a pre-DDL question, or for a table whose DDL the driver deferred, take the same cut.
+  - **The envelopes.** The code, status, `cause` and withheld text of every refusal are unchanged. Two composed messages, the read terminal's `DATABASE_ERROR` and the raw-statement terminal's, said the statement was written to the server log; they now say the diagnostic was written with the statement and its bound values cut.
+  - **What changes for an operator.** A log reader that took the statement or a bound value from these lines now finds the marker where the dialect's text carried them, and nothing where the raw-statement line wrote the sent statement on its own. The diagnostic, the codes and the named object and column are where they were.
+- 440cd32: A `Field.date` grouped by `day`, `week`, `month`, `quarter` or `year` buckets as its own calendar day on PostgreSQL and MySQL, whatever zone the server or the session is in (#21485).
+  
+  Clause-②: no
+  
+  - **What was wrong.** The PostgreSQL bucket cast every column to `timestamptz` and the MySQL bucket passed every column through `convert_tz`. A `date` has no instant, so both invented midnight in the session's zone, and on a session east of UTC the conversion to UTC read the previous day. On PostgreSQL with the server at `Asia/Shanghai`, `2026-06-01` grouped into month `2026-05`, and `2026-01-01` into year `2025`. MySQL did the same once the session zone was `+08:00`; the driver pins its own sessions to UTC, so there it took a host `pool.afterCreate` that sets the session zone.
+  - **What it does now.** A declared `Field.date` buckets its calendar day with no zone conversion. A `Field.datetime`, and a column with no declaration, keep the UTC-instant expression, byte for byte. SQLite already bucketed a `date` as its calendar day and is unchanged.
+  - **Where it shows.** `aggregate()` with a `dateGranularity` group, and the expression `SqlDriver.dateBucketSql()` renders for the analytics SQL echo, which reads the same expression.
+- 5d095a0: On SQLite, a `week` date bucket is grouped in SQL, and the analytics SQL echo never prints a bucket statement that SQLite refuses (#21595).
+  
+  Clause-②: no
+  
+  - **What was wrong.** `driver-sql` grouped `day`, `month`, `quarter` and `year` in SQL on SQLite, but not `week`. Its `supports.queryDateGranularity` said `week: false`, so the engine bucketed weeks in memory, and the ObjectQL face of `POST /api/v1/analytics/query` and `POST /api/v1/analytics/sql` echoed the bucket as `date_trunc('week', col)`. SQLite has no `date_trunc`, so that echo could not run. A non-UTC `timezone` on SQLite gave the same echo for every granularity.
+  - **What it does now.**
+    - SQLite advertises all five granularities. `week` buckets as `YYYY-Www`, the ISO 8601 week that the PostgreSQL and MySQL arms answer. The expression does not use `strftime('%V')`, which needs SQLite 3.46: `@libsql/client` 0.18.0 bundles SQLite 3.45.1, where `%V` answers NULL. It runs on better-sqlite3, on libSQL (`driver-turso`) and on sql.js (`driver-sqlite-wasm`). A `Field.date` still buckets as its own calendar day.
+    - The echo prints that expression for a `week` bucket on SQLite, and the statement runs.
+    - With a non-UTC `timezone` on SQLite, `POST /api/v1/analytics/sql` refuses with `NOT_IMPLEMENTED` / 501, declared as a refusal so its message reaches the caller. `POST /api/v1/analytics/query` still answers the rows, and its answer carries no `sql`. The engine buckets on that zone's calendar in memory, and SQLite has no time-zone database, so no SQLite statement produces those keys.
+  - **Where it shows.** `aggregate()` with a `week` group on SQLite, `SqlDriver.dateBucketSql()`, and the analytics SQL echo. A query sent with `timezone: 'UTC'`, or with no `timezone`, still echoes the driver's own expression.
+- da40a5f: A connect to a SQLite file that is already `auto_vacuum=INCREMENTAL` no longer writes to it. `SqlDriver.connect()` now reads `PRAGMA auto_vacuum` first and runs `PRAGMA auto_vacuum = INCREMENTAL` only when the file answers something else.
+  
+  Clause-②: no
+  
+  - **What changed on disk.** On a file that already answered INCREMENTAL, the setter changed no mode, but it still stamped two header counters: the file change counter (bytes 24–27) and the version-valid-for number (bytes 92–95). So a read-only command such as `os migrate duplicates`, which the CLI docs say writes nothing at all, changed the file's md5 on every run. Reading the pragma changes no bytes, so such a file now comes through a connect, and a whole `os migrate duplicates` run, byte-identical.
+  - **Unchanged.** A fresh file and `:memory:` still come out INCREMENTAL. A legacy NONE file that already holds tables still gets the setter, which leaves it NONE until a `VACUUM` (`os db clean`), exactly as before. The journal-mode step already read first and set only on a difference, and it is untouched. Postgres and MySQL issue no PRAGMA.
+  - **The WASM SQLite driver** inherits the rule. A connect and disconnect no longer rewrites an already-INCREMENTAL image file, because the setter was what marked the image dirty.
+  - ⛔ No config key, export, error code or accepted input changes.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [a2aadab]
+- Updated dependencies [fe10172]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [045f764]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [a0176ef]
+- Updated dependencies [149153c]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [cab6396]
+- Updated dependencies [e864db5]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/types@17.7.0
+  - @objectstack/observability@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

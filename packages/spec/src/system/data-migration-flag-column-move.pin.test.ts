@@ -69,7 +69,7 @@ function baseRow(over: Partial<DataMigrationFlag> = {}): DataMigrationFlag {
   };
 }
 
-describe('columns_moved_at — absence is the contract (#16185, ruling on #15989 Q1)', () => {
+describe('columns_moved_at — absence is the contract (ruled: one nullable datetime on the flag row)', () => {
   it('parses green when the member is absent — every row alive today', () => {
     const result = DataMigrationFlagSchema.safeParse(baseRow());
     expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
@@ -123,7 +123,7 @@ describe('columns_moved_at — absence is the contract (#16185, ruling on #15989
   });
 });
 
-describe('the ONE arbiter is unchanged by this card (#16185 constraint 2)', () => {
+describe('the ONE arbiter is unchanged by the new member — read beside it, never inside it', () => {
   /** `(verified_at, blocking)` and the verdict recorded BEFORE the new member existed. */
   const CASES: Array<{ label: string; over: Partial<DataMigrationFlag>; verified: boolean }> = [
     { label: 'verified, no blocking', over: { verified_at: MOVED_AT, blocking: 0 }, verified: true },

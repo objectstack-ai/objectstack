@@ -70,7 +70,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SqlHttpOutbox } from './sql-http-outbox.js';
 import { SqlNotificationOutbox, DELIVERY_OBJECT } from './sql-outbox.js';
@@ -325,8 +325,11 @@ describe('redeliver — the request-reachable site is SCOPED, never bypassed', (
         expect(writes).toHaveLength(1);
         expect(writes[0].where).toMatchObject({ id: 'h_a', status: { $in: ['success', 'failed', 'dead'] } });
         // ⛔ The forbidden implementation, named: a bypass here would silence
-        // the audit for an authenticated user's unscoped write.
-        expect(writes[0].options?.bypassTenantAudit).toBeUndefined();
+        // the audit for an authenticated user's unscoped write. [#21908] The
+        // write now carries the explicit system opt-in, for which the engine
+        // fills in a bypass on this object unless one is stated — so the
+        // outbox states `false`, and that is what must reach the driver.
+        expect(writes[0].options?.bypassTenantAudit).toBe(false);
         // …and the remedy that replaces it, present.
         expect(writes[0].options?.tenantId).toBe('org_a');
         // The line is absent BECAUSE the write is scoped — the two assertions
@@ -373,6 +376,47 @@ describe('redeliver — the request-reachable site is SCOPED, never bypassed', (
         expect(rows.map((r) => `${r.id}:${r.status}`).sort()).toEqual(['h_a:pending', 'h_b:dead']);
     });
 
+    it('[#21908] ⛔ under the explicit system opt-in the threaded tenant still walls a foreign row', async () => {
+        // The opt-in replaces the security middleware's principal-less
+        // hand-off on these calls; it must not replace the tenant scope. Read
+        // through a wrapper that records the context each engine call carried,
+        // so this is a reading of the opt-in path and of no other.
+        await seedDeadRow('h_a', 'org_a');
+        await seedDeadRow('h_b', 'org_b');
+        const contexts: Array<{ verb: string; context: unknown; tenantId: unknown }> = [];
+        const recorded: any = {
+            findOne: (o: string, q: any, opts: any) => {
+                assertEngineFindOnePredicate(o, q);
+                contexts.push({ verb: 'findOne', context: opts?.context, tenantId: q?.tenantId });
+                return engine.findOne(o, q, opts);
+            },
+            update: (o: string, d: any, opts: any) => {
+                assertEngineUpdateDispatch(d, opts);
+                contexts.push({ verb: 'update', context: opts?.context, tenantId: opts?.tenantId });
+                return engine.update(o, d, opts);
+            },
+        };
+        const outbox = new SqlHttpOutbox(recorded, { partitionCount: 1 });
+
+        await expect(outbox.redeliver('h_b', { tenantId: 'org_a' })).rejects.toMatchObject({
+            name: 'HttpRedeliverError',
+            code: 'RESOURCE_NOT_FOUND',
+        });
+        expect(contexts).toEqual([{ verb: 'findOne', context: { isSystem: true }, tenantId: 'org_a' }]);
+        expect(driverUpdateManys.filter((u) => u.object === SYS_HTTP_DELIVERY)).toHaveLength(0);
+
+        // The still-works half, on the same path: the caller's own row resets.
+        const replayed = await outbox.redeliver('h_a', { tenantId: 'org_a' });
+        expect(`${replayed.id}:${replayed.status}:${replayed.attempts}`).toBe('h_a:pending:0');
+        expect(contexts.slice(1)).toEqual([
+            { verb: 'findOne', context: { isSystem: true }, tenantId: 'org_a' },
+            { verb: 'update', context: { isSystem: true }, tenantId: 'org_a' },
+            { verb: 'findOne', context: { isSystem: true }, tenantId: 'org_a' },
+        ]);
+        const rows = (await engine.find(SYS_HTTP_DELIVERY, { where: {} })) as any[];
+        expect(rows.map((r) => `${r.id}:${r.status}:${r.attempts}`).sort()).toEqual(['h_a:pending:0', 'h_b:dead:3']);
+    });
+
     it('a tenant-less caller is NOT silenced — the audit still reports the gap', async () => {
         // The honest half of `tenantId: string | undefined`. Passing
         // `undefined` leaves the write unscoped, and the finding is REPORTED
@@ -389,7 +433,8 @@ describe('redeliver — the request-reachable site is SCOPED, never bypassed', (
         // have consumed this op's one warning.
         const writes = driverUpdateManys.filter((u) => u.object === SYS_HTTP_DELIVERY);
         expect(writes).toHaveLength(1);
-        expect(writes[0].options?.bypassTenantAudit).toBeUndefined();
+        // [#21908] Stated `false` under the opt-in — see the first test.
+        expect(writes[0].options?.bypassTenantAudit).toBe(false);
         expect(auditedUpdateMany(SYS_HTTP_DELIVERY)).toBe(true);
     });
 });

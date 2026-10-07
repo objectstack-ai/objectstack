@@ -54,6 +54,13 @@ import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
 import { isPublicSharingEnabled } from '@objectstack/spec/data';
 // [#21197] The one dereference of an `internal` column — see the probe below.
 import { readInternalColumn } from '@objectstack/objectql/core';
+// [#22049] The one reading of the password header pair (`X-Share-Password` and
+// the `X-Share-Password-Encoding` that declares it), shared with the
+// plugin-sharing mount's `presentedPassword`. It lives in `@objectstack/types`
+// because `@objectstack/plugin-sharing` is a DEV dependency here — the same
+// reason `isPublicSharingEnabled` above is imported from the spec — and both
+// packages already depend on `@objectstack/types`, so the import adds no edge.
+import { readSharePasswordHeader, SHARE_PASSWORD_VARY, type SharePasswordHeaderReading } from '@objectstack/types';
 
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -67,8 +74,59 @@ export function createShareLinksDomain(deps: DomainHandlerDeps): DomainRoute {
     };
 }
 
+/**
+ * [#21839] Response headers the two public routes (`/:token/resolve` and
+ * `/:token/messages`) answer with, on every outcome — success, refusal, or a
+ * thrown error. `Cache-Control: no-store` keeps the token-released record (and
+ * any refusal) out of every browser and shared cache; `Vary: X-Share-Password,
+ * X-Share-Password-Encoding` marks the answer as depending on that request
+ * header, and on the one declaring its encoding (#22049), for any cache that
+ * does not honour `no-store`. The plugin-sharing mount
+ * (`plugin-sharing/src/share-link-routes.ts`) sends the same pair, from the
+ * same `SHARE_PASSWORD_VARY` constant.
+ */
+const PUBLIC_RESPONSE_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+    'Cache-Control': 'no-store',
+    Vary: SHARE_PASSWORD_VARY,
+});
+
+function isPublicShareLinkRoute(subPath: string, method: string): boolean {
+    const parts = subPath.replace(/^\/+/, '').split('/').filter(Boolean);
+    return (
+        method.toUpperCase() === 'GET' &&
+        parts.length === 2 &&
+        (parts[1] === 'resolve' || parts[1] === 'messages')
+    );
+}
+
 /** Body kept signature-compatible with the legacy `HttpDispatcher.handleShareLinks`. */
 export async function handleShareLinksRequest(
+    deps: DomainHandlerDeps,
+    subPath: string,
+    method: string,
+    body: any,
+    query: any,
+    context: HttpProtocolContext,
+): Promise<HttpDispatcherResult> {
+    const isPublic = isPublicShareLinkRoute(subPath, method);
+    let result: HttpDispatcherResult;
+    try {
+        result = await handleShareLinksRequestBody(deps, subPath, method, body, query, context);
+    } catch (err: unknown) {
+        // A throw from OUTSIDE the body's own try (service resolution, engine
+        // lookup) would otherwise leave a public route without the headers
+        // above. Authenticated routes keep their existing propagation.
+        if (!isPublic) throw err;
+        result = { handled: true, response: deps.errorFromThrown(err, 500) };
+    }
+    if (!result.response || !isPublic) return result;
+    return {
+        ...result,
+        response: { ...result.response, headers: { ...result.response.headers, ...PUBLIC_RESPONSE_HEADERS } },
+    };
+}
+
+async function handleShareLinksRequestBody(
     deps: DomainHandlerDeps,
     subPath: string,
     method: string,
@@ -118,6 +176,19 @@ export async function handleShareLinksRequest(
         const v = typeof h.get === 'function' ? h.get(name) : (h[name] ?? h[name.toLowerCase()]);
         return Array.isArray(v) ? v[0] : (v ?? undefined);
     };
+    // [#21839 → #22049] The password a holder presented, read the ONE way both
+    // public routes read it: the `?password=` query parameter first (a URL needs
+    // no declared encoding, and when it wins the header pair is not read), then
+    // the `X-Share-Password` header as `X-Share-Password-Encoding` declares it —
+    // raw when that is absent, exactly as before; percent-encoded UTF-8 under
+    // `utf-8`. A declared encoding that does not hold is a refusal the caller
+    // answers `400 VALIDATION_FAILED` before the token is looked up, ⛔ never a
+    // raw compare. The plugin-sharing twin (`presentedPassword`) reads the same
+    // pair through the same `readSharePasswordHeader`.
+    const presentedPassword = (): SharePasswordHeaderReading =>
+        typeof query?.password === 'string'
+            ? { ok: true, password: query.password as string }
+            : readSharePasswordHeader(headerOf('x-share-password'), headerOf('x-share-password-encoding'));
     const sendErr = (status: number, code: string, msg: string): HttpDispatcherResult => ({
         handled: true,
         response: deps.error(msg, status, { code }),
@@ -161,8 +232,9 @@ export async function handleShareLinksRequest(
             const token = decodeURIComponent(parts[0]);
             const signedInUserId = ec?.userId;
             const recipientEmail = typeof query?.email === 'string' ? query.email : undefined;
-            const providedPassword =
-                typeof query?.password === 'string' ? (query.password as string) : headerOf('x-share-password');
+            const presented = presentedPassword();
+            if (!presented.ok) return sendErr(400, 'VALIDATION_FAILED', presented.message);
+            const providedPassword = presented.password;
 
             const resolved = await svc.resolveToken(token, { signedInUserId, recipientEmail, providedPassword });
             if (!resolved) {
@@ -258,9 +330,9 @@ export async function handleShareLinksRequest(
         // ── PUBLIC: ai_conversations messages for a resolved token ────
         if (parts.length === 2 && parts[1] === 'messages' && m === 'GET') {
             const token = decodeURIComponent(parts[0]);
-            const providedPassword =
-                typeof query?.password === 'string' ? (query.password as string) : headerOf('x-share-password');
-            const resolved = await svc.resolveToken(token, { signedInUserId: ec?.userId, providedPassword });
+            const presented = presentedPassword();
+            if (!presented.ok) return sendErr(400, 'VALIDATION_FAILED', presented.message);
+            const resolved = await svc.resolveToken(token, { signedInUserId: ec?.userId, providedPassword: presented.password });
             if (!resolved) return sendErr(404, 'NOT_FOUND', 'Share link not found');
             if (resolved.link.object_name !== 'ai_conversations') {
                 return sendErr(400, 'UNSUPPORTED', 'This share link does not expose messages');

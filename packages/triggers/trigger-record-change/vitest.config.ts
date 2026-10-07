@@ -14,9 +14,10 @@ import path from 'path';
  * `exports` to `dist/` with no config, so it is aliased to source here —
  * exactly the fix that gate's own header prescribes, not a widening of its
  * `KNOWN_UNALIASED_TEST_IMPORTS` registry entry for this package (which stays
- * unchanged: `@objectstack/core`, `@objectstack/driver-sql`,
- * `@objectstack/objectql`, `@objectstack/service-automation` are untouched by
- * this file and remain that registry's problem to eventually retire).
+ * unchanged: `@objectstack/driver-sql`, `@objectstack/objectql`,
+ * `@objectstack/service-automation` are untouched by this file and remain that
+ * registry's problem to eventually retire; `@objectstack/core` has since been
+ * aliased below and taken off that entry).
  */
 export default defineConfig({
   test: {
@@ -31,8 +32,17 @@ export default defineConfig({
     environment: 'node',
   },
   resolve: {
-    alias: {
-      '@objectstack/formula': path.resolve(__dirname, '../../formula/src/index.ts'),
-    },
+    // Anchored array form: the object form matches by PREFIX, so a bare
+    // `@objectstack/spec` key would swallow every subpath (the ENOTDIR trap
+    // `check-test-source-alias` names). `@objectstack/spec/data` is imported
+    // for a VALUE (`SECRET_MASK`) by `trigger-record-credential-mask.test.ts`.
+    alias: [
+      { find: /^@objectstack\/formula$/, replacement: path.resolve(__dirname, '../../formula/src/index.ts') },
+      { find: /^@objectstack\/spec\/data$/, replacement: path.resolve(__dirname, '../../spec/src/data/index.ts') },
+      // `@objectstack/core` carries `omitInternalFieldsFromWriteResponse`, the
+      // ADR-0100 mask helper `record-change-trigger.ts` applies, so the mask
+      // pins read it from source rather than from core's `dist/`.
+      { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+    ],
   },
 });

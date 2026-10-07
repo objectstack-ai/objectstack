@@ -94,7 +94,8 @@ describe('StorageMetadataStore.createFile: the acting organization reaches the e
     // The platform's insert-side chokepoint reads exactly this:
     // `context.tenantId` → `buildDriverOptions` → `DriverOptions.tenantId` →
     // `SqlDriver.injectTenantOnInsert` → the object's tenant column.
-    expect(engine._inserts[0].options).toEqual({ context: { tenantId: 'org_A' } });
+    // [#21908] …beside the explicit system opt-in (ruling Q1).
+    expect(engine._inserts[0].options).toEqual({ context: { tenantId: 'org_A', isSystem: true } });
   });
 
   it('⛔ does NOT stamp the column onto the payload — that decision is the driver’s', async () => {
@@ -110,7 +111,7 @@ describe('StorageMetadataStore.createFile: the acting organization reaches the e
     expect(engine._inserts[0].data).not.toHaveProperty('organization_id');
   });
 
-  it('passes NO options at all when there is no organization — the pre-#12745 shape', async () => {
+  it('carries the opt-in and NO tenant when there is no organization — ⛔ none is invented', async () => {
     const engine = createRecordingEngine();
     const store = new StorageMetadataStore(engine);
 
@@ -119,13 +120,14 @@ describe('StorageMetadataStore.createFile: the acting organization reaches the e
     await store.createFile(fileRec('f3'), { organizationId: '' });
     await store.createFile(fileRec('f4'), { organizationId: null });
 
-    // An empty context is still a context; handing one to the engine would
-    // change what every other option resolver on that call sees.
+    // [#21908] Every insert now carries the explicit system opt-in (ruling Q1),
+    // and still no `tenantId` where the caller has no organization: the opt-in
+    // is the only key, never a guessed organization.
     expect(engine._inserts.map((i: { options: unknown }) => i.options)).toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+      { context: { isSystem: true } },
+      { context: { isSystem: true } },
+      { context: { isSystem: true } },
+      { context: { isSystem: true } },
     ]);
   });
 
@@ -225,12 +227,44 @@ describe('storage upload routes: a file created with a session lands with that o
         // The owner was already threaded before this card; the organization is
         // what was being dropped two lines away from it.
         expect(insert.data.owner_id).toBe('u1');
-        expect(insert.options).toEqual({ context: { tenantId: 'org_A' } });
+        expect(insert.options).toEqual({ context: { tenantId: 'org_A', isSystem: true } });
       } finally {
         await fs.rm(rootDir, { recursive: true, force: true });
       }
     });
   }
+
+  it('[#21908] ⛔ the owner stamp is the door-derived user alone — a body naming another user does not reach the insert', async () => {
+    // Under the explicit system opt-in (ruling Q1) RLS no longer reads this
+    // insert, so the user the door resolved from the session is the boundary.
+    const rootDir = join(tmpdir(), `os-21908-owner-${Math.random().toString(36).slice(2)}`);
+    await fs.mkdir(rootDir, { recursive: true });
+    try {
+      const adapter = new LocalStorageAdapter({ rootDir, signingSecret: 'test-secret' });
+      const engine = createRecordingEngine();
+      const store = new StorageMetadataStore(engine);
+      const httpServer = createMockHttpServer();
+      registerStorageRoutes(httpServer as any, adapter, store, {
+        basePath: '/api/v1/storage',
+        resolveSession: async () => ({ userId: 'u1', organizationId: 'org_A' }),
+      });
+
+      const handler = httpServer._getHandler('POST', '/api/v1/storage/upload/presigned')!;
+      const res = createMockRes();
+      await handler(
+        createMockReq({ body: { filename: 'a.txt', mimeType: 'text/plain', size: 3, owner_id: 'u_other', organization_id: 'org_B' } }),
+        res,
+      );
+
+      expect(res._status).toBe(200);
+      const insert = engine._inserts.find((i: any) => i.object === 'sys_file');
+      expect(insert.data.owner_id).toBe('u1');
+      expect(insert.data).not.toHaveProperty('organization_id');
+      expect(insert.options).toEqual({ context: { tenantId: 'org_A', isSystem: true } });
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
 
   it('a session with no active organization stamps nothing — ⛔ no guess is substituted', async () => {
     const rootDir = join(tmpdir(), `os-12745-noorg-${Math.random().toString(36).slice(2)}`);
@@ -254,7 +288,8 @@ describe('storage upload routes: a file created with a session lands with that o
 
       expect(res._status).toBe(200);
       // Such a row is precisely what the backfill reports rather than repairs.
-      expect(engine._inserts[0].options).toBeUndefined();
+      // [#21908] The opt-in rides alone: no organization is substituted.
+      expect(engine._inserts[0].options).toEqual({ context: { isSystem: true } });
     } finally {
       await fs.rm(rootDir, { recursive: true, force: true });
     }
@@ -325,7 +360,7 @@ describe('StorageServicePlugin: the session bridge reports the ACTIVE organizati
     });
 
     expect(res._status).toBe(200);
-    expect(engine._inserts[0].options).toEqual({ context: { tenantId: 'org_A' } });
+    expect(engine._inserts[0].options).toEqual({ context: { tenantId: 'org_A', isSystem: true } });
   });
 
   it('accepts the flattened shape a host may hand back directly', async () => {
@@ -335,7 +370,7 @@ describe('StorageServicePlugin: the session bridge reports the ACTIVE organizati
     });
 
     expect(res._status).toBe(200);
-    expect(engine._inserts[0].options).toEqual({ context: { tenantId: 'org_B' } });
+    expect(engine._inserts[0].options).toEqual({ context: { tenantId: 'org_B', isSystem: true } });
   });
 
   it('⛔ invents nothing when the session carries no active organization', async () => {
@@ -351,6 +386,6 @@ describe('StorageServicePlugin: the session bridge reports the ACTIVE organizati
 
     expect(res._status).toBe(200);
     expect(engine._inserts[0].data.owner_id).toBe('u1');
-    expect(engine._inserts[0].options).toBeUndefined();
+    expect(engine._inserts[0].options).toEqual({ context: { isSystem: true } });
   });
 });

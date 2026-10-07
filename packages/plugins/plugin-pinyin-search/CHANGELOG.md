@@ -1,5 +1,50 @@
 # @objectstack/plugin-pinyin-search
 
+## 17.7.0
+
+### Patch Changes
+
+- Updated dependencies [c205b6c]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [748b240]
+- Updated dependencies [50e1c65]
+- Updated dependencies [713b0fa]
+- Updated dependencies [30af17e]
+- Updated dependencies [c2cd651]
+- Updated dependencies [04f0cc4]
+- Updated dependencies [1fd5664]
+- Updated dependencies [ceb4a93]
+- Updated dependencies [57cc695]
+- Updated dependencies [9f13c94]
+- Updated dependencies [d956910]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [6d728b8]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [5c9138b]
+- Updated dependencies [a1ca156]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [5b5e83f]
+- Updated dependencies [be55fd2]
+- Updated dependencies [8843505]
+- Updated dependencies [5259a35]
+- Updated dependencies [26d710e]
+- Updated dependencies [a0176ef]
+- Updated dependencies [149153c]
+- Updated dependencies [0728cbf]
+- Updated dependencies [f243a29]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [13a22d0]
+- Updated dependencies [568dc0b]
+  - @objectstack/core@17.7.0
+  - @objectstack/objectql@17.7.0
+  - @objectstack/types@17.7.0
+
 ## 17.6.0
 
 ### Patch Changes

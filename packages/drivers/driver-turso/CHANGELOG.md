@@ -1,5 +1,162 @@
 # @objectstack/driver-turso
 
+## 17.7.0
+
+### Minor Changes
+
+- 30af17e: Both transports now word the JSON-column filter refusal on a single-value file-class field (`file`, `image`, `avatar`, `video`, `audio`) the way `@objectstack/driver-sql` does: the media-column move, not `$contains`, which answers no rows on that field.
+  
+  Clause-②: no
+  
+  The local transport inherits the new words from `SqlDriver`. The remote transport refuses in its own filter compiler, and now reads the same class from the driver, so one filter gets one message on both transports. The refused operators and fields do not change. Remote mode never moves its media columns, so a single-value file-class field is a JSON column there on every deployment; the remote transport refuses to plan the column step of `objectstack migrate files-to-references` (`NOT_IMPLEMENTED` / 501), as before, so on that transport the prescribed move is not yet available.
+  
+  `RemoteTransport.setJsonColumnResolver` now takes a resolver that answers the column's class (`JsonColumnFieldClass`, from `@objectstack/core`), or `undefined` for a column that is not JSON, in place of `true` / `false`. `TursoDriver` supplies it. A host that calls the method itself returns `'multi-value-or-json'` where it returned `true`, and `undefined` where it returned `false`. That replaces the setter's published parameter type, so a host resolver that returns a boolean no longer compiles: a host that injects its own resolver updates its signature, which is why this release is `minor`.
+
+### Patch Changes
+
+- fd5a1cd: Provenance comments in `@objectstack/driver-turso` cite the commits that decided them, not tracker numbers that no longer resolve
+  
+  Clause-②: no
+  
+  Docblocks and comments across the package cited issue-tracker numbers that now answer 404 on GitHub.
+  Each one now cites the commit in this repository's history that made the decision it describes. Some
+  of these docblocks sit on exported members, so the reworded text appears in the published `index.d.ts`
+  / `index.d.mts`, and the comments esbuild keeps appear in the JavaScript output (`index.js` /
+  `index.mjs`); the sourcemaps do not change.
+  
+  Comment only: no export, type, error code, status, message text or runtime behaviour changes.
+- 35dfb81: fix(service-analytics): the ObjectQL face echoes a date-bucketed dimension in the bucket expression the driver itself groups by, so SQLite runs the statement it prints
+  
+  Clause-②: yes (widening)
+  
+  **Before**, the ObjectQL strategy printed every date-bucketed dimension as `date_trunc('<granularity>', col)` in the `sql` it echoes and in the `POST /analytics/sql` body, on every dialect. The native strategy declines a granularity, so every bucketed query lands on this face. Measured through `POST /api/v1/analytics/query` and `POST /api/v1/analytics/sql` in the default composition: the rows were right. On SQLite the echo failed with `no such function: date_trunc` (month, quarter and week). On PostgreSQL 16.14 it ran but answered `2026-01-01T00:00:00.000Z` where the face answers `2026-01`. The driver groups by `strftime('%Y-%m', …)` on SQLite and `to_char((…)::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM')` on PostgreSQL.
+  
+  **Now** the echo prints the driver's own expression, so it runs on that dialect and answers the face's bucket keys.
+  
+  - **`@objectstack/driver-sql`**: `SqlDriver.dateBucketSql(objectName, field, granularity)` returns the expression `aggregate` groups by, rendered as SQL text: the existing `buildDateBucketExpr`, unchanged, with each identifier quoted by the dialect. It returns `null` for a granularity the dialect buckets in memory (`week` on SQLite). The MySQL arm (`date_format(convert_tz(…))`) is checked by code read only, because no MySQL server was available.
+  - **`@objectstack/service-analytics`**: the new optional `AnalyticsServiceConfig.dateBucketSql` hook carries the expression to the ObjectQL strategy. `AnalyticsServicePlugin` wires it from the driver that serves the object, as it wires `sqlDialect`.
+  - **`@objectstack/driver-turso`**: a comment that said `SqlDriver` buckets with `date_trunc` now names the SQLite `strftime` expression it emits. The inherited `dateBucketSql` answers on the remote face too: it renders the same SQLite expression with no connection, and libSQL runs it.
+  
+  **Unchanged.** The rows every face answers. The echo keeps `date_trunc(…)` where nothing answers: a host that wires no hook, a driver with no bucket expression (memory, MongoDB), a granularity the driver buckets in memory, and a query with a non-UTC `timezone`, which the engine buckets in memory on that zone's calendar.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [13a24ec]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [35dfb81]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [440cd32]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [5d095a0]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [a2aadab]
+- Updated dependencies [fe10172]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [da40a5f]
+- Updated dependencies [045f764]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [a0176ef]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [cab6396]
+- Updated dependencies [e864db5]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/driver-sql@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

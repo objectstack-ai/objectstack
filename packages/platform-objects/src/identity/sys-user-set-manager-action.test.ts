@@ -63,11 +63,21 @@ function sourceOf(raw: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * The admin these verdicts are about: a PLATFORM admin, because the door's
+ * gate admits that standing alone and the predicate leads with it. Bound the
+ * way the console binds it — the whole scope handed to the engine as `extra`,
+ * one subject under every alias — and ⛔ not through `user:`, under which
+ * `@objectstack/formula` re-derives `isPlatformAdmin` from `positions`.
+ */
+const PLATFORM_ADMIN = { id: 'admin_1', isPlatformAdmin: true, positions: [] as string[] };
+
 /** Evaluate through the canonical engine; a fault is reported, never thrown. */
 function evaluate(source: string, record: Record<string, unknown>): boolean | string {
+  const s = PLATFORM_ADMIN;
   const r = celEngine.evaluate(
     { dialect: 'cel', source },
-    { record, user: { id: 'admin_1' }, extra: { features: {} } },
+    { record, extra: { current_user: s, user: s, ctx: { user: s }, os: { user: s }, features: {} } },
   );
   if (!r.ok) return `FAULT ${r.error.message.split('\n')[0].trim()}`;
   return typeof r.value === 'boolean' ? r.value : `NON-BOOLEAN ${JSON.stringify(r.value)}`;

@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { MessagingService, NOTIFICATION_EVENT_OBJECT } from './messaging-service.js';
-import { RECEIPT_OBJECT } from './inbox-channel.js';
+import { INBOX_OBJECT, RECEIPT_OBJECT } from './inbox-channel.js';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /**
@@ -36,6 +36,11 @@ function silentLogger(): any {
  * A data engine holding one `sys_notification` row and recording every insert.
  * `findOne` answers the notification row for the event object and `undefined`
  * for the receipt (so `markRead` takes the insert limb, not the flip limb).
+ *
+ * [#22026] The reader is a RECIPIENT: their inbox holds a message for the
+ * notification, and only its best-effort `delivered` receipt never landed —
+ * the case this insert limb exists for. A reader with no inbox message gets no
+ * receipt at all (`messaging-service.test.ts`, the `[#22026]` block).
  */
 function engineWithNotification(notificationOrg: string | null) {
     const inserted: Array<{ object: string; row: Record<string, unknown> }> = [];
@@ -48,6 +53,9 @@ function engineWithNotification(notificationOrg: string | null) {
             assertEngineFindOnePredicate(object, opts);
             if (object === NOTIFICATION_EVENT_OBJECT) {
                 return { id: 'evt_pin', organization_id: notificationOrg };
+            }
+            if (object === INBOX_OBJECT && opts?.where?.user_id === 'user_1' && opts?.where?.notification_id === 'evt_pin') {
+                return { id: 'msg_pin' };
             }
             void opts;
             return undefined;

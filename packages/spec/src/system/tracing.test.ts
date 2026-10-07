@@ -521,7 +521,7 @@ describe('TracingConfigSchema', () => {
 // never on a bare `toThrow()`. A span is runtime-emitted, so the silent-strip
 // alternative is the real hazard here: an exporter still writing `duration`
 // would have lost the measurement without any error at all.
-describe('Span.duration carries its unit (#15679)', () => {
+describe('Span.duration carries its unit in the key name', () => {
   const base = {
     context: { traceId: '0123456789abcdef0123456789abcdef', spanId: '0123456789abcdef' },
     name: 'GET /api/users',
@@ -562,7 +562,7 @@ describe('Span.duration carries its unit (#15679)', () => {
 // These shapes are NOT `.strict()`, so `unrecognized_keys` was never the
 // alternative: a bare deletion would have been a silent strip that lands a
 // default on an exporter deadline.
-describe('the OTel exporter and performance durations carry their unit (#17785)', () => {
+describe('the OTel exporter and performance durations carry their unit in the describe and the key name', () => {
   const otelBase = {
     exporter: { type: 'console' as const },
     resource: { serviceName: 'test' },
@@ -718,7 +718,7 @@ describe('the OTel exporter and performance durations carry their unit (#17785)'
  *    about the other. The negative is pinned too: a value refused for a reason
  *    that is NOT the retirement must not borrow its sentence.
  */
-describe('#18118 TraceSamplingConfig.composite[].condition — the retired CEL arm', () => {
+describe('TraceSamplingConfig.composite[].condition — the retired CEL arm', () => {
   const parse = (condition: unknown) => TraceSamplingConfigSchema.safeParse({
     type: 'composite',
     composite: [{ strategy: 'always_on', condition }],

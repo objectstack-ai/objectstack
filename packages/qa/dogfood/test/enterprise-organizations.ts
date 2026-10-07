@@ -94,6 +94,7 @@
  */
 
 import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
+import { fileURLToPath } from 'node:url';
 
 /**
  * The multi-org package (ADR-0105 D12 as amended by ADR-0132) these gates need.
@@ -208,7 +209,9 @@ export async function probeOrganizations(
  * time when {@link MULTI_ORG_ENV} is declared but the package is missing — the
  * loud half of the contract.
  */
-const probe = await probeOrganizations();
+// #21914: every dogfood file runs in its own temporary cwd (test/per-file-cwd.setup.ts),
+// so the host app is this package, resolved from this module's location, not the cwd.
+const probe = await probeOrganizations(fileURLToPath(new URL('..', import.meta.url)));
 
 export const organizationsAvailable: boolean = probe.available;
 

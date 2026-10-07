@@ -66,7 +66,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -135,7 +135,7 @@
           "evidence": "re-read JSON + search response"
         },
         {
-          "clause": "clone (POST /data/:object/:id/clone, gated by enable.clone default-on) returns 201 with a NEW id and the source's field VALUES copied, but engine-owned columns (id, audit, autonumber, formula, summary) and readonly columns RE-DERIVED not carried, and the clone is owned by the CLONER — not the source's owner. ⚠️ The readonly half is UNOBSERVABLE on the stock seed: showcase_account declares no readonly column, no showcase object has an approval_status, and the showcase's one readonly field (showcase_contact.lead_score) is null on every seeded row, so carried and re-derived read identically. Record that half blocked(fixture), or first give a contact a lead_score system-side (an objectql write in {isSystem: true} context sets a readonly field, as access-security.write-path-guards negative[1] does) and clone that contact",
+          "clause": "clone (POST /data/:object/:id/clone, gated by enable.clone default-on) returns 201 with a NEW id and the source's field VALUES copied, but engine-owned columns (id, audit, autonumber, formula, summary) and readonly columns RE-DERIVED not carried, and the clone is owned by the CLONER — not the source's owner. ⚠️ The readonly half is UNOBSERVABLE on the stock seed: showcase_account declares no readonly column, no showcase object has an approval_status, and the showcase's one readonly field (showcase_contact.lead_score) is null on every seeded row, so carried and re-derived read identically. Score that half from the pins in `automated`, never as blocked(fixture) and never off two reads that agree only because the column is null: no live run can stage it, because the server drops a readonly column set over HTTP (`x-objectstack-dropped-fields: lead_score;reason=readonly`, QA run #21782)",
           "oracle": "api",
           "verify": "the 201 result carries {id (new ≠ sourceId), sourceId, record}; field-by-field diff shows business values copied and system/readonly columns re-derived (#3043 CLONE_STRIP_FIELDS + the engine's create-side static-readonly strip, #14147); owner_id resolves to the signed-in cloner (the clone is a create in the caller's context — packages/metadata-protocol/src/protocol.ts cloneData)",
           "evidence": "clone response + source-vs-clone field diff + owner_id read"
@@ -157,6 +157,10 @@
         "hydration-race",
         "automation-input"
       ],
+      "automated": {
+        "kind": "test",
+        "ref": "acceptance[6]'s READONLY half ONLY. packages/metadata-protocol/src/protocol.readonly-insert.test.ts ('cloneData forwards the copied row AND the caller overrides whole — and reports the engine’s verdict on both'): the source's readonly column travels to engine.insert whole, the 201 body's droppedFields names it, and the clone's record does not carry it (the engine there is a stub, so this pins the delegation). packages/objectql/src/engine-insert-static-readonly-strip.test.ts pins the enforcement on a REAL engine: a non-system caller's readonly key is stripped on create and falls back to the field's defaultValue. Every other clause still needs the run"
+      },
       "source": [
         "dogfood-verification skill §3",
         "examples/app-showcase/src/data/objects/account.object.ts (requiredness + format/conditional validations)",
@@ -209,6 +213,12 @@
           "date": "2026-10-01",
           "change": "checklist-accuracy findings of QA run #21056: acceptance[6]'s readonly-column half is unobservable on the stock seed (no readonly column on showcase_account, no approval_status anywhere, lead_score null on every seeded contact) — recorded with the system-side way to make it observable; steps[8] warns that an own-row invoice pointing at the run's account turns the delete into 409 DELETE_RESTRICTED",
           "ref": "#21060"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 2). acceptance[6]'s readonly half was blocked(fixture): no stock readonly column can be set over HTTP, so a carried value and a re-derived one read the same. Disposition: pin. protocol.readonly-insert.test.ts pins that clone forwards the copied readonly column to engine.insert and reports the drop, and engine-insert-static-readonly-strip.test.ts pins the engine's strip on a real engine. The clause now says to score that half from those pins, and `automated` names them for that half only",
+          "ref": "#22017"
         }
       ]
     },
@@ -1440,7 +1450,7 @@
       "title": "CSV import: GBK decode, required-field hint, legacy-fallback notice",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -1452,7 +1462,8 @@
           "an importable showcase object (e.g. showcase_contact) and a GBK-encoded CSV fixture; the pinned unit suites carry their own byte fixtures"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact.",
+          "acceptance[2] (the legacy-fallback notice) is PIN-ONLY BY DESIGN, never a live leg. The wizard takes the per-row legacy path only when its data source has no importRecords, and the console's ObjectStackAdapter always provides one (objectui packages/data-objectstack/src/index.ts), so no live server reaches the path. QA run #21782 recorded it blocked(dependency); parked on #22017 row 3. Score it ONLY from importLegacyReferenceGuard.test.tsx run in an objectui checkout at the .objectui-sha revision (present at objectui 0abd4f9f8769: 'blocks the import and writes nothing when a lookup column is mapped'). A run without that checkout records blocked(environment: no objectui checkout at the pin), never a hand-driven verdict"
         ]
       },
       "steps": [
@@ -1476,7 +1487,7 @@
           "evidence": "test run output"
         },
         {
-          "clause": "the legacy-reference fallback path shows a visible degrade notice instead of silently degrading — pinned",
+          "clause": "the legacy-reference fallback path shows a visible degrade notice instead of silently degrading — pinned, and PIN-ONLY: no live ObjectStack server reaches the legacy path (fixtures.knownGaps)",
           "oracle": "test",
           "verify": "pnpm --filter @object-ui/plugin-grid exec vitest run src/__tests__/importLegacyReferenceGuard.test.tsx",
           "evidence": "test run output"
@@ -1522,6 +1533,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 3). acceptance[2] was blocked(dependency): the legacy per-row path exists only without importRecords, the live adapter always has it, and the pin is objectui-only. Disposition: pin. The objectui pin is confirmed at the current .objectui-sha (0abd4f9f8769), and the clause and a knownGap now say the leg is pin-only by design and name the environment that runs the pin",
+          "ref": "#22017"
         }
       ]
     },
@@ -1530,7 +1547,7 @@
       "title": "Action buttons surface at exactly their declared locations — list toolbar, list row, record header/more/related/section — and each dispatches for real",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 9,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1544,7 +1561,7 @@
         ],
         "knownGaps": [
           "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact.",
-          "the showcase hosts NO surface for three of the six locations on showcase_task (#21782 VF4; measured at objectui 2e818d0b51ec, re-read at 9dfaca6543). task-detail.page.ts is kind 'full' with no record:header node, and an authored page gets no injected header actions (objectui#7298 ruling), so record_header and record_more have no surface. project-detail.page.ts overrides the tabs slot with an inline record:line_items grid in place of the synthesized related strip, and project (a master-detail) is showcase_task's only parent relation, so record_related has no surface either. The console's renderer half is landed in the pin (objectui#11270, RelatedRecordActionsBridge). Hosting the three needs a showcase_task page that composes a record header and a parent record page that renders the synthesized Tasks related list, which is a showcase fixture change outside this checklist. Until it lands, score record_header / record_more / record_related blocked(fixture), never a missing placement"
+          "[CLOSED by #22030 (PR #22036, 60ccda5a24), lifted by #22039 — the gap text is rewritten to say where each location now lives] a stock showcase boot hosts all six locations on showcase_task, including the three this gap used to block. record_header and record_more: Task Detail (showcase_task_detail, the record page the console opens for any task), whose first node is a page:header. That header renders the action ids it lists, each placed by its own locations, followed by the host's Edit / Share / Delete. Inline (record_header) on a desktop viewport, where the header's default inline budget is 3 (1 on mobile; a record_header action past the budget folds into ⋯): showcase_mark_done (script, shown only while the task is not done), showcase_log_time (form) and showcase_archive_task (script, disabled until the task is done). Under the ⋯ overflow (record_more without record_header): showcase_open_docs (url), showcase_recalc_estimate (api) and showcase_recalc_selection (api). record_related: Project Detail (showcase_project_detail, the record page for any project) → the Related tab (?tab=related), which holds the Tasks related list, a record:related_list for showcase_task through its project FK; open a project that has tasks. It is an authored node, not the synthesizer's strip: the page's tabs override still replaces that strip, and this tab puts the list back with no actions key, so its rows carry showcase_log_time beside the task's list_item actions. The Tasks tab beside it is the record:line_items grid, which hosts no record_related action. An expected action missing from one of these hosts is a missing placement, never blocked(fixture). The hosts were read from objectui source at pin a58626c88dc8 and from the served metadata, not from a browser render, so the first run against them is their first browser evidence"
         ]
       },
       "variants": [
@@ -1558,7 +1575,7 @@
       ],
       "steps": [
         "boot the showcase isolated; sign in as admin; open the showcase_task list view",
-        "for each location variant, navigate to its surface (list header / row menu / a not-done task's detail title bar / its ⋯ menu / a related-list section / the Task Detail quick-actions bar), screenshot AFTER render settles, then read the rendered action buttons from the DOM. A location with no hosting surface at this fixture (record_header / record_more / record_related — fixtures.knownGaps) is recorded blocked(fixture)",
+        "for each location variant, navigate to its surface (list header / row menu / a not-done task's Task Detail title bar / that title bar's ⋯ menu / the rows of the Tasks related list on a project's Project Detail Related tab, not the Tasks tab's line-items grid / the Task Detail quick-actions bar; fixtures.knownGaps names each record host), screenshot AFTER render settles, then read the rendered action buttons from the DOM",
         "record for every fixture action WHERE it rendered — building the full placement matrix (rendered locations vs declared locations)",
         "dispatch one action per location with a ref-targeted click: bulk_reassign (screen-flow wizard opens), quick_view (modal opens), mark_done (script executes), log_time (form dialog opens on showcase_task.form), open_docs (url navigation), recalc_selection from the ⋯ menu (api POST); capture each network trace",
         "verify the state-changing dispatches server-side: mark_done flips the task's done flag (API re-read), recalc_selection's per-record branch recomputes the estimate",
@@ -1567,9 +1584,9 @@
       ],
       "acceptance": [
         {
-          "clause": "Per variant, every location the fixture actually HOSTS renders ≥1 action declared for it; record_header/record_more require a showcase_task page that composes a record header and record_related a parent record page that renders the synthesized Tasks related list (fixture must provide both).",
+          "clause": "Per variant, every location the fixture actually HOSTS renders ≥1 action declared for it; record_header/record_more require a showcase_task page that composes a record header and record_related a parent record page that renders the Tasks related list (fixture must provide both).",
           "oracle": "dom",
-          "verify": "after each hosted surface's screenshot confirms render, the DOM read lists the expected action names in that slot; matrix compiled per variant. At this fixture record_header, record_more and record_related are not hosted (fixtures.knownGaps): record those three blocked(fixture), never as missing placements",
+          "verify": "after each hosted surface's screenshot confirms render, the DOM read lists the expected action names in that slot; matrix compiled per variant. The stock fixture hosts all six (fixtures.knownGaps names the page and tab for record_header, record_more and record_related): an expected action absent from its host is a missing placement, never blocked(fixture)",
           "evidence": "per-location screenshots + the placement matrix"
         },
         {
@@ -1579,7 +1596,7 @@
           "evidence": "the same matrix, extra-placement columns"
         },
         {
-          "clause": "each HOSTED location's sampled action DISPATCHES for real — flow wizard opens and resumes, modal opens, script executes, form opens the declared edit form view, url navigates, api POSTs — and state-changing ones round-trip server-side (mark_done flips done; recalc updates the estimate). The url (open_docs) and api (recalc_selection) legs live on record_more and share its fixture gap: record them blocked(fixture) with it, never as dispatch failures",
+          "clause": "each HOSTED location's sampled action DISPATCHES for real — flow wizard opens and resumes, modal opens, script executes, form opens the declared edit form view, url navigates, api POSTs — and state-changing ones round-trip server-side (mark_done flips done; recalc updates the estimate). The url (open_docs) and api (recalc_selection) legs live on record_more, under the ⋯ overflow of the Task Detail title bar",
           "oracle": "network",
           "verify": "one captured dispatch per location + API re-reads for the two state changes",
           "evidence": "the six traces + the two re-reads"
@@ -1660,6 +1677,18 @@
           "date": "2026-10-05",
           "change": "clause 1 and step 2 re-paired, plus clause 3 and a fixture knownGap (invalid pairing, #21782 VF4). objectui#11270 is landed in the pin (RelatedRecordActionsBridge ROW_LOCATIONS_IN_RECORD), but the showcase hosts none of the three record surfaces for showcase_task. task-detail.page.ts is kind 'full' with no record:header node, and authored pages get no injected header actions (objectui#7298 ruling). project-detail.page.ts replaces the related strip with record:line_items, and project is showcase_task's only parent relation. All of this predates 17.6.0. The clause uses the verifier's wording, and clause 3's url / api dispatch legs share the record_more gap. The fixture change that would host them belongs in examples/app-showcase and is reported on #21797, not made here",
           "ref": "#21797"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 7). A3's url / api dispatch legs were blocked(fixture): the fixture hosts no ⋯ surface. Revision 7 (#21797) already scores them blocked(fixture) with record_more. Disposition: recorded knownGap. The leg needs an examples/app-showcase fixture change, carded as #22030, and the knownGap now parks the three record_* variants and A3's url / api legs on #22030. No clause changed",
+          "ref": "#22017"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-06",
+          "change": "lifted the row-7 fixture knownGap (#22039): #22030 (PR #22036, 60ccda5a24) hosts record_header, record_more and record_related for showcase_task on stock showcase pages. knownGaps[1] is rewritten from 'no surface' to where each location lives: Task Detail's page:header (record_header inline; record_more's url / api / api under the ⋯ overflow) and Project Detail's Related tab (the Tasks related list, an authored record:related_list rather than the synthesizer's strip). The lines revision 7 added for the gap are re-pointed. Step 2 names each host and drops its blocked(fixture) sentence. Clause 1 drops 'synthesized', and its verify scores an absent action as a missing placement. Clause 3 no longer parks the url / api legs. knownGaps[0] is unchanged",
+          "ref": "#22039"
         }
       ],
       "enumSource": {
@@ -1772,7 +1801,7 @@
       "title": "Gantt is interactive, not a picture: drag persists, locked tasks survive auto-schedule, host veto restores",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -1784,7 +1813,7 @@
           "the task gantt view (task.view.ts 'Schedule (Gantt)': startDateField/endDateField/titleField/progressField)"
         ],
         "knownGaps": [
-          "the stock view declares NO dependenciesField / lockField / parentField, so auto-schedule + locked-task + subtree-drag surfaces are unreachable on stock fixtures — needs the view extended (objectui carries unit pins for those behaviors: GanttView.autoscheduledlg / summaryedit / deptypes tests)",
+          "the stock task gantt view (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt) declares NO dependenciesField / lockField / parentField, so the auto-schedule, locked-task and subtree-drag surfaces are unreachable LIVE on stock fixtures. ⚠ All three ARE GanttConfig keys (packages/spec/src/ui/view.zod.ts#GanttConfigSchema). QA run #21782 read `lockField` as no spec key; that is wrong, so the variants need no re-point. A2 and A3 are scored from the objectui pins `automated` names per clause. The one sub-leg no pin reaches is a DIRECT drag on a locked LEAF bar: GanttView.tsx returns from the drag start for a locked task, but only the summary-drag and link-drop locked cases are unit-pinned. It needs the view extended live, with lockField pointing at a boolean on showcase_task such as `done` (a view overlay or a scratch copy). That recipe is not run-proven, so score the sub-leg blocked(fixture) until a run proves it",
           "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
         ]
       },
@@ -1836,7 +1865,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "objectui: packages/plugin-gantt/src (GanttView.autoscheduledlg.test.tsx, GanttView.summaryedit.test.tsx, GanttView.deptypes.test.tsx, scheduling.selfextent.test.ts)"
+        "ref": "objectui: packages/plugin-gantt/src (GanttView.autoscheduledlg.test.tsx, GanttView.summaryedit.test.tsx, GanttView.deptypes.test.tsx, scheduling.selfextent.test.ts, GanttView.countinterp.i18n.test.tsx, GanttView.dnd.test.tsx). Per clause, at objectui 0abd4f9f8769: acceptance[1] by GanttView.autoscheduledlg.test.tsx ('computes first and asks — nothing is written before confirm', 'cancel discards without writing', 'confirm applies the shift') and GanttView.countinterp.i18n.test.tsx (two unlocked violators shift, the locked one is reported in the skipped notice); acceptance[2] by scheduling.selfextent.test.ts ('a locked violated task is reported in skippedLocked and left in place') and GanttView.dnd.test.tsx ('summary drag skips locked descendants — they are neither previewed nor committed'). acceptance[0] and acceptance[3] are not covered here"
       },
       "source": [
         "#3358 §8 (the three never-imported gantt rows)",
@@ -1856,6 +1885,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 4). A2 / A3 were blocked(fixture): the stock view has no dependenciesField, and the record said lockField is not a GanttConfig key. That second premise is false: lockField, dependenciesField and parentField are all GanttConfigSchema keys (packages/spec/src/ui/view.zod.ts, also at the run's subject 316be321), so no clause is re-pointed. Disposition: pin. `automated` now names the objectui tests that prove A2 and A3 per clause, and the knownGap records the one unpinned sub-leg (a direct drag on a locked leaf) as blocked(fixture)",
+          "ref": "#22017"
         }
       ]
     },
@@ -2521,7 +2556,7 @@
       "title": "Grid personalization persists across reload: column resize/reorder/pin, row-height, group-by (with API-true totals), row-color",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2538,16 +2573,16 @@
       },
       "variants": [
         "column-resize",
-        "column-reorder",
-        "column-pin",
+        "column-reorder (only on a grid that sets reorderableColumns; n/a on the stock list view)",
+        "column-pin (author-declared `pinned`, not a runtime control)",
         "row-height",
         "group-by",
         "row-color"
       ],
       "steps": [
         "open showcase_task grid; screenshot",
-        "resize a column, reorder two columns, pin a column, and set a row-height mode (compact/short/medium/tall/extra_tall)",
-        "reload; confirm the columnState (widths, order, pinned) and row-height restored from localStorage grid-columns-showcase_task-<viewId> (or the persisted view override via dataSource.updateViewConfig)",
+        "resize a column (reorder two columns only on a grid that sets reorderableColumns; there is no runtime pin control — acceptance[0]), and set a row-height mode (compact/short/medium/tall/extra_tall)",
+        "reload; confirm the columnState (widths, and the order where reorder is enabled) and row-height restored from localStorage grid-columns-showcase_task-<viewId> (or the persisted view override via dataSource.updateViewConfig)",
         "group-by status; confirm per-group headers appear and each group shows its summarizeField (estimate_hours) total; clear grouping and confirm the headers are removed cleanly",
         "cross-check one group's total against a direct API aggregate: GET /api/v1/data/showcase_task grouped client-side from the raw rows",
         "set a row-color rule; confirm rows paint by the rule (useRowColor)",
@@ -2555,9 +2590,9 @@
       ],
       "acceptance": [
         {
-          "clause": "PER-VARIANT: column resize + reorder + pin persist across a reload — the columnState (widths/order/pinned) restores from localStorage (grid-columns-<object>-<view>) or a persisted view override; a repaint that does NOT survive reload fails that variant",
+          "clause": "PER-VARIANT: column RESIZE persists across a reload — the widths restore from the column-state store (localStorage grid-columns-<object>[-<view>], or a persisted view override). Column REORDER and PIN are not stock list-view personalizations, and the clause does not assert them there. ObjectGrid enables drag-reorder only from `reorderableColumns` (default false), which is an object-grid component prop (packages/spec/src/ui/component.zod.ts#ObjectGridPropsSchema), not a ListView key. Pinning is AUTHOR-declared per column (`pinned`, packages/spec/src/ui/view.zod.ts#ListColumnSchema), with no runtime pin control, and the persisted column state carries widths and order, never pins. So: reorder persists across a reload only on a grid that enables it (score it there, or record n/a on the stock showcase_task list view); a column the view declares `pinned` renders pinned after the reload (n/a when the view declares none, as the stock task views do)",
           "oracle": "dom",
-          "verify": "after a screenshot confirms render, the reloaded grid shows the same widths/order/pinned column (ObjectGrid columnState priority: props override > localStorage > empty; saveColumnState writes both)",
+          "verify": "after a screenshot confirms render, the reloaded grid shows the same widths (ObjectGrid columnState priority: props override > localStorage > empty; saveColumnState persists widths and order only). The reorder and pin variants are judged as the clause scopes them",
           "evidence": "before/after-reload screenshots + the storage value"
         },
         {
@@ -2601,7 +2636,8 @@
         "objectui: packages/plugin-grid/src/ObjectGrid.tsx (columnState + saveColumnState localStorage grid-columns-*, rowHeightMode, schema.grouping, useRowColor, useColumnSummary)",
         "objectui: packages/components/src/renderers/complex/data-table.tsx (the underlying table)",
         "objectui: packages/app-shell/src/views/listFilterStorage.ts (documents grid-columns-* is NOT user-scoped by design)",
-        "examples/app-showcase/src/ui/views/task.view.ts"
+        "examples/app-showcase/src/ui/views/task.view.ts",
+        "packages/spec/src/ui/component.zod.ts#ObjectGridPropsSchema (reorderableColumns is a grid component prop, not a ListView key) + packages/spec/src/ui/view.zod.ts#ListColumnSchema (pinned is declared per column by the author) + objectui packages/plugin-grid/src/ObjectGrid.tsx (reorderableColumns defaults false; the persisted columnState holds widths and order)"
       ],
       "history": [
         {
@@ -2615,6 +2651,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 6), re-pointed clause. A1's reorder / pin half was blocked: reorderableColumns is off and there is no runtime pin control. Verified in source: reorderableColumns is an ObjectGridPropsSchema prop (packages/spec/src/ui/component.zod.ts) that ObjectGrid defaults to false, never a ListView key; pinning is the author's ListColumnSchema `pinned`; the persisted columnState holds widths and order only. The clause asserted two user personalizations the stock list view does not offer. A1 now asserts resize persistence, reorder only where enabled, and an author-pinned column after reload; the verify, two variants, steps 2-3 and source follow",
+          "ref": "#22017"
         }
       ]
     },
@@ -3495,7 +3537,7 @@
       "title": "Secret/encrypted field: ciphertext at rest, masked on every read, no-op mask re-submit, and fail-CLOSED without an ICryptoProvider (ADR-0100)",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3509,7 +3551,7 @@
         ],
         "knownGaps": [
           "f_secret is NOT seeded (the Specimen rows omit it) — drive a live UI/API write to exercise the encrypt path.",
-          "the fail-CLOSED path is not observed on a stock `os serve` boot (which wires LocalCryptoProvider by default) — it is observed by deliberately unwiring the provider (no OS_SECRET_KEY under the production guard, or a boot without service-settings), or via the unit pin (secret-fields.test.ts + engine.ts encryptSecretFields throw). The field-type-matrix's 'seed deliberately omits it' note is about SEEDING, not serve-time wiring.",
+          "the fail-CLOSED path is PIN-ONLY of necessity (QA run #21784, parked on #22017 row 22). Every stock boot wires LocalCryptoProvider. The 'no OS_SECRET_KEY under the production guard' boot this note once suggested never comes up: LocalCryptoProvider refuses to start in production without a stable key, and serve.ts rethrows that refusal. A boot without @objectstack/service-settings is not a stock composition. Score acceptance[3] from packages/objectql/src/secret-fields.test.ts ('fail-closed: writing a secret field with no CryptoProvider throws': the write throws and neither store holds a row). The field-type-matrix's 'seed deliberately omits it' note is about SEEDING, not serve-time wiring.",
           "inspecting the raw business-row column / sys_secret ciphertext needs DB access (file:/tmp/<run>/data.db) — where the API is the only surface, assert the mask on read + the absence of plaintext in any API response instead."
         ]
       },
@@ -3544,7 +3586,7 @@
         {
           "clause": "fail-CLOSED without a provider: with no ICryptoProvider registered, a non-empty f_secret write is REFUSED ('Refusing to store cleartext … fail-closed') and NOTHING is persisted — cleartext never reaches the business row; a `password` write needs no provider (plaintext at rest, masked on read)",
           "oracle": "api",
-          "verify": "the unwired-boot POST throws the fail-closed error and the row is absent/unset; engine.ts encryptSecretFields (`if (!this.cryptoProvider) throw`). Pinned by packages/objectql/src/secret-fields.test.ts. On a stock `os serve` boot the provider IS wired, so this is a deliberately-unwired or unit-pin verdict",
+          "verify": "the unwired-boot POST throws the fail-closed error and the row is absent/unset; engine.ts encryptSecretFields (`if (!this.cryptoProvider) throw`). Pinned by packages/objectql/src/secret-fields.test.ts. No stock boot runs without a provider (fixtures.knownGaps), so this is a unit-pin verdict",
           "evidence": "the refusal + a GET/list confirming no persisted cleartext"
         },
         {
@@ -3583,6 +3625,12 @@
           "date": "2026-08-08",
           "change": "initial — drills the field-type-matrix's shallow 'credential types mask on read' clause into the full ADR-0100 secret contract: ciphertext-at-rest (sys_secret ref), unconditional read mask for every reader, echoed-mask no-op, fail-CLOSED without an ICryptoProvider, and the credential-aggregate guard. Records that `os serve` wires LocalCryptoProvider by default (fail-closed observed by unwiring) and that f_secret is unseeded",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 22). A4 was pin-only of necessity: an unwired-crypto boot refuses to start. Disposition: pin. The knownGap had offered a production boot without OS_SECRET_KEY as the unwired path; LocalCryptoProvider refuses to start there (serve.ts rethrows 'Refusing to start in production'), so the knownGap and A4's verify now name secret-fields.test.ts ('fail-closed: writing a secret field with no CryptoProvider throws') as the leg's only oracle",
+          "ref": "#22017"
         }
       ]
     },
@@ -4174,12 +4222,12 @@
       "title": "A validation rule reads a parent field one hop through a lookup",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123)",
-        "a member with showcase_invoice CRUD and NO read on showcase_account — the persona the rule exists to constrain"
+        "a member with create/edit on a child object and NO read on its lookup parent — the persona the rule exists to constrain. ⚠ No stock showcase persona is one (fixtures.knownGaps): acceptance[3] is scored from the engine pin or on a scratch pair"
       ],
       "fixtures": {
         "app": "showcase",
@@ -4189,14 +4237,14 @@
           "at least one churned account and one non-churned account to invoice against"
         ],
         "knownGaps": [
-          "An earlier revision of this item asserted that no seeded persona fails to read showcase_account. CI measured that false: the Dogfood Regression Gate persona in packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts holds showcase_invoice CRUD and no grant on showcase_account, and under the security plugin CRUD gate member_default does not grant it either. That is now the POINT of the item rather than a gap: a validation rule reads the related record under SYSTEM authority, bounded by the fields the predicate names, so this persona writes successfully and the rule still enforces. The clause that once expected a loud fault for this persona has been inverted accordingly."
+          "No stock persona has showcase_invoice CRUD WITHOUT showcase_account read, and none can be provisioned. showcase_member_default, the everyone baseline every member holds, grants showcase_account allowRead (examples/app-showcase/src/security/permission-sets.ts), and permission sets only ever ADD grants, so no extra set takes it away (QA run #21720, parked on #22017 row 14). An earlier revision of this item said the opposite, reading packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts. That test's persona is its own injected fallback set, not a stock persona, and it never writes against a churned account. So acceptance[3] is scored from the ENGINE pin in `automated`, which proves the mechanism the clause rests on: the related row is read under SYSTEM authority with the acting identity carried, and the write path accepts and refuses by the parent field. A run that wants the live leg builds the scratch substitute #21720 measured: a scratch package with a parent object the member holds no grant on, and a child object (member create/edit) carrying a one-hop script validation over the lookup. Then it writes, as that member, against a tripping and a non-tripping parent"
         ]
       },
       "steps": [
         "POST /api/v1/data/showcase_invoice with `account` pointing at a NON-churned account",
         "POST /api/v1/data/showcase_invoice with `account` pointing at a CHURNED account",
         "PATCH an existing invoice to REPOINT it at a churned account (the update path reads the FK off the merged record, not the patch alone)",
-        "as the persona with NO read on showcase_account, POST an invoice against a non-churned account, then against a churned one"
+        "as a persona with NO read on the parent (none exists on stock — fixtures.knownGaps): run the engine pin, or on the scratch substitute write against a non-tripping parent, then a tripping one"
       ],
       "acceptance": [
         {
@@ -4220,7 +4268,7 @@
         {
           "clause": "a rule whose parent the acting user cannot read still ENFORCES, and still lets a legitimate write through — the read is system-authority, bounded by the fields the predicate names",
           "oracle": "api",
-          "verify": "the non-churned write is 2xx and the churned write is 400 carrying the AUTHORED message; an unevaluable-rule envelope for this persona is the defect this clause exists to catch, and so is a 2xx on the churned account",
+          "verify": "on stock showcase no such persona exists (fixtures.knownGaps), so score this from the engine pin in `automated` or live on the scratch substitute. With such a persona, the non-churned write is 2xx and the churned write is 400 carrying the AUTHORED message; an unevaluable-rule envelope for this persona is the defect this clause exists to catch, and so is a 2xx on the churned account",
           "evidence": "both responses for the restricted persona"
         }
       ],
@@ -4232,6 +4280,10 @@
       "traps": [
         "seed-data-thin"
       ],
+      "automated": {
+        "kind": "test",
+        "ref": "acceptance[3] ONLY. packages/objectql/src/engine-predicate-relationship.test.ts, on a real engine: 'reads the related row under SYSTEM authority' (the related read runs with isSystem true and the acting userId carried), 'ACCEPTS and REFUSES on the real write path, per the parent field', and 'resolves the FK off the PRIOR row when the patch does not carry it'. The other clauses still need the run"
+      },
       "source": [
         "examples/app-showcase/src/data/objects/invoice.object.ts (no_invoice_for_churned_account)",
         "packages/objectql/src/validation/rule-validator.ts (checkPredicate, resolveTraversalScope, collectPredicateRelationships)",
@@ -4243,6 +4295,12 @@
           "date": "2026-09-22",
           "change": "initial — acceptance for predicate relationship traversal under ADR-0137 D2 (a field-rule predicate that faults refuses the submit and names the field and the rule). The related record is read under SYSTEM authority bounded by the fields the predicate names, so the ruled outcomes are: the write passes when the parent field does not trip the rule, is refused with the AUTHORED message when it does, and is refused naming the related object when the rule cannot be evaluated at all",
           "ref": "claude/issue-18682-predicate-relationship-traversal"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21720 parked on #22017 (row 14), re-pointed clause. A4 was blocked(fixture): no stock persona has invoice CRUD without account read, and the item's knownGap said otherwise. Verified in source: showcase_member_default grants showcase_account read to every member (examples/app-showcase/src/security/permission-sets.ts), and grants are additive, so the persona cannot be provisioned on stock. The knownGap, the second persona, step 4 and A4's verify now say so. A4 is scored from engine-predicate-relationship.test.ts (named in `automated`) or live on the scratch-object substitute the record measured",
+          "ref": "#22017"
         }
       ]
     },

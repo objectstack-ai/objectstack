@@ -136,7 +136,7 @@ const MISDIRECTED: Array<[string, unknown, string]> = [
     'sort',
   ],
   [
-    '[#21180] the retired `publicPicker` key itself — its prescription, not the container text',
+    'the retired `publicPicker` key itself — its prescription, not the container text',
     formItem({ field: 'owner', publicPicker: { displayFields: ['name'] } }),
     'publicPicker',
   ],
@@ -158,7 +158,7 @@ const MISDIRECTED: Array<[string, unknown, string]> = [
   ],
 ];
 
-describe('[#7510] a ViewItem-branch failure surfaces the ViewItem branch', () => {
+describe('a ViewItem-branch failure surfaces the ViewItem branch', () => {
   for (const [label, body, key] of MISDIRECTED) {
     it(`names \`${key}\` — ${label}`, () => {
       const text = rendered(body);
@@ -170,7 +170,7 @@ describe('[#7510] a ViewItem-branch failure surfaces the ViewItem branch', () =>
     // before this change: the container branch wins, which is exactly the
     // wrong prescription the card measured. If this ever stops holding the
     // fix is no longer load-bearing and the tests above prove nothing.
-    it(`…and the pre-#7510 ranking picked \`container\` for it — ${label}`, () => {
+    it(`…and the pre-fix ranking picked \`container\` for it — ${label}`, () => {
       expect(oldSelection(body)).toBe('container');
     });
   }
@@ -189,7 +189,7 @@ describe('[#7510] a ViewItem-branch failure surfaces the ViewItem branch', () =>
   });
 });
 
-describe('[#7510] the container diagnostic still belongs to containers', () => {
+describe('the container diagnostic still belongs to containers', () => {
   // (c) of the card's constraints: the :2328 guidance text is GOOD. A body that
   // really is a container with a wrong-layer key must keep reading it.
   const BAD_CONTAINER = {
@@ -200,7 +200,7 @@ describe('[#7510] the container diagnostic still belongs to containers', () => {
     columns: [{ field: 'title' }],
   };
 
-  it('a container with wrong-layer keys keeps the #4001 wrap prescription', () => {
+  it('a container with wrong-layer keys keeps the `defineView` wrap prescription', () => {
     expect(selectViewMetadataBranch(BAD_CONTAINER)).toBe('container');
     const text = rendered(BAD_CONTAINER);
     expect(text).toContain(CONTAINER_MISDIRECT);
@@ -218,7 +218,7 @@ describe('[#7510] the container diagnostic still belongs to containers', () => {
   });
 });
 
-describe('[#7510] the union\'s error payload is focused, never reshaped', () => {
+describe('the union\'s error payload is focused, never reshaped', () => {
   const CLAIMED = formItem({ field: 'owner', keyField: { field: 'name', sort: [] } });
 
   it('keeps four branches, in position — a positional consumer still finds its member', () => {
@@ -258,7 +258,7 @@ describe('[#7510] the union\'s error payload is focused, never reshaped', () => 
   });
 });
 
-describe('[#7510] ⛔ the acceptance face did not move', () => {
+describe('⛔ the branch focusing did not move the acceptance face', () => {
   // Verdict-identical to `origin/main` @ `9051802`, measured body by body
   // through the same door. The refusals' top-level issue CODES are pinned with
   // them: focusing happens inside `errors`, so the envelope other consumers key

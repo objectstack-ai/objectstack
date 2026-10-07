@@ -432,6 +432,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.code-defined-datasource-door.test.ts",
+      "verb": "delete",
+      "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.code-defined-datasource-door.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.code-defined-datasource-door.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.code-only-types.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1112,6 +1127,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.platform-store-system-opt-in.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.platform-store-system-opt-in.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.platform-store-system-opt-in.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.publish-commit-capture-read-failure.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1388,6 +1418,11 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.scoped-list-fallback.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.search-skip-unreadable.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
@@ -2682,6 +2717,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/auth-manager.org-slug-guard-system-context.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/auth-manager.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2758,6 +2798,21 @@
     },
     {
       "file": "packages/plugins/plugin-auth/src/impersonation-bearer-rotation.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/implicit-account-linking.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/implicit-account-linking.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/implicit-account-linking.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3289,7 +3344,7 @@
     {
       "file": "packages/plugins/plugin-security/src/security-plugin.test.ts",
       "verb": "findOne",
-      "pinned": 6
+      "pinned": 7
     },
     {
       "file": "packages/plugins/plugin-security/src/security-plugin.test.ts",
@@ -3340,6 +3395,11 @@
       "file": "packages/plugins/plugin-security/src/suggested-audience-bindings-install-path.test.ts",
       "verb": "update",
       "pinned": 2
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/tenant-layer0-verdict-on-operation.test.ts",
+      "verb": "findOne",
+      "pinned": 1
     },
     {
       "file": "packages/plugins/plugin-security/src/vama-write-path-convergence.test.ts",
@@ -4047,6 +4107,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-system-context.pin.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-system-context.pin.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-system-context.pin.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-job/src/db-job-adapter.degraded-outcome.test.ts",
       "verb": "update",
       "pinned": 1
@@ -4152,6 +4227,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-messaging/src/system-context.pin.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/system-context.pin.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-messaging/src/template-renderer.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -4195,6 +4280,16 @@
       "file": "packages/services/service-settings/src/settings-secret-rotation.test.ts",
       "verb": "update",
       "pinned": 2
+    },
+    {
+      "file": "packages/services/service-settings/src/settings-system-context.pin.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-settings/src/settings-system-context.pin.test.ts",
+      "verb": "update",
+      "pinned": 1
     },
     {
       "file": "packages/services/service-settings/src/sys-secret-orphan-report.test.ts",
@@ -4324,17 +4419,17 @@
     {
       "file": "packages/services/service-storage/src/tenant-audit-update-delete-half-repairs.test.ts",
       "verb": "delete",
-      "pinned": 1
+      "pinned": 2
     },
     {
       "file": "packages/services/service-storage/src/tenant-audit-update-delete-half-repairs.test.ts",
       "verb": "findOne",
-      "pinned": 1
+      "pinned": 2
     },
     {
       "file": "packages/services/service-storage/src/tenant-audit-update-delete-half-repairs.test.ts",
       "verb": "update",
-      "pinned": 1
+      "pinned": 2
     },
     {
       "file": "packages/services/service-storage/src/tombstone-download-live-reference.test.ts",

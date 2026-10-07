@@ -12,15 +12,15 @@
  * This test pins each shipped non-English locale to full coverage of every
  * manifest's structural strings — namespace title/description, each group
  * title, and each field label. Dropdown *option* labels are intentionally
- * excluded: several are codes or format specimens (e.g. `date_format` =
- * "YYYY-MM-DD", `number_format` = "1,234.56") that must not be "translated",
- * and option-level parity is filled per-locale on a best-effort basis.
+ * excluded: several must not be "translated" (the `timezone` option "UTC" is a
+ * code; each `locale` option names its language in that language), and
+ * option-level parity is filled per-locale on a best-effort basis.
  */
 
 import { describe, it, expect } from 'vitest';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import * as manifestsModule from '../manifests/index.js';
-import { zhCN, jaJP, esES } from './index.js';
+import { en, zhCN, jaJP, esES } from './index.js';
 
 // The manifests barrel also exports action handlers and the aggregate array;
 // keep only the manifest objects.
@@ -53,6 +53,35 @@ function missingFor(data: { settings?: Record<string, any> }, m: SettingsManifes
   return missing;
 }
 
+/**
+ * The other direction: copy for a group or key no manifest declares. Such an
+ * entry renders nowhere, so it survives every review as dead text. The four
+ * Localization format keys retired by #21958 are the case that named it.
+ */
+function undeclaredIn(data: { settings?: Record<string, any> }): string[] {
+  const byNamespace = new Map(manifests.map((m) => [m.namespace, m]));
+  const extra: string[] = [];
+  for (const [ns, tr] of Object.entries(data.settings ?? {})) {
+    const m = byNamespace.get(ns);
+    if (!m) {
+      extra.push(`namespace:${ns}`);
+      continue;
+    }
+    const groups = new Set<string>();
+    const keys = new Set<string>();
+    for (const s of m.specifiers) {
+      if (s.type === 'group') {
+        if (s.id) groups.add(s.id);
+      } else if (s.key) {
+        keys.add(s.key);
+      }
+    }
+    for (const g of Object.keys(tr?.groups ?? {})) if (!groups.has(g)) extra.push(`${ns}.group:${g}`);
+    for (const k of Object.keys(tr?.keys ?? {})) if (!keys.has(k)) extra.push(`${ns}.key:${k}`);
+  }
+  return extra;
+}
+
 describe('settings translation coverage', () => {
   it('covers every built-in settings manifest', () => {
     expect(manifests.length).toBeGreaterThanOrEqual(10);
@@ -65,5 +94,12 @@ describe('settings translation coverage', () => {
         expect(missing, `${locale} missing for ${m.namespace}: ${missing.join(', ')}`).toEqual([]);
       });
     }
+  }
+
+  for (const [locale, data] of [['en', en], ...LOCALES] as typeof LOCALES) {
+    it(`${locale} carries no copy for a group or key no manifest declares`, () => {
+      const extra = undeclaredIn(data);
+      expect(extra, `${locale} has undeclared settings copy: ${extra.join(', ')}`).toEqual([]);
+    });
   }
 });

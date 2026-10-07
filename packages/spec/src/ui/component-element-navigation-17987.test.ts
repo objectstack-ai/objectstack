@@ -82,7 +82,7 @@ function unknownKeyMessage(result: z.ZodSafeParseResult<unknown>): string {
   return String(issue?.message ?? '');
 }
 
-describe('[#17987] the standalone element faces declare `navigation`', () => {
+describe('the standalone element faces declare `navigation`', () => {
   it('each of the three accepts the card\'s acceptance document', () => {
     for (const { type, schema } of FACES) {
       const r = schema.safeParse({ objectName: 'task', navigation: { mode: 'drawer' } });
@@ -128,7 +128,7 @@ describe('[#17987] the standalone element faces declare `navigation`', () => {
   });
 });
 
-describe('[#17987] the element carrier is the view face\'s def, not a second dialect', () => {
+describe('the element carrier is the view face\'s def, not a second dialect', () => {
   it('is the very object `ListViewSchema.navigation` carries, on all three faces', () => {
     // Resolved through the doors themselves rather than through the exported
     // symbol: `lazySchema` hands back a lazy proxy until something touches it,
@@ -189,7 +189,7 @@ describe('[#17987] the element carrier is the view face\'s def, not a second dia
   });
 });
 
-describe('[#17987] the VIEW-level carrier is untouched', () => {
+describe('the VIEW-level carrier is untouched', () => {
   it('`ListViewSchema` still accepts `navigation`, and still refuses a bogus key', () => {
     const ok = ListViewSchema.safeParse(baseView({ navigation: { mode: 'drawer' } }));
     expect(ok.success).toBe(true);
@@ -199,7 +199,7 @@ describe('[#17987] the VIEW-level carrier is untouched', () => {
   });
 });
 
-describe('[#17987] the `object-timeline` row judges the block in BOTH directions', () => {
+describe('the `object-timeline` row judges the block in BOTH directions', () => {
   const TIMELINE = ComponentPropsMap['object-timeline'];
 
   it('accepts the key set measured from the renderer at the `.objectui-sha` pin', () => {

@@ -82,7 +82,7 @@ const numericBagArtifact: AssembledViewArtifact = { object: 'crm_lead', viewKind
 const numericBagParsedArtifact: AssembledViewArtifactParsed = { object: 'crm_lead', viewKind: 'list', options: { kanban: 42 } };
 void [typedBag, numericBagMetadata, numericBagParsedMetadata, numericBagArtifact, numericBagParsedArtifact];
 
-describe('[#19920] the list overlay options bag carries each kind block', () => {
+describe('the list overlay options bag carries each kind block', () => {
   it('the runtime key set is the kind set the type names', () => {
     const bag = VIEW_METADATA_MEMBERS.listOverlay.shape.options.unwrap();
     expect(Object.keys(bag.shape).sort()).toEqual([...KIND_BLOCKS]);

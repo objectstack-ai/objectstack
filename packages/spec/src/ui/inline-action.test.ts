@@ -125,7 +125,7 @@ describe('InlineActionSchema — identity is optional, unlike a registered actio
  * same-name union. `bodyExtra` is that key — already declared on `ActionSchema`
  * for `type:'api'` bodies, now picked onto the inline shape.
  */
-describe('InlineActionSchema — `bodyExtra` is the payload key, `params` is not (#5777)', () => {
+describe('InlineActionSchema — `bodyExtra` is the payload key, `params` is not', () => {
   it('accepts the showcase submit button verbatim, `{{page.<var>}}` tokens included', () => {
     // examples/app-showcase/src/ui/pages/contact-form.page.ts — the site the
     // #5068 gate reported. Values are template tokens, not literals: the
@@ -222,7 +222,7 @@ describe('InlineActionSchema — `bodyExtra` is the payload key, `params` is not
  * regression that drops either arm is a wrong instruction again, and the bare
  * "expected array, received object" would keep a `toThrow()`-shaped test green.
  */
-describe('object-form `params` prescribes per action type (#6828)', () => {
+describe('object-form `params` prescribes per action type — its url meaning is retired, not re-keyed', () => {
   /** The `params` issue a parse produced, or a readable failure if it produced none. */
   const paramsIssue = (r: { success: boolean; error?: z.ZodError }) => {
     expect(r.success).toBe(false);
@@ -380,7 +380,7 @@ describe('element:button declares its action', () => {
     expect(r.success).toBe(false);
   });
 
-  it('carries an api payload through to parse output (#5777, end to end)', () => {
+  it('carries an api payload through to parse output (end to end)', () => {
     // The #5068 gate parses `properties` through this schema, so this is the
     // exact call whose `component-props-invalid` finding the showcase page
     // produced before the ruling.

@@ -42,6 +42,20 @@
  * mints the organization and sets membership roles in system context — the
  * shape `delegated-admin-invite.dogfood.test.ts` uses, and the only writer
  * better-auth-managed tables accept (ADR-0092).
+ *
+ * ## The one affordance no grade reaches: "Add Member"
+ *
+ * `sys_member.add_member` targets a door gated on PLATFORM-admin standing
+ * (ADR-0068), not on a grade, so an org owner is refused it too. Its `visible`
+ * reads that standing, `current_user.isPlatformAdmin == true` (ADR-0068 D4,
+ * the ADR-0095 D3 rung). That case binds `current_user` the way the CONSOLE
+ * does — the whole scope handed to the engine as `extra`, one subject built
+ * from the served session — and ⛔ not through `user:`, under which
+ * `@objectstack/formula` re-derives `isPlatformAdmin` from `positions` and so
+ * measures the name instead of the rung the session carries. The grade cases
+ * above keep their `user:` binding: their predicates read `positions` only.
+ * The platform admin is the seeded dev admin (the harness's signed-in
+ * principal); a second org owner who is NOT one is minted for the case.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -115,11 +129,15 @@ describe('org-admin affordances follow the membership grade (served metadata × 
   const tokens = {} as Record<Grade, string>;
   const sessionUser = {} as Record<Grade, Record<string, unknown>>;
   const served = {} as Record<Grade, Map<string, ServedAction>>;
+  /** The field names each grade is served per object — what the metadata-plane field mask left. */
+  const servedFields = {} as Record<Grade, Record<string, string[]>>;
   let features: Record<string, unknown>;
   /** A representative row per object — the binding a row action is evaluated against. */
   const rowOf = {} as Record<string, Record<string, unknown>>;
   let plainMemberRowId: string;
   let pendingInvitationId: string;
+  /** An org owner who is NOT a platform admin — the principal "Add Member" must not be offered to. */
+  const standingOwner = {} as { token: string; userId: string; session: Record<string, unknown>; served: Map<string, ServedAction> };
 
   beforeAll(async () => {
     stack = await bootStack(showcaseStack, {});
@@ -153,6 +171,16 @@ describe('org-admin affordances follow the membership grade (served metadata × 
       }
     }
 
+    // A second owner of the same org, signed up rather than seeded, so the
+    // owner grade is measured apart from platform-admin standing.
+    standingOwner.token = await stack.signUp('reach.owner@example.com', 'Reach!Pass123', 'Reach second owner');
+    {
+      const [user] = await findRows(ql, 'sys_user', { email: 'reach.owner@example.com' }, 1);
+      standingOwner.userId = String(user.id);
+      const membership = await waitForMembership(ql, standingOwner.userId);
+      await ql.update('sys_member', { id: membership.id, role: 'owner' }, { context: SYSTEM_CTX });
+    }
+
     // Rows for the row actions to bind against: a pending invitation, a team,
     // and a team membership — created through the doors, as the owner.
     const invite = await stack.apiAs(tokens.owner, 'POST', '/auth/organization/invite-member', {
@@ -181,12 +209,24 @@ describe('org-admin affordances follow the membership grade (served metadata × 
       expect(session.status).toBe(200);
       sessionUser[grade] = ((await session.json()) as { user: Record<string, unknown> }).user;
       served[grade] = new Map();
+      servedFields[grade] = {};
       for (const object of OBJECTS) {
         const meta = await stack.apiAs(tokens[grade], 'GET', `/meta/object/${object}`);
         expect(meta.status, `${grade} reads /meta/object/${object}`).toBe(200);
-        const body = (await meta.json()) as { item?: { actions?: ServedAction[] } };
+        const body = (await meta.json()) as { item?: { actions?: ServedAction[]; fields?: Record<string, unknown> } };
         for (const action of body.item?.actions ?? []) served[grade].set(`${object}.${action.name}`, action);
+        servedFields[grade][object] = Object.keys(body.item?.fields ?? {});
       }
+    }
+
+    {
+      const session = await stack.apiAs(standingOwner.token, 'GET', '/auth/get-session');
+      expect(session.status).toBe(200);
+      standingOwner.session = ((await session.json()) as { user: Record<string, unknown> }).user;
+      const meta = await stack.apiAs(standingOwner.token, 'GET', '/meta/object/sys_member');
+      expect(meta.status, 'the second owner reads /meta/object/sys_member').toBe(200);
+      const body = (await meta.json()) as { item?: { actions?: ServedAction[] } };
+      standingOwner.served = new Map((body.item?.actions ?? []).map((a) => [`sys_member.${a.name}`, a]));
     }
   }, 240_000);
 
@@ -224,16 +264,6 @@ describe('org-admin affordances follow the membership grade (served metadata × 
     return gateAdmits(grade, site);
   };
 
-  /**
-   * The one site the metadata-plane field mask (ADR-0106) withholds below
-   * tenant-admin grade: `sys_user.invite_user`'s `role` param names
-   * `sys_user.role`, a field those callers cannot read, so the whole action is
-   * dropped from their `/meta/object/sys_user` — independently of this gate.
-   * Every other site must be served to every grade, or a verdict below would be
-   * the mask's rather than the gate's.
-   */
-  const MASKED_BELOW_TENANT_ADMIN = ['sys_user.invite_user'];
-
   it('the session face carries each grade under its projected name, and no other grade', () => {
     // The capability half of every composed predicate is ON here, so each
     // verdict below is decided by the grade term alone.
@@ -251,12 +281,30 @@ describe('org-admin affordances follow the membership grade (served metadata × 
     expect(ALL.filter((site) => gateAdmits(grade, site))).toEqual(ALL.filter((site) => EXPECTED[grade].includes(site)));
   });
 
+  // Every site is served to every grade, so each verdict below is the gate's
+  // rather than the metadata-plane field mask's.
   it.each(Object.keys(EXPECTED) as Grade[])('%s is offered, on its own served metadata, exactly those it is served', (grade) => {
     const unserved = ALL.filter((site) => !served[grade].has(site));
-    const tenantAdmin = grade === 'owner' || grade === 'admin';
-    expect(unserved).toEqual(tenantAdmin ? [] : MASKED_BELOW_TENANT_ADMIN);
+    expect(unserved).toEqual([]);
     const shown = ALL.filter((site) => offered(grade, site));
-    expect(shown).toEqual(ALL.filter((site) => EXPECTED[grade].includes(site) && !unserved.includes(site)));
+    expect(shown).toEqual(ALL.filter((site) => EXPECTED[grade].includes(site)));
+  });
+
+  it('a delegated_admin is offered Invite User on sys_user; a plain member is not — by the reach gate, not the field mask', () => {
+    // `invite_user`'s `role` param names `sys_member.role` through
+    // `objectOverride`. Neither grade is served `sys_user.role`, so a mask that
+    // read the param as THIS object's field withheld the action from both. Both
+    // ARE served `sys_member.role`, the field the param actually names.
+    for (const grade of ['delegated_admin', 'member'] as const) {
+      expect(servedFields[grade].sys_user, `${grade} is not served sys_user.role`).not.toContain('role');
+      expect(servedFields[grade].sys_member, `${grade} is served sys_member.role`).toContain('role');
+      expect(served[grade].has('sys_user.invite_user'), `${grade} is served sys_user.invite_user`).toBe(true);
+    }
+    expect(offered('delegated_admin', 'sys_user.invite_user')).toBe(true);
+    // The member is served the same action and is still not offered it: the
+    // served `requiresMembershipReach` predicate excludes its grade.
+    expect(gateAdmits('member', 'sys_user.invite_user')).toBe(false);
+    expect(offered('member', 'sys_user.invite_user')).toBe(false);
   });
 
   it('a plain member sees none of them on the member, invitation and team lists', () => {
@@ -311,5 +359,75 @@ describe('org-admin affordances follow the membership grade (served metadata × 
     await refused(await stack.apiAs(tokens.admin, 'POST', '/auth/organization/update-member-role', {
       memberId: plainMemberRowId, role: 'owner', organizationId: orgId,
     }), 'YOU_ARE_NOT_ALLOWED_TO_UPDATE_THIS_MEMBER');
+  }, 60_000);
+
+  it('Add Member is offered to a platform admin alone — current_user bound as the console binds it — and the door agrees', async () => {
+    const servedAddMember = served.owner.get('sys_member.add_member')?.visible;
+    expect(servedAddMember, 'add_member is served with a predicate').toBeDefined();
+
+    /**
+     * The console's evaluation, not this file's `user:` one: objectui hands
+     * its whole scope to the engine as `extra`, ONE subject built from the
+     * served session under `current_user` / `user` / `ctx.user` / `os.user`,
+     * with `features` beside it — so `isPlatformAdmin` is the session's own
+     * value, the rung the door's gate judges.
+     */
+    const consoleOffers = (session: Record<string, unknown>, own: Map<string, ServedAction>): boolean => {
+      const action = own.get('sys_member.add_member');
+      if (!action) throw new Error('sys_member.add_member is not served to this principal');
+      expect(action.visible, 'one predicate is served to every principal').toEqual(servedAddMember);
+      const subject = {
+        id: session.id,
+        name: session.name,
+        email: session.email,
+        isPlatformAdmin: session.isPlatformAdmin,
+        positions: session.positions,
+      };
+      const result = celEngine.evaluate(action.visible as never, {
+        extra: { current_user: subject, user: subject, ctx: { user: subject }, os: { user: subject }, features },
+      });
+      if (!result.ok) throw new Error(`sys_member.add_member faulted: ${JSON.stringify(result)}`);
+      return result.value === true;
+    };
+
+    // The standing each principal's served session carries — measured, not
+    // assumed: the seeded admin holds the rung, and no org grade does.
+    const principals: Array<[string, Record<string, unknown>, Map<string, ServedAction>, boolean]> = [
+      ['platform admin (the seeded admin)', sessionUser.owner, served.owner, true],
+      ['org owner, not a platform admin', standingOwner.session, standingOwner.served, false],
+      ['org admin', sessionUser.admin, served.admin, false],
+      ['delegated admin', sessionUser.delegated_admin, served.delegated_admin, false],
+      ['plain member', sessionUser.member, served.member, false],
+    ];
+    for (const [who, session, , platformAdmin] of principals) {
+      expect(session.isPlatformAdmin, `${who}: the session's standing`).toBe(platformAdmin);
+    }
+    // The second owner really is an owner on the session face, so its hidden
+    // verdict is about standing and not about a missing grade.
+    expect(standingOwner.session.positions as string[]).toContain('org_owner');
+
+    // Both halves at once, every principal named: who IS offered it, and so
+    // who is not.
+    const offeredTo = principals.filter(([, session, own]) => consoleOffers(session, own)).map(([who]) => who);
+    expect(offeredTo).toEqual(['platform admin (the seeded admin)']);
+
+    // The door's own verdicts on the same boot: the owner and the plain member
+    // are refused before anything is written; the platform admin is admitted.
+    const org2 = await ql.insert('sys_organization', { name: 'Reach Org Two', slug: 'reach-org-two' }, { context: SYSTEM_CTX });
+    const attach = { userId: standingOwner.userId, role: 'member', organizationId: String(org2.id) };
+    for (const [who, token] of [['org owner', standingOwner.token], ['plain member', tokens.member]] as const) {
+      const res = await stack.apiAs(token, 'POST', '/auth/organization/add-member', attach);
+      const body = (await res.clone().json()) as { success?: boolean; error?: { code?: string } };
+      expect(res.status, `${who}: ${JSON.stringify(body)}`).toBe(403);
+      expect(body.error?.code, who).toBe('PERMISSION_DENIED');
+    }
+    expect(await findRows(ql, 'sys_member', { user_id: standingOwner.userId, organization_id: String(org2.id) }, 5)).toEqual([]);
+
+    const admitted = await stack.apiAs(tokens.owner, 'POST', '/auth/organization/add-member', attach);
+    const admittedBody = (await admitted.clone().json()) as { success?: boolean };
+    expect(admitted.status, JSON.stringify(admittedBody)).toBe(200);
+    expect(admittedBody.success).toBe(true);
+    const attached = await findRows(ql, 'sys_member', { user_id: standingOwner.userId, organization_id: String(org2.id) }, 5);
+    expect(attached.map((m) => m.role)).toEqual(['member']);
   }, 60_000);
 });

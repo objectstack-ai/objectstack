@@ -46,7 +46,7 @@ import {
 // Form follows #4988 / #5055: resolved symbol identity over every public entry
 // via the build-time `export-origins/` artifact, plus the file-deletion probe
 // in the #4988 direction (whole-file retirement, no surviving occupant).
-describe('[#8075] system/ message-queue config family retirement', () => {
+describe('system/ message-queue config family retirement', () => {
   /** The 14 names the five retired defs exported (5 schema consts + 9 types). */
   const RETIRED_NAMES = [
     'MessageQueueProviderSchema', 'MessageQueueProvider',
@@ -84,7 +84,7 @@ describe('[#8075] system/ message-queue config family retirement', () => {
     // ── ABSENCE (every entry — exact names, so the near-namesakes cannot
     //    satisfy these by substring) ────────────────────────────────────────
     for (const name of RETIRED_NAMES) {
-      expect(holdersOf(name), `${name} must have zero holders after #8075`).toEqual([]);
+      expect(holdersOf(name), `${name} must have zero holders after the family's retirement`).toEqual([]);
     }
 
     // ── SURVIVAL ──────────────────────────────────────────────────────────
@@ -124,7 +124,7 @@ describe('[#8075] system/ message-queue config family retirement', () => {
       }
     };
     walk(srcRoot);
-    expect(importers, 'a resurrected import means the retirement is being undone — re-read #8075').toEqual([]);
+    expect(importers, 'a resurrected import means the retirement is being undone — the family had no consumer and carried an inline credential').toEqual([]);
   });
 
   it('runtime namespace agrees with the compiler view', async () => {

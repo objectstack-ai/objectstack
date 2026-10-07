@@ -57,7 +57,7 @@ const EMAIL_INDEX_SOURCE = join(REPO_ROOT, 'packages', 'plugins', 'plugin-email'
 /** `export const DEFAULT_TEMPLATE_LOCALE = '…';` — how plugin-email declares it. */
 const DECLARATION = /^export const DEFAULT_TEMPLATE_LOCALE = '([^']*)';\s*$/m;
 
-describe('#17614 — the published "must stay equal" claim, held', () => {
+describe('EMAIL_TEMPLATE_FLOOR_LOCALE — the published "must stay equal" claim, held', () => {
   it("plugin-email's DEFAULT_TEMPLATE_LOCALE literal equals EMAIL_TEMPLATE_FLOOR_LOCALE", () => {
     const source = readFileSync(EMAIL_SERVICE_SOURCE, 'utf8');
     const match = DECLARATION.exec(source);

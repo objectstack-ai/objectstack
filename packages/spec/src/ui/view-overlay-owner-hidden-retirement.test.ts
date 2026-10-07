@@ -332,7 +332,7 @@ describe('overlay owner/hidden retirement — ADR-0087 registration', () => {
     expect(MIGRATIONS_BY_MAJOR[18]!.conversionIds).toContain('view-overlay-owner-hidden-removed');
   });
 
-  it('the family carries ONE D3 semantic entry, and it names the family\'s D2 conversion (ruling B on #17152)', () => {
+  it('the family carries ONE D3 semantic entry, and it names the family\'s D2 conversion (ruled: a D3 entry per family, even beside a lossless D2)', () => {
     const semantic = MIGRATIONS_BY_MAJOR[18]!.semantic;
     const family = semantic.filter((s) => s.id === 'view-overlay-owner-hidden-retired');
     expect(family).toHaveLength(1);

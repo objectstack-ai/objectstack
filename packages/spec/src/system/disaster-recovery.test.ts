@@ -232,7 +232,7 @@ import { z } from 'zod';
 // neighbouring `dns.ttl` is a DECLARED `externalVocabulary` mirror and must
 // survive this rename untouched, and no gate can catch its loss (the marker
 // exempts the key either way), so the pin is the only guard.
-describe('FailoverConfig.healthCheckInterval carries its unit (#15679)', () => {
+describe('FailoverConfig.healthCheckInterval carries its unit in the key name', () => {
   const regions = [
     { name: 'us-east-1', role: 'primary' as const },
     { name: 'eu-west-1', role: 'secondary' as const },

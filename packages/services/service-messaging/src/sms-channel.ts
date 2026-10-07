@@ -17,6 +17,7 @@ import {
     DEFAULT_LOCALE,
 } from './template-renderer.js';
 import { RECIPIENT_LOCALE_FIELD, USER_OBJECT, resolveRecipientLocale } from './recipient-locale.js';
+import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
 
 /**
  * Structural view of the SMS service (`@objectstack/service-sms`'s
@@ -148,10 +149,12 @@ export function createSmsChannel(opts: SmsChannelOptions): MessagingChannel {
         // retry the column was never asked for, so rung 2 applies.
         let localeRead = false;
         try {
+            // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: the
+            // recipient's number and locale, read for the delivery only.
             user = await data.findOne(userObject, {
                 where: { id: recipient },
                 fields: ['phone_number', RECIPIENT_LOCALE_FIELD],
-            });
+            }, { context: FAN_OUT_SYSTEM_CONTEXT });
             localeRead = true;
         } catch (err) {
             // Ruling item 3 (#13881): the locale read must never cost the
@@ -160,7 +163,11 @@ export function createSmsChannel(opts: SmsChannelOptions): MessagingChannel {
                 `[sms] recipient lookup for '${recipient}' with '${RECIPIENT_LOCALE_FIELD}' failed (${(err as Error).message}); retrying phone-only`,
             );
             try {
-                user = await data.findOne(userObject, { where: { id: recipient }, fields: ['phone_number'] });
+                user = await data.findOne(
+                    userObject,
+                    { where: { id: recipient }, fields: ['phone_number'] },
+                    { context: FAN_OUT_SYSTEM_CONTEXT },
+                );
             } catch (retryErr) {
                 ctx.logger.warn(`[sms] phone lookup for '${recipient}' failed (${(retryErr as Error).message})`);
                 return undefined;

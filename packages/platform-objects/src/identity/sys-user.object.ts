@@ -115,6 +115,18 @@ export const SysUser = ObjectSchema.create({
     // "More" menu) so platform admins can manage an account from either
     // the Users list or an open user record — without dropping to SQL or
     // a custom Setup wizard.
+    //
+    // Every action in this block, and `set_user_manager` below, is OFFERED
+    // only to the one standing its door admits (ADR-0068 D4): each endpoint
+    // runs the platform-admin gate first and answers every other caller —
+    // org owners and admins included — 403 `PERMISSION_DENIED`. So each one
+    // authors `visible: 'current_user.isPlatformAdmin == true'`, the ADR-0095
+    // D3 PLATFORM_ADMIN posture rung that the session payload emits and the
+    // gate judges; `requiresFeature` composes onto it at parse time, e.g.
+    // `(current_user.isPlatformAdmin == true) && features.admin == true`.
+    // ⛔ Never `'platform_admin' in current_user.positions`: `EvalUserSchema`
+    // rules that standing is read from this key, never from the array. The
+    // repo-wide pin is `platform-admin-affordance-standing.test.ts`.
     {
       name: 'ban_user',
       label: 'Ban User',
@@ -123,6 +135,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/ban-user',
+      // Platform-admin standing (ADR-0068 D4) — see the block header above.
+      visible: 'current_user.isPlatformAdmin == true',
       requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'User banned',
@@ -149,6 +163,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/unban-user',
+      // Platform-admin standing (ADR-0068 D4) — see the block header above.
+      visible: 'current_user.isPlatformAdmin == true',
       requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'User unbanned',
@@ -165,6 +181,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/unlock-user',
+      // Platform-admin standing (ADR-0068 D4) — see the block header above.
+      visible: 'current_user.isPlatformAdmin == true',
       requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'Account unlocked',
@@ -185,6 +203,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/admin/create-user',
+      // Platform-admin standing (ADR-0068 D4) — see the block header above.
+      visible: 'current_user.isPlatformAdmin == true',
       requiresFeature: 'admin',
       successMessage: 'User created',
       refreshAfter: true,
@@ -249,6 +269,8 @@ export const SysUser = ObjectSchema.create({
       // legacy role scalar), can mint a temporary password, and stamps
       // must_change_password.
       target: '/api/v1/auth/admin/set-user-password',
+      // Platform-admin standing (ADR-0068 D4) — see the block header above.
+      visible: 'current_user.isPlatformAdmin == true',
       requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'Password updated',
@@ -298,6 +320,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/impersonate-user',
+      // Platform-admin standing (ADR-0068 D4) — see the block header above.
+      visible: 'current_user.isPlatformAdmin == true',
       requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'Now impersonating user',
@@ -358,7 +382,14 @@ export const SysUser = ObjectSchema.create({
       // half is deliberately NOT copied (it would hide the button from every
       // admin). `has()` per operand for the sparse action face (#8990) — the
       // rationale is on the self-service block below.
-      visible: 'has(record.source) && record.source != "idp_provisioned"',
+      //
+      // ANDed ahead of it, the platform-admin standing the door's gate judges
+      // (ADR-0068 D4, the admin block header above): without it the button
+      // was offered to every caller who could open a user row, and the door
+      // refused each one 403 `PERMISSION_DENIED`. One flat conjunction, the
+      // principal term first, the way the self-service predicates below lead
+      // with theirs.
+      visible: 'current_user.isPlatformAdmin == true && has(record.source) && record.source != "idp_provisioned"',
       // The action collects a param, so its explanatory line rides
       // `description` and ⛔ never `confirmText` — pairing the two shows two
       // dialogs for one decision (#7278/#7309).
@@ -601,11 +632,28 @@ export const SysUser = ObjectSchema.create({
   ],
 
   listViews: {
-    // Self-service profile entry — surfaced by the Account App so every
-    // authenticated user can view / edit their own basic profile (name,
-    // email, avatar). Filtered to a single row (the caller) via the
-    // `{current_user_id}` template variable; RLS additionally enforces
-    // that non-admins cannot read other users' rows.
+    // [#21972] Declared FIRST on purpose: a route that names no view opens the
+    // first declared list view — Setup's Users entry, which names this view
+    // explicitly (#21960), and the bare-object doors (the record page's
+    // object breadcrumb, the object switcher), which name none. So the
+    // caller-scoped `me` is never first.
+    all_users: {
+      type: 'grid',
+      name: 'all_users',
+      label: 'All Users',
+      data: { provider: 'object', object: 'sys_user' },
+      columns: ['name', 'email', 'phone_number', 'email_verified', 'source', 'two_factor_enabled', 'created_at'],
+      sort: [{ field: 'name', order: 'asc' }],
+      pagination: { pageSize: 50 },
+    },
+    // The caller's own row, as a tab of this object's view switcher.
+    // Filtered to a single row via the `{current_user_id}` template
+    // variable — presentation scope only; which other users' rows a caller
+    // may read is RLS's decision (`member_default` admits the caller's own
+    // row and their organization's users). No navigation entry names this
+    // view: the Account App's profile entry is the `account:profile_card`
+    // component (`account.app.ts`), which reads the signed-in user from the
+    // session, not from this list.
     me: {
       type: 'grid',
       name: 'me',
@@ -615,15 +663,6 @@ export const SysUser = ObjectSchema.create({
       filter: [{ field: 'id', operator: 'equals', value: '{current_user_id}' }],
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 1 },
-    },
-    all_users: {
-      type: 'grid',
-      name: 'all_users',
-      label: 'All Users',
-      data: { provider: 'object', object: 'sys_user' },
-      columns: ['name', 'email', 'phone_number', 'email_verified', 'source', 'two_factor_enabled', 'created_at'],
-      sort: [{ field: 'name', order: 'asc' }],
-      pagination: { pageSize: 50 },
     },
     unverified: {
       type: 'grid',

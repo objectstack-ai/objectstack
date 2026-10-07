@@ -48,40 +48,14 @@ export const SysAccount = ObjectSchema.create({
   // `accountId`). The form is locked to the row's values so it acts
   // as a one-click confirmation rather than a free-form edit.
   //
-  // `link_social` is the self-service counterpart — a toolbar action
-  // that redirects the browser to better-auth's social sign-in endpoint
-  // with a callbackURL pointing back to the linked-accounts view. The
-  // endpoint sets the link cookie and OAuth-dances through the provider,
-  // which is why it's `type: 'url'` (full page navigation) rather than
-  // `type: 'api'` (XHR — would block on CORS / 302).
+  // There is deliberately no LINK action. `link_social` was retired under
+  // ADR-0049 enforce-or-remove: it navigated to a GET of the POST-only
+  // social sign-in route and offered a fixed provider list, so it was dead
+  // on every boot. Linking is the signed-in `POST /api/v1/auth/link-social`
+  // (SDK `auth.accounts.linkSocial`), which answers the provider URL; a
+  // console surface for it reads the configured providers from
+  // `/auth/config`, never a static option list.
   actions: [
-    {
-      name: 'link_social',
-      label: 'Link Social Account',
-      icon: 'link-2',
-      variant: 'primary',
-      mode: 'create',
-      locations: ['list_toolbar'],
-      type: 'url',
-      target: '/api/v1/auth/sign-in/social?provider=${param.provider}&callbackURL=${ctx.origin}/_console/apps/account/sys_account',
-      params: [
-        {
-          name: 'provider',
-          label: 'Provider',
-          type: 'select',
-          required: true,
-          options: [
-            { label: 'Google', value: 'google' },
-            { label: 'GitHub', value: 'github' },
-            { label: 'Microsoft', value: 'microsoft' },
-            { label: 'Apple', value: 'apple' },
-            { label: 'Facebook', value: 'facebook' },
-            { label: 'GitLab', value: 'gitlab' },
-            { label: 'Discord', value: 'discord' },
-          ],
-        },
-      ],
-    },
     {
       name: 'unlink_account',
       label: 'Unlink Account',
@@ -94,7 +68,7 @@ export const SysAccount = ObjectSchema.create({
       // Confirm question on `description`, not `confirmText`: this action collects
       // params, and pairing the two keys opens two dialogs for one decision
       // (#7278 ruling 2026-08-10, swept by #7309).
-      description: 'Unlink this identity link? The user will no longer be able to sign in with this provider until they re-link it from their account settings.',
+      description: 'Unlink this identity link? The user will no longer be able to sign in with this provider until they re-link it.',
       successMessage: 'Identity link removed',
       refreshAfter: true,
       params: [
@@ -104,6 +78,19 @@ export const SysAccount = ObjectSchema.create({
   ],
 
   listViews: {
+    // [#21972] Declared FIRST on purpose: a route that names no view opens the
+    // first declared list view, so a caller-scoped view (`mine`) is never
+    // first. Setup's `nav_accounts` names this view; the Account app's
+    // `nav_account_linked` names `mine`.
+    all_links: {
+      type: 'grid',
+      name: 'all_links',
+      label: 'All',
+      data: { provider: 'object', object: 'sys_account' },
+      columns: ['provider_id', 'user_id', 'account_id', 'created_at', 'updated_at'],
+      sort: [{ field: 'created_at', order: 'desc' }],
+      pagination: { pageSize: 100 },
+    },
     mine: {
       type: 'grid',
       name: 'mine',
@@ -122,15 +109,6 @@ export const SysAccount = ObjectSchema.create({
       columns: ['provider_id', 'user_id', 'account_id', 'created_at'],
       sort: [{ field: 'provider_id', order: 'asc' }, { field: 'created_at', order: 'desc' }],
       grouping: { fields: [{ field: 'provider_id', order: 'asc', collapsed: false }] },
-      pagination: { pageSize: 100 },
-    },
-    all_links: {
-      type: 'grid',
-      name: 'all_links',
-      label: 'All',
-      data: { provider: 'object', object: 'sys_account' },
-      columns: ['provider_id', 'user_id', 'account_id', 'created_at', 'updated_at'],
-      sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 100 },
     },
   },

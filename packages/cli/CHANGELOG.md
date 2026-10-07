@@ -1,5 +1,772 @@
 # @objectstack/cli
 
+## 17.7.0
+
+### Minor Changes
+
+- bcd68a2: feat(cli): `objectstack generate picklist NAME` scaffolds a shared option list, and the metadata summary counts picklists
+  
+  Clause-②: yes (widening)
+  
+  - **`objectstack generate picklist NAME`** (alias `os g picklist`) writes `src/picklists/NAME.picklist.ts`, a list declared with `definePicklist({ name, label, options })`, and adds its export line to `src/picklists/index.ts`. The list is collected under the `picklists` stack key. A select field takes its options from the list by naming it, `Field.select({ picklist: 'NAME' })`, in place of options of its own. The server serves that field with the list's options resolved onto it, together with any options other packages add through `picklistExtensions`, and judges writes against them. `objectstack validate` and `objectstack build` refuse a field whose `picklist` names no list the stack declares, and so does the boot.
+  - **`objectstack init`** wires the new `src/picklists` barrel in the `app` and `plugin` templates, the same way it wires every other directory `objectstack generate` writes into: an empty `src/picklists/index.ts` and a `picklists: exportsOf(picklists)` key in `objectstack.config.ts`. A project scaffolded by an earlier release keeps its config. `objectstack generate picklist` then reports the list as not wired and prints the import line and the `defineStack` key to add.
+  - **The metadata summary** that `objectstack validate`, `objectstack build` and `objectstack info` print counts the picklists a stack declares, in the `Data:` row: `Data: 1 Objects  3 Fields  1 Picklists`. A stack that declares none prints the row it printed before. The `stats` object in the `--json` output of the same three commands gains a `picklists` count. A `picklistExtensions` entry is not counted as a list.
+- 713b0fa: fix(metadata-protocol)!: a metadata body's stored content hash is served and compared only in keyed form, never copied, and never evaluated (#21207)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the stored content hash of a metadata body stays the canonical hash at rest and no metadata body, authorable key, spelling or export moves; what changes is the form a door serves the hash in (a keyed digest: the crypto provider's, or a process-scoped ephemeral key's when none is registered), the form an inbound version token is compared in, and which query shapes the doors accept over the two hash columns, so `objectstack migrate meta` has nothing to rewrite. The operator-run rewrite this release asks for is of audit, activity and decision-audit copies, not of metadata. The other categories are closed on facts: every package here publishes (not `unpublished`); no ADR-0087 id covers a served version token or a refused query shape (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what the metadata doors serve and accept for the stored content hash of a metadata body — a hash over the whole stored body, withheld credential material included. Served beside the projected body it let a reader confirm a guess at that material offline; filtered on, it confirmed one online. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **Three things change for callers and operators.**
+  
+  1. **A held version token gets one `409 METADATA_CONFLICT`.** Every door that hands out a metadata version token — the save, publish, package-publish and rollback receipts and the history read — now hands out a keyed digest of the stored hash instead of the hash itself, and the save and reset doors compare a token they are sent in that same form. The key is the crypto provider's; a host that registers none keys under a process-scoped ephemeral key instead, so a token is always issued and never empty. A token a client held from before the upgrade is refused once; take the token from the next read or receipt and retry. On a host with no provider the same happens after a restart, and on any host when a provider is first registered. An empty, withheld, raw or stale token is refused with the same `409`; it is never read as "no pin".
+  2. **Filter, sort and group on the two stored content-hash columns, and on the version history's change note, now answer `400 INVALID_FIELD`** — on the generic data door, the MCP stdio reader and the analytics door, before the engine runs. The change note is included because a draft promotion that stated no message of its own recorded the draft's stored hash in it; the publish door now always states a hash-free message, and a note written before this release is served with the quoted hash in keyed form. A data-door search over the two stored-metadata tables no longer scans those columns or the stored body column, and an explicit search-field list naming one answers the same `400`. Every other column of the two tables is served, filtered, sorted and grouped as before, and every other object is unchanged.
+  3. **Operators run `os migrate audit-metadata-bodies` once after upgrading, dry run first.** The audit ledger, the activity feed and the metadata decision-audit trail no longer copy the stored hash. The extended command drops it from the copies already written and withholds it in the decision-audit notes and their copies: a dry run by default, `--apply` to rewrite, idempotent. The version history stays the lineage.
+  
+  **What else changes.** The data door serves the two hash columns of the stored-metadata tables in keyed form, under the same key as the version tokens. The MCP stdio reader serves them keyed under the crypto provider's key, and omits them on a host with no provider. A `409` conflict refusal carries keyed values or none. The ObjectQL engine gains a read accessor for the registered provider's keyed digest; it is additive. A member's read of these tables is refused as before.
+- f397608: fix(cli)!: `os verify` runs the author-time rules first, and a stack they refuse fails `verify` with the findings `os validate` reports (#21323)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a CLI command's verdict, not a declaration: os verify now refuses, before it boots anything, a stack the author-time rule registry refuses or that does not parse against the protocol schema. No authorable key, spelling, export or stored shape moves: every stack parses and loads exactly as before, os validate and os build answer exactly as before, and nothing on the metadata load path is read or rewritten. What an author does about a refusal is fix the finding the message names, which os validate and os build already report for the same stack, so there is no rewrite a ledger entry could carry. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a command's verdict (not registered / already-registered); and the change is CLI behaviour, not a TypeScript declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** — `os verify` narrows what it passes. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **What was accepted before.** `os verify` booted the app and exercised CRUD round-trip fidelity and, with `--rls`, the RLS invariant — and nothing else. A stack carrying a lookup to an object that does not exist, an action `visible` expression naming a field without `record.`, or a list column naming no field booted, round-tripped its records and printed `✓ verify passed` at exit 0, while `os validate`, `os build` and `os lint` all refused it. The documented done-bar ("`objectstack verify` is green") was green on a stack the build refuses to ship.
+  
+  **What is refused now.** `os verify` runs two stages. The first is the author-time rule registry `os validate` runs, over the stack prepared the way `os validate` prepares it: normalized, inline handlers lowered, parsed against the protocol schema, the SDUI manifest read beside the config, judged whole and then once per package of a multi-package artifact. A gating finding, or a stack that does not parse, exits 1 with those findings and the runtime stage never starts:
+  
+  - text face: `✗ Author-time rules failed (N issues) — the runtime stage did not run`, then each finding with its rule and location (the per-package and schema refusals have their own sentence);
+  - `--json`: the command's failure envelope, `error` (the sentence), plus a new key, `errors`, carrying the findings in the shape `os validate --json` carries them under `errors` — rule findings (with `package` on a per-package one), or the schema issues.
+  
+  Advisories never fail the stage; the text face counts them and points at `os validate`. On a passing stack the text face prints one step line and `✓ Author-time rules passed (N rules)` before the runtime stage, and the `--json` report of a run that reaches the runtime stage is unchanged.
+  
+  **Who is affected.** Only a stack `os build` already refuses: the first stage runs the same gating rules over the same prepared stack, so every stack it refuses, `os build` refuses too. The remedy is the one `os validate` prints for each finding. Measured with this branch's CLI over the examples at `222ecc27f9` (unchanged on this branch): `os validate` exits 0 on `examples/app-todo`, `examples/app-crm`, `examples/app-showcase` and `examples/app-multi-package`, so none of the four is refused by the new stage.
+- 11905a4: fix(cli)!: `objectstack generate` binds a view, flow, action or app to an object (and an action to a flow) that you name or that the stack declares, never to one derived from the new item's name, and every scaffold passes `objectstack validate`, `objectstack build` and `objectstack lint` with zero findings
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a change to which `objectstack generate` invocations write a scaffold, and to what the scaffolds contain. No authorable key, spelling, export or stored shape moves: every schema the scaffolds are written against parses exactly what it parsed, the files `objectstack generate` wrote earlier are untouched and still load, and no stored row is read or rewritten. What is narrowed is the command's own argument handling, which no ledger entry can rewrite: the object a scaffold should have bound is the author's to say, which is the whole point of the change. The other categories are closed on facts: the package publishes (not `unpublished`); no ADR-0087 id covers a CLI argument, and this diff adds none (not `registered` / `already-registered`); and the change is command behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows which `objectstack generate` invocations write a file. It ships as `minor` under the launch-window convention for narrowings. No export or published type changes.
+  
+  **Why.** `view`, `flow`, `action` and `app` scaffolds took the object they bind from their own name, and an action took its flow the same way. On a fresh `npm create objectstack` project holding `project` and `task`, `objectstack generate flow task_done` wrote a flow triggered by an object called `task_done` that nothing declares (a flow that never fires) and reported success, while `objectstack generate action complete_task` and `objectstack generate app tasks` were refused, because no object was called `complete_task` or `tasks`. Nothing let the author name the object they meant.
+  
+  **New options.**
+  
+  - `--object <object>` names the object a `flow`, `action` or `app` binds, as the stack declares it or without the namespace prefix (`--object task` binds `tasks_app_task` under `namespace: 'tasks_app'`). Without it, the scaffold binds the stack's only object.
+  - `--flow <flow>` names the flow an `action` runs. Without it, the action runs the stack's only flow.
+  
+  **What is now refused, with nothing written.** In each case the command names what the stack declares and the command to run instead.
+  
+  - A `flow`, `action` or `app` with no `--object` in a stack that declares no object, or several.
+  - `--object` or `--flow` naming nothing the stack declares.
+  - An `action` with no `--flow` in a stack that declares no flow, or several.
+  - A `view` whose name is not an object the stack declares. A view is still named after the object it binds: `objectstack generate view task` writes the views of `tasks_app_task`.
+  - Any of these four outside a project, where there is no config and so no stack to check the binding against.
+  - `--object` or `--flow` on a type that takes neither (`object`, `dashboard`, `skill`, `picklist`, and the `types`, `client` and `migration` routes), instead of reading as honoured.
+  
+  **What the scaffolds now write.** Each was measured adding at least one finding to `os validate`, `os build` or `os lint`, and now adds none.
+  
+  - `object`: the record's title field (`name`) and no `description` field. Nothing read the `description` field, so `field-no-consumers` reported it on every generated object as soon as the project held any view, flow, action, app, dashboard or skill.
+  - `view`: no container `name` or `label`. The container is registered under its `object`, so `name` could only restate that key or contradict it, and no reader reaches a container's `label`. Both were `liveness-dead-property` warnings. The list now carries the `label` that `os lint` requires (`required/label` was an error). Its columns are every field the bound object declares, and it is sorted by the object's title field. It used to show a fixed `name` column, which an object without a `name` field refused.
+  - `flow`: `status: 'active'` in place of `'draft'`. A draft flow already fires its trigger (only `obsolete` and `invalid` disable one), so the runtime behaviour is unchanged. `flow-draft-status-ambiguous` warned on every scaffold.
+  - `action`: `locations: ['record_header']`. With no placement, `action-no-placement` warned that the button renders nowhere.
+  - `app`: its navigation entry opens the bound object and is labelled with that object's plural label.
+  
+  **What to write instead.** Name the object a flow, action or app binds, for example `objectstack generate flow task_done --object task`. Name the flow an action runs when the stack has more than one, for example `objectstack generate action complete_task --object task --flow task_done_flow`. Run the command in the project's directory. Generate a view under the name of an object the stack declares.
+  
+  **Unchanged.** `objectstack generate object`, `dashboard`, `skill` and `picklist`, and every name, namespace, parse and import check in front of the bindings. Files generated by earlier releases are not touched.
+- 0557c2f: feat(cli): `os secret rewrap` re-wraps version-1 `sys_secret` ciphertext under the current AAD derivation, each row under its holder's producer scope (ADR-0128 §4.2, #21326 stage 2)
+  
+  Clause-②: yes (widening)
+  
+  A ciphertext sealed before ADR-0128 D1–D3 carries the older binding over
+  `(namespace, key)` alone, and still opens in this release. `os secret rewrap` moves
+  the stored values to the current binding through `rotateKey`, the seam ADR-0128 §4
+  names. It is an operator command: a dry run by default, `--apply` to write, and
+  nothing on any boot or upgrade path invokes it. It has no HTTP surface.
+  
+  - **The scope comes from the holder.** `sys_secret` records no producer, and a
+    version-1 ciphertext binds no scope, so each row is re-sealed under the scope of
+    the producer whose holder references it: `settings` for a `sys_setting.value_enc`
+    handle, `object_secret_field` for a `secret:` ref on a business row,
+    `datasource_credential` for a `sys_secret:` `credentialsRef`. The holders come from
+    the same cross-producer reference union `os secret orphans` reads. A row nothing
+    references, a row whose holders belong to different producers, and every row while
+    a holder family could not be read are left as they are and counted, never re-sealed
+    under a guessed scope. `--apply` refuses an incomplete union and names the family.
+  - **Resumable.** A row already sealed under the current derivation is skipped as
+    done, so a stopped run finishes the rest when re-run and a finished run writes
+    nothing.
+  - **Safe against a live deployment.** Each row is written by one conditional update,
+    keyed on its id and the ciphertext the run read. A row a producer changed in
+    between is not overwritten, and a re-run picks it up. A driver with no
+    `updateMany` is refused before any row is opened.
+  - **Fails closed.** A row that does not open, or whose re-seal does not open to the
+    same plaintext under the same scope, is not written. The run finishes the rest and
+    exits 1. The check happens before the write.
+  - **Output is classes and counts only.** It never prints a plaintext, a ciphertext
+    or a row id.
+  
+  The command resolves its data key from `OS_SECRET_KEY`, `OS_DEV_CRYPTO_KEY` or the
+  persisted key file, in the strict posture: it never mints a key, and it hands the
+  settings service it boots the same provider so that service does not mint one
+  either. With no key it refuses before opening any row.
+  
+  `@objectstack/service-settings` publishes `ciphertextDerivationStatus` (and its
+  `CiphertextDerivationStatus` type). It is `LocalCryptoProvider`'s own reading of
+  which derivation sealed a stored ciphertext, read off its marker without opening it:
+  `current`, `superseded` or `unknown`. The re-wrap classifies rows with it rather than
+  restating the marker grammar.
+- 3b4efa7: `os migrate meta --stored` and `os migrate audit-metadata-bodies` without `--apply` no longer write to the database they preview. Both now boot the stack the way `os migrate plan` does: schema DDL is held back, the app's inline seed loader does not run, and a SQLite file that does not exist is not created.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a CLI command's verdict on one edge, not a declaration: a preview of os migrate meta --stored or os migrate audit-metadata-bodies at a database that lacks the table it reads now exits 1 instead of creating the table and reporting nothing to examine. No authorable key, spelling, export or stored shape moves: every stack parses and loads exactly as before, the --apply runs boot and write exactly as before, and no stored row is read differently or rewritten. What an operator does about the refusal is point --database-url at the deployment's database or boot the deployment once, so there is no rewrite a ledger entry could carry. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a command's verdict, and this diff adds none (not registered / already-registered); and the change is CLI behaviour, not a TypeScript declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** — a preview of either command at a database that lacks the table it reads now exits 1, where it used to exit 0. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **What was wrong.** Both previews booted the full data stack before reading, and that boot ran schema sync and the app's seed loader. The seed loader upserts every seeded row, so a preview bumped `updated_at`, stamped `organization_id` on seeded rows that had none, put an operator's edit to a seeded row back to the seed's value, and re-evaluated relative-date seed values. On a database that was behind the app's schema, the boot also added the missing columns and created the missing tables. The 17.6.0 upgrade checklist runs both previews before their `--apply` runs, so the safety step changed the data.
+  
+  **What changes for an operator.** A preview leaves the schema and every row byte-identical, and its report is the same as before. `--apply` boots and writes exactly as before. One edge changes: a preview pointed at a database that lacks the table it reads (a SQLite file that does not exist, an unbooted database, or the wrong `--database-url`) now fails and exits 1 instead of creating the table and reporting nothing to examine. Point `--database-url` at the deployment's database, or boot the deployment once first.
+- 4b20c84: `os environments list | show | create | bind | switch` run on the `os cloud login` session
+  
+  Clause-②: yes (widening)
+  
+  The documented hosted flow is `os cloud login`, then `os environments create`. The five
+  `os environments` subcommands read only `~/.objectstack/credentials.json` (the `os login`
+  session), so with only `~/.objectstack/cloud.json` they exited 1 with
+  `Authentication required` before sending any request, while `os login --help` sends hosted
+  users to `os cloud login`.
+  
+  All five now choose their session in one shared resolver:
+  
+  - With no `--url` / `OS_CLOUD_URL`, they use the `os login` session when there is one, which
+    is the same behaviour as before. Otherwise they use the `os cloud login` session and the URL
+    it recorded.
+  - With a `--url`, they use the session whose file names that server, `credentials.json` first.
+    When neither file names it, they use `credentials.json`'s session as before. The cloud token
+    is never sent to a URL other than its own.
+  - The active environment sent with each request comes from the chosen session's file.
+    `os environments switch` and `create --activate` no longer write a cloud environment id into
+    `credentials.json` when they ran on the cloud session.
+  
+  With no session at all, the `Authentication required` message now names `os cloud login` as
+  well as `os login`. `os package publish` is unchanged: it still reads only `cloud.json`.
+- b206403: The CLI's one-shot commands no longer write to the database as a side effect of booting. No `os migrate *`, `os meta resync`, `os secret orphans` or `os storage orphans` run loads the app's inline seed data, apply and delete modes included, and every mode that writes nothing now boots read-only.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a CLI command's verdict on one edge, not a declaration: a no-write mode of os migrate value-shapes, os migrate recorded-by, os migrate resume, os secret orphans or os storage orphans pointed at a database that lacks a table it reads now exits 1 instead of creating the table and reporting nothing. No authorable key, spelling, export or stored shape moves: every stack parses and loads exactly as before, the write modes write exactly what they wrote before minus the seed loader's rows, and no stored row is read differently or rewritten. What an operator does about the refusal is point --database-url at the deployment's database or boot the deployment once, so there is no rewrite a ledger entry could carry. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers a command's verdict, and this diff adds none (not registered / already-registered); and the change is CLI behaviour plus one new optional runtime config key, not a TypeScript declaration change to an existing surface (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** — a no-write run of `os migrate value-shapes`, `os migrate recorded-by`, `os migrate resume`, `os secret orphans` or `os storage orphans` at a database that lacks a table it reads now exits 1, where it used to exit 0. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **What was wrong.** Eight commands booted the full data stack in a mode their documentation says writes nothing: `os migrate value-shapes` (scan), `summary-nulls`, `files-to-references` and `recorded-by` (dry run), `os migrate resume` (list), `os secret orphans` and `os storage orphans` (report), and `os meta resync` without `--yes`. That boot ran schema sync and the app's inline seed loader. The seed loader upserts every seeded row, so each run bumped `updated_at`, stamped `organization_id` on seeded rows that had none, and put an operator's edit to a seeded row back to the seed's value. On `examples/app-crm` that was all 28 seeded rows on every run. On a database behind the app's schema, the boot also added columns and created tables. The apply and delete modes ran the same seed loader alongside the write the operator confirmed.
+  
+  **What changes for an operator.**
+  
+  - Every mode that writes nothing boots the way `os migrate plan` does: the schema sync is held back, no seed rows are written, and a SQLite file that does not exist is not created. The database is left byte-identical, and the report is the same as before.
+  - No one-shot CLI boot loads the app's inline seed data. `--apply`, `--delete`, `os migrate resume --run` and `os meta resync --yes` write what they report and nothing else. Seeding stays with `os dev` and `os serve`.
+  - The deferred schema sync now covers every SQL datasource the boot connects, not only the default one. `os migrate plan` lists a second datasource's pending tables, and `os migrate apply` creates them after you confirm.
+  - One edge changes: a no-write run pointed at a database that lacks a table it reads (a SQLite file that does not exist, a database that was never booted, or the wrong `--database-url`) refuses and exits 1 instead of creating the table and reporting nothing. Point `--database-url` at the deployment's database, or boot the deployment once first. `os secret orphans --json` answers that refusal with `"error": "scan_failed"`.
+  - `os migrate value-shapes --json` prints one JSON document when the scan fails its gate. It used to print a second one, `{"error":"EEXIT: 1"}`.
+  
+  **For embedders of `@objectstack/runtime`.** `createStandaloneStack` accepts `armLifecycleSweep` (default `true`). With `false`, the ADR-0057 lifecycle sweep (rotation, retention reaping, archiving and the dangling-reference audit that rides its clock) is never armed on that boot, and an explicit `sweep()` call on it returns an empty report. The CLI passes `false` on every one-shot boot.
+- 6c5697d: fix(runtime,cloud-connection)!: a job's sandboxed `body` is scheduled on every door that brings an artifact in, and install-local refuses an enabled job with no `body` (#21489)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no authorable key, spelling, export or stored shape moves: `JobSchema` is unchanged by this release (its `body` landed earlier), so `objectstack migrate meta` has nothing to rewrite. What changes is which packages one install door accepts, and that job bodies now run. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a refused install or a scheduled body (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: `os package install` (the install-local door, `POST /api/v1/marketplace/install-local`) now refuses a package that declares an **enabled job with no `body`**. Such a job names its code only through `handler` — a `defineStack({ functions })` entry, which travels in the artifact's runtime module and never in the package JSON this door installs — so it used to install with a 200 and never run, hot or after a restart, with nothing saying so.
+  
+  - **Job bodies run.** A job's sandboxed `body` (`JobSchema.body`, the hook body shape) is now scheduled on every door that brings an artifact in: the boot (`os start --artifact`, a `defineStack` config) and install-local, on install and on every rehydrate after a restart. One binder does it for all of them. With both `body` and `handler` declared, the `body` wins. The body runs in the QuickJS sandbox with `ctx.api` (as system: a job has no caller), `ctx.log` and `ctx.crypto` behind its declared `capabilities`. The job's `timeoutMs` is its one time limit; with none, a job body gets a 5000 ms CPU budget. A body may return `{ outcome: 'degraded', reason }` to report a run that did not do its work.
+  - **A package's jobs stop with it.** Re-scheduling a package's jobs replaces its set: a reinstall whose new version drops, disables or can no longer run a job cancels that job, and a version with no jobs cancels them all. Uninstalling a package cancels its scheduled jobs through a new uninstall cleanup, `runtime.package-jobs`, on the protocol's uninstall-cleanup registry, so install-local's `DELETE` and the protocol's package uninstall both stop them and report it in `cleanups`. Another package's jobs are never touched.
+  - **The refusal.** The install answers `422` with `VALIDATION_ERROR`, names each refused job and the function its `handler` declares, and installs nothing: nothing is registered, persisted or scheduled. A disabled job (`enabled: false`) is not judged. A package installed by an earlier version keeps rehydrating; its handler-only job is reported at `warn` and does not run.
+  - **CLI.** `os package install` prints a refusal's code beside its status (`Install failed (422 VALIDATION_ERROR): …`), for every refusal alike.
+  - **Spec.** The shipped liveness ledger records `job.body` (`language`, `source`, `capabilities`, `memoryMb`) as live, so `os validate` / `os build` no longer warn that a job's `body` is planned and not read yet. `body.timeoutMs` stays refused on a job. `JobSchema.body`'s description and the `defineJob` example no longer say to keep a `handler` until the runtime runs job bodies.
+  - **Unchanged:** a `handler` job on a boot that loads the artifact's runtime module (`os start --artifact`, a `defineStack` config) still runs its `functions` entry; a package without jobs installs exactly as before.
+  
+  The route for a refused package: give each enabled job a `body` (sandboxed JS that reaches data through `ctx.api`), or boot the artifact with `os start --artifact`, which loads its runtime module. It ships as `minor` under the launch-window convention for accept-set narrowings.
+- 9a4182a: fix(spec,runtime,cli)!: the in-memory (mingo) engine is no longer a boot store — every boot door refuses it and names SQLite instead (#21492, #21572)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata body, authorable key or stored shape moves: the driver table keeps `memory`, `mingo`, `in-memory` and `inmemory` on its config-contract face, so `resolveDriverId` answers them exactly as before and a stored `datasource.driver: memory` still parses against `MemoryConfigSchema`; what narrows is the boot selection (`--database-driver`, `OS_DATABASE_DRIVER`, `databaseDriver`, a `memory://` or `mingo://` database URL, and a project's default datasource declared on the engine), which is host configuration that `objectstack migrate meta` does not rewrite — and no rewrite would be truthful, since the only replacement is a different engine the operator has to choose. The other categories are closed on facts: all three packages publish (not `unpublished`); no ADR-0087 id covers a boot selection (not `registered` / `already-registered`); and the change is runtime behaviour plus exported constant values, not an interface or a type alone (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: the in-memory (mingo) engine can no longer be selected as the store a server, a migration or an embedded stack boots on. It refuses every tenant-scoped read by design, so a boot on it signed a user in and then answered `503` to every data request; there was nothing working to keep. The retirement is made at the declaration: `@objectstack/spec`'s driver table withdrew `memory`, `mingo` and `in-memory` from its selection face (they stay on the config-contract face beside `inmemory`), and every boot door refuses the engine with one sentence that names the replacement.
+  
+  - **`@objectstack/spec`** — `DATABASE_DRIVER_SELECTION_ALIASES` no longer lists `memory`, `mingo` or `in-memory`; `DATABASE_DRIVER_SELECTION_IDS` no longer lists `memory`; `resolveDatabaseDriverId` answers `undefined` for all four spellings. `resolveDriverId`, `DRIVER_ID_ALIASES`, `BUILTIN_DRIVER_IDS` and the `memory` config contract are unchanged.
+  - **`@objectstack/cli`** — `--database-driver memory` is refused while the flags parse (`os dev`, `os start`); `OS_DATABASE_DRIVER=memory` / `mingo` / `in-memory` is refused before `os dev` or `os start` prints its Database row; `os serve`'s legacy path refuses the spellings and the `memory://` / `mingo://` schemes as a fatal boot error. The help no longer offers `memory://`.
+  - **`@objectstack/runtime`** — `createStandaloneStack`, `createDefaultHostConfig` and `resolveStandaloneDatabase` (every ordinary `os dev` / `os start` / `os serve` boot and every `os migrate` subcommand) refuse the spellings, the `memory://` and `mingo://` schemes, and a project whose default datasource is declared with `driver: 'memory'`. `resolveProjectDatabaseUrl` refuses a retired driver selection ahead of every rung, and its `ProjectDatabaseUrlSource` type no longer has the `'memory-driver'` member. `ResolvedStandaloneDatabase.driver` never names `memory`. Two exports are added for hosts that refuse the engine themselves: `namesRetiredMemoryEngine` and `retiredMemoryEngineMessage`.
+  - **Unchanged:** the `@objectstack/driver-memory` package; a declared non-default datasource with `driver: 'memory'` and a directly constructed `InMemoryDriver`, both still built; SQLite's dev step-down, whose last rung is still this driver.
+  
+  Migration — one flag change:
+  
+  - FROM `os dev --database-driver memory` (or `OS_DATABASE_DRIVER=memory`) TO `os dev --fresh` for a throwaway database deleted on exit.
+  - FROM `OS_DATABASE_URL=memory://…` / `--database memory://…` / `databaseUrl: 'memory://…'` TO `:memory:` (SQLite's own in-memory database), e.g. `OS_DATABASE_URL=:memory:`.
+  - FROM a default datasource declared `{ driver: 'memory' }` TO a SQLite one, e.g. `{ driver: 'sqlite', config: { filename: ':memory:' } }`.
+  
+  No shipped example selects the engine. It ships as `minor` under the launch-window convention for accept-set narrowings.
+- 759dbe9: feat(cli): `os migrate unmapped-columns --object NAME` reads the values of a retired field's columns, keyed by record id, for a conversion before `os migrate apply --allow-destructive` drops them (#21573)
+  
+  Clause-②: yes (widening)
+  
+  - **What it reads.** The columns `os migrate plan` reports as `unmapped_column` for one object's table: a column that is still in the table and that no metadata declares, typically one a retired field left behind. The column set is the plan's own findings, from the same differ on the same read-only boot, so the command never reads a column the plan does not report. Each record is emitted as `{ id, values }`. `--json` prints one document, `{ database, object, table, columns, count, records, duration }`. The text face lists the columns and each record's values.
+  - **Why it exists.** A read or a write through the engine now serves an object's declared fields only, and naming an undeclared column is refused. An app that moves a retired field's values into the field that replaced it reads them once with this command, writes them with its own script, and then drops the columns with `os migrate apply --allow-destructive`. That is the route the read and write narrowing in `@objectstack/objectql` names for this case.
+  - **Operator-only and read-only.** It runs under the database credentials you pass (`--database-url`, else `OS_DATABASE_URL`, else the project database), and it reads every organization's rows. No REST route, API flag or per-request option serves these values, and the runtime doors are unchanged. It boots the way `os migrate plan` does: no schema DDL, no seed data, and no database file created.
+  - **Values as stored.** An unmapped column has no declared type, so each value is emitted as the database client returns it, with no field-type decoding; a PostgreSQL `timestamp` arrives as a date and is emitted as its ISO 8601 text. A value JSON cannot carry as stored (binary bytes, a `bigint`, or a non-finite number) is refused in both faces with exit 1, naming the column and the record id, and no record is emitted: read that column with the database's own client. No column the platform creates for a field type answers with one of these, on SQLite or on PostgreSQL.
+  - **Answers.** An object with no unmapped column, or with no table yet: empty work, exit 0. No SQL driver: `os migrate plan`'s own `no_sql_driver` answer, exit 0. An undeclared object name: `OBJECT_NOT_FOUND`, exit 1. An object the plan does not diff (federated, or bound to another datasource): refused, exit 1. A read that cannot be complete, such as one stopped by `--max-records`: refused, exit 1, and no partial set is emitted. A value JSON cannot carry as stored: refused, exit 1, as above.
+  - `MigrateUnmappedColumnsCommand` is exported from `@objectstack/cli` beside the other `os migrate` commands.
+  
+  Nothing that ran before changes. This is a new command.
+
+### Patch Changes
+
+- aead296: `os lint` and `os i18n extract` ask for a flow's `flows.<flow>.label` translation only when the flow has a screen node at any depth, the only kind of flow the console's screen-flow runner opens and names, so a scheduled, record-triggered or API flow with no screen no longer draws an `i18n/missing-flow` demand for a label no surface shows.
+  
+  Clause-②: no
+- dabd1c5: The published `package.json` no longer declares `oclif.plugins`, and the package no longer lists `@oclif/plugin-help` or `@oclif/plugin-plugins` as devDependencies. The array named both plugins, but they were only devDependencies, and oclif loads an `oclif.plugins` entry only when the same name is in `dependencies`. Neither plugin ever loaded.
+  
+  Clause-②: no
+  
+  **What changes for an operator.** Nothing. `os --help`, every command and topic, and the output of `os help` and `os plugins` read byte-identical before and after the change. `os help` and `os plugins …` were never commands, and each still exits 2 with `command … not found`. Use `os --help` or `os <command> --help` for help.
+  
+  **What the README now says.** It said `os plugins install`, `uninstall` and `update` came from `@oclif/plugin-plugins` and installed CLI extensions. That was never true. This CLI ships no plugin manager. To add commands to it, build an `os` distribution: a package whose own `package.json` lists the extension in both `oclif.plugins` and `dependencies`.
+- 37a0148: The published README now describes the `os` that ships. Five things it said were false.
+  
+  Clause-②: no
+  
+  - **Short flags.** The README listed `-v, --version` and `-h, --help` as global options. `os -v` and `os -h` exit 2 with `command -v not found` / `command -h not found`, because only `--version` and `--help` are registered. It now lists `--version` and `--help` alone and says there is no short form. `-v` already belongs to commands of their own: it is `--verbose` on `os dev`, `os serve`, `os start` and `os doctor`, and `--version` on `os package publish` and `os package install`.
+  - **The `os plugin` group.** The README said there is no `os plugin` command group. `os plugin build`, `os plugin sign` and `os plugin publish` are registered, and the README now lists them. It also says the group has no `install`, and that `os plugin` is a different thing from `os plugins`, which is not a command.
+  - **Two command rows.** `os init [name]` creates a new directory of that name when a name is given, so it no longer says "in the current directory" for every case. `os dev` restarts the server after each rebuild, so it no longer says "with hot reload".
+  - **Cloud credentials and flags.** The README said every cloud command takes its credentials from `os cloud login` or from `--token` / `OS_CLOUD_API_KEY` and `--server` / `OS_CLOUD_URL`. That holds only for `os package publish` and `os plugin publish`. `os environments list`, `show`, `create`, `bind` and `switch` take `-u, --url` (env `OS_CLOUD_URL`) and `-t, --token` (env `OS_TOKEN`), and otherwise use the `os login` session in `~/.objectstack/credentials.json` — never the `os cloud login` session. With only `os cloud login` done they exit 1 with `Authentication required`. The README now has a per-command table, and its typical publish flow says so at the `os environments create` step.
+  - **`os serve --ui`.** The README said it enables "Studio UI". It enables the bundled Console portal at `/_console/` when `@object-ui/console` is installed, which is what `os serve --help` says.
+  
+  **What changes for an operator.** Nothing at runtime. No command, flag, environment variable, exit code or help page changes.
+- 5155093: fix(cli): `os verify --json` writes exactly one JSON document to stdout; the booted stack's log lines move to stderr (#21324)
+  
+  Clause-②: no
+  
+  `os verify --json > report.json` used to exit 0 and leave a file no JSON parser accepts. On a two-object stack that reaches the runtime stage, 318 lines landed on stdout ahead of the report: the kernel logger's `INFO` and `WARN` records, the ObjectQL registry's `[Registry] …` lines and the HTTP server's stop line. `JSON.parse` failed at position 4.
+  
+  Under `--json`, stdout now carries the report and nothing else, and every other line the run writes goes to stderr. Nothing is dropped: the boot records, the warnings among them and the shutdown lines all still reach the operator, on stderr. The document is unchanged, and so is the shape of each of the three `--json` documents (the runtime report, the author-time refusal, and the could-not-run envelope).
+  
+  `os verify` without `--json` is unchanged: the log lines stay on stdout beside the text report.
+  
+  A script that read those log lines from `os verify --json`'s stdout now reads them from stderr.
+- fa7b565: fix: a fresh project no longer warns about its own starter fields after the first `objectstack generate`
+  
+  Clause-②: no
+  
+  The blank starter's `note` object (`npm create objectstack`) and the item object of the `app` template (`objectstack init -t app`) now declare one field group, `fieldGroups: [{ key: 'details', label: 'Details' }]`, and place every field in it with `group: 'details'`. Before this, the first view, flow, dashboard or other metadata that can read a field made `objectstack validate` and `objectstack lint` report `field-no-consumers` on a field the author never wrote: the note's `body`, or the item's `description` and `status`. That held whether the author generated it or wrote it by hand. Both commands still exited 0. A field placed in a declared group is drawn by the object's form and detail page, and the rule counts that as displayed, so a fresh project now reports nothing. The `plugin` and `empty` templates are unchanged: the plugin's one field is the record's title, which the rule never reports, and the empty template declares no object.
+  
+  **What changes for an author.** In a new project, the object's form and detail page show the starter fields in one section labelled Details instead of a flat list. A field you add joins a section the same way, by naming its `key` in `group`. A project scaffolded by an earlier release keeps its files. To clear the warning there, add the same `fieldGroups` entry to the object and `group: 'details'` to each field the warning names, or give each field another consumer, such as a view column.
+- 2ee8383: fix(cli): `os migrate recorded-by`, `resume` and `account-issuer` print exactly one `--json` document, and a completed run exits 0 (#21434)
+  
+  Clause-②: no
+  
+  `os migrate recorded-by --apply --yes --json` converted the rows, printed its result, then printed a second document, `{"error":"EEXIT: 0","duration":…}`, and exited 1. A script that read the exit status took the completed run for a failure, and a parser that read stdout failed on the second document. The cause was the command's own `catch`: the `this.exit(…)` inside its `try` throws oclif's exit signal, and the `catch` reported the signal as an error.
+  
+  The same `catch` sat in three more commands:
+  
+  - **`os migrate resume --run <id> --json`.** A run that was already concluded printed a second `{"error":"EEXIT: 0"}` and exited 1 instead of 0. A resumed run did the same. Every refusal inside the command (unknown run id, plan not loaded, confirmation required) printed a second `{"error":"EEXIT: 1"}` under its own document.
+  - **`os migrate account-issuer --json`.** A refused pre-flight printed a second `{"error":"EEXIT: 1"}` under its report. Without `--json`, it printed an extra `EEXIT: 1` error line.
+  - **`os migrate apply`** (text output). A `sys_account.issuer` pre-flight refusal printed an extra `EEXIT: 1` error line.
+  
+  Each command now prints one document and exits with the status it computes. A completed `recorded-by --apply` and an already-concluded or resumed `resume --run` exit 0. Refusals and failed runs still exit 1. A script that worked around the second document or the exit status 1 can drop that workaround.
+- 25797a1: `os secret orphans`, `os storage orphans` and `os migrate files-to-references` no longer create a data key file in the key home. A one-shot command never mints key material (#21471)
+  
+  Clause-②: no
+  
+  Each of these commands composes the settings service. Given no crypto provider, the service builds its own default one. In a development posture with no `OS_SECRET_KEY`, no `OS_DEV_CRYPTO_KEY` and no key file, that default writes a new key file into the key home. So a report that promises to write nothing left key material behind, and the next development-posture process on that host adopted the minted key. A minted key opens nothing that is stored, so the run gained nothing from it.
+  
+  - **What these commands hand the settings service now.** They pass the provider `os secret rewrap` already passed: the one over a data key that already exists, resolved the way every host resolves it, in the strict posture and with the auto-key opt-in withheld, so it never mints. With no key, the service gets a provider that refuses every call and says why. A stored setting that cannot be opened reads as it did with a freshly minted key: empty, with a warning.
+  - **One composition.** The settings service is composed in one place in `@objectstack/cli` (`utils/one-shot-settings.ts`), shared by `secret orphans`, `secret rewrap` and the storage arm of the data-migration plugins. `os serve` still takes the service's default: persisting a key in a development posture so restarts reuse it is that host's documented behaviour.
+  - **Visible difference.** On a host whose key lives only in the key file, these commands now print the strict posture's one-line note on stderr ("using the persisted key at …"), as `os secret rewrap` already did. stdout and `--json` output are unchanged.
+- 5895119: fix(cli): `os package install`, `os package publish` and `os plugin sign` print one error line per refusal (#21496)
+  
+  Clause-②: no
+  
+  `os package install ./does-not-exist.json` printed `✗ Cannot read artifact: ENOENT …` and then a second line, `✗ EEXIT: 1`. The exit status, 1, was right. The extra line came from the command's own `catch`: the `this.exit(1)` inside its `try` throws oclif's exit signal, and the `catch` reported the signal as an error.
+  
+  The same `catch` sat in two more commands:
+  
+  - **`os package publish`.** Every refusal it makes printed the extra `✗ EEXIT: 1` line. Examples are an unreadable artifact, an invalid manifest id, no cloud login, a failed package registration and a failed version publish. An `--icon-file` whose image type it cannot infer printed three error lines: the refusal, then `✗ Cannot read --icon-file '…': EEXIT: 1`, then `✗ EEXIT: 1`.
+  - **`os plugin sign`.** A signature that failed its self-verification printed `✗ Self-verification error: EEXIT: 1` under the refusal.
+  
+  Each refusal is now one error line, and every exit status is unchanged. A script that filtered out the `EEXIT` line can drop that filter.
+- 550f4cc: `os migrate resume --run <id> --yes` can resume an interrupted `os migrate recorded-by` run, and `os serve` reports interrupted migration runs at boot (#21498)
+  
+  Clause-②: no
+  
+  `MigrationRecoveryPlugin` owns two things: the `migration-plans` registry, where a journal-backed migration's code is looked up, and the boot scan that reports runs which started and never finished. No CLI boot composed it. So `os migrate resume` found no plan for any run. It refused with "no loaded package registers" the plan, even though the plan's package was loaded in that process. And no `os serve`, `os start` or `os dev` boot ever scanned the migration journal.
+  
+  - **The `os migrate` data commands** (`recorded-by`, `resume`, `value-shapes`, `summary-nulls`, `files-to-references`, `meta --stored`, `audit-metadata-bodies`, `os storage orphans`) now boot with the plugin. A run interrupted before any of its chunks committed now resumes to completion. A command booted over an interrupted run also warns about that run on stderr first.
+  - **Every `os serve` boot** (and so `os start` and `os dev`, which spawn it) composes the plugin beside `PlatformObjectsPlugin`, which registers the journal the scan reads. An interrupted run is reported once at boot, with the `os migrate resume --run <id>` command that resumes it. Nothing is resumed automatically. A database with no interrupted run prints nothing. A config that composes its own `new MigrationRecoveryPlugin()` keeps that instance.
+  - **A run that had committed a chunk, or that was started with a non-default `--chunk-size`,** reaches the runner too. The runner fix that lets it resume is in the `@objectstack/core` entry for #21528.
+- e909aa0: `os dev -a PATH` and `os start --artifact PATH` now serve the artifact they name, also from a directory that holds an `objectstack.config.ts` (#21501).
+  
+  Clause-②: no
+  
+  - **One precedence, written once.** The order is `--artifact` > `OS_ARTIFACT_URL` > `OS_ARTIFACT_PATH` > `<cwd>/dist/objectstack.json` > `<home>/dist/objectstack.json` (`os start` only) > a cwd `objectstack.config.ts`, except that a cwd config joins the boot when the resolved artifact is its own compiled output. It is the order the `os start` reference already published. `os start` and `os dev` both resolve through one module, and the `serve` child they spawn boots exactly their answer.
+  - **Beside a config.** The child used to read the supervisor's answer only when the working directory held no config. So `os dev -a X` and `os start --artifact X` printed `Artifact: X` and served the config's `dist/objectstack.json`, or the config itself. A named artifact now boots alone, exactly as it boots from a directory with no config. The config takes part only when the artifact is its own compiled output: `<config dir>/dist/objectstack.json`, or the path the command compiled it to. A bare `os dev`, a bare `os start` in a project, and `os start --artifact ./dist/objectstack.json` take that path, and are unchanged. A host config (its `plugins` hold code) boots its own module there, because its compiled output cannot carry that code.
+  - **`OS_ARTIFACT_PATH` beside a config** follows the same rule: `OS_ARTIFACT_PATH=Y os start` serves `Y` without loading the config. Under `os start --artifact ./dist/objectstack.json` the flag now also wins over an exported `OS_ARTIFACT_PATH` inside the config boot.
+  - **`os dev` under a local `OS_ARTIFACT_PATH`** compiles the cwd config into that path, so the file there is the config's own compiled output. The config takes part in the boot that serves it, and a host config compiled there keeps its plugins.
+  - **`os dev` gains the `OS_ARTIFACT_URL` rung.** `--artifact` outranks it. Before, the reference stayed in the child's environment and won. Without the flag the reference drives the boot, as under `os start`. The `Artifact:` row names it (redacted), and nothing is compiled into, watched for or judged stale against it.
+  - **Banner rows.** `os start` and `os dev` print `Config:` only when the config takes part in the boot. The child says it is not loading a config that sits beside a named artifact, instead of `No objectstack.config.ts found`.
+  - **The ready banner names what loaded.** On a config boot, a non-host config whose app was served from its compiled artifact gets `Artifact: dist/objectstack.json` in the ready banner, and a host config keeps `Config: objectstack.config.ts`. No ready-banner row names a file the boot did not load.
+  
+  Upgrading: a project that ran `os dev -a`, `os start --artifact` or `OS_ARTIFACT_PATH` beside its config, and relied on that config being loaded, should drop the override or point it at `./dist/objectstack.json`.
+- 24dc7c1: fix(cli): `os init` prints its dependency-install and scaffold-validation refusals once (#21523)
+  
+  Clause-②: no
+  
+  `os init demo -p npm` with an unreachable package registry printed `✗ Project scaffolded, but dependency installation failed.`, then a second `✗ Dependency installation failed`, then oclif's `Error: Dependency installation failed`, and exited 2. The second `✗` line came from the command's outer `catch`: the `this.error(…)` inside its `try` throws oclif's exit signal, and the `catch` reported it again. A scaffold that failed its own validation got a second `✗ Scaffold validation failed` line under its refusal the same way.
+  
+  The `catch` now lets the signal through. Each refusal prints its `✗` line once, followed by oclif's `Error:` line as before, and the exit status is still 2.
+- aa0d4b9: `os migrate resume`, `os migrate recorded-by` and `os migrate value-shapes` answer a project whose database does not exist yet with empty work and exit 0, instead of exiting 1 with "The database refused to run this query" (#21529)
+  
+  Clause-②: no
+  
+  Each of these commands boots read-only by default: the schema sync is held back, and a missing SQLite file is opened as an empty in-memory stand-in. That boot already measures which tables the database lacks, because the held-back sync lists each one as a table to create. Each command then read the very tables it had just found missing. On a never-booted database (or a `--database-url` that points at one), every default run failed:
+  
+  - `os migrate resume` exited 1, naming `sys_migration_journal`;
+  - `os migrate recorded-by` exited 1, naming `sys_metadata_history`;
+  - `os migrate value-shapes` reported every scanned object as unreadable, kept the gate closed and exited 1, over data that does not exist.
+  
+  Each command now reads only the tables its boot found present. A table that does not exist holds nothing, so:
+  
+  - `os migrate resume` lists no interrupted runs (`{"interrupted": [], "count": 0}`), exit 0;
+  - `os migrate recorded-by` reports `pending: 0`, nothing to convert, exit 0;
+  - `os migrate value-shapes` completes a clean scan of zero records, exit 0, and names the objects it did not read because they have no table yet (on stderr under `--json`).
+  
+  Human mode says the table is not there yet, instead of implying the command looked through one. `--json` documents have the same shape as on a booted database with nothing to do. The write modes (`--run`, `--apply`) are unchanged: they boot with the schema sync, so their tables exist before they read.
+  
+  `MigrationRecoveryPlugin` (`@objectstack/runtime`), which every one of these boots composes, scans the migration journal at boot. On such a database it logged "Migration journal scan failed; interrupted migrations (if any) were NOT detected" on every run. It now treats a missing journal table as "no runs" and says nothing. It recognises that case only with the shared `isMissingTableError` predicate, asked about `sys_migration_journal` itself. Any other failure of the scan still warns.
+  
+  There is nothing to migrate.
+- bf36edd: fix(cli): `os init` and `os compile` render each refusal once, not once on stdout and again as oclif's `Error:` block on stderr (#21542)
+  
+  Clause-②: no
+  
+  `os init demo -t bogus` printed `✗ Unknown template: bogus` on stdout, then the same sentence as oclif's `Error:` block on stderr, and exited 2. Ten refusals did it: the five `os init` makes before it writes anything (an unknown template, a project name that is not valid, a target directory that is not empty, a current directory whose name is not a valid project name, an `objectstack.config.ts` that already exists), its scaffold self-test and dependency install, its catch-all, and `os compile`'s runtime-bundle refusal and catch-all (`os build` inherits both). Each printed its own `✗` line and then handed the sentence to `this.error`, which has oclif's entry point render it again.
+  
+  Each now prints its `✗` line and the hint under it once, and ends in `this.exit(2)`: the status `this.error` raised, with nothing rendered by the entry point. Stdout carries the same lines as before; stderr no longer repeats them. Exit statuses are unchanged: 2 for all ten.
+  
+  A script that read the sentence from stderr, from the `Error:` block, now finds it on stdout, on the `✗` line, which is where the full wording and the hint always were.
+- 1777a9b: `os migrate account-issuer`, `os migrate audit-metadata-bodies`, `os migrate meta --stored`, `os secret orphans`, `os secret rewrap` and `os storage orphans` answer a project whose database does not exist yet with empty work and exit 0, instead of exiting 1 on a refused read (#21552)
+  
+  Clause-②: no
+  
+  Each of these commands boots read-only by default: the schema sync is held back, and a missing SQLite file is opened as an empty in-memory stand-in. That boot already measures which tables the database lacks, because the held-back sync lists each one as a table to create. Each command then read the very tables it had just found missing, and the database refused the read. On a never-booted database (or a `--database-url` that points at one) every default run exited 1:
+  
+  - `os migrate account-issuer` refused, naming `sys_account`;
+  - `os migrate audit-metadata-bodies` counted `failures: 3` for `sys_audit_log`, `sys_activity` and `sys_metadata_audit`;
+  - `os migrate meta --stored` refused, naming `sys_metadata`;
+  - `os secret orphans` and `os secret rewrap` answered `"error": "scan_failed"`, naming `sys_secret`;
+  - `os storage orphans` refused, naming `sys_file`.
+  
+  Each command now reads only the tables its boot found present. A table that does not exist holds nothing, so:
+  
+  - `os migrate account-issuer` reports no account and no collision (`ok: true`), exit 0;
+  - `os migrate audit-metadata-bodies` reports nothing to rewrite, with `failures: 0`, exit 0;
+  - `os migrate meta --stored` reports no stored metadata to examine (`scanned: 0`, `clean: true`), exit 0;
+  - `os secret orphans` and `os secret rewrap` report no secret to act on, with every holder family enumerated rather than a gap, exit 0;
+  - `os storage orphans` reports no stranded file, exit 0.
+  
+  Each names the tables it did not read: on stdout in human mode, on stderr under `--json`, where stdout stays one document. `os migrate account-issuer` is the one that recognises the refusal instead of asking the boot: its boot composes no auth plugin, so `sys_account` is never listed as a table to create. It recognises only the missing-table refusal for `sys_account`, with the shared `isMissingTableError` predicate.
+  
+  A table that exists but lacks a column, and any other read that is refused, is still read and still refuses with exit 1. The write modes (`--apply`, `--delete`) are unchanged: they boot with the schema sync, so their tables exist before they read.
+  
+  There is nothing to migrate.
+- 417443e: `os migrate value-shapes` and `os migrate files-to-references` record the deployment-level ADR-0104 flag only from a run over every object, and every command in the `os migrate` data-migration family refuses an `--object` name the deployment does not declare (#21644).
+  
+  Clause-②: no
+  
+  - **A narrowed `--apply` records no deployment flag.** The flag attests the stored data of every object and turns strict enforcement on, but a run narrowed by `--object` reads only the named objects. Such a run still applies its fixes: `files-to-references` converts the named objects' values. It records no flag, whether it passes or fails, and leaves a flag that an earlier full-scope run recorded exactly as it was. Its output says why and names the run that records the flag: the same command without `--object`. The `--json` document carries `filter: { objects }`, which is `null` on a full-scope run, so a narrowed run is never mistaken for a full one. Any `--object` narrows, even a list that names every object. A full-scope `--apply` records the flag as before.
+  - **`runFilesToReferencesMigration`** (`@objectstack/service-storage`) skips the flag write when it is given `objects`. That includes `[]`, which walks nothing. Its `flag` result is `null` on a narrowed run.
+  - **The column step of `files-to-references` does not run on a narrowed run.** It retypes every single-value media column in the database on the authority of the gate, and a narrowed gate vouches only for the named objects. Before this change, a narrowed `--apply` or a misspelled one moved those columns and stamped `columns_moved_at`.
+  - **An unknown `--object` is an error.** This applies to `value-shapes`, `files-to-references`, `summary-nulls` and `duplicates`. A name the booted registry does not declare exits 1 with `OBJECT_NOT_FOUND`, and the error names that name and the declared objects. The check runs before anything is read or written. Until now, such a name was filtered out of the scan without a word, so a typo scanned nothing and read as a clean run. `duplicates` reports the refusal as `{ error: 'report_failed', detail, code }`. A declared object that the command has nothing to check on is still accepted.
+- 1c3a4d9: A TOTP enrollment names the deployment, not the auth library. `/two-factor/enable` and `/two-factor/get-totp-uri` answered an otpauth URI whose issuer and label prefix were `Better Auth`, so every authenticator app listed the account under that name. They now carry the deployment's app name: `OS_APP_NAME`, else the configured `appName`, else `ObjectStack`. An explicitly set `branding.workspace_name` setting still outranks it.
+  
+  Clause-②: no
+  
+  - **Existing enrollments keep working.** The issuer is a display label. The stored enrollment holds only the encrypted secret, the backup codes and the confirmation flag, and the codes depend only on the secret, digits and period. An authenticator app enrolled under `Better Auth` keeps producing codes that verify. It keeps its old label until the user re-enrolls.
+  - **`@objectstack/plugin-auth`.** `AuthManager` passes its app name to better-auth as `appName`. In better-auth 1.7.3 that key names only these two otpauth URIs. No cookie name or stored value derives from it.
+  - **`@objectstack/cli`.** `objectstack serve` now passes the deployment app name to `AuthPlugin`. It is resolved by the same chain the email service's template context uses: `OS_APP_NAME` > `config.email.appName` > `config.email.defaultTemplateContext.appName` > `config.appName` > `ObjectStack`. Before, `serve` built `AuthPlugin` with no app name, so auth answered `ObjectStack` whatever `OS_APP_NAME` said. Auth emails were affected too: under `serve` they now name the deployment the way every other email already did.
+  - The issuer is read when the auth instance is built. A `branding.workspace_name` change made after that reaches new enrollments at the next restart or auth-settings change, while auth emails pick it up on their next send.
+- 6afb1b5: `os migrate plan` and `os migrate apply` boot a config whose connector plugins depend on a service that only `requires` supplies (#21732). Before this fix, both commands exited 1 on a fresh `create-objectstack -t blank` app and on `examples/app-showcase` with `[Kernel] Dependency 'com.objectstack.service-automation' not found for plugin 'com.objectstack.connector.rest'`.
+  
+  Clause-②: no
+  
+  - **Why it failed.** The connectors (`@objectstack/connector-rest`, `-openapi`, `-mcp`, `-slack`) declare a hard dependency on the automation service. The blank template and the showcase ask for automation only through `requires: ['automation', …]`. `os serve` turns that token into the provider, but the schema-migration composition read `config.plugins` and never read `requires`.
+  - **What it composes now.** It uses the same token lookup `os serve` uses (`Serve.CAPABILITY_PROVIDERS`, with exact identity matching, and an explicit instance in `plugins` still wins). It composes a provider only when a plugin it already composed hard-depends on that provider and the config's `requires` (or the always-on slate) supplies it.
+  - **Automation is taken inert** (`armRuntime: false`). The engine and node registry come up. No flow is registered, no trigger or job is bound, no connector is materialized and no suspended run is resumed. Its `init()` declares `sys_automation_run`, `sys_flow_dispatch` and `sys_flow_credential`, so the plan now covers the tables `os serve` creates for this capability.
+  - **A provider with no measured declaration posture is refused by name.** The refusal names the plugin, its dependency and the token, instead of booting that provider's `start()` inside a dry run. A dependency that no token supplies is still refused by the kernel, as `os serve` refuses it.
+  - A config that lists no plugin with such a dependency composes exactly what it did before.
+- 025008a: fix(runtime,cli): a plain `os dev` now self-heals safe schema drift on restart and provisions the `telemetry` sibling database, as `content/docs/deployment/cli.mdx` already says (#21733)
+  
+  Clause-②: yes (widening)
+  
+  - **What was broken.** A config with no instantiated `plugins[]` (every fresh scaffold) boots through the standalone stack. Its `default` datasource was built without `autoMigrate: 'safe'`: only the config-load fallback that a host config or `OS_MODE=off` takes carried it. So safe drift was never applied on restart. An example is a per-organization unique index that an older release left non-NULL-safe. Meanwhile the driver's drift line and `os migrate plan` both said the change was "auto-applied at boot under dev autoMigrate: 'safe'". The same boot never provisioned the `<db>.telemetry.<ext>` sibling either.
+  - **The fix.** The dev self-heal decision now lives in one place, `devAutoMigrateConfig` in `@objectstack/runtime`. That is the driver kinds whose connection contract declares `autoMigrate` (sqlite, postgres, mysql), on a dev boot. The standalone stack, the CLI's config-load fallback and the telemetry sibling all read it, so no kind gains or loses the self-heal relative to the host path. The telemetry provision is one helper (`provisionTelemetryDatasource`) that both serving paths call, under the same `resolveTelemetryDbPath` rule: dev default-on for a file-backed SQLite primary, `OS_TELEMETRY_DB=0` to opt out, `OS_TELEMETRY_DB=<path>` to opt in anywhere.
+  - **Only a serving boot self-heals.** The standalone stack arms the self-heal on an explicit `dev: true`. That is what `os dev` passes. It does not arm it on the `NODE_ENV=development` default that its sqlite step-down still takes. A one-shot command (`os migrate *`, `os meta resync`, …) passes no `dev`, so it never applies drift its operator did not confirm, whatever `NODE_ENV` says. Production boots are unchanged: the definition carries no `autoMigrate`, and the SQL driver refuses it under `NODE_ENV=production` anyway.
+  - **Why minor.** `@objectstack/runtime` gains two exports on its only entry, `devAutoMigrateConfig` and its `DevAutoMigrateConfig` type. That is the widening: the existing decision moved out of the CLI so that the CLI reads it rather than keep a second copy. No config key, schema or accept set moves. `@objectstack/cli` is a `patch`: its fix restores documented behaviour and adds no public surface.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [bdd3654]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [db0cf22]
+- Updated dependencies [f97660c]
+- Updated dependencies [13a24ec]
+- Updated dependencies [fd5a1cd]
+- Updated dependencies [0a0debb]
+- Updated dependencies [c98a72d]
+- Updated dependencies [8598614]
+- Updated dependencies [48fa7a3]
+- Updated dependencies [7e7e64b]
+- Updated dependencies [15b29d3]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [6091136]
+- Updated dependencies [f9bcd08]
+- Updated dependencies [cc07862]
+- Updated dependencies [e3ad492]
+- Updated dependencies [4916168]
+- Updated dependencies [f9f9f91]
+- Updated dependencies [44072fc]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [0fc8087]
+- Updated dependencies [99589f9]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [bcd68a2]
+- Updated dependencies [39a912e]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [713b0fa]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [30af17e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1878ef9]
+- Updated dependencies [7aab759]
+- Updated dependencies [7aab759]
+- Updated dependencies [0e10be6]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [97239c3]
+- Updated dependencies [c2cd651]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [69a12a0]
+- Updated dependencies [222ecc2]
+- Updated dependencies [1371dc9]
+- Updated dependencies [1caa603]
+- Updated dependencies [04f0cc4]
+- Updated dependencies [1fd5664]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [ceb4a93]
+- Updated dependencies [16eefc6]
+- Updated dependencies [fbe2deb]
+- Updated dependencies [ee75aae]
+- Updated dependencies [6e33b67]
+- Updated dependencies [1d0600b]
+- Updated dependencies [ab52182]
+- Updated dependencies [57cc695]
+- Updated dependencies [0557c2f]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [49524f6]
+- Updated dependencies [9f13c94]
+- Updated dependencies [9f13c94]
+- Updated dependencies [535d1d2]
+- Updated dependencies [d956910]
+- Updated dependencies [6d487d2]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [d7d5b4f]
+- Updated dependencies [fa7b565]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [8b123c0]
+- Updated dependencies [5e58193]
+- Updated dependencies [45efcfa]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [6d728b8]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [3bddd4a]
+- Updated dependencies [b206403]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [520f66f]
+- Updated dependencies [b793010]
+- Updated dependencies [6f17d1d]
+- Updated dependencies [5555047]
+- Updated dependencies [5555047]
+- Updated dependencies [5555047]
+- Updated dependencies [5555047]
+- Updated dependencies [81e69ca]
+- Updated dependencies [85e29b8]
+- Updated dependencies [d70353f]
+- Updated dependencies [086ad0a]
+- Updated dependencies [0b82391]
+- Updated dependencies [6210f88]
+- Updated dependencies [35dfb81]
+- Updated dependencies [e9dec3d]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [2f837a5]
+- Updated dependencies [abe8f28]
+- Updated dependencies [88fb5e8]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [ce53218]
+- Updated dependencies [44defd4]
+- Updated dependencies [44defd4]
+- Updated dependencies [83b3d32]
+- Updated dependencies [a7ab047]
+- Updated dependencies [440cd32]
+- Updated dependencies [f9a8eb8]
+- Updated dependencies [6c5697d]
+- Updated dependencies [74281a8]
+- Updated dependencies [9a4182a]
+- Updated dependencies [550f4cc]
+- Updated dependencies [2df621a]
+- Updated dependencies [41b1333]
+- Updated dependencies [1ca1eb0]
+- Updated dependencies [bee8d1c]
+- Updated dependencies [5dbcee8]
+- Updated dependencies [ec390ec]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [a4f0cb0]
+- Updated dependencies [bd70706]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [aa0d4b9]
+- Updated dependencies [6cf1154]
+- Updated dependencies [5d0e4e2]
+- Updated dependencies [e367002]
+- Updated dependencies [9e9d693]
+- Updated dependencies [5c9138b]
+- Updated dependencies [901e7cf]
+- Updated dependencies [045b946]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [316be32]
+- Updated dependencies [5d095a0]
+- Updated dependencies [a1ca156]
+- Updated dependencies [6946f2f]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [5b5e83f]
+- Updated dependencies [7b07749]
+- Updated dependencies [96b0e31]
+- Updated dependencies [f40bb32]
+- Updated dependencies [5ac2ba1]
+- Updated dependencies [1968d5e]
+- Updated dependencies [eea82af]
+- Updated dependencies [417443e]
+- Updated dependencies [be55fd2]
+- Updated dependencies [31e3e00]
+- Updated dependencies [a2aadab]
+- Updated dependencies [ced217c]
+- Updated dependencies [8843505]
+- Updated dependencies [ff16740]
+- Updated dependencies [234d1d8]
+- Updated dependencies [fe10172]
+- Updated dependencies [83e2fee]
+- Updated dependencies [5259a35]
+- Updated dependencies [7fd2c34]
+- Updated dependencies [c43a8ae]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [cf60dbc]
+- Updated dependencies [a6a7547]
+- Updated dependencies [309224d]
+- Updated dependencies [73b2246]
+- Updated dependencies [c7a60e1]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [d7fff21]
+- Updated dependencies [3eb38ae]
+- Updated dependencies [33f9791]
+- Updated dependencies [1c3a4d9]
+- Updated dependencies [025008a]
+- Updated dependencies [da40a5f]
+- Updated dependencies [b7a13c7]
+- Updated dependencies [50b5e03]
+- Updated dependencies [045f764]
+- Updated dependencies [18c2ddc]
+- Updated dependencies [75ddcd1]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [e09f1ac]
+- Updated dependencies [c4d5713]
+- Updated dependencies [93f51f1]
+- Updated dependencies [26d710e]
+- Updated dependencies [08adfea]
+- Updated dependencies [a0176ef]
+- Updated dependencies [07e933b]
+- Updated dependencies [c9be1f1]
+- Updated dependencies [e1790fd]
+- Updated dependencies [e1790fd]
+- Updated dependencies [149153c]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [833d57c]
+- Updated dependencies [607463d]
+- Updated dependencies [607463d]
+- Updated dependencies [18fe681]
+- Updated dependencies [3237b4a]
+- Updated dependencies [088428f]
+- Updated dependencies [2e78046]
+- Updated dependencies [48297ad]
+- Updated dependencies [0fe0a59]
+- Updated dependencies [cab6396]
+- Updated dependencies [9f9510f]
+- Updated dependencies [87712ab]
+- Updated dependencies [f5b8e29]
+- Updated dependencies [e864db5]
+- Updated dependencies [25eb7de]
+- Updated dependencies [41a1135]
+- Updated dependencies [255a777]
+- Updated dependencies [54fb60a]
+- Updated dependencies [7665c54]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [5e0b489]
+- Updated dependencies [07c842d]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [dcb11c2]
+- Updated dependencies [bc7747c]
+- Updated dependencies [b238856]
+- Updated dependencies [0728cbf]
+- Updated dependencies [e6dc7a2]
+- Updated dependencies [faf8dce]
+- Updated dependencies [9cc2c79]
+- Updated dependencies [f243a29]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [131b937]
+- Updated dependencies [76fec88]
+- Updated dependencies [13a22d0]
+- Updated dependencies [753e7a1]
+- Updated dependencies [c9761cd]
+- Updated dependencies [c9761cd]
+- Updated dependencies [c9761cd]
+- Updated dependencies [c9761cd]
+- Updated dependencies [80f9f7e]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [0d8ea5e]
+- Updated dependencies [f76c622]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [3c7785d]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [568dc0b]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/platform-objects@17.7.0
+  - @objectstack/runtime@17.7.0
+  - @objectstack/service-automation@17.7.0
+  - @objectstack/lint@17.7.0
+  - @objectstack/metadata-protocol@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/driver-memory@17.7.0
+  - @objectstack/driver-mongodb@17.7.0
+  - @objectstack/driver-sql@17.7.0
+  - @objectstack/driver-turso@17.7.0
+  - @objectstack/formula@17.7.0
+  - @objectstack/metadata-core@17.7.0
+  - @objectstack/metadata@17.7.0
+  - @objectstack/plugin-email@17.7.0
+  - @objectstack/service-queue@17.7.0
+  - @objectstack/service-sms@17.7.0
+  - @objectstack/service-storage@17.7.0
+  - @objectstack/trigger-record-change@17.7.0
+  - @objectstack/service-datasource@17.7.0
+  - @objectstack/plugin-approvals@17.7.0
+  - @objectstack/plugin-audit@17.7.0
+  - @objectstack/plugin-security@17.7.0
+  - @objectstack/plugin-sharing@17.7.0
+  - @objectstack/service-analytics@17.7.0
+  - @objectstack/trigger-api@17.7.0
+  - @objectstack/objectql@17.7.0
+  - create-objectstack@17.7.0
+  - @objectstack/types@17.7.0
+  - @objectstack/trigger-schedule@17.7.0
+  - @objectstack/plugin-auth@17.7.0
+  - @objectstack/mcp@17.7.0
+  - @objectstack/service-package@17.7.0
+  - @objectstack/service-settings@17.7.0
+  - @objectstack/cloud-connection@17.7.0
+  - @objectstack/rest@17.7.0
+  - @objectstack/verify@17.7.0
+  - @objectstack/plugin-hono-server@17.7.0
+  - @objectstack/service-messaging@17.7.0
+  - @objectstack/plugin-webhooks@17.7.0
+  - @objectstack/console@17.7.0
+  - @objectstack/account@17.7.0
+  - @objectstack/setup@17.7.0
+  - @objectstack/client@17.7.0
+  - @objectstack/driver-sqlite-wasm@17.7.0
+  - @objectstack/observability@17.7.0
+  - @objectstack/service-cache@17.7.0
+  - @objectstack/service-job@17.7.0
+  - @objectstack/service-realtime@17.7.0
+  - @objectstack/plugin-pinyin-search@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

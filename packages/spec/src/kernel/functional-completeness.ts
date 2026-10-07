@@ -287,7 +287,13 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   English sentence. So the loss is total rather than partial — every
  *   record, on every object — and the author is told at render time as well
  *   as here. Both reads hold at the pin this repo builds against
- *   (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+ *   (`.objectui-sha` = `a58626c88`, re-read there 2026-10-06:
+ * on the hop off `0abd4f9f8` `ObjectCalendar.tsx` and `ListView.tsx` are
+ * byte-identical (`git diff --quiet`), so every anchor held unmoved, and the
+ * `en` / `zh` / `de` packs changed (objectui#11658, objectui#11659,
+ * objectui#11666, objectui#11667, objectui#11674 and objectui#11676) but not
+ * their `calendar.configRequired` strings.
+ * At `0abd4f9f8`, re-read there 2026-10-05:
  * every objectui file this record cites is byte-identical across the hop from
  * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
  * At `9dfaca654`, re-read 2026-10-05: on the hop off
@@ -358,7 +364,10 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   This repo already records the same deletion one door over: the #13817
  *   check in `../ui/view.zod.ts` names objectui#7029 as its runtime half.
  * - `gantt`    → NO fallback, and no silence [#19630]. Measured at the pin
- *   this repo builds against (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+ *   this repo builds against (`.objectui-sha` = `a58626c88`, re-read there 2026-10-06:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
+ * At `0abd4f9f8`, re-read there 2026-10-05:
  * every objectui file this record cites is byte-identical across the hop from
  * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
  * At `9dfaca654`, re-read
@@ -423,7 +432,15 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   requires. So the view does not draw a blank chart: it refuses, by name.
  * - `timeline` → date axis: NO fallback [#19630]; title: `titleField || 'name'`,
  *   which still stands. Measured at the same pin (`.objectui-sha` =
- *   `0abd4f9f8`, re-read there 2026-10-05:
+ *   `a58626c88`, re-read there 2026-10-06:
+ * on the hop off `0abd4f9f8` `ObjectTimeline.tsx` changed (+39/-9:
+ * objectui#11675 starts the date buckets' week on the display locale's first
+ * day, and objectui#11676 heads a past date "Earlier" and retires the
+ * `timeline.bucket.overdue` read), but its start-date chain and its
+ * `if (!hasAuthoredItems && !startDateField)` refusal arm are byte-identical,
+ * MOVED `:574-576` → `:578-580` and `:911` → `:941`, and `ListView.tsx` is
+ * byte-identical (`git diff --quiet`).
+ * At `0abd4f9f8`, re-read there 2026-10-05:
  * every objectui file this record cites is byte-identical across the hop from
  * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
  * At `9dfaca654`; `ObjectTimeline.tsx` and `ListView.tsx` are byte-identical
@@ -476,7 +493,10 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   block does render; the warning still fires there, because the block the
  *   view TYPE names is the one that is missing. Unchanged by this row.
  * - `map`      → NO fallback, and no silence [#19630]. Measured at the same
- *   pin (`.objectui-sha` = `0abd4f9f8`, re-read there 2026-10-05:
+ *   pin (`.objectui-sha` = `a58626c88`, re-read there 2026-10-06:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
+ * At `0abd4f9f8`, re-read there 2026-10-05:
  * every objectui file this record cites is byte-identical across the hop from
  * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
  * At `9dfaca654`; `ObjectMap.tsx` and `ListView.tsx`

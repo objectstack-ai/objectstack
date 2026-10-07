@@ -31,6 +31,16 @@
 //     ones, and the `listForRepo` double honours `state` and `labels` so they
 //     can tell the two lookups apart at all.
 //
+//   limb (3) names the CLASS of a red -- `infra:no-runner` when every red is
+//     explained by jobs that never got a runner (read from the job RECORD and
+//     the check-run annotation, never from log text), `failure` otherwise --
+//     and states a re-queue budget of ONE per PR head, carried by a per-head
+//     marker that the NEXT red on that head must find. Like limb (2), the
+//     property lives in the pair of runs (N3 drives it as one), and the real
+//     2026-10-05 job records are the input (N1, N2). The act itself is not
+//     wired -- the workflow holds no credential that can enqueue -- so an
+//     enqueue call is unmodelled here on purpose (M28).
+//
 // So the subject here is the shipped bytes, driven twice where it matters, with
 // real logs on the input side and a full call ledger on the output side.
 //
@@ -52,8 +62,9 @@
 //
 // ## The corpus, and where every byte of it came from
 //
-// `scripts/fixtures/merge-queue-triage/` holds three files. None is invented,
-// and each states which half of the argument it carries:
+// `scripts/fixtures/merge-queue-triage/` holds three log files, plus the three
+// limb (3) job-record captures its README describes. None is invented, and
+// each states which half of the argument it carries:
 //
 //   plugin-dev-timeout.job-log.txt / plugin-dev-assertion.job-log.txt
 //     Real vitest 4.1.10 output, captured in this repo on 2026-08-20 by running
@@ -242,6 +253,14 @@ function fixture(root, name) {
 }
 
 /**
+ * A trimmed REAL job-record capture -- `listJobsForWorkflowRun` for one queue
+ * build, cut down to the fields the shipped script reads (README: provenance).
+ */
+function jobsFixture(root, runId) {
+  return JSON.parse(fixture(root, `run-${runId}.jobs.json`)).jobs;
+}
+
+/**
  * Wrap captured tool output in the runner's line prefix.
  *
  * GitHub Actions stamps every job-log line with an ISO timestamp, and the
@@ -265,6 +284,11 @@ const MODELLED_ISSUE_METHODS = new Set([
   'addLabels',
 ]);
 const MODELLED_ACTION_METHODS = new Set(['listJobsForWorkflowRun', 'listWorkflowRunsForRepo']);
+// Limb (3) reads -- and ONLY reads -- these two. ⛔ An enqueue / auto-merge
+// mutation is deliberately NOT modelled: the workflow holds no credential that
+// can perform one, so a call to it fails the battery as an unmodelled access.
+const MODELLED_PULL_METHODS = new Set(['get']);
+const MODELLED_CHECK_METHODS = new Set(['listAnnotations']);
 
 /**
  * `github` / `context` / `core` doubles plus a full call ledger.
@@ -307,12 +331,19 @@ function makeDoubles(world) {
     addLabelsError: null,
     queueRuns: [],
     prCommentPostError: null,
+    // Limb (3): the PR's current head (what the re-queue budget is keyed on)
+    // and the check-run annotations, keyed by check-run id.
+    prHeadSha: 'c'.repeat(40),
+    prGetError: null,
+    annotations: {},
+    annotationErrors: {},
     ...world,
   };
 
   const calls = {
     listComments: [], listCommentsForRepo: [], listForRepo: [],
     createComment: [], issueCreate: [], issueUpdate: [], addLabels: [], logs: [],
+    pullsGet: [], listAnnotations: [],
   };
   const log = { info: [], warning: [], failed: [], summary: [] };
   const unstubbedCalls = [];
@@ -377,6 +408,23 @@ function makeDoubles(world) {
     },
   };
 
+  const pullsApi = {
+    async get({ pull_number: n }) {
+      calls.pullsGet.push(n);
+      if (w.prGetError) throw w.prGetError;
+      return { data: { number: n, head: { sha: w.prHeadSha } } };
+    },
+  };
+
+  const checksApi = {
+    async listAnnotations({ check_run_id: id }) {
+      calls.listAnnotations.push(id);
+      const err = w.annotationErrors[id];
+      if (err) throw err;
+      return { data: w.annotations[id] ?? [] };
+    },
+  };
+
   const actionsApi = {
     async listJobsForWorkflowRun() { return { data: w.jobs }; },
     async listWorkflowRunsForRepo() { return { data: w.queueRuns }; },
@@ -406,9 +454,11 @@ function makeDoubles(world) {
     {
       issues: guard(issuesApi, 'github.rest.issues', MODELLED_ISSUE_METHODS),
       actions: guard(actionsApi, 'github.rest.actions', MODELLED_ACTION_METHODS),
+      pulls: guard(pullsApi, 'github.rest.pulls', MODELLED_PULL_METHODS),
+      checks: guard(checksApi, 'github.rest.checks', MODELLED_CHECK_METHODS),
     },
     'github.rest',
-    new Set(['issues', 'actions']),
+    new Set(['issues', 'actions', 'pulls', 'checks']),
   );
 
   const github = guard(
@@ -608,6 +658,15 @@ const guidanceProse = (r) => postedBody(r);
 
 const REFUSED = httpError(503, 'No server is currently available to service your request.');
 
+// Limb (3)'s readings, single-sourced so a scenario and a mutation cannot
+// disagree about the spelling they look for.
+const PR_HEAD = 'd'.repeat(40);
+const INFRA_CLASS = '**分类：`infra:no-runner`**';
+const FAILURE_CLASS = '**分类：`failure`**';
+const VERDICT_ONCE = '重排判定：可以重排一次。';
+const VERDICT_PERSON = '重排判定：交给人，不要再重排。';
+const VERDICT_UNKNOWN = '重排判定：无法确认';
+
 function scenarios(root) {
   const TIMEOUT_LOG = asJobLog(fixture(root, 'plugin-dev-timeout.job-log.txt'));
   const ASSERTION_LOG = asJobLog(fixture(root, 'plugin-dev-assertion.job-log.txt'));
@@ -635,6 +694,21 @@ function scenarios(root) {
   const base = (over = {}) => ({
     jobs: [shardJob(111)],
     logs: { 111: TIMEOUT_LOG },
+    ...over,
+  });
+
+  // Limb (3)'s world: the REAL queue build that ejected #21872 on 2026-10-05
+  // with nothing failing -- its run id, its queue ref and its job records.
+  // Only the PR head is synthetic (PR_HEAD, declared below): the budget is
+  // keyed on it, and any fixed 40-hex value exercises the same comparison.
+  const noRunnerWorld = (over = {}) => ({
+    runId: 37374282440,
+    prNumber: 21872,
+    headBranch: 'gh-readonly-queue/main/pr-21872-cab639671528ef6f3a201e8995794378a4a28bfe',
+    headSha: '33486923c015218b3e203c948122c6aaa7bd1667',
+    prHeadSha: PR_HEAD,
+    jobs: jobsFixture(root, 37374282440),
+    logs: {},
     ...over,
   });
 
@@ -1157,6 +1231,187 @@ function scenarios(root) {
         ];
       },
     },
+    // ── limb (3): infra:no-runner classification and the re-queue budget ──
+    {
+      id: 'N1',
+      name: 'REAL record (run 37374282440): one shard never got a runner -> `infra:no-runner`, re-queue ONCE',
+      world: () => noRunnerWorld(),
+      check(r, t) {
+        const body = postedBody(r);
+        return [
+          t(body.includes(INFRA_CLASS), `the comment NAMES the class, got: ${JSON.stringify(body.slice(0, 600))}`),
+          t(body.includes('`Test Core (5/6)`'), 'the shard that never got a runner is named'),
+          t(/聚合 job 的红只因为同族分片没跑：`Test Core`/.test(body), 'the aggregate red is attributed to its own family\'s missing shard'),
+          t(body.includes(VERDICT_ONCE), 'the verdict is: re-queue ONCE'),
+          t(body.includes('仍然不算通过'), 'the comment restates that a shard that never ran still does not attest as passing'),
+          t(body.includes(`<!-- merge-queue-infra:no-runner|pr=21872|head=${PR_HEAD}|run=37374282440 -->`),
+            'the durable per-head marker is written, keyed on the PR HEAD (not the queue sha)'),
+          t(r.calls.pullsGet.length === 1, `the PR head is read once, got ${r.calls.pullsGet.length}`),
+          t(r.calls.listAnnotations.length === 0, 'the record decided every cancelled job, so no annotation is fetched'),
+          t(r.log.failed.length === 0 && r.calls.createComment.length === 1, 'and the comment is delivered'),
+        ];
+      },
+    },
+    {
+      id: 'N2',
+      name: 'REAL record (run 37371558473): eight jobs without a runner, two aggregates red -> `infra:no-runner`',
+      world: () => noRunnerWorld({ runId: 37371558473, jobs: jobsFixture(root, 37371558473) }),
+      check(r, t) {
+        const body = postedBody(r);
+        return [
+          t(body.includes(INFRA_CLASS), 'the class is named'),
+          t(body.includes('没拿到 runner 的 job（8 个）'), `all eight no-runner jobs are counted, got: ${JSON.stringify(body.slice(0, 900))}`),
+          t(body.includes('`Build Core`'), 'a no-runner job outside any shard family (`Build Core`) is named too'),
+          t(body.includes('`Test Core`') && body.includes('`Dogfood Regression Gate`'), 'both aggregates are explained by their own families'),
+          t(body.includes(VERDICT_ONCE), 'first no-runner red on this head -> once'),
+        ];
+      },
+    },
+    {
+      id: 'N3',
+      name: 'the SECOND no-runner red on the SAME head goes to a person, and is not re-queued',
+      // Driven as a pair, like A2: run 2 reads run 1's OWN comment, so the
+      // marker's spelling cannot drift between writer and reader unnoticed.
+      world: () => noRunnerWorld(),
+      rerun: (first) => noRunnerWorld({ runId: 37374999999, prComments: [postedBody(first)] }),
+      check(r, t, first) {
+        const body = postedBody(r);
+        return [
+          t(postedBody(first).includes(VERDICT_ONCE), 'the first run granted the one re-queue'),
+          t(body.includes(INFRA_CLASS), 'the second run still names the class'),
+          t(body.includes(VERDICT_PERSON), `the second run sends it to a person, got: ${JSON.stringify(body.slice(0, 900))}`),
+          t(!body.includes(VERDICT_ONCE), 'and does NOT grant a second re-queue'),
+          t(body.includes('37374282440'), 'it names the earlier queue build that spent the budget'),
+        ];
+      },
+    },
+    {
+      id: 'N4',
+      name: 'the budget is PER HEAD: a no-runner marker for an OLDER head does not spend the new head\'s re-queue',
+      world: () => noRunnerWorld({
+        prComments: [`earlier\n<!-- merge-queue-infra:no-runner|pr=21872|head=${'e'.repeat(40)}|run=37000000000 -->`],
+      }),
+      check(r, t) {
+        return [
+          t(postedBody(r).includes(VERDICT_ONCE), 'a new head gets its own one re-queue'),
+          t(!postedBody(r).includes(VERDICT_PERSON), 'and is not sent to a person on an old head\'s account'),
+        ];
+      },
+    },
+    {
+      id: 'N5',
+      name: 'a REAL shard failure is `failure`, earns no re-queue, and writes no no-runner marker',
+      world: () => base(),
+      check(r, t) {
+        const body = postedBody(r);
+        return [
+          t(body.includes(FAILURE_CLASS), `the class is named as failure, got: ${JSON.stringify(body.slice(0, 600))}`),
+          t(!body.includes(INFRA_CLASS) && !body.includes('重排判定'), 'no infra class and no re-queue verdict'),
+          t(!body.includes('merge-queue-infra:no-runner|'), 'no per-head marker is written -- a real failure spends no budget'),
+          t(r.calls.pullsGet.length === 0, 'the PR head is not even read'),
+        ];
+      },
+    },
+    {
+      id: 'N6',
+      name: 'MIXED: a no-runner shard beside a REAL failing shard is `failure`, never re-queued',
+      world: () => noRunnerWorld({
+        jobs: [
+          ...jobsFixture(root, 37374282440).filter((j) => j.name !== 'Test Core (2/6)'),
+          shardJob(111, 'Test Core (2/6)'),
+        ],
+        logs: { 111: TIMEOUT_LOG },
+      }),
+      check(r, t) {
+        const body = postedBody(r);
+        return [
+          t(body.includes(FAILURE_CLASS), `the class is failure, got: ${JSON.stringify(body.slice(0, 900))}`),
+          t(!body.includes('重排判定'), 'no re-queue verdict at all'),
+          t(body.includes('另有 1 个 job 没拿到 runner') && body.includes('Test Core (2/6) · failure'),
+            'the no-runner job is still reported, and the red it cannot explain is named'),
+          t(!body.includes('merge-queue-infra:no-runner|'), 'no per-head marker'),
+        ];
+      },
+    },
+    {
+      id: 'N7',
+      name: 'ANNOTATION leg: a cancelled job that DID get a runner is no-runner only if its check run says so',
+      world: () => noRunnerWorld({
+        jobs: jobsFixture(root, 37374282440).map((j) => (j.name === 'Test Core (5/6)'
+          ? { ...j, runner_name: 'GitHub Actions 1001213999', runner_id: 1001213999 }
+          : j)),
+        annotations: { 111979038621: JSON.parse(fixture(root, 'check-run-111979038621.annotations.json')) },
+      }),
+      rerun: () => noRunnerWorld({
+        // The control: same record, NO such annotation -- a job-level timeout
+        // or a manual cancel looks exactly like this, and is not weather.
+        jobs: jobsFixture(root, 37374282440).map((j) => (j.name === 'Test Core (5/6)'
+          ? { ...j, runner_name: 'GitHub Actions 1001213999', runner_id: 1001213999 }
+          : j)),
+      }),
+      check(r, t, first) {
+        return [
+          t(first.calls.listAnnotations.includes(111979038621), 'the annotation is read for the undecided cancelled job'),
+          t(postedBody(first).includes(INFRA_CLASS) && postedBody(first).includes(VERDICT_ONCE),
+            'the real "not acquired by Runner" annotation classifies it'),
+          t(postedBody(r).includes(FAILURE_CLASS) && !postedBody(r).includes('重排判定'),
+            'without the annotation the same record is `failure`, with no re-queue'),
+        ];
+      },
+    },
+    {
+      id: 'N8',
+      name: 'NOT KNOWING is never `once`: an unreadable PR head or comment list leaves the verdict unknown',
+      world: () => noRunnerWorld({ prGetError: REFUSED }),
+      rerun: () => noRunnerWorld({ prCommentsError: REFUSED }),
+      check(r, t, first) {
+        return [
+          t(postedBody(first).includes(INFRA_CLASS) && postedBody(first).includes(VERDICT_UNKNOWN)
+            && !postedBody(first).includes(VERDICT_ONCE), 'head unreadable -> unknown, not once'),
+          t(!postedBody(first).includes('merge-queue-infra:no-runner|'), 'and no marker keyed on a head it never read'),
+          t(postedBody(r).includes(VERDICT_UNKNOWN) && !postedBody(r).includes(VERDICT_ONCE),
+            `comments unreadable -> unknown, not once, got: ${JSON.stringify(postedBody(r).slice(0, 900))}`),
+          t(postedBody(r).includes(`head=${PR_HEAD}|run=`), 'the sighting is still recorded when the head IS known'),
+        ];
+      },
+    },
+    {
+      id: 'N9',
+      name: 'an aggregate red is explained only by its OWN family: a no-runner `Test Core` shard does not excuse a red `Dogfood Regression Gate`',
+      world: () => noRunnerWorld({
+        jobs: [
+          ...jobsFixture(root, 37374282440),
+          {
+            id: 222, name: 'Dogfood Regression Gate', conclusion: 'failure', runner_name: 'GitHub Actions 1',
+            html_url: 'https://github.com/objectstack-ai/objectstack/actions/runs/1/job/222',
+            steps: [{ name: 'Verify dogfood shard results', conclusion: 'failure' }],
+          },
+        ],
+      }),
+      check(r, t) {
+        return [
+          t(postedBody(r).includes(FAILURE_CLASS), `the unexplained aggregate keeps it failure, got: ${JSON.stringify(postedBody(r).slice(0, 900))}`),
+          t(!postedBody(r).includes('重排判定'), 'no re-queue verdict'),
+        ];
+      },
+    },
+    {
+      id: 'N10',
+      name: 'an unreadable annotation is never read as no-runner, and says so',
+      world: () => noRunnerWorld({
+        jobs: jobsFixture(root, 37374282440).map((j) => (j.name === 'Test Core (5/6)'
+          ? { ...j, runner_name: 'GitHub Actions 1001213999' }
+          : j)),
+        annotationErrors: { 111979038621: httpError(403, 'Resource not accessible by integration') },
+      }),
+      check(r, t) {
+        return [
+          t(postedBody(r).includes(FAILURE_CLASS), 'the build reads as failure'),
+          t(postedBody(r).includes('注解读不到'), 'the comment says the annotation could not be read'),
+          t(r.log.warning.some((x) => /classification incomplete/i.test(x.props?.title ?? '')), 'and the run is annotated'),
+        ];
+      },
+    },
   ];
 }
 
@@ -1185,6 +1440,14 @@ export async function judge(source, root) {
   checked++;
   if (perms['pull-requests'] !== 'write') {
     failures.push({ id: 'P0', message: `job \`${JOB}\` must keep \`pull-requests: write\` -- the comment is the primary signal. Got: ${JSON.stringify(perms)}` });
+  }
+  checked++;
+  if (perms.checks !== 'read') {
+    failures.push({ id: 'P0', message: `job \`${JOB}\` must declare \`checks: read\` (and no more) -- limb (3) reads the "not acquired by Runner" annotation. Got: ${JSON.stringify(perms)}` });
+  }
+  checked++;
+  if (perms.contents !== undefined) {
+    failures.push({ id: 'P0', message: `job \`${JOB}\` must not hold \`contents:\` -- nothing here enqueues, merges or writes a ref; a re-queue credential is a decision to take in the open, not a grant to slip in. Got: ${JSON.stringify(perms)}` });
   }
 
   for (const s of scenarios(root)) {
@@ -1491,6 +1754,79 @@ const MUTATIONS = [
     expect: ['E1'],
     keepGreen: ['A1'],
   },
+  // ── limb (3) ──────────────────────────────────────────────────────────
+  {
+    id: 'M20',
+    what: 'the job-RECORD leg is dropped, so a cancelled job with no runner and no steps is no longer infra:no-runner',
+    from: "  if (noRunnerByRecord(j)) { noRunner.push({ job: j, via: 'record' }); continue; }",
+    to: '',
+    expect: ['N1', 'N2'],
+    keepGreen: ['N5'],
+  },
+  {
+    id: 'M21',
+    what: 'an aggregate red is excused by ANY no-runner job, not one of its own shard family',
+    from: '    && noRunnerNames.some((n) => n.startsWith(`${j.name} (`));',
+    to: '    && noRunner.length > 0;',
+    expect: ['N9'],
+    keepGreen: ['N1', 'N2'],
+  },
+  {
+    id: 'M22',
+    what: 'a no-runner job anywhere makes the build infra:no-runner, so a REAL failure beside it earns a re-queue',
+    from: 'const infraOnly = noRunner.length > 0 && unexplained.length === 0;',
+    to: 'const infraOnly = noRunner.length > 0;',
+    expect: ['N6', 'N9'],
+    keepGreen: ['N5', 'N1'],
+  },
+  {
+    id: 'M23',
+    what: 'the budget stops being keyed on the head, so ANY earlier no-runner marker on the PR spends it',
+    from: 'mm[2] === prHead && ',
+    to: '',
+    expect: ['N4'],
+    keepGreen: ['N3'],
+  },
+  {
+    id: 'M24',
+    what: 'an earlier no-runner red on the same head is not counted, so the same head is re-queued again and again',
+    from: 'priorRuns.add(mm[3]);',
+    to: 'void mm;',
+    expect: ['N3'],
+    keepGreen: ['N4'],
+  },
+  {
+    id: 'M25',
+    what: 'an unreadable comment listing stops being `unknown` (the script then reads the absent listing as if it were there)',
+    from: '  } else if (prComments === null) {',
+    to: '  } else if (false) {',
+    expect: ['N8'],
+    keepGreen: ['N1'],
+  },
+  {
+    id: 'M26',
+    what: 'the "not acquired by Runner" annotation is no longer consulted',
+    from: "NO_RUNNER_ANNOTATION.test(String(a?.message ?? ''))",
+    to: 'false',
+    expect: ['N7'],
+    keepGreen: ['N1'],
+  },
+  {
+    id: 'M27',
+    what: 'the per-head marker is no longer written, so a second no-runner red on the head cannot be recognised',
+    from: '  ...(noRunnerMarker ? [noRunnerMarker] : []),',
+    to: '',
+    expect: ['N1', 'N3'],
+    keepGreen: ['N5'],
+  },
+  {
+    id: 'M28',
+    what: 'the script grows an enqueue call -- an act this workflow holds no credential for, so it must fail the battery as unmodelled',
+    from: 'const noRunnerMarker = infraOnly && prHead',
+    to: "if (infraOnly) await github.graphql('mutation { enqueuePullRequest }');\nconst noRunnerMarker = infraOnly && prHead",
+    expect: ['N1'],
+    keepGreen: ['N5'],
+  },
 ];
 
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
@@ -1571,7 +1907,10 @@ async function selfTest() {
   // 5. The corpus is the evidence. A fixture that quietly vanished would leave
   //    every extraction scenario asserting over an empty string.
   battery('5. The corpus is the evidence. A fixture that quietly vanished would leave');
-  for (const name of ['plugin-dev-timeout.job-log.txt', 'plugin-dev-assertion.job-log.txt', 'incident-32333709633-published-excerpt.job-log.txt']) {
+  for (const name of [
+    'plugin-dev-timeout.job-log.txt', 'plugin-dev-assertion.job-log.txt', 'incident-32333709633-published-excerpt.job-log.txt',
+    'run-37374282440.jobs.json', 'run-37371558473.jobs.json', 'check-run-111979038621.annotations.json',
+  ]) {
     assert(existsSync(join(root, FIXTURES, name)), `corpus: ${FIXTURES}/${name} exists`);
   }
   const timeoutFixture = fixture(root, 'plugin-dev-timeout.job-log.txt');
@@ -1582,6 +1921,16 @@ async function selfTest() {
   const failOf = (t) => t.split('\n').find((l) => / FAIL  src\//.test(l));
   assert(failOf(timeoutFixture) === failOf(assertionFixture),
     'corpus: the two captures share a byte-identical FAIL line -- that identity IS the defect limb (1) exists for');
+  // Limb (3)'s corpus must keep carrying the shape it is evidence of: a job
+  // that ended `cancelled` with no runner and no steps, and the platform's own
+  // annotation for it. A recapture that lost either would leave N1/N2/N7
+  // asserting over a world that no longer exhibits the outage.
+  const shard56 = jobsFixture(root, 37374282440).find((j) => j.name === 'Test Core (5/6)');
+  assert(shard56?.conclusion === 'cancelled' && shard56?.runner_name === '' && shard56?.steps?.length === 0,
+    'corpus: run 37374282440 still records `Test Core (5/6)` as cancelled with no runner and no steps');
+  assert(JSON.parse(fixture(root, 'check-run-111979038621.annotations.json'))
+    .some((a) => /not acquired by Runner/.test(a.message)),
+  'corpus: the captured annotation still carries the platform\'s "not acquired by Runner" message');
 
   // 6. Wiring. A check nobody runs is the #4449 shape this repo keeps paying for.
   battery('6. Wiring. A check nobody runs is the #4449 shape this repo keeps paying for.');

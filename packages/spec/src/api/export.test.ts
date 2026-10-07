@@ -267,7 +267,7 @@ describe('ExportImportTemplateSchema', () => {
  * Before commit c3f491626 the two disagreed on exactly one input — the omitted key — and
  * that is the case a reader should look at first.
  */
-describe('ImportRequestSchema — runAutomations declared default (#6704)', () => {
+describe('ImportRequestSchema — runAutomations declared default', () => {
   const bodyWithout = { format: 'json' as const, rows: [{ title: 'a' }] };
 
   it('materialises `true` when the caller omits the key', () => {
@@ -325,7 +325,7 @@ describe('ImportRequestSchema — runAutomations declared default (#6704)', () =
  * wire, because the route parses the raw body itself and never depends on
  * callers having used this schema.
  */
-describe('ImportRequestSchema — mappingName declared (#10330)', () => {
+describe('ImportRequestSchema — mappingName declared', () => {
   const base = { format: 'csv' as const, csv: 'Full Name,E-mail\nAda,ada@example.com\n' };
 
   it('parses a body naming a registered mapping, and the value survives', () => {
@@ -342,7 +342,7 @@ describe('ImportRequestSchema — mappingName declared (#10330)', () => {
     expect(parsed.mappingName).toBe('showcase_inquiry_feed');
   });
 
-  it('the typed SDK request can express it — the #10330 TS2353 repro, inverted', () => {
+  it('the typed SDK request can express it — the original TS2353 repro, inverted', () => {
     // Before the declaration this exact literal was a compile error
     // (TS2353: 'mappingName' does not exist in type …). The literal itself is
     // the pin: this file is type-checked, so the key regressing out of the

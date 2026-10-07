@@ -68,7 +68,7 @@ const RETIRED_V0_FAMILY = [
   'EnvironmentArtifactRequirement', 'EnvironmentArtifactRequirementSchema',
 ] as const;
 
-describe('[#4740] `EnvironmentArtifact(Schema)` resolves to the ./system declaration everywhere', () => {
+describe('`EnvironmentArtifact(Schema)` resolves to the ./system declaration everywhere', () => {
   it('resolves the export surface: one declaration in ./system, no other entry names it, the v0 family is gone', () => {
     // Anti-vacuity: the baseline must cover the real surface. (This used to
     // enumerate package.json's exports map and build its own `ts.createProgram`
@@ -192,7 +192,7 @@ describe('EnvironmentArtifactSchema (wire shape)', () => {
   // ⚠ #4666 pin — the checksum object→string convergence is a TYPE change
   // invisible to the key-level authorable-surface gates (`checksum` exists in
   // both shapes). These parses are the gate for it.
-  describe('checksum is a 64-char hex STRING (#4666 pin)', () => {
+  describe('checksum is a 64-char hex STRING (pinned here: a type change the key-level gates cannot see)', () => {
     it('accepts a 64-char lowercase hex digest', () => {
       expect(Sha256DigestSchema.parse(WIRE_CHECKSUM)).toBe(WIRE_CHECKSUM);
     });
@@ -256,7 +256,7 @@ describe('EnvironmentArtifactSchema (wire shape)', () => {
   // The v0 keys are tombstoned, not silently stripped: authoring one raises
   // the prescription itself (retiredKey, #3855), and `tsc` types the key
   // `never` at the authoring site.
-  describe('retired v0 keys are tombstoned (#4740, ADR-0049)', () => {
+  describe('retired v0 keys are tombstoned (ADR-0049)', () => {
     it('rejects `functions` with the prescription', () => {
       expect(() => EnvironmentArtifactSchema.parse({ ...wireMinimal, functions: [] }))
         .toThrow(/`environmentArtifact\.functions` was removed in @objectstack\/spec 17\.0\.0.*Delete the key/s);
@@ -272,7 +272,7 @@ describe('EnvironmentArtifactSchema (wire shape)', () => {
         .toThrow(/`environmentArtifact\.payloadRef` was removed in @objectstack\/spec 17\.0\.0.*Delete the key/s);
     });
 
-    it('a full pre-#4740 v0 artifact is rejected loudly, not half-parsed', () => {
+    it('a full v0 artifact is rejected loudly, not half-parsed', () => {
       const v0 = {
         schemaVersion: '0.1',
         environmentId: 'proj_01HABCDE',
@@ -308,7 +308,7 @@ describe('EnvironmentArtifactSchema (wire shape)', () => {
 // have gone passthrough to admit this key. Every pin here is a schema-reachable
 // parse, not a type-level assertion.
 
-describe('grantedPermissions — install-time granted set per plugin manifest `id` (#14865)', () => {
+describe('grantedPermissions — install-time granted set per plugin manifest `id`', () => {
   const granted = {
     '@acme/plugin-crm': {
       services: ['object', 'http'],

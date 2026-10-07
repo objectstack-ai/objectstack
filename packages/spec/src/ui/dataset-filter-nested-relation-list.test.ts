@@ -113,7 +113,7 @@ const REFUSED: ReadonlyArray<readonly [
 // §1 Both carriers refuse, at the list's own path
 // ---------------------------------------------------------------------------
 
-describe('#20080 §1 — both analytics carriers refuse a list inside a nested relation', () => {
+describe('§1 — both analytics carriers refuse a list inside a nested relation, at save', () => {
   it.each(REFUSED)('DatasetSchema.filter refuses %s', (_label, filter, issuePath) => {
     const issue = issueAt(DatasetSchema.safeParse(withScope(filter)), `filter.${issuePath}`);
     expect(issue.message).toMatch(/requires a single comparable value, but received an array/);
@@ -145,7 +145,7 @@ describe('#20080 §1 — both analytics carriers refuse a list inside a nested r
 // §2 The carrier prints the analytics door's sentence
 // ---------------------------------------------------------------------------
 
-describe('#20080 §2 — the carrier refusal is the analytics door\'s sentence', () => {
+describe('§2 — the carrier refusal is the analytics door\'s sentence', () => {
   it.each(REFUSED)('%s', (_label, filter, issuePath, field, list, eq, holder) => {
     const door = analyticsDoorRefusal(field, eq ? { $eq: list } : list, holder);
     // The door's refusal is the ADR-0112 class-1 envelope the face throws.
@@ -175,7 +175,7 @@ describe('#20080 §2 — the carrier refusal is the analytics door\'s sentence',
 // §3 A list the shared schema already refuses is refused once, not twice
 // ---------------------------------------------------------------------------
 
-describe('#20080 §3 — outside a nested relation the shared schema answers, once', () => {
+describe('§3 — outside a nested relation the shared schema answers, once', () => {
   it.each([
     ['top level, implicit', { region: ['a'] }, 'region', /^The implicit-equality comparand on field "region"/],
     ['top level, $eq', { region: { $eq: ['a'] } }, 'region.$eq', /^Operator "\$eq" on field "region"/],
@@ -192,7 +192,7 @@ describe('#20080 §3 — outside a nested relation the shared schema answers, on
 // §4 CONTROLS — accepted on both carriers, and kept
 // ---------------------------------------------------------------------------
 
-describe('#20080 §4 — what a nested relation may still carry', () => {
+describe('§4 — what a nested relation may still carry', () => {
   const day = new Date('2026-07-01T00:00:00.000Z');
   it.each([
     ['a scalar', { account: { region: 'a' } }],
@@ -217,7 +217,7 @@ describe('#20080 §4 — what a nested relation may still carry', () => {
     expect(measure.data!.filter).toEqual(filter);
   });
 
-  it('[#20116] $ne carrying a list inside a relation is refused on both carriers, in the door\'s $ne sentence', () => {
+  it('$ne carrying a list inside a relation is refused on both carriers, in the door\'s $ne sentence', () => {
     // This row sat in the table above as "not yet at this save door (#20116)".
     // #20116 routes every slot this walk reaches through the query faces'
     // verdict, so the shape the analytics door refuses on chart is refused here.

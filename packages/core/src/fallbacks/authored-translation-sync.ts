@@ -119,13 +119,18 @@ export async function readAuthoredTranslationLayer(
 ): Promise<Record<string, Record<string, unknown>> | null> {
   let rows: any[];
   try {
+    // [#21911, ADR-0096] The explicit system opt-in: a boot / resync read of
+    // the platform store with no caller behind it, never a principal-less
+    // engine context.
     rows = (await engine.find('sys_metadata', {
       where: { type: 'translation', state: 'active' },
+      context: { isSystem: true },
     })) ?? [];
     if (rows.length === 0) {
       // Legacy plural rows — mirrors the protocol's singular/plural fallback.
       rows = (await engine.find('sys_metadata', {
         where: { type: 'translations', state: 'active' },
+        context: { isSystem: true },
       })) ?? [];
     }
   } catch (err: any) {

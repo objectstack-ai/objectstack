@@ -76,7 +76,7 @@ describe('envelopeViolations — what the schema MISSES', () => {
     expect(envelopeViolations(body)).toContain('success body carries no `data`');
   });
 
-  it('the duplicate-payload drift #4049 removed', () => {
+  it('the duplicate-payload drift the /share-links domain stopped emitting', () => {
     // `{ success: true, data: link, link }` — the payload under BOTH the
     // envelope's `data` and a legacy top-level key, so two dialects stay alive
     // at once and no consumer has to choose.

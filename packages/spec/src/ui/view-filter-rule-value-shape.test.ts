@@ -95,7 +95,7 @@ function valueIssue(result: ReturnType<typeof parse>) {
   return issues[0]!;
 }
 
-describe('#6227 — the reported shape is refused at authoring time', () => {
+describe('the reported shape — a set operator carrying a scalar — is refused at authoring time', () => {
   it('refuses the card example: a set operator carrying a scalar', () => {
     const result = parse({ field: 'stage', operator: 'not_in', value: 'won' });
     const issue = valueIssue(result);
@@ -148,7 +148,7 @@ describe('#6227 — the reported shape is refused at authoring time', () => {
   });
 });
 
-describe('#6227 — the three constraints mirror the runtime gate exactly', () => {
+describe('the three constraints mirror the runtime gate exactly', () => {
   it.each([
     ['in', 'scalar string', 'won'],
     ['in', 'scalar number', 5],
@@ -181,7 +181,7 @@ describe('#6227 — the three constraints mirror the runtime gate exactly', () =
   });
 });
 
-describe('#6227 — what stays accepted (the #5685 side: never stricter than the runtime)', () => {
+describe('what stays accepted (never stricter than the runtime)', () => {
   it.each([
     ['in + array', { field: 'f', operator: 'in', value: ['a', 'b'] }],
     ['not_in + array', { field: 'f', operator: 'not_in', value: ['a'] }],
@@ -246,13 +246,13 @@ describe('#6227 — what stays accepted (the #5685 side: never stricter than the
   });
 });
 
-describe('#19514 — the scalar arm, in both directions', () => {
+describe('the scalar arm, in both directions: a single-valued operator refuses an array', () => {
   /** The three pins this arm MOVED, named as such so the reversal is legible. */
   it.each([
     ['equals + array', { field: 'f', operator: 'equals', value: ['a', 'b'] }, 'equals'],
     ['not_equals + array', { field: 'f', operator: 'not_equals', value: ['a'] }, 'not_equals'],
     ['greater_than + array', { field: 'f', operator: 'greater_than', value: [1, 2] }, 'greater_than'],
-  ])('refuses %s — recorded as ACCEPTED at #6227, reversed on measurement', (_label, rule, operator) => {
+  ])('refuses %s — recorded as ACCEPTED by the first value-shape rule, reversed on measurement', (_label, rule, operator) => {
     const issue = valueIssue(parse(rule as Record<string, unknown>));
     expect(issue.code).toBe('custom');
     expect(issue.path).toEqual(['value']);
@@ -311,7 +311,7 @@ describe('#19514 — the scalar arm, in both directions', () => {
   });
 });
 
-describe('#19751 — an ABSENT value on an operator that takes one is refused', () => {
+describe('an ABSENT value on an operator that takes one is refused', () => {
   /** The rule as a view stores it when the comparand was never written. */
   const valueless = (operator: string, field = 'f') => ({ field, operator });
 
@@ -422,7 +422,7 @@ describe('#19751 — an ABSENT value on an operator that takes one is refused', 
   });
 });
 
-describe('#6227 — the exported vocabularies are the ones the check reads', () => {
+describe('the exported vocabularies are the ones the check reads', () => {
   it('declares exactly the operators that lower to $in / $nin', () => {
     expect([...VIEW_FILTER_LIST_VALUE_OPERATORS]).toEqual(['in', 'not_in']);
   });
@@ -441,7 +441,7 @@ describe('#6227 — the exported vocabularies are the ones the check reads', () 
   });
 });
 
-describe('#6227 — the refinement does not disturb the schema around it', () => {
+describe('the value-shape refinement does not disturb the schema around it', () => {
   it('still folds alias operators to canonical on a CONFORMING rule', () => {
     const parsed = ViewFilterRuleSchema.parse({ field: 'tags', operator: 'nin', value: ['a'] });
     expect(parsed.operator).toBe('not_in');
