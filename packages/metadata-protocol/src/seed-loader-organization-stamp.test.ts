@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { SeedLoaderService } from './seed-loader';
+import { SeedLoaderService } from './seed-loader.js';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 
 type Row = Record<string, unknown> & { id?: string };
@@ -143,7 +143,8 @@ describe('[ADR-0131 D9] no derivable owner — the rows of an organization-owned
 
     // The two unowned rows (the platform seed and the unpinned business row)
     // are refused, counted, and named — never written NULL.
-    const refused = result.errors.filter((e) => e.field === 'organization_id');
+    type RefusalRow = { field: string; sourceObject: string; message: string };
+    const refused = (result.errors as RefusalRow[]).filter((e) => e.field === 'organization_id');
     expect(refused.map((e) => e.sourceObject).sort()).toEqual(['my_app_widget', 'sys_business_unit']);
     for (const e of refused) {
       expect(e.message).toContain('was REFUSED');
@@ -173,9 +174,10 @@ describe('[ADR-0131 Q2, held as-is] a composition with NO organization object ke
 
   it('the engine refusing the unregistered organization name reads the same way', async () => {
     const { engine, inserted } = createEngine({});
-    const find = engine.find as unknown as ReturnType<typeof vi.fn>;
+    type Find = (object: string, q?: unknown) => Promise<Row[]>;
+    const find = engine.find as unknown as { getMockImplementation(): Find | undefined; mockImplementation(f: Find): void };
     const base = find.getMockImplementation()!;
-    find.mockImplementation(async (object: string, q: unknown) => {
+    find.mockImplementation(async (object: string, q?: unknown) => {
       if (object === 'sys_organization') {
         throw Object.assign(new Error("object 'sys_organization' not found"), {
           code: 'OBJECT_NOT_FOUND', object: 'sys_organization',

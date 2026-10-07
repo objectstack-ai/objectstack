@@ -568,7 +568,7 @@ describe('[ADR-0131 D3 / ADR-0093 D7] the first admin is the owner even when the
     expect(res).toMatchObject({ ownerPromoted: true, memberCreated: false, defaultOrgId: 'org_d' });
     expect(ql.tables.sys_member).toEqual([{ ...reconciled('org_d'), role: 'owner' }]);
     const decision = ql.tables.sys_migration.find((r: Row) => r.id === 'adr-0093-default-org-owner-bind');
-    expect(JSON.parse(decision.details)).toMatchObject({ outcome: 'promoted', organizationId: 'org_d' });
+    expect(JSON.parse(String(decision?.details))).toMatchObject({ outcome: 'promoted', organizationId: 'org_d' });
   });
 
   it('never promotes once the owner bind is DECIDED (ADR-0093 D7: a removed owner stays removed)', async () => {
