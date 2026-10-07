@@ -309,9 +309,10 @@ export interface AuthoringRuleContext {
    *
    * [#22019] One other rule reads it, on that argument: `validateStackExpressions`
    * is one entry over several PASSES, and an `object` write is admitted for its
-   * field-formula pass alone (`runStackExpressionPasses`, `StackExpressionOptions`). The
-   * entry-level `runtimeTypes` can say that an object write reaches the rule; it
-   * cannot say which of the rule's passes judge that write.
+   * field-formula pass and (#22032) its validation-rule pass alone
+   * (`runStackExpressionPasses`, `StackExpressionOptions`). The entry-level
+   * `runtimeTypes` can say that an object write reaches the rule; it cannot say
+   * which of the rule's passes judge that write.
    */
   runtimeWriteType?: string;
   /**
@@ -588,9 +589,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // NARROW by construction, not by snapshot shape: `ctx.runtimeWriteType`
     // reaches `runStackExpressionPasses` — the body `validateStackExpressions`
     // runs, whose public signature is unchanged — which on an object write runs
-    // the field-formula pass and fences every other object-borne expression
+    // the passes admitted there and fences every other object-borne expression
     // pass off by name (`StackExpressionOptions.runtimeWriteType`) — each of
-    // those is a crossing of its own, not a rider on this one.
+    // those is a crossing of its own, not a rider on another.
     //
     // MEASURED over the stored corpus at the door's own snapshot shape before
     // crossing: every formula field the repository ships — 29 fields on 28
@@ -598,6 +599,20 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // app-multi-package none; platform `display_title` formulas: 22 on 22) →
     // 0 differential errors and 0 advisories, against 1 refusal for the card's
     // own `sqrt(record.amount)` body under the same harness.
+    //
+    // [#22032, pass 1] The validation-rule pass joins the object door: every
+    // `validations[]` `condition` and `when`, with the null-guard gate over
+    // the nested `then` / `otherwise` branches — the same sentence of
+    // `formulas.mdx`, and the same gap (`sqrt(record.amount) > 1` and a bare
+    // `amount > 1` saved with a 200). No entry-level change: `object` was
+    // already declared above. MEASURED first, at both the raw and the parsed
+    // shape: every validation rule the repository ships — 21 rules carrying 13
+    // predicates on 10 objects (examples: app-crm 3 on 2, app-showcase 6 on 4,
+    // app-todo 2 on 1; platform: plugin-security 2 on 2, and one
+    // predicate-less rule on `sys_user`) → 0 build errors and 0 warnings for
+    // the pass, and 0 door errors and 0 advisories at the door's own snapshot
+    // shape, against 2 refusals at each for the card's two bodies in the same
+    // harness.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object'],
     run: (stack, ctx) =>
