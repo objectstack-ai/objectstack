@@ -3715,12 +3715,16 @@ export default class Serve extends Command {
       // dist hasn't been built yet.  The directory is resolved as:
       //   1. OS_RUNTIME_ASSETS_DIR env var (explicit override)
       //   2. process.cwd() + '/assets' (when CLI cwd is a runtime/ package)
-      // Silently skips if no assets directory exists.
-      const runtimeAssetsDir = (
-        process.env.OS_RUNTIME_ASSETS_DIR?.trim() ||
-        path.resolve(process.cwd(), 'assets')
-      );
-      await kernel.use(createRuntimeAssetsPlugin(runtimeAssetsDir));
+      // No route is mounted when the directory does not exist. That is not
+      // silent (#22071): once the boot settles, the plugin warns for every
+      // loaded app's branding logo / favicon under /runtime/assets/ it will not
+      // serve, naming the directory searched and which of the two it came from.
+      const runtimeAssetsDirFromEnv = process.env.OS_RUNTIME_ASSETS_DIR?.trim();
+      const runtimeAssetsDir = runtimeAssetsDirFromEnv || path.resolve(process.cwd(), 'assets');
+      await kernel.use(createRuntimeAssetsPlugin(
+        runtimeAssetsDir,
+        runtimeAssetsDirFromEnv ? 'OS_RUNTIME_ASSETS_DIR' : 'cwd',
+      ));
 
       // Unknown-environment hostname guard.
       //
