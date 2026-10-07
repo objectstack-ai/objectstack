@@ -143,7 +143,6 @@ import type { ServiceObject } from '@objectstack/spec/data';
 import { BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE, MAX_BULK_PER_ROW_HOOK_ROWS } from '@objectstack/spec/data';
 import { SystemUserId } from '@objectstack/spec/system';
 import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
-import type { ExecutionContext } from '@objectstack/spec/kernel';
 
 interface ClaimOwnershipOptions {
   logger?: {
@@ -172,15 +171,20 @@ const SYSTEM_CTX = { isSystem: true };
  *
  * `skipAutomations` alone, never a narrower flag: it is the spec's one spelling
  * of "skip metadata hooks AND record-change flows, keep code-registered hooks"
- * ({@link ExecutionContext}), and `skipTriggers` alone would leave the app's
- * metadata hooks firing on every claimed row.
+ * (`ExecutionContext`, `@objectstack/spec/kernel`), and `skipTriggers` alone
+ * would leave the app's metadata hooks firing on every claimed row.
+ *
+ * A plain literal, like {@link SYSTEM_CTX}: `pnpm check:tenant-audit-census`
+ * reads `isSystem` off it statically, and it does not see through a
+ * `satisfies` wrapper — spelled that way, this write would drop from
+ * "decidably elevated" to "elevation undecidable" in the census.
  *
  * It does NOT move the per-row hook ceiling, so {@link CLAIM_PAGE_ROWS} needs no
  * change: the engine counts the matched rows against the ceiling whenever ANY
  * hook covers the object, without consulting the flag — and code-registered
  * hooks still run per row under it, so the bound still means what it did.
  */
-const CLAIM_WRITE_CTX = { isSystem: true, skipAutomations: true } as const satisfies ExecutionContext;
+const CLAIM_WRITE_CTX = { isSystem: true, skipAutomations: true };
 
 /**
  * Rows a single fallback page takes off the top of an over-ceiling predicate.
