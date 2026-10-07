@@ -51,10 +51,19 @@ describe('interpolatePhoneSms', () => {
 });
 
 describe('resolvePhoneSmsTemplateBody', () => {
-  /** Rows answered as the engine answers `find`: by every key in `where`. */
+  /**
+   * Rows answered as the engine answers `find`: by every key in `where`, plain
+   * equality only. A combinator is REFUSED, never read as a field name
+   * (`check:where-matcher`).
+   */
   const engineWith = (rows: Array<Record<string, unknown>>) => ({
     find: vi.fn(async (_obj: string, q: any) =>
-      rows.filter((r) => Object.entries(q.where).every(([k, v]) => r[k] === v)).slice(0, q.limit ?? Infinity),
+      rows.filter((r) => Object.entries(q.where).every(([k, v]) => {
+        if (k.startsWith('$') || (v !== null && typeof v === 'object')) {
+          throw new Error(`engineWith(): unsupported where clause on '${k}'`);
+        }
+        return r[k] === v;
+      })).slice(0, q.limit ?? Infinity),
     ),
   });
 

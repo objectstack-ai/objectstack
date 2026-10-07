@@ -21,6 +21,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import type { PluginContext } from '@objectstack/core';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { AuthPlugin } from './auth-plugin';
 import {
   BUILTIN_PHONE_SMS_TEMPLATES,
@@ -37,13 +38,26 @@ const SECRET = 'test-secret-at-least-32-chars-long';
 
 type Row = Record<string, unknown>;
 
-/** A row store answering `find` by every key in `where`, honouring `limit`. */
+/**
+ * A row store answering `find` by every key in `where` (plain equality),
+ * honouring `limit`. It REFUSES a combinator it does not implement rather than
+ * reading `$and` / `$or` as a field name (`check:where-matcher`).
+ */
+function matchesWhere(row: Row, where: Record<string, unknown> = {}): boolean {
+  return Object.entries(where).every(([k, v]) => {
+    if (k.startsWith('$') || (v !== null && typeof v === 'object')) {
+      throw new Error(`store(): unsupported where clause on '${k}' — this double implements plain equality only`);
+    }
+    return row[k] === v;
+  });
+}
+
 function store(rows: Row[]) {
   const all = rows.map((r) => ({ ...r }));
   return {
     all,
     async find(_object: string, q: any) {
-      const hit = all.filter((r) => Object.entries(q?.where ?? {}).every(([k, v]) => r[k] === v));
+      const hit = all.filter((r) => matchesWhere(r, q?.where));
       return typeof q?.limit === 'number' ? hit.slice(0, q.limit) : hit;
     },
     async insert(_object: string, row: Row) { all.push({ ...row }); return row; },
@@ -181,8 +195,14 @@ describe('a fresh boot with phone sign-in on', () => {
       unregisterHooksByPackage: vi.fn(() => 0),
       count: vi.fn(async () => 0),
       find: vi.fn(async () => []),
-      findOne: vi.fn(async () => null),
-      update: vi.fn(async () => ({})),
+      findOne: vi.fn(async (object: string, query: unknown = {}) => {
+        assertEngineFindOnePredicate(object, query as never);
+        return null;
+      }),
+      update: vi.fn(async (_object: string, doc: Record<string, unknown>, options?: unknown) => {
+        assertEngineUpdateDispatch(doc, options as never);
+        return {};
+      }),
       insert: vi.fn(async (object: string, row: Row) => { inserted.push({ object, row }); return row; }),
     };
     const hooks: Array<() => Promise<void>> = [];
