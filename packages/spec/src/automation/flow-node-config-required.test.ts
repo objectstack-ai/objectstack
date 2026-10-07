@@ -160,9 +160,15 @@ describe('FlowSchema.parse refuses a key the node\'s executor contract requires,
       expect(issuesOf(flowWith(node('loop')))).toEqual([]);
     });
 
-    it('a PRESENT value of the wrong type is not this rule\'s finding — absence only', () => {
-      expect(issuesOf(flowWith(node('get_record', { objectName: 42 })))).toEqual([]);
-      expect(issuesOf(flowWith(node('script', { function: '' })))).toEqual([]);
+    it('a PRESENT value of the wrong type is not this rule\'s finding — the value arm refuses it under its own code', () => {
+      // #21898: present values are judged since, by `node-config-refused-by-contract`
+      // (`flow-builtin-node-config-values.test.ts`); this rule still reports absence only.
+      expect(flowNodeConfigRefusals('get_record', { objectName: 42 }).map(({ code, path }) => ({ code, path }))).toEqual([
+        { code: 'node-config-refused-by-contract', path: 'objectName' },
+      ]);
+      expect(flowNodeConfigRefusals('script', { function: '' }).map(({ code, path }) => ({ code, path }))).toEqual([
+        { code: 'node-config-refused-by-contract', path: 'function' },
+      ]);
     });
 
     it('a key missing INSIDE an authored value is not a config key left out — the value-envelope pass owns it', () => {

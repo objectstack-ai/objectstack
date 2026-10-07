@@ -1,0 +1,7 @@
+{
+  "file": "packages/plugins/plugin-security/src/grant-permission-set-name.ts",
+  "adrs": [
+    "ADR-0131"
+  ],
+  "invariant": "A grant names its permission set BY NAME beside the id (D4), and the two never disagree: on every sys_user_permission_set write that carries permission_set_id, for every caller, the name is derived from the id and a supplied name that names another set is refused. The id column may be dropped (D10) only once every grant's name is written and verified this way."
+}

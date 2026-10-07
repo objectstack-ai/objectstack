@@ -11,7 +11,10 @@
  * open `z.record`, so what its executor requires, or refuses, was checked by
  * nobody until the run. And (#21850) **the whole config of a plugin node type
  * whose contract the spec itself declares** — `approval`, judged against
- * `ApprovalNodeConfigSchema` with no plugin loaded.
+ * `ApprovalNodeConfigSchema` with no plugin loaded. And (#21898) **a value a
+ * builtin node's executor contract refuses**, where the build can know what
+ * the run will parse — see {@link flowNodeConfigRefusals}' first arm for what
+ * that excludes, and why.
  *
  * Its refusal codes join the closed flow slot table
  * (`FLOW_SLOT_REFUSAL_CODES`, `flow-node-expression-paths.ts`); the
@@ -132,11 +135,12 @@ let cachedDeclaredPluginNodeConfigContracts: ReadonlyMap<string, BuiltinNodeConf
  * `node.config ?? {}` against `ApprovalNodeConfigSchema` before it does
  * anything else, and fails the node on ANY issue.
  *
- * Judged WHOLE, unlike the builtin map's presence-only arm: every issue the
- * contract raises is a refusal — a key it requires left out, a key it does not
- * declare, and a value it refuses — because the executor refuses the node on
- * every one of them, so a flow carrying one would fail at every run that
- * reached the node. The contract is a `strictObject` whose unknown-key text
+ * Judged WHOLE, unlike the builtin map's arm (#21898: a key left out and a
+ * value refused, never key membership): every issue the contract raises is a
+ * refusal — a key it requires left out, a key it does not declare, and a value
+ * it refuses — because the executor refuses the node on every one of them,
+ * before anything else and on its authored config, so a flow carrying one
+ * would fail at every run that reached the node. The contract is a `strictObject` whose unknown-key text
  * carries its own did-you-mean (`timeout` → `timeoutHours`), and that text is
  * the refusal's.
  *
@@ -185,9 +189,10 @@ function ledgerPathOf(path: ReadonlyArray<PropertyKey>): string {
 
 /**
  * Is the key an issue names ABSENT from the authored config — its parent
- * reached, and the key itself not there (or `undefined`)? The one question
- * the contract arm asks: a present value of the wrong type is a different
- * finding, and not this judge's.
+ * reached, and the key itself not there (or `undefined`)? The contract arm's
+ * first question: a key left out is `node-config-key-missing` (or the rule's
+ * own code), and a present value is a different finding — refused, for a
+ * builtin, only where {@link builtinValueJudged} holds (#21898).
  */
 function absentAt(config: Readonly<Record<string, unknown>>, path: ReadonlyArray<PropertyKey>): boolean {
   let parent: unknown = config;
@@ -226,6 +231,135 @@ function insideValueSlot(nodeType: string, path: ReadonlyArray<PropertyKey>): bo
     if (path.length <= segments.length) return false;
     return segments.every((segment, i) => segment === '*' || segment === path[i]);
   });
+}
+
+// ─── The builtin VALUE arm (#21898) ───────────────────────────────────
+
+/**
+ * [#21898] A `{token}` the run interpolates — the interpolator's own token
+ * shape (`service-automation` `builtin/template.ts`, `interpolateString`, and
+ * the lint's `TEMPLATE_TOKEN_RE`), which also matches the double-brace and
+ * dollar-brace spellings an author may write. A string carrying one means
+ * something only after interpolation, so the build never judges its type.
+ */
+const INTERPOLATION_TOKEN = /\{[^{}]+\}/;
+
+/**
+ * [#21898] Does `value`, or anything inside it, carry a {@link
+ * INTERPOLATION_TOKEN}? Cycle-safe: a flow arriving as hand-built objects
+ * rather than parsed JSON may hold a self-reference.
+ */
+function carriesInterpolationToken(value: unknown, seen: Set<object> = new Set()): boolean {
+  if (typeof value === 'string') return INTERPOLATION_TOKEN.test(value);
+  if (value === null || typeof value !== 'object' || seen.has(value)) return false;
+  seen.add(value);
+  return (Array.isArray(value) ? value : Object.values(value)).some((v) => carriesInterpolationToken(v, seen));
+}
+
+/** The authored value an issue path names, or `undefined` when the walk leaves the config. */
+function authoredAt(config: Readonly<Record<string, unknown>>, path: ReadonlyArray<PropertyKey>): unknown {
+  let at: unknown = config;
+  for (const segment of path) {
+    if (at === null || typeof at !== 'object') return undefined;
+    at = (at as Record<PropertyKey, unknown>)[segment as PropertyKey];
+  }
+  return at;
+}
+
+/**
+ * [#21898] The builtin node types whose executor parses its contract AFTER
+ * interpolating the whole config — today `http` alone (`builtin/http-nodes.ts`:
+ * `parseNodeConfig(…, interpolate(raw, …))`). Its contract describes the
+ * INTERPOLATED shape, so a `{token}` anywhere may change what the contract
+ * sees — a sole token resolves to its value's real type — and a rule, which may
+ * read keys other than the one its issue names, is judged only on a config that
+ * carries no token at all. Every other builtin parses its config as authored.
+ */
+const PARSED_AFTER_INTERPOLATION: ReadonlySet<string> = new Set(['http']);
+
+/**
+ * [#21898] Builtin config keys whose run-time value may not be the authored
+ * one: `http.signingSecret` — a secret the write-only flow credential channel
+ * holds takes the literal's place before the parse (`builtin/http-nodes.ts`),
+ * so the build cannot know what the contract will see there.
+ */
+const RUN_RESOLVED_KEYS: Readonly<Record<string, readonly string[]>> = { http: ['signingSecret'] };
+
+/** The ledger roles whose slots another judge owns — never re-judged by the value arm. */
+const LEDGER_JUDGED_ROLES: ReadonlySet<string> = new Set(['predicate', 'value']);
+
+/** A ledger path (`fields[].visibleWhen`, `fields.*`) → match segments: `[]` any index, `*` any key. */
+function ledgerSlotSegments(path: string): string[] {
+  const segments: string[] = [];
+  for (const part of path.split('.')) {
+    if (part.endsWith('[]')) segments.push(part.slice(0, -2), '[]');
+    else segments.push(part);
+  }
+  return segments;
+}
+
+/**
+ * [#21898] Does an issue path sit AT or INSIDE a `predicate` or `value` slot the
+ * expression ledger declares for this node type? Those slots have judges of
+ * their own: `predicateSlotRefusal` (whose non-strings the flow parse leaves to
+ * `registerFlow` and `objectstack validate` by ruling — `flow.zod.ts`), and the
+ * value-envelope pass.
+ */
+function atOrInsideJudgedLedgerSlot(nodeType: string, path: ReadonlyArray<PropertyKey>): boolean {
+  return FLOW_NODE_EXPRESSION_PATHS.some((entry) => {
+    if (entry.nodeType !== nodeType || !LEDGER_JUDGED_ROLES.has(entry.role)) return false;
+    const segments = ledgerSlotSegments(entry.path);
+    if (path.length < segments.length) return false;
+    return segments.every((segment, i) =>
+      segment === '*' ? typeof path[i] === 'string'
+        : segment === '[]' ? typeof path[i] === 'number'
+          : segment === path[i]);
+  });
+}
+
+/** One contract issue, as much of it as the value arm reads. */
+interface ContractIssue {
+  readonly code: string;
+  readonly path: ReadonlyArray<PropertyKey>;
+  readonly message: string;
+}
+
+/**
+ * [#21898] Is a builtin contract's issue at a PRESENT key a value the build can
+ * refuse — one the run would refuse for the same reason? Every carve-out is a
+ * place where the build does not know what the run will parse, or where
+ * another judge owns the finding:
+ *
+ *  - key membership — an undeclared key (`unrecognized_keys`) and a tombstoned
+ *    one (a `retiredKey()`, an `invalid_type` expecting `never`): registration
+ *    refuses an undeclared key against the descriptor with its own
+ *    prescriptions, the lint names the retired script keys, and the conversion
+ *    layer rewrites a retired spelling before the two doors that convert first;
+ *  - an ADR-0031 region slot, the slot itself included (`try: 5`): a region's
+ *    shape is `validateControlFlow`'s, and its nodes are the region walk's;
+ *  - a `predicate` or `value` ledger slot, at or inside it
+ *    ({@link atOrInsideJudgedLedgerSlot});
+ *  - a run-resolved key ({@link RUN_RESOLVED_KEYS});
+ *  - a value carrying a `{token}` anywhere inside it: it is never refused for
+ *    its pre-interpolation type, even where the executor parses the authored
+ *    config and so refuses it at the run;
+ *  - for a contract parsed after interpolation ({@link
+ *    PARSED_AFTER_INTERPOLATION}), a rule (`custom`) when the config carries a
+ *    token anywhere.
+ */
+function builtinValueJudged(
+  nodeType: string,
+  authored: Readonly<Record<string, unknown>>,
+  issue: ContractIssue,
+): boolean {
+  if (issue.code === 'unrecognized_keys') return false;
+  if (issue.code === 'invalid_type' && (issue as { readonly expected?: unknown }).expected === 'never') return false;
+  if ((FLOW_REGION_SLOTS_BY_TYPE.get(nodeType) ?? []).some((slot) => slot.key === issue.path[0])) return false;
+  if (atOrInsideJudgedLedgerSlot(nodeType, issue.path)) return false;
+  if ((RUN_RESOLVED_KEYS[nodeType] ?? []).includes(issue.path[0] as string)) return false;
+  if (carriesInterpolationToken(authoredAt(authored, issue.path))) return false;
+  if (PARSED_AFTER_INTERPOLATION.has(nodeType) && issue.code === 'custom' && carriesInterpolationToken(authored)) return false;
+  return true;
 }
 
 /**
@@ -316,26 +450,24 @@ function unrecognizedKeysOf(issue: { readonly code: string }): readonly string[]
 }
 
 /**
- * Every reason a node's `config` is refused on SHAPE or PRESENCE, and (#21654)
- * a write node's static TARGET in the stored-metadata family — the ONE judge
- * `FlowSchema.parse`, `AutomationEngine.registerFlow` (which parses first) and
- * `objectstack validate` share (#20316).
+ * Every reason a node's `config` is refused on SHAPE, PRESENCE or (#21898)
+ * VALUE, and (#21654) a write node's static TARGET in the stored-metadata
+ * family — the ONE judge `FlowSchema.parse`, `AutomationEngine.registerFlow`
+ * (which parses first) and `objectstack validate` share (#20316).
  *
  * Three arms.
  *
- * ## The executor contract — a key it requires, absent
+ * ## The executor contract — a key it requires absent, or a value it refuses
  *
  * For a type in {@link getBuiltinNodeConfigContracts}, the config is parsed
  * against the executor's own contract, on the executor's own condition
  * (`config ?? {}`, as `parseNodeConfig` reads it; `loop` only with a `body`),
- * and a failure is kept ONLY where the key it names is absent from what was
- * authored. That keeps the judge to one question — "would the run refuse this
- * node for a key it leaves out?" — and leaves every other contract finding
- * (a present value of the wrong type, an undeclared key) where it lives
- * today. Issues inside an ADR-0031 region are the region's own and skipped,
- * and so are issues inside a ledger `value` slot (`fields.*`,
- * `assignments.*`): a key missing inside an authored value is a malformed
- * value, refused by the value-envelope pass, not a config key left out.
+ * and a failure is kept where it answers one question: "would the run refuse
+ * this node, for this reason, whatever it is handed?" Issues inside an
+ * ADR-0031 region are the region's own and skipped, and so are issues inside
+ * a ledger `value` slot (`fields.*`, `assignments.*`): a key missing inside an
+ * authored value is a malformed value, refused by the value-envelope pass, not
+ * a config key left out.
  *
  *  - A key the contract simply requires → `node-config-key-missing`, whose
  *    message names the key and the node type.
@@ -343,6 +475,31 @@ function unrecognizedKeysOf(issue: { readonly code: string }): readonly string[]
  *    with no `template` needs `title`; a `lookup` screen field needs its
  *    `reference`) → `node-config-key-required-by-rule`, whose message is the
  *    contract's own.
+ *  - (#21898) A value the contract refuses at a key the author wrote →
+ *    `node-config-refused-by-contract`, anchored at the key
+ *    (`outputVariable` for a `create_record` `42`; `fields[0].min` for a
+ *    screen field's `'1'`), the same code and message the declared plugin
+ *    contract below uses. Kept only where {@link builtinValueJudged} holds —
+ *    key MEMBERSHIP is not judged here (an undeclared key, a tombstoned one),
+ *    nor a region slot, a `predicate` / `value` ledger slot, a run-resolved
+ *    key, or any value carrying a `{token}`: never refused for its
+ *    pre-interpolation type.
+ *
+ * Where the build cannot read the config whole, it reads only what is sound,
+ * and each such type is named here, not skipped in silence:
+ *
+ *  - `http` parses AFTER interpolating its whole config, so a value is judged
+ *    only when nothing inside it carries a `{token}` (its interpolation is then
+ *    the identity), a rule only when the whole config carries none, and
+ *    `signingSecret` never (the credential channel may supply it);
+ *  - `loop` parses only with a `body` (`parsedWhen`), so a legacy flat-graph
+ *    loop is judged for nothing, and a loop with a body on its own keys
+ *    (`collection`, `iteratorVariable`, `indexVariable`, `maxIterations`);
+ *  - the region containers — `loop` (`body`), `parallel` (`branches`) and
+ *    `try_catch` (`try`, `catch`) — hold regions, judged as graphs of their
+ *    own; a container is judged on the keys beside them (`try_catch`'s
+ *    `errorVariable` and `retry`), so `parallel`, whose one key is its region
+ *    slot, is judged for presence alone.
  *
  * A key only the conversion layer spells canonically (`object` →
  * `objectName`, `flow` → `flowName`, …) is judged AFTER the conversion at
@@ -363,7 +520,9 @@ function unrecognizedKeysOf(issue: { readonly code: string }): readonly string[]
  *    type and the key around the contract's own sentence — for an unknown key,
  *    its did-you-mean (`timeout` → `timeoutHours`).
  *
- * The builtin arm stays presence-only: nothing here widens what it judges.
+ * Whole, where the builtin arm is not: no carve-out above applies to it —
+ * the approval executor parses its authored config, with no interpolation and
+ * no region, before it does anything else.
  *
  * ## The decision branch shape
  *
@@ -446,7 +605,9 @@ export function flowNodeConfigRefusals(nodeType: string, config: unknown): FlowN
     if (insideRegion(nodeType, issue.path)) continue;
     if (insideValueSlot(nodeType, issue.path)) continue;
     const absent = absentAt(authored, issue.path);
-    if (!absent && !whole) continue;
+    // [#21898] A present builtin value: refused where the build knows what the
+    // run will parse — see `builtinValueJudged`.
+    if (!absent && !whole && !builtinValueJudged(nodeType, authored, issue)) continue;
     const key = ledgerPathOf(issue.path);
     if (seen.has(key)) continue;
     seen.add(key);

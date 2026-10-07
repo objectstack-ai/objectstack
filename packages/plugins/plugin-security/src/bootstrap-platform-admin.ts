@@ -1134,6 +1134,9 @@ export async function bootstrapPlatformAdmin(
       id: genId('ups'),
       user_id: chosen.id,
       permission_set_id: adminPsId,
+      // [ADR-0131 D4] Both columns, agreeing: `adminPsId` is the row seeded
+      // under exactly this name (`seeded[PLATFORM_ADMIN_PERMISSION_SET_NAME]`).
+      permission_set: PLATFORM_ADMIN_PERMISSION_SET_NAME,
       organization_id: null,
       granted_by: null,
     });

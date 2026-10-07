@@ -18,6 +18,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { HttpConfigSchema, NotifyConfigSchema } from './io-node-config.zod.js';
+import {
+  TYPED_EXPRESSION_DIALECT_ONLY,
+  TYPED_EXPRESSION_SOURCE_REQUIRED,
+  tmpl,
+} from '../shared/expression.zod.js';
 
 /** The unknown-key message, or `undefined` when the shape was accepted. */
 function unknownKeyMessage(schema: { safeParse(v: unknown): { success: boolean; error?: { issues: ReadonlyArray<{ code: string; message: string }> } } }, value: unknown): string | undefined {
@@ -46,7 +51,14 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
       actionUrl: '/task/{record.id}',
       payload: { taskName: '{record.name}' },
     };
-    expect(NotifyConfigSchema.parse(full)).toEqual(full);
+    // Every key survives the parse; `title`/`message` are template slots, so
+    // their bare strings come back as the `{ dialect: 'template', source }`
+    // envelope the slot normalizes to (pinned on its own below).
+    expect(NotifyConfigSchema.parse(full)).toEqual({
+      ...full,
+      title: { dialect: 'template', source: 'New task' },
+      message: { dialect: 'template', source: 'You have been assigned a task.' },
+    });
   });
 
   it('accepts every declared key (template content path)', () => {
@@ -356,6 +368,103 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
       const dataDoc = shape.templateData!.description ?? '';
       expect(dataDoc.length, 'templateData .describe() must not be empty').toBeGreaterThan(0);
       expect(dataDoc).toMatch(/together with `template`/);
+    });
+  });
+
+  // The dialect table in `shared/expression.zod.ts` lists notification
+  // subjects/bodies as `template` slots, and the executor already interpolated
+  // `title`/`message` — but both were `z.string()`, so the envelope `tmpl`
+  // builds was refused at the execute-time parse (`expected string, received
+  // object`). They are typed with the shared template input now: both
+  // spellings parse, to ONE value, and everything else is still refused.
+  describe('title / message — template slots (the bare string and the template envelope)', () => {
+    const TEXT = '[{record.priority}] {record.subject}';
+
+    /** Issues at exactly `[key]`, as `{ code, message }`, or `[]` when accepted. */
+    function issuesAt(value: unknown, key: string): ReadonlyArray<{ code: string; message: string }> {
+      const result = NotifyConfigSchema.safeParse(value);
+      if (result.success) return [];
+      return result.error.issues
+        .filter((i) => i.path.length === 1 && i.path[0] === key)
+        .map((i) => ({ code: i.code, message: i.message }));
+    }
+
+    it('parses both spellings on both keys, and they parse to the same value', () => {
+      const bare = NotifyConfigSchema.safeParse({ recipients: ['u1'], title: TEXT, message: TEXT });
+      const envelope = NotifyConfigSchema.safeParse({
+        recipients: ['u1'],
+        title: { dialect: 'template', source: TEXT },
+        message: tmpl`[{record.priority}] {record.subject}`,
+      });
+      expect(bare.success, JSON.stringify(bare.error?.issues)).toBe(true);
+      expect(envelope.success, JSON.stringify(envelope.error?.issues)).toBe(true);
+      // The executor reads this parsed value, so one value is what makes the
+      // two spellings render one notification (pinned end to end in
+      // service-automation's `notify-template-slots.test.ts`).
+      const expected = { dialect: 'template', source: TEXT };
+      expect(bare.data?.title).toEqual(expected);
+      expect(bare.data?.message).toEqual(expected);
+      expect(envelope.data?.title).toEqual(expected);
+      expect(envelope.data?.message).toEqual(expected);
+    });
+
+    it('still refuses a value that is neither a string nor a template envelope — one issue at the key', () => {
+      for (const key of ['title', 'message'] as const) {
+        for (const value of [42, true, ['a'], { source: TEXT }, { dialect: 'cel', source: 'record.x' }]) {
+          const issues = issuesAt({ recipients: ['u1'], title: 'x', [key]: value }, key);
+          expect(issues, `${key} = ${JSON.stringify(value)}`).toEqual([
+            { code: 'invalid_union', message: TYPED_EXPRESSION_DIALECT_ONLY.template },
+          ]);
+        }
+      }
+    });
+
+    it('refuses a blank bare string at the slot (the shared non-blank rule)', () => {
+      for (const key of ['title', 'message'] as const) {
+        for (const value of ['', '   ']) {
+          expect(issuesAt({ recipients: ['u1'], title: 'x', [key]: value }, key), `${key} = ${JSON.stringify(value)}`)
+            .toEqual([{ code: 'invalid_union', message: TYPED_EXPRESSION_SOURCE_REQUIRED.template }]);
+        }
+      }
+    });
+
+    it('refuses an envelope with no non-blank `source` — the executor renders `source` and nothing else', () => {
+      // The shared envelope arm is the persistence contract and admits both of
+      // these; this slot's executor cannot render either, so the slot refuses
+      // them by its own rule rather than letting a `title` fail every run or a
+      // `message` go out empty.
+      for (const key of ['title', 'message'] as const) {
+        for (const value of [
+          { dialect: 'template', ast: { kind: 'text' } },
+          { dialect: 'template', source: '   ' },
+        ]) {
+          const issues = issuesAt({ recipients: ['u1'], title: 'x', [key]: value }, key);
+          expect(issues.map((i) => i.code), `${key} = ${JSON.stringify(value)}`).toEqual(['custom']);
+          expect(issues[0]!.message).toContain('`source`');
+        }
+      }
+    });
+
+    it('keeps the content-path rules exactly: an envelope title still excludes `template`, and one still satisfies "needs a content source"', () => {
+      const combined = issuesAt(
+        { recipients: ['u1'], template: 'crm.large_deal_won', title: tmpl`Deal {record.name} won` },
+        'template',
+      );
+      expect(combined.map((i) => i.code)).toEqual(['custom']);
+      expect(NotifyConfigSchema.safeParse({ recipients: ['u1'], title: tmpl`Deal {record.name} won` }).success)
+        .toBe(true);
+    });
+
+    it('says what the slot takes and which placeholder spelling its renderer reads', () => {
+      const shape = (NotifyConfigSchema as unknown as { shape: Record<string, { description?: string }> }).shape;
+      for (const key of ['title', 'message'] as const) {
+        const doc = shape[key]!.description ?? '';
+        expect(doc.length, `${key} .describe() must not be empty`).toBeGreaterThan(0);
+        expect(doc).toContain('`{ dialect: \'template\', source }`');
+        expect(doc).toContain('`{token}`');
+        // The text is interpolated, so "sent verbatim" was never true of it.
+        expect(doc).not.toMatch(/verbatim/);
+      }
     });
   });
 });
