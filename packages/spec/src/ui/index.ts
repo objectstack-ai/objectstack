@@ -70,6 +70,11 @@ export * from './notification.zod';
 // it). `EmbedConfigSchema` / `EmbedConfig` were REMOVED at #5015 per ADR-0049 —
 // one file, two verdicts. See the block in that module.
 export * from './sharing.zod';
+// Which forms a `view` body opens to anonymous intake: the candidates half of
+// the one rule `SharingConfigSchema` feeds. The server's anonymous form doors
+// read these bindings through `@objectstack/metadata-core`, which re-exports
+// them, and a console imports them from here instead of re-reading the keys.
+export * from './anonymous-form-intake';
 
 // ---------------------------------------------------------------------------
 // RETIRED in v17 (#4988, ADR-0049 enforce-or-remove): the five interaction

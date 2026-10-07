@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import * as specUi from '@objectstack/spec/ui';
 import { SharingConfigSchema } from '@objectstack/spec/ui';
 import {
     anonymousFormIntakeCandidates,
@@ -15,6 +16,8 @@ import {
     anonymousFormSharingPath,
     publicFormSlug,
 } from './anonymous-form-intake.js';
+import * as intakeModule from './anonymous-form-intake.js';
+import * as metadataCore from './index.js';
 
 const OPEN = { enabled: true, allowAnonymous: true, publicLink: '/forms/contact-us' };
 
@@ -313,5 +316,23 @@ describe('anonymousFormIntakeWithdrawnIn — an explicit withdrawal of the same 
             expect(closedIn(row({ formViews: { a: { sharing: { ...LINK_A, enabled: false } }, b: { sharing: LINK_B } } })))
                 .toEqual([]);
         });
+    });
+});
+
+// The candidates half is declared in `@objectstack/spec/ui` and re-exported by
+// this package. "One copy" is checkable only as IDENTITY: a wrapper or a copy
+// answers the same today and drifts tomorrow, while the same binding cannot.
+describe('the candidates half is the spec binding itself, re-exported (one copy, not a copy)', () => {
+    const NAMES = [
+        'publicFormSlug',
+        'anonymousFormIntakeSlug',
+        'anonymousFormIntakeCandidates',
+        'anonymousFormIntakeSlugs',
+    ] as const;
+
+    it.each(NAMES)('%s: this module and the package barrel export the @objectstack/spec/ui function', (name) => {
+        expect(typeof specUi[name]).toBe('function');
+        expect(intakeModule[name]).toBe(specUi[name]);
+        expect(metadataCore[name]).toBe(specUi[name]);
     });
 });
