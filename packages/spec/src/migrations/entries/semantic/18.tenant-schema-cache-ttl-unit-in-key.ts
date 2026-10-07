@@ -31,9 +31,9 @@ export const entry: SemanticMigration = {
     + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
     + 'and its test the only occurrences are the four generated rows in '
     + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-    + 'objectui checkout — `.objectui-sha` = `0abd4f9f8769fc4c19ad2f96707684876f74c09f` — spells it 0 '
-    + 'times across 7650 tracked files, against lit controls `TTL` 182 and `tenant` 1318 on the '
-    + 'same corpus (0 across 7632, against 182 and 1318, at 9dfaca654; 0 across 7579, against 182 and 1317, at 2e818d0b5; 0 across 10267, against 180 and 1238, at ab1879721; 0 across 10071, against 181 and 1237, at 89cad75d5; 0 across 9912, against 181 and 1237, at 31971ff1e; 0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
+    + 'objectui checkout — `.objectui-sha` = `a58626c88dc85954bd0af24f16ebb69454c03eee` — spells it 0 '
+    + 'times across 7754 tracked files, against lit controls `TTL` 184 and `tenant` 1319 on the '
+    + 'same corpus (0 across 7650, against 182 and 1318, at 0abd4f9f8; 0 across 7632, against 182 and 1318, at 9dfaca654; 0 across 7579, against 182 and 1317, at 2e818d0b5; 0 across 10267, against 180 and 1238, at ab1879721; 0 across 10071, against 181 and 1237, at 89cad75d5; 0 across 9912, against 181 and 1237, at 31971ff1e; 0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
     + 'and 987, at 62597c588).',
   acceptanceCriteria:
     'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '

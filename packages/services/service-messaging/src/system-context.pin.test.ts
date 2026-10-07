@@ -26,9 +26,13 @@ import { SqlNotificationOutbox } from './sql-outbox.js';
 import { SqlHttpOutbox } from './sql-http-outbox.js';
 import { MessagingService } from './messaging-service.js';
 import { createInboxChannel } from './inbox-channel.js';
+import { RecipientResolver } from './recipient-resolver.js';
+import { createEmailChannel } from './email-channel.js';
+import { createSmsChannel } from './sms-channel.js';
+import { NotificationTemplateStore } from './template-renderer.js';
 import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
-type Call = { verb: string; object: string; context: unknown };
+type Call = { verb: string; object: string; context: unknown; query?: any; data?: any; options?: any; answered?: unknown };
 
 function silentLogger() {
     return { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
@@ -44,21 +48,28 @@ function recordingEngine(answer: (verb: string, object: string, query: any) => u
     const ctxOf = (query: any, options: any) => options?.context ?? query?.context;
     const engine = {
         async find(object: string, query: any, options?: any) {
-            calls.push({ verb: 'find', object, context: ctxOf(query, options) });
-            return (answer('find', object, query) as unknown[]) ?? [];
+            // Recorded before it is answered, so a read the double fails is counted too.
+            const call: Call = { verb: 'find', object, context: ctxOf(query, options), query };
+            calls.push(call);
+            const rows = (answer('find', object, query) as unknown[]) ?? [];
+            // [#21908] The caller's bound holds here as it does on the engine.
+            call.answered = typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
+            return call.answered;
         },
         async findOne(object: string, query: any, options?: any) {
             assertEngineFindOnePredicate(object, query);
-            calls.push({ verb: 'findOne', object, context: ctxOf(query, options) });
-            return answer('findOne', object, query) ?? null;
+            const call: Call = { verb: 'findOne', object, context: ctxOf(query, options), query };
+            calls.push(call);
+            call.answered = answer('findOne', object, query) ?? null;
+            return call.answered;
         },
         async insert(object: string, data: Record<string, unknown>, options?: any) {
-            calls.push({ verb: 'insert', object, context: options?.context });
+            calls.push({ verb: 'insert', object, context: options?.context, data, options });
             return { id: `${object}_1`, ...data };
         },
         async update(object: string, data: Record<string, unknown>, options?: any) {
             assertEngineUpdateDispatch(data, options);
-            calls.push({ verb: 'update', object, context: options?.context });
+            calls.push({ verb: 'update', object, context: options?.context, data, options });
             return 1;
         },
         async count() { return 0; },
@@ -159,6 +170,253 @@ describe('[#21913] the emit fan-out carries the explicit system opt-in', () => {
         ]));
         expect(calls.filter((c) => c.object === 'sys_user')).toHaveLength(2); // address + locale
         expect(calls.filter((c) => c.object === 'sys_notification_preference')).toHaveLength(2);
+        expectAllSystem(calls);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// [#21908] Stage 1 of the closure: the producers the services-lane slice left.
+// ---------------------------------------------------------------------------
+
+/** Plain-equality `where` over seeded rows — anything else is refused, loudly. */
+function matchRows(rows: Array<Record<string, unknown>>, where: Record<string, unknown> = {}) {
+    return rows.filter((r) => Object.entries(where).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`recording engine: unimplemented combinator ${k}`);
+        return (r[k] ?? null) === (v ?? null);
+    }));
+}
+
+const USER_SCOPED = new Set(['sys_inbox_message', 'sys_notification_receipt']);
+
+/**
+ * Two users' inbox rows and receipts, and the events they are about. Every read
+ * answers only what its `where` selects, so a call that dropped its `user_id`
+ * term would be answered the other user's rows — and the negative pin sees it.
+ */
+function twoUserInbox() {
+    const rows: Record<string, Array<Record<string, unknown>>> = {
+        sys_inbox_message: [
+            { id: 'm1', user_id: 'u_a', notification_id: 'n1', topic: 't', title: 'a1', created_at: '2026-01-03' },
+            { id: 'm2', user_id: 'u_b', notification_id: 'n2', topic: 't', title: 'b1', created_at: '2026-01-02' },
+            { id: 'm3', user_id: 'u_a', notification_id: 'n3', topic: 't', title: 'a2', created_at: '2026-01-01' },
+        ],
+        sys_notification_receipt: [
+            { id: 'r1', notification_id: 'n1', user_id: 'u_a', channel: 'inbox', state: 'delivered' },
+            { id: 'r2', notification_id: 'n2', user_id: 'u_b', channel: 'inbox', state: 'delivered' },
+        ],
+        sys_notification: [
+            { id: 'n1', organization_id: 'org_1' },
+            { id: 'n2', organization_id: 'org_2' },
+            { id: 'n3', organization_id: 'org_1' },
+        ],
+    };
+    return recordingEngine((verb, object, query) => {
+        const hits = matchRows(rows[object] ?? [], query?.where);
+        return verb === 'find' ? hits : (hits[0] ?? null);
+    });
+}
+
+async function driveInboxAs(engine: any, userId: string) {
+    const service = new MessagingService({ logger: silentLogger(), getData: () => engine } as any);
+    // A saturated window, so `countUnreadTotal` runs too.
+    const listed = await service.listInbox(userId, { limit: 2 });
+    // n1 has a receipt (the update branch); n3 has none (the insert branch,
+    // which reads the event's organization).
+    await service.markRead(userId, ['n1']);
+    await service.markRead(userId, ['n3']);
+    const swept = await service.markAllRead(userId);
+    return { listed, swept };
+}
+
+describe('[#21908] Q1 — the inbox read-state producers: the opt-in inside the service, the door-derived user scope kept', () => {
+    it('every call carries isSystem, and every call on the user’s rows carries the user id in its where or its stamp', async () => {
+        const { engine, calls } = twoUserInbox();
+        const { listed } = await driveInboxAs(engine, 'u_a');
+        expect(listed.notifications.map((n) => n.id)).toEqual(['n1', 'n3']);
+
+        // The population first: every producer the ruling names actually ran —
+        // listInbox's window and countUnreadTotal, readReceiptStates,
+        // unreadNotificationIds, upsertReadReceipt's read, update and insert,
+        // and notificationOrganization.
+        const seen = (verb: string, object: string) => calls.filter((c) => c.verb === verb && c.object === object);
+        expect(seen('find', 'sys_inbox_message').length).toBeGreaterThanOrEqual(3);
+        expect(seen('find', 'sys_notification_receipt').length).toBeGreaterThanOrEqual(2);
+        expect(seen('findOne', 'sys_notification_receipt').length).toBeGreaterThanOrEqual(2);
+        // (The double keeps no write state, so mark-all-read re-flips n1 and
+        // re-inserts n3's receipt: each branch runs at least once.)
+        expect(seen('update', 'sys_notification_receipt').length).toBeGreaterThanOrEqual(1);
+        expect(seen('insert', 'sys_notification_receipt').length).toBeGreaterThanOrEqual(1);
+        expect(seen('findOne', 'sys_notification').length).toBeGreaterThanOrEqual(1);
+        expectAllSystem(calls);
+
+        // Reads of the user's rows: keyed on the door-derived user id.
+        for (const c of calls.filter((x) => (x.verb === 'find' || x.verb === 'findOne') && USER_SCOPED.has(x.object))) {
+            expect(c.query?.where?.user_id, `${c.verb} on ${c.object}`).toBe('u_a');
+        }
+        // The receipt it inserts: stamped with it.
+        for (const insert of seen('insert', 'sys_notification_receipt')) {
+            expect(insert.data).toMatchObject({ user_id: 'u_a', notification_id: 'n3', organization_id: 'org_1' });
+        }
+        // The receipt it updates: addressed by an id a user-keyed read returned, and by nothing else.
+        const returnedIds = seen('findOne', 'sys_notification_receipt').map((c) => (c.answered as any)?.id).filter(Boolean);
+        for (const update of seen('update', 'sys_notification_receipt')) {
+            expect(update.options.where).toEqual({ id: 'r1' });
+        }
+        expect(returnedIds).toContain('r1');
+        // The event read: one row by id, two columns, used only as the stamp.
+        for (const event of seen('findOne', 'sys_notification')) {
+            expect(event.query).toEqual({ where: { id: 'n3' }, fields: ['id', 'organization_id'] });
+        }
+    });
+
+    it('⛔ negative: no call made for one user reads, writes or addresses another user’s rows', async () => {
+        const { engine, calls } = twoUserInbox();
+        await driveInboxAs(engine, 'u_a');
+
+        // Every row any read answered belongs to the caller…
+        for (const c of calls.filter((x) => USER_SCOPED.has(x.object) && (x.verb === 'find' || x.verb === 'findOne'))) {
+            const answered = c.verb === 'find' ? (c.answered as any[]) : [c.answered].filter(Boolean);
+            for (const row of answered) expect(row.user_id, `${c.verb} on ${c.object}`).toBe('u_a');
+        }
+        // …and nothing is written as, or onto, u_b: not their receipt r2, not their inbox row.
+        for (const c of calls.filter((x) => x.verb === 'insert' || x.verb === 'update')) {
+            expect(c.data?.user_id ?? 'u_a').toBe('u_a');
+            expect(c.options?.where?.id).not.toBe('r2');
+        }
+    });
+});
+
+describe('[#21908] Q2 — `owner_of:` carries the opt-in, reads only the owner fields, and yields only recipient ids', () => {
+    it('resolveOwnerOf: isSystem, a projection of id plus the owner fields, and the owner id alone back', async () => {
+        const { engine, calls } = recordingEngine((verb, object) =>
+            verb === 'findOne' && object === 'deal'
+                ? { id: 'd1', owner_id: 'u_owner', name: 'Confidential deal', amount: 900_000 }
+                : null);
+        const resolver = new RecipientResolver({ getData: () => engine, logger: silentLogger() });
+
+        const ids = await resolver.resolve(['owner_of:deal:d1', { ownerOf: { object: 'deal', id: 'd1' } } as any]);
+
+        // Only the recipient id leaves the resolver — never a value the record carried.
+        expect(ids).toEqual(['u_owner']);
+        const reads = calls.filter((c) => c.object === 'deal');
+        expect(reads).toHaveLength(2);
+        for (const read of reads) {
+            expect(read.context).toEqual({ isSystem: true });
+            expect(read.query).toEqual({
+                where: { id: 'd1' },
+                fields: ['id', 'owner_id', 'assigned_to', 'assignee_id', 'owner', 'assignee'],
+            });
+        }
+    });
+
+    it('nothing the read returns reaches the emitter: emit() answers recipient ids and counts only', async () => {
+        const { engine } = recordingEngine((verb, object) =>
+            verb === 'findOne' && object === 'deal'
+                ? { id: 'd1', owner_id: 'u_owner', name: 'Confidential deal' }
+                : (verb === 'find' ? [] : null));
+        const service = new MessagingService({ logger: silentLogger(), getData: () => engine } as any);
+        service.registerChannel(createInboxChannel({ getData: () => engine }));
+
+        const result = await service.emit({ topic: 'deal.won', audience: ['owner_of:deal:d1'], channels: ['inbox'], title: 't', body: 'b' } as any);
+
+        expect(result.delivered).toBe(1);
+        expect(JSON.stringify(result)).not.toContain('Confidential deal');
+    });
+});
+
+describe('[#21908] rows 24 onward — the remaining fan-out and outbox calls carry the explicit system opt-in', () => {
+    it('resolveRole and resolveTeam', async () => {
+        const { engine, calls } = recordingEngine((verb) => (verb === 'find' ? [{ user_id: 'u1' }] : null));
+        const resolver = new RecipientResolver({ getData: () => engine, logger: silentLogger() });
+        expect(await resolver.resolve(['role:admin', 'team:t1'], { organizationId: 'org_1' })).toEqual(['u1']);
+        expect(calls.map((c) => c.object)).toEqual(['sys_member', 'sys_team_member']);
+        expectAllSystem(calls);
+    });
+
+    it('emit()’s dedup lookup', async () => {
+        const { engine, calls } = recordingEngine((verb, object, query) =>
+            verb === 'findOne' && object === 'sys_notification' && query?.where?.dedup_key ? { id: 'n_prior' } : null);
+        const service = new MessagingService({ logger: silentLogger(), getData: () => engine } as any);
+        const result = await service.emit({ topic: 't', audience: ['u1'], channels: ['inbox'], dedupKey: 'k1', title: 't', body: 'b' } as any);
+        expect(result).toMatchObject({ notificationId: 'n_prior', deduped: true });
+        expect(calls).toHaveLength(1);
+        expectAllSystem(calls);
+    });
+
+    it('SqlNotificationOutbox: enqueue (dedup read, insert, race read-back), ack (state read, CAS write, read-back) and list', async () => {
+        let inserted = false;
+        const { engine, calls } = recordingEngine((verb, _object, query) => {
+            if (verb === 'findOne' && query?.where?.notification_id) return inserted ? { id: 'd_winner' } : null;
+            if (verb === 'findOne' && Array.isArray(query?.fields) && query.fields.includes('claimed_by')) {
+                return { status: 'in_flight', attempts: 0, claimed_by: 'node-a', claimed_at: NOW };
+            }
+            if (verb === 'findOne') return { status: 'success', attempts: 1 };
+            return [];
+        });
+        // The insert loses a dedup race once, so the winner read-back runs too.
+        const realInsert = engine.insert;
+        engine.insert = async (...args: any[]) => { await realInsert(...args); inserted = true; throw new Error('unique violation'); };
+        const outbox = new SqlNotificationOutbox(engine, { partitionCount: 1 });
+
+        expect(await outbox.enqueue({ notificationId: 'n1', recipientId: 'u1', channel: 'inbox' } as any)).toBe('d_winner');
+        await outbox.ack({ id: 'd1', claimedBy: 'node-a', claimedAt: NOW } as any, { success: true } as any);
+        await outbox.list({ status: 'success' });
+
+        expect(calls.map((c) => c.verb)).toEqual(['findOne', 'insert', 'findOne', 'findOne', 'update', 'findOne', 'find']);
+        expectAllSystem(calls);
+    });
+
+    it('SqlHttpOutbox: enqueue and recordUndeliverable, ack (both arities) and list', async () => {
+        const { engine, calls } = recordingEngine((verb, _object, query) => {
+            if (verb === 'findOne' && query?.where?.dedup_key) return null;
+            if (verb === 'findOne' && Array.isArray(query?.fields) && query.fields.includes('claimed_by')) {
+                return { status: 'in_flight', attempts: 0, claimed_by: 'node-a', claimed_at: NOW };
+            }
+            if (verb === 'findOne' && Array.isArray(query?.fields) && query.fields.length === 1) return { attempts: 0 };
+            if (verb === 'findOne') return { status: 'success', attempts: 1 };
+            return [];
+        });
+        const outbox = new SqlHttpOutbox(engine, { partitionCount: 1 });
+        const base = { source: 'webhook', refId: 'wh1', url: 'https://example.test/hook', payload: {} };
+
+        await outbox.enqueue({ ...base, dedupKey: 'k1' } as any);
+        await outbox.recordUndeliverable({ ...base, dedupKey: 'k2', reason: 'no secret' } as any);
+        await outbox.ack('h1', { success: true } as any, { claimedBy: 'node-a', claimedAt: NOW } as any);
+        await outbox.ack('h2', { success: false, error: 'x' } as any);
+        await outbox.list({ source: 'webhook' });
+
+        expect(calls.map((c) => c.verb)).toEqual([
+            'findOne', 'insert', 'findOne', 'insert', // enqueue, recordUndeliverable
+            'findOne', 'update', 'findOne', // the credentialed ack
+            'findOne', 'update', // the by-id ack
+            'find', // list
+        ]);
+        expect(calls.every((c) => c.object === 'sys_http_delivery')).toBe(true);
+        expectAllSystem(calls);
+    });
+
+    it('the email and SMS recipient reads — the first read and the address-only retry — and the template read', async () => {
+        let failFirst = true;
+        const { engine, calls } = recordingEngine((verb, object, query) => {
+            if (verb !== 'findOne') return [];
+            if (object === 'sys_user' && failFirst && query?.fields?.length === 2) {
+                failFirst = false;
+                throw new Error('no locale column');
+            }
+            if (object === 'sys_user') return { email: 'ada@example.com', phone_number: '+15555550100' };
+            return null;
+        });
+        const store = new NotificationTemplateStore({ getData: () => engine });
+        const email = createEmailChannel({ getEmail: () => ({ async send() { return { id: 'e1' }; } }) as any, getData: () => engine, store });
+        const sms = createSmsChannel({ getSms: () => ({ async send() { return { id: 's1' }; } }) as any, getData: () => engine, store });
+        const notification = { title: 't', body: 'b', recipients: ['u1'], topic: 'deal.won' };
+
+        expect((await email.send({ logger: silentLogger() }, { notification, channel: 'email', recipient: 'u1' } as any)).ok).toBe(true);
+        expect((await sms.send({ logger: silentLogger() }, { notification, channel: 'sms', recipient: 'u1' } as any)).ok).toBe(true);
+
+        // email: failed read + retry; sms: one read; and the template reads.
+        expect(calls.filter((c) => c.object === 'sys_user')).toHaveLength(3);
+        expect(calls.filter((c) => c.object === 'sys_notification_template').length).toBeGreaterThanOrEqual(2);
         expectAllSystem(calls);
     });
 });

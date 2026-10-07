@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { MessagingService } from './messaging-service.js';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { MessagingService, NOTIFICATION_EVENT_OBJECT } from './messaging-service.js';
 import { InboxCallerError } from './inbox-caller.js';
 import { MemoryNotificationOutbox } from './memory-outbox.js';
 import type { Delivery, MessagingChannel, SendResult } from './channel.js';
@@ -1392,5 +1392,139 @@ describe('MessagingService — plugin-facing inbox read scoped to the authentica
             await expectRefusal(() => new MessagingService({ logger }).listInboxAsCaller(undefined));
             await expectRefusal(() => new MessagingService({ logger }).listInboxAsCaller({}));
         });
+    });
+});
+
+/**
+ * [#22026] A read receipt belongs to a RECIPIENT (ADR-0030 keys it by
+ * recipient). `markRead` inserts a `read` receipt only for a notification
+ * delivered to that user: a receipt keyed on them already exists (it is
+ * flipped, as before), or their inbox holds a message for it. Any other id
+ * writes no row, is not counted, and never has its event's organization read.
+ *
+ * Both halves are pinned on the same notification, so the only difference
+ * between the green half and the refused half is who asks. The doubles are
+ * this file's stateful `inboxEngine`, observed through spies.
+ */
+describe('[#22026] markRead writes a read receipt only for a notification delivered to that user', () => {
+    const logger = silentLogger();
+
+    /**
+     * One notification event, delivered to `u_recipient` only: their inbox
+     * message exists and its best-effort `delivered` receipt never landed —
+     * the case the insert limb exists for.
+     */
+    function deliveredToOne() {
+        const engine = inboxEngine({
+            inbox: [{ id: 'm1', user_id: 'u_recipient', notification_id: 'n1', title: 'A', created_at: '1' }],
+        });
+        engine.store[NOTIFICATION_EVENT_OBJECT] = [{ id: 'n1', organization_id: 'org_1' }];
+        const findOne = vi.spyOn(engine, 'findOne');
+        const insert = vi.spyOn(engine, 'insert');
+        const svc = new MessagingService({ logger, getData: () => engine });
+        return { engine, findOne, insert, svc };
+    }
+    const callsOn = (spy: { mock: { calls: any[][] } }, object: string) =>
+        spy.mock.calls.filter(([o]) => o === object);
+
+    it('the recipient half: an inbox message alone is delivery, so the receipt persists, stamped, and counts 1', async () => {
+        const { engine, findOne, svc } = deliveredToOne();
+
+        expect(await svc.markRead('u_recipient', ['n1'])).toEqual({ success: true, readCount: 1 });
+
+        expect(engine.store.sys_notification_receipt).toHaveLength(1);
+        expect(engine.store.sys_notification_receipt[0]).toMatchObject({
+            notification_id: 'n1', user_id: 'u_recipient', channel: 'inbox', state: 'read', organization_id: 'org_1',
+        });
+        expect(callsOn(findOne, NOTIFICATION_EVENT_OBJECT)).toHaveLength(1);
+        expect((await svc.listInbox('u_recipient')).unreadCount).toBe(0);
+    });
+
+    it('⛔ the non-recipient half: the same notification writes no row, counts 0, and its organization is never read', async () => {
+        const { engine, findOne, insert, svc } = deliveredToOne();
+
+        expect(await svc.markRead('u_other', ['n1'])).toEqual({ success: true, readCount: 0 });
+
+        expect(engine.store.sys_notification_receipt).toEqual([]);
+        expect(callsOn(insert, 'sys_notification_receipt')).toHaveLength(0);
+        expect(callsOn(findOne, NOTIFICATION_EVENT_OBJECT)).toHaveLength(0);
+        // Nothing of the recipient's moved either.
+        expect((await svc.listInbox('u_recipient')).unreadCount).toBe(1);
+    });
+
+    it('⛔ the in-process door answers the same: markReadAsCaller for a non-recipient counts 0 and writes nothing', async () => {
+        const { engine, svc } = deliveredToOne();
+
+        expect(await svc.markReadAsCaller({ userId: 'u_other' }, ['n1'])).toEqual({ success: true, readCount: 0 });
+        expect(engine.store.sys_notification_receipt).toEqual([]);
+    });
+
+    it('a mixed call counts only the delivered id, and writes only its receipt', async () => {
+        const { engine, svc } = deliveredToOne();
+
+        expect(await svc.markRead('u_recipient', ['n1', 'n_never_delivered'])).toEqual({ success: true, readCount: 1 });
+        expect(engine.store.sys_notification_receipt.map((r: any) => r.notification_id)).toEqual(['n1']);
+    });
+
+    it('the receipt half: a delivered receipt keyed on the user is flipped in place, with no inbox message (unchanged)', async () => {
+        const engine = inboxEngine({
+            receipts: [{ id: 'r1', notification_id: 'n2', user_id: 'u_recipient', channel: 'inbox', state: 'delivered' }],
+        });
+        const insert = vi.spyOn(engine, 'insert');
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        expect(await svc.markRead('u_recipient', ['n2'])).toEqual({ success: true, readCount: 1 });
+        expect(engine.store.sys_notification_receipt).toHaveLength(1);
+        expect(engine.store.sys_notification_receipt[0]).toMatchObject({ id: 'r1', state: 'read' });
+        expect(insert).not.toHaveBeenCalled();
+    });
+
+    it('the delivery check reads only the caller’s own inbox, under the system opt-in, projecting the id', async () => {
+        const { findOne, svc } = deliveredToOne();
+
+        await svc.markRead('u_other', ['n1']);
+
+        const inboxReads = callsOn(findOne, 'sys_inbox_message');
+        expect(inboxReads).toHaveLength(1);
+        expect(inboxReads[0][1]).toEqual({ where: { user_id: 'u_other', notification_id: 'n1' }, fields: ['id'] });
+        expect(inboxReads[0][2]).toEqual({ context: { isSystem: true } });
+    });
+
+    it('an inbox row with no notification_id: naming its row id writes nothing, and the row lists unread as it always did', async () => {
+        // listInbox looks read-state up only through a row's notification_id,
+        // so this row read as unread before the check existed, whatever
+        // receipt a mark-read wrote under its row id. It still does.
+        const engine = inboxEngine({
+            inbox: [{ id: 'm_no_event', user_id: 'u_recipient', title: 'X', created_at: '1' }],
+        });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        expect(await svc.markRead('u_recipient', ['m_no_event'])).toEqual({ success: true, readCount: 0 });
+        expect(engine.store.sys_notification_receipt).toEqual([]);
+        const listed = await svc.listInbox('u_recipient');
+        expect(listed.notifications).toMatchObject([{ id: 'm_no_event', read: false }]);
+        expect(listed.unreadCount).toBe(1);
+    });
+
+    it('markAllRead needs no check of its own: every id it sweeps comes from the user’s own inbox, so each is delivered', async () => {
+        const engine = inboxEngine({
+            inbox: [
+                { id: 'm1', user_id: 'u_recipient', notification_id: 'n1', title: 'A', created_at: '1' },
+                { id: 'm2', user_id: 'u_recipient', notification_id: 'n2', title: 'B', created_at: '2' },
+                { id: 'm3', user_id: 'u_other', notification_id: 'n3', title: 'C', created_at: '3' },
+            ],
+            receipts: [{ id: 'r1', notification_id: 'n1', user_id: 'u_recipient', channel: 'inbox', state: 'delivered' }],
+        });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        // n1 flips its delivered receipt; n2 has only its inbox message and is inserted.
+        expect(await svc.markAllRead('u_recipient')).toEqual({ success: true, readCount: 2 });
+        const receipts = engine.store.sys_notification_receipt;
+        expect(receipts.map((r: any) => [r.notification_id, r.user_id, r.state])).toEqual([
+            ['n1', 'u_recipient', 'read'],
+            ['n2', 'u_recipient', 'read'],
+        ]);
+        expect((await svc.listInbox('u_recipient')).unreadCount).toBe(0);
+        expect((await svc.listInbox('u_other')).unreadCount).toBe(1);
     });
 });

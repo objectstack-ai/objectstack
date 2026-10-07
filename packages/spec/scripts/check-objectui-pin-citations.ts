@@ -808,11 +808,20 @@ export function verifyAssertion(
  * `53ded82b` when that docblock's claim about the map renderer was corrected:
  * the two flatten sites and their whitelist, the renderer's own
  * `ObjectMapConfigSchema`, the `safeParse` and the spread beside it, and
- * `LIST_VIEW_LOCAL_OVERRIDES`. 145 objectui anchors elsewhere in
- * `packages/spec/src` still carry none — `--verify-anchors` prints that
- * worklist.
+ * `LIST_VIEW_LOCAL_OVERRIDES`.
+ *
+ * The next three are the props-read sites of three `ComponentPropsMap` rows in
+ * `src/ui/component.zod.ts`, re-read at pin `a58626c88`: the
+ * `forwarded: ActionDef` literal of `action:button` and of `action:icon`, where
+ * the keys each row forwards to the runner are enumerated, and the `readProps`
+ * call of `element:definition-list`, whose type literal is that row's key set.
+ * The section's other three rows (`action:group`, `action:menu`,
+ * `element:repeater`) carry none yet: their cited lines do not hold at that
+ * pin, and a quote goes only beside a line that does. 418 objectui anchors in
+ * `packages/spec/src` still carry none, read against objectui `a58626c88` —
+ * `--verify-anchors` prints that worklist.
  */
-const ASSERTED_ANCHOR_FLOOR = 7;
+const ASSERTED_ANCHOR_FLOOR = 10;
 
 // ---------------------------------------------------------------------------
 // self-test — the shapes, not the corpus

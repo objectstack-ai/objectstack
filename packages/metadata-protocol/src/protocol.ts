@@ -16746,10 +16746,9 @@ export class ObjectStackProtocolImplementation implements
      *
      * [#21922] The layered read asks this predicate through
      * {@link declinesStoredRow}, which also declines the stored row of a
-     * code-defined datasource name. The published doors ask this predicate
-     * alone, so for such a name they still serve the stored row: the active
-     * overlay row, as the route's spec describes it. That door is not moved
-     * here.
+     * code-defined datasource name. [#21986] The published doors ask
+     * {@link declinesStoredRow} in its place, so for such a name they serve
+     * the code definition too.
      */
     isShippedFlowName(type: string, name: unknown): boolean {
         if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'flow') return false;
@@ -16806,8 +16805,18 @@ export class ObjectStackProtocolImplementation implements
      * (`storedRowServed`, the fact {@link servedLockState}'s `deletable`
      * reads), the `_lock` gate's overlay layer ({@link overlayLockLayerAt},
      * read whether or not the row is adopted), and the DELETE's own row probe.
+     *
+     * [#21986] PUBLIC so a door that serves a stored row out of the layered
+     * read can ASK it, never re-derive it: `GET /meta/:type/:name/published`
+     * (the REST route and its dispatcher twin) reads {@link getMetaItemLayered}
+     * and, when a stored row is present and this predicate holds for the
+     * answer's `type` and `name`, serves the `effective` layer (the loader's
+     * body, or the code definition) instead of the row. Every other stored row
+     * is served as before. A door asks this method alone: ⛔ no door restates
+     * either half, or the host's code-datasource set. A write door does not
+     * ask it; the writes keep their own refusals.
      */
-    private declinesStoredRow(type: string, name: unknown): boolean {
+    declinesStoredRow(type: string, name: unknown): boolean {
         if (this.isShippedFlowName(type, name)) return true;
         return typeof name === 'string' && name !== '' && this.isDeclaredCodeDatasource(type, name);
     }

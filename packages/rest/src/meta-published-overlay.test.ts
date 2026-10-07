@@ -586,11 +586,14 @@ describe('[#21002] the published door follows the layered read for a shipped flo
     it('control: a protocol that brings no such predicate keeps today\'s answer, the stored row', async () => {
         const { engine, metadata, protocol } = shippedHarness();
         await storeActiveRow(engine, 'flow', SHIPPED, flowBody(SHIPPED, 'STORED'));
-        // The same protocol with the predicate hidden from the door only; its
-        // own methods keep calling it on the real instance.
+        // The same protocol with the predicate the door asks hidden from the
+        // door only; its own methods keep calling it on the real instance.
+        // [#21986] That predicate is `declinesStoredRow`. `isShippedFlowName`
+        // stays visible, so this also pins that the door does not fall back
+        // to it: a protocol without the one predicate gets the stored row.
         const withoutPredicate = new Proxy(protocol, {
             get(target, key) {
-                if (key === 'isShippedFlowName') return undefined;
+                if (key === 'declinesStoredRow') return undefined;
                 const value = Reflect.get(target, key);
                 return typeof value === 'function' ? value.bind(target) : value;
             },
@@ -600,5 +603,109 @@ describe('[#21002] the published door follows the layered read for a shipped flo
 
         expect(res.statusCode).toBe(200);
         expect(res.body).toMatchObject({ name: SHIPPED, label: 'STORED' });
+    }, 60_000);
+});
+
+/**
+ * [#21986] The other name class whose stored row the layered read declines: a
+ * CODE-DEFINED DATASOURCE name (here one an installed package declares). The
+ * by-name read, the list and the layered read's effective layer serve the code
+ * definition, the MetadataService's registration, and the stored row is
+ * residue, still reported in `overlay`. This door asks the protocol's one
+ * predicate for both name classes, `declinesStoredRow`, with the answer's own
+ * `type` / `name`, so it serves that effective layer too. A runtime
+ * datasource's stored row is still served.
+ *
+ * The cold-boot reading over the real showcase composition is recorded on the
+ * PR; the predicate's two halves are pinned in `metadata-protocol`.
+ */
+describe('[#21986] the published door serves a code-defined datasource\'s code definition over a stored row', () => {
+    const CODE_DS = 'showcase_external';
+    const RUNTIME_DS = 'rt_datasource_21986';
+    const CODE_LABEL = 'External Analytics (SQLite)';
+    const SHADOW_LABEL = 'Shadow 21986';
+    const dsBody = (name: string, label: string, origin: 'code' | 'runtime', filename: string) => ({
+        name, label, driver: 'sqlite', config: { filename }, origin,
+    });
+
+    /**
+     * The file's engine double, with an installed package that declares
+     * {@link CODE_DS}, and the MetadataService holding the code definition the
+     * runtime registers at boot (and a copy of the runtime datasource under a
+     * label its row does not carry, so the control can tell which layer answered).
+     */
+    async function datasourceHarness() {
+        const { engine, rows } = makeStubEngine();
+        engine.registry = {
+            registerItem: () => {},
+            registerObject: () => {},
+            getPackage: () => undefined,
+            getItem: () => undefined,
+            getAllPackages: () => [{
+                manifest: {
+                    id: 'com.example.showcase',
+                    datasources: [{ name: CODE_DS, label: CODE_LABEL, driver: 'sqlite', config: { filename: 'x.db' } }],
+                },
+            }],
+        };
+        const metadata = new MetadataManager({});
+        await metadata.register('datasource', CODE_DS, dsBody(CODE_DS, CODE_LABEL, 'code', `${CODE_DS}.db`));
+        await metadata.register('datasource', RUNTIME_DS, dsBody(RUNTIME_DS, 'Runtime (MetadataService copy)', 'runtime', 'rt.db'));
+        const protocol = makeProtocol(engine, metadata);
+        return { engine, rows, metadata, protocol };
+    }
+
+    async function storeActiveRow(engine: any, name: string, body: unknown) {
+        await engine.insert('sys_metadata', {
+            type: 'datasource', name, organization_id: null, package_id: null, state: 'active',
+            metadata: JSON.stringify(body), checksum: 'sha256:stored', version: 1,
+        });
+    }
+
+    /**
+     * {@link setup}, read by a caller the `/meta` doors admit to a datasource
+     * read: `datasource` reads require `manage_platform_settings`, the
+     * capability the datasource admin door requires.
+     */
+    function setupAsPlatformAdmin(protocol: unknown, metadata: unknown) {
+        const rest = setup(protocol, metadata);
+        (rest as any).resolveExecCtx = async () => ({ userId: 'u_platform', systemPermissions: ['manage_platform_settings'] });
+        return rest;
+    }
+
+    it('a stored row under a code-defined datasource name: the door answers the code definition, the layered effective layer', async () => {
+        const { engine, rows, metadata, protocol } = await datasourceHarness();
+        await storeActiveRow(engine, CODE_DS, dsBody(CODE_DS, SHADOW_LABEL, 'runtime', 'shadow-external.db'));
+        expect(rows.size).toBe(1);
+
+        // The decision this door follows: a stored layer IS present, and the
+        // layered read put the code definition over it.
+        const layered: any = await protocol.getMetaItemLayered({ type: 'datasource', name: CODE_DS });
+        expect(layered.overlay).toMatchObject({ origin: 'runtime', label: SHADOW_LABEL });
+        expect(layered.effective).toMatchObject({ origin: 'code', label: CODE_LABEL });
+
+        const rest = setupAsPlatformAdmin(protocol, metadata);
+        for (const type of ['datasource', 'datasources']) {
+            const res = await callPublished(rest, { type, name: CODE_DS });
+
+            expect(res.statusCode, type).toBe(200);
+            expect(res.body, type).toMatchObject({ name: CODE_DS, origin: 'code', label: CODE_LABEL });
+            expect(JSON.stringify(res.body), type).not.toContain('shadow-external.db');
+            expect(res.body, type).toEqual(layered.effective);
+        }
+        // The row stays at rest: the door read past it, nothing removed it.
+        expect(rows.size).toBe(1);
+    }, 60_000);
+
+    it('control: a runtime datasource\'s stored row is still what the door serves', async () => {
+        const { engine, metadata, protocol } = await datasourceHarness();
+        await storeActiveRow(engine, RUNTIME_DS, dsBody(RUNTIME_DS, 'Runtime (stored row)', 'runtime', 'rt.db'));
+
+        const layered: any = await protocol.getMetaItemLayered({ type: 'datasource', name: RUNTIME_DS });
+        const res = await callPublished(setupAsPlatformAdmin(protocol, metadata), { type: 'datasource', name: RUNTIME_DS });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toMatchObject({ name: RUNTIME_DS, label: 'Runtime (stored row)' });
+        expect(res.body).toEqual(layered.overlay);
     }, 60_000);
 });

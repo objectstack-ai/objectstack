@@ -496,7 +496,8 @@ export class SysMetadataRepository implements MetadataRepository {
     //
     // [#21911, ADR-0096] This read, and every store call of `put`, `delete`,
     // `promoteDraft`, `restoreVersion`, `listDrafts` and the two lineage
-    // counters, carries the explicit system opt-in (`{ ...ctx, isSystem: true }`
+    // counters — and [#21908] the reads of `getByHash`, `list`, `history` and
+    // `watch`'s replay — carries the explicit system opt-in (`{ ...ctx, isSystem: true }`
     // inside a transaction, so the handle rides along): the repository is
     // platform plumbing under a door that already authorized the caller, and
     // it scopes its own rows by organization. None of them reaches the data
@@ -520,6 +521,7 @@ export class SysMetadataRepository implements MetadataRepository {
   async getByHash(ref: MetaRef, hash: string): Promise<MetadataItem | null> {
     this.assertOpen();
     const full = this.fullRef(ref);
+    // [#21908] The explicit system opt-in, as `get` carries — see its note.
     const row = await this.engine.findOne(this.historyTable, {
       where: {
         organization_id: this.organizationId,
@@ -527,6 +529,7 @@ export class SysMetadataRepository implements MetadataRepository {
         name: full.name,
         checksum: hash,
       },
+      context: { isSystem: true },
     });
     if (!row) return null;
     const rawBody = (row as any).metadata;
@@ -1189,9 +1192,11 @@ export class SysMetadataRepository implements MetadataRepository {
       state: 'active',
     };
     if (filter.type) where.type = filter.type;
+    // [#21908] The explicit system opt-in, as `get` carries — see its note.
     const rows = await this.engine.find('sys_metadata', {
       where,
       limit: filter.limit,
+      context: { isSystem: true },
     });
     for (const row of rows) {
       if (filter.nameContains && !String(row.name).includes(filter.nameContains)) continue;
@@ -1305,7 +1310,8 @@ export class SysMetadataRepository implements MetadataRepository {
       type: full.type,
       name: full.name,
     };
-    const rows = await this.engine.find(this.historyTable, { where });
+    // [#21908] The explicit system opt-in, as `get` carries — see its note.
+    const rows = await this.engine.find(this.historyTable, { where, context: { isSystem: true } });
     rows.sort((a: any, b: any) => {
       const va = typeof a.event_seq === 'number' ? a.event_seq : 0;
       const vb = typeof b.event_seq === 'number' ? b.event_seq : 0;
@@ -1378,8 +1384,10 @@ export class SysMetadataRepository implements MetadataRepository {
     filter: WatchFilter,
     since: number,
   ): Promise<MetadataEvent[]> {
+    // [#21908] The explicit system opt-in, as `get` carries — see its note.
     const rows = await this.engine.find(this.historyTable, {
       where: { organization_id: this.organizationId },
+      context: { isSystem: true },
     });
     const out: MetadataEvent[] = [];
     for (const row of rows as Array<Record<string, unknown>>) {

@@ -23,6 +23,7 @@ import type {
 import { INBOX_OBJECT, RECEIPT_OBJECT } from './inbox-channel.js';
 import { type InboxCaller, resolveInboxRecipient } from './inbox-caller.js';
 import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
+import { INBOX_SYSTEM_CONTEXT } from './inbox-system-context.js';
 import { assertActorReferenceResolves } from './actor-reference.js';
 
 /** The L2 event object every `emit()` writes one row to (ADR-0030). */
@@ -545,7 +546,12 @@ export class MessagingService {
         if (opts.type) where.topic = opts.type;
 
         const [rows, stateByNotif] = await Promise.all([
-            data.find(INBOX_OBJECT, { where, orderBy: [{ field: 'created_at', order: 'desc' }], limit }) as Promise<Array<Record<string, unknown>>>,
+            // The explicit system opt-in, scoped by `where.user_id` — see INBOX_SYSTEM_CONTEXT.
+            data.find(
+                INBOX_OBJECT,
+                { where, orderBy: [{ field: 'created_at', order: 'desc' }], limit },
+                { context: INBOX_SYSTEM_CONTEXT },
+            ) as Promise<Array<Record<string, unknown>>>,
             this.readReceiptStates(data, userId),
         ]);
 
@@ -641,10 +647,11 @@ export class MessagingService {
         where: Record<string, unknown>,
         stateByNotif: ReadonlyMap<string, string>,
     ): Promise<number> {
+        // `where` is listInbox's own, so it carries `user_id` — see INBOX_SYSTEM_CONTEXT.
         const ids = (await data.find(INBOX_OBJECT, {
             where,
             fields: ['notification_id'],
-        })) as Array<Record<string, unknown>>;
+        }, { context: INBOX_SYSTEM_CONTEXT })) as Array<Record<string, unknown>>;
 
         let unread = 0;
         for (const row of ids) {
@@ -671,7 +678,7 @@ export class MessagingService {
     private async readReceiptStates(data: IDataEngine, userId: string): Promise<Map<string, string>> {
         const receipts = await (data.find(RECEIPT_OBJECT, {
             where: { user_id: userId, channel: 'inbox' },
-        }) as Promise<Array<Record<string, unknown>>>).catch(() => [] as Array<Record<string, unknown>>);
+        }, { context: INBOX_SYSTEM_CONTEXT }) as Promise<Array<Record<string, unknown>>>).catch(() => [] as Array<Record<string, unknown>>);
 
         const stateByNotif = new Map<string, string>();
         for (const r of receipts) {
@@ -690,8 +697,11 @@ export class MessagingService {
      * Mark specific notifications read by upserting their inbox receipts to
      * `read`. Updates the existing `delivered` receipt in place (keyed
      * `(notification_id, user_id, channel:'inbox')`); inserts one only when
-     * absent. `ids` are notification (event) ids. Returns the REST contract
-     * shape (`MarkNotificationsReadResponseSchema`): `{ success, readCount }`.
+     * absent AND the notification was delivered to that user — see
+     * {@link upsertReadReceipt}. An id that was never delivered to the user
+     * writes nothing and is not counted. `ids` are notification (event) ids.
+     * Returns the REST contract shape (`MarkNotificationsReadResponseSchema`):
+     * `{ success, readCount }`.
      *
      * **This is the REST door's method** — `INotificationService.markRead?`,
      * called by `runtime/src/domains/notifications.ts`, which binds `userId`
@@ -860,7 +870,7 @@ export class MessagingService {
             data.find(INBOX_OBJECT, {
                 where: { user_id: userId },
                 fields: ['notification_id'],
-            }) as Promise<Array<Record<string, unknown>>>,
+            }, { context: INBOX_SYSTEM_CONTEXT }) as Promise<Array<Record<string, unknown>>>,
             this.readReceiptStates(data, userId),
         ]);
 
@@ -877,7 +887,26 @@ export class MessagingService {
         return ids;
     }
 
-    /** Upsert a `read` receipt for one notification; returns 1 when it persisted. */
+    /**
+     * Upsert a `read` receipt for one notification; returns 1 when it
+     * persisted, 0 when the notification was never delivered to the user.
+     *
+     * [#22026] A read receipt belongs to a RECIPIENT (ADR-0030 keys it by
+     * recipient). A notification counts as delivered to this user when either
+     * half holds, both read under INBOX_SYSTEM_CONTEXT and keyed on `user_id`:
+     *
+     *  - a receipt keyed `(notification_id, user_id, channel:'inbox')` exists —
+     *    the inbox channel's `delivered` receipt, or one already flipped. That
+     *    is `flipToRead`'s own read: the receipt key IS the delivered-receipt
+     *    key, so when it finds nothing there is no delivered receipt to find;
+     *  - an inbox message for this user names the notification. It must
+     *    suffice on its own, because the `delivered` receipt is best-effort
+     *    (`writeDeliveredReceipt` logs and moves on, and the inbox row stands).
+     *
+     * Neither half ⇒ nothing is written, nothing is counted, and the event's
+     * organization is never read: an id the user was never sent cannot become
+     * a receipt of theirs, nor stamp one with that notification's organization.
+     */
     private async upsertReadReceipt(
         data: IDataEngine,
         userId: string,
@@ -886,16 +915,27 @@ export class MessagingService {
     ): Promise<number> {
         const where = { notification_id: notificationId, user_id: userId, channel: 'inbox' };
         const flipToRead = async (): Promise<boolean> => {
-            const existing = await data.findOne(RECEIPT_OBJECT, { where, fields: ['id'] });
+            // Under INBOX_SYSTEM_CONTEXT: the read is keyed on `user_id`, and the
+            // update addresses only the id that read returned.
+            const existing = await data.findOne(RECEIPT_OBJECT, { where, fields: ['id'] }, { context: INBOX_SYSTEM_CONTEXT });
             if (!existing?.id) return false;
-            await data.update(RECEIPT_OBJECT, { state: 'read', at }, { where: { id: existing.id } } as never);
+            await data.update(
+                RECEIPT_OBJECT,
+                { state: 'read', at },
+                { where: { id: existing.id }, context: INBOX_SYSTEM_CONTEXT } as never,
+            );
             return true;
         };
 
         if (await flipToRead()) return 1;
 
-        // No receipt yet — insert one. findOne→insert is check-then-act, so a
-        // concurrent mark-read (or the best-effort `delivered` write still in
+        // No receipt keyed on this user, so no `delivered` one either: the
+        // inbox message is the only delivery evidence left. Without it the id
+        // was never delivered to this user — write nothing, count nothing.
+        if (!(await this.inboxMessageNames(data, userId, notificationId))) return 0;
+
+        // Delivered, and no receipt yet — insert one. findOne→insert is
+        // check-then-act, so a concurrent mark-read (or the best-effort `delivered` write still in
         // flight) can win the (notification_id, user_id, channel) unique index
         // between our read and write. Treat that collision as "someone else
         // created it" and flip the now-present row to `read` instead of failing.
@@ -931,12 +971,33 @@ export class MessagingService {
                 at,
                 organization_id: organizationId,
                 created_at: at,
-            });
+            }, { context: INBOX_SYSTEM_CONTEXT });
             return 1;
         } catch (err) {
             if (isUniqueViolationError(err) && (await flipToRead())) return 1;
             throw err;
         }
+    }
+
+    /**
+     * [#22026] Does this user's inbox hold a message for `notificationId`? The
+     * inbox half of {@link upsertReadReceipt}'s delivery check.
+     *
+     * Keyed on `user_id` under INBOX_SYSTEM_CONTEXT, projecting `id` alone: the
+     * answer is a yes/no about the caller's own rows. NOT best-effort — a read
+     * that throws propagates to `markRead`, which logs it and leaves the id
+     * uncounted with no row written, the direction a check must fail in.
+     */
+    private async inboxMessageNames(
+        data: IDataEngine,
+        userId: string,
+        notificationId: string,
+    ): Promise<boolean> {
+        const message = await data.findOne(INBOX_OBJECT, {
+            where: { user_id: userId, notification_id: notificationId },
+            fields: ['id'],
+        }, { context: INBOX_SYSTEM_CONTEXT });
+        return message != null;
     }
 
     /**
@@ -955,10 +1016,12 @@ export class MessagingService {
         notificationId: string,
     ): Promise<string | null> {
         try {
+            // One event row, two columns, used only as the stamp on the
+            // caller's own receipt — see INBOX_SYSTEM_CONTEXT.
             const row = await data.findOne(NOTIFICATION_EVENT_OBJECT, {
                 where: { id: notificationId },
                 fields: ['id', 'organization_id'],
-            });
+            }, { context: INBOX_SYSTEM_CONTEXT });
             const org = (row as Record<string, unknown> | undefined)?.organization_id;
             return org != null && String(org) !== '' ? String(org) : null;
         } catch (err) {
@@ -1295,10 +1358,12 @@ export class MessagingService {
     /** Find an existing event id by its dedup key, tolerating lookup failure. */
     private async findEventByDedupKey(data: IDataEngine, dedupKey: string): Promise<string | undefined> {
         try {
+            // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT. The id it
+            // finds is the one `emit()` answers for a key the emitter named.
             const row = await data.findOne(NOTIFICATION_EVENT_OBJECT, {
                 where: { dedup_key: dedupKey },
                 fields: ['id'],
-            });
+            }, { context: FAN_OUT_SYSTEM_CONTEXT });
             const id = row?.id;
             return id != null && String(id).length > 0 ? String(id) : undefined;
         } catch (err) {

@@ -8621,24 +8621,30 @@ export class RestServer {
                                         : {}),
                                 });
                                 if (layered?.overlay !== undefined && layered?.overlay !== null) {
-                                    // [#21002, ADR-0126 §2] When the layered
-                                    // read put the LOADER's body over this stored
-                                    // row — a shipped flow name, decided by the
-                                    // protocol's `isShippedFlowName` — this door
-                                    // serves that effective layer, not the row:
-                                    // `flow` is Regime C, "never an overlay read
-                                    // path". The predicate is ASKED of its owner
-                                    // with the answer's own `type` / `name`,
-                                    // never re-derived here, so this door and
+                                    // [#21002, #21986, ADR-0126 §2, ADR-0062 D4]
+                                    // When the layered read put a code layer
+                                    // over this stored row, this door serves
+                                    // that effective layer, not the row. The
+                                    // protocol decides it with one predicate,
+                                    // `declinesStoredRow`, for both name
+                                    // classes: a shipped flow name (the
+                                    // loader's body; `flow` is Regime C,
+                                    // "never an overlay read path") and a
+                                    // code-defined datasource name (the code
+                                    // definition; "code wins on collision").
+                                    // The predicate is ASKED of its owner with
+                                    // the answer's own `type` / `name`, never
+                                    // re-derived here, so this door, the
+                                    // by-name read, the list and
                                     // `getMetaItemLayered` read one rule. Every
                                     // other stored row is served exactly as
                                     // before — an `object` too, whose effective
                                     // layer differs from its row by folding, not
                                     // by this decision — and so is every row of a
                                     // protocol that brings no such predicate.
-                                    const shippedFlow: { isShippedFlowName?(type: string, name: unknown): boolean } = publishedProtocol;
-                                    publishedOverlay = typeof shippedFlow.isShippedFlowName === 'function'
-                                        && shippedFlow.isShippedFlowName(layered.type, layered.name)
+                                    const decliner: { declinesStoredRow?(type: string, name: unknown): boolean } = publishedProtocol;
+                                    publishedOverlay = typeof decliner.declinesStoredRow === 'function'
+                                        && decliner.declinesStoredRow(layered.type, layered.name)
                                         ? layered.effective
                                         : layered.overlay;
                                 }

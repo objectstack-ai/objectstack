@@ -97,7 +97,7 @@
 // Imported per-module, never through `./index.js`: the barrel would make this
 // file a cycle partner of its own package entry, and the runtime surface
 // (`./runtime.js`) needs a graph it can reason about rule by rule.
-import { validateStackExpressions } from './validate-expressions.js';
+import { runStackExpressionPasses } from './validate-expressions.js';
 import { validateListViewMode } from './validate-list-view-mode.js';
 import { validateFunctionalCompleteness } from './validate-functional-completeness.js';
 import { validateManagedApiMethods } from './validate-managed-api-methods.js';
@@ -306,6 +306,12 @@ export interface AuthoringRuleContext {
    * members can judge a partial per-write snapshot without inventing
    * findings. No other rule reads it, and none should without the same
    * argument.
+   *
+   * [#22019] One other rule reads it, on that argument: `validateStackExpressions`
+   * is one entry over several PASSES, and an `object` write is admitted for its
+   * field-formula pass alone (`runStackExpressionPasses`, `StackExpressionOptions`). The
+   * entry-level `runtimeTypes` can say that an object write reaches the rule; it
+   * cannot say which of the rule's passes judge that write.
    */
   runtimeWriteType?: string;
   /**
@@ -570,10 +576,32 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // crossing: 79 actions and 6 hooks (showcase 70/4, todo 8/1, crm 1/1) →
     // 0 differential findings, with lit synthetic probes refused per type in
     // `runtime-gate.inert-type-writes.test.ts`.
+    //
+    // [#22019] `object` joins, for ONE pass: a formula field's `expression`.
+    // `formulas.mdx` says the same `validateExpression` validator backs
+    // `os build` and metadata registration; at the object save door it did
+    // not, so `sqrt(record.amount)` — refused by `os build` as an unknown
+    // function — saved with a 200 and read `null` on every row, logged
+    // nowhere. The door now gives the build's verdict, from this entry, in the
+    // build's words (rule, location, message and hint are the same finding).
+    //
+    // NARROW by construction, not by snapshot shape: `ctx.runtimeWriteType`
+    // reaches `runStackExpressionPasses` — the body `validateStackExpressions`
+    // runs, whose public signature is unchanged — which on an object write runs
+    // the field-formula pass and fences every other object-borne expression
+    // pass off by name (`StackExpressionOptions.runtimeWriteType`) — each of
+    // those is a crossing of its own, not a rider on this one.
+    //
+    // MEASURED over the stored corpus at the door's own snapshot shape before
+    // crossing: every formula field the repository ships — 29 fields on 28
+    // objects (examples: app-crm 4 on 3, app-showcase 2 on 2, app-todo 1 on 1,
+    // app-multi-package none; platform `display_title` formulas: 22 on 22) →
+    // 0 differential errors and 0 advisories, against 1 refusal for the card's
+    // own `sqrt(record.amount)` body under the same harness.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'action', 'hook'],
-    run: (stack) =>
-      validateStackExpressions(stack).map((i) => ({
+    runtimeTypes: ['flow', 'action', 'hook', 'object'],
+    run: (stack, ctx) =>
+      runStackExpressionPasses(stack, { runtimeWriteType: ctx.runtimeWriteType }).map((i) => ({
         severity: i.severity ?? 'error',
         rule: EXPRESSION_INVALID,
         where: i.where,
