@@ -10,10 +10,15 @@
  * answers that slot ahead of every package's own entry, whichever package the
  * read names. The question each row below answers is the card's: can this
  * registration put a body bound to one package under a bare name that
- * another package ships? Where it can, the registration first asks
+ * another package ships? Where it can for a VIEW, the registration first asks
  * `anotherPackageShips` and skips the name (#21980's shape for an expansion),
  * and the reads answer the body from its stored row. The behaviour is pinned
  * in `protocol.org-scoped-write-refused.test.ts`, block (j).
+ *
+ * ⛔ View only. For every other type a row bound to one package, of a name two
+ * packages ship, holds the bare entry with its own body and envelope, as
+ * #4624 rules (`objectql`'s `protocol-boot-hydration-scoped.test.ts`,
+ * ADR-0048); block (j)'s control (e) pins that here.
  *
  * The population is the card's enumeration command,
  * `git grep -n "registerItem(" -- packages/metadata-protocol/src/protocol.ts`:
@@ -68,14 +73,20 @@ function callsOf(): Located[] {
     return calls;
 }
 
-type Disposition = 'no' | 'skips a name another package ships';
+type Disposition = 'no' | 'yes, view only: skips a name another package ships';
 
 /**
  * The recorded disposition of every call. `path`: the callers that reach it
  * and the kernels it registers on. `why`: why it cannot put a body bound to
  * one package under a name another package ships, or how it skips that name.
  */
-const SITES: ReadonlyArray<Site & { readonly disposition: Disposition; readonly path: string; readonly why: string }> = [
+const SITES: ReadonlyArray<Site & {
+    readonly disposition: Disposition;
+    readonly path: string;
+    readonly why: string;
+    /** For a `yes`: the source text that keeps the skip to `view`. */
+    readonly viewOnlyBy?: string;
+}> = [
     {
         member: 'applyObjectRegistryMutation', args: 'request.type, request.item, \'name\'', disposition: 'no',
         path: 'applyRegistryWriteThrough for `object` (a save, a publish, a rollback, a revert, a replica\'s mutation), on every kernel',
@@ -85,22 +96,27 @@ const SITES: ReadonlyArray<Site & { readonly disposition: Disposition; readonly 
     },
     {
         member: 'hydrateOverlayIntoRegistry', args: 'type, mergeArtifactProtection(stateTenantAuthorship(data), envelope), \'name\' as any',
-        disposition: 'skips a name another package ships',
+        disposition: 'yes, view only: skips a name another package ships',
         path: 'the list\'s hydration and the write-through on an unscoped kernel; the boot\'s loadMetaFromDb on every kernel',
-        why: 'a stored row: a row bound to a package is not registered where another package ships its name, and the reads '
-            + 'answer it from its row (a package-less row, and a row the reads decline, register as before)',
+        why: 'a stored row: a view row bound to a package is not registered where another package ships its name, and the '
+            + 'reads answer it from its row; a package-less row, and every other type, register as before (#4624)',
+        viewOnlyBy: 'const bound = canonicalType === \'view\' ? boundPackageOf(options.packageId) : undefined;',
     },
     {
-        member: 'hydrateExpandedViewItems', args: 'type, item, \'name\' as any', disposition: 'skips a name another package ships',
+        member: 'hydrateExpandedViewItems', args: 'type, item, \'name\' as any',
+        disposition: 'yes, view only: skips a name another package ships',
         path: 'hydrateOverlayIntoRegistry, for each expansion of a stored view container',
         why: 'an expansion: not registered where another package ships its name (#21980), and the by-name read answers it '
             + 'from its stored container row',
+        viewOnlyBy: 'if ((PLURAL_TO_SINGULAR[type] ?? type) !== \'view\') return [];',
     },
     {
-        member: 'restoreArtifactRegistryView', args: 'type, baseline.data, \'name\'', disposition: 'skips a name another package ships',
+        member: 'restoreArtifactRegistryView', args: 'type, baseline.data, \'name\'',
+        disposition: 'yes, view only: skips a name another package ships',
         path: 'the delete\'s heal, tier 2 (deleteMetaItem, revertCommit\'s removal, a replica\'s removal), on an unscoped kernel',
-        why: 'the metadata service\'s baseline: a baseline bound to a package is not re-registered where another package '
-            + 'ships the name; tier 1 finds no bare entry to drop for a row the hydration skipped',
+        why: 'the metadata service\'s baseline: a view baseline bound to a package is not re-registered where another '
+            + 'package ships the name; tier 1 finds no bare entry to drop for a row the hydration skipped',
+        viewOnlyBy: 'const bound = canonicalMetaType(type) === \'view\'',
     },
 ];
 
@@ -139,11 +155,18 @@ describe('[#22057] every registerItem( in protocol.ts has a recorded disposition
     });
 
     it('each registration that skips a name another package ships asks anotherPackageShips before it registers', () => {
-        for (const site of SITES.filter((s) => s.disposition === 'skips a name another package ships')) {
+        for (const site of SITES.filter((s) => s.disposition !== 'no')) {
             const call = found.find((f) => keyOf(f) === keyOf(site));
             expect(call, keyOf(site)).toBeDefined();
             const body = LINES.slice(call!.headerLine, call!.line).join('\n');
             expect(body, `${site.member}: the question asked ahead of its registration`).toContain('this.anotherPackageShips(');
+        }
+    });
+
+    it('each skip is kept to view, so every other type registers as #4624 rules', () => {
+        for (const site of SITES.filter((s) => s.disposition !== 'no')) {
+            expect(site.viewOnlyBy, `${site.member}: the text that keeps it to view`).toBeDefined();
+            expect(SOURCE.split(site.viewOnlyBy!).length - 1, `${site.member}: ${site.viewOnlyBy}`).toBe(1);
         }
     });
 

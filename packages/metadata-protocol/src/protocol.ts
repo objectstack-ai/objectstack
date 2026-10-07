@@ -18387,40 +18387,40 @@ export class ObjectStackProtocolImplementation implements
      * bodies without a `name`, and registry doubles without `registerItem`
      * are no-ops and return `false`. The boot's page report reads it.
      *
-     * ## [#22057] Never a row bound to one package, under a name another ships
+     * ## [#22057] A VIEW row bound to one package, never under a name another ships
      *
      * The registry keeps one bare slot per name, and `SchemaRegistry.getItem`
      * answers it ahead of every package's own entry, whichever package the read
      * names. ADR-0005 gives that slot to a package-less row, which overlays the
-     * item of the name in every package, so for such a row the precedence is
-     * right. A row bound to a package (ADR-0048) overlays that package's item
-     * alone. The registry has no slot of that package's to hold it, and under
-     * the bare name it answered every package's read of the name. Where only
-     * its own package ships the name, or no package does, nothing else answers
-     * the name, and it is registered as before. Where another package also
-     * ships it, a read naming that package used to get this row: the by-name
-     * read found no row of its own, expanded nothing, and served this row's
-     * body at the registry step, under the other package's envelope, while the
-     * list served that package's own item. That broke ADR-0048 §3.3, which
-     * says a read that carries its package id never mis-resolves. Measured on
-     * an unscoped kernel after a save, and on either kernel after a cold boot
-     * (`loadMetaFromDb` hydrates through this method on every kernel).
+     * item of the name in every package. A view row bound to a package
+     * (ADR-0048) overlays that package's view alone, and under the bare name it
+     * answered every package's read of the name. Where another package also
+     * ships the name, the by-name read naming that package found no row of its
+     * own, expanded nothing, and served this row's body at the registry step,
+     * under the other package's envelope, while the list served that package's
+     * own view. Measured on an unscoped kernel after a save, and on either
+     * kernel after a cold boot (`loadMetaFromDb` hydrates through this method on
+     * every kernel).
      *
-     * Such a row is not registered, which is #21980's shape for an expansion
-     * ({@link hydrateExpandedViewItems}). The reads answer it from its row on
-     * every kernel ({@link findServedOverlayRow}): for its own package, and for
-     * a read naming no package. The list merges it into its package's slot.
-     * An aggregated container row still has its expansions judged one by one.
-     * A registry read naming no package keeps ADR-0048 §3.3's best effort, the
-     * first package's entry. The environment-scoped kernel's running answer
-     * was already this one, because it registers nothing on a save.
+     * Such a view row is not registered, which is #21980's shape for an
+     * expansion ({@link hydrateExpandedViewItems}), and for the same reason it
+     * is safe there: no reader outside this class reads a view's bare entry.
+     * The reads answer the row from its row on every kernel
+     * ({@link findServedOverlayRow}): for its own package, and for a read naming
+     * no package. The list merges it into its package's slot. An aggregated
+     * container row still has its expansions judged one by one. The
+     * environment-scoped kernel's running answer was already this one, because
+     * it registers nothing on a save.
      *
-     * Two things are registered as before. A package-less row overlays every
-     * package's item. And the reads decline the stored row of a shipped FLOW
-     * name or of a code-defined datasource name ({@link declinesStoredRow}).
-     * Each read's registry half declines its bare entry too, so no read is
-     * served it, and the automation boot pull reports the flow row as a
-     * shadowed contender, from that entry.
+     * ⛔ `view` only, judged on the canonical type. Every other type registers
+     * as before: a row bound to one package, of a name two packages ship, holds
+     * the bare entry with its own body and its own package's envelope (#4624,
+     * ADR-0048, pinned in `objectql`'s `protocol-boot-hydration-scoped.test.ts`).
+     * Registry readers that name no package read those entries (the declared
+     * security-metadata bootstraps, the action router, the picklist read), and
+     * which body they should see for such a name is not ruled here. A
+     * package-less view row, and a view row of a name only its own package
+     * ships or no package ships, register as before too.
      *
      * ## [#9111] `type` is an ASSERTED input, not a silently-trusted one
      *
@@ -18531,16 +18531,11 @@ export class ObjectStackProtocolImplementation implements
         if (!data || typeof data !== 'object' || !('name' in data)) return false;
         const registry: any = (this.engine as any)?.registry;
         if (!registry || typeof registry.registerItem !== 'function') return false;
-        // [#22057] See the header: a row bound to one package is not registered
-        // under a name another package ships. Its expansions are judged by
-        // their own names.
-        const bound = boundPackageOf(options.packageId);
-        const rowName = String((data as any).name);
-        if (
-            bound !== undefined
-            && this.anotherPackageShips(type, rowName, bound)
-            && !this.declinesStoredRow(canonicalType, rowName)
-        ) {
+        // [#22057] See the header: a view row bound to one package is not
+        // registered under a name another package ships. Its expansions are
+        // judged by their own names. ⛔ View only.
+        const bound = canonicalType === 'view' ? boundPackageOf(options.packageId) : undefined;
+        if (bound !== undefined && this.anotherPackageShips(type, String((data as any).name), bound)) {
             this.hydrateExpandedViewItems(type, data, options, registry);
             return true;
         }
@@ -19004,11 +18999,12 @@ export class ObjectStackProtocolImplementation implements
      * package's.
      *
      * The registry's bare slot answers every package's read of the name, so
-     * each registration under a bare name asks this first:
+     * each VIEW registration under a bare name asks this first:
      * {@link hydrateExpandedViewItems} for an expansion,
-     * {@link hydrateOverlayIntoRegistry} for a row bound to a package, and the
-     * delete's heal ({@link restoreArtifactRegistryView}) for a package's body
-     * it would re-register.
+     * {@link hydrateOverlayIntoRegistry} for a view row bound to a package,
+     * and the delete's heal ({@link restoreArtifactRegistryView}) for a
+     * package's view it would re-register. ⛔ Only views ask it: see the
+     * hydrator's header for why every other type does not.
      */
     private anotherPackageShips(type: string, name: string, own: unknown, shipping?: ShippingPackages): boolean {
         return this.shippedArtifactsOf(type, name, shipping)
@@ -19141,12 +19137,13 @@ export class ObjectStackProtocolImplementation implements
      *     re-register it, preserving the historical refresh behaviour
      *     for items the SchemaRegistry never held as artifacts.
      *     [#22057] Tier 1 also declines when there is no plain-key entry,
-     *     which is what a row bound to one package leaves under a name
+     *     which is what a VIEW row bound to one package leaves under a name
      *     another package ships ({@link hydrateOverlayIntoRegistry}). So a
-     *     baseline bound to one package, under a name another package ships,
-     *     is not re-registered here: under the bare name it would answer
-     *     every package's read of the name. The walk stops there, as for any
-     *     baseline found.
+     *     view baseline bound to one package, under a name another package
+     *     ships, is not re-registered here: under the bare name it would
+     *     answer every package's read of the name. The walk stops there, as
+     *     for any baseline found. ⛔ View only, as at the hydration: every
+     *     other type re-registers as before.
      *  3. [#5079] When NEITHER layer has anything, the deleted row was the
      *     whole item — so the plain-key entry is retired too
      *     ({@link SchemaRegistry.removeOverlayEntry}).
@@ -19279,8 +19276,10 @@ export class ObjectStackProtocolImplementation implements
             const baseline = await this.readItemFromMetadataService(type, name);
             if (baseline.data !== undefined && baseline.data !== null) {
                 if (this.environmentId === undefined) {
-                    // [#22057] See tier 2 in the header.
-                    const bound = boundPackageOf((baseline.data as { _packageId?: unknown })._packageId);
+                    // [#22057] See tier 2 in the header. ⛔ View only.
+                    const bound = canonicalMetaType(type) === 'view'
+                        ? boundPackageOf((baseline.data as { _packageId?: unknown })._packageId)
+                        : undefined;
                     if (bound === undefined || !this.anotherPackageShips(type, name, bound)) {
                         this.engine.registry.registerItem(type, baseline.data, 'name');
                     }

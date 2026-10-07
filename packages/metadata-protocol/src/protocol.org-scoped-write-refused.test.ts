@@ -1940,6 +1940,8 @@ describe('each package\'s copy of a view container expands into its own package\
         // A cold boot hydrates the stored rows through the same door on either
         // kernel. Such a row is not registered: the reads answer it from its
         // row, for its own package and for a read naming none, on every kernel.
+        // ⛔ View only: a row of any other type keeps the bare entry (#4624),
+        // pinned as the control (e) below.
         describe('(j) a stored row bound to one package, of a name another package ships: the read naming each package answers its own item', () => {
             const ORDERS = [[OTHER, COPYING], [COPYING, OTHER]] as const;
             const KEYED_MEMBER = MEMBERS.find((m) => m.member === 'a keyed member');
@@ -2054,6 +2056,65 @@ describe('each package\'s copy of a view container expands into its own package\
                     expect(titleOf(registry.getItem('view', SHARED, OTHER)), `the registry read naming ${OTHER}`).toBe(SHIPPED_TITLE(OTHER));
                     const read = await protocol.getMetaItem({ type: 'view', name: SHARED, packageId: OTHER });
                     expect(envelopeOf(read.item), `the read naming ${OTHER}`).toEqual([SHIPPED_TITLE(OTHER), OTHER, 'package']);
+                });
+            }
+
+            /**
+             * A registry double for any type, held as `SchemaRegistry` holds it:
+             * each package's entry under `<package>:<name>`, a hydrated row under
+             * the bare name, `getItem` bare slot first, and `getArtifactItem`'s
+             * package-scoped code-artifact lookup.
+             */
+            function typedRegistry() {
+                const byType = new Map<string, Map<string, Record<string, any>>>();
+                const of = (type: string) => byType.get(type) ?? byType.set(type, new Map()).get(type)!;
+                const composite = (type: string, name: string) => [...of(type)].filter(([key]) => key.endsWith(`:${name}`)).map(([, it]) => it);
+                return {
+                    registerItem: (type: string, item: Record<string, any>, _keyField?: string, packageId?: string) => {
+                        if (packageId) {
+                            if (item._packageId === undefined) item._packageId = packageId;
+                            if (item._provenance === undefined) item._provenance = 'package';
+                        }
+                        of(type).set(packageId ? `${packageId}:${String(item.name)}` : String(item.name), item);
+                    },
+                    bare: (type: string, name: string) => of(type).get(name),
+                    listItems: (type: string, packageId?: string) => [...of(type).values()].filter((it) => !packageId || it._packageId === packageId),
+                    getItem: (type: string, name: string, packageId?: string) => of(type).get(name)
+                        ?? (packageId ? of(type).get(`${packageId}:${name}`) : undefined) ?? composite(type, name)[0],
+                    getArtifactItem: (type: string, name: string, packageId?: string) => {
+                        const shippedAs = composite(type, name).filter((it) => isCodeArtifactBody(it));
+                        return (packageId ? shippedAs.find((it) => it._packageId === packageId) : undefined) ?? shippedAs[0];
+                    },
+                    getObject: () => undefined,
+                    registerObject: () => {},
+                    getPackage: () => undefined,
+                    isPackageDisabled: () => false,
+                    isObjectPackageDisabled: () => false,
+                    applyNavContributions: (app: unknown) => app,
+                };
+            }
+
+            // ⛔ View only. A row of any other type, bound to one package, of a
+            // name two packages ship, holds the bare entry with its own body and
+            // its own package's envelope, as #4624 rules (ADR-0048; `objectql`'s
+            // `protocol-boot-hydration-scoped.test.ts`), through either hydration.
+            for (const order of ORDERS) {
+                it(`(e) control, an unscoped kernel; ${order[0]} registered first: a page row bound to ${COPYING}, of a name both ship, holds the bare entry with its own body and envelope`, async () => {
+                    for (const hydration of ['the cold boot', 'the list read'] as const) {
+                        const { engine, rows } = makeStubEngine();
+                        const registry = typedRegistry();
+                        for (const pkg of order) registry.registerItem('page', { name: 'home', label: `Home (shipped by ${pkg})` }, 'name', pkg);
+                        engine.registry = registry;
+                        rows.set(`page|home|__env__|active|${COPYING}`, {
+                            id: 'r_page_home', type: 'page', name: 'home', organization_id: null, package_id: COPYING, state: 'active',
+                            metadata: JSON.stringify({ name: 'home', label: ROW_TITLE }),
+                        });
+                        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), undefined) as any;
+                        if (hydration === 'the cold boot') expect((await protocol.loadMetaFromDb()).errors, 'the boot hydrates the row').toBe(0);
+                        else await protocol.getMetaItems({ type: 'page' });
+                        const bare = registry.bare('page', 'home');
+                        expect([bare?.label, bare?._packageId, bare?._provenance], `${hydration}: the bare entry`).toEqual([ROW_TITLE, COPYING, 'package']);
+                    }
                 });
             }
         });
