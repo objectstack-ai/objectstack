@@ -256,11 +256,17 @@ describe('the first sign-up claims the seed without dispatching automation', () 
         expect(owned).toHaveLength(SEEDED.length);
         for (const row of owned) expect(row.owner_id, `${row.name} owner`).toBe(adminId);
 
-        // ⭐ The claim dispatched no automation.
-        expect(claim.appHooks, 'metadata-bound hook dispatches during the claim').toBe(0);
-        expect(claim.flowRuns, 'record-change flow runs during the claim').toBe(0);
-        expect(claim.approvals, 'approval requests opened during the claim').toBe(0);
-        expect(claim.notifications, 'notifications emitted during the claim').toBe(0);
+        // ⭐ The claim dispatched no automation. One assertion over all four,
+        // so a failure reports every count at once rather than the first.
+        expect(
+          {
+            appHooks: claim.appHooks,
+            flowRuns: claim.flowRuns,
+            approvals: claim.approvals,
+            notifications: claim.notifications,
+          },
+          'automation the claim dispatched (metadata hooks, flow runs, approvals opened, notifications emitted)',
+        ).toEqual({ appHooks: 0, flowRuns: 0, approvals: 0, notifications: 0 });
 
         // ⭐ …and still ran the code-registered hooks: one audit row per
         // claimed record, and the grants the owner change earns.
