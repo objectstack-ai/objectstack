@@ -144,12 +144,16 @@ const PLATFORM_GLOBAL = {
 
 const ORG_OBJECT = { name: 'sys_organization', fields: { name: { type: 'text' } } } as any;
 
-async function makeEngine(opts: { posture?: string; organizations?: string[] } = {}) {
+async function makeEngine(opts: { posture?: string; organizations?: string[]; lean?: boolean } = {}) {
   const observed: ObservedCall[] = [];
   const engine = new ObjectQL();
   engine.registerDriver(makeDriver(observed, opts.organizations ?? [ORG_ID]), true);
   await engine.init();
-  for (const o of [DISPATCH_ORDER, SYS_LEDGER, PLATFORM_GLOBAL, ORG_OBJECT]) {
+  // `lean` models a composition that registers NO organization object at all.
+  const objects = opts.lean
+    ? [DISPATCH_ORDER, SYS_LEDGER, PLATFORM_GLOBAL]
+    : [DISPATCH_ORDER, SYS_LEDGER, PLATFORM_GLOBAL, ORG_OBJECT];
+  for (const o of objects) {
     engine.registry.registerObject(o, PACKAGE_ID);
   }
   if (opts.posture) engine.setTenancyPostureProvider(() => opts.posture);
@@ -168,15 +172,16 @@ describe('#8844 the decision — the ruling as one pure function', () => {
   const probe = (ids: string[]) => () => Promise.resolve(ids);
 
   it('[binding point 1] single-tenant with exactly one organization derives it', async () => {
-    expect(await resolveSystemWriteOrganization({ posture: 'single', probeOrganizations: probe([ORG_ID]) }))
-      .toEqual({ kind: 'derived', organizationId: ORG_ID });
+    expect(await resolveSystemWriteOrganization({
+      posture: 'single', probeOrganizations: probe([ORG_ID]), organizationObjectRegistered: true,
+    })).toEqual({ kind: 'derived', organizationId: ORG_ID });
   });
 
   it.each(['group', 'isolated'] as const)(
     '[binding point 2] the walled posture %s refuses, without asking the database anything',
     async (posture) => {
       const probeOrganizations = vi.fn(async () => [ORG_ID]);
-      expect(await resolveSystemWriteOrganization({ posture, probeOrganizations }))
+      expect(await resolveSystemWriteOrganization({ posture, probeOrganizations, organizationObjectRegistered: true }))
         .toEqual({ kind: 'refuse', reason: 'walled-posture' });
       // The count could not change the verdict on a walled install, so it is
       // not read — a refusal must not cost a query per write.
@@ -192,16 +197,28 @@ describe('#8844 the decision — the ruling as one pure function', () => {
     expect(await resolveSystemWriteOrganization({
       posture: 'single',
       probeOrganizations: probe([ORG_ID, SECOND_ORG_ID]),
+      organizationObjectRegistered: true,
     })).toEqual({ kind: 'refuse', reason: 'ambiguous-organization', organizationCount: 2 });
   });
 
-  it('[first boot] no organization yet is NOT a refusal — there is nothing to fork away from', async () => {
-    // Seeds land during `start()`; the admin, and with them the first
-    // organization, arrive by a later sign-up POST. Refusing here would refuse
-    // first boot itself, and there is no second partition to fork from anyway —
-    // #8686's `sys_organization`-insert handoff adopts exactly these rows.
-    expect(await resolveSystemWriteOrganization({ posture: 'single', probeOrganizations: probe([]) }))
-      .toEqual({ kind: 'no-organization-yet' });
+  it('[ADR-0131 D9] `single` with the organization object registered and NO organization refuses', async () => {
+    // The Default Organization is a boot invariant under `single` (D3): it
+    // exists before the application seeds and before the listener. An install
+    // that registers the organization object and holds none of it has no owner
+    // to derive, and D9 refuses rather than landing a row nobody owns.
+    expect(await resolveSystemWriteOrganization({
+      posture: 'single', probeOrganizations: probe([]), organizationObjectRegistered: true,
+    })).toEqual({ kind: 'refuse', reason: 'no-organization', organizationCount: 0 });
+  });
+
+  it('[ADR-0131 Q2, held as-is] a composition with NO organization object keeps today\'s branch', async () => {
+    // A lean embedding / bare-kernel composition registers no
+    // `sys_organization` at all. Whether D9's refusal reaches it is ADR-0131
+    // C8's question; C1 pins today's answer unchanged — nothing to stamp,
+    // nothing refused.
+    expect(await resolveSystemWriteOrganization({
+      posture: 'single', probeOrganizations: probe([]), organizationObjectRegistered: false,
+    })).toEqual({ kind: 'no-organization-object' });
   });
 });
 
@@ -253,12 +270,32 @@ describe('#8844 single-tenant — the system write is stamped like a session wri
     expect(probes()).toBe(2);
   });
 
-  it('[first boot] leaves the write untenanted when the install has no organization yet', async () => {
+  it('[ADR-0131 D9] refuses the write when the install registers the organization object and holds none', async () => {
     const { engine, observed } = await makeEngine({ organizations: [] });
-    await engine.insert('dispatch_order', { subject: 'seeded' }, { context: SYSTEM_CTX } as any);
-    // Nothing to stamp and nothing refused: the row lands org-less exactly as
-    // before, for #8686's handoff to adopt when the organization appears.
+    const refusal = await engine
+      .insert('dispatch_order', { subject: 'no owner' }, { context: SYSTEM_CTX } as any)
+      .catch((e) => e);
+    // The envelope (ADR-0112): `code` and `status`, then the reason that
+    // separates this refusal from the other two.
+    expect(refusal.code).toBe('ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED');
+    expect(refusal.status).toBe(500);
+    expect(refusal.reason).toBe('no-organization');
+    // ADR-0123 D4: the refusal names what is missing.
+    expect(refusal.message).toContain('holds NO organization');
+    // ⛔ Nothing reached the driver — not defaulted, not written org-less.
+    expect(observed.filter((c) => c.object === 'dispatch_order')).toEqual([]);
+  });
+
+  it('[ADR-0131 Q2, held as-is] a composition with no organization object still lands the write untenanted', async () => {
+    // DISCRIMINATING CONTROL for the refusal above: the same empty install,
+    // minus the organization object. C1 leaves this branch exactly as it was
+    // (ADR-0131 C8 decides whether D9 reaches it).
+    const { engine, observed } = await makeEngine({ organizations: [], lean: true });
+    await engine.insert('dispatch_order', { subject: 'lean' }, { context: SYSTEM_CTX } as any);
+    expect(lastWrite(observed, 'dispatch_order')?.method).toBe('create');
     expect(lastWrite(observed, 'dispatch_order')?.options?.tenantId).toBeUndefined();
+    // The lean probe answers from the registry and never asks the driver.
+    expect(observed.filter((c) => c.object === 'sys_organization')).toEqual([]);
   });
 });
 

@@ -51,6 +51,12 @@
  *     posture. Nothing here renumbers anything; this module only decides what a
  *     write ABOUT to happen resolves to.
  *
+ * ADR-0131 D9 generalises binding points 1 and 2 to every topology: under
+ * `single` the owner is DERIVED only when exactly one organization exists, and
+ * a write with no derivable owner is REFUSED — several organizations, a wall,
+ * and (since the Default Organization became a boot invariant, D3) zero
+ * organizations alike. ⛔ Nothing defaults to any owner but the derivable one.
+ *
  * ## The three exclusions, and why the refusal is not broader
  *
  * A refusal that fires too widely breaks every system write on a walled install
@@ -78,12 +84,11 @@
  *    none by this control. So the exclusion is now a per-object verdict, and an
  *    object nobody has adjudicated stays excluded and stays ON THE LIST.
  *
- *    ⚠️ The seed loader (`/^(sys_|cloud_|ai_)/` in `seed-loader.ts`) and
- *    #8686's backfill (`seed-tenancy-backfill.ts`) still carry the NAMESPACE
- *    form. That divergence is deliberate and NOT resolved here: #13491's
- *    landing is the runtime write path, and re-cutting the seed and backfill
- *    paths is a separate decision about rows those paths already wrote. Read
- *    the three together before changing any of them.
+ *    ⚠️ This per-object exclusion STAYS until ADR-0131 C8, which retires it
+ *    together with the ledger (D13); C1 withdrew only the seed loader's
+ *    namespace exemption. #8686's backfill (`seed-tenancy-backfill.ts`) still
+ *    carries the NAMESPACE form; its residue attribution is C7's. Read the
+ *    three together before changing any of them.
  *  - **Writes that already carry an organization** — on the execution context
  *    or on the row itself. That IS "carrying an explicit organization"; the
  *    ruling asks for nothing more.
@@ -152,17 +157,17 @@ export const DEFAULT_TENANT_FIELD = 'organization_id';
  *    {@link classifyPlatformObjectTenancy} and
  *    {@link isPlatformObjectOutOfTenantAuditScope}, which is what
  *    `Engine.resolveSystemInsertOrganization` calls.
- *  - **`seed-loader.ts`** still cuts by the namespace regexp
- *    (`/^(sys_|cloud_|ai_)/`, at its `fallbackOrgId` decision).
+ *  - **`seed-loader.ts`** no longer cuts at all: ADR-0131 D3 withdrew its
+ *    namespace exemption (C1), so every seed row is stamped with the resolved
+ *    organization — `sys_` / `cloud_` / `ai_` seeds included — or refused.
  *  - **`seed-tenancy-backfill.ts`** still cuts by the namespace regexp (its own
- *    `PLATFORM_NAMESPACE`).
+ *    `PLATFORM_NAMESPACE`); attributing the residue that path already wrote is
+ *    ADR-0131 C7's.
  *
- * ⛔ Do NOT restore the coupling by re-cutting the seed paths per object, and
- * ⛔ do not re-stamp anything to match. Whether those two should follow is a
- * separate decision about rows they have ALREADY WRITTEN, and the re-ruling's
+ * ⛔ Do NOT re-stamp anything here to match. What becomes of rows the seed paths
+ * have ALREADY WRITTEN is the residue question (C7), and the re-ruling's
  * execution point 3 (⛔ never silently rewrite behaviour) governs every answer
- * to it — including "leave them as they are". Read the three together before
- * changing any of them.
+ * to it. Read the three together before changing any of them.
  */
 const PLATFORM_NAMESPACE = /^(sys_|cloud_|ai_)/;
 
@@ -224,15 +229,23 @@ export function carriesOrganization(value: unknown): boolean {
  */
 export type SystemWriteOrganizationDecision =
   /**
-   * Nothing to resolve — the install has no organization yet, which is the
-   * normal state of a fresh boot (seeds land during `start()`; the admin, and
-   * with them the first organization, arrive by a later sign-up POST). No
-   * organization exists, so nothing can be stamped and — crucially — nothing is
-   * forked either: there is no second partition to fork away from. #8686's
-   * `sys_organization`-insert handoff adopts exactly these rows the moment the
-   * answer becomes derivable. ⛔ Refusing here would refuse first boot itself.
+   * Nothing to resolve — this COMPOSITION registers no organization object at
+   * all (a lean embedding, a bare-kernel test), so no organization can exist
+   * and there is nothing to stamp or to refuse in the name of. The write lands
+   * as it always has.
+   *
+   * ⚠️ Deliberately NOT "the install has no organization yet". That reading
+   * used to share this kind, and it was the normal state of a fresh `single`
+   * boot while the Default Organization arrived only with the first sign-up.
+   * ADR-0131 D3 made that organization load-bearing — it exists before the
+   * application seeds and before the listener — so a `single` install that
+   * registers `sys_organization` and holds none of it is the boot invariant
+   * broken, and is refused (`no-organization`) like every other topology with
+   * no derivable owner (D9). Only the composition with no organization object
+   * keeps this branch; whether D9's refusal also reaches it is ADR-0131 C8's
+   * question, not this one's.
    */
-  | { kind: 'no-organization-yet' }
+  | { kind: 'no-organization-object' }
   /** Binding point 1: exactly one organization, so the answer is derivable. */
   | { kind: 'derived'; organizationId: string }
   /** Binding point 2: refuse loudly rather than default to `__global__`. */
@@ -251,25 +264,49 @@ export type SystemWriteRefusalReason =
    * topology falls under binding point 2 rather than getting a guessed default.
    * #8686's backfill draws the same line (`skipped-ambiguous-organization`).
    */
-  | 'ambiguous-organization';
+  | 'ambiguous-organization'
+  /**
+   * The posture says `single`, the composition registers the organization
+   * object, and it holds NO organization. Under ADR-0131 D3 the Default
+   * Organization exists before anything writes (plugin-auth creates it at
+   * boot, and a failure to is a boot error), so this is the boot invariant
+   * broken — and there is no owner to derive, which D9 refuses rather than
+   * writing a row nobody owns.
+   */
+  | 'no-organization';
 
 /**
- * Resolve the organization a system-context write should carry.
+ * Resolve the organization a system-context write should carry (ADR-0131 D9):
+ * derived at exactly one organization under `single`, refused at zero, at
+ * several, and under a wall.
  *
  * `probeOrganizations` is called ONLY on the single-tenant branch — a walled
  * posture is refused without asking the database anything, because the answer
  * could not change the verdict.
+ *
+ * `organizationObjectRegistered` separates the two facts an empty probe can
+ * mean: an install with the organization object and none of its rows (refused,
+ * `no-organization`) and a composition with no organization object at all
+ * (`no-organization-object`, unchanged). It is a required input, not a
+ * defaulted one: a caller that does not know the answer must not be handed the
+ * permissive reading by omission.
  */
 export async function resolveSystemWriteOrganization(args: {
   posture: TenancyPosture;
   /** Organization ids, capped at 2 by the caller — only "0 / 1 / several" matters. */
   probeOrganizations: () => Promise<readonly string[]>;
+  /** Does this composition register the organization object ({@link ORGANIZATION_OBJECT}) at all? */
+  organizationObjectRegistered: boolean;
 }): Promise<SystemWriteOrganizationDecision> {
   if (args.posture !== 'single') {
     return { kind: 'refuse', reason: 'walled-posture' };
   }
   const ids = await args.probeOrganizations();
-  if (ids.length === 0) return { kind: 'no-organization-yet' };
+  if (ids.length === 0) {
+    return args.organizationObjectRegistered
+      ? { kind: 'refuse', reason: 'no-organization', organizationCount: 0 }
+      : { kind: 'no-organization-object' };
+  }
   if (ids.length === 1) return { kind: 'derived', organizationId: ids[0] };
   return { kind: 'refuse', reason: 'ambiguous-organization', organizationCount: ids.length };
 }
@@ -293,9 +330,15 @@ function buildRefusalMessage(
     reason === 'walled-posture'
       ? `this install runs the '${posture}' tenancy posture, where organizations are an enforced ` +
         `boundary and there is no single "install organization" to derive`
-      : `this install declares the 'single' tenancy posture but holds ` +
-        `${organizationCount ?? 'several'} organizations, so which one owns the row is not derivable ` +
-        `(exactly 1 is required to adopt one without guessing)`;
+      : reason === 'no-organization'
+        ? `this install declares the 'single' tenancy posture but holds NO organization, so there is no ` +
+          `Default Organization to derive the owner from. Under 'single' the Default Organization is ` +
+          `created at boot, before application seeds load and before the server accepts requests, and a ` +
+          `failure to create it stops the boot — so its absence means the organization was deleted or ` +
+          `this write ran in a composition that never booted the auth plugin`
+        : `this install declares the 'single' tenancy posture but holds ` +
+          `${organizationCount ?? 'several'} organizations, so which one owns the row is not derivable ` +
+          `(exactly 1 is required to adopt one without guessing)`;
   return (
     `Insert on '${object}' was REFUSED: a system-context write on a tenant-scoped object must carry an ` +
     `organization, and ${condition}. Writing it anyway would store ` +
