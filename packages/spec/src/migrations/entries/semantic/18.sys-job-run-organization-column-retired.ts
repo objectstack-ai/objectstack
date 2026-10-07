@@ -24,8 +24,8 @@ export const entry: SemanticMigration = {
     + 'administrators hold',
   reason:
     'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
-    + 'and loses the column; the writer decides membership, not the name. Writer census on '
-    + 'objectstack main at commit e67ba80049: the sole writer is DbJobAdapter in '
+    + 'and loses the column; the writer decides membership, not the name. Writer census at commit '
+    + 'e67ba80049 of this repository\'s main branch: the sole writer is DbJobAdapter in '
     + '@objectstack/service-job: two write sites (the run start insert and the run finish update), '
     + 'each under a system context whose row literal names no organization, including for a job '
     + 'that declares the organization it runs as, whose stamp reaches the job data writes and never '

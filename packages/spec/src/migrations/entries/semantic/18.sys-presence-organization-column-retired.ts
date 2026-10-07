@@ -24,12 +24,12 @@ export const entry: SemanticMigration = {
     + 'administrators hold',
   reason:
     'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
-    + 'and loses the column; the writer decides membership, not the name. Writer census on '
-    + 'objectstack main at commit e67ba80049: nothing writes the table through ObjectQL at all '
-    + '(presence travels the realtime path, and the generic data door exposes reads only), and a '
-    + 'person present in several organizations is one person. So the injected column only ever held '
-    + 'NULL. The census is the same procedure that reports the organization-stamping writers of '
-    + 'sys_http_delivery, sys_secret and sys_email, so it can fire. Under a walled posture the '
+    + 'and loses the column; the writer decides membership, not the name. Writer census at commit '
+    + 'e67ba80049 of this repository\'s main branch: nothing writes the table through ObjectQL at '
+    + 'all (presence travels the realtime path, and the generic data door exposes reads only), and '
+    + 'a person present in several organizations is one person. So the injected column only ever '
+    + 'held NULL. The census is the same procedure that reports the organization-stamping writers '
+    + 'of sys_http_delivery, sys_secret and sys_email, so it can fire. Under a walled posture the '
     + 'tenant wall compared that NULL to the caller organization and hid every row from every '
     + 'reader, platform administrators included; with no column there is no wall, and the table is '
     + 'governed by object permission instead (D7). The capability gate is part of the same change, '

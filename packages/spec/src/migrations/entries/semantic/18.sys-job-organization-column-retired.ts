@@ -24,8 +24,8 @@ export const entry: SemanticMigration = {
     + 'hold',
   reason:
     'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
-    + 'and loses the column; the writer decides membership, not the name. Writer census on '
-    + 'objectstack main at commit e67ba80049: the sole writer is DbJobAdapter in '
+    + 'and loses the column; the writer decides membership, not the name. Writer census at commit '
+    + 'e67ba80049 of this repository\'s main branch: the sole writer is DbJobAdapter in '
     + '@objectstack/service-job: four write sites (the update and insert arms of the schedule '
     + 'upsert, the active toggle and the run summary bump), each under a system context whose row '
     + 'literal names no organization. So the injected column only ever held NULL. The census is the '

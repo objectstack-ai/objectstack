@@ -24,10 +24,10 @@ export const entry: SemanticMigration = {
     + 'administrators hold',
   reason:
     'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
-    + 'and loses the column; the writer decides membership, not the name. Writer census on '
-    + 'objectstack main at commit e67ba80049: the sole writer is ObjectStoreFlowDispatchStore in '
-    + '@objectstack/service-automation: two write sites (the claim insert and the settle update), '
-    + 'each under a system context whose row is a dispatch key and its outcome, naming no '
+    + 'and loses the column; the writer decides membership, not the name. Writer census at commit '
+    + 'e67ba80049 of this repository\'s main branch: the sole writer is ObjectStoreFlowDispatchStore '
+    + 'in @objectstack/service-automation: two write sites (the claim insert and the settle '
+    + 'update), each under a system context whose row is a dispatch key and its outcome, naming no '
     + 'organization. So the injected column only ever held NULL. The census is the same procedure '
     + 'that reports the organization-stamping writers of sys_http_delivery, sys_secret and '
     + 'sys_email, so it can fire. Under a walled posture the tenant wall compared that NULL to the '
