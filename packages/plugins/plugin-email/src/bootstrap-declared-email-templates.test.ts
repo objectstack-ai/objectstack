@@ -19,10 +19,9 @@ import {
   SWEEP_NAMES_PER_READ,
   SWEEP_ROWS_PER_READ,
 } from './bootstrap-declared-email-templates.js';
-import { bindEmailTemplateProvenanceStamp } from './email-template-provenance.js';
 
 // ---------------------------------------------------------------------------
-// Fakes — mirrors the ObjectQL surface the bridge and the stamp hook touch.
+// Fakes — mirrors the ObjectQL surface the bridge touches.
 // ---------------------------------------------------------------------------
 
 interface HookEntry {
@@ -110,7 +109,6 @@ class FakeEngine {
   }
 }
 
-const ADMIN_CTX = { isSystem: false, positions: [], permissions: [] };
 const TABLE = 'sys_email_template';
 
 function declaredTemplate(over: Record<string, any> = {}): any {
@@ -197,12 +195,11 @@ describe('bootstrapDeclaredEmailTemplates', () => {
     const engine = new FakeEngine({ declared: { email_template: [declaredTemplate()] } });
     await bootstrapDeclaredEmailTemplates(engine as any, undefined);
 
-    // Admin edits the seeded row through a normal (non-system) write; the
-    // provenance stamp freezes it.
-    bindEmailTemplateProvenanceStamp(engine as any);
-    const seeded = rowsOf(engine)[0];
-    await engine.update(TABLE, { id: seeded.id, subject: 'Admin wording' }, { context: ADMIN_CTX });
-    expect(rowsOf(engine)[0].customized).toBe(true);
+    // A row an organization edited BEFORE the sys_email_template door closed
+    // (ADR-0131 ruling C): the retired provenance stamp left it marked
+    // `customized`, and nothing marks a row any more — written here as the
+    // stored state the v18 migration ceremony will find and promote.
+    Object.assign(rowsOf(engine)[0], { subject: 'Admin wording', customized: true });
 
     (engine as any).declared = {
       email_template: [declaredTemplate({ subject: 'Redeploy wording' })],

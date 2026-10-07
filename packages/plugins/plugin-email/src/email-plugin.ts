@@ -42,10 +42,7 @@ import {
   mapTemplateToRow,
   type EffectiveEmailTemplateSources,
 } from './bootstrap-declared-email-templates.js';
-import {
-  bindEmailTemplateProvenanceStamp,
-  unbindEmailTemplateProvenanceStamp,
-} from './email-template-provenance.js';
+import { bindEmailTemplateDoor, unbindEmailTemplateDoor } from './email-template-door.js';
 import { sweepStrandedOutbox, type OutboxSweepResult } from './outbox-sweep.js';
 import { readInternalHeadersJson } from './internal-header-readback.js';
 import {
@@ -324,7 +321,7 @@ export class EmailServicePlugin implements Plugin {
 
   private readonly options: EmailServicePluginOptions;
   private service?: EmailService;
-  /** Engine carrying the template provenance hook — unbound in dispose(). */
+  /** Engine carrying the closed `sys_email_template` door — unbound in destroy(). */
   private boundEngine?: IDataEngine;
   /** Live `email_template` metadata subscription — detached in dispose(). */
   private unsubscribeTemplates?: () => void;
@@ -340,7 +337,7 @@ export class EmailServicePlugin implements Plugin {
    * by the materializer because the projector seam has no unregister verb: a
    * disposed plugin's projector stays in the protocol's per-type slot, and
    * without this it would keep writing `sys_email_template` rows through an
-   * engine whose provenance hook has already been unbound.
+   * engine whose organization door has already been unbound.
    */
   private templateBridgeArmed = false;
   /** SMTP transport currently in use, if any — closed in dispose(). */
@@ -1036,8 +1033,9 @@ export class EmailServicePlugin implements Plugin {
   }
 
   /**
-   * [#4509] Materialize declared `email_template` metadata, bind the provenance
-   * stamp, and keep the rows live for runtime authoring.
+   * [#4509] Materialize declared `email_template` metadata, close the
+   * organization door on `sys_email_template`, and keep the rows live for
+   * runtime authoring.
    *
    * `email_template` is `allowRuntimeCreate: true` (unlike `webhook`), so a
    * boot-only sweep would leave a Studio save inert until the next restart —
@@ -1081,12 +1079,20 @@ export class EmailServicePlugin implements Plugin {
    * lookup.
    */
   private async bootDeclaredTemplates(ctx: PluginContext, engine: IDataEngine): Promise<void> {
-    // Bind the provenance stamp so an admin edit freezes a seeded row.
+    // ADR-0131 D6, ruling C on §6 Q1: an organization does not create or edit
+    // a template row. Only system-context writes reach the table — the seeds,
+    // the boot sweep and the live projector below — see email-template-door.ts.
+    // This replaced the provenance stamp, which marked an organization's edit
+    // `customized` instead of refusing it.
     this.boundEngine = engine;
     this.templateBridgeArmed = true;
-    try { bindEmailTemplateProvenanceStamp(engine as any, ctx.logger as any); }
+    try { bindEmailTemplateDoor(engine as any, ctx.logger as any); }
     catch (err: any) {
-      ctx.logger.warn('EmailServicePlugin: template provenance stamp not bound: ' + (err?.message ?? err));
+      ctx.logger.error(
+        'EmailServicePlugin: the sys_email_template organization door was NOT closed — an organization\'s '
+        + 'create and update of a template row are accepted for the life of this process, while every '
+        + 'template it sends still comes from these rows. Cause: ' + (err?.message ?? err),
+      );
     }
 
     let metadataService: IMetadataService | undefined;
@@ -1361,7 +1367,7 @@ export class EmailServicePlugin implements Plugin {
    * `LiteKernel.destroy()` walk the plugins in reverse calling
    * `plugin.destroy()` — so after `await kernel.shutdown()` had RESOLVED, the
    * two metadata subscriptions were still live, the SMTP transport was still
-   * open and the provenance hook was still bound to the engine. `dispose()`
+   * open and the template hook was still bound to the engine. `dispose()`
    * had exactly ONE caller in the whole repo, a test in this package; the
    * kernel was never one of them.
    *
@@ -1379,7 +1385,7 @@ export class EmailServicePlugin implements Plugin {
       this.liveSmtp = undefined;
     }
     if (this.boundEngine) {
-      try { unbindEmailTemplateProvenanceStamp(this.boundEngine as any); } catch { /* best effort */ }
+      try { unbindEmailTemplateDoor(this.boundEngine as any); } catch { /* best effort */ }
       this.boundEngine = undefined;
     }
   }
