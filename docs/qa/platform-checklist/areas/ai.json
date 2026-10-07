@@ -690,7 +690,7 @@
       "title": "the MCP OAuth transport rule is judged on the DEPLOYMENT's own host: a private / link-local plain-HTTP deployment serves the OAuth track and logs the accepted-transport warning; a public plain-HTTP one is still refused, fail-closed, and logs its own public-plaintext warning",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -714,7 +714,7 @@
         "on boot (a), POST /api/v1/mcp with NO credentials; record the 401 and its WWW-Authenticate header, including whether a resource_metadata pointer is present",
         "if a second machine is available, drive a real MCP client from it against boot (a) over http:// and record whether the client completes the OAuth flow, refuses the scheme up front, or fails elsewhere — RECORD WHICH, because a client-side scheme refusal changes what this compatibility is worth",
         "boot (b) on a PUBLIC host spelling over plain http; capture the boot log and GET both protected-resource paths; record status and body — and record separately whether the public-plaintext warning `OAuth discovery is served over PUBLIC plain HTTP` appears and how many times",
-        "boot (c) on loopback; capture the boot log and the same two GETs",
+        "boot (c) on loopback with --log-level info (its accepted-transport line is logged at INFO there, so a default warn-level boot log does not carry it); capture the boot log and the same two GETs",
         "re-boot (a) with an https base URL (a self-signed terminator is enough — no client needs to trust it, only the deployment's own base URL has to be https); capture the boot log and record the ABSENCE of BOTH plain-HTTP warnings"
       ],
       "acceptance": [
@@ -731,9 +731,9 @@
           "evidence": "the two 404s and the boot-log line"
         },
         {
-          "clause": "eligibility decides WHICH plain-HTTP warning is emitted, never WHETHER one is: every plain-HTTP boot carries exactly one of the two, once, at mount. On a boot whose origin the transport rule ACCEPTS (a and c) it is the accepted-transport line `OAuth is served UNENCRYPTED`; on the PUBLIC plain-HTTP boot (b), whose OAuth track the same rule left dark, it is the distinct line `OAuth discovery is served over PUBLIC plain HTTP`, which states that the AS discovery surface is served over public plain HTTP, that the MCP OAuth track is disabled, and that TLS is the remedy. Neither line on the https re-boot. Each names the issuer URL. The ruled sentence 「OAuth 未加密:仅限可信内网」 is carried as the line's MEANING and lives verbatim in the code comment beside the call — ruling batch #210 item 5",
+          "clause": "eligibility decides WHICH plain-HTTP warning is emitted, never WHETHER one is: every plain-HTTP boot carries exactly one of the two, once, at mount. On a boot whose origin the transport rule ACCEPTS (a and c) it is the accepted-transport line `OAuth is served UNENCRYPTED` — logged at WARN on (a), and at INFO on loopback (c), where nothing crosses a network; on the PUBLIC plain-HTTP boot (b), whose OAuth track the same rule left dark, it is the distinct line `OAuth discovery is served over PUBLIC plain HTTP`, which states that the AS discovery surface is served over public plain HTTP, that the MCP OAuth track is disabled, and that TLS is the remedy. Neither line on the https re-boot. Each names the issuer URL. The ruled sentence 「OAuth 未加密:仅限可信内网」 is carried as the line's MEANING and lives verbatim in the code comment beside the call — ruling batch #210 item 5",
           "oracle": "log",
-          "verify": "grep the captured boot logs for the two ENGLISH anchors separately — `OAuth is served UNENCRYPTED`: exactly 1 on (a), exactly 1 on (c), 0 on (b), 0 on the https re-boot; `OAuth discovery is served over PUBLIC plain HTTP`: exactly 1 on (b), 0 on (a), 0 on (c), 0 on the https re-boot. Each matched line names the issuer, the origin followed by /api/v1/auth. ⛔ Grepping for 「OAuth 未加密:仅限可信内网」 now returns 0 on every boot: ruling batch #210 item 5 moved that sentence out of the emitted string into the code comment, so a run still greping it scores every boot as a miss",
+          "verify": "grep the captured boot logs for the two ENGLISH anchors separately — `OAuth is served UNENCRYPTED`: exactly 1 on (a), at WARN; exactly 1 on (c), at INFO, in its --log-level info boot log (0 in a default warn-level one); 0 on (b), 0 on the https re-boot; `OAuth discovery is served over PUBLIC plain HTTP`: exactly 1 on (b), 0 on (a), 0 on (c), 0 on the https re-boot. Each matched line names the issuer, the origin followed by /api/v1/auth. ⛔ Grepping for 「OAuth 未加密:仅限可信内网」 now returns 0 on every boot: ruling batch #210 item 5 moved that sentence out of the emitted string into the code comment, so a run still greping it scores every boot as a miss",
           "evidence": "the matching log lines with their counts, and the two empty results (the public boot and the https re-boot)"
         },
         {
@@ -783,6 +783,12 @@
           "date": "2026-09-22",
           "change": "ruling batch #210 item 5 (B/B). D1: eligibility decides WHICH plain-HTTP warning is emitted, never WHETHER one is — boot (b) moves from asserting 0 warnings to asserting exactly 1 occurrence of a new, distinct public-plaintext line, because the .well-known discovery routes are mounted regardless of transport while the 'OAuth track is NOT live' line sits inside the MCP-surface condition, so a public plain-HTTP boot with that surface off used to emit nothing at all. D2: the emitted strings are English and the grep anchors move to them; the ruled Chinese sentence is carried as the line's meaning in the code comment beside the call. Steps, clauses and verifies moved together",
           "ref": "claude/issue-19571-plaintext-as-warning"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-07",
+          "change": "the accepted-transport line `OAuth is served UNENCRYPTED` is logged at INFO when the issuer's host is loopback and stays WARN on a private or link-local one (triage ruling on #22073), so boot (c)'s line no longer shows at the default warn level. steps[5] boots (c) with --log-level info; acceptance[2]'s clause and verify name the level per boot. D1 is unchanged: the same sentence is still emitted on every accepted plain-HTTP boot",
+          "ref": "#22073"
         }
       ]
     }
