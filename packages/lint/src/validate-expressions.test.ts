@@ -2353,6 +2353,9 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
 
     it('tolerates a screen with no fields, a non-array fields, and no config', () => {
       expect(validateStackExpressions(screenFlow([]))).toHaveLength(0);
+      // The expression walk tolerates the non-array `fields`; the one finding is
+      // the screen contract's own refusal of that value, from the flow's one
+      // config judge.
       expect(validateStackExpressions({
         objects,
         flows: [{
@@ -2360,7 +2363,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
           nodes: [{ id: 's', type: 'screen', config: { fields: 'nope' } }, { id: 's2', type: 'screen' }],
           edges: [],
         }],
-      })).toHaveLength(0);
+      }).map((issue) => issue.where)).toEqual(["flow 'f' · node 's' (screen) config.fields"]);
     });
   });
 });

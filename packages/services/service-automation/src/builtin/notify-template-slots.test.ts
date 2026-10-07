@@ -114,8 +114,16 @@ describe('notify — title / message are template slots', () => {
         expect(payload).toMatchObject(RENDERED);
     });
 
-    it('refuses a value that is neither a string nor a template envelope at the contract parse, before anything is sent', async () => {
-        const { result } = await deliveredFor({ title: 42 });
+    it('refuses a value that is neither a string nor a template envelope — at registration, and at the contract parse past the doors, before anything is sent', async () => {
+        // The flow parse judges a builtin node's present config value
+        // against its executor contract, so registration refuses it at the key…
+        expect(() => engine.registerFlow('notify_template_flow', notifyFlow({ recipients: ['user_1'], title: 42 })))
+            .toThrow(/refused at `title`/);
+        // …and the executor still refuses one that reaches it past the doors.
+        const stored = engine.registerFlow('notify_template_flow', notifyFlow({ recipients: ['user_1'], title: TITLE }));
+        const node = stored.nodes.find((n) => n.id === 'notify')!;
+        node.config = { ...node.config, title: 42 };
+        const result = await engine.execute('notify_template_flow', { params: PARAMS } as any);
         expect(result.success).toBe(false);
         expect(String(result.error)).toContain('does not satisfy the notify contract');
         expect(String(result.error)).toContain('config.title');

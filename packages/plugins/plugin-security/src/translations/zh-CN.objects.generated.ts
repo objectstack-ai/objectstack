@@ -330,6 +330,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "权限集",
         help: "指向 sys_permission_set 的外键。"
       },
+      permission_set: {
+        label: "权限集名称",
+        help: "[ADR-0131 D4] 此授权所持有的权限集的机器名（sys_permission_set.name）。由平台在每次携带 permission_set_id 的写入中根据 permission_set_id 写入；提供的值必须与该名称一致，否则写入将被拒绝。在此列存在之前写入的授权中为 NULL。"
+      },
       organization_id: {
         label: "组织",
         help: "可选的组织范围。NULL = 在所有组织上下文中都生效。"

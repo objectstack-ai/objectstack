@@ -478,6 +478,9 @@ export async function provisionRlsProbePersona(
       id: genId('ups'),
       user_id: userId,
       permission_set_id: permissionSetId,
+      // [ADR-0131 D4] Both columns, agreeing: found or created under exactly
+      // this name just above.
+      permission_set: RLS_PROBE_PERMISSION_SET,
       organization_id: null,
       granted_by: null,
     },

@@ -330,6 +330,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Permission Set",
         help: "Foreign key to sys_permission_set."
       },
+      permission_set: {
+        label: "Permission Set Name",
+        help: "[ADR-0131 D4] Machine name of the permission set this grant holds (sys_permission_set.name). Written by the platform from permission_set_id on every write that carries it; a supplied value must equal that name or the write is refused. NULL on a grant written before the column existed."
+      },
       organization_id: {
         label: "Organization",
         help: "Optional organization scope. NULL = applies in every org context."

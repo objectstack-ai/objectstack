@@ -167,7 +167,9 @@ export const FLOW_PAUSE_CAPABLE_NODE_TYPES: readonly string[] = [
  * rule reaches in beside it, still without closing the key set (#20316): a
  * key the node's executor contract requires, left out, and a `decision`
  * branch list the executor cannot read — `flowNodeConfigRefusals`, in the
- * same superRefine.
+ * same superRefine — and (#21898) a VALUE rule with it, again without closing
+ * the key set: a value a builtin node's executor contract refuses, where the
+ * build can know what the run will parse.
  */
 
 /**
@@ -1474,19 +1476,23 @@ export const FlowSchema = lazySchema(() => strictObject(
   //    node against at run time, so a flow carrying one used to register and
   //    then fail every run that reached the node (`loop` with a `body` and no
   //    `collection`, `map` with no `collection`, a CRUD node with no
-  //    `objectName`, …). For a builtin only ABSENCE is judged: a present value
-  //    of the wrong type, or an undeclared key, stays where it is judged today.
-  //    The one plugin node contract the spec declares, `approval` (#21850), is
-  //    judged WHOLE — its executor refuses the node on any contract finding —
-  //    so its undeclared keys and refused values are refused here too;
+  //    `objectName`, …). For a builtin (#21898) a present VALUE its contract
+  //    refuses is refused too (`create_record` `outputVariable: 42`, a screen
+  //    field `min: '1'`), where the build can know what the run parses — never
+  //    a value carrying a `{token}`, a region slot, a ledger predicate or
+  //    value slot, or `http`'s run-resolved `signingSecret`; an undeclared key
+  //    stays where it is judged today. The one plugin node contract the spec
+  //    declares, `approval` (#21850), is judged WHOLE — its executor refuses
+  //    the node on any contract finding — so its undeclared keys are refused
+  //    here too;
   //  - a `decision` branch list the executor cannot read — `conditions` not an
   //    array, a branch that is not an object, and a branch whose `label` is
   //    absent, blank or not text. The last one never failed a run at all: the
   //    matched branch reported no label, and traversal took EVERY out-edge.
   //
-  // A PRESENCE rule for a builtin, never a key-set closure: the node `config`
-  // stays the open record the header of this module describes, and only the
-  // approval node's declared contract closes its key set. Walked with
+  // A PRESENCE and VALUE rule for a builtin, never a key-set closure: the node
+  // `config` stays the open record the header of this module describes, and
+  // only the approval node's declared contract closes its key set. Walked with
   // `collectFlowGraphs`, so a node inside an ADR-0031 region body is judged at
   // the path the author wrote; a container's own judgement skips its regions'
   // insides, which this same walk reaches as graphs of their own.
