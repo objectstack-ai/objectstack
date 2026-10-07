@@ -210,9 +210,20 @@
 # can change verdict. What moves from PR time to push-on-main and the hourly
 # run is the NAME half -- an ADDED file in these two classes, which the
 # tracked-name sweep sees and which, like an added file in every other class
-# since #19498, is judged here by its class and not its status. A deletion or
-# a rename still runs every family. Everything else the arm ran on, it still
-# runs on: scripts/pm/**, every code file under any scripts/, the rulebook,
+# since #19498, is judged here by its class and not its status.
+#
+# A third class takes #19498's weaker claim, and only that one: a TEST file
+# under a workspace package's scripts/ that no package manifest and nothing
+# under .github/ names. The discovery opens a package's scripts/ file only as
+# a gate source, and a gate source is a file a check:* command or a workflow
+# step spells; such a test is spelled by neither, so the one battery reader
+# left is the pair of whole-tree censuses -- which read it exactly as they
+# read a test under src/, a class that has skipped this family since #19498.
+# That census coverage is what moves for it.
+#
+# A deletion or a rename still runs every family. Everything else the arm ran
+# on, it still runs on: scripts/pm/**, every code file under the root
+# scripts/, every non-test file under a package's scripts/, the rulebook,
 # every `.claude/**` code file (the hooks, which the shell-mask census reads),
 # the workflow tree and every package manifest.
 #
@@ -451,6 +462,23 @@ named_by_relative_specifier() {
   return 0
 }
 
+# named_in_gate_wiring <path>  -- exit 0 when this path's basename is spelled
+# anywhere in a package manifest or anywhere under .github/ in the HEAD tree,
+# and ALSO when git grep cannot answer: fail-open. A file under a workspace
+# package's scripts/ is a gate source only when a check:* command in a
+# manifest or a workflow step names it (`resolveCheckToFiles` reads the
+# command text; the discovery follows no import into a package's scripts/),
+# so a basename spelled in neither place names no gate source. A comment, a
+# lookalike name, a step that is no gate: every extra hit answers "named".
+named_in_gate_wiring() {
+  local base rc
+  base=${1##*/}
+  rc=0
+  git grep -q -F -e "$base" HEAD -- '*package.json' '.github/' > /dev/null 2>&1 || rc=$?
+  if [ "$rc" -eq 1 ]; then return 1; fi
+  return 0
+}
+
 # reads_gate_tree <path> <class>  -- exit 0 when this change is inside the
 # read-set the dispatch derivation shares with the gates built on it: the
 # workflow tree it discovers (.github/**, workflows and composite actions),
@@ -512,6 +540,18 @@ family_reads() {
           case "$path" in
             *.json|*.md|*.txt)
               if named_by_relative_specifier "$path"; then return 0; fi
+              return 1
+              ;;
+          esac
+          ;;
+        workspace)
+          # A test under a package's scripts/ is product test code to this
+          # battery -- the two whole-tree censuses read it as they read every
+          # source file -- unless gate wiring names it. A package manifest and
+          # every other file under a scripts/ keep running it below.
+          case "$path" in
+            */scripts/*.test.ts|*/scripts/*.test.tsx|*/scripts/*.test.mts|*/scripts/*.test.cts|*/scripts/*.test.js|*/scripts/*.test.mjs|*/scripts/*.test.cjs)
+              if named_in_gate_wiring "$path"; then return 0; fi
               return 1
               ;;
           esac

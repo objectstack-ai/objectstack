@@ -25,8 +25,10 @@
 # scripts/ and agent prose outside the pm-dispatch rulebook skip it, while
 # scripts/pm/** whole, the rulebook, a `.claude/**` shell script, a data file a
 # relative specifier names and a scripts/ file of an unlisted kind still run
-# it; a pull request touching only packages/*/src/** runs no PM self-test, and
-# `schedule` and `push` still run it over the very changes the PR path skips.
+# it; a test under a package's scripts/ skips it unless a manifest or a
+# workflow names it; a pull request touching only packages/*/src/** runs no PM
+# self-test, and `schedule` and `push` still run it over the very changes the
+# PR path skips.
 #
 # Since #19753 it covers migration_registry, the one family that ADDS a gate
 # to the PR path: an entry, the generated registry, the generator and the two
@@ -85,13 +87,17 @@ mkdir -p "$UP/packages/a/scripts" "$UP/packages/a/src" "$UP/apps/site/src" "$UP/
   "$UP/packages/spec/src/migrations/entries/semantic" "$UP/packages/spec/scripts"
 printf '{"name":"fixture","private":true}\n' > "$UP/package.json"
 printf 'packages:\n  - packages/*\n' > "$UP/pnpm-workspace.yaml"
-printf '{"name":"a"}\n' > "$UP/packages/a/package.json"
+printf '{"name":"a","scripts":{"check:gate":"vitest run scripts/gate.test.ts"}}\n' > "$UP/packages/a/package.json"
 printf 'export const a = 1;\n' > "$UP/packages/a/src/index.ts"
 printf 'export const t = 1;\n' > "$UP/packages/a/src/index.test.ts"
 printf '{"rows":[]}\n' > "$UP/packages/a/src/data.json"
 printf '#!/usr/bin/env bash\necho foo\n' > "$UP/packages/a/foo.sh"
 printf 'dist/\n' > "$UP/packages/a/.gitignore"
 printf 'console.log(1);\n' > "$UP/packages/a/scripts/build.mjs"
+# Two tests under a package's scripts/: one a check:* command in its manifest
+# names (a gate source), one nothing names (#22076).
+printf 'export const g = 1;\n' > "$UP/packages/a/scripts/gate.test.ts"
+printf 'export const b = 1;\n' > "$UP/packages/a/scripts/build.test.ts"
 printf 'export const site = 1;\n' > "$UP/apps/site/src/page.tsx"
 printf '# guide\n' > "$UP/docs/guide.md"
 printf '# page\n' > "$UP/content/docs/page.mdx"
@@ -128,6 +134,7 @@ printf 'export const registry = [];\n' > "$UP/packages/spec/src/migrations/regis
 printf 'export const entry = 1;\n' > "$UP/packages/spec/src/migrations/entries/semantic/17.x.ts"
 printf 'export const gen = 1;\n' > "$UP/packages/spec/scripts/build-migration-registry.ts"
 printf 'export const schemas = 1;\n' > "$UP/packages/spec/scripts/build-schemas.ts"
+printf 'export const merge = 1;\n' > "$UP/packages/spec/scripts/conversions-merge.test.ts"
 git_q -C "$UP" add -A
 git_q -C "$UP" commit -q -m 'C0: root'
 C0=$(git_q -C "$UP" rev-parse HEAD)
@@ -544,6 +551,20 @@ run_case 'merge_group: a package-local script is a gate source (the derivation f
 expect_rc 0
 expect_verdicts comment_mask_corpus pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
 
+S=$(scenario M:packages/a/scripts/build.test.ts)
+run_case 'merge_group: a test under a package scripts/ that no manifest or workflow names is product test code to the PM self-test, which skips (#22076)' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_warnings '' ''
+expect_verdicts slot_lookup query_options_erasure comment_mask_corpus declared_population_live bare_root_worklist self_test_workflow_commands
+expect_reason pm_dispatch_gates 'no changed path is in its read-set'
+
+S=$(scenario M:packages/a/scripts/gate.test.ts)
+run_case 'merge_group: a test under a package scripts/ that a check script names is a gate source and still runs the PM self-test' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_warnings '' ''
+expect_verdicts slot_lookup query_options_erasure comment_mask_corpus pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
+expect_reason pm_dispatch_gates 'packages/a/scripts/gate.test.ts (M, workspace)'
+
 S=$(scenario M:scripts/pm/os-verify-lock.sh)
 run_case 'merge_group: the lock script runs its own self-test and every family that reads scripts/' "$REPO" merge_group '' "$C0"
 expect_rc 0
@@ -763,6 +784,20 @@ expect_warnings '' ''
 expect_verdicts entry_guard pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
 expect_reason pm_dispatch_gates 'scripts/pm/README.md (M, scripts)'
 
+# The shape the card measured paying the step: a spec source, tests under
+# packages/spec/scripts/ that nothing wires as a gate, and a changeset.
+git_q -C "$REPO" checkout -q -B feature-22076-spec-tests "$C0"
+printf 'export const merge = 2;\n' > "$REPO/packages/spec/scripts/conversions-merge.test.ts"
+printf 'export const index = 3;\n' > "$REPO/packages/spec/src/index.ts"
+printf -- '---\n"spec": patch\n---\nthe shared entry\n' > "$REPO/.changeset/shared-entry.md"
+git_q -C "$REPO" add -A
+git_q -C "$REPO" commit -q -m 'F6: a spec source, an unwired test under packages/spec/scripts, a changeset'
+run_case 'pull_request: a spec source, an unwired test under packages/spec/scripts and a changeset run no PM self-test (#22076)' "$REPO" pull_request main ''
+expect_rc 0
+expect_warnings '' ''
+expect_verdicts slot_lookup query_options_erasure comment_mask_corpus declared_population_live bare_root_worklist self_test_workflow_commands
+expect_reason pm_dispatch_gates 'no changed path is in its read-set'
+
 git_q -C "$REPO" checkout -q -B feature-19753 "$C0"
 printf 'export const entry = 2;\n' > "$REPO/packages/spec/src/migrations/entries/semantic/17.x.ts"
 git_q -C "$REPO" commit -q -am 'F3: an entry edited on a feature branch, registry not regenerated'
@@ -867,7 +902,7 @@ pin_step migration_registry 'pnpm --filter @objectstack/spec check:migration-reg
 
 # ── Verdict ─────────────────────────────────────────────────────────────────
 # #4690: a battery that ran nothing is a failure, never a pass.
-if [ "$cases" -lt 68 ] || [ "$checks" -lt 354 ]; then
+if [ "$cases" -lt 71 ] || [ "$checks" -lt 369 ]; then
   echo "SELFTEST FAILED: only $cases case(s) / $checks check(s) ran -- the battery is short"
   exit 1
 fi
