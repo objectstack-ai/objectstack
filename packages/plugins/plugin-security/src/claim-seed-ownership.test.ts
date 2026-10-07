@@ -19,6 +19,8 @@ interface RecordedWrite {
   multi: boolean;
   /** Ids this write actually re-owned, in fixture order. */
   matched: string[];
+  /** The execution context the write carried — what the engine's hook dispatch reads. */
+  context: any;
 }
 
 /** One recorded call to `ql.find` — the page request the writer issued. */
@@ -27,6 +29,8 @@ interface RecordedRead {
   where: any;
   limit: number;
   returned: number;
+  /** The execution context the read carried. */
+  context: any;
 }
 
 /**
@@ -90,11 +94,17 @@ function makeQL(
   const ceiling = opts.ceiling ?? MAX_BULK_PER_ROW_HOOK_ROWS;
   const ql: any = {
     registry: { getAllObjects: () => schemas },
-    find: vi.fn(async (object: string, query: any) => {
+    find: vi.fn(async (object: string, query: any, options?: any) => {
       const all = rowsByObject[object] ?? [];
       const hits = all.filter((r) => rowMatches(r, query?.where ?? {}));
       const page = typeof query?.limit === 'number' ? hits.slice(0, query.limit) : hits;
-      reads.push({ object, where: query?.where, limit: query?.limit, returned: page.length });
+      reads.push({
+        object,
+        where: query?.where,
+        limit: query?.limit,
+        returned: page.length,
+        context: options?.context,
+      });
       return page.map((r) => ({ id: r.id }));
     }),
     update: vi.fn(async (object: string, data: any, options: any) => {
@@ -127,6 +137,7 @@ function makeQL(
         where,
         multi: options?.multi === true,
         matched: matched.map((r) => r.id),
+        context: options?.context,
       });
       return matched.length;
     }),
@@ -511,5 +522,42 @@ describe('claimSeedOwnership', () => {
     expect(ql.update).toHaveBeenCalledTimes(2);
     expect(warn).toHaveBeenCalledTimes(2);
     expect(warn.mock.calls[0][0]).toContain('those rows stay unowned');
+  });
+
+  // ── [#22067] the claim's write dispatches no metadata-bound automation ────
+
+  it('every reown write — whole-set attempt and fallback page alike — runs as isSystem with skipAutomations', async () => {
+    // Re-owning a seed row is attribution, not a user event, so the write runs
+    // with metadata-bound automation off: no app hook, no record-change flow,
+    // hence no approval and no notification. Code-registered hooks (audit,
+    // sharing) still run — the real-engine half of this pin is
+    // `claim-seed-ownership-dispatch.pin.test.ts`; this half pins that EVERY
+    // write this function issues carries the flag, including the page writes
+    // a large object takes and the whole-set attempts the engine refuses.
+    //
+    // 12 000 unowned rows: over the per-row hook ceiling, so one fixture drives
+    // a refused whole-set attempt, the page writes, and the closing whole-set
+    // write that lands.
+    const schemas = [{ name: 'crm_lead', fields: [{ name: 'owner_id' }] }];
+    const rows = Array.from({ length: 12_000 }, (_, i) => ({ id: `l${i}`, owner_id: null }));
+    const { ql, writes, reads } = makeQL(schemas, { crm_lead: rows });
+
+    expect(await claimSeedOwnership(ql, ADMIN)).toEqual([{ object: 'crm_lead', count: 12_000 }]);
+
+    // Both write shapes were exercised, so the assertion below covers both.
+    expect(writes.some((w) => (w.where as any)?.id)).toBe(true);
+    expect(writes.some((w) => !(w.where as any)?.id)).toBe(true);
+    expect(reads.length).toBeGreaterThan(0);
+
+    // Every CALL, not only the writes that landed: a refused attempt is
+    // refused for its row count, and the context it asked with is the same.
+    const contexts = ql.update.mock.calls.map((call: any[]) => call[2]?.context);
+    expect(contexts.length).toBeGreaterThan(writes.length);
+    for (const context of contexts) {
+      expect(context).toEqual({ isSystem: true, skipAutomations: true });
+    }
+    // The page read stays a plain system read — the flag is about dispatch,
+    // and a read dispatches no write automation.
+    for (const r of reads) expect(r.context?.isSystem).toBe(true);
   });
 });
