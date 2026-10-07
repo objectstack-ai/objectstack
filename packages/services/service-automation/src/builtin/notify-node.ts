@@ -179,13 +179,19 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     recipients: {
                         description: 'Recipient user id(s) / audience selector(s)',
                     },
+                    // The form edits the bare-string spelling of these two
+                    // template slots; the contract (`NotifyConfigSchema`) also
+                    // takes the `{ dialect: 'template', source }` envelope that
+                    // code-authored flows write with `tmpl`, carrying the same
+                    // text. `type` stays `string` because the form's control is
+                    // a text box: it is the authoring surface, not the contract.
                     title: {
                         type: 'string',
-                        description: 'Notification title, sent verbatim (not localizable — use template for per-locale content). Either this or template is required; mutually exclusive with template.',
+                        description: 'Notification title, interpolated per run with {token} placeholders (e.g. {record.name}; a {{var}} keeps its outer braces). Not localizable — use template for per-locale content. Either this or template is required; mutually exclusive with template.',
                     },
                     message: {
                         type: 'string',
-                        description: 'Notification body, sent verbatim (not localizable). Only valid with inline title, never with template.',
+                        description: 'Notification body, interpolated per run with {token} placeholders like title. Not localizable. Only valid with inline title, never with template.',
                     },
                     // ── Localizable content path (#9205) ─────────────────────
                     // Mirrors `NotifyConfigSchema.template`/`templateData`; the
@@ -243,8 +249,8 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // The historical aliases (`to`/`subject`/`body`/`url`) are canonicalized
             // at load by the ADR-0087 D2 conversion 'flow-node-notify-config-aliases'
             // (#3796), so the parse sees only canonical keys. Parsed BEFORE
-            // interpolation — the contract's slots are string-typed, so `{token}`
-            // templates pass; the post-interpolation guards below still own
+            // interpolation — the contract's slots are string- or template-typed,
+            // so `{token}` templates pass; the post-interpolation guards below still own
             // "title/recipients resolved to nothing" (#3582), which no static
             // parse can see.
             const parsed = parseNodeConfig<NotifyConfigParsed>('notify', node.id, NotifyConfigSchema, node.config);
@@ -256,8 +262,17 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // stringifyForTemplate (not String()): a sole-token `{$error}` resolves
             // to the engine's error OBJECT, which String() would render as the
             // useless `[object Object]` (#3450). Serialize it readably instead.
-            const title = stringifyForTemplate(interpolate(cfg.title ?? '', variables, context));
-            const body = stringifyForTemplate(interpolate(cfg.message ?? '', variables, context));
+            //
+            // `title`/`message` are template slots (`TemplateExpressionInputSchema`):
+            // the parse above normalizes a bare string to the
+            // `{ dialect: 'template', source }` envelope an author may also write
+            // directly (`tmpl`), so the parsed config holds the envelope in BOTH
+            // cases and the text is its `source` — never the envelope itself,
+            // which `interpolate` would walk key by key and `stringifyForTemplate`
+            // would then serialize as JSON. The contract also refuses an envelope
+            // whose `source` is absent or blank, so a present slot always has text.
+            const title = stringifyForTemplate(interpolate(cfg.title?.source ?? '', variables, context));
+            const body = stringifyForTemplate(interpolate(cfg.message?.source ?? '', variables, context));
             // #9205 — the localizable content path. `template` is read RAW (a
             // static metadata cross-reference, like `topic`/`channels`);
             // `templateData` VALUES interpolate per run, so flow state can feed

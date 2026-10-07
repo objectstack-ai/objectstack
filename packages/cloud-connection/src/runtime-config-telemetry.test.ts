@@ -197,8 +197,10 @@ describe('RuntimeConfigPlugin — telemetry.errorReporting (#12681)', () => {
         });
 
         it('a same-origin runtime (controlPlaneUrl: "") is NOT a declined control plane', async () => {
-            // The conflation this must not inherit: `resolveCloudUrl()` returns
-            // '' both for "this runtime IS the cloud" and for `OS_CLOUD_URL=off`.
+            // The conflation this must not inherit: the served `cloudUrl` is ''
+            // both for "keep requests on this origin" (`controlPlaneUrl: ''`,
+            // which the CLI's cloud-connected arm passes while proxying a
+            // control plane) and for `OS_CLOUD_URL=off`.
             // Reading the posture off that would silence the hosted console —
             // the one deployment that legitimately configures a sink.
             process.env[CLIENT_ERROR_REPORTING_DSN_ENV] = DSN;

@@ -14832,6 +14832,23 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
  * that retirements still add to is authored as sorted entries with an explicit
  * `order` ({@link MAJOR_18_CONVERSIONS}), so two retirements in flight do not
  * conflict here; the next major takes the same shape when it opens.
+ *
+ * ⚠️ EVERY CALL THIS TABLE AND {@link ALL_CONVERSIONS} MAKE AT MODULE LOAD
+ * CARRIES AN `@__PURE__` ANNOTATION — a major's `inApplicationOrder(…)` and
+ * the flattening below, and the next major's when it opens. Each published
+ * entry is one flat file (`tsup.config.ts`, `splitting: false`), so a
+ * consumer's bundler keeps every top-level call it cannot prove pure, together
+ * with everything that call references. Unmarked, these two initializers kept
+ * the whole table in every bundle of every entry whose graph reaches this
+ * module — every conversion, and the view, field, page-component, dashboard,
+ * chart and report schemas the conversions read. `./shared` is one of those
+ * entries: it reaches here only through `normalizeStackInput`
+ * (`shared/metadata-collection.zod.ts`), so a console importing an expression
+ * schema from it carried the table too (#22044). Marked, a bundle keeps the
+ * table only when something it keeps reads it. Both calls only sort, map and
+ * concatenate arrays this module owns.
+ * `packages/spec/scripts/pure-schema-construction.test.ts` holds the effect on
+ * the built `./shared` entry.
  */
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
@@ -14904,11 +14921,14 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     appHiddenToUnpublished,
     actionGlobalNavLocationRemoved,
   ],
-  18: inApplicationOrder(MAJOR_18_CONVERSIONS),
+  18: /* @__PURE__ */ inApplicationOrder(MAJOR_18_CONVERSIONS),
 };
 
-/** Flattened, deterministic list of every conversion the loader knows about. */
-export const ALL_CONVERSIONS: readonly MetadataConversion[] = Object.keys(CONVERSIONS_BY_MAJOR)
+/**
+ * Flattened, deterministic list of every conversion the loader knows about.
+ * `@__PURE__` for the reason {@link CONVERSIONS_BY_MAJOR} gives.
+ */
+export const ALL_CONVERSIONS: readonly MetadataConversion[] = /* @__PURE__ */ Object.keys(CONVERSIONS_BY_MAJOR)
   .map(Number)
   .sort((a, b) => a - b)
   .flatMap((major) => CONVERSIONS_BY_MAJOR[major]!);

@@ -223,8 +223,13 @@ membership with CEL: `'org_admin' in current_user.positions` or
 `current_user.positions.exists(p, p == 'sales_manager')`. The framework-seeded
 built-in position names are `platform_admin`, `org_owner`, `org_admin`, and
 `org_member`; `everyone`/`guest` are the implicit audience anchors (ADR-0090 D9).
-(`current_user.isPlatformAdmin` is a derived, deprecated alias of
-`'platform_admin' in current_user.positions`.)
+(`current_user.isPlatformAdmin` is the `PLATFORM_ADMIN` standing of
+ADR-0095 D3, resolved per request from the deployment's declared platform
+administrators — see
+[the `PLATFORM_ADMIN` posture](/docs/permissions/authorization#combination-semantics-the-fixed-order).
+The `platform_admin` name in `positions` is projected from the same grant, so
+the two agree for every genuine administrator, but platform-operator gates read
+`current_user.isPlatformAdmin == true` (ADR-0068 D4), never the array.)
 
 ## Union semantics — no Profile tier (ADR-0090 D2)
 

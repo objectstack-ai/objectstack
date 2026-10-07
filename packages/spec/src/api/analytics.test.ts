@@ -230,6 +230,39 @@ describe('AnalyticsResultResponseSchema', () => {
     expect(bad.success ? [] : bad.error.issues.map((i) => i.path.join('.'))).toContain('data.fields.0.builtinAggregate');
   });
 
+  // `fields[].aggregate` — the measure's aggregate, stated whether or not the
+  // author labelled the column, so it rides beside a `label` where
+  // `builtinAggregate` never does. Same closed `AggregationFunction`
+  // vocabulary: a spelling outside it is refused at the member, not stripped.
+  it('should preserve fields[].aggregate beside a label and refuse a spelling outside the closed enum', () => {
+    const resp = AnalyticsResultResponseSchema.parse({
+      success: true,
+      data: {
+        rows: [{ status: 'open', task_count: 7, count: 7 }],
+        fields: [
+          { name: 'status', type: 'string', label: 'Status' },
+          { name: 'task_count', type: 'number', label: 'Tasks', aggregate: 'count' },
+          { name: 'count', type: 'number', builtinAggregate: 'count', aggregate: 'count' },
+        ],
+      },
+    });
+    expect(resp.data.fields[1].aggregate).toBe('count');
+    expect(resp.data.fields[1].label).toBe('Tasks');
+    expect(resp.data.fields[1].builtinAggregate).toBeUndefined();
+    expect(resp.data.fields[2].aggregate).toBe('count');
+    expect(resp.data.fields[2].builtinAggregate).toBe('count');
+    expect(resp.data.fields[0].aggregate).toBeUndefined();
+
+    const bad = AnalyticsResultResponseSchema.safeParse({
+      success: true,
+      data: { rows: [], fields: [{ name: 'task_count', type: 'number', label: 'Tasks', aggregate: 'total' }] },
+    });
+    expect(bad.success).toBe(false);
+    const issues = bad.success ? [] : bad.error.issues;
+    expect(issues.map((i) => i.path.join('.'))).toContain('data.fields.0.aggregate');
+    expect(issues.find((i) => i.path.join('.') === 'data.fields.0.aggregate')?.code).toBe('invalid_value');
+  });
+
   it('should preserve totals — the marginal-aggregate channel, grand total included', () => {
     const resp = AnalyticsResultResponseSchema.parse({
       success: true,

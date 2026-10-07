@@ -22,11 +22,11 @@
  * config against its schema before running (`service-automation`'s
  * `parse-config.ts`), so type and `required` violations refuse the node as a
  * guard (not routable via `fault` edges). `notify` parses the RAW stored
- * config — its slots are string-typed, so `{token}` templates pass and the
- * post-interpolation guards still own "resolved to nothing". `http` parses
- * the INTERPOLATED config, because that is the shape its executor reads —
- * a `{token}` in a typed slot (`timeoutMs`, `durable`) resolves to its real
- * type first.
+ * config — its slots are string-typed or template-typed, so `{token}`
+ * templates pass and the post-interpolation guards still own "resolved to
+ * nothing". `http` parses the INTERPOLATED config, because that is the shape
+ * its executor reads — a `{token}` in a typed slot (`timeoutMs`, `durable`)
+ * resolves to its real type first.
  *
  * ## Unknown keys — closed here too, as of #4001 批 9
  *
@@ -54,7 +54,9 @@
  */
 
 import { z } from 'zod';
+import { TemplateExpressionInputSchema } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { NON_BLANK_STRING } from '../shared/refinement-projection';
 import { strictObject } from '../shared/strict-object';
 
 /**
@@ -93,11 +95,11 @@ const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
   subject:
     'The heading slot is `title`. `subject` is the pre-17 spelling rewritten at load by '
     + '`flow-node-notify-config-aliases`; delete it once `title` carries the text. If `title` is also present with '
-    + 'DIFFERENT text, the conversion kept both rather than choosing — reconcile them onto `title`.',
+    + 'a DIFFERENT value, the conversion kept both rather than choosing — reconcile them onto `title`.',
   body:
     'The body slot is `message`. `body` is the pre-17 spelling rewritten at load by '
     + '`flow-node-notify-config-aliases`; delete it once `message` carries the text. If `message` is also present '
-    + 'with DIFFERENT text, the conversion kept both rather than choosing — reconcile them onto `message`. '
+    + 'with a DIFFERENT value, the conversion kept both rather than choosing — reconcile them onto `message`. '
     + '(`body` IS canonical on an `http` node — the key is wrong only here.)',
   url:
     'The click-through slot is `actionUrl`. It was renamed at 17 because `url` elsewhere on the platform means '
@@ -114,6 +116,25 @@ const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
     + 'Note the pair only takes effect together: a half-specified target is dropped so the inbox never renders a '
     + 'dead link.',
 };
+
+/**
+ * The refusal for a `title` / `message` template envelope that carries no
+ * non-blank `source` — what the slot's executor renders. It names the key and
+ * the fix, and prescribes the slot's own placeholder spelling (`{token}`), not
+ * the `{{var}}` the shared template prose shows: this slot's renderer is the
+ * flow's `interpolate()`.
+ */
+function notifyTemplateSourceRequired(key: 'title' | 'message'): string {
+  const consequence = key === 'title'
+    ? 'every run that reached this node would fail with no title to send'
+    : 'the notification would go out with an empty body';
+  return (
+    `\`${key}\` is a template envelope with no non-blank \`source\`. The notify executor renders \`source\` — `
+    + 'interpolating its `{token}` placeholders per run — and has nothing to render from `ast` alone or from a '
+    + `blank \`source\`, so ${consequence}. Put the text in \`source\` `
+    + `(\`{ dialect: 'template', source: 'Deal {record.name} won' }\`), or write it as a bare string.`
+  );
+}
 
 // ─── notify ──────────────────────────────────────────────────────────
 
@@ -152,12 +173,12 @@ const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
  *    exist at async delivery time and is not part of this chain. So two
  *    recipients with different `sys_user.locale` values DO receive different
  *    rows of the same bundle.
- *    Inline `title`/`message` are the NON-localizable path — raw strings sent
- *    to every recipient verbatim. The two paths are mutually exclusive on one
- *    node (see the `superRefine` below): runtime precedence would silently
- *    ignore one of them, so the ambiguous combination is unrepresentable
- *    instead — the same posture as `objectNavTargetExclusivity`
- *    (`ui/app.zod.ts`).
+ *    Inline `title`/`message` are the NON-localizable path — one text for
+ *    every recipient, interpolated per run (below), never translated. The two
+ *    paths are mutually exclusive on one node (see the `superRefine` below):
+ *    runtime precedence would silently ignore one of them, so the ambiguous
+ *    combination is unrepresentable instead — the same posture as
+ *    `objectNavTargetExclusivity` (`ui/app.zod.ts`).
  *  - `recipients`, `title`, `message`, `actionUrl` and `payload` pass through
  *    `interpolate()`, so `{record.x}` templates are legal in them. So do
  *    `templateData` VALUES (they are per-run render inputs). `channels`,
@@ -168,6 +189,19 @@ const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
  *    `notify-node.ts` for #7086: the previous wording ("every string-ish value
  *    except `channels`") was stale for `topic` and `severity`, and it is what
  *    makes closing the `severity` gate below safe.
+ *  - `title` and `message` are TEMPLATE slots, typed with
+ *    `TemplateExpressionInputSchema` like every other `template` slot in the
+ *    dialect table (`shared/expression.zod.ts`): a bare string, or a
+ *    `{ dialect: 'template', source }` envelope — what the `tmpl` helper
+ *    builds. The parse normalizes the bare string to that envelope, so the
+ *    executor reads one shape and interpolates its `source`; both spellings of
+ *    one text render the same notification. The renderer here is the flow's
+ *    `interpolate()`, so the placeholder spelling is its single-brace
+ *    `{token}` (`{record.name}`). A `{{var}}` is not a placeholder in these two
+ *    slots: the inner `{var}` resolves and the outer braces stay in the text.
+ *    An envelope must carry a non-blank `source` (the `superRefine` below) —
+ *    the executor renders `source` and has nothing to render from `ast` alone,
+ *    which the shared schema's envelope arm would otherwise admit.
  *  - `sourceObject`/`sourceId` only take effect as a PAIR — a half-specified
  *    click-through target is dropped so the inbox never renders a dead link.
  *    The schema keeps both optional rather than refining, because the executor
@@ -186,14 +220,15 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
   recipients: z.union([z.string(), z.array(z.string())])
     .describe('Recipient user id(s) / audience selector(s); `{token}` templates resolve per run'),
   /**
-   * Inline notification title — the NON-localizable content path. Required
-   * unless `template` is set (the superRefine below owes one of the two).
+   * Inline notification title — the NON-localizable content path, and a
+   * template slot (see the docblock above). Required unless `template` is set
+   * (the superRefine below owes one of the two).
    */
-  title: z.string().optional()
-    .describe('Notification title, sent to every recipient verbatim (not localizable — use `template` for per-locale content). Either this or `template` is required; the two are mutually exclusive.'),
-  /** Notification body (inline path only). */
-  message: z.string().optional()
-    .describe('Notification body, sent verbatim like `title` (not localizable). Only valid with inline `title`, never with `template`.'),
+  title: TemplateExpressionInputSchema.optional()
+    .describe('Notification title — a template: a bare string, or a `{ dialect: \'template\', source }` envelope (the `tmpl` helper) carrying the same text. It is interpolated per run with the flow\'s single-brace `{token}` placeholders (`{record.name}`); a `{{var}}` is not a placeholder here — its inner `{var}` resolves and the outer braces stay in the text. One text for every recipient (not localizable — use `template` for per-locale content). Either this or `template` is required; the two are mutually exclusive.'),
+  /** Notification body (inline path only) — the same template input as `title`. */
+  message: TemplateExpressionInputSchema.optional()
+    .describe('Notification body — the same template input as `title` (a bare string or a `{ dialect: \'template\', source }` envelope), interpolated per run with single-brace `{token}` placeholders; not localizable. Only valid with inline `title`, never with `template`.'),
   /**
    * The localizable content path (#9205): name of a `sys_email_template`
    * bundle. Resolved by `(name, locale)` AT DELIVERY TIME —
@@ -277,7 +312,7 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
         '`template` cannot be combined with inline `title`/`message` — pick ONE content path: '
         + '`template` (localizable: resolves `(name, locale)` from sys_email_template at delivery, the locale being '
         + 'each recipient\'s own `sys_user.locale` or the deployment default — resolved per recipient, after fan-out) '
-        + 'or inline `title` + `message` (sent verbatim, not localizable). To localize, keep `template`, move '
+        + 'or inline `title` + `message` (one text for every recipient, not localizable). To localize, keep `template`, move '
         + 'the text into the template bundle\'s rows, and delete `title`/`message`; runtime precedence would '
         + 'silently ignore one of them.',
     });
@@ -301,6 +336,20 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
         + '(the recipient\'s own `sys_user.locale` or the deployment default — resolved per recipient, after fan-out). '
         + 'Neither was given, so there is nothing to deliver.',
     });
+  }
+  // The two template slots render `source` (see the docblock): the executor
+  // interpolates it per run and has no renderer for `ast`. The shared
+  // `TemplateExpressionInputSchema` is the persistence contract, so its
+  // envelope arm admits an `ast`-only envelope and a whitespace `source` —
+  // shapes that parse and then render nothing (a `title` failing every run, a
+  // `message` going out empty). The slot states what its executor needs
+  // instead, in the same notion of blank as the bare-string arm. Reached only
+  // once both values parsed, so `source` is read off a template envelope.
+  for (const key of ['title', 'message'] as const) {
+    const value = cfg[key];
+    if (value !== undefined && !(typeof value.source === 'string' && NON_BLANK_STRING(value.source))) {
+      ctx.addIssue({ code: 'custom', path: [key], message: notifyTemplateSourceRequired(key) });
+    }
   }
 }));
 

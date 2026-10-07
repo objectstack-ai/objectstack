@@ -84,6 +84,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_shares: {
+        label: "Todas"
+      },
       granted_to_me: {
         label: "Concedidos a mí"
       },
@@ -98,9 +101,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       rule_grants: {
         label: "Concesiones por regla"
-      },
-      all_shares: {
-        label: "Todas"
       }
     }
   },

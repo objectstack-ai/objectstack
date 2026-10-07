@@ -1,5 +1,470 @@
 # @objectstack/platform-objects
 
+## 17.7.0
+
+### Minor Changes
+
+- 50e1c65: fix(plugin-audit,platform-objects,plugin-auth,plugin-sharing,plugin-approvals)!: the audit ledger no longer records fields declared `internal`, and the platform's credential-class fields are declared `internal`
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or config field is removed or renamed: the change narrows what the generic data path and the audit ledger return for platform-owned columns, and nothing an author wrote needs rewriting. The objectql half adds exports only. -->
+  
+  **BREAKING for readers of credential-class columns on the generic data path and in the audit ledger.**
+  
+  **What changed.**
+  
+  - The audit plugin's CRUD mirror now omits every field declared `internal: true` from the
+    rows it writes to `sys_audit_log` and `sys_activity`: create `new_value`, both sides of an
+    update, delete `old_value`, and the activity row. It already masked `secret` and `password`
+    fields; `internal` is the same contract the generic data path already enforces ("never
+    returned on the generic data path"). An update that changes only an `internal` field still
+    writes its row, with neither value.
+  - These platform fields are now declared `internal: true`, so neither the generic data path
+    nor the ledger returns them: the JWT signing key's private key (`sys_jwks`), both credential
+    columns of the one-time verification object (`sys_verification`), the two-factor secret and
+    backup codes, the SSO provider's OIDC and SAML protocol blobs, the OAuth access and refresh
+    token columns, the OAuth client secret digest, the SCIM credential digest, the share link's
+    token and password hash, and the approval action-token digest. API key digests and email
+    headers were already `internal`; the ledger now honours that too.
+  - Every built-in consumer that needs one of these values reads it back through the engine's
+    privileged accessor rather than the generic path: JWT signing, password reset and the other
+    one-time verification flows, two-factor verification, SSO sign-in and the legacy SSO secret
+    migration, OAuth client authentication, share-link redemption (the password gate is held)
+    and the creator's share-link list, which keeps returning each link's token. The runtime's
+    share-link resolve route (the dispatcher twin of the plugin's) still answers "password
+    required" for a protected link rather than the unknown-link shape.
+  - The one-time verification object's record title is now the fixed label `Verification`; it no
+    longer shows the identifier column.
+  - `@objectstack/objectql` exports two helpers from its main and `/core` entries:
+    `collectInternalReadFields` (the names of an object's `internal` fields) and
+    `readInternalColumn` (recovers one `internal` column for rows already read, through the
+    engine's privileged accessor, and fails closed when the value cannot be recovered).
+  
+  **What to do after upgrading.**
+  
+  - **Rotate the JWT signing keys.** Ledger rows written before this release are not rewritten
+    (the ledger is append-only), so a signing key that existed before the upgrade may have a copy
+    in the ledger. Rotate the keys so that copy signs nothing.
+  - **Revoke and re-mint share links that must stay private.** A share link's token is a
+    capability that stays valid until the link expires or is revoked, and links minted before this
+    release may have a copy in the ledger.
+  - A copy of a one-time verification credential is usable only while that credential is still
+    outstanding: once it is consumed or expires, its copy names nothing that will be accepted.
+  - An integration that read any of these columns through `GET /api/v1/data/...` no longer
+    receives them. Read share links through `/api/v1/share-links`, and OAuth clients and SSO
+    providers through their auth routes.
+- 7665c54: fix(platform-objects)!: retire the `sys_account` `link_social` action, which was dead on every boot; `unlink_account` stays
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The withdrawn action is platform-shipped metadata on sys_account, not something an author writes: no spec key, spelling, export name or config field is retired or renamed, and nothing an author wrote needs rewriting. No stored shape carries it either: sys_account is lock full, so no sys_metadata overlay of the object can be saved, and an action is not a stored row. No reachable member of an exported type carries it, measured on the built declarations: SysAccount's declared type keeps only fields from its literal, so its action names already resolved to string, and the bundles are typed as TranslationData objects with no key types. -->
+  
+  **BREAKING**: `sys_account` no longer declares the `link_social` action, so the "Link Social Account" toolbar button is gone from the Account app's Linked Accounts list and from Setup's Identity Links. It never completed a link on any boot: it navigated to a `GET` of the social sign-in route, which is served as `POST` only, and it offered a fixed list of seven providers whatever the boot had configured. It is retired under ADR-0049 (enforce or remove) and ships as `minor` under the launch-window convention for narrowings.
+  
+  **What stays.** `unlink_account` is unchanged: the same type, target, placement and row-id parameter. Its confirm question no longer says the user can re-link "from their account settings", because no console surface offers that now. The `sys_account._actions.link_social` leaves are gone from the `en`, `zh-CN`, `ja-JP` and `es-ES` bundles.
+  
+  **What to do after upgrading.** Linking a social or OIDC identity stays available through the signed-in `POST /api/v1/auth/link-social`, which is `auth.accounts.linkSocial({ provider, callbackURL })` in `@objectstack/client`: call it and navigate to the `url` it answers.
+
+### Patch Changes
+
+- 22c2d6f: feat(spec)!: an agent's `memory` contract states exactly what the runtime honours — `maxEntries` and `reflectionInterval` are required once long-term memory is enabled, `longTerm.store` is retired, and the block is `live`, enforced by the cloud AI runtime (#20274)
+  
+  **BREAKING** — `agent.memory` narrows to what the cloud AI runtime, the one runtime
+  that executes agents, actually does with it. That runtime recalls the newest
+  `maxEntries` distilled notes for the user before the first round, writes one note
+  every `reflectionInterval` delivered interactions, evicts notes beyond `maxEntries`,
+  and keeps them in its own database store. Before an agent's first turn it refused
+  exactly the declarations this spec still accepted, so authoring now refuses them,
+  by name, with a prescription (ADR-0049 enforce-or-remove):
+  
+  - **`longTerm.maxEntries` and `reflectionInterval` are required when
+    `longTerm.enabled` is true.** No default is declared for either: none has a
+    measured basis, and the runtime adds none.
+  - **`reflectionInterval` is refused without an enabled `longTerm`** — a reflection
+    writes a long-term note, so with none enabled it would do nothing.
+  - **`longTerm.store` is retired as a whole key.** The memory store is platform
+    infrastructure, not agent metadata: the runtime keeps the notes in its own
+    database store, and refused `vector` (the key's default, so what an omitted
+    `store` parsed to) and `redis`. Its old spellings `backend`, `storage` and
+    `provider` under `longTerm` are answered with the same prescription instead of
+    being steered onto `store`.
+  
+  `longTerm.enabled` is unchanged.
+  
+  ### FROM → TO
+  
+  | before | what to write instead |
+  | --- | --- |
+  | `memory.longTerm.store` — any value, `database` included | delete the key; where the notes are kept is the platform's choice. |
+  | `longTerm: { enabled: true, … }` without `maxEntries` | add `maxEntries`: how many distilled notes are kept for each user (an integer of at least 1). |
+  | `longTerm: { enabled: true, … }` without `memory.reflectionInterval` | add `reflectionInterval`: how many delivered interactions pass between the reflections that write a note (an integer of at least 1). |
+  | `memory.reflectionInterval` without `longTerm.enabled: true` | enable long-term memory with both numbers, or delete `reflectionInterval`. |
+  
+  **The one-line fix: declare `maxEntries` and `reflectionInterval` when `longTerm.enabled`; delete `store`.**
+  `os migrate meta --from 17` lists the mechanical edits for existing sources (the
+  `store` deletion); the two numbers are the author's to choose.
+  
+  Each refusal is a parse error at the key's own path, naming the key and the fix, and
+  `store` also fails `tsc` (its input type is `never`).
+  
+  ### The retirement kit
+  
+  - **Tombstone.** `longTerm.store` is a `retiredKey()` carrying the prescription; the
+    three old alias spellings moved from `aliases` to `guidance`, because an alias may
+    not steer an author onto a tombstone.
+  - **The contract check** is a refinement on `memory` (`reflectionInterval` is
+    `longTerm`'s sibling), one `custom` issue per missing or misplaced key. A JSON
+    Schema cannot state a value-conditioned requirement in the closed projection list,
+    so the published `ai/Agent` schema (and the four installed-package schemas that
+    embed agents) names the site in `x-dropped-refinements`, recorded in
+    `dropped-refinements.baseline.json`.
+  - **D2 conversion `agent-memory-long-term-store-removed`** (step 18, retired from the
+    load path): it deletes `store` from `memory.longTerm`, whatever it holds — the
+    delete is lossless, because no value of it ever chose a backend. Stored
+    `sys_metadata` agent rows and built artifacts replay it; one notice per agent. It
+    supplies neither number.
+  - **D3 entry `agent-memory-store-retired-and-limits-required`** carries the judgement
+    the conversion cannot make: the two numbers an enabled `longTerm` now requires.
+  - **`RETIRED_KEYS_BY_MAJOR[18]`** registers `ai/Agent:memory.longTerm.store`.
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  ### Describes and the liveness ledger
+  
+  - `agent.memory` drops `[EXPERIMENTAL — not enforced]`: it states that the cloud AI
+    runtime enforces it and that the open framework edition does not run agents.
+    `longTerm`, `enabled`, `maxEntries` and `reflectionInterval` each state what the
+    runtime does with them.
+  - The ledger row moves `experimental` → `live`, citing the cloud reader
+    `agent-runtime.ts#compileAgentMemory` (via `AgentRuntime.resolveTurnGuardrails`),
+    the enforcement in `ai-service.ts` and the store `agent-memory.ts#AgentMemoryStore`,
+    as attested by the cloud seat's reading at cloud `ef5a4344`, `verifiedAt`
+    2026-10-02. `os lint` / `os validate` no longer warn
+    `liveness-experimental-property` on an agent that sets `memory`.
+  - ⚠️ **The window, stated.** At `ef5a4344` the cloud reader still reads `store`: it
+    honours `database` only and refuses `vector` and `redis`. Cloud drops `store` in
+    that one reader once this release reaches its pin, and no earlier.
+  
+  ### The agent form's help texts
+  
+  - The `memory` row's help text on the agent metadata form named short-term memory,
+    a key the schema refuses. It now states what memory does and that `maxEntries`
+    and `reflectionInterval` are required once long-term memory is enabled.
+  - The neighbouring `planning` row named a strategy and a replan switch the schema
+    does not declare; it now states the one key it has, the iteration cap.
+  - The `platform-objects` metadata-form catalogs follow: the English leaves are
+    regenerated, and the `zh-CN`, `ja-JP` and `es-ES` leaves are authored, not copied.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is
+  published, and tenant-authored agents were not measured. This repo authors no
+  `longTerm` outside `packages/spec`, and no cloud built-in agent declares one.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered agent-memory-long-term-store-removed, agent-memory-store-retired-and-limits-required -->
+- 48fa7a3: Provenance comments in `@objectstack/platform-objects` cite the commits that decided them, not tracker numbers that no longer resolve
+  
+  Clause-②: no
+  
+  Docblocks and comments across the package cited issue-tracker numbers that now answer 404 on GitHub.
+  Each now cites the commit in this repository's history that made the decision it describes, except one
+  that cites ADR-0104's 2026-09-05 addendum, the record of that ruling. Some of these docblocks sit on
+  exported members, so the reworded text appears in the published declaration files (`apps`, `identity`,
+  `metadata-translations` and `system` `index.d.ts` / `index.d.mts`), and the field comments esbuild keeps
+  appear in the JavaScript output (`index`, `apps`, `audit`, `identity` and `plugin`, `.js` / `.mjs`).
+  
+  Comment only: no export, type, error code, status, message text or runtime behaviour changes.
+- 36ad321: feat(spec)!: `element:text` `variant` refuses `heading` / `subheading` by name — the vocabulary is the nine `ui:text` publishes, and `os migrate meta` rewrites them to `h2` / `h3` (#21015)
+  
+  **BREAKING** — `heading` and `subheading` leave `ElementTextPropsSchema.variant` (an
+  `element:text` page component's `properties.variant`). This is the second release of
+  the ruled two-release convergence on the nine values `ui:text` publishes — `h1`-`h6`,
+  `body`, `caption`, `overline`. 17.5.0 added the nine and refused nothing; 17.6.0 was
+  the full release in which both vocabularies parsed; this release refuses the two old
+  spellings. A heading is a document level, not a text style: `heading` and
+  `subheading` named a style and left the renderer to pick the level.
+  
+  ### FROM → TO
+  
+  | removed | what to write instead |
+  | --- | --- |
+  | `variant: 'heading'` | `variant: 'h2'` — the heading element `heading` always rendered — or the level the page outline means. |
+  | `variant: 'subheading'` | `variant: 'h3'` — the heading element `subheading` always rendered — or the level the page outline means. |
+  
+  **The one-line fix: `heading` → `h2`, `subheading` → `h3`.**
+  `os migrate meta --from 17` lists the mechanical edits for existing sources.
+  
+  The rewrite keeps the heading ELEMENT (so the document outline is unchanged) but not
+  the size: `heading` drew in the `h3` style and `subheading` in a medium-weight small
+  heading style, and `h2` / `h3` draw their own, larger styles. Where the old look
+  mattered more than the level, pick the level whose style you want.
+  
+  Each retired spelling is refused at parse with a prescription naming the level to
+  write, and in `tsc` (the two members are gone from the input type). Any other unknown
+  value keeps zod's own message. An `element:text` with no `variant` still parses to
+  `body`.
+  
+  ### The retirement kit
+  
+  - **Value-level retirement.** The enum is declared through `enumWithRetiredValues`
+    (`shared/retired-key.ts`), with the two prescriptions module-private. No authorable
+    KEY and no def changed, so nothing lands in `RETIRED_KEYS_BY_MAJOR` and the four
+    surface ratchets (`api-surface`, `authorable-surface`, `json-schema.manifest`,
+    `api-surface-signatures`) are byte-identical; the generated component reference
+    page drops the two values.
+  - **D2 conversion `element-text-variant-heading-levels`** (step 18, retired from the
+    load path): `heading` → `h2` and `subheading` → `h3` on every `element:text` page
+    component — regions, named slots and container nesting. Stored `sys_metadata` page
+    rows replay it at rehydration; one notice per rewritten block.
+  - **D3 entry `element-text-variant-heading-subheading-retired`** carries the judgement
+    the conversion cannot make: whether the rewritten level is the one the page means.
+  - **No further deprecation window**: 17.6.0 was the window the ruling asked for.
+  
+  ### Producers moved in this repository
+  
+  - `@objectstack/platform-objects`: the four section headings on the `sys_user` record
+    page's Security tab (`Password & Sign-in`, `Two-Factor Authentication`, `Email
+    Verification`, `Danger Zone`) move from `subheading` to `h3`. They render the same
+    h3 element, in the `h3` style.
+  - `examples/app-showcase`: the `page-variables` detail heading moves to `h3`.
+  
+  ⚠️ **The out-of-repo author population is NOT MEASURED.** `@objectstack/spec` is
+  published, and tenant-authored pages were not measured. In this repository the five
+  writers above were the only ones outside `packages/spec`. objectui at `main` authors
+  neither value; its `element:text` renderer, registry `inputs` enum, html tier and the
+  published `sdui.manifest.json` still list the two, and drop them once this release is
+  installable there (the objectui follow-up).
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered element-text-variant-heading-levels, element-text-variant-heading-subheading-retired -->
+- 1878ef9: fix(plugin-security,platform-objects): an org member reading a colleague's `sys_user` row is no longer served the identity object's `Admin` field group, directly or through the activity stream (#21237)
+  
+  Clause-②: no
+  
+  - **What a member was served.** The platform baseline `member_default` opens every org peer's `sys_user` row (the `sys_user_org_members` policy) and declared no field-level security on it. An org member reading a colleague's row was therefore served the whole `Admin` field group: the sign-in trail, the lockout state, the ban reason and expiry, the password and MFA stamps, the legacy platform role scalar and the AI-seat flag. With object-level read on `sys_activity`, the colleague's activity metadata carried the same fields, because the activity field redaction serves exactly what the data plane serves.
+  - **What changes.** `member_default` and `viewer_readonly` now declare the `Admin` group `readable: false` through the permission set's existing `fields` entries. The withheld set is built from the identity object's declaration, so a field the declaration adds to the group is withheld from the day it is declared. `admin_full_access` and `organization_admin` (and so `organization_admin_no_bypass`) declare the group readable and editable, the same state as a field no set names, so an administrator's reads and writes are unchanged. `member_default` is the additive baseline every authenticated user resolves, and field grants merge most-permissively, which is why the admin sets carry that keeping entry.
+  - **What a member sees now.** On the direct read, the list read and the activity metadata, a member is served no `Admin`-group field of a colleague's row. The directory fields (name, email, image) are still served. Field-level security does not distinguish rows, so the member's own row read through the generic data API is withheld the group too; every platform reader of those fields on a member's own row (the auth gates, the sign-in stamps, the session, the AI-seat resolution) reads under system or auth context and is unaffected. A member's query that filters or sorts on a withheld field is refused (`403 PERMISSION_DENIED`, the filter-oracle rule). A member's user-context write that names a withheld field is refused by the field-level write gate (`403 PERMISSION_DENIED`), and a payload mixing such a field with profile fields no longer lands partially.
+  - **The deactivation flag is directory data.** `sys_user.banned` moves from the `Admin` field group to the `Account` group in `@objectstack/platform-objects`, so members are still served it. Every user picker filters its candidates on it, and a filter on a withheld field would be refused. Its reason and expiry stay in the `Admin` group. In a record form the field now renders in the `Account` section.
+  
+  **Migration.** None for shipped apps. A custom permission set that grants an org member read on `sys_user` and is meant to show them the `Admin` group must name those fields `readable: true` in its `fields` entries. A client that filtered members' `sys_user` queries on an `Admin`-group field must drop that predicate or run it with an administrator's grant.
+- 6e33b67: feat(spec)!: retire `agent.lifecycle`, the agent conversation state machine, and with it the XState `StateMachineSchema` family — a conversation phase is a skill with `triggerConditions`, orchestration is Flow, record transitions are the `state_machine` validation rule (#21320)
+  
+  **BREAKING** — `agent.lifecycle` was parsed and never read. No runtime, in this
+  repository or in the cloud AI runtime that executes agents, moved an agent through a
+  declared state or refused an undeclared transition, so an authored machine changed
+  nothing an agent did (ADR-0049 enforce-or-remove). Enforcing it would have meant a
+  statechart interpreter beside Flow, the two-engine shape ADR-0020 rejected. Authoring
+  now refuses the key by name, with a prescription, and TypeScript rejects it.
+  
+  Its value schema had no other authorable door: ADR-0020 had already retired the XState
+  shape as a record-lifecycle declaration and kept the file only for this key. So the
+  family leaves the package with it.
+  
+  ### FROM → TO
+  
+  | before | what to write instead |
+  | --- | --- |
+  | `agent.lifecycle` — any value | delete the key. |
+  | a conversation phase in the machine (its own instructions and tools) | a skill with its own `instructions` and `tools`, selected by its `triggerConditions`, listed in the agent's `skills`. |
+  | a multi-step process in the machine | a Flow. |
+  | a record's status transitions in the machine | a `state_machine` validation rule in the object's `validations`: `{ type: 'state_machine', field, transitions: { from: [to, …] } }`. |
+  | `StateMachineSchema`, `StateNodeSchema`, `TransitionSchema`, `ActionRefSchema`, `GuardRefSchema` and the types `StateMachineConfig`, `StateNode`, `StateNodeConfig`, `Transition`, `ActionRef`, `GuardRef` from `@objectstack/spec/automation` | no replacement: declare the shape your code needs itself, or drop it. For record transitions, `StateMachineValidationSchema` in `@objectstack/spec/data` is the enforced shape. |
+  | `StateNodeConfig` from `@objectstack/spec` or `@objectstack/spec/ai` | removed with the family; nothing in those entries mentions it any more. |
+  
+  **The one-line fix: delete `lifecycle`; put phase-scoped instructions and tools in
+  skills with `triggerConditions`, and orchestration in Flow.** `os migrate meta --from 17`
+  lists the mechanical edits for existing sources (the `lifecycle` deletion). Where each
+  deleted machine's intent goes is the author's judgement.
+  
+  The refusal is a parse error at `lifecycle` naming the key and the fix, and the key
+  fails `tsc` (its input type is `never`).
+  
+  ### The retirement kit
+  
+  - **Tombstone.** `lifecycle` is a `retiredKey()` on `AgentSchema` carrying the
+    prescription; the agent metadata form no longer offers it.
+  - **D2 conversion `agent-lifecycle-removed`** (step 18, retired from the load path):
+    it deletes `lifecycle` from every agent, whatever it holds. The delete is lossless,
+    because no value of it ever changed what an agent did. Stored `sys_metadata` agent
+    rows and built artifacts replay it; one notice per agent. An object's ADR-0057
+    `lifecycle` block shares the name and is not touched.
+  - **D3 entry `agent-lifecycle-retired`** carries the judgement the conversion cannot
+    make: which of the three destinations each deleted machine meant.
+  - **`RETIRED_KEYS_BY_MAJOR[18]`** registers `ai/Agent:lifecycle`, and
+    **`RETIRED_DEFS_BY_MAJOR[18]`** registers the five published defs
+    `automation/StateMachine`, `automation/StateNode`, `automation/Transition`,
+    `automation/ActionRef` and `automation/GuardRef`. Their reference page
+    (`references/automation/state-machine`) is gone.
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  ### The liveness ledger
+  
+  The `agent.lifecycle` row moves `experimental` → `dead` with a REMOVED note
+  (`verifiedAt` 2026-10-02); the tombstone keeps it in the walked shape. No `agent` row is
+  `experimental` any more. `os validate` and every other parsing door refuse the key at
+  parse, before any advisory runs. `os lint` reads the unparsed stack, so it now grades the
+  key `liveness-dead-property` where it used to say `liveness-experimental-property`.
+  
+  ### `@objectstack/platform-objects`
+  
+  The agent metadata-form catalogs drop the `lifecycle` row's label and help text in all
+  four locales.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is
+  published: tenant-authored agents, and code outside this repository importing the
+  family's exports, were not measured. This repository authors no `agent.lifecycle`
+  outside `packages/spec` and imports none of the family outside it; the pinned objectui
+  checkout imports none of the family and reads no `agent.lifecycle`.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered agent-lifecycle-removed, agent-lifecycle-retired -->
+- ca0dfb6: The agent metadata form now offers `structuredOutput`, the output contract the cloud AI runtime enforces on every final answer. It is a `composite` row in the AI Configuration section, spelled like the `memory` and `guardrails` rows: Studio derives its seven sub-rows from the served JSON Schema.
+  
+  Clause-②: no
+  
+  - Before this, the block had no row on the agent form, so the only way to author it in Studio was the Source tab. The form's reconciliation test excused that with a ledger row saying the key was declared but not enforced. The key has been enforced since the structured-output enforcement landed (liveness `live`), and that row is gone.
+  - What Studio renders, read in the console's metadata form renderer: `format` and `fallbackFormat` are selects over `json_object` / `json_schema`. `strict` and `retryOnValidationFailure` are switches, and `maxRetries` is a number. `transformPipeline` is a multi-select over `trim` / `parse_json` / `validate`. `schema`, the free-form JSON Schema record, is a JSON text editor: the stored value is shown as JSON and saved back as parsed. That is the same editor the action form already gives `ai.outputSchema`, which is the other slot this JSON Schema rule governs.
+  - Two editing limits of those controls. A multi-select toggle stores the steps in the order the enum declares them (`trim`, `parse_json`, `validate`). And the schema editor keeps the last valid JSON while the text does not parse. A value nobody edits is saved back unchanged.
+  - No schema, parse or export change. The accept set of `AgentSchema` is unchanged, and so is the refusal of an untyped JSON subschema at `structuredOutput.schema`. What moves is the form payload `getMetaTypes()` serves, and the two new leaves of the `platform-objects` metadata-form catalogs (the row's label and help text). Those are authored in `zh-CN`, `ja-JP` and `es-ES`, not left as copies of the English source.
+- 2df3d13: Studio's object form offers `imageField`, the record's picture, as a text row beside `nameField`
+  
+  Clause-②: no
+  
+  The object form in the metadata form registry now has an `imageField` row, a plain text input placed beside `nameField`. Until now the only way to set the record picture from Studio was the Source tab's raw JSON. The help text says what the parse accepts: a field of this object whose type is `image` or `avatar`. Left empty, the object has no record picture and no placeholder is drawn. The row brings no picker and no validator of its own. A name that is not an `image` / `avatar` field of the object is refused when the object is saved, by the same parse rule as before.
+  
+  `@objectstack/platform-objects` ships the row's label and help text in its metadata-form translation catalogs, translated for `zh-CN`, `ja-JP` and `es-ES`.
+  
+  No schema key, accept set, refusal, error code or status changes, and you have nothing to re-author.
+- 607463d: The organization's member, invitation and team actions are offered only to the membership grades the server admits. A plain member no longer sees "Invite User", "Change Role", "Remove Member", "Cancel Invitation", "Create Team" and the rest, each of which the server refused with 403.
+  
+  - `invite_user` (on the Users, Members and Invitations lists) and `resend_invitation`: owner, admin and delegated_admin.
+  - `update_member_role`, `remove_member`, `cancel_invitation`, `create_team`, `update_team`, `remove_team`, `add_team_member` and `remove_team_member`: owner and admin.
+  - `transfer_ownership`: the owner alone, on a non-owner row.
+  - `add_member` is unchanged. Its door is platform-admin standing, not a membership grade.
+  
+  Each action declares `requiresMembershipReach` from `@objectstack/spec`, which is lowered into its `visible` predicate.
+- 8e35895: Studio's action form now offers `onSuccess` (the route an `api` or `script` action opens once it succeeds, and whether it opens in place or in a new tab) and `outcomeMessages` (a JSON map from each `outcome` the handler returns to the success message shown for it), with their labels and help text translated for `zh-CN`, `ja-JP` and `es-ES`.
+- f76c622: Setup → Users now opens on the "All Users" list. Before this, the console opened `sys_user`'s first declared list view, "My Profile". That view is filtered to the caller with a page size of 1, so an administrator saw one row, themselves, and nothing said the rest of the organization was one tab away.
+  
+  Clause-②: no
+  
+  - The Setup app's `nav_users` entry now sets `viewName: 'all_users'`. The key is the one the spec already declares on an object navigation item, and the console honours it. No new key, no `listViews` reorder, and no view is removed.
+  - "My Profile" (`me`) is still a tab on the Users page. The Account app's profile entry is unchanged: it is the `account:profile_card` component, which reads the signed-in user from the session, not this list view. The `me` view's code comment no longer says the Account app surfaces it.
+  - ⛔ No schema, parse, export or accept-set change.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c98a72d]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [5a9292e]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [83b3d32]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [a2aadab]
+- Updated dependencies [fe10172]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [a6a7547]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [045f764]
+- Updated dependencies [75ddcd1]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [e1790fd]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [cab6396]
+- Updated dependencies [e864db5]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [e6dc7a2]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [3c7785d]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/metadata-core@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

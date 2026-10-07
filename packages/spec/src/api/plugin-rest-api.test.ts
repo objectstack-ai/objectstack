@@ -541,7 +541,7 @@ describe('plugin-rest-api.zod', () => {
       expect(paths).not.toContain('/preferences');
     });
 
-    it('declares no AI routes — this table cannot vouch for a Cloud/EE surface (#3718)', () => {
+    it('declares no AI routes — this table cannot vouch for a Cloud/EE surface', () => {
       // DEFAULT_AI_ROUTES used to sit here declaring `/nlq`, `/suggest` and
       // `/insights`, and this test asserted its shape — three endpoints no repo
       // has ever mounted, checked for `toHaveLength(3)`. Shape is not
@@ -691,7 +691,7 @@ describe('plugin-rest-api.zod', () => {
 // than a bare unrecognized-key error, and the value survives at the same
 // magnitude. Asserting the message, not just `.toThrow()`: a bare throw stays
 // green when the schema throws for some unrelated reason.
-describe('RestApiEndpoint / RestApiPluginConfig durations carry their unit (#15677)', () => {
+describe('RestApiEndpoint / RestApiPluginConfig durations carry their unit in the key name', () => {
   const endpoint = {
     method: 'GET' as const, path: '/api/v1/discovery',
     handler: 'getDiscovery', category: 'discovery' as const,

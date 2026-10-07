@@ -80,7 +80,7 @@
       "title": "A phone-based user's number shows across the identity surfaces, and the phone capability is advertised honestly",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": ["admin"],
@@ -88,10 +88,12 @@
         "app": "showcase",
         "requires": [
           "a seeded phone persona (Mei Phone — the seed itself failed silently until #3408; if she is absent, that regression has returned)",
-          "the exact seeded identity: usr_showcase_phone_demo / 'Mei Phone (demo)' / phone.demo@example.com / phone_number +8613800138000 (examples/app-showcase/src/security/seed-approval-demo.ts)"
+          "the exact seeded identity: usr_showcase_phone_demo / 'Mei Phone (demo)' / phone.demo@example.com / phone_number +8613800138000 (examples/app-showcase/src/security/seed-approval-demo.ts)",
+          "for acceptance[1] and acceptance[2]: a boot with the phoneNumber plugin ON, through its documented boot switch OS_AUTH_PHONE_NUMBER_ENABLED=true on the `os dev` / `os serve` command (packages/cli/src/commands/serve.ts maps it onto the injected AuthPlugin's plugins.phoneNumber; os dev forwards its environment to the serve child). Without it features.phoneNumber is false, the create-user phoneNumber param is withheld, and those two clauses have no surface. No SMS provider is needed: an admin create-user with a phone number and phone+password sign-in work without one"
         ],
         "knownGaps": [
-          "the seeded persona's sign-in credential is not documented in the seed — driving an actual phone+password sign-in belongs to identity-auth.auth-method-matrix with a user created for that purpose; this item verifies the identity SURFACES"
+          "the seeded persona's sign-in credential is not documented in the seed — driving an actual phone+password sign-in belongs to identity-auth.auth-method-matrix with a user created for that purpose; this item verifies the identity SURFACES",
+          "QA run #21782 recorded acceptance[1] / acceptance[2] blocked(fixture) because plugins.phoneNumber has no runtime setting (parked on #22017 row 1). That is true of the Settings surface, but the plugin has a documented BOOT switch, OS_AUTH_PHONE_NUMBER_ENABLED=true (content/docs/permissions/authentication.mdx, 'Phone-Number Authentication'), and features.phoneNumber mirrors it (packages/plugins/plugin-auth/src/auth-manager.ts, getPublicConfig). The same switch on an `os dev` boot reached the plugin's routes in run #21784 (identity-auth.auth-method-matrix acceptance[3]). Run those two clauses on that boot, and acceptance[3]'s two sides on two boots: switch on (flag true, param shown) and the default (flag false, param absent)"
         ]
       },
       "steps": [
@@ -99,7 +101,7 @@
         "GET /api/v1/auth/config and record features.phoneNumber (the flag that gates the create_user phoneNumber param — the original #2871 fix)",
         "open the All Users admin list and locate 'Mei Phone (demo)'; screenshot the list row showing the phone number column",
         "open her record detail and screenshot the highlights showing the number",
-        "as admin, run the create-user action for a NEW phone-carrying user (the phoneNumber param is visible only when features.phoneNumber is true) and screenshot the create-result dialog",
+        "on a boot with OS_AUTH_PHONE_NUMBER_ENABLED=true (fixtures.requires), as admin, run the create-user action for a NEW phone-carrying user (the phoneNumber param is visible only when features.phoneNumber is true) and screenshot the create-result dialog",
         "verify the new user via the API read (phone_number persisted, phone_number_verified present as a column)",
         "if the deployment has the phoneNumber plugin OFF: verify the param is absent from the create-user dialog instead, and record which side of the gate this run exercised"
       ],
@@ -139,11 +141,13 @@
         "#3408",
         "examples/app-showcase/src/security/demo-personas.ts#PHONE_DEMO_USER (PHONE_DEMO_USER — re-pointed #18104: seed-approval-demo.ts only IMPORTS this persona and provisions it; the constant, phone_number included, is declared in demo-personas.ts, the one registry the seed and the approval bootstrap share)",
         "packages/spec/src/system/auth-config.zod.ts#phoneNumber (phoneNumber plugin: unique phone_number + phone_number_verified columns)",
-        "packages/spec/src/kernel/public-auth-features.ts#phoneNumber (phoneNumber gates sys_user.actions.create_user.params.phoneNumber — #2871)"
+        "packages/spec/src/kernel/public-auth-features.ts#phoneNumber (phoneNumber gates sys_user.actions.create_user.params.phoneNumber — #2871)",
+        "packages/cli/src/commands/serve.ts (OS_AUTH_PHONE_NUMBER_ENABLED → the injected AuthPlugin's plugins.phoneNumber: the boot switch acceptance[1] and acceptance[2] need) + content/docs/permissions/authentication.mdx (the documented opt-in)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; encoded the #3408 silent-seed-failure as an explicit negative", "ref": "#3358" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 1). A2 / A3 were blocked(fixture) because features.phoneNumber is false and plugins.phoneNumber has no runtime setting. Disposition: fixture recipe, a documented boot switch. OS_AUTH_PHONE_NUMBER_ENABLED=true sets plugins.phoneNumber on the AuthPlugin serve.ts injects, os dev forwards it to its serve child, and run #21784 booted it on os dev for auth-method-matrix A4. fixtures.requires, a knownGap, step 5 and source name it. No clause changed", "ref": "#22017" }
       ]
     },
     {
@@ -151,7 +155,7 @@
       "title": "Every supported auth method signs in when enabled, is absent when disabled, and is advertised exactly as configured",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous visitor", "provisioned user per method", "admin (for env configuration)"],
@@ -162,9 +166,10 @@
           "an SMS service (@objectstack/service-sms) is required ONLY to make phone-OTP pass; its ABSENCE is itself a tested state (loud 400 SMS_SERVICE_REQUIRED)"
         ],
         "knownGaps": [
-          "magic-link and passkeys: the AuthPluginConfigSchema flags still exist, but objectui ships NO login UI for either, so #7481 withdrew both from the /api/v1/auth/config payload (protocol 17) — features.magicLink / features.passkeys are now ABSENT by design, not false. Run these variants as blocked(dependency, objectui#4179) at the browser lane. The flag-advertisement clause inverts here: seeing either key in the payload is itself a FAIL now, and magic-link's endpoints (/magic-link/send, /magic-link/verify) stay live and drivable without a UI",
+          "magic-link and passkeys: the AuthPluginConfigSchema flags still exist, but objectui ships NO login UI for either, so #7481 withdrew both from the /api/v1/auth/config payload (protocol 17) — features.magicLink / features.passkeys are now ABSENT by design, not false. objectui#4179 (the login-UI card) was CLOSED not_planned on 2026-09-24: the maintainer's 'no UI for now' stands until the login UI is scheduled. So the browser-lane variants have no environment to run in; record them blocked(dependency, objectui#4179 closed not_planned), never pass (QA run #21784 N3, parked on #22017 row 20). The flag-advertisement clause inverts here: seeing either key in the payload is itself a FAIL now, and magic-link's endpoints (/magic-link/send, /magic-link/verify) stay live and drivable without a UI",
           "the two spec files disagree on the device-flow paths (packages/spec/src/api/auth-endpoints.zod.ts: /device/request, /device/token, /device/approve vs packages/spec/src/system/auth-config.zod.ts: /device/code, /device/token, /device, /device/approve, /device/deny) — the LIVE better-auth surface serves POST /device/code, /device/token, /device/approve, /device/deny and GET /device (auth-route-ledger.ts BETTER_AUTH_MOUNTED_SURFACE); trust the live routes and file the doc divergence",
-          "the password-reset path names ALSO diverge from the spec: AuthEndpointPaths.forgetPassword = '/forget-password' but the live catch-all serves POST /request-password-reset, POST /reset-password and GET /reset-password/:token (BETTER_AUTH_MOUNTED_SURFACE) — trust the live routes (this is the same divergence identity-auth.self-service-password-reset drives)"
+          "the password-reset path names ALSO diverge from the spec: AuthEndpointPaths.forgetPassword = '/forget-password' but the live catch-all serves POST /request-password-reset, POST /reset-password and GET /reset-password/:token (BETTER_AUTH_MOUNTED_SURFACE) — trust the live routes (this is the same divergence identity-auth.self-service-password-reset drives)",
+          "acceptance[0]'s SSO and device-authorization variants have no switch on the stock `os dev` → `os serve` path (QA run #21784, parked on #22017 row 20). The AuthPlugin the CLI injects takes only env-mapped plugins (packages/cli/src/commands/serve.ts: OS_AUTH_ADMIN, OS_AUTH_TWO_FACTOR, OS_AUTH_PASSWORD_REJECT_BREACHED, OS_AUTH_PHONE_NUMBER_ENABLED), and neither plugins.deviceAuthorization nor an oidcProviders map is one of them. Device authorization needs a host that constructs AuthPlugin itself with plugins.deviceAuthorization: true. The SSO plugin DOES have a boot switch, OS_SSO_ENABLED (packages/plugins/plugin-auth/src/auth-manager.ts, isSsoWired), but features.sso is advertised only once a provider is registered, and registering one needs a reachable external IdP. So the environment these variants need is a custom host (device) and a reachable IdP (SSO / OIDC). The QA container and CI have neither; record both blocked(environment)"
         ]
       },
       "steps": [
@@ -245,7 +250,7 @@
       "negative": [
         "a silent 200 on any disabled method's endpoint is a FAIL — a gate that only hides the button is not a gate",
         "phone OTP hanging, returning 2xx, or answering a bare 500 with an empty body with no SMS service is a FAIL (the contract is a loud 400 SMS_SERVICE_REQUIRED)",
-        "ticking magic-link or passkeys as pass at the browser lane is a false positive — there is no UI to drive (objectui#4179); the honest verdict is blocked",
+        "ticking magic-link or passkeys as pass at the browser lane is a false positive — there is no UI to drive (objectui#4179, closed not_planned); the honest verdict is blocked",
         "features.magicLink or features.passkeys appearing in the /api/v1/auth/config payload is a FAIL — #7481 withdrew both until objectui#4179 ships the UI, so their return means the stop-advertising posture regressed",
         "a discovery document whose issuer/endpoints point at a base the server does not actually mount is a FAIL — a wrong .well-known breaks every downstream RP/relying party silently"
       ],
@@ -275,7 +280,8 @@
         { "revision": 2, "date": "2026-08-08", "change": "added the .well-known/openid-configuration + oauth-authorization-server discovery-document clause (issuer/endpoints match the mounted base, jwks cross-check) and self-service change-email + delete-user clauses; recorded the live-route divergences (device flow, password reset) from the spec paths (PENDING-GAPS §D)", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-08-20", "change": "scoped scan-functionality (扫描功能) sweep: the 2FA clause asserted the interrupt but cited no pin — added packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts to source and noted in the clause verify + variant row that cookie-lane completion is pinned end-to-end by that test (cite per rule 6 instead of re-deriving). Enrollment lifecycle around the gate now owned by the four new identity-auth.two-factor-* items. No restructuring", "ref": "claude/new-session-0pv25p" },
         { "revision": 4, "date": "2026-10-05", "change": "clause 10 and step 9 re-pointed: the delete-user half only (stale, #21784 VF4). plugin-auth's auth-route-ledger books POST /api/v1/auth/delete-user with disposition 'disabled': user.deleteUser is deliberately unconfigured (auth-manager), per the maintainer ruling of 2026-08-12 on #7735, so it answers 404 to every caller. The clause dates from revision 1 (2026-08-07) and predates the ruling. The verifier's wording is used. The change-email half is unchanged", "ref": "#21797" },
-        { "revision": 5, "date": "2026-10-05", "change": "clause 4, its negative, step 4, the fixtures row and the phone-OTP variant re-pointed from NOT_SUPPORTED to the shipped refusal: with no deliverable SMS service, send-otp answers 400 with code SMS_SERVICE_REQUIRED (registered for @objectstack/plugin-auth in the ADR-0112 ledger) instead of a 500 with an empty body (#21784 A4). A bare 500 is now named a FAIL. The clause verify cites the door pin", "ref": "#21793" }
+        { "revision": 5, "date": "2026-10-05", "change": "clause 4, its negative, step 4, the fixtures row and the phone-OTP variant re-pointed from NOT_SUPPORTED to the shipped refusal: with no deliverable SMS service, send-otp answers 400 with code SMS_SERVICE_REQUIRED (registered for @objectstack/plugin-auth in the ADR-0112 ledger) instead of a 500 with an empty body (#21784 A4). A bare 500 is now named a FAIL. The clause verify cites the door pin", "ref": "#21793" },
+        { "revision": 6, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 20). A1's SSO / device variants were blocked (no switch on the dev → serve path) and N3 was blocked(dependency, objectui#4179). Disposition: recorded knownGap. Verified: serve.ts injects AuthPlugin with four env-mapped plugins and no deviceAuthorization or oidcProviders; SSO has the OS_SSO_ENABLED boot switch but needs a registered provider behind a reachable IdP. A knownGap names that environment, and that CI and the QA container lack it. objectui#4179 closed not_planned on 2026-09-24, so the magic-link / passkey knownGap and negative 3 now say so", "ref": "#22017" }
       ]
     },
     {
@@ -373,7 +379,7 @@
       "title": "Admin user-lifecycle operations (ban/unban, set-password, impersonate, create/set-role/remove, revoke-sessions) enforce, persist, and stay closed to non-admins",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["platform admin", "target user", "non-admin forger"],
@@ -390,16 +396,16 @@
       },
       "steps": [
         "GET /api/v1/auth/config and confirm features.admin is advertised (opt-in flag; it gates the sys_user ban/unban/set-password/impersonate actions)",
-        "as platform admin, GET /api/v1/auth/admin/list-users and record the roster the admin surface reads from",
+        "as platform admin, GET /api/v1/auth/admin/list-users and record the RULED refusal: 403 YOU_ARE_NOT_ALLOWED_TO_LIST_USERS (#9969, closed not_planned: no ObjectStack consumer). The console reads the roster through the sys_user data surface, so read the roster from GET /api/v1/data/sys_user instead",
         "create a login-capable user via POST /api/v1/auth/admin/create-user with an EXPLICIT password AND generatePassword:true set (the console dialog sends both — generatePassword defaults true, the input is labelled 'leave empty to generate'); then sign in as that user with the EXPLICIT password to prove it won over the generated one (#3031/#3033)",
         "as platform admin, ban the target user with a reason via the sys_user action (or POST /api/v1/auth/admin/ban-user); read sys_user back and record banned/ban_reason",
         "attempt to sign in as the banned user (POST /api/v1/auth/sign-in/email) and capture the refusal",
         "unban, then verify the same sign-in now succeeds",
         "set the target's password via the admin set-password (out-of-band recovery); verify the NEW password signs in and the OLD one is refused",
-        "sign the target in to establish a LIVE session, then as admin POST /api/v1/auth/admin/revoke-user-sessions for that target; the target's very next PROTECTED authed request (e.g. GET /api/v1/data/<an object the target could read a moment ago>) must be refused mid-flight — the kill is immediate, not deferred to expiry. Do NOT score this off get-session's status code — and since #17881 that is no longer because it cannot discriminate: an anonymous OR revoked get-session answers 401 with the ADR-0112 refusal envelope (code UNAUTHENTICATED), converted from better-auth's bare 200+null by packages/plugins/plugin-auth/src/anonymous-session-refusal.ts, while a live session still answers 200 with { user, session }. It is not the oracle because this clause's contract is an immediate kill on a PROTECTED request, and one auth-route seam's status is not proof the AUTHORIZATION layer refuses the target's in-flight protected reads",
-        "change the target's role via POST /api/v1/auth/admin/set-role and prove the change bites: an operation the new role gates flips outcome (e.g. promote → an admin-only read now 2xx; demote → it now 403)",
+        "RULED (#9969, closed not_planned): sign the target in to establish a LIVE session, then as platform admin POST /api/v1/auth/admin/revoke-user-sessions for that target and record the refusal, 403 YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS. Then re-drive the target's PROTECTED authed request (e.g. GET /api/v1/data/OBJECT for an object the target could read a moment ago): it still answers 2xx, because the refused call moved nothing. If the route is ever re-mounted for an ObjectStack consumer, the same request must instead be refused mid-flight (acceptance[4]'s re-mount contract). Either way, do NOT score this off get-session's status code: an anonymous OR revoked get-session answers 401 with the ADR-0112 refusal envelope (code UNAUTHENTICATED, packages/plugins/plugin-auth/src/anonymous-session-refusal.ts), while a live session still answers 200 with { user, session }. One auth-route seam's status is not proof the AUTHORIZATION layer refuses the target's protected reads",
+        "RULED (#9968, ruled B): as platform admin, POST /api/v1/auth/admin/set-role for the target and record the refusal, 403 YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE. Then re-read the target's sys_user row: the role scalar and positions[] are unchanged",
         "impersonate the target from the admin surface; verify via the API that the impersonation session carries impersonated_by, and screenshot the console's impersonation state; stop impersonating and verify the admin's own session is restored",
-        "POST /api/v1/auth/admin/remove-user for a throwaway user that OWNS at least one showcase row (task/note), then read that owned row back: its owner_id is cleared to null (engine referential-integrity FK clear), the row itself survives, and the owner-anchor transfer guard did NOT veto the cascade (#3023/#3048)",
+        "RULED (#9969, closed not_planned): as platform admin, POST /api/v1/auth/admin/remove-user for a throwaway user that OWNS at least one showcase row and record the refusal, 403 YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS. Then confirm the user and the owned row are both still there. The engine cascade exemption the old step drove (#3023/#3048) has no public door left, so acceptance[5] scores it from its pin",
         "as a NON-admin, fire each of /admin/ban-user, /admin/list-users, /admin/create-user, /admin/set-role, /admin/remove-user, /admin/revoke-user-sessions directly and capture every refusal",
         "run the audit-trail pin and capture its output for the attribution clause"
       ],
@@ -423,22 +429,22 @@
           "evidence": "the create response + the two sign-in attempts"
         },
         {
-          "clause": "set-role changes gate outcomes, not just a column: after POST /admin/set-role the target's access to a role-gated operation flips (grants what the new role allows, revokes what it removes) — the role write is authoritative for authorization, verified by re-driving the gated call",
+          "clause": "set-role is RULED, not built, for the platform admin (#9968, ruled B: the sys_user set-role action was retired and the vendor route left vendor-gated, because its only effect is writing the legacy role scalar ADR-0068 D2 retired). POST /admin/set-role answers the platform admin 403 YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE and moves nothing. A gate flip is not the contract",
           "oracle": "api",
-          "verify": "the same gated request returns 2xx vs 403 before/after the role change, as the target",
-          "evidence": "the two gated-request responses bracketing the set-role"
+          "verify": "the step-9 refusal, status AND code, and the unchanged sys_user re-read. packages/qa/dogfood/test/admin-platform-admin-standing.dogfood.test.ts pins both: its by-design list and its no-effect control",
+          "evidence": "the refusal + the unchanged re-read, or the pin output"
         },
         {
-          "clause": "revoke-user-sessions kills the target's LIVE session mid-flight: a PROTECTED authed request that succeeded a moment earlier is refused immediately after the admin revoke — not at token expiry",
+          "clause": "revoke-user-sessions is RULED, not built, for the platform admin (#9969, closed not_planned: no ObjectStack consumer, re-implemented on demand). At head it answers the platform admin 403 YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS, and the target's live session keeps answering a PROTECTED request. The contract a re-mount must meet is unchanged: revoke-user-sessions kills the target's LIVE session mid-flight, so a PROTECTED authed request that succeeded a moment earlier is refused immediately after the revoke, not at token expiry. admin-platform-admin-standing.dogfood.test.ts fails until that route moves to its admitted list",
           "oracle": "api",
-          "verify": "ORACLE = a protected authed request as the target (a data read the target was entitled to), 2xx before the revoke and refused on the very next call after it. get-session is NOT the oracle for this clause. Since #17881 an anonymous OR revoked get-session answers 401 UNAUTHENTICATED in the ADR-0112 refusal envelope (packages/plugins/plugin-auth/src/anonymous-session-refusal.ts) while a live session still answers 200 with { user, session }, so a 401 there is the CORRECT answer and must never be filed as the defect. It stays off the oracle seat for a reason that does not move with the wire: this clause's contract is an immediate kill on a PROTECTED request, and a refusal emitted by that one auth-route seam is not proof the authorization layer refuses the target's in-flight protected reads. If get-session is captured at all it is corroboration only — read its BODY as well as its status, the discipline packages/plugins/plugin-auth/src/session-of-record.test.ts states: a session that is gone is proven gone by the absence of a user, not by a status the file would then be trusting a single seam to keep emitting",
-          "evidence": "the before/after protected-request pair (plus the get-session body, if captured)"
+          "verify": "At head: the step-8 refusal, status AND code, and the target's next PROTECTED request still 2xx (pinned by packages/qa/dogfood/test/admin-platform-admin-standing.dogfood.test.ts). On a re-mount: ORACLE = a protected authed request as the target (a data read the target was entitled to), 2xx before the revoke and refused on the very next call after it. get-session is NOT the oracle for this clause, in either case. Since #17881 an anonymous OR revoked get-session answers 401 UNAUTHENTICATED in the ADR-0112 refusal envelope (packages/plugins/plugin-auth/src/anonymous-session-refusal.ts), while a live session still answers 200 with { user, session }, so a 401 there is the CORRECT answer and must never be filed as the defect. It stays off the oracle seat for a reason that does not move with the wire: the contract is about a PROTECTED request, and a refusal emitted by that one auth-route seam is not proof the authorization layer refuses the target's protected reads. If get-session is captured at all it is corroboration only. Read its BODY as well as its status, the discipline packages/plugins/plugin-auth/src/session-of-record.test.ts states: a session that is gone is proven gone by the absence of a user",
+          "evidence": "the refusal + the post-refusal protected request, or the pin output"
         },
         {
-          "clause": "engine cascade exemption (§A5): removing a user who OWNS rows clears owner_id to null on those rows via the engine's referential-integrity FK clear — the owner-anchor transfer guard does NOT veto this system-context cascade write (it rides a server-DERIVED marker, __referentialFieldClear, that cannot be forged from a request), and the owned row survives with owner_id null rather than the delete aborting",
+          "clause": "remove-user is RULED, not built, for the platform admin (#9969): it answers 403 YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS and the user and its owned rows stay. The engine cascade exemption this clause asserted (§A5, #3023: an owner_id-null referential clear rides the server-derived __referentialFieldClear marker, and the owner-anchor guard does not veto it) has no public door left. remove-user is refused, and POST /auth/delete-user is unwired (identity-auth.auth-method-matrix acceptance[9]). So the exemption is scored from its pin",
           "oracle": "api",
-          "verify": "read the owned row after remove-user: it exists, owner_id is null; the remove-user call itself returned 2xx (not a guard-abort). Cross-checked by packages/plugins/plugin-security/src/security-plugin.test.ts '[#3023] an engine referential FK clear … is exempt'",
-          "evidence": "the owned-row read (owner_id null) + the remove-user response"
+          "verify": "the step-11 refusal and the unchanged reads; the exemption from packages/plugins/plugin-security/src/security-plugin.test.ts '[#3023] an engine referential FK clear (__referentialFieldClear) is exempt — owner_id:null cascade is allowed for a plain member'",
+          "evidence": "the refusal + the reads, and the pin output"
         },
         {
           "clause": "impersonation is attributed: the impersonated session records impersonated_by, and stop-impersonating returns the admin to their own session",
@@ -468,8 +474,8 @@
       "negative": [
         "a non-admin forged admin operation succeeding is a FAIL of the highest severity — apply RUNNER rule 7 (independent re-derivation) before acting on it",
         "a ban that hides the user in the UI while their sign-in still works is a FAIL — the sign-in refusal is the enforcement, not the list filter",
-        "revoke-user-sessions that only stops NEW logins while the existing live session keeps answering a PROTECTED request is a FAIL — the contract is an immediate kill. Two scoring errors to avoid on get-session, and since #17881 inverted the wire answer they point OPPOSITE ways. (a) A 401 UNAUTHENTICATED there after the revoke is the CORRECT answer, not the failure — filing it as one is the false positive run #7663 corrected, and the remedy that mis-filing invites is undoing anonymous-session-refusal.ts, an auth tightening. (b) A 200 carrying a user after the revoke is no longer the benign no-session convention this line once described; the live-session answer is the only 200 left, so it IS a real signal the kill did not land. Neither is this clause's oracle: read the body, or better, re-drive a protected request",
-        "remove-user aborting because the owner-anchor guard vetoed the owner_id-null cascade (instead of exempting the engine FK clear) is the #3023 regression returned — FAIL; equally, a create-user that applies the GENERATED password when an explicit one was supplied is the #3031 failure — FAIL"
+        "(moot while revoke-user-sessions stays ruled, #9969; it applies again on a re-mount) revoke-user-sessions that only stops NEW logins while the existing live session keeps answering a PROTECTED request is a FAIL — the contract is an immediate kill. Two scoring errors to avoid on get-session, and since #17881 inverted the wire answer they point OPPOSITE ways. (a) A 401 UNAUTHENTICATED there after the revoke is the CORRECT answer, not the failure — filing it as one is the false positive run #7663 corrected, and the remedy that mis-filing invites is undoing anonymous-session-refusal.ts, an auth tightening. (b) A 200 carrying a user after the revoke is no longer the benign no-session convention this line once described; the live-session answer is the only 200 left, so it IS a real signal the kill did not land. Neither is this clause's oracle: read the body, or better, re-drive a protected request",
+        "the owner-anchor guard vetoing the engine's owner_id-null cascade (instead of exempting the FK clear) is the #3023 regression returned — FAIL, read from its plugin-security pin while remove-user stays ruled (#9969); equally, a create-user that applies the GENERATED password when an explicit one was supplied is the #3031 failure — FAIL"
       ],
       "automated": {
         "kind": "e2e",
@@ -501,6 +507,12 @@
           "date": "2026-09-17",
           "change": "CORRECTION, and a correction OF a correction. Revision 3 was RIGHT when it was written: in August 2026 better-auth's bare no-session answer really was HTTP 200 with a JSON null body, so the literal 401 expectation it removed really did misdescribe a correct implementation. Its cited authority was then INVERTED underneath it — #17238 ruled the answer, #17881 landed refuseAnonymousSession (packages/plugins/plugin-auth/src/anonymous-session-refusal.ts), and packages/plugins/plugin-auth/src/session-of-record.test.ts now pins the very 401 it was cited for denying. Revision 3 is therefore left standing and UNEDITED: it records what the judgement rested on at the time, which is the whole point of keeping a revision history. This revision re-points the four instructional sites (the step, clause 5's verify, the third negative and the evidence row) at today's live wire answer, measured on this checkout rather than relayed: a sign-up read 200 with { user, session }, a revoke-sessions then read 401 with {\"success\":false,\"error\":{\"code\":\"UNAUTHENTICATED\"}}, and a fresh manager's new session still read 200 as the control — so the refusal covers the REVOKED path and not only the never-signed-in one, because the seam keys on the answer shape (/get-session + 200 + a body that is exactly null) rather than on how the caller became anonymous. The SUBSTANTIVE advice is unchanged and now rests on something that does not move with the wire: get-session is still not this clause's oracle, because the contract is an immediate kill on a PROTECTED request and one auth-route seam's status is not proof the authorization layer refuses one. Consistency between this file and the runtime's refusal envelope is now pinned by packages/plugins/plugin-auth/src/checklist-refusal-envelope-consistency.test.ts, which reads the status and code from the runtime constants rather than from a copy, so the next behaviour change reds instead of replaying this drift",
           "ref": "#18650"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 15), re-pointed clauses. A4-A6 were blocked(dependency): set-role, revoke-user-sessions and remove-user are ruled not built for the platform admin (#9968 ruled B; #9969 closed not_planned). The clauses still asserted the positive outcomes, which the platform has ruled out. A4-A6 now assert the ruled refusals, each with its vendor code and a no-effect read, pinned by admin-platform-admin-standing.dogfood.test.ts. A5 and step 8 also keep the contract a re-mount must meet (revoke-user-sessions kills the live session mid-flight) and its non-status oracle: a PROTECTED request, never get-session, whose 401 UNAUTHENTICATED is the ADR-0112 refusal (the alignment plugin-auth's checklist-refusal-envelope-consistency.test.ts pins). A6's cascade exemption is scored from plugin-security's [#3023] test, since no public door deletes a user. Steps 2, 8, 9 and 11 (list-users is refused by the same ruling, record #21784's accuracy finding) and negatives 3-4 follow",
+          "ref": "#22017"
         }
       ]
     },

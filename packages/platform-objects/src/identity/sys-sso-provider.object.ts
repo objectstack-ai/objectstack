@@ -73,6 +73,18 @@ export const SysSsoProvider = ObjectSchema.create({
   // All mutations go through @better-auth/sso's endpoints under
   // /api/v1/auth/sso/* (register / delete-provider) rather than the generic
   // data layer, so server-side config validation + secret handling run.
+  //
+  // The four `/admin/sso/*` bridge actions are OFFERED only to the one
+  // standing their door admits (ADR-0068 D4): each bridge runs the
+  // platform-admin gate before it delegates and answers every other caller
+  // 403 `PERMISSION_DENIED`. So each authors
+  // `visible: 'current_user.isPlatformAdmin == true'`, the ADR-0095 D3
+  // PLATFORM_ADMIN rung that the session payload emits and the gate judges
+  // (⛔ never a `current_user.positions` read). The object-level
+  // `manage_platform_settings` requirement above is a capability, not that
+  // rung, so it does not stand in for it. `delete_sso_provider` carries no
+  // such term: its door is @better-auth/sso's own `/sso/delete-provider`,
+  // which authorizes the provider's owner or an admin of its organization.
   actions: [
     {
       name: 'register_sso_provider',
@@ -90,6 +102,8 @@ export const SysSsoProvider = ObjectSchema.create({
       // /sso/register would drop clientId/clientSecret (top-level → Zod-stripped)
       // and persist an unusable `oidc_config = null` provider.
       target: '/api/v1/auth/admin/sso/register',
+      // Platform-admin standing (ADR-0068 D4) — see the actions header above.
+      visible: 'current_user.isPlatformAdmin == true',
       refreshAfter: true,
       params: [
         { name: 'providerId', label: 'Provider ID', type: 'text', required: true, helpText: 'Stable identifier, e.g. "okta" or "acme-entra".' },
@@ -130,6 +144,8 @@ export const SysSsoProvider = ObjectSchema.create({
       // re-dispatches to /sso/register (admin gate runs). The response returns
       // the SP ACS + metadata URLs to configure on the IdP.
       target: '/api/v1/auth/admin/sso/register-saml',
+      // Platform-admin standing (ADR-0068 D4) — see the actions header above.
+      visible: 'current_user.isPlatformAdmin == true',
       refreshAfter: true,
       params: [
         { name: 'providerId', label: 'Provider ID', type: 'text', required: true, helpText: 'Stable identifier, e.g. "acme-saml".' },
@@ -160,6 +176,8 @@ export const SysSsoProvider = ObjectSchema.create({
       // feature is OFF the bridge returns a clear "not enabled for this
       // environment" error instead of a bare 404.
       target: '/api/v1/auth/admin/sso/request-domain-verification',
+      // Platform-admin standing (ADR-0068 D4) — see the actions header above.
+      visible: 'current_user.isPlatformAdmin == true',
       params: [
         { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
         { name: 'domain', field: 'domain', defaultFromRow: true, required: false },
@@ -188,6 +206,8 @@ export const SysSsoProvider = ObjectSchema.create({
       // on success. Routed through the env bridge, which maps @better-auth/sso's
       // empty 204 / 502 into a clear success/error toast.
       target: '/api/v1/auth/admin/sso/verify-domain',
+      // Platform-admin standing (ADR-0068 D4) — see the actions header above.
+      visible: 'current_user.isPlatformAdmin == true',
       successMessage: 'Domain ownership verified',
       refreshAfter: true,
       params: [

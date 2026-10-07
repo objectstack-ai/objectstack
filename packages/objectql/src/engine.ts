@@ -246,7 +246,7 @@ import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter } from './search-filter.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
-import { ExpressionEngine, toEvalPermissions, type EvalPermissions } from '@objectstack/formula';
+import { ExpressionEngine, toEvalPermissions, type EvalError, type EvalPermissions } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import {
   isAggregatedViewContainer,
@@ -2237,11 +2237,20 @@ function roundFormulaValue(value: unknown, scale: number | undefined): unknown {
   return Object.is(rounded, -0) ? 0 : rounded;
 }
 
+/**
+ * [#22019] Where {@link applyFormulaPlan} reports a formula it could not
+ * evaluate: the field it was computing and the evaluator's own error. The
+ * engine binds one per call to the object being read, so the report names the
+ * (object, field) pair — see {@link ObjectQL.formulaFaultSink}.
+ */
+type FormulaFaultSink = (field: string, error: EvalError) => void;
+
 function applyFormulaPlan(
   plan: FormulaPlanEntry[],
   records: any[],
   execCtx?: ExecutionContext,
   permissions?: EvalPermissions,
+  onFault?: FormulaFaultSink,
 ): void {
   if (!plan.length) return;
   const now = new Date();
@@ -2252,7 +2261,17 @@ function applyFormulaPlan(
     if (rec == null) continue;
     for (const fp of plan) {
       const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, record: rec });
-      rec[fp.name] = r.ok ? roundFormulaValue(r.value, fp.scale) : null;
+      if (r.ok) {
+        rec[fp.name] = roundFormulaValue(r.value, fp.scale);
+        continue;
+      }
+      // [#22019] The answer stays `null` — a formula that cannot be computed
+      // has no value, and changing what a read returns is a protocol change.
+      // What changes is that the fault is no longer swallowed (ADR-0032: a
+      // call site must not silently turn a bad expression into `null`): the
+      // sink names the field and the evaluator's error.
+      rec[fp.name] = null;
+      onFault?.(fp.name, r.error);
     }
   }
 }
@@ -2303,6 +2322,7 @@ async function hydrateWriteFormulas(
   results: unknown[],
   execCtx: ExecutionContext | undefined,
   permissionsFor: (plan: FormulaPlanEntry[], records: readonly unknown[]) => Promise<EvalPermissions | undefined>,
+  onFault?: FormulaFaultSink,
 ): Promise<void> {
   const records = results.filter(
     (r): r is Record<string, unknown> => r != null && typeof r === 'object',
@@ -2310,7 +2330,7 @@ async function hydrateWriteFormulas(
   if (records.length === 0) return;
   const { plan } = planFormulaProjection(schema, undefined);
   if (plan.length === 0) return;
-  applyFormulaPlan(plan, records, execCtx, await permissionsFor(plan, records));
+  applyFormulaPlan(plan, records, execCtx, await permissionsFor(plan, records), onFault);
 }
 
 /**
@@ -5078,6 +5098,64 @@ export class ObjectQL implements IObjectQLEngine {
       );
       return undefined;
     }
+  }
+
+  /**
+   * [#22019] The (object, field) pairs whose formula fault this engine instance
+   * has already reported — see {@link reportFormulaFault}.
+   */
+  private readonly formulaFaultReported = new Set<string>();
+
+  /**
+   * [#22019] The sink a read or a write response of `object` hands to
+   * {@link applyFormulaPlan}, bound to the object so a report names the pair.
+   */
+  private formulaFaultSink(object: string): FormulaFaultSink {
+    return (field, error) => this.reportFormulaFault(object, field, error);
+  }
+
+  /**
+   * [#22019] A formula field that did not evaluate, reported ONCE per
+   * (object, field) per engine instance.
+   *
+   * ## What it closes
+   *
+   * {@link applyFormulaPlan} answers `null` for a formula it cannot evaluate,
+   * and said nothing. A formula calling an unregistered function
+   * (`sqrt(record.amount)`) therefore read `null` on every row of every read
+   * and every write response, with no line anywhere to say why — the silent
+   * swallow ADR-0032 forbids at a call site. The answer stays `null` (what a
+   * read returns is protocol); the fault is now said.
+   *
+   * ## Level and rate
+   *
+   * `warn`, on AGENTS.md's one question: a formula is computed on read and
+   * nothing is persisted from it, so the degradation is a field reading `null`
+   * — visible to whoever reads it — never a write that claims to land and does
+   * not. That is the reading {@link resolveFormulaPermissions} makes for the
+   * same `null`.
+   *
+   * Once per pair per engine instance, as {@link warnCascadeNotAtomic} says its
+   * piece once per object: a list read evaluates a faulting formula once per
+   * row, and a line per row is the volume that gets a log skimmed. A later
+   * fault on the same pair is not re-reported, even with a different error —
+   * the first line already names the field to fix.
+   */
+  private reportFormulaFault(object: string, field: string, error: EvalError): void {
+    const key = JSON.stringify([object, field]);
+    if (this.formulaFaultReported.has(key)) return;
+    this.formulaFaultReported.add(key);
+    // The evaluator's message carries the source and a caret on the lines after
+    // its first; the first line goes in the sentence, the whole of it in the meta.
+    const headline = error.message.split('\n', 1)[0];
+    this.logger.warn(
+      `formula field '${field}' on '${object}' could not be evaluated, so it reads null wherever this `
+      + `fault holds (${error.kind}: ${headline}). If the expression itself is at fault — an unknown `
+      + 'function, a missing field — `os validate`, or a re-save of the object, refuses it with a located '
+      + 'message; if it faults on some records\' values, guard the operands it reads. Reported once per '
+      + 'object and field per engine instance.',
+      { object, field, kind: error.kind, error: error.message },
+    );
   }
 
   /**
@@ -12071,7 +12149,7 @@ export class ObjectQL implements IObjectQLEngine {
           if (Array.isArray(result)) {
             applyFormulaPlan(_findFormula.plan, result, opCtx.context, await this.resolveFormulaPermissions(
               object, _findFormula.plan, result, opCtx.context, this.permissionResolution(opCtx.context),
-            ));
+            ), this.formulaFaultSink(object));
           }
 
           // Post-process: expand related records if expand is requested
@@ -12347,7 +12425,7 @@ export class ObjectQL implements IObjectQLEngine {
       if (result != null) {
         applyFormulaPlan(_findOneFormula.plan, [result], opCtx.context, await this.resolveFormulaPermissions(
           objectName, _findOneFormula.plan, [result], opCtx.context, this.permissionResolution(opCtx.context),
-        ));
+        ), this.formulaFaultSink(objectName));
       }
 
       // Post-process: expand related records if expand is requested
@@ -13812,6 +13890,7 @@ export class ObjectQL implements IObjectQLEngine {
         await hydrateWriteFormulas(
           schemaForValidation, resultRows, opCtx.context,
           (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
+          this.formulaFaultSink(object),
         );
         for (let k = 0; k < liveIndexes.length; k++) {
           const rowCtx = rowHookContexts[liveIndexes[k]];
@@ -15607,6 +15686,7 @@ export class ObjectQL implements IObjectQLEngine {
                Array.isArray(result) ? result : [result],
                opCtx.context,
                (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
+               this.formulaFaultSink(object),
              );
            }
            // Coerce boolean fields (SQLite 0/1 → JS bool) on the after-hook view

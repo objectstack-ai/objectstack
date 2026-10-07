@@ -129,6 +129,17 @@ export const AnalyticsResultResponseSchema = lazySchema(() => BaseResponseSchema
         + 'name for the aggregate. Absent whenever the author declared a label, and '
         + 'on dimension / derived columns.',
       ),
+      aggregate: AggregationFunction.optional().describe(
+        'The aggregate a measure column carries, in the closed `AggregationFunction` '
+        + 'vocabulary: the dataset measure\'s own `aggregate`, stated whether or not the '
+        + 'author declared a `label`, so a renderer can tell a `count` from a `sum` (integer '
+        + 'axis ticks for a count, for example). Set on every measure column of a dataset '
+        + 'answer (`POST /analytics/dataset/query`, the live query and the draft-data '
+        + 'preview alike) whose measure declares an `aggregate`, its `__compare` column '
+        + 'included. Absent on dimension columns and on derived measures, which have no '
+        + 'single aggregate, and on a cube query answer (`POST /analytics/query`). Unlike '
+        + '`builtinAggregate`, it says nothing about who named the column.',
+      ),
     })).describe('Column metadata'),
     sql: z.string().optional().describe('Executed SQL (if debug enabled)'),
     totals: z.array(z.object({

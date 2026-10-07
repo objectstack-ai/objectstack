@@ -87,7 +87,7 @@ describe('validation message catalog — completeness', () => {
   });
 });
 
-describe('renderValidationMessage — English output is unchanged (#3957 no-regression)', () => {
+describe('renderValidationMessage — English output is unchanged, the field label in place of the API name', () => {
   // Byte-for-byte the pre-#3957 strings, with the field's label where the API
   // name used to be interpolated.
   const cases: Array<[string, Record<string, unknown> | undefined, string]> = [

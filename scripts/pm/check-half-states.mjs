@@ -1333,10 +1333,10 @@ export function markerMatches(marker, text) {
  * decoration is ADDED here — where a fixture and a case come with it — ⛔ never
  * discovered again from a silent row.
  *
- * The register is `SCHEMA_PROPERTY_FORMS`' (`scripts/pm/check-widening-tells.mjs`,
- * #18560): a frozen roster the detector is BUILT from, each member carrying its
- * own `example`, so a form added without a fixture and a form silently dropped
- * both go red instead of quietly changing what the instrument sees.
+ * The register is a frozen roster the detector is BUILT from, each member
+ * carrying its own `example`, so a form added without a fixture and a form
+ * silently dropped both go red instead of quietly changing what the instrument
+ * sees.
  *
  * ## What a member is, and what it is NOT
  *

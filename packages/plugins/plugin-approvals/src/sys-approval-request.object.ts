@@ -58,7 +58,26 @@ export const SysApprovalRequest = ObjectSchema.create({
 
   // Curated built-in list views — render as segmented tabs in the console.
   // Filters use {current_user_id} substitution wired by the console.
+  //
+  // `all_requests` is declared FIRST, and that position is the contract: when
+  // a route names no view, the console opens an object's first declared list
+  // view (objectui `ObjectView`: URL view id, `?view=`, `isDefault`, then
+  // `views[0]`). A caller-scoped view (`my_pending`, `submitted_by_me`) in
+  // first place turned Setup → Approvals → Requests, and every bare-object door
+  // (the record page's object breadcrumb, the object switcher), into a list of
+  // the caller's own rows. A caller-scoped list view is never an object's
+  // first; an entry that wants one names it. The order decides which view
+  // opens, never which rows a caller may read.
   listViews: {
+    all_requests: {
+      type: 'grid',
+      name: 'all_requests',
+      label: 'All',
+      data: { provider: 'object', object: 'sys_approval_request' },
+      columns: ['process_name', 'object_name', 'record_id', 'status', 'current_step', 'submitter_id', 'updated_at'],
+      sort: [{ field: 'updated_at', order: 'desc' }],
+      pagination: { pageSize: 50 },
+    },
     my_pending: {
       type: 'grid',
       name: 'my_pending',
@@ -95,15 +114,6 @@ export const SysApprovalRequest = ObjectSchema.create({
       filter: [{ field: 'status', operator: 'in', value: ['approved', 'rejected', 'recalled', 'cancelled'] }],
       sort: [{ field: 'completed_at', order: 'desc' }],
       pagination: { pageSize: 25 },
-    },
-    all_requests: {
-      type: 'grid',
-      name: 'all_requests',
-      label: 'All',
-      data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_name', 'object_name', 'record_id', 'status', 'current_step', 'submitter_id', 'updated_at'],
-      sort: [{ field: 'updated_at', order: 'desc' }],
-      pagination: { pageSize: 50 },
     },
   },
 

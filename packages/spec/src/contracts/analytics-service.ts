@@ -116,6 +116,26 @@ export interface AnalyticsResult {
          * aggregate vocabulary; no second spelling.
          */
         builtinAggregate?: AggregationFunction;
+        /**
+         * The aggregate the measure column carries — the dataset measure's own
+         * `aggregate`, stated whether or not the author declared a `label`.
+         * `builtinAggregate` answers "is this header the server's default?";
+         * this answers "what kind of number is this?", which a renderer needs
+         * whatever the header says: a `count` is a whole number, so a chart
+         * axis over it takes integer ticks, while a `sum` or `avg` may be
+         * fractional.
+         *
+         * Present on every measure column of a `queryDataset` answer — the live
+         * query and the draft-data preview, which share one column-description
+         * seam — whose dataset measure declares an `aggregate`, the measure's
+         * `__compare` column included (the same aggregate over the shifted
+         * window). Absent on dimension columns and on derived measures, which
+         * combine other measures and have no single aggregate (a `derived`
+         * measure's stray `aggregate` is ignored at compile time and is not
+         * stated here either), and absent on a `query` (cube) answer. Reuses
+         * `AggregationFunction`, the one closed aggregate vocabulary.
+         */
+        aggregate?: AggregationFunction;
     }>;
     /** Generated SQL (if available) */
     sql?: string;

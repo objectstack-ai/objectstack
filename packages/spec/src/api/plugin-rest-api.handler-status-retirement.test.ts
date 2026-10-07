@@ -70,7 +70,7 @@ const WELL_FORMED = {
 
 const PRESCRIPTION = /`RestApiEndpoint\.handlerStatus`.*was removed.*17/s;
 
-describe('[#13823] RestApiEndpoint.handlerStatus retirement', () => {
+describe('RestApiEndpoint.handlerStatus retirement', () => {
   // All three former values, INCLUDING the documented default: the old
   // docblock's `@default 'implemented'` was prose only — the key never carried
   // a Zod `.default()`, so no built artifact materialised it and there is no
@@ -156,7 +156,7 @@ describe('[#13823] RestApiEndpoint.handlerStatus retirement', () => {
   });
 });
 
-describe('[#13823] api/HandlerStatus + api/RouteCoverage{Entry,Report} def retirement', () => {
+describe('api/HandlerStatus + api/RouteCoverage{Entry,Report} def retirement', () => {
   /** The 6 names the three retired defs exported (3 schema consts + 3 types). */
   const RETIRED_NAMES = [
     'HandlerStatusSchema',
@@ -176,7 +176,7 @@ describe('[#13823] api/HandlerStatus + api/RouteCoverage{Entry,Report} def retir
 
     // ── ABSENCE (every entry, not just ./api) ─────────────────────────────
     for (const name of RETIRED_NAMES) {
-      expect(holdersOf(name), `${name} must have zero holders after #13823`).toEqual([]);
+      expect(holdersOf(name), `${name} must have zero holders after its retirement`).toEqual([]);
     }
 
     // ── SURVIVAL ──────────────────────────────────────────────────────────
@@ -205,7 +205,7 @@ describe('[#13823] api/HandlerStatus + api/RouteCoverage{Entry,Report} def retir
   });
 });
 
-describe('[#13823] ADR-0087 registration', () => {
+describe('handlerStatus retirement — ADR-0087 registration', () => {
   it('declares the tombstoned key and the three removed defs under major 18, with the D3 entry', () => {
     expect(RETIRED_KEYS_BY_MAJOR[18]).toContain('api/RestApiEndpoint:handlerStatus');
     for (const def of ['api/HandlerStatus', 'api/RouteCoverageEntry', 'api/RouteCoverageReport']) {

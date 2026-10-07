@@ -33,13 +33,13 @@
 //     naming the host's database configuration — no `*.datasource.ts`
 //     declares `default`;
 //   - a runtime datasource with no code twin still restores, and one still
-//     saves through the `/meta` door.
-//
-// ⚠ Not pinned here, and named rather than hidden: while a stored row exists,
-// `GET /api/v1/meta/datasource/:name` serves THAT row — the door reads its
-// stored overlay first (ADR-0005's read order), whatever the MetadataService
-// holds. `meta-door-code-datasource.dogfood.test.ts` pins that read as it is.
-// After the repair below it serves the code definition, in the same boot.
+//     saves through the `/meta` door;
+//   - [#21922's metadata-door half] while each row still exists,
+//     `GET /api/v1/meta/datasource/:name` and the `/meta` list serve the code
+//     definition, not the row: the reads decline a stored row under a name the
+//     host registers from code, as they do for a shipped flow name. The repair
+//     below still removes each row, and a runtime datasource's row is still
+//     what both doors serve.
 //
 // The verify harness composes the datasource-admin service but not its REST
 // routes, so this file mounts `registerDatasourceAdminRoutes` the way
@@ -55,9 +55,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-/** The showcase's code-defined datasource. */
+/** The showcase's code-defined datasource, and the package that declares it. */
 const EXTERNAL = 'showcase_external';
 const EXTERNAL_LABEL = 'External Analytics (SQLite)';
+const SHOWCASE_PACKAGE = 'com.example.showcase';
 /** The label and origin the stored rows assert — what an earlier runtime write could leave. */
 const SHADOW_LABEL = 'Shadow 21922';
 /** A runtime datasource created through the admin door before the restart. */
@@ -122,6 +123,14 @@ describe('[#21922 / #21944] a stored datasource row never displaces a code datas
       find(object: string, query: unknown): Promise<Array<Record<string, unknown>>>;
     };
     return ql.find('sys_metadata', { where: { type: 'datasource', name }, context: SYS });
+  };
+  /** `GET /meta/datasource`: the served list, unwrapped as the shipped-flow list pins unwrap it. */
+  const metaList = async (): Promise<Array<Record<string, any>>> => {
+    const read = await call('GET', '/meta/datasource');
+    expect(read.status, JSON.stringify(read.json)).toBe(200);
+    const json = read.json as unknown as Record<string, unknown>;
+    const data = (json?.data ?? json) as Record<string, unknown> | unknown[];
+    return (Array.isArray(data) ? data : (data as { items?: unknown[] })?.items ?? []) as Array<Record<string, any>>;
   };
   const adminEntry = async (name: string) => {
     const listed = await call('GET', '/datasources');
@@ -257,6 +266,40 @@ describe('[#21922 / #21944] a stored datasource row never displaces a code datas
     const runtimePatch = await call('PATCH', `/datasources/${RUNTIME}`, { label: 'Runtime 21922 (edited)' });
     expect(runtimePatch.status, JSON.stringify(runtimePatch.json)).toBe(200);
   }, 180_000);
+
+  it('[#21922] with each row present, the /meta door serves the code definition by name and in its list', async () => {
+    // Both rows are still at rest: this is the read before any repair, and the
+    // repair in the next case still finds and removes each one.
+    expect(await storedRows(EXTERNAL)).toHaveLength(1);
+    expect(await storedRows('default')).toHaveLength(1);
+
+    // By name: the code definition, never the row's label, origin or file.
+    const external = await call('GET', `/meta/datasource/${EXTERNAL}`);
+    expect(external.status, JSON.stringify(external.json)).toBe(200);
+    expect(external.json.item).toMatchObject({ origin: 'code', label: EXTERNAL_LABEL, _packageId: SHOWCASE_PACKAGE });
+    expect(JSON.stringify(external.json.item)).not.toContain('shadow-external.db');
+    const def = await call('GET', '/meta/datasource/default');
+    expect(def.status, JSON.stringify(def.json)).toBe(200);
+    expect(def.json.item).toMatchObject({ origin: 'code' });
+    expect(def.json.item?.label).not.toBe(SHADOW_LABEL);
+    expect(JSON.stringify(def.json.item)).not.toContain('shadow-default.db');
+
+    // The list: one entry under each code name, the same code definition.
+    const listed = await metaList();
+    const entries = (name: string) => listed.filter((it) => it?.name === name);
+    expect(entries(EXTERNAL)).toHaveLength(1);
+    expect(entries(EXTERNAL)[0]).toMatchObject({ origin: 'code', label: EXTERNAL_LABEL, _packageId: SHOWCASE_PACKAGE });
+    expect(entries('default')).toHaveLength(1);
+    expect(entries('default')[0]).toMatchObject({ origin: 'code', label: def.json.item?.label });
+
+    // Control: a runtime datasource's row is still what both doors serve.
+    const runtime = await call('GET', `/meta/datasource/${RUNTIME}`);
+    expect(runtime.status, JSON.stringify(runtime.json)).toBe(200);
+    const admin = await adminEntry(RUNTIME);
+    expect(runtime.json.item).toMatchObject({ origin: 'runtime', label: admin?.label });
+    expect(entries(RUNTIME)).toHaveLength(1);
+    expect(entries(RUNTIME)[0]).toMatchObject({ origin: 'runtime', label: admin?.label });
+  });
 
   it('the /meta DELETE of each row (the repair) removes it, and what the admin door serves does not change', async () => {
     const before = { external: await adminEntry(EXTERNAL), def: await adminEntry('default') };

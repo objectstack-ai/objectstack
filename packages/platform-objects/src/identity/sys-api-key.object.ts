@@ -119,6 +119,19 @@ export const SysApiKey = ObjectSchema.create({
   ],
 
   listViews: {
+    // [#21972] Declared FIRST on purpose: a route that names no view opens the
+    // first declared list view, so a caller-scoped view (`mine`) is never
+    // first. Setup's `nav_api_keys` names this view; the Account app's entry
+    // names `mine`.
+    all_keys: {
+      type: 'grid',
+      name: 'all_keys',
+      label: 'All',
+      data: { provider: 'object', object: 'sys_api_key' },
+      columns: ['name', 'prefix', 'user_id', 'active_organization_id', 'expires_at', 'last_used_at', 'revoked'],
+      sort: [{ field: 'created_at', order: 'desc' }],
+      pagination: { pageSize: 50 },
+    },
     mine: {
       type: 'grid',
       name: 'mine',
@@ -152,15 +165,6 @@ export const SysApiKey = ObjectSchema.create({
       columns: ['name', 'prefix', 'user_id', 'expires_at', 'updated_at'],
       filter: [{ field: 'revoked', operator: 'equals', value: true }],
       sort: [{ field: 'updated_at', order: 'desc' }],
-      pagination: { pageSize: 50 },
-    },
-    all_keys: {
-      type: 'grid',
-      name: 'all_keys',
-      label: 'All',
-      data: { provider: 'object', object: 'sys_api_key' },
-      columns: ['name', 'prefix', 'user_id', 'active_organization_id', 'expires_at', 'last_used_at', 'revoked'],
-      sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
   },

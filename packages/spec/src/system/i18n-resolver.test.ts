@@ -225,7 +225,7 @@ describe('resolveViewDescription', () => {
  * it spells identity, these expectations change with it instead of silently
  * describing a shape the runtime no longer produces.
  */
-describe('resolveViewLabel — served view-document shape (#4854)', () => {
+describe('resolveViewLabel — served view-document shape', () => {
   const container = {
     listViews: {
       all_accounts: {
@@ -1141,7 +1141,7 @@ describe('translateDashboard', () => {
   // (#7862); it now writes nothing into `options`. The bundle key is a
   // tombstone, so a well-typed bundle cannot carry it — the residue below is
   // cast, standing in for a stored row the conversion has not reached yet.
-  describe('widget options — the retired sub-caption overlay (#21257)', () => {
+  describe('widget options — the retired sub-caption overlay', () => {
     const residueBundle = {
       'zh-CN': {
         dashboards: {
@@ -1204,7 +1204,7 @@ describe('translateDashboard', () => {
 
 import { translatePage } from './i18n-resolver';
 
-describe('translateDashboard — global filters (#16772)', () => {
+describe('translateDashboard — global filters, addressable from a bundle', () => {
   const bundle: TranslationBundle = {
     'zh-CN': {
       dashboards: {
@@ -1318,7 +1318,7 @@ describe('translateDashboard — global filters (#16772)', () => {
   });
 });
 
-describe('translateDashboard — the catalog loses to an explicit override (#20680, ADR-0029 D9.2a)', () => {
+describe('translateDashboard — the catalog loses to an explicit override (ADR-0029 D9.2a)', () => {
   // What the package shipped — the catalog's subject.
   const PACKAGED = {
     name: 'system_overview',
@@ -1423,7 +1423,7 @@ describe('translateDashboard — the catalog loses to an explicit override (#206
     expect(widget(out, 'widget_added').title).toBe('Added by the org');
   });
 
-  it('NO packaged base supplied → the pre-#20680 behaviour, catalog applies (the measured defect, as a control)', () => {
+  it('NO packaged base supplied → the behaviour before the override rule, catalog applies (the measured defect, as a control)', () => {
     const doc = clone(PACKAGED);
     doc.widgets[0].title = 'Total Users (edited)';
     expect(widget(translateDashboard(doc, BUNDLE, { locale: 'en' }), 'widget_total_users').title).toBe('Total Users');
@@ -1570,7 +1570,7 @@ describe('translatePage', () => {
   // rendered a translated header above English cards and English KPI blocks,
   // because `pages` had four keys and none of them could reach a component.
   // ──────────────────────────────────────────────────────────────────────────
-  describe('per-component copy (#6080)', () => {
+  describe('per-component copy, keyed by component id', () => {
     const homeBundle: TranslationBundle = {
       'zh-CN': {
         pages: {
@@ -1634,7 +1634,7 @@ describe('translatePage', () => {
       expect(byId(out, 'lead_picker').properties.emptyText).toBe('暂无记录');
     });
 
-    it('no longer overlays `submitLabel` — the key retired from the copy face (#10926)', () => {
+    it('no longer overlays `submitLabel` — the key retired from the copy face', () => {
       // Flipped, not deleted: this used to assert the overlay ('创建'). The
       // schema now refuses `submitLabel` in a bundle, but the resolver is
       // deliberately schema-independent (it reads whatever object it is
@@ -1814,7 +1814,7 @@ describe('translatePage', () => {
 // their labels stayed English while the header and card titles translated.
 // ────────────────────────────────────────────────────────────────────────────
 
-describe('translatePage — nested `properties.children` descent (#12961)', () => {
+describe('translatePage — nested `properties.children` descent', () => {
   /**
    * Fixtures are typed through these open shapes instead of being left to
    * literal inference. `translatePage<T extends PageLike>` returns `T`, so an
@@ -1951,7 +1951,7 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
       }],
     });
 
-    it('does not descend into `body` — the back-compat spelling is not authorable (#5775)', () => {
+    it('does not descend into `body` — the back-compat spelling is not authorable', () => {
       // The renderers read `schema.children || schema.body` for STORED
       // documents, but `body` is deliberately NOT a declared authoring key.
       // Descending into it would resurrect a second composition spelling.
@@ -1963,7 +1963,7 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
       expect((card(out).properties.body as any[])[0].properties.label).toBe('Deals Won');
     });
 
-    it('descends into `items[].children` — the contract call the #12961 line left open, made by #16772', () => {
+    it('descends into `items[].children` — the contract call the `children`-descent ruling left open, made for tab and accordion panels', () => {
       // `page:tabs` / `page:accordion` nest their children one level deeper,
       // under `properties.items[].children`. The 2026-08-29 ruling (commit 901355c3b) named
       // `properties.children` and recorded this one as "its own contract
@@ -1979,7 +1979,7 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
       expect((card(out).properties.items as any[])[0].label).toBe('Details');
     });
 
-    it('descends into `footer` — a declared, rendered slot, not a back-compat spelling (#20940)', () => {
+    it('descends into `footer` — a declared, rendered slot, not a back-compat spelling', () => {
       // `PageCardProps.footer` is declared "Card footer components (slot)" and
       // objectui's `PageCardRenderer` draws it under the body. It used to sit
       // beside `body` here as "the other back-compat spelling", so its copy
@@ -2212,7 +2212,7 @@ import {
 } from './i18n-resolver';
 import { ComponentPropsMap } from '../ui/component.zod';
 
-describe('walkAddressedPageComponents (#13218)', () => {
+describe('walkAddressedPageComponents — the one addressed-component walk, shared by the resolver and the CLI extractor', () => {
   /** Enumeration-style consumption: what the walk reports, in visit order. */
   const trace = (doc: any): AddressedPageComponentContext[] => {
     const rows: AddressedPageComponentContext[] = [];
@@ -2223,7 +2223,7 @@ describe('walkAddressedPageComponents (#13218)', () => {
     return rows;
   };
 
-  it('walks regions[].components[] AND slots.<slot> as roots — regions first, then slots in authored order (#16772)', () => {
+  it('walks regions[].components[] AND slots.<slot> as roots — regions first, then slots in authored order', () => {
     // A slot holds one component OR an array of them (`PageSchema.slots`);
     // both shapes are roots, at depth 0 and un-nested, exactly like a
     // region's entry. Before #16772 this walk visited `a` alone.
@@ -2245,7 +2245,7 @@ describe('walkAddressedPageComponents (#13218)', () => {
     ]);
   });
 
-  it('visits every root of a `kind: slotted` page that authors `regions: []` — the measured zero (#16772)', () => {
+  it('visits every root of a `kind: slotted` page that authors `regions: []` — the measured zero', () => {
     // The shape the card measured: `regions: []`, everything under `slots`.
     // `walkAddressedPageComponents(page, …)` visited NOTHING on it, so
     // `pages.<name>` carried exactly two addressable keys however many
@@ -2275,7 +2275,7 @@ describe('walkAddressedPageComponents (#13218)', () => {
     ]);
   });
 
-  it('descends properties.children, properties.footer AND properties.items[].children — body stays unvisited (#16772, #20940)', () => {
+  it('descends properties.children, properties.footer AND properties.items[].children — body stays unvisited', () => {
     const doc: any = {
       regions: [{
         name: 'main',
@@ -2303,7 +2303,7 @@ describe('walkAddressedPageComponents (#13218)', () => {
     ]);
   });
 
-  it('hands a malformed node in a `page:card` footer to the visitor, so a consumer that judges what the walk visits judges it (#20940)', () => {
+  it('hands a malformed node in a `page:card` footer to the visitor, so a consumer that judges what the walk visits judges it', () => {
     // The consumer shape objectui's validator has: judge each visited node's
     // props against its `ComponentPropsMap` row. Before #20940 the footer was
     // not descended, so the typo'd card below came back judged by nobody —
@@ -2500,7 +2500,7 @@ describe('walkAddressedPageComponents (#13218)', () => {
 // #16772 — a `kind: 'slotted'` page goes from unaddressable to addressable
 // ────────────────────────────────────────────────────────────────────────────
 
-describe('translatePage — slotted page roots and tab panels (#16772)', () => {
+describe('translatePage — slotted page roots and tab panels', () => {
   /**
    * The measured shape, rebuilt as a minimal fixture rather than restated
    * from the card: a `kind: 'slotted'` record page authoring `regions: []`,
@@ -2649,7 +2649,7 @@ describe('translatePage — slotted page roots and tab panels (#16772)', () => {
 
 import { resolveTabLabel } from './i18n-resolver';
 
-describe('resolveTabLabel (#5377)', () => {
+describe('resolveTabLabel — filter-preset tab labels, keyed under `_tabs`', () => {
   const bundle: TranslationBundle = {
     'zh-CN': {
       objects: {
@@ -2722,7 +2722,7 @@ describe('resolveTabLabel (#5377)', () => {
   });
 });
 
-describe('translatePage — filter-preset tab bar (#5377)', () => {
+describe('translatePage — filter-preset tab bar', () => {
   const bundle: TranslationBundle = {
     'zh-CN': {
       objects: {
@@ -2781,7 +2781,7 @@ describe('translatePage — filter-preset tab bar (#5377)', () => {
     expect(tabs(out)[0].label).toBe('进行中');
   });
 
-  it('leaves an inline-locale-map label alone rather than flattening it (#5728)', () => {
+  it('leaves an inline-locale-map label alone rather than flattening it', () => {
     // Since the union widening a tab label may itself be multilingual. That is
     // the author's own resolution route (`pickLocalized` picks at render time);
     // overwriting it with a bundle miss would turn four languages into one.
@@ -2804,7 +2804,7 @@ describe('translatePage — filter-preset tab bar (#5377)', () => {
   });
 });
 
-describe('ObjectTranslationDataSchema._tabs (#5377)', () => {
+describe('ObjectTranslationDataSchema._tabs', () => {
   it('accepts a `_tabs` entry — the key a strict schema used to reject', () => {
     const data = TranslationDataSchema.parse({
       objects: { showcase_task: { _tabs: { urgent: { label: '紧急' } } } },
@@ -2937,7 +2937,7 @@ describe('translateObject system-field label fallback', () => {
 
 import { injectedSystemColumnDefs } from '../data/injected-system-column-provenance';
 
-describe('translateObject localises every platform-injected column (objectstack#14972)', () => {
+describe('translateObject localises every platform-injected column', () => {
   // The column definitions come from the provenance module itself — the same
   // objects `applySystemFields` spreads at registration and the `/meta` read
   // exits serve — so the English defaults this block starts from cannot drift
@@ -3046,7 +3046,7 @@ describe('translateObject localises every platform-injected column (objectstack#
   });
 });
 
-describe('translateObject inline actions (objectstack#3370)', () => {
+describe('translateObject inline actions — served with their `_actions` translations', () => {
   // The `sys_approval_request` shape: decision actions declared inline on the
   // object. The plugin ships `_actions` translations for them, but the object
   // document used to go out with the English literals regardless of locale —
@@ -3128,7 +3128,7 @@ describe('translateObject inline actions (objectstack#3370)', () => {
 // resolveObjectFieldLabels — the `/i18n/labels/:object/:locale` body
 // ==========================================
 
-describe('resolveObjectFieldLabels (objectstack#3833, #3847)', () => {
+describe('resolveObjectFieldLabels — the declared rich entries, read from the nested translation shape', () => {
   const data = TranslationDataSchema.parse({
     objects: {
       contact: {
@@ -3155,7 +3155,7 @@ describe('resolveObjectFieldLabels (objectstack#3833, #3847)', () => {
     });
   });
 
-  it('carries the help and options the bundle holds (#3847)', () => {
+  it('carries the help and options the bundle holds', () => {
     // These are the translations the endpoint used to discard by emitting a
     // bare string per field. objectui needs exactly them, and had to read the
     // full-bundle route to get them.
@@ -3206,7 +3206,7 @@ describe('resolveObjectFieldLabels (objectstack#3833, #3847)', () => {
    * mismatch no test compared, because none of them ever put the emitted
    * value and the declared contract in the same assertion.
    */
-  it('produces a body that satisfies GetFieldLabelsResponseSchema (#3847)', () => {
+  it('produces a body that satisfies GetFieldLabelsResponseSchema', () => {
     const response = {
       object: 'contact',
       locale: 'en-US',
@@ -3265,7 +3265,7 @@ describe('toLocaleDescriptors', () => {
     expect(toLocaleDescriptors([], 'en')).toEqual([]);
   });
 
-  it('sets `label` to the code, and the declaration promises exactly that (#7634)', () => {
+  it('sets `label` to the code, and the declaration promises exactly that', () => {
     // The SUBSTANCE pin: producer output vs the DECLARED shape, both halves.
     //
     // `GetLocalesResponseSchema` described `label` as "Display name of the
@@ -3285,7 +3285,7 @@ describe('toLocaleDescriptors', () => {
       expect(
         descriptor.label,
         `toLocaleDescriptors must set label to the code (${descriptor.code}) — producing a real `
-        + 'display name is a product decision nothing pulls for, and the describe promises the code (#7634)',
+        + 'display name is a product decision nothing pulls for, and the describe promises the code',
       ).toBe(descriptor.code);
     }
 
@@ -3296,16 +3296,16 @@ describe('toLocaleDescriptors', () => {
     expect(description.length, 'the `label` field must carry a describe at all').toBeGreaterThan(0);
     expect(
       description,
-      'the `label` describe must not promise a display name while every producer sets the code (#7634)',
+      'the `label` describe must not promise a display name while every producer sets the code',
     ).not.toMatch(/display name/i);
     expect(
       description,
-      'the `label` describe must state the code-equality convention it actually ships (#7634)',
+      'the `label` describe must state the code-equality convention it actually ships',
     ).toMatch(/equals `code`/i);
   });
 });
 
-describe('normalizeSupportedLocales (#7679)', () => {
+describe('normalizeSupportedLocales — the declared supportedLocales narrow the advertised set', () => {
   // The narrowing rule both providers of the `i18n` slot share. Held here,
   // next to `toLocaleDescriptors`, because both of them can be the thing
   // mounting `GET /i18n/locales` and a second copy is how that route came to
@@ -3383,7 +3383,7 @@ describe('normalizeSupportedLocales (#7679)', () => {
  * end-to-end shape is pinned in
  * `packages/qa/dogfood/test/showcase-object-extension-scalar-divergence.dogfood.test.ts`.
  */
-describe('translateObject — catalog vs explicit override (#8284)', () => {
+describe('translateObject — catalog vs explicit override', () => {
   /** The packaged declaration, as the owner contributor holds it. */
   const PACKAGED = {
     name: 'showcase_account',
@@ -3472,7 +3472,7 @@ describe('translateObject — catalog vs explicit override (#8284)', () => {
     expect(out.label).toBe('Customer');
   });
 
-  it('NO packaged base supplied → pre-#8284 behaviour, catalog applies', () => {
+  it('NO packaged base supplied → the behaviour before the override rule, catalog applies', () => {
     // "Unknown" is not "authored". A host whose protocol cannot answer (or a
     // runtime-authored object with no code owner) keeps every translation it
     // has today rather than losing them to an inference nobody can support.
@@ -3729,7 +3729,7 @@ import {
 } from './i18n-resolver';
 import { type TranslationBundle as FlowTestBundle } from './translation.zod';
 
-describe('translateFlow (#11287)', () => {
+describe('translateFlow — screen-flow copy from the `flows` bundle group', () => {
   // Mirrors #11287's measurement: HotCRM's real `lead_conversion` flow with
   // the real zh-CN bundle carrying the `flows` section. The probe
   // `i18n.t('flows.lead_conversion.screens.screen_1.title','zh-CN') = 转化详情`
@@ -3930,7 +3930,7 @@ describe('translateFlow (#11287)', () => {
   });
 });
 
-describe('translateFlow — screens inside ADR-0031 regions (#11745)', () => {
+describe('translateFlow — screens inside ADR-0031 regions', () => {
   // The fourth pass in this repo written against a flat `flow.nodes` walk
   // (#4347 `applyConversionsToFlow`, #4380 the flow lint rules, #5383
   // `flow-inert-node-condition` were the first three). `FlowNode.config`
@@ -4131,7 +4131,7 @@ describe('translateFlow — screens inside ADR-0031 regions (#11745)', () => {
   });
 });
 
-describe('resolveFlowScreenTitle (#11287)', () => {
+describe('resolveFlowScreenTitle — a screen title from the `flows` bundle group', () => {
   const bundle: FlowTestBundle = {
     'zh-CN': {
       flows: { lead_conversion: { screens: { screen_1: { title: '转化详情' } } } },
@@ -4176,7 +4176,7 @@ describe('resolveFlowScreenTitle (#11287)', () => {
  * or the pin describes a shape the runtime never produces — the #4854 lesson,
  * one level in.
  */
-describe('translateView — bulkActionDefs (#14253)', () => {
+describe('translateView — bulkActionDefs', () => {
   const container = {
     listViews: {
       open_duties: {
@@ -4318,7 +4318,7 @@ describe('translateView — bulkActionDefs (#14253)', () => {
 
 import { translateView } from './i18n-resolver';
 
-describe('translateView — the catalog loses to an explicit override (#20731, ADR-0029 D9.2a)', () => {
+describe('translateView — the catalog loses to an explicit override (ADR-0029 D9.2a)', () => {
   // The view container as the package ships it. The served documents below are
   // what `expandViewContainer` emits from it — the same composer the boot
   // registers each packaged view with — so the base and the served view share
@@ -4486,7 +4486,7 @@ describe('translateView — the catalog loses to an explicit override (#20731, A
     expect(param(out, 'mark_done', 'note').label).toBe('备注');
   });
 
-  it('NO packaged base supplied → the pre-#20731 behaviour, catalog applies (the measured defect, as a control)', () => {
+  it('NO packaged base supplied → the behaviour before the override rule, catalog applies (the measured defect, as a control)', () => {
     const doc = clone(PACKAGED);
     doc.label = 'In Progress (edited)';
     expect(translateView(doc, BUNDLE, { locale: 'zh-CN' }).label).toBe('进行中');
@@ -4542,7 +4542,7 @@ describe('translateView — the catalog loses to an explicit override (#20731, A
   });
 });
 
-describe('ObjectTranslationDataSchema — _views.<view>.bulkActions (#14253)', () => {
+describe('ObjectTranslationDataSchema — _views.<view>.bulkActions', () => {
   it('accepts the measured key face', () => {
     const data = ObjectTranslationDataSchema.parse({
       _views: {
@@ -4609,7 +4609,7 @@ describe('ObjectTranslationDataSchema — _views.<view>.bulkActions (#14253)', (
  * the two ends from drifting: `objectFieldLabelKey` / `objectLabelKey` exist
  * for the same reason.
  */
-describe('objectValidationMessageKey (#14253)', () => {
+describe('objectValidationMessageKey', () => {
   it('spells the address the `_validations` group declares', () => {
     expect(objectValidationMessageKey('duly_duty', 'standing_no_frequency'))
       .toBe('objects.duly_duty._validations.standing_no_frequency.message');
@@ -4634,7 +4634,7 @@ describe('objectValidationMessageKey (#14253)', () => {
   });
 });
 
-describe('ObjectTranslationDataSchema — _validations (#14253)', () => {
+describe('ObjectTranslationDataSchema — _validations', () => {
   it('accepts a rule message keyed by rule name', () => {
     const data = ObjectTranslationDataSchema.parse({
       _validations: { standing_no_frequency: { message: '常规任务必须设置频率。' } },
@@ -4690,7 +4690,7 @@ describe('ObjectTranslationDataSchema — _validations (#14253)', () => {
  * addresses members by a name the authoring schema does not carry is
  * unresolvable, which is the trap the whole file is built to keep out.
  */
-describe('translateDataset (#14253)', () => {
+describe('translateDataset', () => {
   const dataset = () => DatasetSchema.parse({
     name: 'duty_pulse',
     label: 'Duty pulse',
@@ -4723,7 +4723,7 @@ describe('translateDataset (#14253)', () => {
     },
   };
 
-  it('is registered in the dispatch table, so the REST boundary follows (#3786)', () => {
+  it('is registered in the dispatch table, so the REST boundary follows — one derived list, no hand-kept copy', () => {
     // `TRANSLATABLE_METADATA_TYPES` is DERIVED from `METADATA_DOCUMENT_TRANSLATORS`
     // and `@objectstack/rest` reads the derived set — this is the assertion that
     // the wiring is one edit, not two.
@@ -4752,7 +4752,7 @@ describe('translateDataset (#14253)', () => {
     expect(out.dimensions.find((d: any) => d.name === 'status').label).toBe('Status');
   });
 
-  it('leaves an inline locale map intact when the bundle does not cover it (#5728)', () => {
+  it('leaves an inline locale map intact when the bundle does not cover it', () => {
     // `label` is `I18nLabelSchema`, so the author may already have written a
     // map. Resolving over it would flatten four languages down to one.
     const inline = DatasetSchema.parse({
@@ -4796,7 +4796,7 @@ describe('translateDataset (#14253)', () => {
   });
 });
 
-describe('TranslationDataSchema — datasets (#14253)', () => {
+describe('TranslationDataSchema — datasets', () => {
   it('accepts the measured key face', () => {
     const data = TranslationDataSchema.parse({
       datasets: {
@@ -4850,7 +4850,7 @@ describe('TranslationDataSchema — datasets (#14253)', () => {
 // #14882 — the fallback chain is the DECLARED one, not a literal `en`
 // ---------------------------------------------------------------------------
 
-describe('#14882 — a declared fallback chain, at the resolver', () => {
+describe('a declared fallback chain, not a literal `en`, at the resolver', () => {
   /**
    * The card's workspace, at the resolver: labels authored in the default
    * locale (`zh-CN`), a courtesy `en` bundle for English users, NO `zh-CN`
@@ -4941,7 +4941,7 @@ describe('#14882 — a declared fallback chain, at the resolver', () => {
   // #15711 — ruled A: the authored label IS the default-locale text
   // -------------------------------------------------------------------------
 
-  it('[#15711] a chain that DECLARES en does not outrank the authored label for a default-locale request', () => {
+  it('a chain that DECLARES en does not outrank the authored label for a default-locale request (ruled: the authored label is the default-locale text)', () => {
     // A stack declaring `defaultLocale: 'zh-CN'` with a reflexive
     // `fallbackLocale: 'en'` and no zh-CN bundle — the trap #14882 pinned as
     // it answered then (`Entry Sheet`, the declared `en` outranking the
@@ -4957,7 +4957,7 @@ describe('#14882 — a declared fallback chain, at the resolver', () => {
       .toBe('Entry Sheet');
   });
 
-  it('[#15711] a NON-default request still walks the declared chain: fr → en bundle → authored', () => {
+  it('a NON-default request still walks the declared chain: fr → en bundle → authored', () => {
     // `fallbackLocale` keeps its full meaning for every non-default request.
     const fr = { locale: 'fr', fallbackChain: ['en'], defaultLocale: 'zh-CN' };
     expect(labelsOf(translateMetadataDocument('object', SHEET, EN_ONLY, fr))).toEqual(ENGLISH);
@@ -4967,7 +4967,7 @@ describe('#14882 — a declared fallback chain, at the resolver', () => {
     expect(labelsOf(translateMetadataDocument('object', SHEET, EN_ONLY, en))).toEqual(ENGLISH);
   });
 
-  it('[#15711] a default-locale bundle, when shipped, still wins over the authored label', () => {
+  it('a default-locale bundle, when shipped, still wins over the authored label', () => {
     // Only the CHAIN is skipped: the requested locale's own bundle is
     // consulted first, so the reporter's `os i18n extract --locales=zh-CN`
     // layout keeps working — optional now, not dead.
@@ -4982,12 +4982,12 @@ describe('#14882 — a declared fallback chain, at the resolver', () => {
     expect(out.fields.name.label).toBe('填报单名称');
   });
 
-  it('[#15711] the default-locale match is a BCP-47 comparison: zh-cn names zh-CN', () => {
+  it('the default-locale match is a BCP-47 comparison: zh-cn names zh-CN', () => {
     const lower = { locale: 'zh-cn', fallbackChain: ['en'], defaultLocale: 'zh-CN' };
     expect(translateMetadataDocument('object', SHEET, EN_ONLY, lower).label).toBe('填报单');
   });
 
-  it("[#15711] a caller that declares NO chain gets 'requested locale, then the authored label' — no literal en", () => {
+  it("a caller that declares NO chain gets 'requested locale, then the authored label' — no literal en", () => {
     // The ruling's second facet: `fallbackChain ?? ['en']` became
     // `fallbackChain ?? []`. A chain-less caller (a host outside this repo;
     // the core in-memory i18n fallback, #15694) no longer has `en` consulted
@@ -5008,7 +5008,7 @@ describe('#14882 — a declared fallback chain, at the resolver', () => {
   });
 });
 
-describe('resolveMetadataFormSchemaTitles (#16458)', () => {
+describe('resolveMetadataFormSchemaTitles — bundle labels overlaid as JSON Schema titles, repeater rows included', () => {
   const bundle: TranslationBundle = {
     'zh-CN': {
       metadataForms: {

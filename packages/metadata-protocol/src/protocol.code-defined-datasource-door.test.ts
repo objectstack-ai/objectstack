@@ -111,10 +111,19 @@ function makeSession(opts: {
     seed?: Row[];
     /** [#21944] The kernel services the protocol resolves — the host's code-datasource set among them. */
     services?: Map<string, unknown>;
+    /**
+     * [#21922] A registry that keeps what is registered under the bare key and
+     * lists it, as the real one does, so a stored row the hydrator registers
+     * (the boot pull, an unscoped list) is read back. Off: the registry lists
+     * nothing, as the other cases assume.
+     */
+    hydrating?: boolean;
 } = {}) {
     const rows = new Map<string, Row>();
     for (const r of opts.seed ?? []) rows.set(r.id, r);
     const historyRows: Array<Record<string, unknown>> = [];
+    /** [#21922] The bare-key entries a hydrating registry holds, per type. */
+    const registered = new Map<string, Map<string, Record<string, unknown>>>();
 
     const engine: any = {
         async findOne(table: string, o: { where: Record<string, unknown> }) {
@@ -126,10 +135,15 @@ function makeSession(opts: {
             for (const row of rows.values()) if (matchesWhere(row as any, o.where)) return row;
             return null;
         },
-        async find(table: string) {
+        async find(table: string, o?: { where?: Record<string, unknown>; limit?: number }) {
             if (table === 'sys_metadata_history') return historyRows;
             if (table !== 'sys_metadata') return [];
-            return Array.from(rows.values());
+            // [#21922] The caller's predicate, as the real engine applies it:
+            // the list reads one type's ACTIVE rows, so a draft row of the
+            // same name must not reach it. `check:objectql-double-limit` —
+            // the caller's bound, applied after the filter.
+            const matched = Array.from(rows.values()).filter((row) => matchesWhere(row as any, o?.where ?? {}));
+            return o?.limit === undefined ? matched : matched.slice(0, o.limit);
         },
         async insert(table: string, data: Record<string, unknown>) {
             if (table === 'sys_metadata_history') {
@@ -158,15 +172,21 @@ function makeSession(opts: {
             return { deleted: existed ? 1 : 0 };
         },
         registry: {
-            registerItem: () => {},
+            registerItem: (type: string, item: Record<string, unknown>, keyField = 'name') => {
+                if (!opts.hydrating) return;
+                if (!registered.has(type)) registered.set(type, new Map());
+                registered.get(type)!.set(String(item[keyField]), item);
+            },
             registerObject: () => {},
-            listItems: () => [],
-            // The served code definition, as the runtime's in-memory
-            // registration serves it on a read.
-            getItem: (type: string, name: string) =>
-                (type === 'datasource' && name === CODE_DS && (opts.packages ?? []).length > 0
+            listItems: (type: string) => [...(registered.get(type)?.values() ?? [])],
+            // The real registry answers the bare slot first; with nothing
+            // registered there, the served code definition, as the runtime's
+            // in-memory registration serves it on a read.
+            getItem: (type: string, name: string) => registered.get(type)?.get(name)
+                ?? (type === 'datasource' && name === CODE_DS && (opts.packages ?? []).length > 0
                     ? { ...body(CODE_DS, 'External Analytics (SQLite)'), origin: 'code' }
                     : undefined),
+            isPackageDisabled: () => false,
             applyNavContributions: (app: unknown) => app,
             // A code-defined datasource is never a SchemaRegistry item — the
             // artifact-only lookup misses it, exactly as on a booted showcase.
@@ -527,6 +547,183 @@ for (const { label, environmentId } of KERNELS) {
             const saved = await protocol.saveMetaItem({ type: 'datasource', name: RUNTIME_DS, item: body(RUNTIME_DS, 'Runtime') });
             expect(saved).toMatchObject({ success: true });
             expect(Array.from(rows.values()).filter((r) => r.name === RUNTIME_DS)).toHaveLength(1);
+        });
+    });
+}
+
+/**
+ * [#21922] The active reads DECLINE a stored row under a code-defined
+ * datasource name (triage's answer A, the #20946 shape).
+ *
+ * A row the `/meta` door saved before it refused these names, or one an earlier
+ * runtime write left, sits under a name the host registers from code. The boot
+ * restore no longer registers it over the code definition, so the
+ * MetadataService holds the code definition. But the by-name read still served
+ * the row first (ADR-0005's read order, `findServedOverlayRow`), and the list
+ * did too, because its stored rows are the higher layer over the
+ * MetadataService's. Now the one predicate the reads already asked of a shipped
+ * flow name (`declinesStoredRow`) answers for these names too:
+ *
+ *  - (a) the by-name read, the list and the layered read's `effective` serve
+ *    the code definition while the row exists — the list also after the row
+ *    was hydrated into the registry's bare slot (the registry half);
+ *  - (b) the row stays FOUND, so `deletable` still offers the repair, and the
+ *    `/meta` DELETE still removes it;
+ *  - (c) a runtime datasource's stored row is served exactly as before;
+ *  - (d) a draft is answered as a draft.
+ *
+ * The MetadataService double is the composition's: the in-memory registrations
+ * the runtime made at boot, read first (`MetadataManager.get` / `list`).
+ */
+const CODE_LABEL = 'External Analytics (SQLite)';
+const DEFAULT_LABEL = 'Host Default 21922';
+const SHADOW_LABEL = 'Shadow 21922';
+const RUNTIME_ROW_LABEL = 'Runtime 21922 (stored row)';
+const DRAFT_LABEL = 'Draft 21922';
+
+/** A row an earlier runtime write left under `name`: it asserts `origin: 'runtime'` and its own file. */
+const residueRow = (name: string, overrides: { label?: string; state?: string } = {}): Row => ({
+    id: `row_residue_${name}_${overrides.state ?? 'active'}`,
+    type: 'datasource',
+    name,
+    organization_id: null,
+    package_id: null,
+    state: overrides.state ?? 'active',
+    metadata: JSON.stringify({
+        ...body(name, overrides.label ?? SHADOW_LABEL),
+        origin: 'runtime',
+        config: { filename: `shadow-${name}.db` },
+    }),
+    checksum: `sha256_residue_${name}`,
+});
+
+/** The `metadata` service: what the runtime registered in memory, read first. */
+const metadataServiceOf = (items: Array<Record<string, unknown>>) => {
+    const byName = new Map(items.map((it) => [String(it.name), it] as const));
+    const read = (type: string, name: string) => (type === 'datasource' ? byName.get(name) : undefined);
+    return {
+        get: async (type: string, name: string) => read(type, name),
+        getDiagnosed: async (type: string, name: string) => ({ data: read(type, name), degraded: false, errors: [] as string[] }),
+        list: async (type: string) => (type === 'datasource' ? [...byName.values()] : []),
+    };
+};
+
+/**
+ * The two code definitions (`AppPlugin`, `DefaultDatasourcePlugin`), and the
+ * runtime datasource as the restore registered it, under a label its row does
+ * not carry, so the control can tell which layer answered.
+ */
+const IN_MEMORY: Array<Record<string, unknown>> = [
+    { ...body(CODE_DS, CODE_LABEL), origin: 'code', _packageId: PACKAGE_ID },
+    { name: 'default', label: DEFAULT_LABEL, driver: 'sqlite', config: { filename: 'host.db' }, origin: 'code' },
+    { ...body(RUNTIME_DS, 'Runtime 21922 (MetadataService copy)'), origin: 'runtime' },
+];
+
+for (const { label, environmentId } of KERNELS) {
+    describe(`[#21922] the active reads decline a stored row under a code-defined datasource name — ${label}`, () => {
+        beforeEach(resetEnvHatch);
+        afterEach(resetEnvHatch);
+
+        const session = (seed: Row[]) => makeSession({
+            ...(environmentId ? { environmentId } : {}),
+            packages: [SHOWCASE_PACKAGE],
+            services: new Map<string, unknown>([
+                [CODE_NAMES_SERVICE, new Set([CODE_DS, 'default'])],
+                ['metadata', metadataServiceOf(IN_MEMORY)],
+            ]),
+            seed,
+            hydrating: true,
+        });
+        const byName = (protocol: any, request: Record<string, unknown>) =>
+            protocol.getMetaItem({ type: 'datasource', ...request });
+        const listed = async (protocol: any, name: string): Promise<Array<Record<string, any>>> =>
+            ((await protocol.getMetaItems({ type: 'datasource' })).items as Array<Record<string, any>>)
+                .filter((it) => it.name === name);
+        /** The boot pull's call (`loadMetaFromDb`): the row, hydrated under the registry's bare key. */
+        const hydrate = (protocol: any, row: Row) => {
+            protocol.hydrateOverlayIntoRegistry('datasource', JSON.parse(row.metadata), { organizationId: null });
+            expect(protocol.engine.registry.getItem('datasource', row.name)?.label).toBe(SHADOW_LABEL);
+        };
+
+        it('(a) by name: the code definition is served while the row exists, and the envelope still offers the repair', async () => {
+            const { protocol, rows } = session([residueRow(CODE_DS)]);
+
+            for (const type of ['datasource', 'datasources']) {
+                const read = await byName(protocol, { type, name: CODE_DS });
+                expect(read.item, type).toMatchObject({ origin: 'code', label: CODE_LABEL, _packageId: PACKAGE_ID });
+                expect(read.item.config, type).toEqual({ filename: `${CODE_DS}.db` });
+                expect({ editable: read.editable, deletable: read.deletable }, type).toEqual({ editable: false, deletable: true });
+            }
+            expect(rows.size).toBe(1);
+        });
+
+        it('(a) in the list: one entry under the name, the code definition, before and after the row is hydrated into the registry', async () => {
+            const row = residueRow(CODE_DS);
+            const { protocol } = session([row]);
+
+            const before = await listed(protocol, CODE_DS);
+            hydrate(protocol, row);
+            const after = await listed(protocol, CODE_DS);
+
+            for (const list of [before, after]) {
+                expect(list.map((it) => it.label)).toEqual([CODE_LABEL]);
+                expect(list[0]).toMatchObject({ origin: 'code', _packageId: PACKAGE_ID });
+            }
+            // The by-name read agrees with the list after the hydration too.
+            expect((await byName(protocol, { name: CODE_DS })).item.label).toBe(CODE_LABEL);
+        });
+
+        it('(a) the host\'s `default`, which no package declares, the same way', async () => {
+            const row = residueRow('default');
+            const { protocol } = session([row]);
+
+            expect((await byName(protocol, { name: 'default' })).item).toMatchObject({ origin: 'code', label: DEFAULT_LABEL });
+            hydrate(protocol, row);
+            expect((await listed(protocol, 'default')).map((it) => it.label)).toEqual([DEFAULT_LABEL]);
+        });
+
+        it('(a) the layered read: `effective` is the code definition, and the row is still reported in `overlay`', async () => {
+            const { protocol } = session([residueRow(CODE_DS)]);
+
+            const layered = await protocol.getMetaItemLayered({ type: 'datasource', name: CODE_DS });
+
+            expect(layered.effective).toMatchObject({ origin: 'code', label: CODE_LABEL });
+            expect(layered.code).toMatchObject({ origin: 'code', label: CODE_LABEL });
+            expect(layered.overlay).toMatchObject({ origin: 'runtime', label: SHADOW_LABEL });
+            expect(layered.overlayScope).toBe('env');
+            expect({ editable: layered.editable, deletable: layered.deletable }).toEqual({ editable: false, deletable: true });
+        });
+
+        it('(b) the /meta DELETE still removes the row (the repair), and the reads serve the code definition after it', async () => {
+            const { protocol, rows } = session([residueRow(CODE_DS)]);
+
+            const res = await protocol.deleteMetaItem({ type: 'datasource', name: CODE_DS });
+
+            expect(res).toMatchObject({ success: true, reset: true });
+            expect(rows.size).toBe(0);
+            const read = await byName(protocol, { name: CODE_DS });
+            expect(read.item).toMatchObject({ origin: 'code', label: CODE_LABEL });
+            expect(read.deletable).toBe(false);
+            expect((await listed(protocol, CODE_DS)).map((it) => it.label)).toEqual([CODE_LABEL]);
+        });
+
+        it('(c) control: a runtime datasource\'s stored row is still served, by name and in the list', async () => {
+            const row = residueRow(RUNTIME_DS, { label: RUNTIME_ROW_LABEL });
+            const { protocol } = session([row]);
+
+            expect((await byName(protocol, { name: RUNTIME_DS })).item).toMatchObject({ label: RUNTIME_ROW_LABEL });
+            expect((await listed(protocol, RUNTIME_DS)).map((it) => it.label)).toEqual([RUNTIME_ROW_LABEL]);
+            const layered = await protocol.getMetaItemLayered({ type: 'datasource', name: RUNTIME_DS });
+            expect(layered.effective).toMatchObject({ label: RUNTIME_ROW_LABEL });
+        });
+
+        it('(d) a draft is answered as a draft: the strict draft read and the preview arm serve the draft row', async () => {
+            const { protocol } = session([residueRow(CODE_DS), residueRow(CODE_DS, { state: 'draft', label: DRAFT_LABEL })]);
+
+            expect((await byName(protocol, { name: CODE_DS, state: 'draft' })).item).toMatchObject({ label: DRAFT_LABEL });
+            expect((await byName(protocol, { name: CODE_DS, previewDrafts: true })).item).toMatchObject({ label: DRAFT_LABEL, _draft: true });
+            // The active read beside them still serves the code definition.
+            expect((await byName(protocol, { name: CODE_DS })).item).toMatchObject({ label: CODE_LABEL });
         });
     });
 }

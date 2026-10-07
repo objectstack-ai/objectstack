@@ -154,10 +154,14 @@ export const ACCOUNT_APP: App = {
       expanded: true,
       children: [
         {
+          // Names `mine` like every other self-service entry here (#21972):
+          // `sys_account` no longer declares its caller-scoped view first,
+          // so an entry naming no view would open the `all_links` tab.
           id: 'nav_account_linked',
           type: 'object',
           label: 'Linked Accounts',
           objectName: 'sys_account',
+          viewName: 'mine',
           icon: 'link-2',
           requiresObject: 'sys_account',
         },

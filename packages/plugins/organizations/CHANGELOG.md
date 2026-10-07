@@ -1,5 +1,181 @@
 # @objectstack/organizations
 
+## 17.7.0
+
+### Minor Changes
+
+- 251a7dd: fix(organizations)!: a create that names an `organization_id` meets the Layer 0 write wall, as the update does — the insert stamp no longer rewrites it (#21666)
+  
+  Clause-②: no (narrowing)
+  
+  **BREAKING.** On a walled posture (`isolated` / `group`), the insert stamp (Middleware A) overwrote a supplied `organization_id` with the caller's active organization in every user context. A create naming another tenant's organization answered `201` and stored the row in the caller's own organization, while the PATCH naming the same organization and the array insert (`createMany`) were refused `403 PERMISSION_DENIED`. One operation answered two ways, and the caller of the `201` had no signal that its input had been replaced.
+  
+  The stamp now fills only an absent or empty `organization_id`, for every non-system context (ADR-0105 D5). A supplied value is left as sent and meets the Layer 0 write wall in `@objectstack/plugin-security` (ADR-0095 D1), which answers the create exactly as it answers the update:
+  
+  - **Another tenant's organization** → `403 PERMISSION_DENIED`, nothing stored (was `201`, stored in the active organization). This holds for a member and for a platform administrator on a tenant object. A member's forged `organization_id` stays refused; the wall refuses it now, where the stamp used to rewrite it.
+  - **No organization** → stamped with the active organization, as before.
+  - **The caller's own active organization** → admitted, as before.
+  - **Under `group`, a sister organization the caller holds** → admitted and stored in that organization, the same place the PATCH already moves a row to (was `201`, stored in the active organization). Where `organization_id` is the platform-injected column, the engine still strips it from a non-system payload as `readonly` and reports it in `droppedFields`, on the create as on the update.
+  - **A platform administrator on a posture-permitting object** (`private`, platform-global, better-auth-managed) is exempt from the wall on the create as on the update.
+  
+  Every door that writes one row at a time under the caller's context gives the same answer: `POST /data/:object`, the `create` operation of `POST /batch`, the clone route and the import runner's per-row fallback. Two of these change in ways worth knowing:
+  
+  - An import row naming another tenant's organization is now reported as a failed row (`PERMISSION_DENIED`). Before, it was created in the active organization.
+  - The clone route copies an `organization_id` that the object declares itself. So under `group`, a clone of a sister-organization row now lands beside its source instead of in the active organization.
+  
+  System contexts are unchanged. The per-organization seed replay, the orphan claim, migrations and every other `isSystem` writer meet neither the stamp nor the wall. The `single` posture is unchanged too, because `objectstack serve` mounts this package only under a walled posture.
+  
+  **What to do.** On create, either omit `organization_id` or name your active organization. If a platform operator needs a row in another organization, write it with a system-context write.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a runtime write verdict: the insert stamp no longer rewrites a supplied organization_id, so the Layer 0 write wall judges it as it already judged the update and the array insert. No authorable key, spelling, export or stored shape moves, no stored row is read or rewritten, and which organization a caller meant to name is not something a ledger entry can rewrite. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this behaviour (not already-registered); and the change is a middleware verdict, not a TypeScript declaration (not runtime-interface-only or type-surface-only). -->
+
+### Patch Changes
+
+- 149153c: Membership under the `auto` policy is settled when the user is created, per ADR-0093 D7.
+  
+  Clause-②: yes (widening)
+  
+  - **At creation.** A user created under `auto` is bound to the default organization at creation, and the first session of that creating request carries it. Membership is not decided again when the user signs in later.
+  - **One-time backfill.** The ADR-0093 D6 backfill of pre-existing users runs once per deployment, and once per process even if its record cannot be written. Its verdict is recorded in the `sys_migration` ledger with id `adr-0093-membership-backfill`. A pass on a deployment with no organization at all records nothing, and the backfill runs again once the default organization is created. If the ledger is missing or cannot be read, the pass does not run and logs a warning. If the record cannot be written, that is logged as an error. `OS_SKIP_MEMBERSHIP_BACKFILL=1` still disables the pass.
+  - **Default organization owner.** The platform admin is bound as owner of the default organization once, by the bootstrap that first decides it, in both the single-org and the walled organizations wiring. The decision is recorded in the same ledger with id `adr-0093-default-org-owner-bind` and held for the rest of the process even if the record cannot be written. After that, a missing default organization is recreated without binding anyone. To recover, an administrator re-adds members, including themselves, through member management. On a kernel without the ledger, the owner is bound only when the bootstrap creates the default organization. If the ledger exists but cannot be read, that call binds nobody and the next trigger decides.
+  - **Full scan.** The backfill reads the user and membership tables page by page with no row cap. A scan that cannot read either table in full binds nobody and records nothing. With organizations present but no default target, as in multi-organization deployments, the refusal is recorded.
+  - **Upgrade.** The first boot of an upgraded deployment runs the backfill once.
+  - **Unchanged.** `invite-only` binds nobody. Multi-organization deployments get no automatic binding. Users created through sign-up, admin create-user, import or SSO are bound under `auto` as before.
+  - **Narrowed.** A `sys_user` row inserted straight through the data engine never passes through user creation. Once the backfill is recorded, a later `app:seeded` pass leaves it unbound. That includes users written by a seed that finishes after its inline budget. Code that inserts users this way must write their membership itself; the showcase approval-demo personas now do.
+  - **`keysetWalk` (`@objectstack/types`).** The walk now decides that a page did not advance only when it gets back the same cursor key or the same page again. It no longer compares keys in JavaScript string order, which disagrees with database collations and could report a healthy walk as truncated.
+  - **New public surface of `@objectstack/plugin-auth` (additive).**
+    - `createEnsureDefaultOrganizationOnce` and `EnsureDefaultOrganizationOnceOptions` are the gated bootstrap both wirings call.
+    - `ObjectQLAdapterFactoryOptions` adds `onRecordCreated`, passed as the new optional second argument of `createObjectQLAdapterFactory`.
+    - `EnsureDefaultOrganizationOptions` gains `bindOnlyOnCreate` and `bindOwner`.
+    - `EnsureDefaultOrganizationResult.reason` gains `'owner_bind_decided'`.
+    - `BackfillMembershipsResult.reason` gains `'scan-incomplete'`.
+    - Code that switches exhaustively over those reasons sees one more member.
+  - **`backfillMemberships` (exported) changed behaviour.** Its `limit` option used to cap the rows scanned (default 5000); it is now the page size of a full scan with no cap. The function now needs a reader that can page by `id`; a reader that cannot gets `scan-incomplete` and binds nobody, where it used to bind. A direct call is not gated by the one-time ledger and decides membership again on every call; call it through the one-time pass instead.
+  - **Policy switch.** Once a pass under `invite-only` is recorded, switching the policy to `auto` later does not backfill the users who existed then; they get membership through invitation or member management.
+  - **Deprecated, not removed.** The ungated `ensureDefaultOrganization`, both plugin-auth's helper and the `@objectstack/organizations` wrapper, is `@deprecated` in favour of `createEnsureDefaultOrganizationOnce`.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [6c5697d]
+- Updated dependencies [9a4182a]
+- Updated dependencies [41b1333]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [a2aadab]
+- Updated dependencies [fe10172]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [1c3a4d9]
+- Updated dependencies [045f764]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [a0176ef]
+- Updated dependencies [149153c]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [cab6396]
+- Updated dependencies [e864db5]
+- Updated dependencies [41a1135]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [dcb11c2]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [131b937]
+- Updated dependencies [80f9f7e]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/types@17.7.0
+  - @objectstack/plugin-auth@17.7.0
+
 ## 17.6.0
 
 ### Patch Changes

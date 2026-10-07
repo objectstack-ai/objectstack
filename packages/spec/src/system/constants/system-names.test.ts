@@ -103,7 +103,7 @@ describe('SystemFieldName', () => {
   // authorable, pinned in `../../data/object.test.ts`. The column reaching a row
   // and the tier being declarable are now BOTH true — a change from the split
   // state this comment used to record, not a restatement of it.
-  it('registers the ADR-0117 business-unit ownership stamp, distinct from the user attribute (#4611)', () => {
+  it('registers the ADR-0117 business-unit ownership stamp, distinct from the user attribute', () => {
     expect(SystemFieldName.OWNING_BUSINESS_UNIT_ID).toBe('owning_business_unit_id');
     // Guard the naming discipline ADR-0117 D10 spells out: the record stamp must
     // NOT be confused with `sys_user.primary_business_unit_id`, which is a USER

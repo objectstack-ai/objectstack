@@ -669,7 +669,7 @@ describe('TranslationItemSchema', () => {
     expect(message).toContain('apps.<app_name>');
   });
 
-  it('should reject an unknown key the retired-key list never named (#4001)', () => {
+  it('should reject an unknown key the retired-key list never named', () => {
     // What the #3778 guard could not do. It enumerated ten keys someone had
     // thought of; `object` for `objects` was not one of them, and a bundle
     // written that way saved clean and resolved to nothing.
@@ -710,7 +710,7 @@ describe('TranslationItemSchema', () => {
     expect(item._lock).toBe('no-overlay');
   });
 
-  it('should reject the retired shape rather than silently stripping it (#3778)', () => {
+  it('should reject the retired object-first `o.` shape rather than silently stripping it', () => {
     // The pre-fix failure mode: Zod strips undeclared keys, so an `o.`-shaped
     // item saved cleanly and then resolved to nothing. A save that succeeds
     // must be a save that renders.
@@ -764,7 +764,7 @@ describe('TranslationItemSchema', () => {
 // Unknown-key strictness across the translation groups (#4001)
 // ============================================================================
 
-describe('translation unknown-key strictness (#4001)', () => {
+describe('translation unknown-key strictness', () => {
   // The failure this file is closing is unusually cruel: a translation that
   // resolves to nothing is indistinguishable from a translation nobody wrote.
   // There is no wrong string on screen to notice — just the source language,
@@ -837,7 +837,7 @@ describe('translation unknown-key strictness (#4001)', () => {
   // ──────────────────────────────────────────────────────────────────────────
   // #16772 — `dashboards.<name>.globalFilters.<key>`, the filter bar's copy
   // ──────────────────────────────────────────────────────────────────────────
-  describe('dashboard global-filter copy (#16772)', () => {
+  describe('dashboard global-filter copy, addressable from a bundle by filter name', () => {
     const parse = (globalFilters: unknown) =>
       TranslationDataSchema.safeParse({ dashboards: { sales: { label: 'Sales', globalFilters } } });
 
@@ -898,7 +898,7 @@ describe('translation unknown-key strictness (#4001)', () => {
   // ──────────────────────────────────────────────────────────────────────────
   // #6080 — `pages.<name>.components.<id>`, the page half of `dashboards.widgets`
   // ──────────────────────────────────────────────────────────────────────────
-  describe('page component copy (#6080)', () => {
+  describe('page component copy, keyed by component id', () => {
     const parse = (components: unknown) =>
       TranslationDataSchema.safeParse({ pages: { sales_home_page: { label: 'Sales', components } } });
 
@@ -912,7 +912,7 @@ describe('translation unknown-key strictness (#4001)', () => {
       expect(result.success).toBe(true);
     });
 
-    it('refuses `submitLabel` with the retirement prescription (#10926)', () => {
+    it('refuses `submitLabel` with the retirement prescription', () => {
       // Flipped, not deleted: until commit d173125fb this case pinned `submitLabel` as
       // an accepted copy key (latterly on a bespoke component type, after
       // #9249 retired `element:form`, its only spec-declared carrier). The
@@ -1002,7 +1002,7 @@ describe('translation unknown-key strictness (#4001)', () => {
   // retirement as `guidance` rather than a rename onto a tombstone. A widget
   // keeps one authored description, `widget.description`.
   // ──────────────────────────────────────────────────────────────────────────
-  describe('dashboard widget sub-caption — retired (#21257)', () => {
+  describe('dashboard widget sub-caption — retired', () => {
     const parse = (widgets: unknown) =>
       TranslationDataSchema.safeParse({ dashboards: { sales: { widgets } } });
 
@@ -1079,7 +1079,7 @@ describe('translation unknown-key strictness (#4001)', () => {
   // ──────────────────────────────────────────────────────────────────────────
   // #7646 — `flows.<name>.screens.<nodeId>`, the screen-flow wizard's copy
   // ──────────────────────────────────────────────────────────────────────────
-  describe('screen-flow copy (#7646)', () => {
+  describe('screen-flow copy — a `flows` bundle group, runner chrome kept out', () => {
     const parse = (flows: unknown) => TranslationDataSchema.safeParse({ flows });
 
     it('accepts a fully-populated flow entry', () => {
@@ -1258,7 +1258,7 @@ describe('translation unknown-key strictness (#4001)', () => {
       expect(TranslationItemSchema.safeParse({ locale: 'zh-CN', flows: { f: { titel: 'x' } } }).success).toBe(false);
     });
 
-    it('declares exactly the keys the resolver and the extractor act on (#11287)', () => {
+    it('declares exactly the keys the resolver and the extractor act on', () => {
       // `FLOW_SCREEN_COPY_KEYS` / `FLOW_SCREEN_FIELD_COPY_KEYS` drive
       // `translateFlow`'s overlay and (downstream card) the CLI's skeleton
       // extraction — the same one-list-both-sides rule the #6080 pin above
@@ -1336,7 +1336,7 @@ describe('translation unknown-key strictness (#4001)', () => {
   // ──────────────────────────────────────────────────────────────────────────
   // #15178 — `settings` is a PLATFORM group; the per-app door refuses it
   // ──────────────────────────────────────────────────────────────────────────
-  describe('per-app `settings` is refused with the platform-only prescription (#15178)', () => {
+  describe('per-app `settings` is refused with the platform-only prescription', () => {
     const settings = { mail: { title: 'Mail', keys: { host: { label: 'Host' } } } };
 
     it.each([
@@ -1382,7 +1382,7 @@ describe('translation unknown-key strictness (#4001)', () => {
   // accepted shape). It used to ACCEPT it — and there it overrode the
   // platform's copy, not merely filled gaps.
   // ──────────────────────────────────────────────────────────────────────────
-  describe('item-door `settings` is refused with the platform-only prescription (#19620)', () => {
+  describe('item-door `settings` is refused with the platform-only prescription', () => {
     const settings = { mail: { title: 'Mail', keys: { host: { label: 'Host' } } } };
 
     it.each([
@@ -1700,7 +1700,7 @@ describe('CoverageBreakdownEntrySchema', () => {
 });
 
 // ── `validationMessages` retired in 17.0.0 (#4667, ADR-0049) ────────────────
-describe('retired translation.validationMessages (#4667)', () => {
+describe('retired translation.validationMessages', () => {
   it('rejects the group at BOTH doors — bundle entry and registered item', () => {
     // #3778's original guard ran on the item door only, which is exactly how
     // this key survived in file-authored bundles. It now lives in the shared

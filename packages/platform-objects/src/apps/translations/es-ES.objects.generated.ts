@@ -122,11 +122,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
-      me: {
-        label: "Mi perfil"
-      },
       all_users: {
         label: "Todos los usuarios"
+      },
+      me: {
+        label: "Mi perfil"
       },
       unverified: {
         label: "No verificados"
@@ -376,11 +376,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
-      mine: {
-        label: "Mis sesiones"
-      },
       all_sessions: {
         label: "Todas"
+      },
+      mine: {
+        label: "Mis sesiones"
       },
       revoked: {
         label: "Revocadas"
@@ -460,14 +460,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_links: {
+        label: "Todos"
+      },
       mine: {
         label: "Mis enlaces"
       },
       by_provider: {
         label: "Por proveedor"
-      },
-      all_links: {
-        label: "Todos"
       }
     },
     _actions: {
@@ -1022,6 +1022,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_keys: {
+        label: "Todas"
+      },
       mine: {
         label: "Mis claves"
       },
@@ -1030,9 +1033,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked: {
         label: "Revocado"
-      },
-      all_keys: {
-        label: "Todas"
       }
     },
     _actions: {
@@ -1225,14 +1225,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_preferences: {
+        label: "Todas"
+      },
       mine: {
         label: "Mis preferencias"
       },
       by_user: {
         label: "Por usuario"
-      },
-      all_preferences: {
-        label: "Todas"
       }
     }
   },
@@ -1386,6 +1386,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_apps: {
+        label: "Todas"
+      },
       mine: {
         label: "Mis aplicaciones"
       },
@@ -1394,9 +1397,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       disabled_apps: {
         label: "Deshabilitado"
-      },
-      all_apps: {
-        label: "Todas"
       }
     },
     _actions: {

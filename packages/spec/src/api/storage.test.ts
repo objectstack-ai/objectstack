@@ -634,7 +634,7 @@ describe('FileDownloadUrlResponseSchema', () => {
     expect(resp.data.url).toBe('/api/v1/storage/_local/raw/eyJrIjoi.c2ln');
   });
 
-  it('should reject the bare pre-#3689 shape', () => {
+  it('should reject the bare shape from before the shared success envelope', () => {
     expect(() =>
       FileDownloadUrlResponseSchema.parse({ url: 'https://cdn.example.com/f1.png' })
     ).toThrow();
@@ -655,7 +655,7 @@ describe('RawUploadResponseSchema', () => {
     expect(resp.data.key).toBe('user/f1.png');
   });
 
-  it('should reject the pre-#3689 `{ ok, key }` shape', () => {
+  it('should reject the `{ ok, key }` shape from before the shared success envelope', () => {
     expect(() => RawUploadResponseSchema.parse({ ok: true, key: 'user/f1.png' })).toThrow();
   });
 

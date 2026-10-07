@@ -122,11 +122,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
-      me: {
-        label: "我的资料"
-      },
       all_users: {
         label: "全部用户"
+      },
+      me: {
+        label: "我的资料"
       },
       unverified: {
         label: "未验证"
@@ -376,11 +376,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
-      mine: {
-        label: "我的会话"
-      },
       all_sessions: {
         label: "全部"
+      },
+      mine: {
+        label: "我的会话"
       },
       revoked: {
         label: "已撤销"
@@ -460,14 +460,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_links: {
+        label: "全部"
+      },
       mine: {
         label: "我的链接"
       },
       by_provider: {
         label: "按提供方"
-      },
-      all_links: {
-        label: "全部"
       }
     },
     _actions: {
@@ -1022,6 +1022,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_keys: {
+        label: "全部"
+      },
       mine: {
         label: "我的密钥"
       },
@@ -1030,9 +1033,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked: {
         label: "已撤销"
-      },
-      all_keys: {
-        label: "全部"
       }
     },
     _actions: {
@@ -1225,14 +1225,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_preferences: {
+        label: "全部"
+      },
       mine: {
         label: "我的偏好"
       },
       by_user: {
         label: "按用户"
-      },
-      all_preferences: {
-        label: "全部"
       }
     }
   },
@@ -1386,6 +1386,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_apps: {
+        label: "全部"
+      },
       mine: {
         label: "我的应用"
       },
@@ -1394,9 +1397,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       disabled_apps: {
         label: "已禁用"
-      },
-      all_apps: {
-        label: "全部"
       }
     },
     _actions: {

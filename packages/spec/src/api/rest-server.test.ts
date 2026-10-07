@@ -79,7 +79,7 @@ describe('RestApiConfigSchema', () => {
     expect(config.enableDiscovery).toBe(false);
   });
 
-  it('[#11983] enableSearch defaults to true — search is ON unless opted out', () => {
+  it('enableSearch defaults to true — search is ON unless opted out', () => {
     // Pinning the MATERIALIZED default (not just the declaration) is what makes
     // a later `.optional()` — which would hand `undefined` to the REST layer —
     // fail here rather than silently change the mount decision.
@@ -88,7 +88,7 @@ describe('RestApiConfigSchema', () => {
     expect(config.enableSearch).toBe(true);
   });
 
-  it('[#11983] enableSearch: false is the declared deployment-wide opt-out, and it SURVIVES the parse', () => {
+  it('enableSearch: false is the declared deployment-wide opt-out, and it SURVIVES the parse', () => {
     // Before this key had a declared seat, this exact parse was the measured
     // trap: `RestApiConfigSchema` is not `.strict()`, so it STRIPPED the
     // undeclared key and any consumer of the parsed output silently got search
@@ -103,7 +103,7 @@ describe('RestApiConfigSchema', () => {
     expect(RestApiConfigSchema.parse({ enableSearch: true }).enableSearch).toBe(true);
   });
 
-  it('[#11983] enableSearch is authorable without a cast, and is a boolean (compile-time)', () => {
+  it('enableSearch is authorable without a cast, and is a boolean (compile-time)', () => {
     // The declaration's REASON for existing: `objectstack.config.ts` authors
     // the key by name and `packages/rest`'s `normalizeConfig` reads it. Both go
     // through this input type, so this is the pin that says the key no longer
@@ -205,7 +205,7 @@ describe('CrudEndpointsConfigSchema', () => {
     expect(config.operations?.delete).toBe(false);
   });
 
-  it('[#14691] REJECTS `patterns` with the retirement prescription — the key never customized a route', () => {
+  it('REJECTS `patterns` with the retirement prescription — the key never customized a route', () => {
     expect(() => CrudEndpointsConfigSchema.parse({
       patterns: {
         create: { method: 'POST', path: '/objects/{object}' },
@@ -221,14 +221,14 @@ describe('CrudEndpointsConfigSchema', () => {
     expect(config.dataPrefix).toBe('/objects');
   });
 
-  it('[#14691] REJECTS `objectParamStyle` — both former enum values, with the prescription', () => {
+  it('REJECTS `objectParamStyle` — both former enum values, with the prescription', () => {
     for (const objectParamStyle of ['path', 'query']) {
       expect(() => CrudEndpointsConfigSchema.parse({ objectParamStyle }), objectParamStyle)
         .toThrow(/`crud\.objectParamStyle` was removed.*path segment.*Delete the key/s);
     }
   });
 
-  it('[#14691] the tombstones reject one key each, not the config — every live key still parses', () => {
+  it('the tombstones reject one key each, not the config — every live key still parses', () => {
     const config = CrudEndpointsConfigSchema.parse({
       operations: { list: false },
       dataPrefix: '/records',
@@ -266,7 +266,7 @@ describe('MetadataEndpointsConfigSchema', () => {
     expect(config.enableCache).toBe(false);
   });
 
-  it('[#14691] REJECTS `cacheTtl` — including the negative value the old contract accepted', () => {
+  it('REJECTS `cacheTtl` — including the negative value the old contract accepted', () => {
     for (const cacheTtl of [7200, 0, -1]) {
       expect(() => MetadataEndpointsConfigSchema.parse({ cacheTtl }), String(cacheTtl))
         .toThrow(/`metadata\.cacheTtl` was removed.*takes no TTL.*Delete the key/s);
@@ -290,7 +290,7 @@ describe('MetadataEndpointsConfigSchema', () => {
     expect(config.endpoints?.maintenance).toBe(true);
   });
 
-  it('[#14691] REJECTS `endpoints.schema` — it gated a route that does not exist', () => {
+  it('REJECTS `endpoints.schema` — it gated a route that does not exist', () => {
     expect(() => MetadataEndpointsConfigSchema.parse({ endpoints: { schema: false } }))
       .toThrow(/`metadata\.endpoints\.schema` was removed.*does not exist.*Delete the key/s);
   });
@@ -386,12 +386,12 @@ describe('BatchEndpointsConfigSchema', () => {
     expect(config.operations).not.toHaveProperty('upsertMany');
   });
 
-  it('[#14691] REJECTS `operations.upsertMany` — it gated a route that was never built', () => {
+  it('REJECTS `operations.upsertMany` — it gated a route that was never built', () => {
     expect(() => BatchEndpointsConfigSchema.parse({ operations: { upsertMany: false } }))
       .toThrow(/`batch\.operations\.upsertMany` was removed.*never built.*Delete the key.*'upsert'/s);
   });
 
-  it('[#14691] REJECTS `defaultAtomic` — atomicity is the per-request `options.atomic`', () => {
+  it('REJECTS `defaultAtomic` — atomicity is the per-request `options.atomic`', () => {
     for (const defaultAtomic of [true, false]) {
       expect(() => BatchEndpointsConfigSchema.parse({ defaultAtomic }), String(defaultAtomic))
         .toThrow(/`batch\.defaultAtomic` was removed.*options\.atomic.*Delete the key/s);
@@ -400,27 +400,27 @@ describe('BatchEndpointsConfigSchema', () => {
 });
 
 describe('RouteGenerationConfigSchema', () => {
-  it('should accept the empty sub-object — and materialize nothing, every key being a tombstone (#14691)', () => {
+  it('should accept the empty sub-object — and materialize nothing, every key being a tombstone', () => {
     const config = RouteGenerationConfigSchema.parse({});
 
     expect(config).toEqual({});
   });
 
-  it('[#14691] REJECTS `includeObjects` / `excludeObjects` — the object declares its own exposure', () => {
+  it('REJECTS `includeObjects` / `excludeObjects` — the object declares its own exposure', () => {
     expect(() => RouteGenerationConfigSchema.parse({ includeObjects: ['account', 'contact'] }))
       .toThrow(/`routes\.includeObjects` was removed.*Delete the key.*enable\.apiEnabled.*enable\.apiMethods/s);
     expect(() => RouteGenerationConfigSchema.parse({ excludeObjects: ['system_log'] }))
       .toThrow(/`routes\.excludeObjects` was removed.*Delete the key.*enable\.apiEnabled.*enable\.apiMethods/s);
   });
 
-  it('[#14691] REJECTS `nameTransform` — every former enum value, `none` included', () => {
+  it('REJECTS `nameTransform` — every former enum value, `none` included', () => {
     for (const nameTransform of ['none', 'plural', 'kebab-case', 'camelCase']) {
       expect(() => RouteGenerationConfigSchema.parse({ nameTransform }), nameTransform)
         .toThrow(/`routes\.nameTransform` was removed.*Delete the key.*canonical id/s);
     }
   });
 
-  it('[#14691] REJECTS `overrides` — the per-object record turned nothing on or off', () => {
+  it('REJECTS `overrides` — the per-object record turned nothing on or off', () => {
     expect(() => RouteGenerationConfigSchema.parse({
       overrides: {
         account: { enabled: true, basePath: '/accounts' },
@@ -473,7 +473,7 @@ describe('RestServerConfigSchema', () => {
     expect(config.routes).toEqual({});
   });
 
-  it('[#14691] a retired sub-object key is refused THROUGH the whole config, with its own prescription', () => {
+  it('a retired sub-object key is refused THROUGH the whole config, with its own prescription', () => {
     // The tombstones live on the sub-schemas; this pins that composing them
     // under `RestServerConfigSchema` changes nothing — the same authored key is
     // refused at the whole-config parse with the same string.
@@ -697,7 +697,7 @@ describe('Integration Tests', () => {
 // tests were removed with the schemas (#4579, ADR-0049 enforce-or-remove).
 // The retirement itself is pinned below.
 
-describe('[#4579] `RestServerConfig.openApi31` retirement', () => {
+describe('`RestServerConfig.openApi31` retirement', () => {
   it('REJECTS an authored openApi31 block, with the fix in the message', () => {
     // Tombstoned, not deleted: RestServerConfigSchema is not `.strict()`, so a
     // plain deletion would silently strip the key — the author's webhook
@@ -739,7 +739,7 @@ describe('[#4579] `RestServerConfig.openApi31` retirement', () => {
 // so the load-bearing pin is the compiler-API test below, with anti-vacuity
 // guards (a resolution failure would otherwise make every assertion pass
 // vacuously); sabotage-verified in the PR (re-adding an export turns it red).
-describe('[#4579] the OpenApi31 block schemas are not exported from any entry point', () => {
+describe('the OpenApi31 block schemas are not exported from any entry point', () => {
   const REMOVED_NAMES = [
     'OpenApi31ExtensionsSchema',
     'OpenApi31Extensions',
@@ -765,7 +765,7 @@ describe('[#4579] the OpenApi31 block schemas are not exported from any entry po
     expect(apiNames).toContain('RestApiConfigSchema');
 
     for (const removed of REMOVED_NAMES) {
-      expect(holdersOf(removed), `no entry may export ${removed} (#4579)`).toEqual([]);
+      expect(holdersOf(removed), `no entry may export ${removed}`).toEqual([]);
     }
   });
 
@@ -789,7 +789,7 @@ describe('[#4579] the OpenApi31 block schemas are not exported from any entry po
   // and removed; WebhookEvent(Schema) was first renamed OpenApiWebhookEvent(Schema)
   // (#4572) and then removed outright with the openApi31 block (#4579).
   // Pin: this module declares neither the bare names nor the renamed ones.
-  it('does not re-expose the bare WebhookEvent/WebhookConfig names from ./api (#4572)', async () => {
+  it('does not re-expose the bare WebhookEvent/WebhookConfig names from ./api', async () => {
     const restServer = await import('./rest-server.zod');
     expect('WebhookEventSchema' in restServer).toBe(false);
     expect('WebhookConfigSchema' in restServer).toBe(false);

@@ -54,12 +54,12 @@
  * its own. A review hit with no `TRIAGE` row prints as UNTRIAGED and reds the
  * self-test: a new claim of this shape has to be judged by someone.
  *
- * ## Scope, and the two files deliberately outside it
+ * ## Scope, and the file deliberately outside it
  *
- * `scripts/pm/dispatch-gates.mjs` and `scripts/pm/check-widening-tells.mjs` are
- * EXCLUDED, with their reasons carried as data in `EXCLUDED` and printed on
- * every run rather than left in prose. The residue they hold is therefore
- * un-swept, and the scope line says so instead of reading as complete.
+ * `scripts/pm/dispatch-gates.mjs` is EXCLUDED, with its reason carried as data
+ * in `EXCLUDED` and printed on every run rather than left in prose. The residue
+ * it holds is therefore un-swept, and the scope line says so instead of reading
+ * as complete.
  *
  * ## ⚠️ This tool is not wired into CI
  *
@@ -118,10 +118,6 @@ const EXCLUDED = [
     file: 'scripts/pm/dispatch-gates.mjs',
     why: 'edited by open PRs #19162 and #19024, and its `--self-test` exceeds the agent '
       + 'container foreground cap (#17765), so a change here could not be verified from a seat',
-  },
-  {
-    file: 'scripts/pm/check-widening-tells.mjs',
-    why: 'edited by open PRs #19153 and #19024',
   },
 ];
 

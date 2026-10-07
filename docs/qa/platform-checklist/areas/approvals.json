@@ -405,7 +405,7 @@
       "title": "Every approval action executes its REST route and produces the expected state transition plus a timeline entry",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["dev admin (pending approver on the seeded requests; submitter of the invoice request)"],
@@ -416,7 +416,7 @@
           "showcase_budget_approval's manager step declares the ADR-0044 revise loop (maxRevisions: 2) and lockRecord: false; its exec step (budget > 500000) declares NO revise edge and lockRecord: true — both sides of two gates in one flow"
         ],
         "knownGaps": [
-          "the ORG-LESS request the READ_BACK_FAILED clause needs arises only from schedule / time-relative / api-trigger runs, which open their requests with organization_id null by construction (#10131; #9132 pinned that behaviour rather than repairing it) — no seeded showcase flow opens one on demand, so that clause scores blocked(fixture) on stock seeds until a scratch schedule- or api-triggered approval flow provisions it. The behaviour itself is unit-pinned (packages/plugins/plugin-approvals/src/approval-service.test.ts, the #12769 org-filtered read-back describe), so a run may cite the pin for the mechanism while recording the live-HTTP leg as the blocked half"
+          "the ORG-LESS request the READ_BACK_FAILED clause needs arises only from schedule / time-relative / api-trigger runs, which open their requests with organization_id null by construction (#10131; #9132 pinned that behaviour rather than repairing it) — no seeded showcase flow opens one on demand, so that clause cannot be provisioned on stock seeds. QA run #21784 tried the api-trigger route and found even an api-hook approval org-stamped, so that candidate is refuted (parked on #22017 row 19). A schedule-triggered approval flow (scheduled work needs OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true) is the one untried candidate, not run-proven. The behaviour itself is unit-pinned (packages/plugins/plugin-approvals/src/approval-service.test.ts, the #12769 org-filtered read-back describe), and that pin is how acceptance[9] is scored. It proves the clause's verdict: the mutation lands, and the read-back throws READ_BACK_FAILED naming the request instead of a success with request:null, on recall, decide and comment alike, with org-less and org-matched controls. Only the wire envelope (the generic 500 APPROVAL_*_FAILED carrying that text) stays unobserved on stock: record it blocked(fixture) beside the pin's pass"
         ]
       },
       "variants": ["approve", "reject", "reassign", "revise (send-back)", "resubmit", "recall", "remind", "request-info", "comment"],
@@ -502,6 +502,10 @@
         "any action POST accepted from an actor the service should deny (wrong relationship to the request) is a FAIL even when the state happens to end up plausible"
       ],
       "traps": ["automation-input", "wrong-persona"],
+      "automated": {
+        "kind": "test",
+        "ref": "acceptance[9] (the READ_BACK_FAILED clause) ONLY: packages/plugins/plugin-approvals/src/approval-service.test.ts, describe 'ApprovalService — org-filtered read-back refuses loudly (#12769)'. The other clauses still need the run"
+      },
       "source": [
         "#3358 §1 (the action-table evidence this matrix grounds in)",
         "packages/rest/src/rest-route-ledger.ts (approve/reject/recall/revise/resubmit/reassign/remind/request-info/comment + GET /:id/actions)",
@@ -515,7 +519,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — decision-action matrix derived from the approvals REST route ledger and the ADR-0044 revise/resubmit flow shape", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "corrected the resubmit transition the item asserted: it does NOT move the original returned→pending — the approval node's re-entry mints a round-N+1 request while the original stays terminally returned (source-confirmed as by design). Split the old combined revise/resubmit clause into three (revise parks · resubmit mints · original stays returned) and sharpened the maxRevisions verify to name which request the auto-reject lands on. Fixes the sole reason #7517 scored this item PARTIAL", "ref": "#7530" },
-        { "revision": 3, "date": "2026-08-30", "change": "added the READ_BACK_FAILED clause (#12769, landed #13181 2026-08-29): all ten fresh! non-null assertions on the post-write echo are gone — deciding an org-less request (the schedule/api-trigger shape, #10131) as an org-scoped caller now answers a loud named refusal with the write recorded, never a malformed 200 with request:null. Fixture reality recorded in knownGaps: no seeded flow opens an org-less request on demand, so the live-HTTP leg is blocked(fixture) while the unit pin covers the mechanism", "ref": "#13181" }
+        { "revision": 3, "date": "2026-08-30", "change": "added the READ_BACK_FAILED clause (#12769, landed #13181 2026-08-29): all ten fresh! non-null assertions on the post-write echo are gone — deciding an org-less request (the schedule/api-trigger shape, #10131) as an org-scoped caller now answers a loud named refusal with the write recorded, never a malformed 200 with request:null. Fixture reality recorded in knownGaps: no seeded flow opens an org-less request on demand, so the live-HTTP leg is blocked(fixture) while the unit pin covers the mechanism", "ref": "#13181" },
+        { "revision": 4, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 19). A10 was blocked(fixture): no org-less request can be provisioned, and even an api-hook approval is org-stamped. Disposition: pin. approval-service.test.ts (the #12769 describe) proves the clause's verdict at the service. `automated` names it for that clause, and the knownGap records the refuted api-trigger candidate, the one untried schedule candidate, and the wire-envelope half that stays unobserved on stock", "ref": "#22017" }
       ]
     },
     {

@@ -48,6 +48,38 @@
  * admin owns them a re-run is a no-op. `managedBy` and `sys_*` tables are
  * skipped (their ownership, if any, is platform-controlled).
  *
+ * ## [#22067] The claim dispatches no automation
+ *
+ * Re-owning a seed row is attribution — the step that completes the seed — not
+ * a user event. The seed itself is written under `SEED_WRITE_EXECUTION_CONTEXT`
+ * because a seed is end-state data, so firing "on update" automation for it is
+ * wrong; the claim keeps that principle for its own write. So every `reown`
+ * write runs under {@link CLAIM_WRITE_CTX}: `isSystem`, plus `skipAutomations`,
+ * which the engine reads in two places:
+ *
+ *  - the hook dispatch skips every hook bound FROM METADATA — an app's
+ *    lifecycle hooks, sandboxed bodies included;
+ *  - it implies `skipTriggers`, so the record-change trigger dispatches no flow
+ *    — and therefore opens no approval and sends no notification on the claim's
+ *    account.
+ *
+ * Hooks that plugins register in code carry no metadata binding and still run
+ * on every claimed row: plugin-audit's writer, capability gates and
+ * plugin-sharing's rule projection. The opt-out can never bypass audit or
+ * sharing (#2922). ObjectQL's own `sys_stamp_audit_*` builtins are bound
+ * through the hook binder, so they carry metadata and are skipped as well; for
+ * this write that changes nothing — the claim has no user to stamp into
+ * `updated_by`, and the drivers stamp `updated_at` themselves.
+ *
+ * Measured before this on hotcrm `56d98f7e` (17.7.0, a 354-row seed): the
+ * first sign-up waited ~45 s while the claim fired 1 254 app hooks, ran 8 flows,
+ * opened 2 approvals and handed 8 emails to the transport.
+ *
+ * It reaches every caller, because they all write through this function: the
+ * promotion pass inside the first sign-up and the `app:seeded` settle pass on
+ * every boot, the first one and every later one.
+ *
+
  * ## [#14530] PAGED predicate writes, never a write per row
  *
  * This used to scan each object twice at `limit: 10_000` and then issue one
@@ -129,7 +161,30 @@ interface ClaimOwnershipOptions {
   seedSettlement?: SeedSettlementSnapshot | undefined;
 }
 
+/** The context of the claim's one READ (`readPage`): system-elevated, nothing more. */
 const SYSTEM_CTX = { isSystem: true };
+
+/**
+ * The context of the claim's WRITE (`reown`): system-elevated, with
+ * metadata-bound automation off — see "The claim dispatches no automation"
+ * above.
+ *
+ * `skipAutomations` alone, never a narrower flag: it is the spec's one spelling
+ * of "skip metadata hooks AND record-change flows, keep code-registered hooks"
+ * (`ExecutionContext`, `@objectstack/spec/kernel`), and `skipTriggers` alone
+ * would leave the app's metadata hooks firing on every claimed row.
+ *
+ * A plain literal, like {@link SYSTEM_CTX}: `pnpm check:tenant-audit-census`
+ * reads `isSystem` off it statically, and it does not see through a
+ * `satisfies` wrapper — spelled that way, this write would drop from
+ * "decidably elevated" to "elevation undecidable" in the census.
+ *
+ * It does NOT move the per-row hook ceiling, so {@link CLAIM_PAGE_ROWS} needs no
+ * change: the engine counts the matched rows against the ceiling whenever ANY
+ * hook covers the object, without consulting the flag — and code-registered
+ * hooks still run per row under it, so the bound still means what it did.
+ */
+const CLAIM_WRITE_CTX = { isSystem: true, skipAutomations: true };
 
 /**
  * Rows a single fallback page takes off the top of an over-ceiling predicate.
@@ -237,7 +292,10 @@ function idsFrom(rows: any): string[] {
  * paging fallback existed, with no ledger row degraded to buy a green gate.
  */
 interface ObjectWriter {
-  /** Re-own every row a predicate matches; resolves the affected-row count. */
+  /**
+   * Re-own every row a predicate matches, under {@link CLAIM_WRITE_CTX};
+   * resolves the affected-row count.
+   */
   reown: (predicate: Record<string, unknown>) => Promise<unknown>;
   /** At most one page of ids the predicate still matches. */
   readPage: (predicate: Record<string, unknown>) => Promise<unknown>;
@@ -435,7 +493,8 @@ function reportClaimPass(
  *   (c) are not `external` (federated remote-table bindings — read-only, DDL
  *       forbidden, and their `owner_id` is not ours to reassign),
  *   (d) declare an `owner_id` field,
- * and re-owns the unowned rows as `isSystem` with one predicate write per
+ * and re-owns the unowned rows as `isSystem`, with metadata-bound automation
+ * off ({@link CLAIM_WRITE_CTX}), in one predicate write per
  * {@link UNOWNED_PREDICATES} entry, paging that write only when the engine
  * refuses it for its per-row hook budget. Returns a per-object summary whose
  * `count` is the sum of every write's affected-row count.
@@ -483,7 +542,7 @@ export async function claimSeedOwnership(
       reown: (predicate) => ql.update(
         schema.name,
         { owner_id: adminUserId },
-        { where: predicate, multi: true, context: SYSTEM_CTX },
+        { where: predicate, multi: true, context: CLAIM_WRITE_CTX },
       ),
       readPage: (predicate) => ql.find(
         schema.name,

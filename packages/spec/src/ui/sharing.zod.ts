@@ -17,8 +17,10 @@
  *   really reads it: `rest-server.ts` serves the anonymous form endpoints only
  *   when `sharing.enabled === true`, `sharing.allowAnonymous === true` and a
  *   `sharing.publicLink` slug matches (`anonymousFormIntakeCandidates` in
- *   `@objectstack/metadata-core`). Both example apps author it (`app-showcase` `inquiry.view.ts`,
- *   `app-crm` `lead.view.ts`). It is `strictObject` as of #4001 批 14.
+ *   `anonymous-form-intake.ts` beside this module, which
+ *   `@objectstack/metadata-core` re-exports to the server's doors). Both
+ *   example apps author it (`app-showcase` `inquiry.view.ts`, `app-crm`
+ *   `lead.view.ts`). It is `strictObject` as of #4001 批 14.
  * - `EmbedConfigSchema` was **REMOVED** at #5015 (ADR-0049 enforce-or-remove) —
  *   see the block below where it stood.
  *

@@ -128,7 +128,7 @@ describe('[#21913] runtime-datasource sys_metadata helpers carry the explicit sy
     const second = await boot(data);
     await second.plugin.start(second.ctx);
     expect((await second.service.listDatasources()).map((d: any) => d.name)).toContain('pin_ds');
-    await (second.plugin as any).convergePool('pin_ds', () => data);
+    await (second.plugin as any).convergePool(second.ctx, 'pin_ds', () => data);
 
     await second.service.removeDatasource('pin_ds');
     expect(data.rows.some((r) => r.name === 'pin_ds')).toBe(false);

@@ -111,6 +111,20 @@ export const SysSession = ObjectSchema.create({
   // the fields would be written and still readable nowhere, which is the same
   // declared-≠-enforced gap one layer up.
   listViews: {
+    // [#21972] Declared FIRST on purpose: a route that names no view opens the
+    // first declared list view, so a caller-scoped view (`mine`) is never
+    // first. Setup's `nav_sessions` names this view; the Account app's entry
+    // names `mine`.
+    all_sessions: {
+      type: 'grid',
+      name: 'all_sessions',
+      label: 'All',
+      data: { provider: 'object', object: 'sys_session' },
+      columns: ['user_id', 'ip_address', 'active_organization_id', 'created_at', 'expires_at'],
+      filter: [{ field: 'revoked_at', operator: 'is_null' }],
+      sort: [{ field: 'created_at', order: 'desc' }],
+      pagination: { pageSize: 50 },
+    },
     mine: {
       type: 'grid',
       name: 'mine',
@@ -121,16 +135,6 @@ export const SysSession = ObjectSchema.create({
         { field: 'user_id', operator: 'equals', value: '{current_user_id}' },
         { field: 'revoked_at', operator: 'is_null' },
       ],
-      sort: [{ field: 'created_at', order: 'desc' }],
-      pagination: { pageSize: 50 },
-    },
-    all_sessions: {
-      type: 'grid',
-      name: 'all_sessions',
-      label: 'All',
-      data: { provider: 'object', object: 'sys_session' },
-      columns: ['user_id', 'ip_address', 'active_organization_id', 'created_at', 'expires_at'],
-      filter: [{ field: 'revoked_at', operator: 'is_null' }],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },

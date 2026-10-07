@@ -84,6 +84,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _views: {
+      all_shares: {
+        label: "すべて"
+      },
       granted_to_me: {
         label: "自分への付与"
       },
@@ -98,9 +101,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       rule_grants: {
         label: "ルール付与"
-      },
-      all_shares: {
-        label: "すべて"
       }
     }
   },

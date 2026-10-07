@@ -145,7 +145,7 @@ describe('rest_api retirement — `api.documentation.enabled`, a tombstone insid
   });
 });
 
-describe('rest_api retirement — `api.documentation.version` (#20294), a second tombstone inside the live block', () => {
+describe('rest_api retirement — `api.documentation.version`, a second tombstone inside the live block', () => {
   // The old authored spellings: a release number, a semver-looking protocol
   // version, and an empty string.
   for (const version of ['2.3.0', '17.4.0', '']) {
@@ -254,7 +254,7 @@ describe('rest_api retirement — ADR-0087 registration', () => {
     expect(step.conversionIds.filter((id) => /response-format|documentation-enabled/.test(id))).toEqual([]);
   });
 
-  it('[#20294] declares `documentation.version` under major 18 with its own family D3 entry, and no D2 conversion', () => {
+  it('declares `documentation.version` under major 18 with its own family D3 entry, and no D2 conversion', () => {
     expect(RETIRED_KEYS_BY_MAJOR[18]).toContain('api/RestApiConfig:documentation.version');
     const step = MIGRATIONS_BY_MAJOR[18]!;
     const entry = step.semantic.find((e) => e.id === 'rest-api-documentation-version-retired');

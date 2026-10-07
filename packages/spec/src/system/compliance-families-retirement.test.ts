@@ -148,7 +148,7 @@ const MUST_SURVIVE_SYSTEM = ['DataClassificationSchema', 'ComplianceFrameworkSch
 const SPEC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SRC_ROOT = path.join(SPEC_ROOT, 'src');
 
-describe('[#15513] system/ compliance families retirement — the public surface', () => {
+describe('system/ compliance families retirement — the public surface', () => {
   it('every retired name has ZERO holders on any public entry; the survivors still stand', () => {
     for (const needed of ['.', './system', './kernel']) {
       expect(EXPORT_ENTRY_POINTS, `exports map must include ${needed}`).toContain(needed);
@@ -156,7 +156,7 @@ describe('[#15513] system/ compliance families retirement — the public surface
     expect(exportNamesOf('./system').length, './system must export a non-trivial surface').toBeGreaterThan(100);
 
     for (const name of RETIRED_NAMES) {
-      expect(holdersOf(name), `${name} must have zero holders after #15513`).toEqual([]);
+      expect(holdersOf(name), `${name} must have zero holders after the families' retirement`).toEqual([]);
     }
     const systemNames = exportNamesOf('./system');
     for (const name of MUST_SURVIVE_SYSTEM) {
@@ -207,7 +207,7 @@ describe('[#15513] system/ compliance families retirement — the public surface
       }
     };
     walk(SRC_ROOT);
-    expect(importers, 'a resurrected import means the retirement is being undone — re-read #15513').toEqual([]);
+    expect(importers, 'a resurrected import means the retirement is being undone — the three families were retired whole, none roadmapped').toEqual([]);
   });
 
   it('the generated shards no longer list any of the nineteen defs or forty-five names', () => {
@@ -238,7 +238,7 @@ describe('[#15513] system/ compliance families retirement — the public surface
   });
 });
 
-describe('[#15513] ADR-0087 registration', () => {
+describe('compliance families retirement — ADR-0087 registration', () => {
   it('declares all nineteen defs under major 18, with the three D3 semantic entries wired and no D2 conversion', () => {
     for (const def of RETIRED_DEFS) {
       expect(RETIRED_DEFS_BY_MAJOR[18], `${def} must be declared`).toContain(def);
@@ -265,7 +265,7 @@ describe('[#15513] ADR-0087 registration', () => {
     expect(step!.rationale).toMatch(/retires those three compliance-shaped families WHOLE/);
   });
 
-  it("keeps PR #15514's fourteen deadline-key registrations and three D3 entries as history", () => {
+  it("keeps the earlier deadline-key retirement's fourteen registrations and three D3 entries as history", () => {
     for (const key of HISTORY_KEYS) {
       expect(RETIRED_KEYS_BY_MAJOR[18], `${key} is history — keep it`).toContain(key);
     }
@@ -312,7 +312,7 @@ describe('[#15513] ADR-0087 registration', () => {
 // the very declaration the self-test refuses.)
 // The residue this leg covers is everything `tsc` does not compile: JSON,
 // YAML, MD, MDX, and (under `packages/`) untyped `.js` / `.mjs` / `.cjs`.
-describe('[#15513] tree-scoped absence: nothing inside the declared radius references a retired name', () => {
+describe('tree-scoped absence: nothing inside the declared radius references a retired name', () => {
   const REPO_ROOT = path.resolve(SPEC_ROOT, '../..');
   const THIS_FILE = path.relative(REPO_ROOT, fileURLToPath(import.meta.url)).split(path.sep).join('/');
 
@@ -491,6 +491,6 @@ describe('[#15513] tree-scoped absence: nothing inside the declared radius refer
     for (const root of WALK_ROOTS) walk(path.join(REPO_ROOT, root));
     // Anti-vacuity: the walk really covered the tree.
     expect(visited).toBeGreaterThan(1000);
-    expect(offenders, 'a reference to a retired name means the retirement is being undone — re-read #15513').toEqual([]);
+    expect(offenders, 'a reference to a retired name means the retirement is being undone — the three families were retired whole, none roadmapped').toEqual([]);
   });
 });

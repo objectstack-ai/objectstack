@@ -1,5 +1,334 @@
 # @objectstack/cloud-connection
 
+## 17.7.0
+
+### Minor Changes
+
+- 6c5697d: fix(runtime,cloud-connection)!: a job's sandboxed `body` is scheduled on every door that brings an artifact in, and install-local refuses an enabled job with no `body` (#21489)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no authorable key, spelling, export or stored shape moves: `JobSchema` is unchanged by this release (its `body` landed earlier), so `objectstack migrate meta` has nothing to rewrite. What changes is which packages one install door accepts, and that job bodies now run. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a refused install or a scheduled body (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: `os package install` (the install-local door, `POST /api/v1/marketplace/install-local`) now refuses a package that declares an **enabled job with no `body`**. Such a job names its code only through `handler` — a `defineStack({ functions })` entry, which travels in the artifact's runtime module and never in the package JSON this door installs — so it used to install with a 200 and never run, hot or after a restart, with nothing saying so.
+  
+  - **Job bodies run.** A job's sandboxed `body` (`JobSchema.body`, the hook body shape) is now scheduled on every door that brings an artifact in: the boot (`os start --artifact`, a `defineStack` config) and install-local, on install and on every rehydrate after a restart. One binder does it for all of them. With both `body` and `handler` declared, the `body` wins. The body runs in the QuickJS sandbox with `ctx.api` (as system: a job has no caller), `ctx.log` and `ctx.crypto` behind its declared `capabilities`. The job's `timeoutMs` is its one time limit; with none, a job body gets a 5000 ms CPU budget. A body may return `{ outcome: 'degraded', reason }` to report a run that did not do its work.
+  - **A package's jobs stop with it.** Re-scheduling a package's jobs replaces its set: a reinstall whose new version drops, disables or can no longer run a job cancels that job, and a version with no jobs cancels them all. Uninstalling a package cancels its scheduled jobs through a new uninstall cleanup, `runtime.package-jobs`, on the protocol's uninstall-cleanup registry, so install-local's `DELETE` and the protocol's package uninstall both stop them and report it in `cleanups`. Another package's jobs are never touched.
+  - **The refusal.** The install answers `422` with `VALIDATION_ERROR`, names each refused job and the function its `handler` declares, and installs nothing: nothing is registered, persisted or scheduled. A disabled job (`enabled: false`) is not judged. A package installed by an earlier version keeps rehydrating; its handler-only job is reported at `warn` and does not run.
+  - **CLI.** `os package install` prints a refusal's code beside its status (`Install failed (422 VALIDATION_ERROR): …`), for every refusal alike.
+  - **Spec.** The shipped liveness ledger records `job.body` (`language`, `source`, `capabilities`, `memoryMb`) as live, so `os validate` / `os build` no longer warn that a job's `body` is planned and not read yet. `body.timeoutMs` stays refused on a job. `JobSchema.body`'s description and the `defineJob` example no longer say to keep a `handler` until the runtime runs job bodies.
+  - **Unchanged:** a `handler` job on a boot that loads the artifact's runtime module (`os start --artifact`, a `defineStack` config) still runs its `functions` entry; a package without jobs installs exactly as before.
+  
+  The route for a refused package: give each enabled job a `body` (sandboxed JS that reaches data through `ctx.api`), or boot the artifact with `os start --artifact`, which loads its runtime module. It ships as `minor` under the launch-window convention for accept-set narrowings.
+- 045b946: fix(runtime,cloud-connection)!: install-local refuses a hook with no `body` and a job `body` that does not bind, and withholds such a hook on rehydrate (#21585)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no authorable key, spelling, export of a published release or stored shape moves: `HookSchema` and `JobSchema` are unchanged, so `objectstack migrate meta` has nothing to rewrite. What changes is which packages one install door accepts, and which hooks it binds on a rehydrate. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a refused install or a withheld hook (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: `os package install` (the install-local door, `POST /api/v1/marketplace/install-local`) now refuses two more kinds of package it used to install with a 200:
+  
+  - **A hook with no `body`.** A hook in the deprecated function-name `handler` form names code that travels only in an artifact's runtime module, never in the package JSON this door installs. Such a hook used to install and then either never fire or bind by name to a function the package does not ship. Every hook is judged, since a hook has no on/off switch. A hook that carries both a `body` and a `handler` installs as before: its `body` wins.
+  - **An enabled job whose `body` does not bind.** The door used to judge only that a job `body` was present. It now judges that the body binds, by the declaration's own parse of `JobSchema.body`, the same parse the scheduler binds by. So a job whose `body` is an expression (L1) body, or carries `body.timeoutMs`, is refused instead of installed and never scheduled.
+  
+  - **The refusal.** The install answers `422` with `VALIDATION_ERROR`, the answer the door already gives an enabled job with no `body`. One answer names everything the door cannot run: each hook and the function its `handler` names, each job and its handler, and each refused job `body` with the key the declaration refuses. Nothing is installed: nothing is registered, persisted, bound or scheduled. `os package install` exits non-zero and prints the code beside the status.
+  - **Rehydrate.** A package installed by an earlier version keeps rehydrating after a restart. Its body hooks bind as before. A hook of it with no `body` is reported at `warn` by name and is **not bound**: this door carries no runtime module, so the hook's `handler` can never name the package's own code. Its job with no runnable `body` is reported and not run, as before.
+  - **Runtime.** The binder exports the two judgements the door reads: `collectHooksWithoutBody`, and `collectJobsWithoutBody`, which also names a job whose `body` does not bind. `bindAppArtifactHandlers` takes `withholdHooksWithoutBody`, which a door that carries no runtime module sets, and reports the hooks it withheld as `withheldHooks`.
+  - **Unchanged:** a boot that loads the artifact's runtime module (`os start --artifact`, a `defineStack` config) binds an app's handler hooks to its own functions exactly as before. Hooks authored through the metadata API are unchanged too. A package whose hooks carry a `body` and whose enabled jobs carry a valid `body` installs exactly as before.
+  
+  The route for a refused package: give each hook a `body` (sandboxed JS, the form actions and jobs use), and correct each job `body` to the declared shape. That shape is a sandboxed JS body whose time limit is the job's own `timeoutMs`, and `os validate` reports the same refusal. Alternatively, boot the artifact with `os start --artifact`, which loads its runtime module. This ships as `minor`, under the launch-window convention for narrowings of an accept set.
+- 83e2fee: fix(runtime,cloud-connection)!: install-local refuses an enabled job whose `pull` does not bind, as it refuses a job `body` that does not bind (#21672)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no authorable key, spelling, export of a published release or stored shape moves: `JobSchema` and `MappingSchema` are unchanged, so `objectstack migrate meta` has nothing to rewrite. What changes is which packages one install door accepts. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a refused install (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: `os package install` (the install-local door, `POST /api/v1/marketplace/install-local`) now refuses a package whose enabled job declares a `pull` that does not bind. It used to install such a package with a 200, and the job was never scheduled; only a server warn said so.
+  
+  - **What does not bind.** The `pull` names a mapping the package does not declare, or a mapping with no `connectorSource`, or the job declares `body` or `handler` beside its `pull`. The door judges this with the scheduler's own judgement, so the door and the scheduler cannot disagree. `defineStack` and `os validate` already refuse the same `pull`, so only a hand-edited package reaches the door with one.
+  - **The refusal.** The install answers `422` with `VALIDATION_ERROR`, the answer the door already gives an enabled job whose `body` does not bind. One answer names everything the door cannot run, and gives each such job the reason its `pull` does not bind, prefixed with the key it names (`pull.mapping: …`). Nothing is installed: nothing is registered, persisted or scheduled. `os package install` exits non-zero and prints the code beside the status.
+  - **Unchanged.** A pull job naming a declared mapping with a `connectorSource` installs and is scheduled as before. A disabled pull job does not block its install. A package installed by an earlier version still rehydrates after a restart, and its pull job that does not bind is not scheduled, with a warn naming the job and the reason, as before.
+  - **Runtime.** `collectJobsWithoutBody` now names an enabled job whose `pull` does not bind, and `JobWithoutBody` gains an optional `pullRefusal`: the reason the scheduler gives when it does not schedule the job. Such a job carries no `bodyRefusal`.
+  
+  The route for a refused package: declare the mapping the job's `pull` names in the package, with a `connectorSource` naming the `rest` or `openapi` connector it reads from, or correct the `pull` as the refusal says. `os validate` refuses the same `pull`. This ships as `minor`, under the launch-window convention for narrowings of an accept set.
+- 93f51f1: An install-local reseed over sample rows that are all still in place answers success, with the loader's `skipped` count, instead of a refusal naming a false cause (#21776).
+  
+  Clause-②: yes (widening)
+  
+  - **Intact baseline.** `POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data`, run while every seed record the package declares is already present, answers `200 { success: true, data: { manifestId, inserted: 0, updated: 0, skipped: N, errors: 0, withSampleData: true } }`. Before, it answered `422 RESEED_NO_ROWS`, "Reseed wrote no rows. The package declares no seedable records for this runtime.", over a package that declares them. The reseed is idempotent, so a run that finds every row in place has reached its goal. The install's record of sample data is set the same way as when rows land.
+  - **`skipped` on every success.** A successful reseed now answers all four of the loader's counts: `inserted`, `updated`, `skipped` and `errors`. Before, `skipped` was not in the response.
+  - **Unchanged refusals.** `422 RESEED_NO_ROWS` still answers a run that wrote nothing because records failed, with the error count and the first error, and its `details` are still `{ inserted, updated, errors }`. It also still answers, with the same text, a run in which the loader had no record to process for this runtime: for example, every dataset is scoped to another environment (`Seed.env`). That text now states a true cause. A package with no seed dataset at all still answers `400 RESEED_SKIPPED` (`no-datasets`).
+
+### Patch Changes
+
+- 1d0600b: An app installed with `os package install <artifact>` now runs its `type: 'script'` action bodies and its body hooks, and MCP `list_actions` lists a script action only when `run_action` can run it (#21321).
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/runtime`.** New export `bindAppArtifactHandlers(ql, bundle, { appId, logger, source? })`. It binds every action `body` of an artifact through `ql.registerAction`, and every hook `body` and bundle function through `ql.bindHooks`, all under the owner `app:<appId>`. `appArtifactHandlerOwner(appId)` returns that owner key. Each call first removes the action handlers and hooks the same owner bound before. A reinstall therefore leaves one handler per action, and an action or hook that the new version dropped stops running. `AppPlugin.start` now binds through this function, with the same log lines and the same results for a boot artifact.
+  - **`@objectstack/runtime`, MCP `list_actions`.** A `script` action is listed only when the engine has a handler registered for it. The check reads `listRegisteredActions()` and uses the same object and key order as `run_action`. Before, a declared `target` or `body` was enough to be listed, so `list_actions` could list an action that `run_action` refused with "No handler registered". An engine without `listRegisteredActions` gets no script actions listed. Declarative update actions and `flow` actions are listed as before.
+  - **`@objectstack/cloud-connection`.** The install-local plugin calls `bindAppArtifactHandlers` on `POST /api/v1/marketplace/install-local` and when it rehydrates its ledger at `kernel:ready`. Before, an installed package's script actions answered REST `404 RESOURCE_NOT_FOUND` and MCP "No handler registered", before and after a restart, and its body hooks never ran. The same artifact booted with `os start --artifact` was not affected.
+- ab52182: fix(cloud-connection,plugin-security): a package installed into a running runtime fires its record-change flows and has its permission sets in `sys_permission_set` right away, not after a restart
+  
+  Clause-②: no
+  
+  **Before**, `os package install ./dist/objectstack.json` into a running `os start` (the install-local route) registered the package, bound its script actions and body hooks, and stopped there. Two things the boot does for a package happen at `kernel:ready`, and that moment had already passed. The automation engine binds flows at `kernel:ready`, so the package's record-change flows never fired: a task updated to `done` wrote no note. The security plugin seeds declared permission sets at `kernel:ready`, so the package's set had no `sys_permission_set` row. `/meta/permission` listed the set, but an admin could not grant it. A restart fixed both, because the restart re-registers the package before those two steps run. Nothing in the CLI output or the install response said a restart was needed.
+  
+  **Now** the install route announces `metadata:reloaded` once the package is registered, bound, persisted and seeded. That is the same event a Studio package publish, a per-item publish and an artifact reload already announce. The automation engine already re-syncs its flows on it. The security plugin now re-runs its declared-permission seeding on it: the same function and organization passes as the boot, with the same provenance rules (`managed_by: 'package'`, `package_id`). Right after the install, the flow fires and the set's row exists, with the same state a restart gives. The seeding is idempotent and writes nothing when no permission set changed. It runs only after the boot's own pass has finished. A failed re-sync does not fail the install. It is logged at `warn` with the restart that repairs it.
+  
+  **Unchanged.** The restart path (the ledger rehydrate) announces nothing and behaves as before. The install response and the CLI output keep their fields and text. A package's `defineStack({ jobs })` are still not scheduled by install-local, on install or after a restart, because a job's handler is code from the artifact's runtime module and an inline install carries only the JSON.
+- 74281a8: fix(cloud-connection): an install-local uninstall runs the protocol's registered uninstall cleanups, so the package's permission sets and their grants go with it
+  
+  Clause-②: yes
+  
+  `DELETE /api/v1/marketplace/install-local/:manifestId` removed the package's ledger entry and nothing else. After a restart the package's objects were gone, but its `managed_by: package` rows in `sys_permission_set`, and every grant of them, survived the uninstall. That broke ADR-0090's "No ghost grants" promise on this door.
+  
+  The door now runs the uninstall cleanups that domain plugins register with the protocol (`registerUninstallCleanup`) once the ledger entry is gone. It uses the same registry and the same runner as the protocol's own uninstall, so `plugin-security`'s `security.package-permissions` cleanup removes the package's sets with their position and user bindings, and any cleanup registered later fires here too. The cleanups run with the package's manifest id and no organization, because an install-local package is installed for the whole runtime.
+  
+  The response carries each outcome as `data.cleanups`, the way the protocol's uninstall reports them. A failed cleanup is reported there and named in the operator log with its remedy (install the package again, then uninstall it again). When the protocol cannot run the cleanups, the response says so as one failed `protocol.runUninstallCleanups` outcome. An uninstall that does not happen (a refused caller, an id this door never installed, a ledger write that fails) revokes nothing.
+  
+  `@objectstack/metadata-protocol`: `ObjectStackProtocolImplementation` gains `runUninstallCleanups({ packageId, organizationId?, actor? })`, the one runner of the uninstall-cleanup registry. It runs every registered cleanup for the package and answers one `UninstallCleanupOutcome` per cleanup. It never throws: a failed cleanup is an outcome, and a thrown fault's driver text goes to the operator log, not into the outcome. `deletePackage` now calls it as its last step in place of its own loop, and its `cleanups` are unchanged. The only visible difference there is the log tag of a failed cleanup's warning, now `[protocol.runUninstallCleanups]` instead of `[protocol.deletePackage]`.
+  
+  `@objectstack/cloud-connection` now declares its dependency on `@objectstack/metadata-protocol`, which it already received through `@objectstack/runtime`, for the cleanup outcome types.
+- 901e7cf: An install-local uninstall (`DELETE /api/v1/marketplace/install-local/:manifestId`) now withdraws the package from the running kernel
+  
+  Clause-②: no
+  
+  - The DELETE used to remove the ledger entry and run the uninstall cleanups, but it left the package registered in the running kernel until the next restart. So another package's hot install re-ran the declared-permission seeding over the uninstalled package too. Its permission set came back as a package-managed row, and that row survived the restart as an orphan that an administrator could grant.
+  - After the ledger entry is removed, the door now calls `SchemaRegistry.uninstallPackage`, the same verb the protocol's own uninstall uses, on the same registry. It does this before the cleanups run. The package's objects answer 404 straight away, not only after a restart, and no reader of the registered packages counts it again. A reinstall of the same package in the same process registers it again.
+  - If the registry refuses the withdrawal, for example because another package extends an object this package owns, the uninstall still succeeds and the cleanups still run. The refusal is reported as a failed `registry.uninstallPackage` entry in `cleanups`. The operator log carries the cause and the remedy.
+  - The response `note` no longer says the kernel cannot unregister a package in place. The request and response keys are unchanged.
+- d7fff21: `POST /api/v1/marketplace/install-local/:manifestId/purge-sample-data` now deletes an installed package's sample rows. Before, it answered `500 DRIVER_UNAVAILABLE` on every runtime.
+  
+  Clause-②: no
+  
+  - **What was wrong.** The purge looked up a bare `driver` service, a name no kernel registers (drivers register as `driver.<name>`), so it refused everywhere. Behind that it matched seed records by `id`, which seed records rarely carry: the CRM example's 28 records key by `name`, `email` and `subject`. It also deleted through the driver, past every engine hook.
+  - **What it does now.** It deletes through the ObjectQL engine, so lifecycle hooks and the audit trail run, under the posture the seed was written with (record-change automation suppressed). Rows are matched by each dataset's `externalId`, the key the install and the reseed upsert by. A row whose key no seed record declares is never touched. Children are deleted before parents, in the reverse of the seed loader's own dependency order.
+  - **Scope.** Under an organization wall the purge removes only the seed rows of the caller's active organization, the scope the install and the reseed seed into. A session with no active organization is refused with `403 PERMISSION_DENIED` and a message naming the missing active organization, the way reseed refuses it. Without a wall the deployment is one tenant, and the match is table-wide, as the install's own match is.
+  - **The response keeps its shape**, `{ manifestId, deleted, skipped, errors, withSampleData }`. `skipped` counts seed records no row carries (already deleted). `errors` counts records that could not be purged, each with its reason in the server log: a delete the engine refused (for example, a user's row still requires the seed row as its parent), a key that more than one row carries, or a seed record with no key value.
+  - A runtime with no data engine or no metadata service still answers `500 DRIVER_UNAVAILABLE`, now naming what is missing.
+- 75ddcd1: `POST /api/v1/marketplace/install-local` now runs the ADR-0087 D1 protocol handshake. A manifest whose declared range excludes this runtime's protocol major is refused with `422 OS_PROTOCOL_INCOMPATIBLE`, the answer `POST /api/v1/packages` already gives. It used to install with a `200` (#21762).
+  
+  Clause-②: yes (widening)
+  
+  - **Install.** The handshake runs after the manifest id is parsed and before anything is registered, written or synced. The range is read from `engines.protocol`, then `engines.platform`, then `engine.objectstack`. The refusal answers `422` with `error.code: 'OS_PROTOCOL_INCOMPATIBLE'`, the handshake's own `error.message`, and `error.details: { requiredRange, rangeSource, protocolVersion, targetMajor, migrateCommand }`. It is the same on the inline-manifest branch and the cloud-snapshot branch. No ledger file is written, and an installed earlier version stays as it was. A manifest with no range, or a range the handshake cannot read, still installs, and the handshake's warning goes to the plugin's logger.
+  - **Restart.** On `kernel:ready`, a ledger entry whose range excludes this runtime's major is not loaded. Nothing is registered, synced, bound or seeded for it. One `error` line names the package, `OS_PROTOCOL_INCOMPATIBLE` and the replay command (`objectstack migrate meta --from N`). The boot continues with the other entries. The entry stays in the ledger, so `DELETE /api/v1/marketplace/install-local/{id}` still removes it, and installing a compatible version replaces it. Before, it was registered and its schemas synced, with no warning.
+  - **`@objectstack/metadata-core`:** a new export, `protocolIncompatibleAnswer(err)`, with its return type `ProtocolIncompatibleAnswer`. It turns a `ProtocolIncompatibleError` into the status, code, message and five-member `details` an HTTP door answers. Both install doors call it, so their answers are the same bytes.
+  - **`@objectstack/runtime`:** `POST /api/v1/packages` answers through that helper. Its response is unchanged.
+  
+  A client that relied on install-local accepting a package built for another protocol major gets `422` now. Install a version built for this runtime's protocol, or migrate the package with the `migrateCommand` in the refusal.
+- e09f1ac: Under an organization wall, the install-local sample-data doors now refuse a session with no active organization, and the refusal names what is missing (ADR-0123 D2 / D4). Before, they skipped quietly.
+  
+  Clause-②: no
+  
+  - **Reseed and purge.** `POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data` and `…/purge-sample-data` answer `403 PERMISSION_DENIED`, with a message saying the session has no active organization and that one must be joined or selected. Before, the reseed answered `400 RESEED_SKIPPED` (`multi-tenant-no-active-org`); the purge, which starts deleting in this same release, refuses the same way from the start. Reseed's other declines are unchanged and still answer `400 RESEED_SKIPPED`: a package with no seed datasets, a runtime with no data engine or metadata service, and a seed run that threw.
+  - **Install.** `POST /api/v1/marketplace/install-local` still installs the package, which is environment-wide. Its `seeded` block now reads `{ mode: "refused", reason: "…" }`, where `reason` names the missing active organization and says to select one and then reseed. Before, it read `{ mode: "skipped", reason: "multi-tenant-no-active-org" }`.
+  - **No organization is guessed.** The active-organization read no longer falls back to the user's first membership. ADR-0123 D1 makes "authenticated, with no active organization" a declared state. A guess would write into an organization the caller never chose. The fallback read an object no package defines, so it never resolved anything.
+  - **Unchanged.** A session with an active organization seeds, reseeds and purges in that organization, as before. Without a wall (`single` posture), no organization is read, and the three doors act table-wide.
+- c4d5713: `GET /api/v1/marketplace/install-local` now answers each entry's `withSampleData` for the caller's own organization. Before, after a purge in organization A, the listing read as organization B answered `withSampleData: false` while B still held every one of its seed rows.
+  
+  Clause-②: no
+  
+  - **What was wrong.** The listing served the install ledger's `withSampleData`, one value per install. Under an organization wall, sample data is per organization: the install, the reseed and the purge each act in the caller's active organization. A purge in A flipped the one value for every organization, and a restart kept it.
+  - **What it does now.** The listing reads the rows. An entry answers `true` when at least one of the package's seed rows is in the caller's scope. Rows are matched the way the purge matches them, by each dataset's `externalId`. "At least one" is exactly when the purge has something to delete, and it decides whether the console labels its reseed action "Add sample data" or "Reseed again". The purge's matching is now a separate read-only step, and the purge deletes what it returns, with the same counts and log lines as before.
+  - **Scope.** Under a wall, the scope is the caller's active organization. A session with no active organization reads nothing, so every entry answers `false` with `200`, and no row is read. Without a wall, the match covers the whole table, and the answer is the one the ledger records after an install, a purge and a reseed.
+  - **When the rows cannot be read** (for example, a package the runtime did not load), the entry answers `false`, and the server log says why at `warn`, once per entry per request.
+  - **The response keeps its shape.** The ledger keeps its shape too. Its `withSampleData` and `sampleDataPurged` stay as install-time records, and their docs now say they are not per organization.
+- 48297ad: `GET /api/v1/marketplace/install-local` now marks an installed package that this runtime refused to load. Before, after a restart whose rehydrate refused a package built for another protocol major, the listing served it like any loaded package, and the console's Installed Apps showed it as installed.
+  
+  Clause-②: no
+  
+  - **What was wrong.** On a restart, a ledger entry whose `engines.protocol` range excludes this runtime is not loaded, and the boot logs `OS_PROTOCOL_INCOMPATIBLE` at `error`. The entry stays in the ledger, so `DELETE` and a compatible re-install still act on it. The listing served it with the same fields as a loaded package. Each request also tried to read its seed rows from objects that were never registered, and logged a `warn` saying it could not.
+  - **What it does now.** That entry is listed with `"notLoaded": { "code": "OS_PROTOCOL_INCOMPATIBLE", "requiredRange": "^16" }` (the range the package declares) in place of `withSampleData`. No seed row is read for it, so the per-request `warn` is gone. `notLoaded` has exactly these two members, and every authenticated caller sees it.
+  - **Unchanged.** A loaded package's entry is exactly as before, with no `notLoaded` key. `DELETE /api/v1/marketplace/install-local/:manifestId` removes a marked entry as before, and once a compatible version is installed over it, the entry is listed as loaded.
+  - **Where the marker comes from.** The rehydrate records each entry it refuses, and the listing reads that record. The listing does not run the protocol check again.
+- 9f9510f: `reseed-sample-data` and `purge-sample-data` on an installed package that this runtime refused to load now answer `422 OS_PROTOCOL_INCOMPATIBLE` before they change anything. Before, both acted on such a package anyway.
+  
+  Clause-②: no
+  
+  - **What was wrong.** On a restart, a ledger entry whose `engines.protocol` range excludes this runtime is not loaded: nothing is registered, synced, bound or seeded for it. `POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data` on that entry loaded the package's translations into the i18n service and merged its seed datasets into the kernel's shared `seed-datasets` list, and then failed with `400 RESEED_SKIPPED` because the package's objects were never registered. `POST …/:manifestId/purge-sample-data` answered `200` with every record counted in `errors`, and set the ledger's `withSampleData` to `false` with no row deleted.
+  - **What it does now.** Both doors run the protocol check on the ledger entry right after reading it. An entry whose declared range excludes this runtime gets the answer the install route gives the same manifest: `422`, `error.code` `OS_PROTOCOL_INCOMPATIBLE`, the check's own message, and `error.details` with `requiredRange`, `rangeSource`, `protocolVersion`, `targetMajor` and `migrateCommand`. No translation is loaded, no dataset is merged, no seed row is read or deleted, and the ledger is not written. The refusal comes before the organization check too, so a session with no active organization on a walled deployment also gets the `422` for such an entry.
+  - **Unchanged.** An entry this runtime loads is answered exactly as before. An entry that declares no range, or a range the check cannot read, is admitted as before, with no new warning. `DELETE /api/v1/marketplace/install-local/:manifestId` still removes a refused entry, and installing a compatible version over it makes both doors act on it again.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [c98a72d]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [50e1c65]
+- Updated dependencies [713b0fa]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [0e10be6]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [1fd5664]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [1d0600b]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [535d1d2]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [b206403]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [e9dec3d]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [2f837a5]
+- Updated dependencies [abe8f28]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [ce53218]
+- Updated dependencies [44defd4]
+- Updated dependencies [83b3d32]
+- Updated dependencies [6c5697d]
+- Updated dependencies [74281a8]
+- Updated dependencies [9a4182a]
+- Updated dependencies [550f4cc]
+- Updated dependencies [41b1333]
+- Updated dependencies [5dbcee8]
+- Updated dependencies [ec390ec]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [bd70706]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [aa0d4b9]
+- Updated dependencies [5d0e4e2]
+- Updated dependencies [e367002]
+- Updated dependencies [9e9d693]
+- Updated dependencies [045b946]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [316be32]
+- Updated dependencies [6946f2f]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [7b07749]
+- Updated dependencies [eea82af]
+- Updated dependencies [a2aadab]
+- Updated dependencies [ced217c]
+- Updated dependencies [ff16740]
+- Updated dependencies [fe10172]
+- Updated dependencies [83e2fee]
+- Updated dependencies [7fd2c34]
+- Updated dependencies [c43a8ae]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [cf60dbc]
+- Updated dependencies [a6a7547]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [025008a]
+- Updated dependencies [b7a13c7]
+- Updated dependencies [045f764]
+- Updated dependencies [18c2ddc]
+- Updated dependencies [75ddcd1]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [a0176ef]
+- Updated dependencies [e1790fd]
+- Updated dependencies [e1790fd]
+- Updated dependencies [149153c]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [18fe681]
+- Updated dependencies [3237b4a]
+- Updated dependencies [088428f]
+- Updated dependencies [2e78046]
+- Updated dependencies [cab6396]
+- Updated dependencies [87712ab]
+- Updated dependencies [f5b8e29]
+- Updated dependencies [e864db5]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [e6dc7a2]
+- Updated dependencies [faf8dce]
+- Updated dependencies [9cc2c79]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [131b937]
+- Updated dependencies [753e7a1]
+- Updated dependencies [c9761cd]
+- Updated dependencies [c9761cd]
+- Updated dependencies [c9761cd]
+- Updated dependencies [c9761cd]
+- Updated dependencies [80f9f7e]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [3c7785d]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/runtime@17.7.0
+  - @objectstack/metadata-protocol@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/metadata-core@17.7.0
+  - @objectstack/types@17.7.0
+
 ## 17.6.0
 
 ### Patch Changes

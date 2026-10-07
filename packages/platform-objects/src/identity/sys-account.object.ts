@@ -78,6 +78,19 @@ export const SysAccount = ObjectSchema.create({
   ],
 
   listViews: {
+    // [#21972] Declared FIRST on purpose: a route that names no view opens the
+    // first declared list view, so a caller-scoped view (`mine`) is never
+    // first. Setup's `nav_accounts` names this view; the Account app's
+    // `nav_account_linked` names `mine`.
+    all_links: {
+      type: 'grid',
+      name: 'all_links',
+      label: 'All',
+      data: { provider: 'object', object: 'sys_account' },
+      columns: ['provider_id', 'user_id', 'account_id', 'created_at', 'updated_at'],
+      sort: [{ field: 'created_at', order: 'desc' }],
+      pagination: { pageSize: 100 },
+    },
     mine: {
       type: 'grid',
       name: 'mine',
@@ -96,15 +109,6 @@ export const SysAccount = ObjectSchema.create({
       columns: ['provider_id', 'user_id', 'account_id', 'created_at'],
       sort: [{ field: 'provider_id', order: 'asc' }, { field: 'created_at', order: 'desc' }],
       grouping: { fields: [{ field: 'provider_id', order: 'asc', collapsed: false }] },
-      pagination: { pageSize: 100 },
-    },
-    all_links: {
-      type: 'grid',
-      name: 'all_links',
-      label: 'All',
-      data: { provider: 'object', object: 'sys_account' },
-      columns: ['provider_id', 'user_id', 'account_id', 'created_at', 'updated_at'],
-      sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 100 },
     },
   },

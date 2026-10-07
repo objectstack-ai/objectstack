@@ -999,12 +999,12 @@ ObjectStack sends CORS headers automatically:
 ```http
 Access-Control-Allow-Origin: https://app.acme.com
 Access-Control-Allow-Methods: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS
-Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Tenant-ID, X-Environment-Id, If-Match, X-Share-Password
+Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Tenant-ID, X-Environment-Id, If-Match, X-Share-Password, X-Share-Password-Encoding
 Access-Control-Expose-Headers: set-auth-token, x-objectstack-dropped-fields
 Access-Control-Max-Age: 86400
 ```
 
-Four of the allowed request headers are easy to overlook, and each one disables
+Five of the allowed request headers are easy to overlook, and each one disables
 a feature if an intermediate proxy strips it:
 
 | Header | Why it is allowed |
@@ -1012,6 +1012,7 @@ a feature if an intermediate proxy strips it:
 | `X-Tenant-ID` / `X-Environment-Id` | Route the request to its environment on a multi-tenant host. |
 | `If-Match` | Carries the OCC token on record `PATCH`es. Without it, a cross-origin save fails in the browser with "Failed to fetch". |
 | `X-Share-Password` | Carries a share-link password to the public `/share-links/:token/resolve` and `/messages` routes. It is the preferred form because a header stays out of URLs; without it, a cross-origin client can only send the password as a query parameter. |
+| `X-Share-Password-Encoding` | Declares how `X-Share-Password` is encoded. Its one accepted value is `utf-8` (any case): the password header then carries the password's UTF-8 bytes percent-encoded, as `encodeURIComponent(password)` produces them. A browser cannot put a character above U+00FF in a header, and strips leading and trailing spaces, so this is how such a password is sent. Without this header, `X-Share-Password` is read raw, as it arrives. Any other value, or a password header that is not percent-encoded UTF-8 under `utf-8`, is refused with `400 VALIDATION_FAILED`. |
 
 The two **exposed** response headers matter to browser clients specifically:
 `set-auth-token` delivers a rotated session token (without it a cross-origin

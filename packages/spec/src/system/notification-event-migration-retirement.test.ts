@@ -121,7 +121,7 @@ const PRE_RETIREMENT_MATRIX = `/**
  *   - \`details.outcome\`: the four-valued result, verbatim.
  */`;
 
-describe('[#16194] adr-0030-notification-event: the id left the creation-attested set', () => {
+describe('adr-0030-notification-event: the id left the creation-attested set', () => {
   it('CREATION_ATTESTED_MIGRATION_IDS is exactly the TWO surviving ids, in order', () => {
     // Literal on purpose. A length alone would not notice which member went,
     // and a `not.toContain` alone would pass on an array that lost everything.
@@ -157,12 +157,12 @@ describe('[#16194] adr-0030-notification-event: the id left the creation-atteste
   });
 });
 
-describe('[#16194] adr-0030-notification-event: the ruled receipt-claim matrix is withdrawn', () => {
+describe('adr-0030-notification-event: the ruled receipt-claim matrix is withdrawn', () => {
   it("the id's docblock no longer states a ledger-claim matrix", () => {
     const doc = notificationEventDoc();
     expect(
       statesClaimMatrix(doc),
-      'a receipt-claim matrix is back on an id no code can write a row for — re-read #16194',
+      'a receipt-claim matrix is back on an id no code can write a row for — its runner was retired, with no operator door and no boot-time invoker',
     ).toBe(false);
   });
 

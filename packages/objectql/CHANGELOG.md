@@ -1,5 +1,678 @@
 # @objectstack/objectql
 
+## 17.7.0
+
+### Minor Changes
+
+- 50e1c65: fix(plugin-audit,platform-objects,plugin-auth,plugin-sharing,plugin-approvals)!: the audit ledger no longer records fields declared `internal`, and the platform's credential-class fields are declared `internal`
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or config field is removed or renamed: the change narrows what the generic data path and the audit ledger return for platform-owned columns, and nothing an author wrote needs rewriting. The objectql half adds exports only. -->
+  
+  **BREAKING for readers of credential-class columns on the generic data path and in the audit ledger.**
+  
+  **What changed.**
+  
+  - The audit plugin's CRUD mirror now omits every field declared `internal: true` from the
+    rows it writes to `sys_audit_log` and `sys_activity`: create `new_value`, both sides of an
+    update, delete `old_value`, and the activity row. It already masked `secret` and `password`
+    fields; `internal` is the same contract the generic data path already enforces ("never
+    returned on the generic data path"). An update that changes only an `internal` field still
+    writes its row, with neither value.
+  - These platform fields are now declared `internal: true`, so neither the generic data path
+    nor the ledger returns them: the JWT signing key's private key (`sys_jwks`), both credential
+    columns of the one-time verification object (`sys_verification`), the two-factor secret and
+    backup codes, the SSO provider's OIDC and SAML protocol blobs, the OAuth access and refresh
+    token columns, the OAuth client secret digest, the SCIM credential digest, the share link's
+    token and password hash, and the approval action-token digest. API key digests and email
+    headers were already `internal`; the ledger now honours that too.
+  - Every built-in consumer that needs one of these values reads it back through the engine's
+    privileged accessor rather than the generic path: JWT signing, password reset and the other
+    one-time verification flows, two-factor verification, SSO sign-in and the legacy SSO secret
+    migration, OAuth client authentication, share-link redemption (the password gate is held)
+    and the creator's share-link list, which keeps returning each link's token. The runtime's
+    share-link resolve route (the dispatcher twin of the plugin's) still answers "password
+    required" for a protected link rather than the unknown-link shape.
+  - The one-time verification object's record title is now the fixed label `Verification`; it no
+    longer shows the identifier column.
+  - `@objectstack/objectql` exports two helpers from its main and `/core` entries:
+    `collectInternalReadFields` (the names of an object's `internal` fields) and
+    `readInternalColumn` (recovers one `internal` column for rows already read, through the
+    engine's privileged accessor, and fails closed when the value cannot be recovered).
+  
+  **What to do after upgrading.**
+  
+  - **Rotate the JWT signing keys.** Ledger rows written before this release are not rewritten
+    (the ledger is append-only), so a signing key that existed before the upgrade may have a copy
+    in the ledger. Rotate the keys so that copy signs nothing.
+  - **Revoke and re-mint share links that must stay private.** A share link's token is a
+    capability that stays valid until the link expires or is revoked, and links minted before this
+    release may have a copy in the ledger.
+  - A copy of a one-time verification credential is usable only while that credential is still
+    outstanding: once it is consumed or expires, its copy names nothing that will be accepted.
+  - An integration that read any of these columns through `GET /api/v1/data/...` no longer
+    receives them. Read share links through `/api/v1/share-links`, and OAuth clients and SSO
+    providers through their auth routes.
+- 713b0fa: fix(metadata-protocol)!: a metadata body's stored content hash is served and compared only in keyed form, never copied, and never evaluated (#21207)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the stored content hash of a metadata body stays the canonical hash at rest and no metadata body, authorable key, spelling or export moves; what changes is the form a door serves the hash in (a keyed digest: the crypto provider's, or a process-scoped ephemeral key's when none is registered), the form an inbound version token is compared in, and which query shapes the doors accept over the two hash columns, so `objectstack migrate meta` has nothing to rewrite. The operator-run rewrite this release asks for is of audit, activity and decision-audit copies, not of metadata. The other categories are closed on facts: every package here publishes (not `unpublished`); no ADR-0087 id covers a served version token or a refused query shape (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what the metadata doors serve and accept for the stored content hash of a metadata body — a hash over the whole stored body, withheld credential material included. Served beside the projected body it let a reader confirm a guess at that material offline; filtered on, it confirmed one online. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **Three things change for callers and operators.**
+  
+  1. **A held version token gets one `409 METADATA_CONFLICT`.** Every door that hands out a metadata version token — the save, publish, package-publish and rollback receipts and the history read — now hands out a keyed digest of the stored hash instead of the hash itself, and the save and reset doors compare a token they are sent in that same form. The key is the crypto provider's; a host that registers none keys under a process-scoped ephemeral key instead, so a token is always issued and never empty. A token a client held from before the upgrade is refused once; take the token from the next read or receipt and retry. On a host with no provider the same happens after a restart, and on any host when a provider is first registered. An empty, withheld, raw or stale token is refused with the same `409`; it is never read as "no pin".
+  2. **Filter, sort and group on the two stored content-hash columns, and on the version history's change note, now answer `400 INVALID_FIELD`** — on the generic data door, the MCP stdio reader and the analytics door, before the engine runs. The change note is included because a draft promotion that stated no message of its own recorded the draft's stored hash in it; the publish door now always states a hash-free message, and a note written before this release is served with the quoted hash in keyed form. A data-door search over the two stored-metadata tables no longer scans those columns or the stored body column, and an explicit search-field list naming one answers the same `400`. Every other column of the two tables is served, filtered, sorted and grouped as before, and every other object is unchanged.
+  3. **Operators run `os migrate audit-metadata-bodies` once after upgrading, dry run first.** The audit ledger, the activity feed and the metadata decision-audit trail no longer copy the stored hash. The extended command drops it from the copies already written and withholds it in the decision-audit notes and their copies: a dry run by default, `--apply` to rewrite, idempotent. The version history stays the lineage.
+  
+  **What else changes.** The data door serves the two hash columns of the stored-metadata tables in keyed form, under the same key as the version tokens. The MCP stdio reader serves them keyed under the crypto provider's key, and omits them on a host with no provider. A `409` conflict refusal carries keyed values or none. The ObjectQL engine gains a read accessor for the registered provider's keyed digest; it is additive. A member's read of these tables is refused as before.
+- c2cd651: fix(objectql)!: `having` and the per-aggregation `filter` refuse a plain `{ $field }` reference between two columns of different comparison classes with `INVALID_FILTER` / 400, as `where` refuses it
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of filter STRUCTURE at the engine's query door: a plain { $field } comparand whose two columns belong to different comparison classes, at having and at a per-aggregation filter. No authorable key, spelling, export or stored shape moves: FieldReferenceSchema, every query shape and every object definition parse as before, @objectstack/objectql exports nothing new and nothing less, and no stored row is read or rewritten. What is refused is a comparison the same query's where already refuses on driver-sql, and which same-class column the caller meant is not something a ledger entry can decide. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a filter's comparison class (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what a `{ $field }` reference may pair at two positions of `engine.aggregate`. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What was accepted before.** At `having` and at a per-aggregation `filter` (`aggregations[i].filter`), the comparison-class rule was applied only to a reference carrying `addDays`. A plain reference across two classes was answered: `{ closed_at: { $lte: { $field: 'due_on' } } }`, with `closed_at` a `datetime` and `due_on` a `date`, counted rows by `@objectstack/formula`'s whole-day reading of the bare day, and a `having` of `max(closed_at)` against a `day` date bucket kept groups the same way. The same comparison in a `where` is refused `INVALID_FILTER` / 400 by `driver-sql`.
+  
+  **What is refused now.** A scalar comparison (`$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`) whose comparand is a plain `{ $field }` naming a column of a different comparison class. The classes are the spec's `CROSS_FIELD_COMPARISON_CLASSES` (`numeric`, `text`, `boolean`, `date`, `datetime`, `time`), judged by the spec's `crossFieldComparisonVerdict`, the classification `driver-sql`'s `where` compiler reads. The refusal is `INVALID_FILTER` / 400, raised before any driver is asked for a row, on an empty set as on a populated one, through `engine.aggregate` and `POST /api/v1/data/:object/query`:
+  
+  - in a per-aggregation `filter`, the fields, the operator and the reason are withheld from the message and written to the server log, as `where` withholds them; the message now names the same-class rule beside the `addDays` one;
+  - in `having`, the message names the two columns of the query's own projection and their classes, in the sentence `where` logs for the same pair. A `having` column's class is read off the query: a `day` date bucket is a `date`, a coarser bucket a `text` label, `count` / `count_distinct` / `sum` / `avg` are `numeric`, and `min` / `max` take the type of the field they read.
+  
+  **The remedy.** Compare same-class columns: a `datetime` with a `datetime`, a `date` with a `date` (a `day` bucket is one), a number with a number. A comparison between a `datetime` and a calendar day has no single answer across SQL and memory, so the platform does not define one.
+  
+  **Unchanged.** A reference between two columns of one class answers as before. A `{ $field, addDays }` pair keeps its judgement and its words. A column whose class the declaration cannot tell is not judged, as an `addDays` pair is not: a host with no registered object, a column the field map does not list (`id`), an aggregation over an undeclared field. A column the spec gives no comparison class at all (a structured-JSON, multi-valued or file field, a formula) is not judged by this rule either.
+- ceb4a93: fix(objectql)!: `having` and the per-aggregation `filter` refuse a `{ $field }` comparison against a column with no comparison class (a file field, a list, a formula) with `INVALID_FILTER` / 400, as `where` refuses it; `applyInMemoryAggregation` takes the same reference rules
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of filter STRUCTURE at the engine's query door and at its published in-memory aggregation function: a { $field } comparison against a column the spec's crossFieldComparisonVerdict answers no-class for, at having and at a per-aggregation filter, and the reference rules engine.aggregate already applied, now applied by applyInMemoryAggregation when its caller passes a field map. No authorable key, spelling, export or stored shape moves: FieldReferenceSchema, every query shape and every object definition parse as before, the package entries export nothing new and nothing less, applyInMemoryAggregation keeps its signature, and no stored row is read or rewritten. What is refused is a comparison the same query's where already refuses on driver-sql, and which comparable column the caller meant is not something a ledger entry can decide. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a filter's comparison class (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what a `{ $field }` reference may pair at two positions of `engine.aggregate`, and what `applyInMemoryAggregation` accepts when it is handed a field map. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What was accepted before.** The spec's comparison-class verdict (`crossFieldComparisonVerdict`) answers `no-class` for a pair in which either column has no comparison class: a list or an object (a structured-JSON type, a multi-option type, a multi-capable type flagged `multiple: true`), a file field (`FILE_REFERENCE_TYPES`), or a formula. `having` and a per-aggregation `filter` (`aggregations[i].filter`) did not judge that answer. Measured on `SqlDriver` over better-sqlite3 through `engine.aggregate`, beside a `where` twin that `driver-sql` refused `INVALID_FILTER` / 400 each time:
+  
+  - a per-aggregation `{ customer_id: { $ne: { $field: 'photo' } } }` (text against an image) counted 6 of 6 rows;
+  - a per-aggregation `{ closed_at: { $lte: { $field: 'due_f' } } }` (datetime against a formula) counted 0 of 6;
+  - a per-aggregation `{ amount: { $ne: { $field: 'tags' } } }` (number against a multiselect) counted 6 of 6 when the column held no value, 0 on an empty table, and was refused by the per-row array check, in other words, when the column held a list;
+  - `having: { photo: { $ne: { $field: 'n' } } }` over a groupBy on an image field kept all 6 groups.
+  
+  A `{ $field, addDays }` pair against a formula was answered at both positions. `applyInMemoryAggregation`, called with a field map, applied none of `engine.aggregate`'s reference rules: a reference to a field the map does not declare, a pair across two classes and a pair against a column with no class were all counted.
+  
+  **What is refused now.** At `having` and at a per-aggregation `filter`, a scalar comparison (`$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`) whose `{ $field }` comparand, or whose own column, has no comparison class, with or without `addDays`. The refusal is `INVALID_FILTER` / 400, raised before any driver is asked for a row, on an empty set as on a populated one, in the reason `driver-sql`'s `where` logs for the same pair: the column it names (the referenced one first, as `where` asks it first) "has no scalar stored column a comparison can read". The per-aggregation `filter` withholds the fields, the operator and the reason from the message and writes them to the server log, as `where` does; `having` names the two columns of the query's own projection. A `{ $field, addDays }` pair against a file or list column was already refused, in the `addDays` pair rule's words (that rule reads those types as text, so it answered with a cross-class or an offset sentence); it is now refused in this one.
+  
+  `applyInMemoryAggregation(rows, ast, timezone, fields, reportWithheld)`, when `fields` is passed, judges each per-aggregation `filter` by the reference rules `engine.aggregate` applies at that position, through the same function, before any row is judged: the referenced column (and an `addDays` offset column) is declared, a pair across two classes or against a column with no class is refused, and an `addDays` pair follows its class rule. The refusal is `INVALID_FILTER` / 400; the withheld diagnostic goes to `reportWithheld`, and it names no object (this function is not told one).
+  
+  **The remedy.** Compare two columns that each have a comparison class, and the same one: a file field, a list and a formula have no stored scalar a comparison can read. Compare the scalar column the value is derived from, or filter the column with a literal.
+  
+  **Unchanged.** A reference between two columns of one class answers as before, and the cross-class refusal keeps its words. A side with no declaration is not judged at any of the three positions: a host with no registered object, a column the field map does not carry (`id`, and an audit-opt-out object's row-carried `created_at` / `updated_at`), an aggregation over an undeclared field. A declared type outside `FieldType` is not judged either. `applyInMemoryAggregation` called without `fields` judges nothing it did not judge before.
+- 9f13c94: fix(objectql)!: a comparand against a declared boolean field is narrowed to its boolean at the engine's filter door, and any string other than "true" / "false" / "1" / "0" is refused with `INVALID_FILTER` / 400
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal and a narrowing of filter COMPARANDS at the engine's query door, against a declared boolean or toggle field. No authorable key, spelling, export or stored shape moves: every query shape, every FilterCondition and every object definition parse as before, @objectstack/objectql exports nothing new and nothing less, and no stored row is read or rewritten. What is refused is a comparand that matched no row (and every row under $ne) on InMemoryDriver and on SqlDriver over SQLite (PostgreSQL and MySQL not measured), and which boolean a caller meant by "yes" is not something a ledger entry can decide. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a filter comparand, and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what a filter may compare a declared `boolean` or `toggle` field with, at every filter position and through every door that reaches the engine's filter walk (`engine.find` / `findOne` / `count` / `aggregate` / `update` / `delete`, and every spelling the data API hands it). It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What was accepted before.** A string compared with a boolean field was neither refused nor read as a boolean: the engine handed it to the driver as written, and every answer was a 200. Measured on two rows (one `true`, one `false`) on InMemoryDriver and on SqlDriver over SQLite, through `engine.find`, `engine.aggregate` and the protocol's `findData` with each spelling the `POST /api/v1/data/:object/query` and `GET /api/v1/data/:object` routes hand it:
+  
+  - `"true"` (implicit, `$eq`, `$in`) and `"false"` (implicit), and both through `?filter=`, `?$filter=`, the filter AST and the bare query parameter (`?flag=true`), matched no row on either driver;
+  - `$ne "true"` and `$nin ["true"]` returned both rows, the true row included;
+  - `"yes"` matched no row, and `$ne "yes"` both rows;
+  - `1`, `"1"`, `0` and `"0"` at `where` (and `"1"` / `"0"` through every spelling above) matched the right row on SQLite and no row on InMemoryDriver (`$ne 1` returned both rows there);
+  - the per-aggregation `filter` and `having` (the engine's own evaluator) answered `"true"` with no row and no group, and `$ne "true"` with every one.
+  
+  **What is answered now.** At `where` (both spellings), the per-aggregation `filter` and `having`, on every verb that collects a filter, before any driver is asked for a row:
+  
+  - `true` / `false` are handed to the driver as written;
+  - `1` / `0`, `"1"` / `"0"` and `"true"` / `"false"` are narrowed to `true` / `false`, so every driver receives the one boolean each names. Measured on InMemoryDriver and on SqlDriver over SQLite, `?flag=true` and `?flag=1` now return the true row; any other driver receives the same narrowed boolean by mechanism (PostgreSQL and MySQL not measured);
+  - any other string, a different letter case (`"TRUE"`), surrounding whitespace, a blank and a `{placeholder}` included, is refused `INVALID_FILTER` / 400. The message names the field, its declared type, the comparand and its position, and says what is wrong with it.
+  
+  The accepted set is the one the record validator already admits when a boolean field is WRITTEN. The rule lives in `@objectstack/spec/data`'s `filter-boolean-comparand-declared-type.ts`, and the engine applies it in the same walk that judges number comparands.
+  
+  **The remedy.** Write `true` or `false`. In a querystring, where every value is a string, write `true` / `false` or `1` / `0`.
+  
+  **Unchanged.** A boolean comparand, `null` (the null test) and the flag operators (`$null`, `$exists`, `$empty`) answer as before, and so does every comparand against a field that is not boolean. A number other than `1` / `0` against a boolean field is still handed to the driver as written. A filter on a `formula` field is still refused one step earlier, as before.
+- 45efcfa: fix(objectql)!: a number other than `1` / `0`, a `Date` or an array compared against a boolean field is refused with `INVALID_FILTER` / 400 at `where`, a per-aggregation `filter` and `having`, instead of a PostgreSQL 500 or an empty 200
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of filter COMPARANDS at the engine's query door, against a declared boolean or toggle field or a boolean aggregated column. No authorable key, spelling, export or stored shape moves: every query shape, every FilterCondition and every object definition parse as before, @objectstack/objectql exports nothing new and nothing less, and no stored row is read or rewritten. What is refused is a comparand that answered a server error on PostgreSQL and an empty 200 on InMemoryDriver and SQLite, and which boolean a caller meant by 2 is not something a ledger entry can decide. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a filter comparand, and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what a filter may compare a declared `boolean` or `toggle` field with, at every filter position and through every door that reaches the engine's filter walk (`engine.find` / `findOne` / `count` / `aggregate` / `update` / `delete`, and every spelling the data API hands it). It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type of this package changes; the rule is `@objectstack/spec/data`'s `booleanComparandDoorVerdict`, whose own changeset lists what moved there.
+  
+  **What was answered before.** A non-string comparand outside the accepted set reached the driver as written. Measured on two rows (one `true`, one `false`) through `engine.find` / `engine.aggregate`, on InMemoryDriver, SqlDriver over SQLite and SqlDriver over PostgreSQL 16:
+  
+  | position | comparand | before: memory · SQLite · PostgreSQL | now, on all three |
+  |:--|:--|:--|:--|
+  | `where` | implicit / `$eq` `2`, `-1`, `0.5`, a `Date` | no row · no row · `DATABASE_ERROR` (500) | `INVALID_FILTER` / 400 |
+  | `where` | `$ne` the same | both rows · both rows · 500 | `INVALID_FILTER` / 400 |
+  | `where` | a `$in` member `2` or a `Date` | the other members' rows · the same · 500 | `INVALID_FILTER` / 400 |
+  | `where` | a `$in` member `[true]` | the other members' rows (200) · a driver 400 · a driver 400 | `INVALID_FILTER` / 400, in one set of words |
+  | per-aggregation `filter` / `having` | any of the above | count 0 and no group (every row and group under `$ne`), a `$in` member ignored, on all three | `INVALID_FILTER` / 400 |
+  | all three positions | `true`, `1`, `"true"` (the controls) | the true row, count 1, the true group | the same |
+  
+  **The remedy.** Write `true` or `false` (or `1` / `0`). To match either value, use `$in`, each member a boolean. Compare a `Date` with a date or datetime field.
+  
+  **Unchanged.** `true` / `false` pass as written, the accepted spellings (`1` / `0`, `"1"` / `"0"`, `"true"` / `"false"`) narrow as before, and any other string is refused in the same words as before. `null` (the null test) and the flag operators answer as before. A value outside the accepted comparand types (`undefined`, a plain object, a `Map`) keeps the comparand-type door's own refusal and words. A filter on a `formula` field is still refused one step earlier. Driver-direct callers that never pass through the engine keep each driver's native binding.
+- eb9ef79: An in-process engine verb refuses an object name the registry does not resolve, with the data door's own `OBJECT_NOT_FOUND`, instead of handing it to the driver as a raw table name
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An accept-set narrowing at the engine's name resolution: no authorable spec key, export or metadata shape is removed, renamed or re-shaped, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What a caller meant by a name the registry does not hold is not decidable by a conversion entry. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered); and the change narrows what runtime verbs accept, not a runtime interface or a type surface alone (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** accept-set narrowing of the engine's in-process verbs, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  **What was accepted before.** `find`, `findOne`, `count`, `aggregate`, `insert` (and `insertMany`), `update`, `delete` and `validate` resolved their target through the schema registry and, for a name the registry did not resolve, handed the name to the driver as a raw table name. A caller in the process (a sandboxed action or hook body's `ctx.api`, an action handler, host code) could therefore read or write a table by a name the generic data door refuses with `404 OBJECT_NOT_FOUND`, and every in-process guard keyed by a registered object name could be stepped around by naming the target another way.
+  
+  **What is refused now.** Such a name is refused with the data door's own envelope (`OBJECT_NOT_FOUND`, `status: 404`, the name on `object`, built by `objectNotFoundError` from `@objectstack/core`) before any hook, middleware or driver runs. A registered name resolves exactly as before. `judgeFilter` still judges the filter for a name the registry does not hold, because it reads nothing and reaches no driver; execution refuses that object before admission.
+  
+  **Inside the engine.** The single-tenant organization probe asks the registry first: an install that registers no organization object is the lean case it always was, with no organization to derive, and the write proceeds unstamped without a driver read.
+  
+  **The fix.** Register the object (in the stack, with `registry.registerObject`, or through a plugin manifest) before addressing it through the engine. Host code that must reach storage without a registry entry addresses the driver itself (`datasource(name)`, `getDriverForObject(name)`), a path a sandboxed body cannot reach.
+- 5c9138b: fix(objectql)!: a read with no projection serves the object's declared fields and the platform's system columns, never a column no metadata declares (#21571)
+  
+  **BREAKING (narrowing)** — what a released read door serves shrinks. A column that
+  no metadata declares, typically a field retired in an upgrade whose column additive
+  schema sync leaves in the table until `os migrate apply --allow-destructive`, is no
+  longer returned by any read through the engine.
+  
+  | read | before | now |
+  | --- | --- | --- |
+  | `POST /api/v1/data/:object/query` or `GET /api/v1/data/:object` with no `fields` | every column of the table, retired ones and their values included | the declared fields, the registry's system columns, `id`, `created_at`, `updated_at` |
+  | `GET /api/v1/data/:object/:id`, export, search hits, the RPC dispatcher, `expand`ed records | the same whole row | the same declared set |
+  | `engine.find` / `engine.findOne` in process (hooks, flows, plugins), no `fields` | the whole row | the declared set |
+  | an explicit `fields` naming a declared field whose column does not exist yet (driver-sql retries `select('*')`) | the whole row, retired columns included | the declared set |
+  | `POST /api/v1/data/:object/:id/clone` of a record whose table carries a retired column | refused `INVALID_FIELD` (the copy carried the retired column into the insert) | cloned |
+  
+  **Unchanged:** naming a retired column in `fields` still answers `400 INVALID_FIELD`
+  on the data door. Declared fields keep their treatment: `internal: true` omission,
+  credential masking, formula evaluation and the hidden `__search` strip run as
+  before, and the registry-injected tenant, owner and audit columns are still served.
+  No driver changed: the engine shapes the rows any driver returns, so the answer is
+  the same on every driver and every door. Writes, and the rows a write returns, are
+  not changed by this release.
+  
+  **If you still read a retired column's values** (for example a one-time conversion
+  that copies the old columns into their replacement field): run that conversion
+  BEFORE upgrading to this release, while the old field is still declared, or, once
+  it lands, read the unmapped columns through the operator-only `os migrate` read
+  (objectstack#21573). There is no flag that re-opens undeclared columns on a runtime
+  door. An in-process reader that needs a column must declare it as a field.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, spelling, export, config field or stored shape is removed or renamed, and no stored row is read or rewritten: the change narrows which physical columns the engine's read verbs return, to the field map the metadata already declares. A retired column's values stay in the table; what an app does with them is an operator action stated above (convert before upgrading, or the operator-only os migrate read), not a FROM to TO mapping that objectstack migrate meta could apply. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a read projection (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+- 98eb3b9: fix(objectql,spec)!: a hook's `handler` name resolves inside the hook's own package only (#21604)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no authorable key, spelling, export of a published release or stored shape moves: `HookSchema`'s shape is unchanged (only `HookSchema.handler`'s doc changes), so `objectstack migrate meta` has nothing to rewrite. What changes is which function a string `handler` may bind to at registration. Census of compositions relying on cross-package resolution by name, at the claim: zero in objectstack `examples/**` (15fe567c9c, whose only string `handler` is a job's), hotcrm (f24c196588) and objectos (7612ffebd1); this repository commits no `--artifact` runtime module; cloud is NOT MEASURED (unreachable from the claim's session). The other categories are closed on facts: both packages publish (not `unpublished`); no ADR-0087 id covers a binding rule (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: a hook whose `handler` is a function NAME (the deprecated form, `handler: 'my_fn'`, with no `body`) now binds only to a function its own package holds. It used to fall back to the engine-wide function registry, which is keyed by bare name, so the hook could bind to a function another package registered under the same name and run that package's code on its own events.
+  
+  - **Accepted before:** a string `handler` resolved against the functions handed to the hook's bind, then against every function any package had registered on the engine. A name found nowhere was skipped with a `warn`.
+  - **Accepted now:** a string `handler` resolves against the functions handed to the hook's bind (the package's `functions`, which an `--artifact` runtime module supplies), then against the functions the same package (`packageId`) registered on the engine. Nothing else.
+  - **Refused now, at registration:** a name the hook's own package does not hold, whether another package registered it or nobody did. The hook is not bound. The refusal carries `INVALID_REFERENCE` with status `400` (ADR-0112), names the hook, the function and the package, and is recorded on the bind result (`BindHooksResult.errors[]` gains `code` and `status`) and logged at `error`. Under `strict` (`OBJECTQL_STRICT_HOOKS=1`) it is thrown.
+  - **The doors:** a hook authored at runtime through the metadata API (`PUT /api/v1/meta/hook/:name`) ships with no code package and holds no functions, so a `handler`-only hook authored there is refused when the door binds it; the save itself still answers as before. In a composition of several apps, one app's hook can no longer bind to another app's function. A bind that names no owning package (direct `bindHooksToEngine` use without `packageId`) resolves only the functions handed to it.
+  - **Unchanged:** a hook with a `body` binds as before. An app's hook naming its own `defineStack({ functions })` entry, or a function its own `--artifact` runtime module exports, binds as before. The install-local door's refusal of a hook with no `body` is unchanged.
+  
+  What to do with a refused hook: give it a `body` (sandboxed JS), or declare the function in the hook's own package's `functions`. To reuse another package's function, import it from the package that owns it and declare it there. This ships as `minor`, under the launch-window convention for narrowings of an accept set.
+- 5b5e83f: fix(objectql)!: the record a write returns, and the prior read it binds as `previous`, serve the object's declared fields and the platform's system columns, never a column no metadata declares (#21613)
+  
+  **BREAKING (narrowing)** — what a released write door returns shrinks. A column that
+  no metadata declares, typically a field retired in an upgrade whose column additive
+  schema sync leaves in the table until `os migrate apply --allow-destructive`, is no
+  longer returned by any write through the engine. This completes the read-side rule of
+  the previous release (#21571) for writes.
+  
+  | write | before | now |
+  | --- | --- | --- |
+  | `PATCH /api/v1/data/:object/:id`, batch `update`, `updateMany` | the post-write row read back with `select *`: retired columns with their stored values | the declared fields, the registry's system columns, `id`, `created_at`, `updated_at` |
+  | `POST /api/v1/data/:object`, `POST /api/v1/data/:object/:id/clone`, `createMany`, batch `create` / `upsert`, `insertMany` outcomes | the inserted row from `returning('*')`: retired columns as `null` | the same declared set |
+  | `data.record.created` / `data.record.updated` events, and the webhook deliveries that carry them as `after` | the same whole row | the declared set |
+  | `engine.insert` / `engine.update` in process (actions, flows, plugins), and a hook's `ctx.result` | the whole row | the declared set |
+  | a hook's `ctx.previous` on update and delete (by id and per row), and the audit ledger's delete `old_value` and create `new_value` | the whole stored row, retired columns and their values included | the declared set |
+  
+  **Unchanged:** declared fields keep their treatment. An `internal: true` field is still
+  returned whole on the engine-level write result to the privileged writer that just
+  wrote it, and still stripped from every data-door response; formulas are still
+  hydrated onto the result; the registry-injected tenant, owner and audit columns are
+  still returned. No driver changed: the engine shapes the rows any driver returns, so
+  the answer is the same on every driver and every door. A retired column's values stay
+  in the table.
+  
+  **If you still read a retired column's values off a write** (for example a hook, a
+  flow or a webhook receiver that copied an old column into its replacement): run that
+  conversion BEFORE upgrading to this release, while the old field is still declared, or,
+  once it lands, read the unmapped columns through the operator-only `os migrate` read
+  (objectstack#21573). There is no flag that re-opens undeclared columns on a write. A
+  reader that needs a column must declare it as a field; a validation rule, a
+  `readonlyWhen` or a hook condition that reads a column must name a declared field too.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, spelling, export, config field or stored shape is removed or renamed, and no stored row is read or rewritten: the change narrows which physical columns the engine's write verbs and their prior reads return, to the field map the metadata already declares. A retired column's values stay in the table; what an app does with them is an operator action stated above (convert before upgrading, or the operator-only os migrate read), not a FROM to TO mapping that objectstack migrate meta could apply. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a write result's projection (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+- 8843505: fix(objectql)!: a system write's readonly value is judged for its shape — a seed's `'yesterday'` on a readonly datetime is refused with the sentence any other field gets, never stored (#21663)
+  
+  **BREAKING** — a write that keeps a readonly value now has that value's SHAPE
+  checked. The static readonly strip still exempts a system write (seed replay,
+  migration, `isSystem` plugin code, a `before*` hook's stamp) and still drops a
+  non-system caller's readonly value; what changed is that the value the
+  exemption keeps is no longer stored unjudged. Before, the record validator
+  skipped every readonly field, so under `isSystem` a malformed readonly value
+  reached the driver verbatim — a seed's `run_at: 'yesterday'` on a readonly
+  `datetime`, an unresolved `cel` envelope from a seeder that skips its
+  resolution, an authored `created_at` the seed now keeps — while the same value
+  on a non-readonly field was refused.
+  
+  Now it is refused the same way: `VALIDATION_FAILED` (400 at an HTTP boundary),
+  the same field code and the same sentence a non-readonly field gets
+  (`Run At must be a valid datetime (ISO-8601)`), and a seed counts the row as a
+  seed error. This holds on insert, on the dry run (`ObjectQL.validate`), and on
+  both update paths, where the readonly values left after the strip are judged.
+  
+  Which checks a readonly value reaches — its type's shape, never a constraint:
+  
+  - refused: a `date` / `datetime` / `time` the platform does not read, a
+    non-number on a number-typed field, a non-boolean on a boolean, a non-array on
+    a multi-value field, a filter-operator object, and an ADR-0104 reference /
+    media / structured-JSON shape under the object's own posture (warn-first, as
+    on any other field, until the deployment's evidence enforces it);
+  - NOT checked, exactly as before: option membership, `maxLength` /
+    `minLength`, `valueDomain`, `min` / `max` / `scale` / `precision`, the email /
+    url / phone formats, and `required`. Option membership stays out on purpose:
+    `sys_activity.type` is a readonly `select` whose options are the built-in set
+    of an open vocabulary, and an author-contributed value there is stored.
+  
+  A numeric string on a readonly number field is now written as its number, and a
+  lone scalar on a readonly multi-value field as a one-member list, as on any
+  other field — the door reads the value the same way it judges it.
+  
+  **What moves for consumers.** A seed, migration or `isSystem` write that puts a
+  malformed value in a readonly field — or a hook that stamps one — is refused
+  where it was stored. Fix the value at its producer: write an ISO-8601 instant
+  (or a `Date`) into a readonly `datetime`, resolve a `cel` value before the
+  write, and stamp numbers and booleans as such. Rows already stored are never
+  re-read or rewritten. `validateRecord`, as exported, is unchanged: the readonly
+  scope is the engine write path's own.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a write-time refusal of a malformed value in a readonly field, judged by the same per-type shape checks a non-readonly field already gets. No authorable key, spelling, export or stored shape moves: the field schema is unchanged, the published validateRecord signature is unchanged, no stored row is read or rewritten, and which value a producer meant to write is not something a ledger entry can rewrite. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this behaviour (not already-registered); and the change is a write-path verdict, not a declaration (not runtime-interface-only or type-surface-only). -->
+
+### Patch Changes
+
+- 41a3c8d: Published comments that named `driver-memory`'s retired reference matcher as a live filter backend now name what replaced it
+  
+  Clause-②: no
+  
+  `driver-memory`'s reference matcher (`memory-matcher.ts`) was retired in commit `8fec76a2b`. Four published packages still described it as a live surface in text that ships:
+  
+  - `@objectstack/spec`:
+    - The backend table in the filter-logic conformance docblock, which ships in `data/index.d.ts` and `data/index.d.mts`, now lists the in-memory backend as `driver-memory`'s query path (`normalizeFilterCondition`, then mingo) where it listed `memory-matcher`, and says the matcher held that row until commit `8fec76a2b` retired it.
+    - `src/data/filter.zod.ts` ships as source. In it, the `$icontains` implementation table lists `driver-memory`'s query path and analytics face, both on `asciiCaseInsensitiveRegexSource`. The `$like` / `$ilike` and `$empty` tables keep the matcher only in a note that commit `8fec76a2b` retired it. The `foldAsciiCase` docblock counts five JS evaluation faces where it counted six. The `asciiCaseInsensitiveContains` docblock names objectql's `having` and `formula` as its callers. The string-ordering note says `driver-memory`'s query path hands the comparison to mingo. Of these, the `foldAsciiCase`, `asciiCaseInsensitiveContains` and `FILTER_OPERATORS` docblocks also ship in the filter declaration chunk (`filter.zod-*.d.ts` / `.d.mts`).
+    - `src/ui/view.zod.ts` ships as source. It now says that `driver-memory`'s query path runs `assertFilterConditionShape` through `convertToMongoQuery`, where it said `match()` did.
+    - A comment inside `FILTER_TEXT_CASES` ships in `data/index.js` / `.mjs` and `browser/data/index.js` / `.mjs`. It now says the reference matcher measured case-exact until commit `8fec76a2b` retired it.
+  - `@objectstack/service-analytics`: two comments in `ObjectQLStrategy`, which ship in the JavaScript output (the first also in `index.d.ts` / `index.d.cts`), changed. The first names `driver-memory`'s query path, not its matcher, as a face that pins `{$not: {}}` as the zero-row filter. The second says in the past tense that `memory-matcher.ts` read `$regex` as a real regex, until `$regex` was retired and commit `8fec76a2b` retired the matcher too.
+  - `@objectstack/formula`: the comment over the `$icontains` arm in `matches-filter.ts` ships in `index.js` / `index.mjs`. It now names objectql's `having` as the other caller of `asciiCaseInsensitiveContains`. It says `driver-memory`'s reference matcher called it until commit `8fec76a2b` retired it, and that `driver-memory`'s query path folds through `asciiCaseInsensitiveRegexSource`.
+  - `@objectstack/objectql`: the comment over the `having` walker's `$notContains` arm in `having-filter.ts` ships in `index.js` / `index.mjs` and `core.js` / `core.mjs`. It now says the record-at-a-time faces (`formula` and this walker) answer the predicate on a stored value that is not a string, as `driver-memory`'s reference matcher did until commit `8fec76a2b` retired it.
+  
+  Comment only: no export, type, error code, status, message text or runtime behaviour changes.
+- 04f0cc4: fix(objectql): a driver error that leaves the engine no longer carries the failing statement or the caller's values
+  
+  Clause-②: no
+  
+  The engine has cut the bound statement out of its own log line for a failed driver call for a long time, but it rethrew the driver's raw error. Any in-process code that logged what it caught, such as an auth library's error logger, printed the statement and the row's values. The same cut now runs where the error leaves the engine, so no consumer needs a patch of its own.
+  
+  - **Where.** Every engine operation that reaches a driver: `find`, `findOne`, `count`, `aggregate`, `insert` (batch included), `update` and `delete` (by id and by predicate), `execute`, `transaction`, `resolveSecretField` and `resolveInternalField`.
+  - **What is cut.** The statement and the caller's values, from the error's `message` and `stack`, from the properties drivers attach (mysql2's `sql` and `sqlMessage`; node-postgres' `detail`, `where` and `internalQuery`), and down the `cause` chain. A `DuplicateRecordError` keeps its own fields and carries a cut `cause`.
+  - **What stays.** The error's class (`instanceof` still holds), `name`, `code`, `errno`, `sqlState`, Postgres' identifier fields (`constraint`, `table`, `column`, …) and the database's own diagnostic. The message now reads as the statement's kind, a `[statement and bound values redacted]` marker and the diagnostic. A Postgres key-shaped `detail` keeps its column list. Every REST answer keeps its status, code and `field`.
+  - **What changes for a caller.** Code that read the statement or a value out of a driver error's message or properties now gets the marker instead. Branch on the class, `code` or `errno` instead. The driver error on a `DuplicateRecordError`'s `cause` is an equivalent copy, no longer the object the driver threw. An import's row report for a value-bearing database error no longer repeats the rejected value.
+- 1fd5664: fix: when the store refuses an uninstall's `sys_packages` delete, the uninstall now answers the failure and removes nothing else, instead of answering success and coming back after the next restart (#21276)
+  
+  Clause-②: no
+  
+  **`@objectstack/metadata-protocol`.** `deletePackage` now deletes the package's `sys_packages` row first, before its `sys_metadata` rows, its tables, its registry entry and the rows the uninstall cleanups own. When the `package` service refuses that delete, whether it returns `{ success: false }` or throws, `deletePackage` throws and nothing else is removed. A store fault answers `500`, with `DATABASE_ERROR` from a live SQL driver and `INTERNAL_ERROR` otherwise. A declared 4xx refusal is passed through unchanged. Before this, the refusal was logged as a warning, and `DELETE /api/v1/packages/:id` answered `200` after the package's metadata, tables and grants had been removed. The package then came back after the next restart.
+  
+  Before that store delete, `deletePackage` now also asks the registry whether the uninstall would be refused because another package extends an object this package owns (ADR-0029). If so, it throws the registry's own refusal with nothing removed. A registry without the new question is not asked, and the refusal then surfaces at the registry withdrawal, as before.
+  
+  **`@objectstack/objectql`.** New: `SchemaRegistry.assertPackageUninstallable(packageId)`. It throws the refusal `unregisterObjectsByPackage` and `uninstallPackage` raise for an object another package extends, with the same message, and it changes nothing. `unregisterObjectsByPackage` now calls it, so there is still one copy of that check.
+  
+  **`@objectstack/runtime`.** `DELETE /api/v1/packages/:id` now asks `deletePackage` before it touches anything. It checks that the package exists with a read, and it withdraws the package from the running registry and clears its saved disable record only after `deletePackage` has answered. So when the store refuses, the door answers `500`, the same process keeps serving the package, and a package that was disabled stays disabled after a restart. Before this, the door withdrew the package and cleared its disable record first. A refused delete then left the package missing until a restart, and brought a disabled package back enabled.
+  
+  An uninstall refused because another package extends an object this package owns still answers `500` with nothing changed: the stored rows, the registry entry and the disable record all stay as they were, in the same process and after a restart. That refusal is now decided before the store delete, instead of by the door withdrawing the package first. An ordinary uninstall, and a host with no `package` service, are unchanged.
+- 57cc695: feat(spec): `CryptoContext` gains a required `scope` discriminant, and `LocalCryptoProvider` binds it into a delimiter-safe, versioned AAD (ADR-0128 D1–D3, #21326 stage 1)
+  
+  Clause-②: yes
+  
+  **BREAKING** for `ICryptoProvider` implementers and for every direct caller of
+  `encrypt`, `decrypt` or `rotateKey`: `CryptoContext.scope` is required, so a
+  context literal without it stops compiling (`TS2741`), and the compiler names the
+  missing member. `LocalCryptoProvider` also refuses such a context at runtime with
+  `CryptoContextScopeError`, for a caller the compiler never saw. Code that only
+  injects a provider is unaffected.
+  
+  `scope` is a member of the new closed set `CRYPTO_CONTEXT_SCOPES` (type
+  `CryptoContextScope`), one member per producer of `CryptoContext`:
+  `settings` (`SettingsService`), `object_secret_field` (the ObjectQL engine's
+  secret-field path) and `datasource_credential` (the datasource secret binder).
+  Each producer in this release passes its own member on every call. A new producer
+  adds its own member; it never borrows an existing one.
+  
+  What the contract now requires of every provider that binds AAD:
+  
+  - **Producer-discriminated (D1).** The AAD binds `(scope, namespace, key)`, so a
+    ciphertext sealed by one producer does not authenticate under another
+    producer's context, whatever the two `(namespace, key)` pairs are.
+  - **Delimiter-safe (D2).** Distinct triples produce distinct AAD bytes. An
+    unescaped join is not permitted.
+  - **Versioned.** A ciphertext records which AAD derivation sealed it, and is
+    opened only with that derivation. An unknown derivation fails closed. No second
+    derivation or scope is ever tried after a failure (D3).
+  
+  `LocalCryptoProvider` seals every new value under derivation version 2: a lead
+  byte that never occurs in UTF-8, a versioned label, then the scope, namespace and
+  key, each prefixed with its 4-byte length. The ciphertext carries a `v2:` marker.
+  A ciphertext with no marker is version 1, the bare base64 every earlier release
+  sealed, and it still opens with the older `(namespace, key)` binding. Existing
+  secrets therefore keep working with no action, and carry the older binding until
+  they are re-wrapped. Re-wrapping existing ciphertext at rest is stage 2 of
+  #21326. `rotateKey` already re-seals a version-1 handle under version 2. Any other
+  marker is refused with `UnknownCiphertextVersionError`.
+  
+  Operational note: a secret set or rotated by this release carries the `v2:`
+  marker, and an earlier release cannot open it. A rollback past this release needs
+  those values to be set again.
+  
+  `@objectstack/objectql` and `@objectstack/service-datasource` pass their own
+  scope on every seal and open. Their public surface is unchanged.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) `CryptoContext` and `ICryptoProvider` are TypeScript contracts with no metadata surface: no Zod schema, no authorable key, no export renamed or removed, and no stored row changes shape (`sys_secret.ciphertext` is provider-defined, and every existing ciphertext still opens), so `objectstack migrate meta` has nothing to rewrite. The affected party is a provider implementer or a direct caller, and the compiler names the missing member at their call site. -->
+- d956910: fix(objectql): a raw statement's driver fault, and a lifecycle sweep's direct-driver fault, no longer carry the statement or the caller's values
+  
+  Clause-②: no
+  
+  Two paths the engine-boundary cut did not reach now take it.
+  
+  - **`ObjectQL.execute`.** The cut ran on a driver error's message only when the shared leak predicate recognised a statement in it, and the predicate recognises four leading verbs. A raw statement opening with any other word, such as a common-table-expression form or a dialect's own upsert or merge verb, kept the statement and the bound values on the declared fault's `cause` (its `message` and `stack`), where any logger that prints an error's cause chain wrote them out. The door now tells the cut that it sent a statement, so the cut runs whatever word the statement opens with. The predicate's list is unchanged.
+  - **The lifecycle sweep.** The Archiver copies rows to the cold store and deletes them from the hot store through the drivers directly, not through an engine door. A driver fault there, such as a cold write the archive store refused, put the archived row's values into the sweep's warning line and its `report.errors` entry. The sweep now cuts the fault the same way before it reports or logs it.
+  - **What stays.** The error's class, `code`, `status` and the database's own diagnostic, on the fault and on its `cause`. A raw statement opening with one of the four recognised verbs is cut exactly as before. A sweep failure that is not a driver error is reported word for word as before.
+  - **What changes for a caller.** Code that read the statement or a value out of a raw statement's fault, or out of a lifecycle sweep's error entry, now gets a `[statement and bound values redacted]` marker followed by the diagnostic. Branch on the error's class and `code` instead.
+- 6d728b8: refactor(objectql): the engine takes its driver-fault redaction from `@objectstack/types`
+  
+  Clause-②: no
+  
+  The redaction the engine applies to its write-path log lines, at its boundary, at the raw-statement door and in the lifecycle sweep now lives in `@objectstack/types`, so `@objectstack/driver-sql` calls the same cut. The engine calls it as before, with the same arguments, and its answers are unchanged. None of the moved names was exported from `@objectstack/objectql`'s entries, so its public surface does not move.
+- 5555047: `viewContainerNameRefusal` is now re-exported from `@objectstack/metadata/view-container-name`
+  
+  Clause-②: no
+  
+  The divergent view-container `name` judge moved to `@objectstack/metadata`, the one layer the boot loop, the artifact/HMR loader and the runtime save door all depend on, so all three call one judge. `@objectstack/objectql` keeps the `viewContainerNameRefusal` export, its signature and the `ViewContainerNameRefusal` type. The boot loop's refusal and the words it and `os validate` print are unchanged, byte for byte.
+- a1ca156: `LifecycleService` asks the registry whether `sys_organization` is registered before its governance tenant scan reads it, so a composition that registers no `sys_organization` sweeps single-tenant again instead of aborting every sweep
+  
+  Clause-②: no
+  
+  - The engine's in-process verbs refuse an object name the registry does not resolve (`OBJECT_NOT_FOUND`, 404) before any driver is asked. Take a composition with a settings service and lifecycle-declared objects but no `sys_organization` object. Its tenant scan got that refusal instead of a missing table, so every sweep aborted before applying any policy. The scan now asks `engine.registry.getObject('sys_organization')` first, the same shape `ObjectQL.probeInstallOrganizations` takes. An unregistered object answers "no tenant overrides", and the sweep runs one global pass on each declared window.
+  - A registered `sys_organization` is read as before. A missing table is still the one benign driver cause. Every other failure still aborts the sweep and is reported through `report.errors`, an `OBJECT_NOT_FOUND` from that read included.
+  - `LifecycleEngineLike['registry']` now declares the optional `getObject?(name)` member the scan reads. A registry without it cannot be asked, and the scan then reads exactly as before. No new export and no change to the sweep report's shape.
+- be55fd2: A seed row's authored `created_at` is kept when the row is first inserted, the same as when a later boot replays it (#21646).
+  
+  Clause-②: no
+  
+  - **Before.** The built-in audit stamp (`sys_stamp_audit_insert`) replaced a seed row's authored `created_at` with the boot instant on insert. A later boot's upsert update then wrote the authored value, so a fresh or reset database showed every seeded record as created at boot until the next restart. This held for a literal instant and for a `cel` value such as ``cel`daysAgo(5)` ``.
+  - **After.** Under the seed write context (`ExecutionContext.seedReplay`, set by `SEED_WRITE_EXECUTION_CONTEXT`), the insert stamp keeps an authored `created_at` and stamps the boot instant only when the row has none. Both paths now store the authored value. The update stamp is unchanged, so `updated_at` still moves on a replay. All three seed writers pass that context: `SeedLoaderService`, `AppPlugin`'s replay of a stack's `data[]`, and `@objectstack/verify`'s `seed()`.
+  - **Unchanged.** A REST create, a create from a bare `isSystem` context and every other caller still have `created_at` stamped now. `preserveAudit` is unchanged, and the seed context does not gain it. A non-system create that requests `preserveAudit` gets the same warning as before. `created_by` is not stamped on a seed write, because the seed context has no user. An authored value is kept on insert and on replay, as it was before this change.
+  - ⛔ No schema, key, export or error code is added or removed.
+- 5259a35: `droppedFields` on a create names only keys the caller sent, never a value a write middleware filled in
+  
+  Clause-②: no
+  
+  With `@objectstack/organizations` mounted (the walled tenancy postures), a non-system create that names no `organization_id` has that column filled with the caller's active organization by the organizations write middleware. `ObjectQL.insert` took its record of what the caller sent after that middleware had run. So the static `readonly` strip treated the fill as a caller write, took it, and reported it:
+  
+  - Before: `POST /api/v1/data/<object>` with a body that names no `organization_id` answered 201 with `droppedFields: [{ object, fields: ['organization_id'], reason: 'readonly' }]`. `onFieldsDropped` fired with the same event. The console showed it as a warning toast on every such create.
+  - After: the same create answers 201 with no `droppedFields`, and `onFieldsDropped` does not fire. The row is stored in the active organization, as before.
+  
+  `insert` now records which keys each row carries before any write middleware runs. Only those keys count as sent by the caller. No field is exempted by name, so this covers every write middleware fill, including the `owner_id` fill of `@objectstack/plugin-security`. The referential-integrity check reads the same record, so it no longer checks a middleware-filled reference as if the caller had sent it.
+  
+  Unchanged:
+  
+  - A key the caller does send is judged and reported as before. That includes `organization_id` itself, and a key whose value a middleware rewrote.
+  - The array insert (`createMany`) and the `single` posture already reported nothing for an absent `organization_id`, and they still do.
+  - The stored row is the same. Before, the filled column was stripped and then filled again from the same active organization further down. Now the fill is kept.
+  
+  No export, type, error code or status changes.
+- 26d710e: A runtime schema sync (`ObjectQL.syncSchemas()`) no longer sends DDL to an object with `external` set. That sync runs on an install-local install, a rehydrate and template seeding. It also no longer logs the durability ERROR "Schema sync FAILED … not durable" for such an object. The ERROR still fires for any other object whose sync fails.
+  
+  Clause-②: no
+  
+  - **What was wrong.** A federated object (ADR-0015) lives on a datasource whose schema the remote database owns. The boot sync never sends it DDL. It binds the object to its remote table with the driver's DDL-free `registerExternalObject`. The runtime sync had no such branch, so it called `syncSchema` on every federated object in the registry. On an external-schema datasource the driver refuses that DDL, as designed. The refusal was then logged as a durability failure, although nothing durable was lost. A showcase-based host printed two false ERROR lines on every install-local install, one each for `showcase_ext_customer` and `showcase_ext_order`. A false alarm on every run teaches operators to skip the one line that, for any other object, means its data is not on disk.
+  - **What it does now.** `syncSchemas()` treats a federated object exactly as the boot sync does. It binds the object without DDL and logs a `debug` line. If the driver has no `registerExternalObject`, it skips the object at `debug`. A binding that throws is logged at `warn`. It never calls `syncSchema` for the object. The binding matters for an object registered at runtime: without it, every read resolves to a table named after the object instead of the remote table, and fails with "no such table".
+  - **One predicate.** The boot sync, `syncSchemas()` and `syncObjectSchema()` now ask one shared predicate, `external != null`, so the runtime and boot syncs cannot drift apart again. The predicate reads the object's own `external` block, not its datasource's `schemaMode`. An object without `external` that lands on an external-schema datasource still gets the ERROR when its DDL is refused, because it expected a table it did not get.
+  - No accepted input, key, export, status or error code changes.
+- 0728cbf: A field-narrowed `$search` no longer matches through the pinyin search companion of a field outside the search-field set (#21880).
+  
+  Clause-②: no
+  
+  - **What changed.** When the optional pinyin search companion is on (`OS_SEARCH_PINYIN_ENABLED`), the engine's search expansion (`expandSearchToFilter`) adds the companion clause only when every field the companion mirrors is inside the effective search-field set: the set `resolveSearchFields` computes, after any `$searchFields` narrowing. The mirrored fields are read from `resolveSearchCompanionSources`, the same function the companion is provisioned and filled from.
+  - **What stays the same.** A search with no narrowing keeps the clause whenever the display/name field is in the object's searchable set, so pinyin recall there is unchanged. A CJK term still skips the clause. Deployments with the companion off see no change.
+  - **Who notices.** A search narrowed to fields that leave out the display/name field, by a `$searchFields` override, by the narrowing global search applies to the fields a caller may query, or by a declared `searchableFields` that omits it, no longer matches through that field's pinyin form.
+- f243a29: Deleting an organization no longer fails with a 500 on a deployment that has a federated (ADR-0015 `external`) object bound. The engine's referential cascade no longer treats the `organization_id` the platform injects into a federated object as a reference to `sys_organization`.
+  
+  Clause-②: no
+  
+  - **What was wrong.** The registry injects `organization_id` into every object, federated ones included, and the platform provisions no storage for a federated object. The cascade's dependents probe filtered the remote table on that column, the SQL driver refused the unknown column (`INVALID_FILTER`), and the probe's failure propagated, so the delete failed. The showcase, with its federated fixture provisioned, answered every organization delete with 500.
+  - **What changed.** The cascade scan skips a federated object's injected tenant anchor. It asks the same `isFederatedObject` predicate as the driver-option builder and the related-record read, plus the injected-column provenance marker, so an `organization_id` the author declared on a federated object is still probed. The cascade's atomicity plan asks the same question, so it keeps counting exactly the relations the scan probes.
+  - **What did not change.** Any lookup an author declares on a federated object is still probed, and a probe that cannot run still fails the delete. Only a missing child table is passed over as having no dependents.
+- d16b9fb: The platform's own `sys_metadata` reads and writes now carry the explicit system opt-in (`isSystem: true`) instead of reaching the data engine with no principal at all
+  
+  Clause-②: no
+  
+  - **What moved.** Each engine call in these functions now passes `context: { isSystem: true }`. Inside a repository transaction it passes `{ ...ctx, isSystem: true }`, so the transaction handle still rides along.
+    - `@objectstack/metadata-protocol`: the overlay reads (`findServedOverlayRow`, `overlayLockLayerAt`), the list read (`readActiveOverlayRows`, and `readFlattenedMetaItems`' draft preview), the authoring gate's stored-collection fold (`foldStoredCollection`), the audit and commit trail writes (`recordMetadataAudit`, `persistPackageCommitRow`), and the package verbs' store calls (`publishPackageDrafts`, `resolveOverlayPackageBinding`, `storedFlowBindingAgrees`, `deletePackage`, `duplicatePackage`, `reassignOrphanedMetadata`).
+    - `SysMetadataRepository`: `get`, `put`, `delete`, `promoteDraft`, `restoreVersion`, `listDrafts` and the two lineage counters.
+    - `@objectstack/objectql`: `ObjectQLPlugin`'s authored action and hook reads, at boot and on resync.
+    - `@objectstack/core`: the authored-translation read (`readAuthoredTranslationLayer`).
+  - **Why.** plugin-security passes an engine operation whose context has no user, no position, no permission set and no `isSystem` straight on to the next handler (ADR-0096's principal-less hand-off). These calls worked only because of that pass-through. They are platform plumbing: any door in front of them has already authorized the caller, and the protocol scopes its own rows by organization. So they now say so with the opt-in that already exists.
+  - **No gate verdict moves.** A system context skips the six gates the middleware still runs before that pass-through: package-managed, system-row, curated-capability, audience-anchor, engine-owned and delegated-administration. Four of them only act on other objects. The engine-owned gate never fires on a context with no user. The delegated-administration gate only acts on the RBAC link tables. So none of the six applies to the `sys_metadata` family. An instrumented run of the dogfood suite and a booted dev composition recorded no gate firing on any of these calls before the change. After the change it recorded no principal-less call from these functions.
+  - **One engine check also stands down under `isSystem`.** That is the referential-integrity check on a caller-supplied lookup. On these writes the only lookup it judged was `sys_metadata.organization_id`, which the repository fills from the door-derived organization. The instrumented runs recorded no refusal from it on any of these calls.
+  - ⛔ No new API, no export change, and no change to what any door authorizes.
+- 13a22d0: Deleting a business unit or a user no longer fails on a deployment that has a federated (ADR-0015 `external`) object bound. The engine's referential cascade no longer treats any column the platform injects into a federated object as a reference.
+  
+  Clause-②: no
+  
+  - **What was wrong.** The registry injects its own columns into every object, federated ones included: the tenant anchor `organization_id`, the business-unit anchor `owning_business_unit_id`, the owner `owner_id`, and the audit lookups `created_by` and `updated_by`. The platform provisions no storage for a federated object, so none of them exists on the remote table. An earlier fix taught the cascade to skip `organization_id` alone. The cascade's dependents probe still filtered the remote table on the other anchors, the SQL driver refused the unknown column (`INVALID_FILTER`), and the failure propagated. On the showcase with its federated fixture provisioned, deleting a business unit answered 400 and removing a user answered 500.
+  - **What changed.** The cascade scan and its atomicity plan skip every column the registry injected into a federated object and the object does not provision. They read which columns those are from the registry's own injected-column provenance, not from a list of names, so a column the registry injects later is covered too. The lifecycle reap and archive passes no longer split a federated object's rows per tenant on its injected `organization_id`: such rows carry no organization, so a tenant-scoped retention override for that object has no rows to select, and the object is swept in one global pass.
+  - **What did not change.** A lookup the author declares on a federated object, including the author's own `organization_id` or `owner_id`, is still probed, and a probe that cannot run still fails the delete. Only a missing child table is passed over as having no dependents.
+- 568dc0b: Record-change payloads apply the same credential mask and internal-field omission as write responses.
+  
+  Clause-②: yes (widening)
+  
+  - **`data.record.created` / `data.record.updated` events.** The engine projects the event's `after` and `changes` bodies through `omitInternalFieldsFromWriteResponse` (`@objectstack/core`), the helper every external write response already uses: credential-class fields (`secret`, and `password` outside the exempt `managedBy` buckets) carry `SECRET_MASK` (or `null` when unset), and `internal: true` fields are omitted. The engine's own write result is unchanged, so a privileged in-process caller that reads the stored value back off `insert` / `update` still sees it.
+  - **Approval request snapshot.** The record snapshot an approval request stores (`payload_json`) applies the same rule when the request is opened.
+  - **Outbound webhook body.** The delivered body, and the delivery row that stores it, apply the same rule to `before`, `after` and `changes`.
+  - **Knowledge index documents.** `recordToDocument` takes the object definition as an optional fourth argument and skips credential-class and `internal` fields, under `'*'` and when a source names one explicitly. `KnowledgeService` passes the definition from the bound engine.
+  - **New public surface of `@objectstack/service-knowledge` (additive):** `recordToDocument` accepts the object definition as an optional fourth argument; existing three-argument calls behave as before.
+  - **Receivers see masked values.** Webhook receivers and realtime clients now get `SECRET_MASK` (or `null` when unset) for credential-class fields and no key for `internal` fields.
+  - **Existing rows are not rewritten.** Approval snapshots, webhook delivery rows and knowledge documents written before this change keep their stored bodies; reindexing a knowledge source refreshes its documents.
+  - The audit trail already masked these fields and is unchanged. No other accept set or public schema changes.
+- Updated dependencies [ecb6ca0]
+- Updated dependencies [135daaa]
+- Updated dependencies [22c2d6f]
+- Updated dependencies [909229e]
+- Updated dependencies [0721848]
+- Updated dependencies [bdd3654]
+- Updated dependencies [bdd3654]
+- Updated dependencies [aead296]
+- Updated dependencies [c205b6c]
+- Updated dependencies [0a0debb]
+- Updated dependencies [c98a72d]
+- Updated dependencies [8598614]
+- Updated dependencies [ad7c351]
+- Updated dependencies [e901c27]
+- Updated dependencies [a387354]
+- Updated dependencies [f6b7520]
+- Updated dependencies [36e4647]
+- Updated dependencies [93a54b8]
+- Updated dependencies [f623e2f]
+- Updated dependencies [96a9719]
+- Updated dependencies [41a3c8d]
+- Updated dependencies [c52c49d]
+- Updated dependencies [cfa4d74]
+- Updated dependencies [99589f9]
+- Updated dependencies [36ad321]
+- Updated dependencies [dcc5ef4]
+- Updated dependencies [748b240]
+- Updated dependencies [9b7a0ef]
+- Updated dependencies [713b0fa]
+- Updated dependencies [5a9292e]
+- Updated dependencies [30af17e]
+- Updated dependencies [7aab759]
+- Updated dependencies [0e10be6]
+- Updated dependencies [1c52a5e]
+- Updated dependencies [99e1912]
+- Updated dependencies [7ebb543]
+- Updated dependencies [3911901]
+- Updated dependencies [222ecc2]
+- Updated dependencies [1fd5664]
+- Updated dependencies [3937ad2]
+- Updated dependencies [3a6d92f]
+- Updated dependencies [7526058]
+- Updated dependencies [53fd35e]
+- Updated dependencies [23365ea]
+- Updated dependencies [32d5769]
+- Updated dependencies [16eefc6]
+- Updated dependencies [6e33b67]
+- Updated dependencies [57cc695]
+- Updated dependencies [db3fee3]
+- Updated dependencies [4c8363f]
+- Updated dependencies [9f13c94]
+- Updated dependencies [535d1d2]
+- Updated dependencies [6d67ad5]
+- Updated dependencies [ca0dfb6]
+- Updated dependencies [45efcfa]
+- Updated dependencies [6d728b8]
+- Updated dependencies [c9c555a]
+- Updated dependencies [68c5ab7]
+- Updated dependencies [b793010]
+- Updated dependencies [5555047]
+- Updated dependencies [5555047]
+- Updated dependencies [5555047]
+- Updated dependencies [85e29b8]
+- Updated dependencies [e9dec3d]
+- Updated dependencies [aa46322]
+- Updated dependencies [100c394]
+- Updated dependencies [2f837a5]
+- Updated dependencies [abe8f28]
+- Updated dependencies [72217cd]
+- Updated dependencies [72af58c]
+- Updated dependencies [1289925]
+- Updated dependencies [958cfe2]
+- Updated dependencies [ced3e1a]
+- Updated dependencies [7d674df]
+- Updated dependencies [3f1bc81]
+- Updated dependencies [72f3c74]
+- Updated dependencies [529d971]
+- Updated dependencies [16d241a]
+- Updated dependencies [4331a6b]
+- Updated dependencies [ce53218]
+- Updated dependencies [44defd4]
+- Updated dependencies [44defd4]
+- Updated dependencies [83b3d32]
+- Updated dependencies [6c5697d]
+- Updated dependencies [74281a8]
+- Updated dependencies [9a4182a]
+- Updated dependencies [550f4cc]
+- Updated dependencies [41b1333]
+- Updated dependencies [5dbcee8]
+- Updated dependencies [ec390ec]
+- Updated dependencies [f1e4ae5]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [eb9ef79]
+- Updated dependencies [f83d066]
+- Updated dependencies [1ac7308]
+- Updated dependencies [10454b3]
+- Updated dependencies [5d0e4e2]
+- Updated dependencies [e367002]
+- Updated dependencies [9e9d693]
+- Updated dependencies [6ec54f0]
+- Updated dependencies [98eb3b9]
+- Updated dependencies [7b07749]
+- Updated dependencies [eea82af]
+- Updated dependencies [a2aadab]
+- Updated dependencies [ced217c]
+- Updated dependencies [ff16740]
+- Updated dependencies [fe10172]
+- Updated dependencies [7fd2c34]
+- Updated dependencies [c43a8ae]
+- Updated dependencies [ed15448]
+- Updated dependencies [9d91f58]
+- Updated dependencies [9059082]
+- Updated dependencies [cf60dbc]
+- Updated dependencies [a6a7547]
+- Updated dependencies [309224d]
+- Updated dependencies [e83c9f6]
+- Updated dependencies [b7a13c7]
+- Updated dependencies [045f764]
+- Updated dependencies [18c2ddc]
+- Updated dependencies [75ddcd1]
+- Updated dependencies [2df3d13]
+- Updated dependencies [07bf21f]
+- Updated dependencies [6fb7115]
+- Updated dependencies [53021e3]
+- Updated dependencies [a0176ef]
+- Updated dependencies [e1790fd]
+- Updated dependencies [e1790fd]
+- Updated dependencies [149153c]
+- Updated dependencies [ba57588]
+- Updated dependencies [a43d90a]
+- Updated dependencies [607463d]
+- Updated dependencies [18fe681]
+- Updated dependencies [3237b4a]
+- Updated dependencies [2e78046]
+- Updated dependencies [0fe0a59]
+- Updated dependencies [cab6396]
+- Updated dependencies [87712ab]
+- Updated dependencies [e864db5]
+- Updated dependencies [866683f]
+- Updated dependencies [88a39c0]
+- Updated dependencies [8e35895]
+- Updated dependencies [1f04696]
+- Updated dependencies [e6dc7a2]
+- Updated dependencies [9cc2c79]
+- Updated dependencies [d16b9fb]
+- Updated dependencies [753e7a1]
+- Updated dependencies [c9761cd]
+- Updated dependencies [c9761cd]
+- Updated dependencies [c9761cd]
+- Updated dependencies [c9761cd]
+- Updated dependencies [bab7685]
+- Updated dependencies [fb69825]
+- Updated dependencies [48eb9c1]
+- Updated dependencies [8832655]
+- Updated dependencies [100f68b]
+- Updated dependencies [8963dbf]
+- Updated dependencies [1354e7b]
+- Updated dependencies [1cbe165]
+- Updated dependencies [3c7785d]
+- Updated dependencies [6dd99b8]
+- Updated dependencies [15fe567]
+- Updated dependencies [0bddffd]
+- Updated dependencies [7e0066a]
+  - @objectstack/spec@17.7.0
+  - @objectstack/metadata-protocol@17.7.0
+  - @objectstack/core@17.7.0
+  - @objectstack/formula@17.7.0
+  - @objectstack/metadata-core@17.7.0
+  - @objectstack/metadata@17.7.0
+  - @objectstack/types@17.7.0
+
 ## 17.6.0
 
 ### Minor Changes

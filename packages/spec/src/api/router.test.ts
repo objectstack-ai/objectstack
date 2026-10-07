@@ -562,7 +562,7 @@ describe('Integration Tests', () => {
 // than a bare unrecognized-key error, and the value survives at the same
 // magnitude. Asserting the message, not just `.toThrow()`: a bare throw stays
 // green when the schema throws for some unrelated reason.
-describe('RouteDefinition.timeout \u2192 timeoutMs (#15677)', () => {
+describe('RouteDefinition.timeout \u2192 timeoutMs', () => {
   const base = { method: 'GET' as const, path: '/api/test', handler: 'test_handler' };
 
   it('REFUSES the retired `timeout` spelling with the rename in the message', () => {

@@ -266,10 +266,140 @@ export interface BootstrapDeclaredEmailTemplatesResult {
 }
 
 /**
+ * [#22062] How many declared names one bulk read of the boot sweep carries in
+ * its `$in` list. Module-internal; exported for this package's own tests.
+ */
+export const SWEEP_NAMES_PER_READ = 200;
+
+/**
+ * [#22062] The row bound of one bulk read. Module-internal; exported for this
+ * package's own tests.
+ *
+ * The bound is not a completeness claim. A read that comes back holding this
+ * many rows may have been cut short, and a key the read did not answer is never
+ * taken as "no row": the sweep looks that template up on its own before it
+ * inserts anything (see {@link bootstrapEffectiveEmailTemplates}). Five rows per
+ * name is room for the usual locale and organization spread, so a steady boot
+ * pays that fallback only where a name really carries more rows than that.
+ *
+ * The bound also does a second job: it makes the read PAGED. A paged read with
+ * no `orderBy` is the very shape of the per-template lookup
+ * (`find(…, { where: { name, locale }, limit: 1 })`), so a driver orders both
+ * the same way, and the first row a key meets in the bulk read is the row that
+ * lookup returns. Measured on `ObjectQL` over `SqlDriver` (better-sqlite3): both
+ * statements go out as `… order by id asc limit ?`; the same read with no
+ * `limit` gets no ORDER BY at all and walks rows in storage order, which chose
+ * a different row for a `(name, locale)` held by several organizations.
+ */
+export const SWEEP_ROWS_PER_READ = SWEEP_NAMES_PER_READ * 5;
+
+/** [#22062] A stored template's key: a template is unique per `(name, locale)`. */
+function templateRowKey(name: unknown, locale: unknown): string {
+  return JSON.stringify([name, locale]);
+}
+
+/**
+ * The per-template lookup: the stored row for one `(name, locale)`, or
+ * `undefined`. The live doors read through it, and so does the boot sweep for
+ * every key its bulk read did not answer.
+ */
+async function findTemplateRow(
+  engine: IDataEngine,
+  object: string,
+  name: string,
+  locale: string | undefined,
+): Promise<any> {
+  const existing = await (engine as any).find(object, {
+    where: { name, locale },
+    limit: 1,
+    context: SYSTEM_CTX,
+  });
+  return Array.isArray(existing) ? existing[0] : (existing as any)?.data?.[0];
+}
+
+/**
+ * [#22062] Read the stored rows for the declared names in bulk, one read per
+ * {@link SWEEP_NAMES_PER_READ} names, instead of one lookup per template.
+ *
+ * Each key keeps the FIRST row it meets, in the read's own order — the order
+ * the per-template lookup is answered in (see {@link SWEEP_ROWS_PER_READ}). A
+ * read cut short at its bound keeps that property for every key it answered:
+ * the rows it returned are a prefix of one order, so a key's first row is in
+ * it whenever any of its rows is.
+ *
+ * Answers `undefined` when a read fails or does not answer a row list. The
+ * sweep then looks every template up on its own, exactly as it did before this
+ * read existed — the read is an optimization, and no answer is made up for it.
+ */
+async function readStoredTemplateRows(
+  engine: IDataEngine,
+  declared: unknown[],
+  object: string,
+  logger: Logger | undefined,
+): Promise<Map<string, any> | undefined> {
+  const names = [...new Set(declared.map((item) => (item as { name?: unknown } | null)?.name))]
+    .filter((name): name is string => typeof name === 'string');
+  const byKey = new Map<string, any>();
+  try {
+    for (let start = 0; start < names.length; start += SWEEP_NAMES_PER_READ) {
+      const found = await (engine as any).find(object, {
+        where: { name: { $in: names.slice(start, start + SWEEP_NAMES_PER_READ) } },
+        limit: SWEEP_ROWS_PER_READ,
+        context: SYSTEM_CTX,
+      });
+      if (!Array.isArray(found)) throw new Error('the read answered no row list');
+      for (const row of found) {
+        const key = templateRowKey(row?.name, row?.locale);
+        if (!byKey.has(key)) byKey.set(key, row);
+      }
+    }
+  } catch (err: any) {
+    logger?.warn?.(
+      '[email] bulk read of stored email templates failed — each declared template is looked up on its own instead',
+      { error: err?.message ?? String(err) },
+    );
+    return undefined;
+  }
+  return byKey;
+}
+
+/**
+ * [#22062] Does a stored value already hold what the projection would write?
+ *
+ * Errs toward "no": a false "yes" keeps a stale template silently, while a
+ * false "no" costs one write. So a value is held only when it is the projected
+ * value itself, or one of the two storage spellings a driver may hand back for
+ * it: `1`/`0` for a boolean column, and — for `variables_json`, a JSON text
+ * column — the parsed value whose `JSON.stringify` is the projected text
+ * exactly. Anything else, an absent or `null` column included, is not held.
+ */
+function storedValueHolds(column: string, stored: unknown, projected: unknown): boolean {
+  if (stored === projected) return true;
+  if (typeof projected === 'boolean') return stored === (projected ? 1 : 0);
+  if (column === 'variables_json' && typeof projected === 'string' && stored !== null && typeof stored === 'object') {
+    return JSON.stringify(stored) === projected;
+  }
+  return false;
+}
+
+/**
+ * [#22062] True when the row already holds EVERY column the projection writes —
+ * exactly the column set the update below would write, so "held" means the
+ * update would change nothing the sender reads. A column the projection omits
+ * (an optional key the author left unset) is not compared, as the update does
+ * not write it either.
+ */
+function rowHoldsProjection(row: Record<string, unknown>, projected: Record<string, unknown>): boolean {
+  return Object.entries(projected).every(([column, value]) => storedValueHolds(column, row[column], value));
+}
+
+/**
  * Materialize ONE declared template into `sys_email_template`, honouring
  * seed-not-clobber. Shared by the boot sweep and the live subscribe path.
  *
- * @returns `true` when the row was written, `false` when deliberately skipped.
+ * @returns `true` when the row was written, `false` when deliberately not
+ *   written: an admin-owned or customized row, or a package-managed row that
+ *   already holds the template's projection.
  * @throws when the raw item fails schema validation, or the write itself fails
  *   — callers decide whether that warns or propagates.
  */
@@ -280,14 +410,30 @@ export async function upsertDeclaredEmailTemplate(
   logger?: Logger,
 ): Promise<boolean> {
   const tpl: EmailTemplateDefinition = EmailTemplateDefinitionSchema.parse(raw);
-  const now = new Date().toISOString();
+  const row = await findTemplateRow(engine, object, tpl.name, tpl.locale);
+  return writeTemplateRow(engine, tpl, row, object, logger);
+}
 
-  const existing = await (engine as any).find(object, {
-    where: { name: tpl.name, locale: tpl.locale },
-    limit: 1,
-    context: SYSTEM_CTX,
-  });
-  const row: any = Array.isArray(existing) ? existing[0] : (existing as any)?.data?.[0];
+/**
+ * The one write step behind both doors: write a validated template against the
+ * row already read for its `(name, locale)` (`undefined` when there is none).
+ *
+ * [#22062] A `managed_by: 'package'` row that already holds the projection is
+ * not rewritten. Before, every boot rewrote every effective template — one
+ * UPDATE and the engine's read-backs each — whether or not anything changed.
+ * A row with any other provenance takes exactly the path it took before: an
+ * admin-owned or customized row is never written, and a legacy row with no
+ * `managed_by` (or a `platform` one) is rewritten and adopted.
+ */
+async function writeTemplateRow(
+  engine: IDataEngine,
+  tpl: EmailTemplateDefinition,
+  row: any,
+  object: string,
+  logger: Logger | undefined,
+): Promise<boolean> {
+  const now = new Date().toISOString();
+  const projected = mapTemplateToRow(tpl);
 
   if (row?.id) {
     // Admin owns a same-named row, or has edited this seeded one — never
@@ -300,9 +446,10 @@ export async function upsertDeclaredEmailTemplate(
       return false;
     }
     if (row.customized === true) return false;
+    if (row.managed_by === 'package' && rowHoldsProjection(row, projected)) return false;
     await (engine as any).update(object, {
       id: row.id,
-      ...mapTemplateToRow(tpl),
+      ...projected,
       // Adopt pristine/legacy (pre-provenance) rows so future boots recognize
       // them as package-managed.
       managed_by: 'package',
@@ -313,7 +460,7 @@ export async function upsertDeclaredEmailTemplate(
 
   await (engine as any).insert(object, {
     id: uid('etpl'),
-    ...mapTemplateToRow(tpl),
+    ...projected,
     managed_by: 'package',
     customized: false,
     created_at: now,
@@ -395,6 +542,20 @@ export async function bootstrapDeclaredEmailTemplates(
  * and the package's `exports` map names only that entry, so this function and
  * {@link EffectiveEmailTemplateSources} add nothing to the published surface.
  * No caller outside this package needs them.
+ *
+ * ## [#22062] What a boot costs
+ *
+ * The stored rows are read in bulk ({@link readStoredTemplateRows}), and a
+ * package-managed row that already holds its projection is not rewritten (see
+ * `writeTemplateRow`). Measured on `ObjectQL` over `SqlDriver` (better-sqlite3),
+ * a steady boot over 450 unchanged templates went from 1,800 statements (a
+ * lookup, an UPDATE and its two read-backs per template) to 3 reads and no
+ * write.
+ *
+ * A key the bulk read did not answer — a template new since the last boot, a
+ * read cut short at its bound, or a failed read — is looked up on its own
+ * BEFORE anything is inserted, so no row the bulk read missed is ever inserted
+ * twice. A steady boot has no such key and pays nothing for the lookup.
  */
 export async function bootstrapEffectiveEmailTemplates(
   engine: IDataEngine,
@@ -409,9 +570,21 @@ export async function bootstrapEffectiveEmailTemplates(
   let seeded = 0;
   let skipped = 0;
 
+  const stored = await readStoredTemplateRows(engine, declared, object, logger);
+
   for (const raw of declared) {
     try {
-      const written = await upsertDeclaredEmailTemplate(engine, raw, object, logger);
+      const tpl: EmailTemplateDefinition = EmailTemplateDefinitionSchema.parse(raw);
+      const key = templateRowKey(tpl.name, tpl.locale);
+      const row = stored?.has(key)
+        ? stored.get(key)
+        : await findTemplateRow(engine, object, tpl.name, tpl.locale);
+      const written = await writeTemplateRow(engine, tpl, row, object, logger);
+      // A write leaves the bulk read's copy of this key stale. The list can
+      // name one slot twice — the registry lists an env-wide overlay after the
+      // package entry it overrides — and the later item must meet the row as
+      // it is now, so it is looked up again rather than compared to the copy.
+      if (written) stored?.delete(key);
       if (written) seeded += 1;
       else skipped += 1;
     } catch (err: any) {

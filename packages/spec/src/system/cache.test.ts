@@ -333,7 +333,7 @@ describe('DistributedCacheConfigSchema', () => {
 // Asserted on the issue CODE and the prescription text, never on "it threw":
 // a bare `toThrow()` would stay green against a schema that rejected for any
 // other reason, which is the failure this pin exists to catch.
-describe('cache duration keys carry their unit (#15679)', () => {
+describe('cache duration keys carry their unit in the key name', () => {
   it('REFUSES the retired `CacheTier.ttl` with the rename in the message', () => {
     const result = CacheTierSchema.safeParse({ name: 'l1', type: 'memory', ttl: 600 });
     expect(result.success).toBe(false);

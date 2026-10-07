@@ -211,6 +211,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 ## 升级与决策
 
 - 只在至少一条成立时升级:选项在产品语义或公开契约形状上真实分歧且既有规范定不了。
+- 或责任三答齐指他人代码、已有正路、仅最高权限可达 ⇒ 只提文档或决策卡,⛔ 不派码。
+- 或修复以猜测(键名、值形状、模式表)定安全边界 ⇒ 决策卡先比对声明式方案。
 - 或修复需破坏性/难回滚动作;其余归 PM 裁量:裁定、派发、维护者否决窗口而非许可门。
 - 具名不升级类(立即行动):恢复不变量;技术任务间顺序与依赖;验证策略;说明书脱节。
 - 四类记账事同属不升级类,恒以无产品可见行为变化为界:去重与卡片合并;台账与记账整理;
@@ -279,7 +281,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 终报 JSON 形状住 `.claude/agents/os-dev.md`,⛔ 不抄第二份;`needs_decision` 时 `open_questions` 非空。
 - `premise_still_valid: false` + `pr: null` 是合法终报,当再分诊输入复核,永不当失败派发。
 - `out_of_scope_findings` 每条 `class: a|b|c`+`reach:`+证据,或 `carrier:`(承接者);皆无 ⇒ Acceptance notes。
-- `reach:` 无实测 ⇒ ⛔ 不立卡,例外三种与定义见立卡门 ①;同轮报告互读,同族只开一张。
 - dev 不立卡;ACCEPT 逐条一行 `filed #N`/`Acceptance notes`/`dropped — 因`;三类由席位立在修复仓。
 - 席位读 PR `## Acceptance notes`,实属三类的经立卡门补立、归挂;门外已立卡关 not planned。
 - 同族发现并入收口卡(一卡覆盖全族位置,带枚举钉子),⛔ 不开单点卡;无则第二次即开。
@@ -293,11 +294,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `scripts/pm/check-half-states.mjs` | label/assignee/PR 半状态的 report-only 巡查(含已复核就绪却无人落地的孤儿 PR 检测) |
 | `scripts/pm/check-governed-merges.mjs` | governed 面合并清单的 report-only 审计(事后防线;本地枚举零 API,仅归因走查询) |
 | `scripts/pm/dispatch-gates.mjs` | 文件面 → 该跑的门禁族(派发令取数) |
-| `scripts/pm/git-history.mjs` | 窗口化 commit 计数:回答或 REFUSE(浅 clone 对窗口化 `git log`/`rev-list` 以 exit 0 无警告答错);`historyHorizon()` 是只读谓词 |
 | `scripts/pm/os-regen-merge.sh` | 碰生成物 PR 的 merge 四步序(防静默吞并与锚点倒退) |
 | `scripts/pm/ensure-pm-labels.sh` | pm 标签词表的幂等一次性创建;退役车道刻意不在 ⛔ 不加回,对象清理以脚本头为权威 |
 | `check:skill-frame-sync` / `-freshness` | 四维决策框架唯一一份拷贝的同构与新鲜度 |
-| `guard-main-checkout` / `guard-shared-stash` hooks | worktree-first 与 stash 禁令的机械面 |
 
 ## 模板与表
 
@@ -314,6 +313,7 @@ Seat: `domain:<x>#<n>` (the seat number this PM sits on; absent = seat 1)
 File surface: `<预期触碰的目录>` (stop on breach; explain in the report)
 Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud`, `model: <档位词,引当次 --tier 输出;天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:;⛔ 不抄模型 id>`
 Clause-②: yes | no
+Responsibility: `<whose code produces the risk | the platform path that already covers it, or none | who reaches it, and whether anyone uses it today>` (defect cards only, else `n/a — not a defect card`; the dispatch prompt's ruling section repeats the three answers)
 Thread-read: <id of the newest comment on the card at the moment this claim is written, or none>
 Serial constraints cleared: `<点名同文件/同包的前驱 PR 与在飞认领,及分诊点名的任意车道在飞兄弟卡中本卡 pin 断言其行为者;无则 none>`
 ```

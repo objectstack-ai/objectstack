@@ -304,6 +304,27 @@ export default defineConfig({
               find: /^@objectstack\/plugin-pinyin-search$/,
               replacement: path.resolve(__dirname, '../../plugins/plugin-pinyin-search/src/index.ts'),
             },
+            // `platform-app-object-entry-views.test.ts` boots the Setup and
+            // Account app shells and every plugin that contributes navigation
+            // into them, then judges each object entry against the object's
+            // declared list views. The shells and the sharing plugin are part
+            // of that subject — their entries and view order ARE the verdict —
+            // so they are aliased to THIS checkout's source, not to the last
+            // `pnpm build`. The other contributors it boots are either aliased
+            // above or resolve through `dist/` as this package's
+            // `check:test-source-alias` row already records.
+            {
+              find: /^@objectstack\/setup$/,
+              replacement: path.resolve(__dirname, '../../apps/setup/src/index.ts'),
+            },
+            {
+              find: /^@objectstack\/account$/,
+              replacement: path.resolve(__dirname, '../../apps/account/src/index.ts'),
+            },
+            {
+              find: /^@objectstack\/plugin-sharing$/,
+              replacement: path.resolve(__dirname, '../../plugins/plugin-sharing/src/index.ts'),
+            },
           ],
         },
         test: {

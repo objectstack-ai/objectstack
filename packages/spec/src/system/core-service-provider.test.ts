@@ -31,7 +31,7 @@ describe('CORE_SERVICE_PROVIDER', () => {
         }
     });
 
-    it('carries no entry for retired or never-real slots (#4451)', () => {
+    it('carries no entry for retired or never-real slots', () => {
         for (const slot of ['workflow', 'graphql']) {
             expect(
                 Object.prototype.hasOwnProperty.call(CORE_SERVICE_PROVIDER, slot),

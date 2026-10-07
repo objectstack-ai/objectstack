@@ -588,7 +588,7 @@ export class SharingServicePlugin implements Plugin {
           priority: 200,
           items: [
             { id: 'nav_sharing_rules', type: 'object', label: 'Sharing Rules', objectName: 'sys_sharing_rule', icon: 'share-2', requiresObject: 'sys_sharing_rule', requiredPermissions: ['manage_platform_settings'] },
-            { id: 'nav_record_shares', type: 'object', label: 'Record Shares', objectName: 'sys_record_share', icon: 'link', requiresObject: 'sys_record_share', requiredPermissions: ['manage_platform_settings'] },
+            { id: 'nav_record_shares', type: 'object', label: 'Record Shares', objectName: 'sys_record_share', viewName: 'all_shares', icon: 'link', requiresObject: 'sys_record_share', requiredPermissions: ['manage_platform_settings'] },
           ],
         },
       ],
