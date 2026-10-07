@@ -251,6 +251,19 @@ function printPendingDataMigrations(pending: readonly PendingDataMigration[]): v
   console.log('');
 }
 
+/**
+ * `--out`: write the migrated stack as a JSON snapshot, and print the line that
+ * names it. The one writer for both exits of {@link printMigrationReport}: the
+ * main path, and the early return of a run with nothing to migrate (#22116).
+ * An operator or a CI step keeps this file as the record of the run, so a run
+ * that returned without it left no file, or an earlier run's file read as this
+ * one's, behind an exit 0. `--json` writes the same bytes on its own branch.
+ */
+function writeStackSnapshot(out: string, stack: Record<string, unknown>): void {
+  writeFileSync(out, JSON.stringify(stack, null, 2));
+  printInfo(`Wrote migrated stack snapshot → ${chalk.white(out)}`);
+}
+
 /** One schema refusal of the migrated stack, in the shape `formatZodIssue` renders. */
 export type MigrationRefusal = Parameters<typeof formatZodIssue>[0];
 
@@ -526,8 +539,12 @@ export function printMigrationReport(report: MigrationReport): void {
       printSuccess('Nothing to migrate — the metadata is already canonical for this range.');
     }
     // Still advertise: metadata needing no rewrite says nothing about whether
-    // this deployment's DATA has been migrated.
+    // this deployment's DATA has been migrated. And still write `--out`, in the
+    // main path's order — the snapshot, then `--write`, then the data
+    // migrations: the snapshot is this run's record whatever the run found, and
+    // `--json` writes it regardless (#22116).
     console.log('');
+    if (report.out) writeStackSnapshot(report.out, result.stack);
     if (report.write) printWriteOutcome(report.write, 0);
     printPendingDataMigrations(report.dataMigrations);
     // Returning is safe only because ① has already printed: the schema verdict
@@ -563,8 +580,7 @@ export function printMigrationReport(report: MigrationReport): void {
   }
 
   if (report.out) {
-    writeFileSync(report.out, JSON.stringify(result.stack, null, 2));
-    printInfo(`Wrote migrated stack snapshot → ${chalk.white(report.out)}`);
+    writeStackSnapshot(report.out, result.stack);
   }
 
   // ④ `--write`: the mechanical changes written into the sources, and the rest.
