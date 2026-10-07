@@ -254,6 +254,7 @@
     "api/MetadataBulkUnregisterRequest",
     "api/MetadataCacheRequest",
     "api/MetadataCacheResponse",
+    "api/MetadataConflictError",
     "api/MetadataDeleteResponse",
     "api/MetadataDependenciesResponse",
     "api/MetadataDependentsResponse",
