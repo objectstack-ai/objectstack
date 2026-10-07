@@ -310,7 +310,7 @@ export const SysAccount = ObjectSchema.create({
     // the column drop is gated behind the `os migrate` preflight
     // (`sys-account-issuer-retirement`), never behind this constraint failing
     // mid-apply.
-    { fields: ['provider_id', 'account_id'], unique: true },
+    { fields: ['provider_id', 'account_id'], unique: 'global' },
   ],
   
   enable: {

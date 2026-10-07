@@ -164,7 +164,7 @@ export const SysViewDefinitionObject = ObjectSchema.create({
     {
       name: 'idx_sys_view_def_active',
       fields: ['name', 'organization_id', 'owner'],
-      unique: true,
+      unique: 'global',
     },
     // The switcher query: views for one object within a tenant.
     { name: 'idx_sys_view_def_object', fields: ['organization_id', 'object'] },

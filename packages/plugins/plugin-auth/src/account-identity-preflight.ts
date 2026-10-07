@@ -319,7 +319,7 @@ export function formatAccountIdentityPreflightReport(
  * provider's account bindings. No key separates them, and after the column drop
  * nothing can.**
  *
- * `sys_sso_provider` declares `{ fields: ['provider_id'], unique: true }`, so
+ * `sys_sso_provider` declares `{ fields: ['provider_id'], unique: 'global' }`, so
  * within one environment `provider_id → issuer` is a function and
  * `(provider_id, account_id)` determines exactly what `(issuer, account_id)`
  * determined — for as long as that function holds. Re-pointing breaks it: rows

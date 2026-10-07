@@ -1011,11 +1011,11 @@ export const SysUser = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['email'], unique: true },
+    { fields: ['email'], unique: 'global' },
     { fields: ['created_at'], unique: false },
     // #2766 V1.5 — phone sign-in identifier; unique when present (null for
     // email-only accounts), also the upsert match key for identity import.
-    { fields: ['phone_number'], unique: true },
+    { fields: ['phone_number'], unique: 'global' },
   ],
 
   enable: {
