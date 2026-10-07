@@ -111,6 +111,12 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
     // distinguishable, and a rule silently joining or leaving this door is
     // precisely the drift this pin exists to catch.
     expect(runtimeAuthoringRulesFor('object').map((r) => r.name)).toEqual([
+      // [#22019] The build's expression rule joins, for ONE of its passes: a
+      // formula field's `expression` — the `validateExpression` verdict the
+      // docs say backs metadata registration. Its other object-borne passes are
+      // fenced off this door inside the rule (`StackExpressionOptions`), and
+      // that fence is pinned in `runtime-gate.object-formula-writes.test.ts`.
+      'validateStackExpressions',
       'validateFunctionalCompleteness',
       'validateManagedApiMethods',
       'validatePresetComparands', // #8793 — at this door before #4716
@@ -391,6 +397,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
     expect(result.advisories, JSON.stringify(result.advisories)).toEqual([]);
     // "clean" and "nothing ran" must stay distinguishable.
     expect(result.rulesRun).toEqual([
+      'validateStackExpressions', // [#22019] — see the roster pin above
       'validateFunctionalCompleteness',
       'validateManagedApiMethods',
       'validatePresetComparands',

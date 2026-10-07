@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
+import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
 
 /** The object notification templates live in. */
 export const TEMPLATE_OBJECT = 'sys_notification_template';
@@ -116,10 +117,12 @@ export class NotificationTemplateStore {
         const candidates = localeCandidates(locale);
         for (const loc of candidates) {
             try {
+                // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: the
+                // platform's own template row, read to render a delivery.
                 const row = await data.findOne(this.objectName, {
                     where: { topic, channel, locale: loc, is_active: true },
                     fields: ['subject', 'body', 'format'],
-                });
+                }, { context: FAN_OUT_SYSTEM_CONTEXT });
                 if (row) return row as NotificationTemplateRow;
             } catch {
                 return null; // best-effort — fall back to generic rendering

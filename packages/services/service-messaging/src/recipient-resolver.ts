@@ -152,7 +152,13 @@ export class RecipientResolver {
         const where: Record<string, unknown> = { role };
         if (ctx.organizationId) where.organization_id = ctx.organizationId;
         try {
-            const rows = await data.find(this.memberObject, { where, fields: ['user_id'], limit: 10000 });
+            // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: a
+            // membership read whose only use is the recipient ids.
+            const rows = await data.find(
+                this.memberObject,
+                { where, fields: ['user_id'], limit: 10000 },
+                { context: FAN_OUT_SYSTEM_CONTEXT },
+            );
             return userIds(rows);
         } catch (err) {
             this.opts.logger.warn(`[recipients] role '${role}' lookup failed (${msg(err)}); 0 recipients`);
@@ -164,11 +170,12 @@ export class RecipientResolver {
     private async resolveTeam(teamId: string, data: IDataEngine | undefined): Promise<string[]> {
         if (!teamId || !data) return [];
         try {
+            // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT.
             const rows = await data.find(this.teamMemberObject, {
                 where: { team_id: teamId },
                 fields: ['user_id'],
                 limit: 10000,
-            });
+            }, { context: FAN_OUT_SYSTEM_CONTEXT });
             return userIds(rows);
         } catch (err) {
             this.opts.logger.warn(`[recipients] team '${teamId}' lookup failed (${msg(err)}); 0 recipients`);
@@ -176,11 +183,30 @@ export class RecipientResolver {
         }
     }
 
-    /** `owner_of:` → the owner/assignee field of the referenced record. */
+    /**
+     * `owner_of:` → the owner/assignee field of the referenced record.
+     *
+     * [#21908, maintainer ruling Q2] The explicit system opt-in, the posture its
+     * sibling {@link resolveEmail} carries (see FAN_OUT_SYSTEM_CONTEXT): the
+     * read projects `id` and the owner fields and nothing else, and its result
+     * leaves this method only as recipient ids. Before this the read reached the
+     * engine with no principal, and the sharing middleware answers such a read
+     * of a `private` object with deny-all, so an `owner_of:` audience on one
+     * silently resolved to nobody. Under the opt-in it resolves the owner,
+     * whatever the object's sharing model; nothing the read returns reaches the
+     * emitter.
+     *
+     * ⛔ Never widen the projection, and never return anything but the id: the
+     * record is read on the platform's authority, not the emitter's.
+     */
     private async resolveOwnerOf(object: string, id: string, data: IDataEngine | undefined): Promise<string[]> {
         if (!object || !id || !data) return [];
         try {
-            const rec = await data.findOne(object, { where: { id }, fields: ['id', ...this.ownerFields] });
+            const rec = await data.findOne(
+                object,
+                { where: { id }, fields: ['id', ...this.ownerFields] },
+                { context: FAN_OUT_SYSTEM_CONTEXT },
+            );
             if (!rec) return [];
             for (const f of this.ownerFields) {
                 const v = rec[f];

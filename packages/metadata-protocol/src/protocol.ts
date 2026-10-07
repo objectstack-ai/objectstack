@@ -18542,6 +18542,30 @@ export class ObjectStackProtocolImplementation implements
      * switcher's default stays the owning package's (the by-name override and
      * a user's own saved default are the routes that change it).
      *
+     * ## …except a stored copy of a container its own package ships (#21980)
+     *
+     * The source loaders register a container a package ships under the
+     * object's name, whichever package owns the object: every member is
+     * `<object>.<key>`, registered for the shipping package
+     * (`objectql`'s boot loop and `metadata`'s artifact loader, both through
+     * the spec's `expandViewContainer`). Those names are that package's,
+     * already published, and an overlay is keyed by its own name (ADR-0005),
+     * so the package's stored copy of that container overlays them: it
+     * expands as the loaders expand the container, and each name lands in
+     * the copying package's own slot, which the list and the by-name read
+     * select per package ({@link servedViewExpansion}). Under its own name,
+     * the copy overlaid none of them, so a form withdrawn in the copy stayed
+     * open in the package's shipped form, at the anonymous doors too.
+     *
+     * The copy is the container the package ships under the copy's name,
+     * bound to the same object ({@link copiesOwnShippedViewContainer}). Every
+     * other container on another package's object keeps the own-name arm,
+     * and a copy, like any container on another package's object, still
+     * declares no default. No expansion writes a name another package
+     * ships: the copy's names are its own package's, and the save door
+     * refuses a member whose name only another package ships
+     * ({@link viewContainerNameCollisionRefusal}).
+     *
      * Every expanded item carries the container's OWN package and, where that
      * package ships an artifact of the same name, that artifact's envelope —
      * never the envelope of an artifact another package ships.
@@ -18565,15 +18589,15 @@ export class ObjectStackProtocolImplementation implements
         if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view') return [];
         if (!isAggregatedViewContainer(data)) return [];
         const container = data as Record<string, any>;
-        const viewObject =
-            (typeof container.object === 'string' && container.object ? container.object : undefined)
-            ?? container?.list?.data?.object
-            ?? container?.form?.data?.object
-            ?? (typeof container.name === 'string' ? container.name : undefined);
+        const viewObject = this.runtimeViewContainerObject(container);
         if (!viewObject) return [];
         const ownPackageId = this.runtimeViewContainerPackage(type, container, options);
         const crossPackage = this.isAnotherPackagesObject(viewObject, ownPackageId);
-        const expanded: ReadonlyArray<Record<string, unknown>> = crossPackage
+        // [#21980] A copy of its own package's shipped container takes the
+        // loaders' names, not the own-name arm.
+        const underOwnName = crossPackage
+            && !this.copiesOwnShippedViewContainer(type, viewObject, container, ownPackageId);
+        const expanded: ReadonlyArray<Record<string, unknown>> = underOwnName
             ? this.expandUnderOwnName(type, viewObject, container, ownPackageId)
             : (expandViewContainer(viewObject, container) as unknown as Record<string, unknown>[]);
         const out: Record<string, unknown>[] = [];
@@ -18601,6 +18625,54 @@ export class ObjectStackProtocolImplementation implements
             out.push(mergeArtifactProtection(authored, ownArtifact) as Record<string, unknown>);
         }
         return out;
+    }
+
+    /**
+     * [#13407] The object a runtime view container binds: its own top-level
+     * `object`, then `list.data.object`, `form.data.object`, and its own
+     * `name`. See {@link expandRuntimeViewContainer}'s "Object-name
+     * derivation".
+     */
+    private runtimeViewContainerObject(container: Record<string, any>): string | undefined {
+        return (typeof container.object === 'string' && container.object ? container.object : undefined)
+            ?? container?.list?.data?.object
+            ?? container?.form?.data?.object
+            ?? (typeof container.name === 'string' ? container.name : undefined);
+    }
+
+    /**
+     * [#21639, #21980] The view container `packageId` ships under `name`: the
+     * registry's artifact read ({@link lookupArtifactItem}) in that package,
+     * kept only when it is a container and that package's own, since the read
+     * falls back to another package's artifact of the name. `undefined` for
+     * no package, and where the package ships no container of the name.
+     */
+    private shippedViewContainerOf(
+        type: string,
+        name: unknown,
+        packageId: string | undefined,
+    ): Record<string, unknown> | undefined {
+        if (packageId === undefined || typeof name !== 'string' || name === '') return undefined;
+        const shipped = this.lookupArtifactItem(type, name, packageId) as Record<string, unknown> | undefined;
+        return isAggregatedViewContainer(shipped) && shipped?._packageId === packageId ? shipped : undefined;
+    }
+
+    /**
+     * [#21980] True when `container`, bound to `object`, is a stored copy of a
+     * container its own package ships: `ownPackageId` ships a view container
+     * under the copy's name ({@link shippedViewContainerOf}), bound to the
+     * same object. The loaders registered that container's views under
+     * `<object>.<key>` for that package, so the copy's names are that
+     * package's, and the copy expands to them.
+     */
+    private copiesOwnShippedViewContainer(
+        type: string,
+        object: string,
+        container: Record<string, any>,
+        ownPackageId: string | undefined,
+    ): boolean {
+        const shipped = this.shippedViewContainerOf(type, container.name, ownPackageId);
+        return shipped !== undefined && this.runtimeViewContainerObject(shipped) === object;
     }
 
     /**
@@ -18658,7 +18730,9 @@ export class ObjectStackProtocolImplementation implements
 
     /**
      * [#21334] Expand a container on another package's object under its own
-     * name. The spec's expander runs with `<object>.<container name>` as its
+     * name: every such container but a stored copy of a container its own
+     * package ships, which takes the loaders' names ([#21980],
+     * {@link copiesOwnShippedViewContainer}). The spec's expander runs with `<object>.<container name>` as its
      * base, so every member it knows — today a named `list`, `listViews`,
      * `formViews`, `form` — comes out as `<object>.<container name>.<key>`,
      * de-duplicated by the spec's own rule, and a member kind the spec adds
@@ -18794,6 +18868,21 @@ export class ObjectStackProtocolImplementation implements
      * own `code` layer (for a package-less container too, through the
      * runtime-only `getItem` arm), where `env_local`, which registers nothing,
      * reported neither. With the marker both kernels give one answer.
+     *
+     * ## [#21980] Never under a name another package ships
+     *
+     * The registry keeps one bare slot per name, and `SchemaRegistry.getItem`
+     * answers it before any package's own entry, whichever package the read
+     * names. So an expansion registered there under a name another package
+     * also ships answered THAT package's by-name read on an unscoped kernel:
+     * `getMetaItem` naming the other package fell through to the registry and
+     * served this container's view, while the list served the other package's
+     * own item in its slot ({@link servedViewExpansion}). Such an expansion is
+     * not registered. Every kernel's by-name read already answers it from its
+     * stored row, ahead of the registry ({@link resolveRowlessExpandedView}),
+     * for its own package and for a read that names none, and the list expands
+     * the row itself. A name that only the container's own package ships, or
+     * that no package ships, is registered as before.
      */
     private hydrateExpandedViewItems(
         type: string,
@@ -18801,7 +18890,13 @@ export class ObjectStackProtocolImplementation implements
         options: { packageId?: string | null; organizationId: string | null },
         registry: any,
     ): void {
+        let shipping: ShippingPackages | undefined;
         for (const item of this.expandRuntimeViewContainer(type, data, { ...options, tenantAuthored: true })) {
+            shipping ??= this.shippingPackagesOf(type);
+            const own = item._packageId;
+            const anotherShips = this.shippedArtifactsOf(type, String(item.name), shipping)
+                .some((artifact) => (artifact as { _packageId?: unknown })._packageId !== own);
+            if (anotherShips) continue;
             registry.registerItem(type, item, 'name' as any);
         }
     }
@@ -19660,9 +19755,8 @@ export class ObjectStackProtocolImplementation implements
         packageId: string | null | undefined,
     ): ReadonlySet<string> {
         const ownPackageId = this.runtimeViewContainerPackage(type, container, { packageId });
-        if (ownPackageId === undefined || typeof container.name !== 'string') return new Set();
-        const shipped = this.lookupArtifactItem(type, container.name, ownPackageId) as Record<string, unknown> | undefined;
-        if (!isAggregatedViewContainer(shipped) || shipped?._packageId !== ownPackageId) return new Set();
+        const shipped = this.shippedViewContainerOf(type, container.name, ownPackageId);
+        if (shipped === undefined) return new Set();
         return new Set(
             this.expandRuntimeViewContainer(type, shipped, { packageId: ownPackageId }).map((view) => String(view.name)),
         );

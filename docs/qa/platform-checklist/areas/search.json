@@ -575,7 +575,7 @@
       "title": "The ⌘K palette is a NAVIGATOR beyond record search: the active app's nav corpus renders grouped (Objects/Dashboards/Pages/Reports), Enter navigates each type, app-switch and theme commands dispatch for real, and visibility-gated / inactive entries stay absent",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -587,7 +587,7 @@
           "the objectui console app-shell (CommandPalette + CommandPaletteProvider)"
         ],
         "knownGaps": [
-          "NO showcase nav item declares a visibility expression (`visible`/`visibleOn` — grepped apps/index.ts), so the gate-hidden clause's HIDDEN side has no stock fixture. App metadata is code-authored and NOT in the org-overridable runtime-write set (view/dashboard/report/translation/email_template only — RUNNER.md), so the fixture is a scratch-app nav item carrying `visible: 'false'` (or a persona-dependent CEL predicate), not a runtime edit; without it, score that side blocked(fixture) and record it",
+          "NO showcase nav item declares a visibility predicate (apps/index.ts), so the gate-hidden clause's HIDDEN side has no stock fixture. App metadata is code-authored and outside the runtime-write overlay set (view/dashboard/report/translation/email_template, RUNNER.md). FIXTURE RECIPE, the smallest one (authored from source for QA run #21782's gap, parked on #22017 row 5; not yet run-proven): in a scratch copy of examples/app-showcase under /tmp, never in the checkout, append two leaves to the showcase app's grp_data children in src/ui/apps/index.ts: { id: 'qa_nav_gate_false', type: 'object', objectName: 'showcase_task', label: 'QA Gate False', visible: 'false' } and the same with id 'qa_nav_gate_true', label 'QA Gate True' and visible: 'true'. Then boot that copy (os dev --fresh -p PORT). The key is `visible` ONLY: a nav item's `visible` takes CEL (EvaluatedExpressionInputSchema; a bare string is a CEL source), while `visibleOn` / `visibleWhen` are refused at authoring as near-misses of `visible` (packages/spec/src/ui/app.zod.ts#NAV_ITEM_ALIASES). Without the copy, score the hidden side blocked(fixture) and record it",
           "the /_console bundle is vendored and may be stale — verify palette behavior against current objectui app-shell or a fresh build (stale-console-bundle, RUNNER §2)"
         ]
       },
@@ -608,7 +608,7 @@
         "open the Switch-app group: it lists the OTHER active apps; select one and confirm the active app changes (URL + the palette's nav corpus now belongs to the target app); switch back",
         "run a theme command ('Dark theme'): the root theme class flips immediately and the palette closes — the command dispatched, not just closed (persistence itself is platform-core.theme-mode-persistence's, not re-proven here)",
         "select 'Open full search' and confirm navigation to /apps/<app>/search (deep coverage of that page stays with search.console-global-search)",
-        "the gate-hidden probe (blocked on stock seeds — see knownGaps): with a scratch nav item whose visibility predicate evaluates false, confirm it appears in NO group while a sibling with a true predicate appears; capture both sides",
+        "the gate-hidden probe (on the scratch copy fixtures.knownGaps describes; blocked on stock seeds): with a scratch nav item whose visibility predicate evaluates false, confirm it appears in NO group while a sibling with a true predicate appears; capture both sides",
         "capture the browser console for the whole session"
       ],
       "acceptance": [
@@ -637,7 +637,7 @@
           "evidence": "the switch-group screenshot + app list"
         },
         {
-          "clause": "visibility-gated entries are ABSENT — both sides: a nav item whose visible/visibleOn predicate evaluates false for the current context appears in NO palette group, while a true-predicate sibling appears (the same evaluateVisibility filter the sidebar honours, so palette and sidebar cannot disagree about what exists)",
+          "clause": "visibility-gated entries are ABSENT — both sides: a nav item whose `visible` predicate evaluates false for the current context appears in NO palette group, while a true-predicate sibling appears (the same evaluateVisibility filter the sidebar honours, so palette and sidebar cannot disagree about what exists)",
           "oracle": "dom",
           "verify": "with the scratch fixture (knownGaps): the false-predicate item absent from every group, the true-predicate item present (CommandPalette.tsx filter over flattenNavigation); on stock seeds score blocked(fixture)",
           "evidence": "the paired present/absent DOM reads"
@@ -664,7 +664,8 @@
         "search.console-global-search (the sibling item owning the record-search half of the same palette: GET /api/v1/search hits, grouping #3371, recents, RLS parity, /search page — the boundary both items keep so neither double-covers)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-30", "change": "new item (sweep 2026-08-30, angle 1), authored as a SIBLING of search.console-global-search rather than an extension — writer's call per the register: that item's identity is the GET /api/v1/search record path (hits, grouping, RLS, recents, /search page) and already carries seven clauses, while the palette's other half — the client-side nav corpus (objects/dashboards/pages/reports groups from the active app's navigation), per-type Enter navigation, app switching, theme dispatch, and the evaluateVisibility gate — was wholly uncovered and is a different mechanism (app metadata + client filter, no server search). Grounded in CommandPalette.tsx; the gate-hidden side is blocked(fixture) on stock seeds because no showcase nav item declares a visibility expression and app metadata is not runtime-writable", "ref": "#sweep-2026-08-30" }
+        { "revision": 1, "date": "2026-08-30", "change": "new item (sweep 2026-08-30, angle 1), authored as a SIBLING of search.console-global-search rather than an extension — writer's call per the register: that item's identity is the GET /api/v1/search record path (hits, grouping, RLS, recents, /search page) and already carries seven clauses, while the palette's other half — the client-side nav corpus (objects/dashboards/pages/reports groups from the active app's navigation), per-type Enter navigation, app switching, theme dispatch, and the evaluateVisibility gate — was wholly uncovered and is a different mechanism (app metadata + client filter, no server search). Grounded in CommandPalette.tsx; the gate-hidden side is blocked(fixture) on stock seeds because no showcase nav item declares a visibility expression and app metadata is not runtime-writable", "ref": "#sweep-2026-08-30" },
+        { "revision": 2, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 5). A5 was blocked(fixture): no stock nav item carries a visibility predicate. Disposition: fixture recipe. The knownGap now spells the smallest fixture: two nav leaves with visible 'false' and 'true' added in a scratch copy of the showcase, authored from source and not yet run-proven. A5 named `visibleOn`, which a nav item refuses as a near-miss of `visible` (NAV_ITEM_ALIASES in packages/spec/src/ui/app.zod.ts), so the clause names `visible` only; step 8 points at the recipe", "ref": "#22017" }
       ]
     },
     {

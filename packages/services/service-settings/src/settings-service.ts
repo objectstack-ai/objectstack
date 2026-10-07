@@ -64,8 +64,9 @@ const DEFAULT_OBJECT = 'sys_setting';
  * gates. See {@link SettingsService.upsertRow} for the full argument and for
  * why the field stays `readonly` for everybody else.
  *
- * The reads ({@link SettingsService.loadRows}, `upsertRow`'s existence probe)
- * and `upsertRow`'s insert carry it too. They are plumbing: the door in front
+ * The reads ({@link SettingsService.loadRows}, `upsertRow`'s existence probe,
+ * and [#21908] `readStoredHandle`'s re-read of the stored handle) and
+ * `upsertRow`'s insert carry it too. They are plumbing: the door in front
  * of them, when there is one, has already authorized the caller, and
  * `loadRows` runs on every request's execution-context build. Without it they
  * reach the data engine with no principal and no system opt-in — the
@@ -2637,7 +2638,14 @@ export class SettingsService {
   ): Promise<{ found: boolean; handle: string | null }> {
     if (this.engine) {
       const { where, bypass } = this.rowIdentity(row);
-      const rows = await this.engine.find(this.objectName, { where, limit: 1, ...bypass });
+      // The explicit system opt-in, as the write it verifies carries: see
+      // SETTINGS_SYSTEM_CONTEXT.
+      const rows = await this.engine.find(this.objectName, {
+        where,
+        limit: 1,
+        ...bypass,
+        context: SETTINGS_SYSTEM_CONTEXT,
+      });
       const current = Array.isArray(rows) ? rows[0] : undefined;
       if (!current) return { found: false, handle: null };
       return {

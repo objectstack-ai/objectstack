@@ -111,7 +111,8 @@ describe('StorageMetadataStore.createSession: the acting organization reaches th
     // The platform's insert-side chokepoint reads exactly this:
     // `context.tenantId` → `buildDriverOptions` → `DriverOptions.tenantId` →
     // `SqlDriver.injectTenantOnInsert` → the object's tenant column.
-    expect(engine._inserts[0].options).toEqual({ context: { tenantId: 'org_A' } });
+    // [#21908] …beside the explicit system opt-in (ruling Q1).
+    expect(engine._inserts[0].options).toEqual({ context: { tenantId: 'org_A', isSystem: true } });
   });
 
   it('⛔ does NOT stamp the column onto the payload — that decision is the driver’s', async () => {
@@ -127,7 +128,7 @@ describe('StorageMetadataStore.createSession: the acting organization reaches th
     expect(engine._inserts[0].data).not.toHaveProperty('organization_id');
   });
 
-  it('passes NO options at all when there is no organization — the pre-#12928 shape', async () => {
+  it('carries the opt-in and NO tenant when there is no organization — ⛔ none is invented', async () => {
     const engine = createRecordingEngine();
     const store = new StorageMetadataStore(engine);
 
@@ -137,13 +138,14 @@ describe('StorageMetadataStore.createSession: the acting organization reaches th
     await store.createSession(sessionRec('s4'), { organizationId: null });
 
     // "NULL only where the caller genuinely has none" — the ruled other half.
-    // An empty context is still a context; handing one to the engine would
-    // change what every other option resolver on that call sees.
+    // [#21908] Every insert now carries the explicit system opt-in (ruling Q1),
+    // and still no `tenantId` where the caller has no organization: the opt-in
+    // is the only key, never a guessed organization.
     expect(engine._inserts.map((i: { options: unknown }) => i.options)).toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+      { context: { isSystem: true } },
+      { context: { isSystem: true } },
+      { context: { isSystem: true } },
+      { context: { isSystem: true } },
     ]);
   });
 
@@ -268,7 +270,7 @@ describe('the chunked-upload door stamps its sys_upload_session row from the ses
     expect(res._status).toBe(200);
     const insert = engine._inserts.find((i: any) => i.object === 'sys_upload_session');
     expect(insert).toBeTruthy();
-    expect(insert.options).toEqual({ context: { tenantId: 'org_A' } });
+    expect(insert.options).toEqual({ context: { tenantId: 'org_A', isSystem: true } });
   });
 
   it('stamps the file and the session row from the SAME session value', async () => {
@@ -279,7 +281,7 @@ describe('the chunked-upload door stamps its sys_upload_session row from the ses
     // pair together is what keeps them from drifting apart again.
     const file = engine._inserts.find((i: any) => i.object === 'sys_file');
     const session = engine._inserts.find((i: any) => i.object === 'sys_upload_session');
-    expect(file.options).toEqual({ context: { tenantId: 'org_A' } });
+    expect(file.options).toEqual({ context: { tenantId: 'org_A', isSystem: true } });
     expect(session.options).toEqual(file.options);
   });
 
@@ -291,7 +293,8 @@ describe('the chunked-upload door stamps its sys_upload_session row from the ses
     expect(insert).toBeTruthy();
     // Ruled: NULL only where the caller genuinely has none. Such a row is what
     // the TTL sweep reaps rather than what a backfill repairs.
-    expect(insert.options).toBeUndefined();
+    // [#21908] The opt-in rides alone: no organization is substituted.
+    expect(insert.options).toEqual({ context: { isSystem: true } });
     expect(insert.data).not.toHaveProperty('organization_id');
   });
 });

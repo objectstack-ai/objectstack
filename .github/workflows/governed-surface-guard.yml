@@ -75,10 +75,22 @@ jobs:
     # live required set`, which is #5617's own defect.
     name: Governed Surface Queue Guard
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET, the split lint.yml's four
+    # Type Check lanes use; `typecheck-source-gates` there argues it, holds the
+    # pooled numbers for this same full-history fetch, and says what a timed-out
+    # checkout step reads as (`failure`) against the wall (`cancelled`).
+    # Window here: the 300 most recent completed runs of this workflow,
+    # 2026-10-05T14:57Z → 2026-10-06T18:59Z, every attempt. Checkout: p50 31 s
+    # / p90 156 s / p99 595 s, and the old 10-minute wall cancelled 4 runs
+    # behind it (3 still inside the checkout), each a required context gone
+    # red with no guard verdict. Body after the checkout, successful runs
+    # (n = 288): max 1.1 minutes; 2× is 2.2, and never below 10. 20 + 10 = 30.
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        # CHECKOUT BUDGET: lint.yml's `typecheck-source-gates` sizes it.
+        timeout-minutes: 20
         with:
           # A governed-surface question answered over a truncated history
           # answers with SILENCE, and silence reads as compliance (#9902). The

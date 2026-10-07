@@ -17,6 +17,7 @@ import {
     DEFAULT_LOCALE,
 } from './template-renderer.js';
 import { RECIPIENT_LOCALE_FIELD, USER_OBJECT, resolveRecipientLocale } from './recipient-locale.js';
+import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
 
 /** The user identity object a recipient id is resolved to an address against (re-exported from the locale seam, #13881). */
 export { USER_OBJECT };
@@ -200,10 +201,12 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
         // under that key is not a read — rung 2 applies.
         let localeRead = false;
         try {
+            // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: the
+            // recipient's address and locale, read for the delivery only.
             user = await data.findOne(userObject, {
                 where: { id: recipient },
                 fields: ['email', RECIPIENT_LOCALE_FIELD],
-            });
+            }, { context: FAN_OUT_SYSTEM_CONTEXT });
             localeRead = true;
         } catch (err) {
             // Ruling item 3: NO path may dead-letter because of the locale
@@ -215,7 +218,11 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                 `[email] recipient lookup for '${recipient}' with '${RECIPIENT_LOCALE_FIELD}' failed (${(err as Error).message}); retrying address-only`,
             );
             try {
-                user = await data.findOne(userObject, { where: { id: recipient }, fields: ['email'] });
+                user = await data.findOne(
+                    userObject,
+                    { where: { id: recipient }, fields: ['email'] },
+                    { context: FAN_OUT_SYSTEM_CONTEXT },
+                );
             } catch (retryErr) {
                 ctx.logger.warn(`[email] address lookup for '${recipient}' failed (${(retryErr as Error).message})`);
                 return undefined;

@@ -1174,12 +1174,58 @@ function evaluatedSourceRefusal(raw: unknown): { message: string; source: string
   return { message: verdict.error.issues[0]?.message ?? EVALUATED_EXPRESSION_SOURCE_REQUIRED, source };
 }
 
+/** Options for {@link runStackExpressionPasses}. */
+export interface StackExpressionOptions {
+  /**
+   * [#22019] The singular metadata type of the per-write snapshot the runtime
+   * publish gate is judging (`AuthoringRuleContext.runtimeWriteType`, passed
+   * through by this rule's registry entry). ABSENT on `os build`, `os lint`
+   * and `os validate`, which run every pass below.
+   *
+   * On an `object` write exactly ONE pass judges: the field-formula pass over
+   * `fields[].expression` — the build's own `validateExpression('value', …)`
+   * call, with its warnings and the unprovisioned-anchor warning on the same
+   * key. That is the verdict `formulas.mdx` says backs both `os build` and
+   * metadata registration, and the save door gave none of it: a formula
+   * calling an unregistered function (`sqrt(record.amount)`) saved with a 200
+   * and read `null` on every row.
+   *
+   * Every other pass is fenced off an object write, deliberately and by name:
+   * the validation-rule predicates, the field-rule slots (`requiredWhen` /
+   * `readonlyWhen` / `conditionalRequired` / `visibleWhen`) with their
+   * `parent` and null-guard gates, the per-option `visibleWhen`, and the
+   * object's own `actions[]` predicates. Each is a build verdict the save
+   * door still does not give, and each would narrow the accept set further
+   * than this crossing does — a crossing of its own, measured over the stored
+   * corpus first, not a rider on this one.
+   */
+  runtimeWriteType?: string;
+}
+
 /**
  * Validate every predicate in the stack. Returns the list of issues (empty =
  * clean). Caller decides how to surface / whether to fail the build.
  */
 export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
+  return runStackExpressionPasses(stack, {});
+}
+
+/**
+ * {@link validateStackExpressions} with the runtime publish gate's write type
+ * — the one body both run, so the CLI and the door cannot drift apart.
+ *
+ * [#22019] Kept OFF the package's public entry on purpose: the write type is
+ * the gate's private input, read only by this rule's registry entry
+ * (`authoring-rules.ts`), and the published `validateStackExpressions(stack)`
+ * keeps the signature it always had.
+ */
+export function runStackExpressionPasses(stack: AnyRec, options: StackExpressionOptions): ExprIssue[] {
   const issues: ExprIssue[] = [];
+  // [#22019] See {@link StackExpressionOptions.runtimeWriteType}: on an object
+  // write only the field-formula pass judges. Every other loop below reads an
+  // empty list under it, so the claim holds by construction rather than by the
+  // shape of the snapshot the gate happens to build today.
+  const fieldFormulasOnly = options.runtimeWriteType === 'object';
   const objects = recordsOf(stack.objects);
   const fieldIndex = buildFieldIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(objects);
@@ -1465,7 +1511,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   };
 
   // ── Flows ──────────────────────────────────────────────────────────
-  for (const flow of recordsOf(stack.flows)) {
+  for (const flow of fieldFormulasOnly ? [] : recordsOf(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
     // `Array.isArray` proves the LIST, never its MEMBERS — the sentence #15742
     // removed from one reader below in this same file. A YAML `nodes:` item
@@ -1810,7 +1856,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     // `validations` is the key `ObjectSchema` declares; `validationRules` is a
     // rejected alias of it (#5017) — see the `## Scope` table above.
     const validations = obj.validations;
-    for (const rule of recordsOf(validations)) {
+    for (const rule of fieldFormulasOnly ? [] : recordsOf(validations)) {
       const where = `object '${objectName}' · validation '${(rule.name as string) ?? '?'}'`;
       // The declared predicate key is `condition` (see `rulePredicates`).
       // Validation predicates are `record`-scoped — no field flattening — so
@@ -1877,7 +1923,57 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       ? [...optionHolders, { root: 'parent', types: masterTypes, owner: master }]
       : optionHolders;
 
+    /**
+     * The field-formula pass — one computed field's `expression`. A closure
+     * rather than inline only so the runtime publish gate's object door
+     * (#22019) runs exactly this pass and nothing beside it; on the three CLI
+     * commands it is called at the same point of the field walk it always ran
+     * at, so the build's findings and their order are unchanged.
+     */
+    const judgeFieldFormula = (fname: string, f: AnyRec): void => {
+      if (f.expression) {
+        // `expression` is the key `FieldSchema` declares for a computed field —
+        // what `Field.formula({ expression: … })` writes. This read was spelled
+        // `formula` until #5026, one of the names `field.zod.ts:333` REJECTS by
+        // aliasing it back to `expression`, so the whole pass had never run
+        // against a stack that parses. Converging it ACTIVATED a check rather
+        // than deleting a dead branch — the real-metadata sweep that had to
+        // accompany that is in #5026's PR body.
+        //
+        // formulas are `value` role (any return type), still CEL. They are
+        // `record`-scoped — `record.<field>`, never bare — so flag bare refs (#1928).
+        //
+        // No `checkNullGuards` here, and unlike the action / flow surfaces this
+        // is NOT a totality verdict (#4811). A formula is `value`-role and
+        // natively nullable, and `guard ? value : null` is the blessed shape
+        // (#3306 rewrites it through `dyn(...)`). Whether unguarded arithmetic
+        // such as `record.budget - record.spent` should be *forbidden* here is a
+        // question about what authors are allowed to write — a product decision
+        // for the maintainer, not a wiring gap for a lint PR to close on its own.
+        // The convention already leans guarded (`showcase_project.budget_remaining`
+        // writes `(record.budget == null ? 0 : record.budget) - …`), so the cost of
+        // deciding later is low. Raise it as its own issue rather than widening
+        // this call. Ledger: `validate-null-guards.ts`.
+        const res = validateExpression('value', f.expression as string | { dialect?: string; source?: string },
+          objectName ? { objectName, fields: fieldIndex.get(objectName), fieldTypes: fieldTypeIndex.get(objectName), scope: 'record' } : { scope: 'record' });
+        // Names the KEY the author edits, not the field type. Saying "formula"
+        // here is how the wrong spelling propagates: the next author reads the
+        // diagnostic and writes `formula:`, which the schema then rejects.
+        const fieldWhere = `object '${objectName}' · field '${fname}' expression`;
+        for (const e of res.errors) issues.push({ where: fieldWhere, message: e.message, source: e.source, severity: 'error' });
+        for (const w of res.warnings) issues.push({ where: fieldWhere, message: w.message, source: w.source, severity: 'warning' });
+        // [#8116] Formulas read the same record binding the predicates do, so
+        // a `record.<anchor>` read inside one degrades identically.
+        warnUnprovisionedAnchors(fieldWhere, f.expression, objectName);
+      }
+    };
+
     for (const [fname, f] of fieldList) {
+      // [#22019] The object write door: this field's formula, and no other slot.
+      if (fieldFormulasOnly) {
+        judgeFieldFormula(fname, f);
+        continue;
+      }
       // Field-level conditional rules are server-enforced (rule-validator) and
       // record-scoped — a bare ref silently fails the rule (required/readonly
       // not enforced = data-integrity hole). #1928 class, same as actions.
@@ -2017,41 +2113,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       ] as const) {
         refuseFieldTraversal(`object '${objectName}' · field '${fname}' ${slot}`, slot, raw, fieldRuleHolders);
       }
-      if (f.expression) {
-        // `expression` is the key `FieldSchema` declares for a computed field —
-        // what `Field.formula({ expression: … })` writes. This read was spelled
-        // `formula` until #5026, one of the names `field.zod.ts:333` REJECTS by
-        // aliasing it back to `expression`, so the whole pass had never run
-        // against a stack that parses. Converging it ACTIVATED a check rather
-        // than deleting a dead branch — the real-metadata sweep that had to
-        // accompany that is in #5026's PR body.
-        //
-        // formulas are `value` role (any return type), still CEL. They are
-        // `record`-scoped — `record.<field>`, never bare — so flag bare refs (#1928).
-        //
-        // No `checkNullGuards` here, and unlike the action / flow surfaces this
-        // is NOT a totality verdict (#4811). A formula is `value`-role and
-        // natively nullable, and `guard ? value : null` is the blessed shape
-        // (#3306 rewrites it through `dyn(...)`). Whether unguarded arithmetic
-        // such as `record.budget - record.spent` should be *forbidden* here is a
-        // question about what authors are allowed to write — a product decision
-        // for the maintainer, not a wiring gap for a lint PR to close on its own.
-        // The convention already leans guarded (`showcase_project.budget_remaining`
-        // writes `(record.budget == null ? 0 : record.budget) - …`), so the cost of
-        // deciding later is low. Raise it as its own issue rather than widening
-        // this call. Ledger: `validate-null-guards.ts`.
-        const res = validateExpression('value', f.expression as string | { dialect?: string; source?: string },
-          objectName ? { objectName, fields: fieldIndex.get(objectName), fieldTypes: fieldTypeIndex.get(objectName), scope: 'record' } : { scope: 'record' });
-        // Names the KEY the author edits, not the field type. Saying "formula"
-        // here is how the wrong spelling propagates: the next author reads the
-        // diagnostic and writes `formula:`, which the schema then rejects.
-        const fieldWhere = `object '${objectName}' · field '${fname}' expression`;
-        for (const e of res.errors) issues.push({ where: fieldWhere, message: e.message, source: e.source, severity: 'error' });
-        for (const w of res.warnings) issues.push({ where: fieldWhere, message: w.message, source: w.source, severity: 'warning' });
-        // [#8116] Formulas read the same record binding the predicates do, so
-        // a `record.<anchor>` read inside one degrades identically.
-        warnUnprovisionedAnchors(fieldWhere, f.expression, objectName);
-      }
+      judgeFieldFormula(fname, f);
     }
   }
 
@@ -2101,10 +2163,10 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     // `$select` projection (and, through `&&` short-circuiting, on row data),
     // neither of which this pass can see. Full reasoning in the ledger.
   };
-  for (const action of recordsOf(stack.actions)) {
+  for (const action of fieldFormulasOnly ? [] : recordsOf(stack.actions)) {
     checkAction('stack', action);
   }
-  for (const obj of objects) {
+  for (const obj of fieldFormulasOnly ? [] : objects) {
     const objectName = typeof obj.name === 'string' ? obj.name : undefined;
     for (const action of recordsOf(obj.actions)) {
       checkAction(`object '${objectName}'`, action, objectName);
@@ -2118,7 +2180,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   // test can tell this receiver apart from the VALIDATION rule one — the two
   // are governed by different schemas, and a scan that merged them would let a
   // key declared by either schema pass on both (#5017).
-  for (const sharingRule of recordsOf(stack.sharingRules)) {
+  for (const sharingRule of fieldFormulasOnly ? [] : recordsOf(stack.sharingRules)) {
     const ruleObj = typeof sharingRule.object === 'string' ? sharingRule.object : undefined;
     const where = `sharingRule '${(sharingRule.name as string) ?? '?'}'${ruleObj ? ` (${ruleObj})` : ''} condition`;
     // `condition` is the authored key `SharingRuleSchema` declares. `criteria`
@@ -2133,7 +2195,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   // A lifecycle hook's `condition` skips the handler when false; it is
   // evaluated against the record, so a bare ref silently makes the hook
   // run on every record (or never) instead of the intended subset.
-  for (const hook of recordsOf(stack.hooks)) {
+  for (const hook of fieldFormulasOnly ? [] : recordsOf(stack.hooks)) {
     const hookName = (hook.name as string) ?? '?';
     if (typeof hook.object === 'string') {
       check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record');

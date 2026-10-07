@@ -598,7 +598,7 @@
       "title": "Wrong flags and unknown commands error with usage and a nonzero exit — never silently ignored, never executed anyway",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -637,7 +637,7 @@
         {
           "clause": "--help exits 0 with a usage block for the root and for EVERY registered command and topic — per-variant, none inferred",
           "oracle": "log",
-          "verify": "the sweep records exit 0 + a USAGE section for all 30 variants",
+          "verify": "the sweep records exit 0 + a USAGE section for EVERY variant: 33 at framework 1fb274e61c (20 top-level commands, 12 topics and the `g` alias of generate). The count is DERIVED, never a constant. Before the sweep, enumerate packages/cli/src/commands (each top-level command file, each topic directory) and every `static aliases` entry; if the count differs from the variants list, the list is stale, so record the measured count and the drift",
           "evidence": "the sweep's exit-code/usage table"
         }
       ],
@@ -675,16 +675,20 @@
         "meta (topic)",
         "migrate (topic)",
         "package (topic)",
-        "plugin (topic)"
+        "plugin (topic)",
+        "g (alias of generate — static aliases in generate.ts)",
+        "storage (topic)",
+        "secret (topic)"
       ],
       "source": [
-        "packages/cli/src/commands/ (the 20 top-level commands + 10 topics enumerated as variants — oclif pattern discovery per package.json oclif.commands)",
+        "packages/cli/src/commands/ (the 20 top-level commands + 12 topics enumerated as variants, plus generate.ts's `g` alias — oclif pattern discovery per package.json oclif.commands)",
         "packages/cli/package.json (no oclif.plugins at all — no plugin manager, no help command and no not-found plugin, so unknown commands hard-error)",
         "@oclif/core parse contract (Nonexistent flag / enum FailedFlagValidation / command-not-found, exit 2)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: flag/command error UX with the full registered command surface enumerated from src/commands/ as variants, and never-executed-anyway as the load-bearing negative", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-10-02", "change": "source: package.json no longer declares oclif.plugins — the two listed plugins sat in devDependencies and never loaded, so the array was dropped; the registered surface and the unknown-command hard-error are unchanged (os --help and the full command table read byte-identical before and after)", "ref": "claude/issue-21285-drop-dead-oclif-plugins" }
+        { "revision": 2, "date": "2026-10-02", "change": "source: package.json no longer declares oclif.plugins — the two listed plugins sat in devDependencies and never loaded, so the array was dropped; the registered surface and the unknown-command hard-error are unchanged (os --help and the full command table read byte-identical before and after)", "ref": "claude/issue-21285-drop-dead-oclif-plugins" },
+        { "revision": 3, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21721 parked on #22017 (row 23), re-pointed clause. A4 pinned 30 variants; the run measured 33 registered (20 commands, 12 topics with secret and storage new, and g), all exiting 0 with a USAGE block. Verified in source: package.json oclif.commands uses the pattern strategy over dist/commands; src/commands holds 20 command files and 12 topic directories; generate.ts declares static aliases ['g']. The variants gain the three, source says 12 topics, and A4's count is derived per run instead of pinned", "ref": "#22017" }
       ]
     },
     {
@@ -1205,7 +1209,7 @@
       "title": "os datasource list-tables/introspect/validate: the federation door answers, the generated draft is cwd-jailed and compiles, and schema drift maps to ✗ diffs with exit 1",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "cli",
       "personas": ["operator (local shell) whose token HOLDS manage_platform_settings — all three commands address federation READ routes, which require it since #9901/#10255", "integration author (adopting a remote table), same capability"],
@@ -1217,13 +1221,14 @@
           "a scratch objects/ dir in the invocation cwd for the --out draft, and a scratch config to wire the draft into for the compile clause"
         ],
         "knownGaps": [
-          "no test anywhere references the three CLI commands themselves (the REST side is tested; the oclif wrappers are not) — this item is their first functional coverage, so there is no automated entry",
-          "the #5594 carve-out applies to the fixture DB: .objectstack/data/showcase_external.db is a cwd-relative app-declared path that survives --fresh by documented design — do not file its persistence as a bug"
+          "the three CLI commands are unit-tested against the server's wrapped envelope since #10675 (packages/cli/src/commands/datasource/envelope-unwrap.test.ts). That suite drives each command over a stubbed fetch, so this item stays their only end-to-end coverage against a live server",
+          "the #5594 carve-out applies to the fixture DB: .objectstack/data/showcase_external.db is a cwd-relative app-declared path that survives --fresh by documented design — do not file its persistence as a bug",
+          "acceptance[0]'s NARROWING half (--schema narrows; a non-matching schema prints 'No remote tables found.') cannot be observed on the stock fixture. SQLite tables carry no schema, and listRemoteTables applies ?schema= only to a table it can attribute to one (packages/services/service-datasource/src/external-datasource-service.ts: a table with no schema part is never filtered), so every --schema run lists all tables (QA run #21721, parked on #22017 row 24). Score that half from the pins in `automated`. The unpinned remainder, the CLI turning --schema into ?schema= (list-tables.ts), is observable live only against a schema-bearing driver such as postgres"
         ]
       },
       "steps": [
         "boot showcase on a scratch port and mint the admin token (the cli.qa-suite-execution recipe)",
-        "`os datasource list-tables showcase_external --url http://localhost:<port> --token <t>` — capture the table listing; repeat with `--schema <s>` and with a schema that matches nothing ('No remote tables found.')",
+        "`os datasource list-tables showcase_external --url http://localhost:<port> --token <t>` — capture the table listing; repeat with `--schema <s>` and with a schema that matches nothing ('No remote tables found.'). On the stock SQLite fixture both runs list every table, since there is no schema to filter on: record that and score the narrowing from the pins",
         "`os datasource introspect showcase_external --table <t> --url … --token <t>` — draft printed to stdout; then re-run with `--out objects/qa_external.object.ts` and capture 'Wrote objects/qa_external.object.ts' plus any 'REVIEW: column …' warnings",
         "escape probes: re-run with `--out ../qa-escape.object.ts` and `--out /tmp/qa-escape.object.ts` — capture both refusals and `echo $?`, and confirm neither file exists afterwards",
         "wire the generated object into the scratch config and run `os build; echo $?`",
@@ -1234,7 +1239,7 @@
         {
           "clause": "list-tables prints the remote tables with schema qualification and column counts (plus row estimates when the driver reports them) through GET /api/v1/datasources/:name/external/tables, and --schema narrows via the ?schema= query — this item pins the CLI's /external/tables FEDERATION door specifically; the admin twin GET /:name/remote-tables is a different mount owned by the integration-system area",
           "oracle": "log",
-          "verify": "the listing matches the fixture DB's actual tables (cross-check with sqlite3.tables on showcase_external.db); the schema filter narrows and the no-match run prints 'No remote tables found.' (list-tables.ts; route registered in packages/rest/src/external-datasource-routes.ts, ledgered at rest-route-ledger.ts)",
+          "verify": "the listing matches the fixture DB's actual tables (cross-check with sqlite3.tables on showcase_external.db); on a schema-bearing driver the schema filter narrows and the no-match run prints 'No remote tables found.' (on the stock SQLite fixture that half is scored from the pins in `automated` — fixtures.knownGaps) (list-tables.ts; route registered in packages/rest/src/external-datasource-routes.ts, ledgered at rest-route-ledger.ts)",
           "evidence": "the listings + the sqlite3 cross-check"
         },
         {
@@ -1276,6 +1281,10 @@
         "wrong-persona shape, NOT a finding: all three commands failing alike with the server's 403 PERMISSION_DENIED naming manage_platform_settings means the token authenticated but is unentitled — re-mint it for a caller holding that capability and re-run before filing anything. Filing it as a CLI or route regression would be a report against the #9901/#10255 gate working as ruled"
       ],
       "traps": ["dispatcher-vs-hono-route", "seed-data-thin", "wrong-persona"],
+      "automated": {
+        "kind": "test",
+        "ref": "acceptance[0]'s NARROWING half ONLY. packages/rest/src/remote-tables-twin.equivalence.test.ts drives the real ExternalDatasourceService behind the federation route this CLI calls (GET …/external/tables) through the real Hono adapter: '?schema= returns the SAME filtered set on both spellings' narrows to the public tables, and 'a ?schema= that matches nothing returns the SAME empty set on both spellings'. packages/services/service-datasource/src/__tests__/external-datasource-service.test.ts adds 'filters by requested schema', and packages/cli/src/commands/datasource/envelope-unwrap.test.ts adds 'keeps \"no remote tables\" reachable from an empty server list'. The CLI's flag-to-query forwarding is not pinned; every other clause still needs the run"
+      },
       "source": [
         "packages/cli/src/commands/datasource/list-tables.ts (route doc, listing), introspect.ts (route doc, flags, the cwd jail, REVIEW passthrough), validate.ts (route doc, diff rendering + exit)",
         "packages/rest/src/external-datasource-routes.ts#routes + rest-route-ledger.ts (the served federation routes incl. POST …/external/validate) and external-datasource-routes-auth-guard.test.ts (the auth wall the token satisfies)",
@@ -1291,6 +1300,12 @@
           "date": "2026-10-04",
           "change": "A6 and its negative step re-pointed: the unknown-name error-arm probe is limited to list-tables / introspect; validate on an unknown name answers a vacuous ok by design — the route is scoped by the call (validateDatasource(:name) validates the federated objects bound to that name; none → {ok:true, results:[]}, CLI 'No federated objects to validate.' exit 0). Assertion defect. Source e634ecf6a (#10537 / #10960)",
           "ref": "#21735"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-06",
+          "change": "partial-coverage gap of QA run #21721 parked on #22017 (row 24). A1's narrowing half was blocked(fixture): SQLite tables carry no schema to filter on. Verified: listRemoteTables skips the ?schema= filter for a table with no schema part, so no stock run can narrow. Disposition: pin. `automated` names the twin-equivalence route test, the service test and the CLI's empty-list test for that half, and a knownGap names the unpinned flag forwarding and the driver it needs. knownGaps[0] said no test referenced the three commands; envelope-unwrap.test.ts has since #10675, so it is corrected",
+          "ref": "#22017"
         }
       ]
     },
