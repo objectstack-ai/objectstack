@@ -33,10 +33,12 @@ import { NON_BLANK_STRING, requiredOneOf } from './refinement-projection';
  * registered `cron` engine has no caller outside that package.
  *
  * A TYPED slot — one declared with `CronExpressionInputSchema` or
- * `TemplateExpressionInputSchema` — takes a bare, non-blank string (shorthand
- * for its own dialect) or an envelope declaring that one dialect. An envelope
- * naming any other dialect, and a blank string, are refused at the slot with
- * one issue whose message names the dialect and the fix. Only the untyped
+ * `TemplateExpressionInputSchema`, or built with `templateExpressionInput` —
+ * takes a bare, non-blank string (shorthand for its own dialect) or an
+ * envelope declaring that one dialect. An envelope naming any other dialect,
+ * and a blank string, are refused at the slot with one issue whose message
+ * names the dialect and the fix; a template slot's fix is written in the
+ * placeholder spelling its renderer reads. Only the untyped
  * `ExpressionInputSchema` takes every declared dialect in envelope form.
  *
  * Those three are the whole list — it is exactly the `ExpressionDialect` enum
@@ -282,6 +284,14 @@ export type TypedExpressionDialect = Extract<ExpressionDialect, 'cron' | 'templa
  * rule. Its own words rather than {@link EVALUATED_EXPRESSION_SOURCE_REQUIRED},
  * because that sentence prescribes `{ dialect: 'cel', source }` — the one
  * envelope a typed slot refuses.
+ *
+ * The `template` sentence prescribes `{{record.name}}`: it is the sentence of
+ * {@link TemplateExpressionInputSchema}, whose slots' renderers read `{{var}}`
+ * (or, for `titleFormat`, either spelling). A template slot whose renderer
+ * reads another spelling does not answer with it: it is built with
+ * {@link templateExpressionInput} and carries sentences prescribing its own
+ * renderer's spelling — the notify node's `title` / `message`, rendered by
+ * the flow interpolator, prescribe `{record.name}` (`automation/io-node-config.zod.ts`).
  */
 export const TYPED_EXPRESSION_SOURCE_REQUIRED: Readonly<Record<TypedExpressionDialect, string>> = {
   cron:
@@ -299,6 +309,8 @@ export const TYPED_EXPRESSION_SOURCE_REQUIRED: Readonly<Record<TypedExpressionDi
  * The one sentence a TYPED slot refuses a foreign-dialect envelope with (and
  * any value that is neither a string nor an envelope). It names the slot's
  * dialect first, then the fix, so the prescription travels with the refusal.
+ * Its `template` sentence serves the same slots, and prescribes the same
+ * spelling, as {@link TYPED_EXPRESSION_SOURCE_REQUIRED}'s.
  */
 export const TYPED_EXPRESSION_DIALECT_ONLY: Readonly<Record<TypedExpressionDialect, string>> = {
   cron:
@@ -334,18 +346,38 @@ export const TYPED_EXPRESSION_DIALECT_ONLY: Readonly<Record<TypedExpressionDiale
  * to its own input type (`ObjectStackDefinitionSchema.parse` output is handed
  * to validators typed with the input shape), and it is — a same-dialect
  * envelope is both.
+ *
+ * Both take the slot's two sentences rather than reading them by dialect, and
+ * the string arm carries the source-required one too: the union's own message
+ * is not the only text an author sees, because `formatZodIssue` and the wire
+ * mapper expand an `invalid_union`'s branches, so a branch message that named
+ * another slot's spelling would reach the author beneath the right one.
  */
-function typedExpressionStringArm<D extends TypedExpressionDialect>(dialect: D) {
+function typedExpressionStringArm<D extends TypedExpressionDialect>(dialect: D, refusals: TypedExpressionRefusals) {
   return z.string()
-    .refine(NON_BLANK_STRING, { message: TYPED_EXPRESSION_SOURCE_REQUIRED[dialect] })
+    .refine(NON_BLANK_STRING, { message: refusals.sourceRequired })
     .transform((source) => ({ dialect, source }));
 }
 
-function typedExpressionUnionParams(dialect: TypedExpressionDialect): { error: (issue: { input?: unknown }) => string } {
+function typedExpressionUnionParams(refusals: TypedExpressionRefusals): { error: (issue: { input?: unknown }) => string } {
   return {
-    error: (issue) => (typeof issue.input === 'string'
-      ? TYPED_EXPRESSION_SOURCE_REQUIRED[dialect]
-      : TYPED_EXPRESSION_DIALECT_ONLY[dialect]),
+    error: (issue) => (typeof issue.input === 'string' ? refusals.sourceRequired : refusals.dialectOnly),
+  };
+}
+
+/** The two sentences one typed slot refuses with — see the two records above. */
+interface TypedExpressionRefusals {
+  /** Refuses a blank bare string. */
+  readonly sourceRequired: string;
+  /** Refuses a foreign-dialect envelope and any value that is neither a string nor an envelope. */
+  readonly dialectOnly: string;
+}
+
+/** The dialect's own sentences, from the two records above. */
+function typedExpressionRefusals(dialect: TypedExpressionDialect): TypedExpressionRefusals {
+  return {
+    sourceRequired: TYPED_EXPRESSION_SOURCE_REQUIRED[dialect],
+    dialectOnly: TYPED_EXPRESSION_DIALECT_ONLY[dialect],
   };
 }
 
@@ -368,10 +400,38 @@ function typedExpressionUnionParams(dialect: TypedExpressionDialect): { error: (
  * reaches no engine, and no grammar is restated here.
  */
 export const CronExpressionInputSchema = z.union([
-  typedExpressionStringArm('cron'),
+  typedExpressionStringArm('cron', typedExpressionRefusals('cron')),
   ExpressionSchema.safeExtend({ dialect: z.literal('cron') }),
-], typedExpressionUnionParams('cron'));
+], typedExpressionUnionParams(typedExpressionRefusals('cron')));
 export type CronExpressionInput = z.input<typeof CronExpressionInputSchema>;
+
+/**
+ * The template-typed input, refusing with the sentences it is given — the one
+ * constructor of {@link TemplateExpressionInputSchema} and of every template
+ * slot whose renderer reads a placeholder spelling other than `{{var}}`.
+ *
+ * The accept set is identical whatever the sentences: a bare, non-blank string
+ * (shorthand for `{ dialect: 'template', source }`) or an envelope declaring
+ * `dialect: 'template'`. Only the refusal text moves, because a refusal is the
+ * one place an author is told exactly what to write, and it must prescribe the
+ * spelling the slot's renderer reads — {@link TYPED_EXPRESSION_SOURCE_REQUIRED}
+ * prescribes `{{record.name}}`, which a single-brace renderer would leave
+ * inside a stray pair of braces. Pass `sourceRequired` for a blank bare string
+ * and `dialectOnly` for everything else, each ending in the slot's own
+ * prescription.
+ *
+ * Declared as a `const` arrow, not a `function`: the expression-surface census
+ * (`packages/qa/dogfood/test/expression-conformance.test.ts`) reads this name
+ * as a roster member, and a `const` binding is the roster-definition shape it
+ * skips.
+ */
+export const templateExpressionInput = (refusals: {
+  readonly sourceRequired: string;
+  readonly dialectOnly: string;
+}) => z.union([
+  typedExpressionStringArm('template', refusals),
+  ExpressionSchema.safeExtend({ dialect: z.literal('template') }),
+], typedExpressionUnionParams(refusals));
 
 /**
  * Template-typed input shape: a bare, non-blank string is shorthand for
@@ -379,8 +439,10 @@ export type CronExpressionInput = z.input<typeof CronExpressionInputSchema>;
  * `dialect: 'template'` — a `cel` or `cron` envelope is refused at the slot,
  * naming the fix (`TYPED_EXPRESSION_DIALECT_ONLY.template`), as is a blank
  * string (`TYPED_EXPRESSION_SOURCE_REQUIRED.template`). Use this for
- * notification subjects/bodies, titleFormat, prompt templates — anything with
- * placeholder interpolation.
+ * titleFormat, prompt templates, and any template slot whose renderer reads
+ * `{{var}}`; a slot whose renderer reads another spelling takes the same input
+ * from {@link templateExpressionInput}, with refusals prescribing its own
+ * spelling (a notify node's `title` / `message` do — see the list below).
  *
  * No template syntax is judged at parse time: this schema judges the dialect
  * tag and non-emptiness and nothing else, so it declares no placeholder
@@ -398,14 +460,19 @@ export type CronExpressionInput = z.input<typeof CronExpressionInputSchema>;
  *   `@objectstack/metadata-protocol`). Both spellings resolve identically
  *   there — single-brace `titleFormat` values are legal by construction, not
  *   a grammar this schema failed to enforce.
+ * - A notify flow node's `title` / `message` read the other way: their
+ *   renderer is the flow interpolator (`interpolate()` in
+ *   `@objectstack/service-automation`), which substitutes single-brace `{var}`
+ *   only — a `{{var}}` keeps its outer braces in the sent text, and the
+ *   build's `flow-double-brace-interpolation` rule flags it on a flow node.
+ *   Those two slots are built with {@link templateExpressionInput}, so their
+ *   refusals prescribe `{record.name}` instead of this schema's `{{record.name}}`.
  *
- * So write `{{var}}` unless the slot's renderer is known to normalize, and do
- * not read either spelling as declared, preferred or rejected here.
+ * So write the spelling the slot's renderer reads — `{{var}}` on this schema's
+ * slots, `{var}` on a notify node's — and do not read either spelling as
+ * declared, preferred or rejected here.
  */
-export const TemplateExpressionInputSchema = z.union([
-  typedExpressionStringArm('template'),
-  ExpressionSchema.safeExtend({ dialect: z.literal('template') }),
-], typedExpressionUnionParams('template'));
+export const TemplateExpressionInputSchema = templateExpressionInput(typedExpressionRefusals('template'));
 export type TemplateExpressionInput = z.input<typeof TemplateExpressionInputSchema>;
 
 /**
@@ -500,13 +567,27 @@ export const F = cel;
 export const P = cel;
 
 /**
- * Tagged template — produces a Mustache-template Expression envelope. Use for
- * notification subjects, prompt bodies, titleFormat strings, etc. Variable
- * scope is the same as CEL (`{{record.x}}`, `{{os.user.id}}`).
+ * Tagged template — produces a `template`-dialect Expression envelope. Use for
+ * notification subjects and bodies, prompt bodies, titleFormat strings, etc.
+ * Variable scope is the same as CEL (`record.x`, `os.user.id`).
+ *
+ * It interpolates nothing and judges no placeholder spelling: the renderer
+ * that consumes the slot does, and the renderers do not read the same braces.
+ * Write the spelling the slot's renderer reads:
+ *
+ * - `{{record.x}}` — the `@objectstack/formula` template engine and the
+ *   messaging, email and i18n renderers read double braces only, and leave a
+ *   `{record.x}` in their output verbatim;
+ * - `{record.x}` — a notify flow node's `title` / `message` are rendered by the
+ *   flow interpolator, which reads single braces only: a `{{record.x}}` keeps
+ *   its outer braces in the sent text, and the build's
+ *   `flow-double-brace-interpolation` rule flags it;
+ * - either — `titleFormat`'s renderers normalize `{{record.x}}` to `{record.x}`.
  */
 export function tmpl(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression {
   // Templates do not get JSON.stringify on substitution — interpolation happens
-  // at evaluate time via `{{path}}` markers, so we keep raw substitutions here.
+  // at evaluate time, by the consuming renderer's placeholder markers (see the
+  // docblock), so we keep raw substitutions here.
   let out = strings[0] ?? '';
   for (let i = 0; i < values.length; i++) {
     out += String(values[i]);
