@@ -2,8 +2,8 @@
   "number": 22012,
   "kind": "issue",
   "title": "spec(identity): `EvalUser.isPlatformAdmin` is the live PLATFORM_ADMIN standing predicate but is still marked Deprecated and positions-derived — lift the mark, describe it as ADR-0095 D3 standing, date-note ADR-0068 D2/D4 (#21886 spec half)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-06T15:14:43Z",
-  "updated_at": "2026-10-06T17:19:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-07T05:06:05Z",
+  "closed_at": "2026-10-07T05:06:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,
