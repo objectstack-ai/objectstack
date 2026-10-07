@@ -2,8 +2,8 @@
   "number": 22019,
   "kind": "issue",
   "title": "formula: the metadata save door stores a formula that calls an unregistered function (`sqrt`), and every read answers null with nothing logged — the docs say the shared validator backs metadata registration",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "bug",
     "domain:engine",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-06T17:01:25Z",
-  "updated_at": "2026-10-06T19:18:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-06T20:52:20Z",
+  "closed_at": "2026-10-06T20:49:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22019",
   "body": "Filing gate: **① a reproducible product defect, class (b): a door that contradicts its own stated contract.** `content/docs/data-modeling/formulas.mdx` says \"the same `validateExpression` validator backs `os build` and metadata registration\". At the runtime save door it does not, and the fault that validator exists to prevent reaches users as a silent `null`.\n\nReader: triage's first touch (grade and route), then the execution seat that claims it.\n\nQA-source: #21784 · api-backend.formula-stdlib-matrix · acceptance[5]\n\nFiled by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`). It is the `Extracted:` disposition for the last fail on qa-run #21784 without a card. The record called it \"known expected-fail #3306\". But #3306 closed `completed` on 2026-07-20 with a different fix (`floor`/`ceil` registered, and date arithmetic made a build error), so the row had no live carrier. ⛔ Not graded here. ⛔ Not a claim.\n\nDedupe: MCP `search_issues` on objectstack, open and closed, for \"formula calling an unregistered function saves and reads null silently, no authoring-time refusal\": 0 hits. The nearest closed card is #3306, a different mechanism (above).\n\n## What happens\n\nFrom the record, confirmed by verifier VF4 at `316be321`:\n1. `PUT /api/v1/meta/object/fx_sqrt?package=…`, with a formula field `sqrt(record.amount)` → **200**.\n2. `POST /api/v1/data/fx_sqrt {amount: 16}` → the formula field reads **null**. Nothing is logged.\n\n`sqrt` is not one of the 27 registered stdlib functions. `os build` refuses the same expression: \"Unknown function\", severity error (`formulas.mdx` about `:228`).\n\n## Where (read on `main` at this filing)\n\n- **The read path:** `packages/objectql/src/engine.ts:2255`, in `applyFormulaPlan`:\n  - `rec[fp.name] = r.ok ? … : null` drops the fault with no log line;\n  - the planning stage's `ExpressionEngine.compile(expr)` (about `:1562`, \"to surface syntax errors at planning stage\") discards its result;\n  - `formulas.mdx` (about `:640`) states ADR-0032's rule for call sites: \"must not silently swallow that\".\n- **The save door:** no `validateExpression` call reaches an object's formula fields on the metadata save path.\n  - `git grep -n validateExpression -- packages/metadata-protocol/src packages/objectql/src` finds no call site.\n  - `registerFlow` in `service-automation` does call it. That is the \"same verdict\" the docs promise for metadata registration.\n\n## Done when\n\n- **The save door refuses** a formula field whose expression `validateExpression('value', …)` refuses, with the same located message `os build` gives. This is the docs' existing promise, ⛔ not a new rule: the build's verdict, at a second door.\n- **The read path no longer drops an evaluation fault silently.** At minimum, one attributed log line per (object, field) fault, under ADR-0032.\n- **Pins:**\n  - the save door refuses `sqrt(record.amount)`;\n  - a registered call (`floor(record.amount)`) still saves;\n  - a row stored before the gate still reads, and the read-path log names it.\n- `api-backend.formula-stdlib-matrix` A6 then scores the new behaviour, as its own step says: \"if an authoring-time gate refuses the formula before it is stored, record THAT as the (better) behavior\". The seat that accepts this card appends the item to the wave anchor's retest list, #22017 (§5, trigger 2)."

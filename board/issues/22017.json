@@ -2,8 +2,8 @@
   "number": 22017,
   "kind": "issue",
   "title": "qa(checklist): park the blocked partial-coverage gaps of the 17.7 pre-release runs (#21720, #21721, #21782, #21784) — each gets a fixture recipe, a pin, a re-pointed clause or a recorded knownGap",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "documentation",
     "domain:devx",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-06T16:59:22Z",
-  "updated_at": "2026-10-06T18:44:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-06T21:23:20Z",
+  "closed_at": "2026-10-06T21:19:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22017",
   "body": "Filing gate: **④ a coordination node**, the wave anchor that `checklist-test` §5 names for parked `partial` gaps. Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) while clearing the close-out debt of the four open `qa-run` records, which the maintainer approved: 「同意，动手」. ⛔ Not a claim.\n\nGraded here: `documentation` · `priority:p3` · `domain:devx` (`docs/qa/**`) · `area:devpath` · `pm:queue`.\n\n## Why this card exists\n\n- Each of the four records names its partial-coverage gaps, as §5 requires (\"named, never dropped\"). But §5 also says each gap is either upgraded to a pin, area by area, or **parked on the wave anchor**. This wave's earlier anchors (#21735, #21797 and #21851) were clause re-point cards, and all three are closed. So no open card carries these gaps, and the records cannot close.\n- ⛔ `not-run` legs are **not** listed here. §4's completion rule keeps them on their own record's handoff list, and ⛔ there is no second list. They are re-selected by §5 trigger 1, the next release-candidate Tier 1 run:\n  - #21782: `platform-core.console-installability-indicators` A3 (the error leg), `records-forms.form-dirty-guard` A3, `records-forms.bulk-select-all-matching` A5;\n  - #21720: the three browser halves deferred past #21696 (`api-backend.route-ledger-live-parity` A10, `automation.packaged-flow-clone-contract` A7, `platform-core.metadata-registry-serving` A7);\n  - #21721: `cli.dev-boot-contract` A1 (the `/_console` half);\n  - #21784: `identity-auth.admin-lifecycle-operations` N3 and `records-forms.field-group-visible-when` N3.\n\n## The parked gaps (the reason is the record's own)\n\nOne named gap is not listed, because it is already answered: #21784's `cli.scaffold-first-run` and `cli.scaffold-console-first-paint` had proved only the published 17.6.0. The follow-up run #21845 re-ran both on the 17.7 candidate, and both PASS.\n\n**From #21782 (browser):**\n1. `identity-auth.phone-signin-surfaces` A2 / A3: blocked(fixture). `features.phoneNumber` is false, and `plugins.phoneNumber` is code config with no runtime setting.\n2. `records-forms.crud-roundtrip` A7, the readonly half: blocked(fixture). No stock readonly column can be set over HTTP.\n3. `records-forms.import-wizard-encoding-and-hints` A3: blocked(dependency). The legacy per-row path exists only without `importRecords`, and its pin is objectui-only.\n4. `records-forms.gantt-interactions` A2 / A3: blocked(fixture). The stock view has no `dependenciesField`, and `lockField` is not a `GanttConfig` key, so the clause also needs checking.\n5. `search.command-palette-navigation` A5: blocked(fixture). No stock nav item carries a visibility predicate.\n6. `records-forms.grid-personalization` A1 (reorder and pin): `reorderableColumns` is off, and there is no runtime pin control.\n7. `records-forms.action-location-matrix` A3 (url and api dispatch): the fixture hosts no ⋯ surface.\n8. `i18n.surface-matrix` A6, the confirm half: there is no zh `confirmText`.\n9. `platform-core.keyboard-shortcut-surface` A5, and `ai.console-ai-surface-gating` A2 on the entitled side: blocked(fixture), as their clauses prescribe.\n10. Marketplace catalog content (`builtin-apps-nav-render`, and `marketplace-console-honesty` boot A): blocked(environment). Egress to the catalog was denied.\n\n**From #21720 (non-browser):**\n\n11. `access-security.rls-both-sides` A6: blocked(dependency), as its clause prescribes.\n12. `access-security.write-path-guards` N2: there is no REST door for an in-process `isSystem` write, and no pin targets it.\n13. `api-backend.declarative-endpoint-execution` A3: there is no live script or proxy endpoint without editing source. Runtime `api` authoring is code-only by design (#5488).\n14. `records-forms.predicate-relationship-traversal` A4: no stock persona has invoice CRUD without account read. The item's knownGap says otherwise, so the clause also needs checking.\n\n**From #21784 (mixed):**\n\n15. `identity-auth.admin-lifecycle-operations` A4–A6: blocked(dependency). These are ruled not-built (#9968, #9969).\n16. `studio-authoring.expression-editors` A8: blocked(environment). The pin lives only in objectui.\n17. `studio-authoring.metadata-diagnostics-sweep` A7: blocked(fixture).\n18. `integration-system.datasource-credential-refusal-matrix` A2 / A7: blocked(environment). There is no Postgres, MySQL or Mongo to connect to.\n19. `approvals.decision-action-matrix` A10: blocked(fixture). No org-less request can be provisioned.\n20. `identity-auth.auth-method-matrix` A1 (the SSO and device variants: there is no switch on the `dev` → `serve` path) and N3 (objectui#4179).\n21. `integration-system.external-schema-browser-ui` A7: it needs an unwired boot.\n22. `records-forms.encrypted-field-behavior` A4: pin-only, of necessity. An unwired-crypto boot refuses to start.\n\n**From #21721 (cli):**\n\n23. `cli.flag-command-error-ux` A4: the clause pins 30 variants, but the registered surface is 20 commands, 12 topics and `g` (33). The count is the runner's, not the item's.\n24. `cli.datasource-introspect-codegen` A1, the narrowing half: blocked(fixture). SQLite tables carry no schema to filter on.\n\n## Done when\n\nEach numbered row ends in exactly one of these, through `checklist-author`'s conventions, with a revision entry citing its record:\n- **a fixture recipe:** the smallest showcase fixture, or a documented boot switch, that makes the leg runnable;\n- **a pin:** an `automated.ref` that proves the leg without a live run;\n- **a re-pointed clause:** where the item asserts something the platform does not offer or has ruled out. Rows 4, 14 and 23 are the likely ones; rows 13 and 15 may be too;\n- **a recorded knownGap:** where the leg cannot be reached in this environment by design. The item names the environment it needs.\n\n⛔ Rows stay; none is dropped. A row's answer can be \"this needs a product change\": that becomes its own card, and this row parks on it.\n\n**Enumeration pin:** 24 rows across 4 records. The PR body tables all 24 with the disposition taken. Each record's close-out carries one `Parked-on:` line per row pointing here.\n\n**Retest list (§5 trigger 2):** when a QA-extracted fix card from this wave lands, the seat that accepts it appends the affected item here. The two cards extracted while clearing this debt (the `ai.console-ai-surface-gating` A6 card and the `api-backend.formula-stdlib-matrix` A6 card) are linked below once filed."

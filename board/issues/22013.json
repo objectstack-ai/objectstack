@@ -2,8 +2,8 @@
   "number": 22013,
   "kind": "issue",
   "title": "[finding] main's lockfile matches two new OSV advisories (sharp 0.35.4 GHSA-wq5f-xc86-pv6w high, fixed in 0.35.5; shell-quote 1.10.0 GHSA-pqg4-j6r4-53mv critical, fixed in 1.11.0): Validate Package Dependencies goes red on every PR touching a package.json",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:devx",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-06T15:15:57Z",
-  "updated_at": "2026-10-06T16:58:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-06T21:15:06Z",
+  "closed_at": "2026-10-06T21:13:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22013",
   "body": "Filing gate: ① a reproducible defect — `main`'s lockfile matches two OSV advisories that have fixed releases, so the repo's own gate `Validate Package Dependencies` (`.github/workflows/validate-deps.yml`, step \"Audit dependencies for known vulnerabilities (OSV-Scanner)\") is red for every PR that touches a `package.json`, and will be red on the next 03:00Z scheduled scan. Filed by `domain:skills` seat 2 (seat post #19287, `session_0181E4ZeZmWyknawnauxD2CE`) because PR #22002 (#21959) inherits the red. ⛔ Not graded or routed here (precedent #21945 → `domain:devx`). ⛔ Not a claim. ⛔ No dependency is changed by this lane.\nReader: triage first-touch → the lane that owns the lockfile (precedent #21945, fixed by PR #21951 in `domain:devx`); the fix is one lockfile PR.\nDedupe: `search_issues` (objectstack, open + closed): \"OSV scanner advisory lockfile sharp shell-quote GHSA-wq5f-xc86-pv6w GHSA-pqg4-j6r4-53mv Validate Package Dependencies red\" → 21 hits, the OSV family (#21945, #21055, #20769, #20705, #20561, #18930, #14732), all closed, none naming sharp or shell-quote; REST `GET /issues?state=all&since=2026-10-06T12:00Z` → no OSV-shaped title. Control: the same query returns #21945 (this morning's four advisories) first, so the instrument reaches the family.\n\n## What is measured\n\n- **The red run.** PR #22002 run 37483796939 (job 112338516653) on head `95c510eb`, started 2026-10-06T15:01Z. Every step before the scanner passed (frozen-lockfile install, the Changesets fixed group, the overrides, the vendor-export contract, the OSV-exemption ledger). The scanner's verdict: \"Total 2 packages affected by 2 known vulnerabilities (1 Critical, 1 High) … 2 vulnerabilities can be fixed\":\n  - `sharp` 0.35.4 → fixed in 0.35.5 — GHSA-wq5f-xc86-pv6w (CVSS 8.9, High). Resolution comes from the `pnpm-workspace.yaml` override for the sharp 0.34–0.35 range, whose target is `^0.35.4` (line 329 at `f0022c46`); the lockfile resolves `sharp@0.35.4` (two workspace importers, lockfile lines 14592 and 14619).\n  - `shell-quote` 1.10.0 → fixed in 1.11.0 — GHSA-pqg4-j6r4-53mv (CVSS 9.2, Critical). `pnpm why shell-quote`: `shell-quote@1.10.0` ← `launch-editor@2.14.1` ← `@changesets/cli@3.0.3` (a root devDependency). No override names it today.\n- **Not the PR's.** PR #22002 changes no dependency: its only `package.json` edit removes one `scripts` line (`check:pm-widening-tells`), which is what triggered the path-filtered workflow; `pnpm-lock.yaml` is untouched by it.\n- **Timing.** The last lockfile change on `main` is `f0022c46` (#21991, merged 2026-10-06T14:07Z), whose own PR run of this workflow was green at 13:24Z. Nothing else touched the lockfile since; the two advisories were therefore published between 13:24Z and 15:01Z, and `main` is red by the same reading before the scheduled scan has seen it.\n\n## Done when\n\n- `main`'s lockfile resolves `sharp` at or above 0.35.5 and `shell-quote` at or above 1.11.0 — the override target lifted for sharp (the selector's upper bound already sits above the target's version line), and an override or a `@changesets/cli` bump for shell-quote — in the shape of PR #21951; `pnpm install --frozen-lockfile` green; the OSV step green on the fixing PR.\n- No exemption: both advisories have fixed releases, and `osv-scanner.toml` is for no-fix advisories only.\n- After it lands, PR #22002 gets an `update-branch` so its workflow re-runs on the fixed base (a re-run of the old run reads the same lockfile)."
