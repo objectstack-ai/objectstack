@@ -160,6 +160,73 @@ function systemInsertOptionsFor(
 }
 
 /**
+ * [#21908] The engine options the four by-id WRITE doors of this store run
+ * under — {@link StorageMetadataStore.updateFile},
+ * {@link StorageMetadataStore.deleteFile},
+ * {@link StorageMetadataStore.updateSession} and
+ * {@link StorageMetadataStore.deleteSession}: the same explicit system opt-in
+ * the inserts take ({@link systemInsertOptionsFor}), taken inside this store,
+ * with the acting organization's `tenantId` beside it when there is one.
+ *
+ * The posture is the inserts', and so is the reason: each of these reached the
+ * data engine with a tenant-only context (or none), no principal and no
+ * opt-in, and passed the security middleware only through its principal-less
+ * hand-off (ADR-0096 E1), which D5 closes. Carrying the caller's principal is
+ * not open — no member grant exists on `sys_file` / `sys_upload_session` — and
+ * the doors keep the authorization they already run (session authentication,
+ * the download door's `authorizeDownload`, the chunk door's resume token).
+ *
+ * What the `tenantId` buys differs by verb ({@link StorageWriteContext}): here
+ * it is the REACH, not a stamp. The driver's `applyTenantScope` still composes
+ * `(organization_id = :tenantId OR organization_id IS NULL)` into the
+ * statement, so a row stamped for another organization stays out of reach of
+ * these doors exactly as before. ⛔ Never drop the `tenantId` here: under the
+ * opt-in the security middleware composes no tenant wall of its own, so the
+ * driver-level scope is the only one these writes have.
+ */
+const systemByIdWriteOptionsFor = systemInsertOptionsFor;
+
+/**
+ * [#21908] The engine options the two by-id READS of this store run under —
+ * {@link StorageMetadataStore.getFile} and
+ * {@link StorageMetadataStore.getSession}: the explicit system opt-in and
+ * nothing else.
+ *
+ * The read's reach is unchanged by it. Before, the read carried no context at
+ * all: no `tenantId` reached the driver, and the security middleware handed it
+ * through before any row or tenant filter (the principal-less hand-off,
+ * ADR-0096 E1). Under the opt-in the middleware short-circuits before the same
+ * filters, and still no `tenantId` reaches the driver. Access is by id, and the
+ * door decides what the caller is shown: the download doors run
+ * `authorizeDownload` on the row this read returns before they disclose
+ * anything, and the chunk door checks the row's resume token before it writes.
+ * ⛔ No `tenantId` is added here: scoping these reads would change which rows
+ * the doors find, and that is a door decision, not this store's.
+ */
+const SYSTEM_BY_ID_READ_OPTIONS = { context: { isSystem: true } } as const;
+
+/**
+ * [#21908] The columns a by-id UPDATE sends to the engine: the caller's patch,
+ * minus the address.
+ *
+ * Until the opt-in, `updateFile` / `updateSession` sent the whole read-back
+ * row merged with the patch, and the engine's update-side `readonly` strip took
+ * the platform-provisioned columns out of it — `organization_id` and the four
+ * audit columns (`created_at`, `updated_at`, `created_by`, `updated_by`). That
+ * strip does not run for an `isSystem` write, so the full row would now be
+ * written back, `organization_id` included, from a read that is not
+ * tenant-scoped. The store sends only what it means to change instead: the
+ * stored row ends up as it did before, those five columns stay the platform's
+ * ({@link FileRecord.organization_id} — the store never puts the tenant column
+ * in the engine payload), and a column another writer changed between the read
+ * and this write is no longer reverted by it.
+ */
+function changedColumns<T extends { id?: string }>(patch: Partial<T>): Partial<T> {
+  const { id: _address, ...changes } = patch;
+  return changes as Partial<T>;
+}
+
+/**
  * Persisted upload-session record (matches `sys_upload_session` object schema).
  */
 export interface UploadSessionRecord {
@@ -372,8 +439,10 @@ export class StorageMetadataStore {
 
   async getFile(id: string): Promise<FileRecord | null> {
     if (!this.engine) return this.files.get(id) ?? null;
+    // [#21908] The explicit system opt-in; access stays by id — see
+    // SYSTEM_BY_ID_READ_OPTIONS.
     const found = await this.engineOp('sys_file', 'findOne', FILE_READ_CONSEQUENCE, (engine) =>
-      engine.findOne('sys_file', { where: { id } }),
+      engine.findOne('sys_file', { where: { id } }, SYSTEM_BY_ID_READ_OPTIONS),
     );
     return (found as FileRecord | null | undefined) ?? null;
   }
@@ -416,9 +485,14 @@ export class StorageMetadataStore {
       this.files.set(id, merged);
       return merged;
     }
-    const options = writeOptionsFor(context);
+    // [#21908] The explicit system opt-in with the organization kept beside it
+    // as the statement's scope (systemByIdWriteOptionsFor), carrying the patch
+    // alone (changedColumns).
     await this.engineOp('sys_file', 'update', FILE_UPDATE_CONSEQUENCE, (engine) =>
-      engine.update('sys_file', merged as any, { where: { id }, ...options } as any),
+      engine.update('sys_file', changedColumns<FileRecord>(patch), {
+        where: { id },
+        ...systemByIdWriteOptionsFor(context),
+      }),
     );
     return merged;
   }
@@ -437,9 +511,10 @@ export class StorageMetadataStore {
       this.files.delete(id);
       return;
     }
-    const options = writeOptionsFor(context);
+    // [#21908] The explicit system opt-in, the organization kept beside it as
+    // the statement's scope — see systemByIdWriteOptionsFor.
     await this.engineOp('sys_file', 'delete', FILE_DELETE_CONSEQUENCE, (engine) =>
-      engine.delete('sys_file', { where: { id }, ...options } as any),
+      engine.delete('sys_file', { where: { id }, ...systemByIdWriteOptionsFor(context) }),
     );
   }
 
@@ -505,7 +580,9 @@ export class StorageMetadataStore {
       'sys_upload_session',
       'findOne',
       SESSION_READ_CONSEQUENCE,
-      (engine) => engine.findOne('sys_upload_session', { where: { id } }),
+      // [#21908] The explicit system opt-in; access stays by id — see
+      // SYSTEM_BY_ID_READ_OPTIONS.
+      (engine) => engine.findOne('sys_upload_session', { where: { id } }, SYSTEM_BY_ID_READ_OPTIONS),
     );
     return (found as UploadSessionRecord | null | undefined) ?? null;
   }
@@ -545,9 +622,12 @@ export class StorageMetadataStore {
       this.sessions.set(id, merged);
       return merged;
     }
-    const options = writeOptionsFor(context);
+    // [#21908] Same opt-in, same scope and same payload as updateFile.
     await this.engineOp('sys_upload_session', 'update', SESSION_UPDATE_CONSEQUENCE, (engine) =>
-      engine.update('sys_upload_session', merged as any, { where: { id }, ...options } as any),
+      engine.update('sys_upload_session', changedColumns<UploadSessionRecord>(patch), {
+        where: { id },
+        ...systemByIdWriteOptionsFor(context),
+      }),
     );
     return merged;
   }
@@ -565,9 +645,10 @@ export class StorageMetadataStore {
       this.sessions.delete(id);
       return;
     }
-    const options = writeOptionsFor(context);
+    // [#21908] The explicit system opt-in, the organization kept beside it as
+    // the statement's scope — see systemByIdWriteOptionsFor.
     await this.engineOp('sys_upload_session', 'delete', SESSION_DELETE_CONSEQUENCE, (engine) =>
-      engine.delete('sys_upload_session', { where: { id }, ...options } as any),
+      engine.delete('sys_upload_session', { where: { id }, ...systemByIdWriteOptionsFor(context) }),
     );
   }
 }
