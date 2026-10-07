@@ -114,9 +114,12 @@ const PLANTED_KEY = 'zzzUndeclaredProbeKey';
 /**
  * A stack that builds cleanly and carries BOTH advisory kinds:
  *
- *  - a bare `unique: true` index -> one authoring-RULE advisory (a RECORD), so
- *    a regression that dropped `ruleAdvisories` while folding in the strings
- *    goes red here rather than passing quietly;
+ *  - `title` unique twice — per organization on the field, `'global'` on a
+ *    declared index -> one authoring-RULE advisory (a RECORD,
+ *    `unique/double-declaration`), so a regression that dropped
+ *    `ruleAdvisories` while folding in the strings goes red here rather than
+ *    passing quietly (it was a bare declared `unique: true` until protocol 18
+ *    refused that spelling outright);
  *  - `PLANTED_KEY` inside the field's `visibleWhen` -> one undeclared-key
  *    finding (a STRING), the subject of this file.
  */
@@ -130,11 +133,12 @@ export default defineStack({
       name: 'uk_ticket',
       label: 'Ticket',
       sharingModel: 'private',
-      indexes: [{ name: 'uk_title_idx', fields: ['title'], unique: true }],
+      indexes: [{ name: 'uk_title_idx', fields: ['title'], unique: 'global' }],
       fields: {
         title: {
           type: 'text',
           label: 'Title',
+          unique: true,
           visibleWhen: { dialect: 'cel', source: 'true', ${PLANTED_KEY}: 1 },
         },
       },
@@ -158,11 +162,12 @@ export default defineStack({
       name: 'uk_ticket',
       label: 'Ticket',
       sharingModel: 'private',
-      indexes: [{ name: 'uk_title_idx', fields: ['title'], unique: true }],
+      indexes: [{ name: 'uk_title_idx', fields: ['title'], unique: 'global' }],
       fields: {
         title: {
           type: 'text',
           label: 'Title',
+          unique: true,
           visibleWhen: { dialect: 'cel', source: 'true' },
         },
       },
@@ -241,7 +246,7 @@ describe('#11643 — `os build --json` carries the undeclared-authoring-key warn
     expect(
       records.map((r) => r.rule),
       'the authoring-rule advisory records were lost from `warnings`',
-    ).toContain('unique/unscoped-declared-index');
+    ).toContain('unique/double-declaration');
 
     // …and the undeclared-key members are STRINGS, which is the shape
     // `os validate --json` ships them in. A consumer reads one shape from
