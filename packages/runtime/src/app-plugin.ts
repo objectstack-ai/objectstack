@@ -118,8 +118,15 @@ export class AppPlugin implements Plugin {
      * composed on engine-less kernels too (metadata-only one-shot commands,
      * mock-engine tests) where it degrades: every `objectql` touch in init
      * is behind a try/catch.
+     *
+     * `com.objectstack.auth` (ADR-0131 D3): under the `single` posture the
+     * auth plugin creates the Default Organization in its `start()`, and that
+     * organization must exist before this plugin's `start()` loads the inline
+     * seed — every seed row is stamped with it or refused. Order-if-present:
+     * a composition without the auth plugin registers no organization object,
+     * and its seeds keep today's unstamped branch.
      */
-    optionalDependencies = ['com.objectstack.engine.objectql'];
+    optionalDependencies = ['com.objectstack.engine.objectql', 'com.objectstack.auth'];
     /**
      * The one init-time service this plugin CANNOT degrade without: a
      * non-empty bundle is registered via `getService('manifest').register()`
