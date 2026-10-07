@@ -47,5 +47,4 @@ export const entry: SemanticMigration = {
     + 'condition of your sharing rules, for != or == whose other side is current_user with no key '
     + 'after it, then rewrite each against the key it means (current_user.id, '
     + 'current_user.organization_id or current_user.email), or with in against a membership set.',
-  relevantWhen: { kind: 'stack-declares', keys: ['permissions', 'sharingRules'] },
 };

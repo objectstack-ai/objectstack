@@ -34,14 +34,17 @@ import type { StackDefinitionKey } from '../stack.zod.js';
 
 /**
  * A top-level stack key a {@link SemanticRelevance} question may name: any key
- * `ObjectStackDefinitionSchema` declares, except the four the evaluation reads
+ * `ObjectStackDefinitionSchema` declares, except the five the evaluation reads
  * as CARRIERS of other definitions rather than as a family of its own —
  * `manifest` (always present), `packages` (whose bodies are searched for the
- * named keys), and `plugins` / `devPlugins` (whose entries can contribute
- * metadata no reader of the stack can see, so their presence makes every
- * answer unknown).
+ * named keys), and `plugins` / `devPlugins` / `tiers` (whose entries, or the
+ * platform plugins a tier preset loads, can contribute metadata no reader of
+ * the stack can see, so their presence makes every answer unknown).
  */
-export type SemanticRelevanceKey = Exclude<StackDefinitionKey, 'manifest' | 'packages' | 'plugins' | 'devPlugins'>;
+export type SemanticRelevanceKey = Exclude<
+  StackDefinitionKey,
+  'manifest' | 'packages' | 'plugins' | 'devPlugins' | 'tiers'
+>;
 
 /**
  * "Does the stack declare anything under one of these top-level keys?" — the
@@ -78,12 +81,12 @@ export interface StackDeclaresRelevance {
  * arbitrary work and could not be enumerated, reviewed or pinned. A new kind of
  * question is a new member here, evaluated in `chain.ts`.
  *
- * The answer is three-valued, and only one value removes anything. `absent`
- * (the stack provably carries no such surface) moves the entry to
- * {@link MigrationChainResult.absentTodos}; `present` and `unknown` (a value
- * the question cannot read, a stack that is not a plain object, or a `plugins`
- * / `devPlugins` entry that can contribute metadata the stack does not show)
- * keep it listed. The proof is about the definition the chain reads: metadata
+ * The answer is three-valued, and only one value takes an entry off a
+ * printer's default list. `absent` (the stack provably carries no such
+ * surface) names the entry in {@link MigrationChainResult.absentTodos} — it
+ * stays in `todos` too; `present` and `unknown` (a value the question cannot
+ * read, a stack that is not a plain object, or a `plugins` / `devPlugins` /
+ * `tiers` entry that can contribute metadata the stack does not show) do not. The proof is about the definition the chain reads: metadata
  * a deployment stores at runtime (Studio, the metadata API) is not part of it.
  */
 export type SemanticRelevance = StackDeclaresRelevance;
@@ -132,9 +135,10 @@ export interface SemanticMigration {
   /**
    * The structured question that can prove this entry irrelevant to a stack:
    * when the chain evaluates it as `absent` over the stack it migrates, the
-   * entry is reported in {@link MigrationChainResult.absentTodos} instead of
-   * `todos`, and `os migrate meta` counts it rather than listing it (`--all`
-   * lists it). See {@link SemanticRelevance} for the evaluation.
+   * entry — still reported in `todos` — is also named in
+   * {@link MigrationChainResult.absentTodos}, and `os migrate meta` counts it
+   * rather than listing it (`--all` lists it). See {@link SemanticRelevance}
+   * for the evaluation.
    *
    * Omit it — the entry is then always listed — unless the surface lives ONLY
    * under top-level stack keys the question names. Two cases keep it listed by
@@ -193,9 +197,13 @@ export interface MigrationHopResult {
   rationale: string;
   stack: Record<string, unknown>;
   applied: MigrationApplication[];
-  /** This hop's semantic TODOs the stack may owe — every entry `absentTodos` does not hold. */
+  /** Every semantic TODO of this hop, whatever the stack holds. */
   todos: MigrationTodo[];
-  /** This hop's semantic TODOs whose surface the stack provably lacks (see {@link MigrationChainResult.absentTodos}). */
+  /**
+   * The subset of this hop's `todos` — the same objects, in the same order —
+   * whose surface the stack provably lacks (see
+   * {@link MigrationChainResult.absentTodos}).
+   */
   absentTodos: MigrationTodo[];
 }
 
@@ -208,18 +216,19 @@ export interface MigrationChainResult {
   /** Every mechanical rewrite across all hops, in application order. */
   applied: MigrationApplication[];
   /**
-   * Every semantic TODO across all hops that this stack may owe — the judgment
-   * delegated to the consumer. That is every entry of every hop crossed except
-   * the ones in {@link absentTodos}; together the two hold each entry once, in
-   * chain order.
+   * Every semantic TODO across all hops — the judgment delegated to the
+   * consumer: every entry of every hop crossed, in chain order, whatever the
+   * stack holds. {@link absentTodos} never removes anything from it.
    */
   todos: MigrationTodo[];
   /**
-   * The semantic TODOs whose {@link SemanticMigration.relevantWhen} question
-   * PROVED their surface absent from the stack — absent from the stack the
-   * chain was handed and from every hop's checkpoint after it. They are
-   * reported here, never dropped (ADR-0087 D3, "never silence"): a printer
-   * counts them, and lists them on request.
+   * The subset of {@link todos} — the same objects, in the same order — whose
+   * {@link SemanticMigration.relevantWhen} question PROVED their surface absent
+   * from the stack: absent from the stack the chain was handed and from every
+   * hop's checkpoint after it. A printer may leave these off its default list
+   * only because they are named here (ADR-0087 D3, "never silence"): it counts
+   * them, and lists them on request. Empty when no entry carries a question
+   * the stack answers `absent`.
    */
   absentTodos: MigrationTodo[];
   /** Per-hop checkpoints, in order (for `--step` bisection). */

@@ -210,7 +210,8 @@ function printEmptyRangeAnswer(
   }
 
   const wider = applyMetaMigrations(stack, fromMajor, CHAIN_TERMINUS_MAJOR);
-  if (wider.applied.length === 0 && wider.todos.length === 0) {
+  const widerListed = listedTodos(wider.todos, wider.absentTodos);
+  if (wider.applied.length === 0 && widerListed.length === 0) {
     printInfo(
       `The widest range this build carries (protocol ${fromMajor} → ${CHAIN_TERMINUS_MAJOR}) has `
       + 'nothing for this stack either.',
@@ -220,9 +221,21 @@ function printEmptyRangeAnswer(
 
   printWarning(
     `Protocol ${fromMajor} → ${CHAIN_TERMINUS_MAJOR} has ${wider.applied.length} mechanical and `
-    + `${wider.todos.length} manual change(s) for this stack — re-run with `
+    + `${widerListed.length} manual change(s) for this stack — re-run with `
     + `\`--to ${CHAIN_TERMINUS_MAJOR}\` to list them.`,
   );
+}
+
+/**
+ * The semantic TODOs the default list prints: every entry of `todos` except
+ * the ones `absentTodos` names (ADR-0087 D3 — an entry leaves the default list
+ * only on the chain's structured, stack-derived proof). Matched by hop and id,
+ * so a copy of a TODO is recognised as well as the chain's own object.
+ */
+function listedTodos(todos: readonly MigrationTodo[], absentTodos: readonly MigrationTodo[]): MigrationTodo[] {
+  if (absentTodos.length === 0) return [...todos];
+  const absent = new Set(absentTodos.map((t) => `${t.toMajor}:${t.id}`));
+  return todos.filter((t) => !absent.has(`${t.toMajor}:${t.id}`));
 }
 
 /** Print the data-migration advice — the last thing a crossing upgrade sees. */
@@ -348,7 +361,7 @@ function judgesByConversion(todos: readonly MigrationTodo[]): ReadonlyMap<string
  * and lines do not change (ADR-0087 D3, "never silence").
  */
 function printAppliedEdits(result: MigrationChainResult): void {
-  const judges = judgesByConversion(result.todos);
+  const judges = judgesByConversion(listedTodos(result.todos, result.absentTodos));
   console.log(chalk.bold(`  Applied ${result.applied.length} mechanical change(s):`));
   let run = 0;
   for (const [i, a] of result.applied.entries()) {
@@ -429,7 +442,8 @@ function printAbsentNotices(result: MigrationChainResult, all: boolean): void {
  *    the semantic entry that judges an edit printed beside it, marked review
  *    (see {@link printAppliedEdits});
  *  ③ the SEMANTIC notices — every semantic entry of every hop crossed that the
- *    chain could not prove irrelevant to this stack (`todos`);
+ *    chain could not prove irrelevant to this stack (`todos` minus
+ *    `absentTodos`, see {@link listedTodos});
  *  ④ the ABSENT notices — the entries whose structured relevance question
  *    (`SemanticMigration.relevantWhen`) the chain answered `absent` over this
  *    stack (`absentTodos`): one line counting them, or with `--all` each one
@@ -461,9 +475,7 @@ export function printMigrationReport(report: MigrationReport): void {
   // ① The verdict and the refusals — first, whatever else the run found.
   printSchemaVerdict(report);
 
-  // A run whose only notices are proven absent is NOT this branch: it falls
-  // through, so ④ counts them and `--out` is still written.
-  if (result.applied.length === 0 && result.todos.length === 0 && result.absentTodos.length === 0) {
+  if (result.applied.length === 0 && result.todos.length === 0) {
     // ⚠️ Two different facts wear the same empty result, and only one of them
     // is good news (#17134). A range that CONTAINS steps and rewrote nothing
     // is a finding about the metadata. A range that contains no step at all
@@ -494,16 +506,18 @@ export function printMigrationReport(report: MigrationReport): void {
     for (const hop of result.hops) {
       console.log(chalk.bold(`  ── protocol ${hop.toMajor} ──`));
       console.log(chalk.dim(`     ${hop.rationale}`));
+      const listed = listedTodos(hop.todos, hop.absentTodos).length;
       const absent = hop.absentTodos.length > 0 ? `, ${hop.absentTodos.length} not listed (surface absent)` : '';
-      console.log(chalk.dim(`     ${hop.applied.length} mechanical, ${hop.todos.length} manual${absent}`));
+      console.log(chalk.dim(`     ${hop.applied.length} mechanical, ${listed} manual${absent}`));
     }
     console.log('');
   }
 
   // ③ The semantic TODOs (delegated to the agent — never auto-applied).
-  if (result.todos.length > 0) {
-    console.log(chalk.bold(chalk.yellow(`  ${result.todos.length} manual change(s) require your judgment:`)));
-    for (const t of result.todos) printNotice(t);
+  const listed = listedTodos(result.todos, result.absentTodos);
+  if (listed.length > 0) {
+    console.log(chalk.bold(chalk.yellow(`  ${listed.length} manual change(s) require your judgment:`)));
+    for (const t of listed) printNotice(t);
     console.log('');
   }
 
@@ -598,7 +612,7 @@ export default class MigrateMeta extends Command {
     all: Flags.boolean({
       description:
         'Also list, in full, the manual changes whose surfaces this stack provably does not declare '
-        + '(by default they are only counted). --json always carries them, under absentTodos.',
+        + '(by default they are only counted). --json always reports them in todos and names them in absentTodos.',
       default: false,
       exclusive: ['stored'],
     }),
@@ -732,9 +746,9 @@ export default class MigrateMeta extends Command {
               protocolVersion: PROTOCOL_VERSION,
               applied: result.applied,
               todos: result.todos,
-              // The semantic entries the chain proved irrelevant to this stack
-              // (ADR-0087 D3): reported beside `todos`, never dropped, so a
-              // machine consumer reaches them without `--all`.
+              // `todos` keeps every semantic entry; `absentTodos` NAMES the
+              // subset the chain proved irrelevant to this stack (ADR-0087 D3),
+              // so a machine consumer reads the default list as the difference.
               absentTodos: result.absentTodos,
               hops: flags.step
                 ? result.hops.map((h) => ({

@@ -8456,7 +8456,6 @@ const step18: MigrationStep = {
         + 'multiple field; rewrite each as the replacement says. Then re-check what each policy is '
         + 'supposed to admit rather than assuming what it admitted before was right: several of these '
         + 'admitted every write, and two folded to no restriction at all.',
-      relevantWhen: { kind: 'stack-declares', keys: ['permissions', 'sharingRules'] },
     },
     // The variable-ROOT sibling of cel-predicate-list-comparand-refused, one
     // comparand kind over: the same pushdown compiler, the same consumers, the same
@@ -8503,7 +8502,6 @@ const step18: MigrationStep = {
         + 'condition of your sharing rules, for != or == whose other side is current_user with no key '
         + 'after it, then rewrite each against the key it means (current_user.id, '
         + 'current_user.organization_id or current_user.email), or with in against a membership set.',
-      relevantWhen: { kind: 'stack-declares', keys: ['permissions', 'sharingRules'] },
     },
     {
       id: 'change-management-duration-keys-retired',
@@ -17688,7 +17686,6 @@ const step18: MigrationStep = {
         + 'Then re-check what each policy is supposed to refuse rather than assuming the writes it '
         + 'admitted before were right: before this change a != or a negated == against a list '
         + 'admitted every write.',
-      relevantWhen: { kind: 'stack-declares', keys: ['permissions'] },
     },
     // The cross-field comparison-class family, both arms in one entry: #20347
     // refuses the comparison where it is authored (the lint rules behind
@@ -17815,7 +17812,6 @@ const step18: MigrationStep = {
         + 'multiple lookup, and rewrite each as the replacement says. Then write a record through each '
         + 'such policy: a write whose compared field holds a list now answers 400 rather than being '
         + 'admitted by string comparison, so re-check what the policy is supposed to admit.',
-      relevantWhen: { kind: 'stack-declares', keys: ['permissions'] },
     },
     // The saved-report stack and the `report` metadata kind shared a word and
     // nothing else; this retires the stack and leaves the kind untouched.

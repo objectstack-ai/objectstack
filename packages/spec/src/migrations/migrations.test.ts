@@ -603,15 +603,16 @@ describe('migration chain (ADR-0087 D3)', () => {
         'action-execute-to-target',
         'field-conditionalRequired-to-requiredWhen',
       ]);
-      // Semantic TODOs are advisory per-major and every entry of the hop is
-      // reported once: listed in `todos` or — only when its structured
-      // `relevantWhen` question proves its surface absent from this stack — in
-      // `absentTodos` (`semantic-relevance.test.ts` pins which entries can be).
-      expect([...result.todos, ...result.absentTodos].map((t) => t.id).sort()).toEqual(
+      // Semantic TODOs are advisory per-major and always surfaced for the hop,
+      // whatever the stack contains.
+      expect(result.todos.map((t) => t.id).sort()).toEqual(
         MIGRATIONS_BY_MAJOR[OLDEST_HOP]!.semantic.map((s) => s.id).sort(),
       );
-      expect(result.absentTodos.filter((t) => !t.relevantWhen)).toEqual([]);
       expect(result.todos.length).toBeGreaterThan(0);
+      // `absentTodos` only NAMES a subset of them — the same objects, never a
+      // removal (`semantic-relevance.test.ts` pins which entries can be named).
+      for (const t of result.absentTodos) expect(result.todos).toContain(t);
+      expect(result.absentTodos.filter((t) => !t.relevantWhen)).toEqual([]);
     });
 
     it('is immutable — the input stack is not mutated', () => {

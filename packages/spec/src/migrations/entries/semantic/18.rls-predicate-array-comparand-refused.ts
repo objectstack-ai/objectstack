@@ -47,5 +47,4 @@ export const entry: SemanticMigration = {
     + 'Then re-check what each policy is supposed to refuse rather than assuming the writes it '
     + 'admitted before were right: before this change a != or a negated == against a list '
     + 'admitted every write.',
-  relevantWhen: { kind: 'stack-declares', keys: ['permissions'] },
 };

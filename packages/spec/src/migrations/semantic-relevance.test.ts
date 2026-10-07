@@ -13,10 +13,10 @@
  * - SHAPE: every question is a closed, structured member of
  *   `SemanticRelevance` naming real top-level stack keys.
  * - EVALUATION: the three-valued answer, and that only `absent` — a positive
- *   proof — moves anything; whatever the evaluation cannot read is `unknown`.
- * - CHAIN: `applyMetaMigrations` reports every entry of every hop crossed
- *   exactly once, in `todos` or in `absentTodos`, and only a proven-absent
- *   entry is in the second.
+ *   proof — names anything; whatever the evaluation cannot read is `unknown`.
+ * - CHAIN: `applyMetaMigrations` reports every entry of every hop crossed in
+ *   `todos`, whatever the stack holds, and `absentTodos` is a SUBSET of it —
+ *   the same objects, in chain order — holding only proven-absent entries.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -29,8 +29,10 @@ import type { MigrationTodo, SemanticRelevance } from './types.js';
 
 /**
  * The first batch: the entries whose surface lives ONLY under the named
- * top-level stack keys, and whose acceptance criteria send the author to no
- * stored row and no runtime door. `major:id` → the keys its question names.
+ * top-level stack keys — no runtime request body, no code door (a direct
+ * caller of an exported evaluator or compiler) — and whose acceptance criteria
+ * send the author to no stored row and no runtime door. `major:id` → the keys
+ * its question names.
  */
 const EXPECTED_RELEVANCE: Readonly<Record<string, readonly string[]>> = {
   '17:dashboard-widget-compareto-offset': ['dashboards'],
@@ -43,8 +45,6 @@ const EXPECTED_RELEVANCE: Readonly<Record<string, readonly string[]>> = {
   '18:analytics-cube-public-default-visible-enforced': ['analyticsCubes'],
   '18:analytics-cube-single-granularity-default-enforced': ['analyticsCubes'],
   '18:api-endpoint-cache-ttl-unit-in-key': ['apis'],
-  '18:cel-predicate-one-value-comparand-refused': ['permissions', 'sharingRules'],
-  '18:cel-predicate-variable-root-comparand-refused': ['permissions', 'sharingRules'],
   '18:chart-config-aria-retired': ['dashboards', 'reports', 'pages'],
   '18:cube-join-sql-and-relationship-retired': ['analyticsCubes'],
   '18:cube-member-inner-name-retired': ['analyticsCubes'],
@@ -60,12 +60,10 @@ const EXPECTED_RELEVANCE: Readonly<Record<string, readonly string[]>> = {
   '18:job-timeout-unit-in-key': ['jobs'],
   '18:mapping-lookup-params-retired': ['mappings'],
   '18:permission-restore-purge-bits-retired': ['permissions'],
-  '18:rls-predicate-array-comparand-refused': ['permissions'],
-  '18:rls-predicate-stored-list-ordering-refused': ['permissions'],
 };
 
 /** The keys the evaluation reads as carriers of other definitions, never as a family. */
-const CARRIER_KEYS = ['manifest', 'packages', 'plugins', 'devPlugins'];
+const CARRIER_KEYS = ['manifest', 'packages', 'plugins', 'devPlugins', 'tiers'];
 
 /** Every registered entry, with the major whose step carries it. */
 const ENTRIES = MIGRATION_MAJORS.flatMap((major) =>
@@ -82,6 +80,13 @@ describe('which entries carry a relevance question (ENUMERATION)', () => {
       if (entry.relevantWhen) actual[`${major}:${entry.id}`] = entry.relevantWhen.keys;
     }
     expect(actual).toEqual(EXPECTED_RELEVANCE);
+  });
+
+  it('is 25 entries: 5 of protocol 17 and 20 of protocol 18', () => {
+    const keys = Object.keys(EXPECTED_RELEVANCE);
+    expect(keys).toHaveLength(25);
+    expect(keys.filter((k) => k.startsWith('17:'))).toHaveLength(5);
+    expect(keys.filter((k) => k.startsWith('18:'))).toHaveLength(20);
   });
 
   it('the table names only registered entries (anti-vacuity for the comparison above)', () => {
@@ -128,7 +133,9 @@ describe('every relevance question is a closed, structured question over top-lev
           MIGRATION_SUPPORT_FLOOR,
           major,
         );
-        expect(result.todos.some((t) => t.id === entry.id), `${entry.id} listed on ${id}'s fixture`).toBe(true);
+        expect(result.todos.some((t) => t.id === entry.id), `${entry.id} reported on ${id}'s fixture`).toBe(true);
+        expect(result.absentTodos.some((t) => t.id === entry.id), `${entry.id} not named absent on ${id}'s fixture`)
+          .toBe(false);
         checked++;
       }
     }
@@ -190,6 +197,15 @@ describe('the answer is three-valued, and only a positive proof is `absent` (EVA
     expect(semanticRelevanceVerdict(q, [{ plugins: [], devPlugins: [] }])).toBe('absent');
   });
 
+  it('a declared `tiers` preset makes every key unknown too, since a tier loads platform plugins', () => {
+    expect(semanticRelevanceVerdict(q, [{ tiers: ['ai'] }])).toBe('unknown');
+    expect(semanticRelevanceVerdict(q, [{ tiers: ['core', 'ui'], objects: [{ name: 'a' }] }])).toBe('unknown');
+    expect(semanticRelevanceVerdict(q, [{ tiers: () => ['ai'] }])).toBe('unknown');
+    // …a key the stack visibly declares is still present, and an empty list loads nothing.
+    expect(semanticRelevanceVerdict(q, [{ tiers: ['ai'], analyticsCubes: [{}] }])).toBe('present');
+    expect(semanticRelevanceVerdict(q, [{ tiers: [] }])).toBe('absent');
+  });
+
   it('an assembled package body counts like the top level, and an unreadable one is unknown', () => {
     const body = (manifest: unknown) => ({ packages: [{ manifest: { id: 'p', objects: [{}] } }, { manifest }] });
     expect(semanticRelevanceVerdict(q, [body({ id: 'q', analyticsCubes: [{ name: 'c' }] })])).toBe('present');
@@ -224,7 +240,7 @@ describe('the answer is three-valued, and only a positive proof is `absent` (EVA
   });
 });
 
-describe('the chain reports every entry exactly once, and only a proven-absent one in absentTodos (CHAIN)', () => {
+describe('todos reports every entry; absentTodos names the proven-absent subset (CHAIN)', () => {
   const TO = Math.max(...MIGRATION_MAJORS);
   /** A stack that declares objects only — none of the first batch's keys. */
   const OBJECTS_ONLY = {
@@ -239,34 +255,36 @@ describe('the chain reports every entry exactly once, and only a proven-absent o
   }
   const ids = (todos: readonly MigrationTodo[]) => todos.map((t) => `${t.toMajor}:${t.id}`);
 
-  it('on a stack declaring none of the batch\'s keys, every questioned entry is absent and every other one listed', () => {
+  it('todos holds every crossed entry, in chain order, whatever the stack holds', () => {
+    for (const stack of [structuredClone(OBJECTS_ONLY), {}]) {
+      const result = applyMetaMigrations(stack, MIGRATION_SUPPORT_FLOOR, TO);
+      expect(ids(result.todos)).toEqual(crossed(MIGRATION_SUPPORT_FLOOR, TO));
+      expect(result.hops.flatMap((h) => ids(h.todos))).toEqual(ids(result.todos));
+    }
+  });
+
+  it('on a stack declaring none of the batch\'s keys, absentTodos names exactly the questioned entries', () => {
     const result = applyMetaMigrations(structuredClone(OBJECTS_ONLY), MIGRATION_SUPPORT_FLOOR, TO);
     const expectedAbsent = crossed(MIGRATION_SUPPORT_FLOOR, TO).filter((k) => k in EXPECTED_RELEVANCE);
     expect(expectedAbsent.length).toBeGreaterThan(0);
     expect(ids(result.absentTodos)).toEqual(expectedAbsent);
-    expect(ids(result.todos)).toEqual(crossed(MIGRATION_SUPPORT_FLOOR, TO).filter((k) => !(k in EXPECTED_RELEVANCE)));
-  });
-
-  it('todos and absentTodos partition the crossed entries, in chain order, hop by hop too', () => {
-    const result = applyMetaMigrations(structuredClone(OBJECTS_ONLY), MIGRATION_SUPPORT_FLOOR, TO);
-    const all = crossed(MIGRATION_SUPPORT_FLOOR, TO);
-    const merged = [...ids(result.todos), ...ids(result.absentTodos)];
-    expect(merged.slice().sort()).toEqual(all.slice().sort());
-    expect(new Set(merged).size).toBe(merged.length);
-    // Each array keeps chain order.
-    const position = new Map(all.map((k, i) => [k, i]));
-    for (const list of [ids(result.todos), ids(result.absentTodos)]) {
-      const at = list.map((k) => position.get(k)!);
-      expect(at).toEqual(at.slice().sort((a, b) => a - b));
-    }
-    expect(result.hops.flatMap((h) => ids(h.todos))).toEqual(ids(result.todos));
     expect(result.hops.flatMap((h) => ids(h.absentTodos))).toEqual(ids(result.absentTodos));
+  });
+
+  it('absentTodos is a subset of todos — the same objects, in chain order — at chain and hop level', () => {
+    const result = applyMetaMigrations(structuredClone(OBJECTS_ONLY), MIGRATION_SUPPORT_FLOOR, TO);
+    expect(result.absentTodos.length).toBeGreaterThan(0);
+    for (const t of result.absentTodos) expect(result.todos.includes(t), `${t.id} is the todos object`).toBe(true);
+    const position = new Map(result.todos.map((t, i) => [t, i]));
+    const at = result.absentTodos.map((t) => position.get(t)!);
+    expect(at).toEqual(at.slice().sort((a, b) => a - b));
     for (const h of result.hops) {
-      expect([...ids(h.todos), ...ids(h.absentTodos)].sort()).toEqual(crossed(h.toMajor - 1, h.toMajor).sort());
+      for (const t of h.absentTodos) expect(h.todos.includes(t), `hop ${h.toMajor}: ${t.id}`).toBe(true);
+      expect(h.todos).toHaveLength(MIGRATIONS_BY_MAJOR[h.toMajor]!.semantic.length);
     }
   });
 
-  it('a stack that declares the key keeps the entries listed', () => {
+  it('a stack that declares the key names none of its entries absent', () => {
     const stack = { ...structuredClone(OBJECTS_ONLY), analyticsCubes: [{ name: 'rel_cube', title: 'Cube', sql: 'rel_thing' }] };
     const result = applyMetaMigrations(stack, MIGRATION_SUPPORT_FLOOR, TO);
     const cubeEntries = Object.entries(EXPECTED_RELEVANCE)
@@ -277,18 +295,20 @@ describe('the chain reports every entry exactly once, and only a proven-absent o
     expect(ids(result.absentTodos).filter((k) => cubeEntries.includes(k))).toEqual([]);
   });
 
-  it('a stack listing a plugin proves nothing absent', () => {
+  it('a stack listing a plugin, or declaring a tier preset, proves nothing absent', () => {
     class LocalPlugin {}
-    const stack = { ...structuredClone(OBJECTS_ONLY), plugins: [new LocalPlugin()] };
-    const result = applyMetaMigrations(stack, MIGRATION_SUPPORT_FLOOR, TO);
-    expect(result.absentTodos).toEqual([]);
-    expect(ids(result.todos)).toEqual(crossed(MIGRATION_SUPPORT_FLOOR, TO));
+    for (const extra of [{ plugins: [new LocalPlugin()] }, { tiers: ['core'] }]) {
+      const result = applyMetaMigrations({ ...structuredClone(OBJECTS_ONLY), ...extra }, MIGRATION_SUPPORT_FLOOR, TO);
+      expect(result.absentTodos).toEqual([]);
+      expect(ids(result.todos)).toEqual(crossed(MIGRATION_SUPPORT_FLOOR, TO));
+    }
   });
 
-  it('an entry with no question is listed even on an empty stack', () => {
+  it('an entry with no question is never named absent, even on an empty stack', () => {
     const result = applyMetaMigrations({}, MIGRATION_SUPPORT_FLOOR, TO);
     const unquestioned = crossed(MIGRATION_SUPPORT_FLOOR, TO).filter((k) => !(k in EXPECTED_RELEVANCE));
     expect(unquestioned.length).toBeGreaterThan(0);
-    expect(ids(result.todos)).toEqual(unquestioned);
+    expect(ids(result.absentTodos).filter((k) => unquestioned.includes(k))).toEqual([]);
+    expect(result.absentTodos.every((t) => t.relevantWhen)).toBe(true);
   });
 });

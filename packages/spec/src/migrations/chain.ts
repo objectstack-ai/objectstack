@@ -45,7 +45,7 @@ export function composeMigrationChain(
 
 /**
  * The answer to a {@link SemanticRelevance} question over a stack. Only
- * `absent` moves an entry out of the listed TODOs; `unknown` keeps it listed,
+ * `absent` names an entry in `absentTodos`; `unknown` keeps it off that list,
  * so a question the evaluation cannot answer never reads as a proof.
  */
 export type SemanticRelevanceVerdict = 'present' | 'absent' | 'unknown';
@@ -83,8 +83,8 @@ function foldVerdicts(verdicts: Iterable<SemanticRelevanceVerdict>): SemanticRel
  *
  * Conservative by construction (ADR-0087 D3, "never silence"): `absent` is a
  * positive proof — the stack is a plain object, no `plugins` / `devPlugins`
- * entry could contribute what it does not show, every carrier of the keys was
- * read, and none held anything. Whatever the evaluation cannot read answers
+ * entry and no `tiers` preset could contribute what it does not show, every
+ * carrier of the keys was read, and none held anything. Whatever the evaluation cannot read answers
  * `unknown`, and a read that throws (a getter, a proxy) answers `unknown` too.
  */
 function stackDeclaresVerdict(stack: unknown, keys: readonly string[]): SemanticRelevanceVerdict {
@@ -111,10 +111,11 @@ function stackDeclaresVerdict(stack: unknown, keys: readonly string[]): Semantic
     }
 
     // A plugin is handed to the kernel, not read by this chain, and it can
-    // register metadata of any type at boot — so while one is listed, no key
-    // can be proven absent from what this stack deploys (a key the stack
-    // visibly declares is still present).
-    for (const carrier of ['plugins', 'devPlugins']) {
+    // register metadata of any type at boot; a `tiers` preset names platform
+    // plugins the host loads the same way. So while one is listed, no key can
+    // be proven absent from what this stack deploys (a key the stack visibly
+    // declares is still present).
+    for (const carrier of ['plugins', 'devPlugins', 'tiers']) {
       if (collectionVerdict(stack[carrier]) !== 'absent') verdicts.push('unknown');
     }
 
@@ -149,7 +150,7 @@ export function semanticRelevanceVerdict(
 }
 
 /**
- * Whether one semantic TODO leaves the listed TODOs: it carries a relevance
+ * Whether one semantic TODO is named in `absentTodos`: it carries a relevance
  * question, it judges no conversion that applied an edit in this run (an
  * applied edit is itself a proof its surface is there), and the question
  * answers `absent` over every checkpoint.
@@ -189,12 +190,14 @@ export class MigrationFloorError extends Error {
  * stack content — only {@link MigrationFloorError} when `fromMajor` is
  * unsupported.
  *
- * Every semantic entry of every hop crossed is reported exactly once: in
- * `todos`, or — when its `relevantWhen` question proves its surface absent from
- * the stack and from every checkpoint the chain made of it — in `absentTodos`
- * (ADR-0087 D3: an entry leaves the list only on a structured, stack-derived
- * proof). An entry that judges a conversion which applied an edit in this run
- * stays in `todos` whatever its question answers.
+ * Every semantic entry of every hop crossed is reported in `todos`, whatever
+ * the stack holds. `absentTodos` additionally names — as the same objects, a
+ * subset of `todos` in chain order — the entries whose `relevantWhen` question
+ * proves their surface absent from the stack and from every checkpoint the
+ * chain made of it (ADR-0087 D3: an entry may leave a printer's default list
+ * only on a structured, stack-derived proof). An entry that judges a
+ * conversion which applied an edit in this run is never named there, whatever
+ * its question answers.
  */
 export function applyMetaMigrations(
   stack: Record<string, unknown>,
@@ -241,12 +244,9 @@ export function applyMetaMigrations(
   const todos: MigrationTodo[] = [];
   const absentTodos: MigrationTodo[] = [];
   const hops: MigrationHopResult[] = replayed.map(({ step, stack: hopStack, applied: hopApplied }) => {
-    const hopTodos: MigrationTodo[] = [];
-    const hopAbsent: MigrationTodo[] = [];
-    for (const s of step.semantic) {
-      const todo: MigrationTodo = { ...s, toMajor: step.toMajor };
-      (semanticTodoAbsent(todo, checkpoints, appliedConversionIds) ? hopAbsent : hopTodos).push(todo);
-    }
+    const hopTodos: MigrationTodo[] = step.semantic.map((s) => ({ ...s, toMajor: step.toMajor }));
+    // The same objects, never copies: `absentTodos` is a subset of `todos`.
+    const hopAbsent = hopTodos.filter((todo) => semanticTodoAbsent(todo, checkpoints, appliedConversionIds));
     todos.push(...hopTodos);
     absentTodos.push(...hopAbsent);
     return {
