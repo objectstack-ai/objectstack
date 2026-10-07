@@ -591,6 +591,152 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
 
 // ─── Runtime Assets Plugin ──────────────────────────────────────────
 
+/** The URL prefix the runtime assets route is mounted under. */
+const RUNTIME_ASSETS_URL_PREFIX = '/runtime/assets/';
+
+/**
+ * Where the host found the directory it handed {@link createRuntimeAssetsPlugin}:
+ * named by `OS_RUNTIME_ASSETS_DIR`, or the `<cwd>/assets` default taken because
+ * that variable is unset. Only the boot warning reads it, to name the remedy.
+ * Not exported: this module's export set is pinned
+ * (`test/published-subpath-console.pin.test.ts`), and the union is spelled out
+ * structurally in the plugin's signature.
+ */
+type RuntimeAssetsDirSource = 'OS_RUNTIME_ASSETS_DIR' | 'cwd';
+
+/**
+ * The ONE resolution of a `/runtime/assets/:filename` parameter to a path on
+ * disk. The route serves through it and the boot check judges through it
+ * (#22071), so the two cannot disagree about which file a name means or which
+ * names are refused. `null` means the name escapes `assetsDir`, which the route
+ * answers 403.
+ */
+function resolveRuntimeAssetPath(assetsDir: string, filename: string): string | null {
+  const filePath = path.join(assetsDir, filename.replace(/[/\\]+/g, ''));
+  // Path-traversal guard: reject any path that escapes assetsDir.
+  if (!path.resolve(filePath).startsWith(path.resolve(assetsDir))) return null;
+  return filePath;
+}
+
+/**
+ * Whether the route answers 200 for this `:filename`: the same resolution, then
+ * what the route's `readFileSync` needs, a readable regular file. A directory,
+ * a missing file and a refused name all answer no.
+ */
+function runtimeAssetIsServable(assetsDir: string, filename: string): boolean {
+  const filePath = resolveRuntimeAssetPath(assetsDir, filename);
+  if (filePath === null) return false;
+  try {
+    if (!fs.statSync(filePath).isFile()) return false;
+    fs.accessSync(filePath, fs.constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * What a branding URL asks the runtime assets route for, read the way a browser
+ * resolves an `<img src>` on this origin (dot segments, query and fragment
+ * removed). `undefined` when the value is not this route's URL: an absolute or
+ * protocol-relative URL, a data URI, a relative path or any other root path
+ * names something this plugin does not serve, so it is not checked.
+ * `filename: null` is a path below a subdirectory, which the route's single
+ * `:filename` segment never matches.
+ */
+function runtimeAssetRequest(value: unknown): { url: string; filename: string | null } | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  // A root path only: a relative one resolves against the console page, not `/`.
+  if (!trimmed.startsWith('/')) return undefined;
+  const thisOrigin = 'http://runtime-assets.invalid';
+  let resolved: URL;
+  try {
+    resolved = new URL(trimmed, thisOrigin);
+  } catch {
+    return undefined;
+  }
+  // `//host/…`, and `/\host/…` which a browser reads the same way, name another host.
+  if (resolved.origin !== thisOrigin) return undefined;
+  const pathname = resolved.pathname;
+  if (!pathname.startsWith(RUNTIME_ASSETS_URL_PREFIX)) return undefined;
+  const segment = pathname.slice(RUNTIME_ASSETS_URL_PREFIX.length);
+  if (segment === '') return undefined;
+  if (segment.includes('/')) return { url: pathname, filename: null };
+  // The route reads its parameter decoded; an undecodable one stays raw here.
+  let filename = segment;
+  try {
+    filename = decodeURIComponent(segment);
+  } catch {
+    /* keep the raw segment */
+  }
+  return { url: pathname, filename };
+}
+
+/** The branding keys whose value the console draws as an image URL. */
+const BRANDING_IMAGE_KEYS = ['logo', 'favicon'] as const;
+
+/**
+ * The apps the console is served: the same `protocol.getMetaItems({ type:
+ * 'app' })` read `GET /api/v1/meta/app` answers from, which the console's app
+ * list and chrome (logo, favicon) are drawn from. It covers config boots and
+ * artifact boots alike, because both register their apps with that protocol.
+ */
+async function readServedApps(ctx: any): Promise<any[]> {
+  const protocol = ctx.getService('protocol');
+  if (typeof protocol?.getMetaItems !== 'function') return [];
+  const answer = await protocol.getMetaItems({ type: 'app' });
+  const items = Array.isArray(answer) ? answer : answer?.items;
+  return Array.isArray(items) ? items : [];
+}
+
+/**
+ * One line per branding URL under `/runtime/assets/` that this boot will not
+ * serve, naming every app and key that uses it, the file, the directory
+ * searched, `OS_RUNTIME_ASSETS_DIR`, and whether that directory exists at all.
+ * Empty when every such URL resolves to a servable file.
+ */
+function describeUnservedBrandingAssets(
+  apps: any[],
+  assetsDir: string,
+  mounted: boolean,
+  dirSource: RuntimeAssetsDirSource,
+): string[] {
+  const unserved = new Map<string, { filename: string | null; uses: Map<string, string[]> }>();
+  for (const app of apps) {
+    const appName = String(app?.name ?? app?.id ?? '(unnamed)');
+    for (const key of BRANDING_IMAGE_KEYS) {
+      const request = runtimeAssetRequest(app?.branding?.[key]);
+      if (!request) continue;
+      if (mounted && request.filename !== null && runtimeAssetIsServable(assetsDir, request.filename)) continue;
+      const entry = unserved.get(request.url) ?? { filename: request.filename, uses: new Map<string, string[]>() };
+      entry.uses.set(appName, [...(entry.uses.get(appName) ?? []), `branding.${key}`]);
+      unserved.set(request.url, entry);
+    }
+  }
+
+  const searched = dirSource === 'OS_RUNTIME_ASSETS_DIR'
+    ? `${assetsDir} (named by OS_RUNTIME_ASSETS_DIR)`
+    : `${assetsDir} (the <cwd>/assets default, since OS_RUNTIME_ASSETS_DIR is unset)`;
+  const lines: string[] = [];
+  for (const [url, { filename, uses }] of unserved) {
+    const users = [...uses].map(([appName, keys]) => `app '${appName}' (${keys.join(', ')})`).join(' and ');
+    const file = filename ?? url.slice(RUNTIME_ASSETS_URL_PREFIX.length);
+    const reason = !mounted
+      ? `the directory searched, ${searched}, does not exist, so ${RUNTIME_ASSETS_URL_PREFIX} is not mounted this run`
+      : filename === null
+        ? `${RUNTIME_ASSETS_URL_PREFIX} serves only files directly inside the directory searched, ${searched}, never a subdirectory`
+        : `${file} is not a readable file in the directory searched, ${searched}`;
+    const remedy = filename === null
+      ? `move the file to the top of that directory and drop the subdirectory from the URL, or set OS_RUNTIME_ASSETS_DIR to a directory that holds it at the top`
+      : `put ${file} in that directory${mounted ? '' : ' and restart'}, or set OS_RUNTIME_ASSETS_DIR to the directory that holds it`;
+    lines.push(
+      `Branding asset not served: ${users} → ${url}, but ${reason}; the console will draw a broken image. To fix, ${remedy}.`,
+    );
+  }
+  return lines;
+}
+
 /**
  * Create a plugin that serves static runtime assets at /runtime/assets/*.
  * Decoupled from the console plugin so branding assets (logos, favicons) are
@@ -598,9 +744,19 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
  *
  * The `distPath` should point at the host project's `runtime/assets` directory
  * (i.e. `path.resolve(process.cwd(), 'assets')` when the CLI cwd is the
- * `runtime/` package).
+ * `runtime/` package); `dirSource` says which of the two it came from.
+ *
+ * When the directory is absent the route is not mounted. Either way, once the
+ * boot has settled (`kernel:bootstrapped`), every loaded app's `branding.logo`
+ * / `branding.favicon` that names a file under `/runtime/assets/` which this
+ * route will not serve is reported ONCE, through this plugin's logger at
+ * `warn` (#22071): an artifact booted outside its project directory otherwise
+ * drew a broken logo and favicon with nothing said on either side. That is the
+ * one channel: under `serve`'s boot-quiet window the line is replayed in the
+ * banner's *Boot diagnostics* block, and at `--log-level debug|info` it streams
+ * live. It changes nothing about what the route serves.
  */
-export function createRuntimeAssetsPlugin(distPath: string) {
+export function createRuntimeAssetsPlugin(distPath: string, dirSource: 'OS_RUNTIME_ASSETS_DIR' | 'cwd') {
   return {
     name: 'com.objectstack.runtime-assets',
 
@@ -612,13 +768,29 @@ export function createRuntimeAssetsPlugin(distPath: string) {
 
       const app = httpServer.getRawApp();
       const assetsDir = path.resolve(distPath);
-      if (!fs.existsSync(assetsDir)) return;
+      const mounted = fs.existsSync(assetsDir);
+
+      // After every `kernel:ready` handler has settled, so an app a later
+      // plugin registers on that hook is read too. A best-effort report: it
+      // must never fail the boot it reports on.
+      ctx.hook('kernel:bootstrapped', async () => {
+        let apps: any[];
+        try {
+          apps = await readServedApps(ctx);
+        } catch (err: any) {
+          ctx.logger.debug(`Branding asset check skipped: the served app list could not be read (${err?.message ?? err})`);
+          return;
+        }
+        for (const line of describeUnservedBrandingAssets(apps, assetsDir, mounted, dirSource)) {
+          ctx.logger.warn(line);
+        }
+      });
+
+      if (!mounted) return;
 
       app.get('/runtime/assets/:filename', async (c: any) => {
-        const filename = String(c.req.param?.('filename') ?? '').replace(/[/\\]+/g, '');
-        const filePath = path.join(assetsDir, filename);
-        // Path-traversal guard: reject any path that escapes assetsDir.
-        if (!path.resolve(filePath).startsWith(path.resolve(assetsDir))) {
+        const filePath = resolveRuntimeAssetPath(assetsDir, String(c.req.param?.('filename') ?? ''));
+        if (filePath === null) {
           return c.text('Forbidden', 403);
         }
         try {
