@@ -1818,57 +1818,81 @@ describe('each package\'s copy of a view container expands into its own package\
                 return (envWide.items as any[]).filter((v) => v?.name === name).map(envelopeOf);
             }
 
-            for (const m of MEMBERS) {
-                for (const owner of [OTHER, undefined] as const) {
-                    for (const order of ORDERS) {
-                        const ownership = owner ? 'another package owns the object' : 'no code package owns the object';
-                        it(`${m.member}; ${ownership}; ${order[0]} registered first: the copy wears its own package, on both kernels`, async () => {
-                            const [name] = loaderNames(m.body('x', true, SLUG));
-                            const placement = PLACEMENTS.find((q) => q.m === m && q.owner === owner && q.ships);
-                            if (!placement) throw new Error(`no placement for ${ownership}, ${m.member}`);
-                            for (const [kernel, environmentId] of KERNELS) {
-                                const { protocol } = harness(shippedFor(m, order), environmentId, owner);
-                                await saveCopyOf(protocol, placement, false);
-
-                                const read = await protocol.getMetaItem({ type: 'view', name });
-                                expect(envelopeOf(read.item), `${kernel}: the read naming no package`)
-                                    .toEqual([COPY_TITLE, COPYING, 'package']);
-                                expect(read.packageId, `${kernel}: the envelope the read reports`).toBe(COPYING);
-                                expect(await listedEnvelopes(protocol, name), `${kernel}: the env-wide list wears the same envelope for the same body`)
-                                    .toContainEqual(envelopeOf(read.item));
-
-                                for (const pkg of [OTHER, COPYING]) {
-                                    const named = await protocol.getMetaItem({ type: 'view', name, packageId: pkg });
-                                    const own = pkg === COPYING ? COPY_TITLE : SHIPPED_TITLE(pkg);
-                                    expect(envelopeOf(named.item), `${kernel}: the read naming ${pkg}`).toEqual([own, pkg, 'package']);
-                                    expect(named.packageId, `${kernel}: the envelope the read naming ${pkg} reports`).toBe(pkg);
-                                }
-                            }
-                        });
-                    }
-                }
+            /**
+             * One store the read naming no package serves COPYING's body from, written on a fresh harness of one
+             * kernel. `named`: the reads naming each package are pinned on it too (the copies of a container,
+             * the measured case).
+             */
+            interface Cell {
+                readonly label: string;
+                readonly named: boolean;
+                readonly setUp: (environmentId: string | undefined) => Promise<{ protocol: any; name: string }>;
             }
-
             const KEYED = MEMBERS.find((m) => m.member === 'a keyed member');
             if (!KEYED) throw new Error('no keyed member');
-            for (const order of ORDERS) {
-                it(`a stored row of the name bound to ${COPYING}; ${order[0]} registered first: the row wears its own package, on both kernels`, async () => {
-                    const [name] = loaderNames(KEYED.body('x', true, SLUG));
-                    for (const [kernel, environmentId] of KERNELS) {
+            const CELLS: readonly Cell[] = [
+                ...MEMBERS.flatMap((m) => ([OTHER, undefined] as const).flatMap((owner) => ORDERS.map((order): Cell => {
+                    const ownership = owner ? 'another package owns the object' : 'no code package owns the object';
+                    const placement = PLACEMENTS.find((q) => q.m === m && q.owner === owner && q.ships);
+                    if (!placement) throw new Error(`no placement for ${ownership}, ${m.member}`);
+                    return {
+                        label: `${m.member}; ${ownership}; ${order[0]} registered first; ${COPYING} stores a copy of the container`,
+                        named: true,
+                        setUp: async (environmentId) => {
+                            const { protocol } = harness(shippedFor(m, order), environmentId, owner);
+                            await saveCopyOf(protocol, placement, false);
+                            return { protocol, name: loaderNames(m.body('x', true, SLUG))[0] };
+                        },
+                    };
+                }))),
+                ...ORDERS.map((order): Cell => ({
+                    label: `${KEYED.member}; ${order[0]} registered first; a stored row of the name, bound to ${COPYING}`,
+                    named: false,
+                    setUp: async (environmentId) => {
+                        const [name] = loaderNames(KEYED.body('x', true, SLUG));
                         const { protocol } = harness(shippedFor(KEYED, order), environmentId);
                         expect((await protocol.saveMetaItem({
                             type: 'view', name, packageId: COPYING,
                             item: { name, label: COPY_TITLE, object: 'task', viewKind: 'form', config: { title: COPY_TITLE } },
                         })).success).toBe(true);
+                        return { protocol, name };
+                    },
+                })),
+            ];
 
+            for (const cell of CELLS) {
+                it(`(a) ${cell.label}: the read naming no package serves that body under ${COPYING}'s envelope, on both kernels`, async () => {
+                    for (const [kernel, environmentId] of KERNELS) {
+                        const { protocol, name } = await cell.setUp(environmentId);
                         const read = await protocol.getMetaItem({ type: 'view', name });
-                        expect(envelopeOf(read.item), `${kernel}: the read naming no package`).toEqual([COPY_TITLE, COPYING, 'package']);
+                        expect(envelopeOf(read.item), `${kernel}: the item`).toEqual([COPY_TITLE, COPYING, 'package']);
                         expect(read.packageId, `${kernel}: the envelope the read reports`).toBe(COPYING);
-                        expect(await listedEnvelopes(protocol, name), `${kernel}: the env-wide list wears the same envelope for the same body`)
-                            .toContainEqual(envelopeOf(read.item));
                     }
                 });
 
+                if (cell.named) it(`(b) ${cell.label}: the read naming each package keeps its own body and its own envelope, on both kernels`, async () => {
+                    for (const [kernel, environmentId] of KERNELS) {
+                        const { protocol, name } = await cell.setUp(environmentId);
+                        for (const pkg of [OTHER, COPYING]) {
+                            const named = await protocol.getMetaItem({ type: 'view', name, packageId: pkg });
+                            const own = pkg === COPYING ? COPY_TITLE : SHIPPED_TITLE(pkg);
+                            expect(envelopeOf(named.item), `${kernel}: the read naming ${pkg}`).toEqual([own, pkg, 'package']);
+                            expect(named.packageId, `${kernel}: the envelope the read naming ${pkg} reports`).toBe(pkg);
+                        }
+                    }
+                });
+
+                it(`(c) ${cell.label}: the env-wide list wears the same envelope for the body the read naming no package serves, on both kernels`, async () => {
+                    for (const [kernel, environmentId] of KERNELS) {
+                        const { protocol, name } = await cell.setUp(environmentId);
+                        const read = await protocol.getMetaItem({ type: 'view', name });
+                        expect(await listedEnvelopes(protocol, name), `${kernel}: the list's envelope of that body`)
+                            .toContainEqual(envelopeOf(read.item));
+                    }
+                });
+            }
+
+            for (const order of ORDERS) {
                 it(`control: a package-less copy stands in for both packages; ${order[0]} registered first: the read wears a package whose list slot serves it`, async () => {
                     const [name] = loaderNames(KEYED.body('x', true, SLUG));
                     for (const [kernel, environmentId] of KERNELS) {
