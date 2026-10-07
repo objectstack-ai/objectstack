@@ -54,6 +54,14 @@ export const SysMigration = ObjectSchema.create({
   icon: 'database',
   isSystem: true,
   managedBy: 'engine-owned',
+  // [ADR-0131 D7] Deployment-level state: NO tenant column. Every writer
+  // (`migration-flag.ts`, the engine's lax-deviation and boot-admission
+  // revocation writes, the seed-tenancy, membership and flow-credential
+  // receipts) writes under a system context, and the row contract
+  // (`DataMigrationFlagSchema`) has no organization field to carry. Who may
+  // read is object permission (D7): the platform-only capability below.
+  systemFields: { tenant: false },
+  requiredPermissions: ['manage_platform_settings'],
   description: 'Deployment-level data-migration flags: which gated data migrations ran here and whether their self-check passed.',
   nameField: 'id', // [ADR-0079] canonical primary-title pointer
   titleFormat: '{id}',
