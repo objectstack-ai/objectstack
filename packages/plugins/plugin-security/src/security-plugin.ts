@@ -36,6 +36,10 @@ import {
 } from './invitation-placement.js';
 import { POSITION_ASSIGNMENT_OBJECT, createPositionCatalogRefusal } from './position-catalog-refusal.js';
 import {
+  registerGrantPermissionSetNameHooks,
+  unregisterGrantPermissionSetNameHooks,
+} from './grant-permission-set-name.js';
+import {
   explainAccess,
   buildContextForUser,
   resolveDelegatorContext,
@@ -4296,6 +4300,19 @@ export class SecurityPlugin implements Plugin {
       { object: POSITION_ASSIGNMENT_OBJECT },
     );
 
+    // [ADR-0131 D4] `sys_user_permission_set.permission_set` names the grant's
+    // set beside `permission_set_id`, and the two never disagree: engine
+    // HOOKS (not a middleware) derive the name from the id on every write, for
+    // every caller, and refuse a supplied name that names another set. A hook
+    // write is what survives the engine's update-side `readonly` strip; see
+    // `grant-permission-set-name.ts`.
+    if (!registerGrantPermissionSetNameHooks(ql)) {
+      ctx.logger.warn(
+        '[security] the ObjectQL engine exposes no hook registry — sys_user_permission_set.permission_set ' +
+          'is NOT derived from permission_set_id on grant writes that omit it, and a supplied name is not checked',
+      );
+    }
+
     // [ADR-0094] Data-door write-through: every non-system CRUD write on
     // `sys_permission_set` is redirected into the metadata store (the ONE
     // authoritative store for definitions); the record is projector-owned.
@@ -5039,6 +5056,7 @@ export class SecurityPlugin implements Plugin {
   async destroy(): Promise<void> {
     this.metadataWatch?.unsubscribe();
     this.metadataWatch = null;
+    unregisterGrantPermissionSetNameHooks(this.ql);
   }
 
   /**
