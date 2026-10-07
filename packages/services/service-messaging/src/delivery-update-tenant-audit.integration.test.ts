@@ -70,7 +70,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SqlHttpOutbox } from './sql-http-outbox.js';
 import { SqlNotificationOutbox, DELIVERY_OBJECT } from './sql-outbox.js';
@@ -386,10 +386,12 @@ describe('redeliver — the request-reachable site is SCOPED, never bypassed', (
         const contexts: Array<{ verb: string; context: unknown; tenantId: unknown }> = [];
         const recorded: any = {
             findOne: (o: string, q: any, opts: any) => {
+                assertEngineFindOnePredicate(o, q);
                 contexts.push({ verb: 'findOne', context: opts?.context, tenantId: q?.tenantId });
                 return engine.findOne(o, q, opts);
             },
             update: (o: string, d: any, opts: any) => {
+                assertEngineUpdateDispatch(d, opts);
                 contexts.push({ verb: 'update', context: opts?.context, tenantId: opts?.tenantId });
                 return engine.update(o, d, opts);
             },

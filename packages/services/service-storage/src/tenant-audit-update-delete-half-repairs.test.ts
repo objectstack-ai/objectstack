@@ -854,17 +854,22 @@ describe('[#21908] D2. ⛔ under the opt-in, a door tenant still cannot reach an
     }
     process.env.OS_TENANCY_POSTURE = 'isolated';
     // The store reaches the REAL engine; this wrapper only records the context
-    // each call carried, so the pin is about the opt-in path and no other.
+    // each call carried, so the pin is about the opt-in path and no other. Each
+    // verb still opens with the engine's own dispatch predicate, as the double
+    // above does, so the wrapper can never accept a shape the engine refuses.
     const recorded: any = {
       findOne: (o: string, q: any, opts: any) => {
+        assertEngineFindOnePredicate(o, q);
         engineContexts.push({ verb: 'findOne', object: o, context: opts?.context ?? q?.context });
         return ql.findOne(o, q, opts);
       },
       update: (o: string, d: any, opts: any) => {
+        assertEngineUpdateDispatch(d, opts);
         engineContexts.push({ verb: 'update', object: o, context: opts?.context });
         return ql.update(o, d, opts);
       },
       delete: (o: string, opts: any) => {
+        assertEngineDeleteDispatch(opts);
         engineContexts.push({ verb: 'delete', object: o, context: opts?.context });
         return ql.delete(o, opts);
       },
