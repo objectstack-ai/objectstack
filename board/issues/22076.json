@@ -2,8 +2,8 @@
   "number": 22076,
   "kind": "issue",
   "title": "ci(lint)/pm: the PM dispatch-gates self-test (7.6–13.1 min, one step) is Lint & Repo Gates' critical path on PR and merge_group runs; its family read-set selects it on most PRs — tier the battery or narrow the read-set",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-07T12:39:52Z",
-  "updated_at": "2026-10-07T13:38:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-07T18:30:58Z",
+  "closed_at": "2026-10-07T17:49:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22076",
   "body": "Filing gate: ③ a maintainer-directed task — the maintainer, after this seat's CI assessment in this session, verbatim: 「CI 优化按照你的建议创建任务」 — carrying ① a measured defect with a named fix site: the `PM dispatch-gates self-test` step takes 7.6–13.1 minutes whenever it runs and alone makes `Lint & Repo Gates` the critical path of `Lint & Type Check` on `pull_request` and `merge_group` runs; its gate-family read-set is the tool's own inputs (every workflow file, every `check:*` script through the root and package `package.json`s, all of `scripts/**` and `packages/*/scripts/**`, `.claude/**`, `skills/**`, `AGENTS.md`, `CLAUDE.md`), so most PRs select it. Filed by `domain:skills` seat 2 (seat post #19287, `session_0181E4ZeZmWyknawnauxD2CE`). ⛔ Not a claim. The `tooling` entry rule (`triage-duties.md:34`) is met by the maintainer's instruction quoted here; the guarded surface is the required context `Lint & Repo Gates`.\nReader: triage first-touch → the battery is PM tooling (`domain:skills`); its CI wiring (`scripts/ci/select-gate-families.sh`, `lint.yml`) is `domain:devx`. The seat proposes `domain:skills` with the wiring touched minimally; triage routes.\nDedupe: page-looped REST listings, closed included (union 1,266 as on the sibling cards) grepped for `dispatch-gates.*(self-test|lint|critical)|pm-dispatch-gates` → 11 hits. The nearest: #16496 (closed: Lint & Repo Gates is the merge-group critical path after #16453; run each gate family only on the paths it reads — the origin of `select-gate-families.sh`), #16769 (closed: pins for the families' key sets), #18201 (closed: `pnpm check:pm-dispatch-gates` cannot complete inside the container's 10-minute cap), #21719 (closed: the battery holds the shared verify lock about 20 minutes), #8162 (the original unconditional rationale cited at `lint.yml:985`). None tiers the battery or re-measures what its read-set costs the PR path; W3 on #22060 (on hold) is the long-horizon split of the frozen file, not this card.\n\n## What is measured\n\n- `Lint & Type Check` `pull_request` run 37567293525 (branch `claude/issue-22044-…`): wall 26.4 min; `Lint & Repo Gates` 26.4 min is the critical path; its longest step is `PM dispatch-gates self-test` 10.9 min, then the engine query-options erasure ratchet 2.1 and ESLint 1.3.\n- `merge_group` run 37570577129 (queue entry for #22048): wall 25.3 min; `Lint & Repo Gates` 25.3 min; the self-test 10.2 min.\n- All four hourly scheduled Lint runs sampled ran it (the scheduled run keeps the whole battery by design, `select-gate-families.sh:27-28`).\n- `pull_request` run 37572678684 (branch `claude/issue-22047-…`) skipped it: Lint wall 17.5 min, and `Type Check · workspace` (17.4 min) became the critical path. So without this step the Lint wall is about 17 minutes.\n- Locally the battery took 842.7 s and 1,023.8 s in the two os-dev reports of this shift (1,976 cases), under the shared verify lock.\n- The read-set (`scripts/ci/select-gate-families.sh:54-74`): the tool discovers every workflow file, resolves every `check:*` script through the root and package `package.json`s, reads each gate's source for watch hints (ALL of `scripts/**` and every `packages/*/scripts/**`), and reads `.claude/**`, `skills/**`, `AGENTS.md`, `CLAUDE.md`. A PR that touches any package manifest or any script selects the 8–13-minute step; the tree-wide content censuses the battery also performs are already declared \"deliberately off the PR path\" in that comment, yet they run whenever the family is selected, because the battery has one tier.\n- Constraint: the self-test lives inside `scripts/pm/dispatch-gates.mjs`, which is frozen under ruling 208 (R6); the wrapper is `scripts/pm/check-dispatch-gates.mjs`.\n\n## Done when\n\n- A timing breakdown of the 1,976 cases by group (one run, exit codes recorded) names which groups carry the minutes.\n- The battery has two tiers: a fast tier — the pins that read the PR's own changed inputs — runs on `pull_request` and `merge_group` when the family is selected; a slow tier — the tree-wide censuses (compound-anchor census, exposed-scratch-dir sweep, tracked-name reachability) — runs on `push` to `main` and the scheduled full run only, where a red files a card as the hourly full run already does (#16467). Implemented in the wrapper and the family selector if the frozen file needs no edit; if it needs one flag, the PR names that flag and quotes the maintainer's unfreeze for exactly it.\n- The family's read-set is narrowed to what the fast tier reads, and `select-gate-families.sh --self-test` pins (#16769) are updated with it.\n- Pin: on a PR touching only `packages/*/src/**`, `Lint & Repo Gates` runs no PM self-test and its wall is under 18 minutes; the merge_group run's critical path after the change is measured in the PR body with run ids.\n- ⛔ No verdict changes: every case still runs at least daily; ⛔ `Lint & Repo Gates` stays a required context; ⛔ no edit to `dispatch-gates.mjs` beyond the one flag, if any, and only with the quoted unfreeze.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

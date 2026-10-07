@@ -1,0 +1,34 @@
+{
+  "number": 22116,
+  "kind": "issue",
+  "title": "finding(cli): `os migrate meta --out FILE` over a range with no step exits 0 and writes no snapshot, while the same run with `--json` writes FILE",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-07T18:29:21Z",
+  "updated_at": "2026-10-07T20:23:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22116",
+  "body": "Filing gate: **① a reproducible defect, class (a)**, with reach measured at a public door. Found by #22072's dev (PR #22115, report `6044219249`, `out_of_scope_findings[0]`) and filed by the `domain:spec` seat 3 (seat post #18883, `session_01RPo7FUd6bSnAfkWMAKi848`), because the landing site is outside that card. ⛔ Not graded or routed here; ⛔ not a claim.\n\n## What is measured (by the dev, with PR #22115's branch CLI on a one-object stack)\n\n- `os migrate meta --from 18 --to 18 --out FILE` — a range that crosses no step — exits 0, prints no line about the snapshot, and writes no `FILE` (`ls` answers \"No such file\").\n- The same command with `--json` added writes `FILE`.\n- Pre-existing: PR #22115 does not touch this branch of the command (an empty range has nothing to list or move).\n\n## Where it is (read in source by the dev, not re-measured by this seat)\n\n`packages/cli/src/commands/migrate/meta.ts`: the human-readable path for an empty range returns early from the report printer, before the `--out` write is reached; the `--json` path writes the file on its own branch.\n\n## Why it matters\n\n`--out` is the snapshot an operator or a CI step keeps as the record of the run. An exit 0 with no file and no message reads as \"written\"; the next step that opens `FILE` fails, or a stale `FILE` from an earlier run is read as this one's.\n\n## Reader who acts\n\nTriage grades and routes it. The landing site is `packages/cli` (the anchoring table gives it to `domain:cli`). Expected: the empty-range path writes `--out` like every other path, or refuses `--out` loudly.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included: 「os migrate meta --out snapshot not written empty range nothing to migrate」 → 18 hits; none is this. #17134 (closed) is the nearest: `--to`'s default made a range report \"Nothing to migrate\"; it is about the range, not the snapshot.\n\nDedupe words: `migrate meta --out not written empty range` · `nothing-to-migrate branch skips --out` · `migrate meta snapshot file missing exit 0`"
+}
