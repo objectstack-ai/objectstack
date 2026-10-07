@@ -330,6 +330,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "権限セット",
         help: "sys_permission_set への外部キー。"
       },
+      permission_set: {
+        label: "権限セット名",
+        help: "[ADR-0131 D4] この付与が保持する権限セットのマシン名（sys_permission_set.name）。permission_set_id を含むすべての書き込みで、プラットフォームが permission_set_id から書き込みます。指定された値はその名前と一致する必要があり、一致しない場合は書き込みが拒否されます。この列が存在する前に書き込まれた付与では NULL です。"
+      },
       organization_id: {
         label: "組織",
         help: "オプションの組織スコープ。NULL = すべての組織コンテキストで適用。"
