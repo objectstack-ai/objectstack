@@ -90,26 +90,32 @@ function foldVerdicts(verdicts: Iterable<SemanticRelevanceVerdict>): SemanticRel
 function stackDeclaresVerdict(stack: unknown, keys: readonly string[]): SemanticRelevanceVerdict {
   if (!isPlainDict(stack)) return 'unknown';
   try {
-    // A plugin is handed to the kernel, not read by this chain, and it can
-    // register metadata of any type at boot — so while one is listed, no key
-    // can be proven absent from what this stack deploys.
-    for (const carrier of ['plugins', 'devPlugins']) {
-      const verdict = collectionVerdict(stack[carrier]);
-      if (verdict !== 'absent') return 'unknown';
-    }
-
     const verdicts: SemanticRelevanceVerdict[] = keys.map((key) => collectionVerdict(stack[key]));
 
     // An assembled multi-package stack (`composeStacks(…, { manifest: 'preserve' })`)
     // carries its collections in each package body rather than at the top level.
     const packages = stack.packages;
     if (packages !== undefined) {
-      if (!Array.isArray(packages)) return 'unknown';
-      for (const entry of packages) {
-        if (!isPlainDict(entry) || !isPlainDict(entry.manifest)) return 'unknown';
-        const body = entry.manifest;
-        for (const key of keys) verdicts.push(collectionVerdict(body[key]));
+      if (!Array.isArray(packages)) {
+        verdicts.push('unknown');
+      } else {
+        for (const entry of packages) {
+          if (!isPlainDict(entry) || !isPlainDict(entry.manifest)) {
+            verdicts.push('unknown');
+            continue;
+          }
+          const body = entry.manifest;
+          for (const key of keys) verdicts.push(collectionVerdict(body[key]));
+        }
       }
+    }
+
+    // A plugin is handed to the kernel, not read by this chain, and it can
+    // register metadata of any type at boot — so while one is listed, no key
+    // can be proven absent from what this stack deploys (a key the stack
+    // visibly declares is still present).
+    for (const carrier of ['plugins', 'devPlugins']) {
+      if (collectionVerdict(stack[carrier]) !== 'absent') verdicts.push('unknown');
     }
 
     return foldVerdicts(verdicts);
@@ -140,6 +146,24 @@ export function semanticRelevanceVerdict(
       // A question this build does not know how to answer proves nothing.
       return 'unknown';
   }
+}
+
+/**
+ * Whether one semantic TODO leaves the listed TODOs: it carries a relevance
+ * question, it judges no conversion that applied an edit in this run (an
+ * applied edit is itself a proof its surface is there), and the question
+ * answers `absent` over every checkpoint.
+ *
+ * Exported for the chain's own tests; not part of the published entry.
+ */
+export function semanticTodoAbsent(
+  todo: MigrationTodo,
+  checkpoints: readonly unknown[],
+  appliedConversionIds: ReadonlySet<string>,
+): boolean {
+  if (!todo.relevantWhen) return false;
+  if (todo.conversionIds?.some((id) => appliedConversionIds.has(id))) return false;
+  return semanticRelevanceVerdict(todo.relevantWhen, checkpoints) === 'absent';
 }
 
 /** Thrown when `--from N` is below the documented support floor. */
@@ -212,12 +236,7 @@ export function applyMetaMigrations(
   // The semantic entries are judged once every hop has run, so a question is
   // asked of the whole sequence of stacks the chain produced.
   const checkpoints: readonly unknown[] = [stack, ...replayed.map((r) => r.stack)];
-  const appliedConversionIds = new Set(applied.map((a) => a.conversionId));
-  const isAbsent = (todo: MigrationTodo): boolean => {
-    if (!todo.relevantWhen) return false;
-    if (todo.conversionIds?.some((id) => appliedConversionIds.has(id))) return false;
-    return semanticRelevanceVerdict(todo.relevantWhen, checkpoints) === 'absent';
-  };
+  const appliedConversionIds: ReadonlySet<string> = new Set(applied.map((a) => a.conversionId));
 
   const todos: MigrationTodo[] = [];
   const absentTodos: MigrationTodo[] = [];
@@ -226,7 +245,7 @@ export function applyMetaMigrations(
     const hopAbsent: MigrationTodo[] = [];
     for (const s of step.semantic) {
       const todo: MigrationTodo = { ...s, toMajor: step.toMajor };
-      (isAbsent(todo) ? hopAbsent : hopTodos).push(todo);
+      (semanticTodoAbsent(todo, checkpoints, appliedConversionIds) ? hopAbsent : hopTodos).push(todo);
     }
     todos.push(...hopTodos);
     absentTodos.push(...hopAbsent);

@@ -258,6 +258,11 @@ export interface MigrationReport {
   dataMigrations: readonly PendingDataMigration[];
   /** `--step`: a checkpoint per hop, between the applied edits and the semantic notices. */
   step: boolean;
+  /**
+   * `--all`: list the notices the chain proved irrelevant (`absentTodos`)
+   * after the listed ones, instead of only counting them.
+   */
+  all: boolean;
   /** `--out`, resolved — the snapshot is written here so its line keeps its place. */
   out?: string;
   /** Printed beside a schema-valid verdict. */
@@ -362,6 +367,58 @@ function printAppliedEdits(result: MigrationChainResult): void {
   console.log('');
 }
 
+/** One semantic notice, as ③ prints it: the headline, then `why:` and `verify:`. */
+function printNotice(t: MigrationTodo): void {
+  console.log(`    ${chalk.yellow('⚠')} [protocol ${t.toMajor}] ${t.surface} → ${t.replacement}`);
+  console.log(chalk.dim(`        why:    ${t.reason}`));
+  console.log(chalk.dim(`        verify: ${t.acceptanceCriteria}`));
+}
+
+/** The keys an absent notice's relevance question found empty, each in backticks, joined by ` / `. */
+function absentKeysText(t: MigrationTodo): string {
+  const keys = t.relevantWhen?.kind === 'stack-declares' ? t.relevantWhen.keys : [];
+  return keys.map((k) => `\`${k}\``).join(' / ');
+}
+
+/**
+ * Group ④ — the semantic entries the chain PROVED irrelevant to this stack:
+ * each carries a structured relevance question (`relevantWhen`) that the chain
+ * answered `absent` over the stack it loaded and every checkpoint it made of it
+ * (`absentTodos`).
+ *
+ * By default one line counts them and names `--all`, and a second says what
+ * the proof covers: the definition this run loaded, not the rows a deployment
+ * stores. With `--all` each is printed in full, exactly as ③ prints a notice,
+ * followed by the keys it was proven absent under. Nothing reaches this group
+ * by matching prose, and nothing in it is unreachable (ADR-0087 D3).
+ */
+function printAbsentNotices(result: MigrationChainResult, all: boolean): void {
+  const count = result.absentTodos.length;
+  if (count === 0) return;
+  if (!all) {
+    console.log(
+      chalk.dim(
+        `  ${count} more manual change(s) not listed: their surfaces are absent from this stack `
+        + '(run with --all to list them).',
+      ),
+    );
+    console.log(
+      chalk.dim(
+        '    Absent is proven over the stack this run loaded; metadata a deployment stores '
+        + '(Studio, the metadata API) is not read here.',
+      ),
+    );
+    console.log('');
+    return;
+  }
+  console.log(chalk.bold(`  ${count} manual change(s) whose surfaces are absent from this stack (listed by --all):`));
+  for (const t of result.absentTodos) {
+    printNotice(t);
+    console.log(chalk.dim(`        absent: nothing is declared under ${absentKeysText(t)}`));
+  }
+  console.log('');
+}
+
 /**
  * The human report of an authored-source run, in the order an upgrader acts on
  * it, each group under one header line that counts it (ADR-0087 D3):
@@ -371,27 +428,32 @@ function printAppliedEdits(result: MigrationChainResult): void {
  *  ② the APPLIED mechanical edits — the diff the chain has already made, with
  *    the semantic entry that judges an edit printed beside it, marked review
  *    (see {@link printAppliedEdits});
- *  ③ the SEMANTIC notices — every semantic entry of every hop crossed.
+ *  ③ the SEMANTIC notices — every semantic entry of every hop crossed that the
+ *    chain could not prove irrelevant to this stack (`todos`);
+ *  ④ the ABSENT notices — the entries whose structured relevance question
+ *    (`SemanticMigration.relevantWhen`) the chain answered `absent` over this
+ *    stack (`absentTodos`): one line counting them, or with `--all` each one
+ *    in full (see {@link printAbsentNotices}).
  *
  * ## Why this order
  *
- * The chain hands the printer every semantic entry of every hop it crosses,
- * whatever the stack holds — `SemanticMigration` carries no predicate over the
- * stack — so ③ is the whole catalogue of each major crossed, 242 notices for
- * protocol 18. It used to be printed first and the verdict last, where it told
- * the author to "resolve the manual changes above"; and the refusals that block
- * the stack were printed nowhere. Measured on a real upgrade: 874 lines, whose
- * 41 refusals were buried under 240 notices about surfaces the stack never used.
+ * The chain hands the printer every semantic entry of every hop it crosses —
+ * the whole catalogue of each major crossed, 300-odd notices for protocol 18 —
+ * and only a structured question proves one irrelevant. ③ used to be printed
+ * first and the verdict last, where it told the author to "resolve the manual
+ * changes above"; and the refusals that block the stack were printed nowhere.
+ * Measured on a real upgrade: 874 lines, whose 41 refusals were buried under
+ * 240 notices about surfaces the stack never used.
  *
  * ## What it must not do
  *
  * ⛔ Drop, filter, collapse or summarise a notice. ADR-0087 D3 is "never
- * silence": an entry may leave ③ only on a structured, stack-derived proof that
- * its surface is absent, and matching the prose of `surface` against the stack
- * is not one. So the groups MOVE and nothing else does: every line ② and ③
- * printed before is printed after, byte-identical and in chain order. The one
- * addition is ②'s review lines, each a copy of an entry ③ still prints.
- * `--json` is untouched — its keys, its values and the order of its arrays.
+ * silence": an entry leaves ③ only on a structured, stack-derived proof that
+ * its surface is absent — the chain's `absentTodos`, which ④ always counts and
+ * `--all` always lists — and matching the prose of `surface` against the stack
+ * is never one. So every line ② and ③ printed is the chain's, byte-identical
+ * and in chain order. The one addition to them is ②'s review lines, each a
+ * copy of an entry ③ still prints.
  */
 export function printMigrationReport(report: MigrationReport): void {
   const { result } = report;
@@ -399,7 +461,9 @@ export function printMigrationReport(report: MigrationReport): void {
   // ① The verdict and the refusals — first, whatever else the run found.
   printSchemaVerdict(report);
 
-  if (result.applied.length === 0 && result.todos.length === 0) {
+  // A run whose only notices are proven absent is NOT this branch: it falls
+  // through, so ④ counts them and `--out` is still written.
+  if (result.applied.length === 0 && result.todos.length === 0 && result.absentTodos.length === 0) {
     // ⚠️ Two different facts wear the same empty result, and only one of them
     // is good news (#17134). A range that CONTAINS steps and rewrote nothing
     // is a finding about the metadata. A range that contains no step at all
@@ -430,7 +494,8 @@ export function printMigrationReport(report: MigrationReport): void {
     for (const hop of result.hops) {
       console.log(chalk.bold(`  ── protocol ${hop.toMajor} ──`));
       console.log(chalk.dim(`     ${hop.rationale}`));
-      console.log(chalk.dim(`     ${hop.applied.length} mechanical, ${hop.todos.length} manual`));
+      const absent = hop.absentTodos.length > 0 ? `, ${hop.absentTodos.length} not listed (surface absent)` : '';
+      console.log(chalk.dim(`     ${hop.applied.length} mechanical, ${hop.todos.length} manual${absent}`));
     }
     console.log('');
   }
@@ -438,13 +503,12 @@ export function printMigrationReport(report: MigrationReport): void {
   // ③ The semantic TODOs (delegated to the agent — never auto-applied).
   if (result.todos.length > 0) {
     console.log(chalk.bold(chalk.yellow(`  ${result.todos.length} manual change(s) require your judgment:`)));
-    for (const t of result.todos) {
-      console.log(`    ${chalk.yellow('⚠')} [protocol ${t.toMajor}] ${t.surface} → ${t.replacement}`);
-      console.log(chalk.dim(`        why:    ${t.reason}`));
-      console.log(chalk.dim(`        verify: ${t.acceptanceCriteria}`));
-    }
+    for (const t of result.todos) printNotice(t);
     console.log('');
   }
+
+  // ④ The notices the chain proved irrelevant to this stack — counted, or listed under --all.
+  printAbsentNotices(result, report.all);
 
   if (report.out) {
     writeFileSync(report.out, JSON.stringify(result.stack, null, 2));
@@ -498,6 +562,7 @@ export default class MigrateMeta extends Command {
   static override examples = [
     `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR}`,
     `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --step`,
+    `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --all`,
     `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --to ${MIGRATION_SUPPORT_FLOOR + 1} --json`,
     `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --out migrated.stack.json`,
     '$ os migrate meta --stored',
@@ -528,6 +593,13 @@ export default class MigrateMeta extends Command {
     }),
     out: Flags.string({
       description: 'Write the migrated stack as a JSON snapshot to this path.',
+      exclusive: ['stored'],
+    }),
+    all: Flags.boolean({
+      description:
+        'Also list, in full, the manual changes whose surfaces this stack provably does not declare '
+        + '(by default they are only counted). --json always carries them, under absentTodos.',
+      default: false,
       exclusive: ['stored'],
     }),
     stored: Flags.boolean({
@@ -660,12 +732,17 @@ export default class MigrateMeta extends Command {
               protocolVersion: PROTOCOL_VERSION,
               applied: result.applied,
               todos: result.todos,
+              // The semantic entries the chain proved irrelevant to this stack
+              // (ADR-0087 D3): reported beside `todos`, never dropped, so a
+              // machine consumer reaches them without `--all`.
+              absentTodos: result.absentTodos,
               hops: flags.step
                 ? result.hops.map((h) => ({
                     toMajor: h.toMajor,
                     rationale: h.rationale,
                     applied: h.applied,
                     todos: h.todos,
+                    absentTodos: h.absentTodos,
                   }))
                 : undefined,
               specChanges,
@@ -701,6 +778,7 @@ export default class MigrateMeta extends Command {
         refusals: parsed.success ? [] : parsed.error.issues,
         dataMigrations,
         step: flags.step,
+        all: flags.all,
         ...(flags.out ? { out: resolve(flags.out) } : {}),
         elapsed: timer.display(),
       });

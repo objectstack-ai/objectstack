@@ -17,11 +17,13 @@
  * stay, because an ADR lives in this repository. The whole printed
  * block is held, so `surface` is held as well as the three prose fields.
  *
- * The chain reports every semantic entry of every hop it crosses, whatever the
- * stack authors, so the fixture only has to be a real stack the command loads;
- * it keeps the lookup and the virtual `formula` field the `engine-*` entries
- * are about. The CLI replays the chain from the support floor to the highest
- * major carrying a semantic entry. Each block is then located VERBATIM in what
+ * The chain reports every semantic entry of every hop it crosses, and the run
+ * passes `--all`, so the entries the chain proves absent from this stack (a
+ * `relevantWhen` question answered `absent`) are printed in full too — the
+ * same block, in group ④. So the fixture only has to be a real stack the
+ * command loads; it keeps the lookup and the virtual `formula` field the
+ * `engine-*` entries are about. The CLI replays the chain from the support
+ * floor to the highest major carrying a semantic entry. Each block is then located VERBATIM in what
  * the terminal printed, and that printed block must hold no `#` followed by
  * four or five digits. The file keeps the name it was given when `engine-*`
  * was the only covered family; the staged rewrites have since reached every
@@ -352,8 +354,8 @@ function printedBlock(e: FamilyEntry): string {
  * A real stack for the command to load. It keeps the shapes the `engine-*`
  * entries are about — a relation a dotted path would follow, and a virtual
  * `formula` field no driver materialises a column for — though which blocks
- * print does not depend on it: every semantic entry of a crossed hop is
- * reported.
+ * print does not depend on it: under `--all` every semantic entry of a crossed
+ * hop is printed, listed or proven absent.
  */
 const FAMILY_FIXTURE = `
 export default {
@@ -383,7 +385,7 @@ beforeAll(async () => {
   const toMajor = Math.max(...FAMILY.map((e) => e.toMajor));
   const run = await execFileP(
     TSX,
-    [CLI, 'migrate', 'meta', '--from', String(MIGRATION_SUPPORT_FLOOR), '--to', String(toMajor)],
+    [CLI, 'migrate', 'meta', '--from', String(MIGRATION_SUPPORT_FLOOR), '--to', String(toMajor), '--all'],
     { cwd: dir, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
   );
   stdout = run.stdout;

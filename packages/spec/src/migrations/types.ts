@@ -142,7 +142,7 @@ export interface SemanticMigration {
    * `conversionIds` names a conversion that applied an edit in the same run is
    * listed whatever the question answers, since the edit is itself a proof the
    * surface is there. Every entry carrying this field is enumerated by
-   * `migrations.test.ts`, so adding one is a reviewed edit.
+   * `semantic-relevance.test.ts`, so adding one is a reviewed edit.
    */
   relevantWhen?: SemanticRelevance;
 }
