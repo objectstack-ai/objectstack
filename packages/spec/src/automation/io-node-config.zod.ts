@@ -54,10 +54,13 @@
  */
 
 import { z } from 'zod';
-import { templateExpressionInput } from '../shared/expression.zod';
+import { ExpressionSchema } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { NON_BLANK_STRING } from '../shared/refinement-projection';
 import { strictObject } from '../shared/strict-object';
+// The package-internal constructor `TemplateExpressionInputSchema` itself is
+// built with — never re-exported, so the notify sentences add no public surface.
+import { templateExpressionInput, type TypedExpressionRefusals } from '../shared/typed-expression-input';
 
 /**
  * What a rejected key on these contracts silently did before #4001 批 9.
@@ -125,8 +128,9 @@ const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
  * `flow-double-brace-interpolation` rule flags a doubled brace on a flow node
  * value; so this is the spelling both read today. The shared
  * `TemplateExpressionInputSchema` prescribes `{{record.name}}` instead, which
- * is why these two slots are built with `templateExpressionInput` and carry
- * the sentences below (#22081).
+ * is why these two slots take the same input from `templateExpressionInput`
+ * (`shared/typed-expression-input.ts`, package-internal) and carry the
+ * sentences below (#22081).
  *
  * The 17.x prescription, ⛔ not an end-state ruling on braces: executing
  * ADR-0032 D3 on the v18 line (#22110) flips the notify convention, and this
@@ -149,7 +153,7 @@ const NOTIFY_TEMPLATE_RENDERER =
  * that is neither a string nor a `template` envelope), naming the key and
  * prescribing {@link NOTIFY_TEMPLATE_PLACEHOLDER}.
  */
-function notifyTemplateRefusals(key: 'title' | 'message'): { sourceRequired: string; dialectOnly: string } {
+function notifyTemplateRefusals(key: 'title' | 'message'): TypedExpressionRefusals {
   const write =
     `Write \`'${NOTIFY_TEMPLATE_PLACEHOLDER}'\` or \`{ dialect: 'template', source: '${NOTIFY_TEMPLATE_PLACEHOLDER}' }\`: `
     + NOTIFY_TEMPLATE_RENDERER;
@@ -246,7 +250,8 @@ function notifyTemplateSourceRequired(key: 'title' | 'message'): string {
  *    here is the flow's `interpolate()`, so the placeholder spelling is its
  *    single-brace `{token}` (`{record.name}`). A `{{var}}` is not a placeholder
  *    in these two slots: the inner `{var}` resolves and the outer braces stay
- *    in the text. So the input is built with `templateExpressionInput` rather
+ *    in the text. So the input is built with `templateExpressionInput` (the
+ *    package-internal constructor of `TemplateExpressionInputSchema`) rather
  *    than taken as `TemplateExpressionInputSchema`, whose refusals prescribe
  *    `{{record.name}}`: a malformed value here is refused with sentences that
  *    prescribe `{record.name}` ({@link NOTIFY_TEMPLATE_PLACEHOLDER}).
@@ -275,10 +280,10 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
    * template slot (see the docblock above). Required unless `template` is set
    * (the superRefine below owes one of the two).
    */
-  title: templateExpressionInput(notifyTemplateRefusals('title')).optional()
+  title: templateExpressionInput(ExpressionSchema, notifyTemplateRefusals('title')).optional()
     .describe('Notification title — a template: a bare string, or a `{ dialect: \'template\', source }` envelope (the `tmpl` helper) carrying the same text. It is interpolated per run with the flow\'s single-brace `{token}` placeholders (`{record.name}`); a `{{var}}` is not a placeholder here — its inner `{var}` resolves and the outer braces stay in the text. One text for every recipient (not localizable — use `template` for per-locale content). Either this or `template` is required; the two are mutually exclusive.'),
   /** Notification body (inline path only) — the same template input as `title`. */
-  message: templateExpressionInput(notifyTemplateRefusals('message')).optional()
+  message: templateExpressionInput(ExpressionSchema, notifyTemplateRefusals('message')).optional()
     .describe('Notification body — the same template input as `title` (a bare string or a `{ dialect: \'template\', source }` envelope), interpolated per run with single-brace `{token}` placeholders; not localizable. Only valid with inline `title`, never with `template`.'),
   /**
    * The localizable content path (#9205): name of a `sys_email_template`

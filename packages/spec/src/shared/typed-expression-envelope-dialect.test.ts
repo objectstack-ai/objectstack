@@ -33,11 +33,11 @@ import {
   TemplateExpressionInputSchema,
   TYPED_EXPRESSION_DIALECT_ONLY,
   TYPED_EXPRESSION_SOURCE_REQUIRED,
-  templateExpressionInput,
   type CronExpressionInput,
   type TemplateExpressionInput,
   type TypedExpressionDialect,
 } from './expression.zod.js';
+import { templateExpressionInput } from './typed-expression-input.js';
 
 const NEITHER_SOURCE_NOR_AST = 'Expression requires at least one of `source` or `ast`';
 
@@ -235,12 +235,14 @@ describe('through `ObjectStackDefinitionSchema` — the stack-reachable typed sl
 });
 
 /**
- * `templateExpressionInput` — the one constructor of the template-typed input,
+ * `templateExpressionInput` — the package-internal constructor of the template-typed input,
  * refusing with the sentences it is given (#22081). A template slot whose
  * renderer reads a spelling other than `{{var}}` (a notify node's `title` /
  * `message`, rendered by the flow interpolator) is built with it so its refusal
  * prescribes that renderer's spelling; `TemplateExpressionInputSchema` is the
- * same constructor with the shared `{{record.name}}` sentences.
+ * same constructor with the shared `{{record.name}}` sentences. It is NOT on
+ * the public face: `check:api-surface` holds `api-surface/shared.json` to the
+ * exports `shared/index.ts` re-exports, and this module is not one of them.
  *
  * Pinned: the accept set does not move with the sentences, the given sentences
  * are the ONLY refusal text — the branch issue the formatters expand included —
@@ -251,7 +253,7 @@ describe('templateExpressionInput — the same input, refusing with the slot\'s 
     sourceRequired: 'OWN source-required sentence. Write `\'{x}\'`.',
     dialectOnly: 'OWN dialect-only sentence. Write `\'{x}\'`.',
   };
-  const own = templateExpressionInput(OWN);
+  const own = templateExpressionInput(ExpressionSchema, OWN);
 
   /** Every message in a refusal's tree: the union's own, then each branch issue beneath it. */
   function messagesIn(issue: { message: string; errors?: ReadonlyArray<ReadonlyArray<unknown>> }): string[] {
