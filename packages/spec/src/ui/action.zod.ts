@@ -976,13 +976,14 @@ const actionObject = () => strictObject({
    * ruling on #7278 is to carry the confirm question here instead: one
    * condition, one wording, one dialog, nothing sent until its own Confirm.
    * `confirmText` stays correct for a param-LESS action, where the confirm IS
-   * the only dialog.
+   * the only dialog. The describe below is Studio form help and says only "one
+   * dialog, not two"; the ruling that decided it is recorded here (#22093).
    *
    * **Not `ai.description`.** That one is the LLM-facing tool contract
    * (≥40 chars, required when `ai.exposed`); this one is human-facing dialog
    * copy and is never sent to a model.
    */
-  description: I18nLabelSchema.optional().describe('Explanatory line shown under the title in the action\'s param dialog. Carries the confirm question for an action that collects params (one dialog, not two —). Not the LLM-facing `ai.description`.'),
+  description: I18nLabelSchema.optional().describe('Explanatory line shown under the title in the action\'s param dialog. Carries the confirm question for an action that collects params (one dialog, not two). Not the LLM-facing `ai.description`.'),
 
   /** Target object this action belongs to (optional, snake_case) */
   objectName: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional().describe('Target object this action belongs to. When set, the action is auto-merged into the object\'s actions array by defineStack().'),

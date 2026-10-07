@@ -28,3 +28,5 @@ Wording only: no schema, key, type, export or error-code change.
   states the rule, why it exists and the repair.
 - The email-template form's Identity section help says how senders address a template instead of
   naming `IEmailService.sendTemplate`, in all four shipped locales.
+- The action `description` help no longer ends in a dangling dash left behind by an earlier
+  strip: "(one dialog, not two —)" now reads "(one dialog, not two)".

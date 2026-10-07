@@ -20,6 +20,7 @@
 // correct.
 
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import { ActionSchema, ActionParamSchema, InlineActionSchema } from './action.zod';
 import { ObjectTranslationDataSchema, TranslationDataSchema } from '../system/translation.zod';
 
@@ -228,5 +229,30 @@ describe('actionTranslationSchema.description', () => {
     expect(result.success && result.data._actions?.approval_reject?.description).toBe('拒绝该请求？');
     expect(result.success && result.data._actions?.approval_reject?.resultDialog?.description)
       .toBe('该请求已被拒绝。');
+  });
+});
+
+describe('the action `description` describe — form help an author reads in Studio (#22093)', () => {
+  // Studio's action inspector renders this describe from the `/meta/types`
+  // schema, which derives `action` in the authoring (`io: 'input'`) shape.
+  const help = (() => {
+    const json = z.toJSONSchema(ActionSchema, { unrepresentable: 'any', io: 'input' }) as {
+      properties?: Record<string, { description?: string }>;
+    };
+    return json.properties?.description?.description ?? '';
+  })();
+
+  it('is present, so the pins below cannot pass on nothing', () => {
+    expect(help).toContain('one dialog, not two');
+  });
+
+  it('carries no residue of a stripped reference — no dash left dangling before a close paren', () => {
+    expect(help).not.toMatch(/[—–-]\s*\)/);
+  });
+
+  it('carries no internal reference — no ruling date, no service interface, no tracker id', () => {
+    expect(help).not.toMatch(/\bruling\b|\bruled\b|\b20\d\d-\d\d-\d\d\b/i);
+    expect(help).not.toMatch(/\bI[A-Z]\w*Service\b/);
+    expect(help).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
   });
 });
