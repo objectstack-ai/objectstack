@@ -225,7 +225,8 @@ const NESTED_VALID = {
     name: 'mid',
     when: 'record.amount != null',
     message: 'y',
-    then: { type: 'script', name: 'deep', condition: 'record.amount > 100', message: 'z' },
+    // Guarded in its own source: the null-guard gate does not credit the enclosing `when`.
+    then: { type: 'script', name: 'deep', condition: 'record.amount != null && record.amount > 100', message: 'z' },
   },
   otherwise: { type: 'script', name: 'other', condition: 'record.amount != null && record.amount < 0', message: 'w' },
 };
