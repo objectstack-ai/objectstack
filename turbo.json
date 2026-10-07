@@ -525,6 +525,7 @@
         "$TURBO_ROOT$/packages/spec/src/data/**",
         "$TURBO_ROOT$/examples/app-showcase/**",
         "$TURBO_ROOT$/packages/cli/src/commands/**",
+        "$TURBO_ROOT$/packages/cli/src/utils/console.ts",
         "$TURBO_ROOT$/packages/metadata/src/**",
         "$TURBO_ROOT$/content/docs/protocol/kernel/realtime-protocol.mdx"
       ]
