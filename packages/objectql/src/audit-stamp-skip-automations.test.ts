@@ -88,7 +88,11 @@ function makeStubDriver() {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async syncSchema() {},
     async find(_o: string, ast: any) {
-      return Array.from(rows.values()).filter((r) => matches(r, ast?.where)).map((r) => ({ ...r }));
+      const hits = Array.from(rows.values()).filter((r) => matches(r, ast?.where));
+      // The caller's bound, applied AFTER the filter (the import runner's
+      // match probe asks for `limit: 2`).
+      const page = typeof ast?.limit === 'number' ? hits.slice(0, ast.limit) : hits;
+      return page.map((r) => ({ ...r }));
     },
     async findOne(_o: string, ast: any) {
       for (const r of rows.values()) if (matches(r, ast?.where)) return { ...r };
