@@ -20,6 +20,19 @@ import { provisionRlsProbePersona, RLS_PROBE_EMAIL } from './rls.js';
 
 const PROBE_SET = 'verify_rls_probe';
 
+/**
+ * The double's WHERE matcher: equality on plain keys, and a combinator it does
+ * not implement is REFUSED rather than read as a field name
+ * (`check:where-matcher`).
+ */
+function matches(row: Record<string, unknown>, where: Record<string, unknown>): boolean {
+  for (const [k, v] of Object.entries(where)) {
+    if (k.startsWith('$')) throw new Error(`stack double: unsupported operator ${k}`);
+    if (row[k] !== v) return false;
+  }
+  return true;
+}
+
 function stackDouble(seed: { sys_permission_set?: any[] } = {}) {
   const tables: Record<string, any[]> = {
     sys_user: [{ id: 'usr_probe', email: RLS_PROBE_EMAIL }],
@@ -29,7 +42,7 @@ function stackDouble(seed: { sys_permission_set?: any[] } = {}) {
   const ql = {
     async find(object: string, query: any) {
       const where = query?.where ?? {};
-      const rows = (tables[object] ?? []).filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+      const rows = (tables[object] ?? []).filter((r) => matches(r, where));
       return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
     },
     async insert(object: string, data: any) {

@@ -162,7 +162,7 @@ async function grantsByPrincipal(posture: Posture): Promise<Record<string, unkno
   // (the per-organization catalog), cloned from the platform bucket.
   if (posture === 'isolated') {
     for (const name of ['organization_admin', 'organization_admin_no_bypass', 'viewer_readonly']) {
-      const [bucket] = await engine.find('sys_permission_set', { where: { name }, context: SYS } as any);
+      const [bucket] = await engine.find('sys_permission_set', { where: { name }, context: SYS });
       const { id: _id, created_at: _c, updated_at: _u, ...rest } = bucket as any;
       await engine.insert('sys_permission_set', { ...rest, id: `ps_${name}_${ORG}`, organization_id: ORG }, { context: orgCtx } as any);
     }
@@ -180,7 +180,7 @@ async function grantsByPrincipal(posture: Posture): Promise<Record<string, unkno
   const [viewer] = await engine.find('sys_permission_set', {
     where: { name: 'viewer_readonly', ...(posture === 'isolated' ? { organization_id: ORG } : {}) },
     context: SYS,
-  } as any);
+  });
   await engine.insert(
     'sys_user_permission_set',
     { user_id: 'usr_member', permission_set_id: (viewer as any).id },

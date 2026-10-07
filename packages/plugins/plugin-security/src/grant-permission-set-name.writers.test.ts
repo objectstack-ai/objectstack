@@ -66,12 +66,12 @@ async function boot(): Promise<ObjectQL> {
 async function expectBothColumnsAgree(engine: ObjectQL, grant: any, expectedName: string): Promise<void> {
   expect(typeof grant?.permission_set_id).toBe('string');
   expect(grant?.permission_set).toBe(expectedName);
-  const [setRow] = await engine.find('sys_permission_set', { where: { id: grant.permission_set_id }, context: SYS } as any);
+  const [setRow] = await engine.find('sys_permission_set', { where: { id: grant.permission_set_id }, context: SYS });
   expect(setRow?.name).toBe(grant.permission_set);
 }
 
 async function grantsOf(engine: ObjectQL, userId: string): Promise<any[]> {
-  const rows = await engine.find('sys_user_permission_set', { where: { user_id: userId }, context: SYS } as any);
+  const rows = await engine.find('sys_user_permission_set', { where: { user_id: userId }, context: SYS });
   return Array.isArray(rows) ? rows : [];
 }
 
