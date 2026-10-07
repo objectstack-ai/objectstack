@@ -161,6 +161,22 @@ describe('[#20913] hydration registers a stored flow row as the tenant row it is
         expect(protocol.packagedArtifactOwner({ type: 'flow', name: SHIPPED })).toBe(PACKAGE_ID);
     });
 
+    // [#22057] The hydration does not register a row bound to one package under
+    // a name another package ships. The reads decline a stored row of a shipped
+    // flow name, so that skip does not apply to it: it is registered as the
+    // tenant row it is, for the boot pull to report as a shadowed contender.
+    it('a stored row of a shipped flow name, bound to another package, is registered as the tenant row it is too', async () => {
+        const { protocol, registry } = harness([
+            storedRow('flow', SHIPPED, flowBody(SHIPPED, 'STORED'), { package_id: 'com.example.other' }),
+        ]);
+        await protocol.getMetaItemsForExecution({ type: 'flow' });
+
+        const hydrated = registry.bare('flow', SHIPPED);
+        expect(hydrated?.label).toBe('STORED');
+        expect(hydrated?._provenance).toBe('org');
+        expect(isCodeArtifactBody(hydrated)).toBe(false);
+    });
+
     it('control: an overlay of a packaged type in the overlay regime keeps the artifact\'s envelope', async () => {
         const { protocol, registry } = harness([storedRow('view', 'pkg_view', { name: 'pkg_view', label: 'OVERLAY VIEW' })]);
         await protocol.getMetaItems({ type: 'view' });
