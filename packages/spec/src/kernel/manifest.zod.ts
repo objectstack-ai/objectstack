@@ -37,7 +37,7 @@ import { NavigationContributionSchema } from '../ui/app.zod';
 const PLUGIN_PERMISSIONS_LIST_FORM =
   'Expected the plugin permission block `{ services?, hooks?, network?, fs? }`, received a flat list. '
   + 'A list of permission strings was the legacy form of a package manifest\'s `permissions`, removed in '
-  + '@objectstack/spec 18.0.0 (ADR-0049 enforce-or-remove) — no loader ever read it: what a package is '
+  + '@objectstack/spec 17 (ADR-0049 enforce-or-remove) — no loader ever read it: what a package is '
   + 'granted at load is the consented grant set, never the manifest\'s list. Name what the plugin may touch '
   + 'in the four lists instead — platform services, lifecycle hooks, network hosts and filesystem paths, '
   + 'e.g. `{ services: [\'object\'], network: [\'api.acme.com\'] }`. A permission string has no mechanical '
