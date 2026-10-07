@@ -269,7 +269,7 @@ describe('security catalog read — a name two packages ship (ADR-0131 D4, today
                     type,
                     name,
                     package_id: OVERRIDE_PACKAGE,
-                    metadata: catalogBody(type, name, 'stored override'),
+                    metadata: JSON.stringify(catalogBody(type, name, 'stored override')),
                 }),
             ];
             const { protocol, reader } = bootWithSharedName(type, name, rows);
