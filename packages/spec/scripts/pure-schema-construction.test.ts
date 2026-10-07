@@ -135,7 +135,12 @@ describe('a consumer of the built ./shared entry keeps the conversion table only
 
     expect(ids.length).toBeGreaterThan(100);
     expect(await kept('normalizeStackInput', 'shared-reader')).toEqual(ids);
-    expect(await kept('EvaluatedExpressionSchema, ValueDomainSchema, canonicalMetaUrlType', 'shared-console')).toEqual([]);
+    expect(
+      await kept(
+        'EVALUATED_EXPRESSION_SOURCE_REQUIRED, EvaluatedExpressionInputSchema, EvaluatedExpressionSchema, ValueDomainSchema, canonicalMetaUrlType',
+        'shared-console',
+      ),
+    ).toEqual([]);
   });
 });
 
