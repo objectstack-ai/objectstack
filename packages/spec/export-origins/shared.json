@@ -121,7 +121,6 @@
     "singularToPlural": "src/meta-spelling/manifest-collection-spelling.ts#singularToPlural (function)",
     "strictUnknownKeyError": "src/shared/suggestions.zod.ts#strictUnknownKeyError (function)",
     "suggestFieldType": "src/shared/field-type-suggestion.ts#suggestFieldType (function)",
-    "templateExpressionInput": "src/shared/expression.zod.ts#templateExpressionInput (const)",
     "tmpl": "src/shared/expression.zod.ts#tmpl (function)",
     "unrecognisedMetaTypeRefusal": "src/meta-spelling/metadata-url-spelling.ts#unrecognisedMetaTypeRefusal (function)"
   }

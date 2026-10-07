@@ -126,7 +126,6 @@
     "singularToPlural (function)",
     "strictUnknownKeyError (function)",
     "suggestFieldType (function)",
-    "templateExpressionInput (const)",
     "tmpl (function)",
     "unrecognisedMetaTypeRefusal (function)"
   ]
