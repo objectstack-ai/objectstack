@@ -151,6 +151,17 @@ export const SysMember = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/organization/add-member',
+      // Offered only to the one standing the door admits (ADR-0068 D4):
+      // `current_user.isPlatformAdmin` is the ADR-0095 D3 PLATFORM_ADMIN
+      // posture rung — what the session payload emits and what the mount's
+      // platform-admin gate judges. Gated on the feature alone, the button was
+      // offered to every member, owners and admins included, and the door
+      // refused each with 403 `PERMISSION_DENIED`. ⛔ Never
+      // `'platform_admin' in current_user.positions`: `EvalUserSchema` rules
+      // that standing is read from this key, never from the array.
+      // `requiresFeature` below composes onto it at parse time:
+      // `(current_user.isPlatformAdmin == true) && features.organization != false`.
+      visible: 'current_user.isPlatformAdmin == true',
       // Gated on the org CAPABILITY, not multi-org (ADR-0093 D9): the
       // better-auth endpoints resolve the session's active org, which
       // single-org mode now guarantees via plugin-auth's default-org
