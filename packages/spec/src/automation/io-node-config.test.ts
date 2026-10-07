@@ -18,6 +18,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { HttpConfigSchema, NotifyConfigSchema } from './io-node-config.zod.js';
+import { flowNodeConfigRefusals } from './flow-node-config-refusals.js';
 import {
   TYPED_EXPRESSION_DIALECT_ONLY,
   TYPED_EXPRESSION_SOURCE_REQUIRED,
@@ -408,23 +409,85 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
       expect(envelope.data?.message).toEqual(expected);
     });
 
-    it('still refuses a value that is neither a string nor a template envelope — one issue at the key', () => {
+    // A refusal is the one place an author is told exactly what to write, and
+    // an AI author writes it verbatim. These two slots' renderer is the flow
+    // interpolator, which reads single-brace `{token}` only, so their refusals
+    // prescribe `{record.name}` — never the shared template input's
+    // `{{record.name}}`, which the build's `flow-double-brace-interpolation`
+    // rule flags on this very node and the executor would send with a stray
+    // pair of braces (#22081). The lint round trip of each prescribed spelling
+    // is pinned in `@objectstack/lint` (`lint-flow-patterns.test.ts`).
+    const BARE_PRESCRIPTION = "`'{record.name}'`";
+    const ENVELOPE_PRESCRIPTION = "`{ dialect: 'template', source: '{record.name}' }`";
+    const BLANK = ['', '   '];
+    const FOREIGN = [42, true, ['a'], { source: TEXT }, { dialect: 'cel', source: 'record.x' }];
+
+    /** Every message in the refusal's tree: the union's own, then each branch issue beneath it. */
+    function messagesIn(issue: { message: string; errors?: ReadonlyArray<ReadonlyArray<unknown>> }): string[] {
+      const nested = (issue.errors ?? []).flat() as Array<{ message: string; errors?: ReadonlyArray<ReadonlyArray<unknown>> }>;
+      return [issue.message, ...nested.flatMap(messagesIn)];
+    }
+
+    it('refuses a blank bare string, or a value that is neither a string nor a template envelope, with one issue prescribing `{record.name}`', () => {
       for (const key of ['title', 'message'] as const) {
-        for (const value of [42, true, ['a'], { source: TEXT }, { dialect: 'cel', source: 'record.x' }]) {
-          const issues = issuesAt({ recipients: ['u1'], title: 'x', [key]: value }, key);
-          expect(issues, `${key} = ${JSON.stringify(value)}`).toEqual([
-            { code: 'invalid_union', message: TYPED_EXPRESSION_DIALECT_ONLY.template },
-          ]);
+        const sentences = new Map<'blank' | 'foreign', Set<string>>([['blank', new Set()], ['foreign', new Set()]]);
+        for (const [kind, values] of [['blank', BLANK], ['foreign', FOREIGN]] as const) {
+          for (const value of values) {
+            const label = `${key} = ${JSON.stringify(value)}`;
+            const issues = issuesAt({ recipients: ['u1'], title: 'x', [key]: value }, key);
+            expect(issues.map((i) => i.code), label).toEqual(['invalid_union']);
+            const message = issues[0]!.message;
+            expect(message, label).toContain(`\`${key}\``);
+            expect(message, label).toContain(BARE_PRESCRIPTION);
+            expect(message, label).toContain(ENVELOPE_PRESCRIPTION);
+            sentences.get(kind)!.add(message);
+          }
+        }
+        // One sentence per kind, and the two kinds are told apart.
+        expect(sentences.get('blank')!.size, key).toBe(1);
+        expect(sentences.get('foreign')!.size, key).toBe(1);
+        expect([...sentences.get('blank')!][0]).not.toBe([...sentences.get('foreign')!][0]);
+      }
+    });
+
+    it('carries no doubled brace anywhere in the refusal — the branch issues the formatters expand included', () => {
+      // `formatZodIssue` and the wire mapper both expand an `invalid_union`'s
+      // branches beneath its own line, so a branch still naming the shared
+      // input's `{{record.name}}` would reach the author under the right one.
+      for (const key of ['title', 'message'] as const) {
+        for (const value of [...BLANK, ...FOREIGN]) {
+          const result = NotifyConfigSchema.safeParse({ recipients: ['u1'], title: 'x', [key]: value });
+          const refusal = result.error!.issues.find((i) => i.path.length === 1 && i.path[0] === key)!;
+          const messages = messagesIn(refusal as unknown as { message: string });
+          expect(messages.length, `${key} = ${JSON.stringify(value)}: the tree was not read`).toBeGreaterThan(0);
+          expect(messages.filter((m) => m.includes('{{')), `${key} = ${JSON.stringify(value)}`).toEqual([]);
         }
       }
     });
 
-    it('refuses a blank bare string at the slot (the shared non-blank rule)', () => {
+    it('reaches the build with the same prescription — the flow judge `FlowSchema`, `registerFlow` and `os validate` share', () => {
       for (const key of ['title', 'message'] as const) {
-        for (const value of ['', '   ']) {
-          expect(issuesAt({ recipients: ['u1'], title: 'x', [key]: value }, key), `${key} = ${JSON.stringify(value)}`)
-            .toEqual([{ code: 'invalid_union', message: TYPED_EXPRESSION_SOURCE_REQUIRED.template }]);
+        for (const value of ['   ', 42]) {
+          const refusals = flowNodeConfigRefusals('notify', { recipients: ['u1'], title: 'x', [key]: value })
+            .filter((r) => r.path === key);
+          expect(refusals.map((r) => r.code), `${key} = ${JSON.stringify(value)}`).toEqual(['node-config-refused-by-contract']);
+          expect(refusals[0]!.message).toContain(BARE_PRESCRIPTION);
+          expect(refusals[0]!.message).not.toContain('{{');
         }
+      }
+    });
+
+    it('control — the shared template input, whose renderers read `{{var}}`, keeps prescribing `{{record.name}}`', () => {
+      // The notify slots took their own sentences; the shared one did not
+      // move. `typed-expression-envelope-dialect.test.ts` pins it at the slots
+      // that answer with it (`titleFormat`, the prompt template).
+      expect(TYPED_EXPRESSION_SOURCE_REQUIRED.template).toContain("`'{{record.name}}'`");
+      expect(TYPED_EXPRESSION_DIALECT_ONLY.template).toContain("`'{{record.name}}'`");
+      for (const key of ['title', 'message'] as const) {
+        const blank = issuesAt({ recipients: ['u1'], title: 'x', [key]: '' }, key)[0]!.message;
+        const foreign = issuesAt({ recipients: ['u1'], title: 'x', [key]: 42 }, key)[0]!.message;
+        expect(blank).not.toBe(TYPED_EXPRESSION_SOURCE_REQUIRED.template);
+        expect(foreign).not.toBe(TYPED_EXPRESSION_DIALECT_ONLY.template);
       }
     });
 

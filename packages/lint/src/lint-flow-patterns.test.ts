@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { TimeRelativeTriggerSchema, LoopConfigSchema, ParallelConfigSchema, TryCatchConfigSchema, HttpConfigSchema, FlowSchema } from '@objectstack/spec/automation';
+import { TimeRelativeTriggerSchema, LoopConfigSchema, ParallelConfigSchema, TryCatchConfigSchema, HttpConfigSchema, FlowSchema, NotifyConfigSchema } from '@objectstack/spec/automation';
+import { TYPED_EXPRESSION_DIALECT_ONLY, TYPED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec/shared';
 // [#5659] The shared identity reduction, asserted beside the rule that consumes
 // it — the rule's verdict and the drivers' verdict are one object now.
 import { reduceFilterVerdict } from '@objectstack/spec/data';
@@ -2416,6 +2417,74 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
       const fnds = lintFlowPatterns(httpFlow({ fields: [{ value: '{{record.amount}}' }] }))
         .filter((f) => f.rule === FLOW_DOUBLE_BRACE_INTERP);
       expect(fnds).toHaveLength(1);
+    });
+
+    /**
+     * [#22081] The round trip an author makes after a refusal: write what it
+     * prescribes, then build. A notify node's `title` / `message` refusal
+     * (`NotifyConfigSchema`, `@objectstack/spec`) used to prescribe the shared
+     * template input's `{{record.name}}` — which this rule then flagged on the
+     * same node. Every spelling the refusal prescribes, read out of the refusal
+     * text itself rather than re-spelled here, must parse and draw no finding.
+     * The control is the shared sentence the notify slots used to answer with:
+     * its prescriptions still draw the finding, so this pin can fail.
+     */
+    describe('a notify slot refusal prescribes only spellings this rule passes', () => {
+      function notifyFlow(key: 'title' | 'message', value: unknown) {
+        return {
+          flows: [{
+            name: 'deal_won_notice',
+            label: 'Deal won notice',
+            type: 'autolaunched',
+            nodes: [
+              { id: 'start', type: 'start', label: 'Start' },
+              { id: 'tell', type: 'notify', label: 'Tell owner', config: { recipients: ['u1'], title: 'Deal won', [key]: value } },
+              { id: 'done', type: 'end', label: 'Done' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'tell' }, { id: 'e2', source: 'tell', target: 'done' }],
+          }],
+        };
+      }
+
+      /** The two spellings a template refusal prescribes — "Write `'X'` or `{ dialect: 'template', source: 'X' }`". */
+      function prescribedIn(refusal: string): unknown[] {
+        const bare = /Write `'([^`']+)'`/.exec(refusal)?.[1];
+        const envelope = /`\{ dialect: 'template', source: '([^`']+)' \}`/.exec(refusal)?.[1];
+        return [bare, envelope === undefined ? undefined : { dialect: 'template', source: envelope }];
+      }
+
+      function doubleBraceFindings(key: 'title' | 'message', value: unknown) {
+        return lintFlowPatterns(notifyFlow(key, value)).filter((f) => f.rule === FLOW_DOUBLE_BRACE_INTERP);
+      }
+
+      it.each(['title', 'message'] as const)('`%s`: each prescribed spelling parses and draws no `flow-double-brace-interpolation`', (key) => {
+        for (const refused of ['   ', 42]) {
+          const parsed = NotifyConfigSchema.safeParse({ recipients: ['u1'], title: 'Deal won', [key]: refused });
+          const refusal = parsed.success ? undefined : parsed.error.issues.find((i) => i.path[0] === key);
+          expect(refusal?.code, `${key} = ${JSON.stringify(refused)}`).toBe('invalid_union');
+          const prescribed = prescribedIn(refusal!.message);
+          expect(prescribed.every((p) => p !== undefined), `no prescription read out of: ${refusal!.message}`).toBe(true);
+          for (const spelling of prescribed) {
+            const label = `${key} = ${JSON.stringify(spelling)}`;
+            const flow = notifyFlow(key, spelling).flows[0];
+            const config = NotifyConfigSchema.safeParse(flow.nodes[1]!.config);
+            expect(config.success, `${label}: ${JSON.stringify(config.error?.issues)}`).toBe(true);
+            const whole = FlowSchema.safeParse(flow);
+            expect(whole.success, `${label}: ${JSON.stringify(whole.error?.issues)}`).toBe(true);
+            expect(doubleBraceFindings(key, spelling), label).toEqual([]);
+          }
+        }
+      });
+
+      it('control: the shared template sentence\'s prescriptions draw the finding on a notify node', () => {
+        for (const sentence of [TYPED_EXPRESSION_SOURCE_REQUIRED.template, TYPED_EXPRESSION_DIALECT_ONLY.template]) {
+          const prescribed = prescribedIn(sentence);
+          expect(prescribed.every((p) => p !== undefined), sentence).toBe(true);
+          for (const spelling of prescribed) {
+            expect(doubleBraceFindings('title', spelling), JSON.stringify(spelling)).toHaveLength(1);
+          }
+        }
+      });
     });
   });
 

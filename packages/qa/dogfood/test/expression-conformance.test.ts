@@ -105,6 +105,14 @@ const EXPRESSION_INPUT_SCHEMAS = [
   'SettingsVisibilityInputSchema',
   'CronExpressionInputSchema',
   'TemplateExpressionInputSchema',
+  // [#22081] The constructor `TemplateExpressionInputSchema` is built with: the
+  // same template input, refusing with the slot's own sentences. A notify
+  // node's `title` / `message` are typed with a call of it (their refusals
+  // prescribe the flow interpolator's `{record.name}`), so without this row
+  // both positions drop out of discovery and `template-notify-content` goes
+  // STALE — #7327's shape again. It is declared as a `const` arrow, which is
+  // the roster-definition shape `LOCAL_BINDING` skips.
+  'templateExpressionInput',
 ];
 /**
  * A roster (or alias) name as an IDENTIFIER, anywhere on the line — #17630.
