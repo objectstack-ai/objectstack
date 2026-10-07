@@ -400,7 +400,7 @@ describe('IndexSchema', () => {
     const index = {
       name: 'idx_email_status',
       fields: ['email', 'status'],
-      unique: true,
+      unique: 'global',
     };
 
     expect(() => IndexSchema.parse(index)).not.toThrow();
@@ -711,12 +711,12 @@ describe('ObjectSchema', () => {
           {
             name: 'idx_email',
             fields: ['email'],
-            unique: true,
+            unique: 'global',
           },
           {
             name: 'idx_username',
             fields: ['username'],
-            unique: true,
+            unique: 'global',
           },
           {
             fields: ['email', 'username'],
@@ -813,7 +813,7 @@ describe('ObjectSchema', () => {
           {
             name: 'idx_account_number',
             fields: ['account_number'],
-            unique: true,
+            unique: 'global',
           },
         ],
         enable: {
