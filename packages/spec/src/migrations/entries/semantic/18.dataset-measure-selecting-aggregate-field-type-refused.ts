@@ -77,4 +77,5 @@ export const entry: SemanticMigration = {
     + 'wired, an unknown field, or a `relationship.field` path whose column lives on a '
     + 'joined object. A measure column over such a pair also stops carrying a corrected '
     + '`fields[].type`, because the pair no longer produces a column at all.',
+  relevantWhen: { kind: 'stack-declares', keys: ['datasets'] },
 };

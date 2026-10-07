@@ -31,4 +31,5 @@ export const entry: SemanticMigration = {
     + 'console the deployment runs, an open dashboard re-queries its widgets at that cadence; '
     + 'where it does not, the console build predates the renderer\'s move to the new key, and the '
     + 'author has recorded that until the console is upgraded.',
+  relevantWhen: { kind: 'stack-declares', keys: ['dashboards'] },
 };

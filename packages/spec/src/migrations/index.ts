@@ -19,6 +19,9 @@ export type {
   MigrationStep,
   MigrationTodo,
   SemanticMigration,
+  SemanticRelevance,
+  SemanticRelevanceKey,
+  StackDeclaresRelevance,
 } from './types.js';
 export {
   MIGRATIONS_BY_MAJOR,

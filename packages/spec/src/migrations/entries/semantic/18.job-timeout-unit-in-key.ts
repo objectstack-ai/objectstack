@@ -27,4 +27,5 @@ export const entry: SemanticMigration = {
     + '`timeoutMs` fails with a timeout and is retried under `retryPolicy`, and an attempt that '
     + 'finishes inside it succeeds as before. No code reads or writes `timeout` on a job '
     + 'definition.',
+  relevantWhen: { kind: 'stack-declares', keys: ['jobs'] },
 };

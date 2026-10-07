@@ -44,4 +44,5 @@ export const entry: SemanticMigration = {
     + 'to be queried) or keep it and confirm that `/analytics/meta` omits the cube and that a query '
     + 'naming it answers 404 `CUBE_NOT_FOUND`. Every compiled artifact in use was built by '
     + '`os compile` from this release or later.',
+  relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
 };

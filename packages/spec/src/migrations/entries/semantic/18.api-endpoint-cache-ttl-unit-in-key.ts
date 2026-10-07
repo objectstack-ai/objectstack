@@ -28,4 +28,5 @@ export const entry: SemanticMigration = {
     + 'meant to cache for one minute reads `cacheTtlSeconds: 60`. A GET to the endpoint repeated '
     + 'inside that window is answered from the cache, and one repeated after it reflects a record '
     + 'changed in between.',
+  relevantWhen: { kind: 'stack-declares', keys: ['apis'] },
 };

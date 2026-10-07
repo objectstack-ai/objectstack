@@ -30,6 +30,64 @@
  *    delegated to it, rather than silence.
  */
 
+import type { StackDefinitionKey } from '../stack.zod.js';
+
+/**
+ * A top-level stack key a {@link SemanticRelevance} question may name: any key
+ * `ObjectStackDefinitionSchema` declares, except the four the evaluation reads
+ * as CARRIERS of other definitions rather than as a family of its own —
+ * `manifest` (always present), `packages` (whose bodies are searched for the
+ * named keys), and `plugins` / `devPlugins` (whose entries can contribute
+ * metadata no reader of the stack can see, so their presence makes every
+ * answer unknown).
+ */
+export type SemanticRelevanceKey = Exclude<StackDefinitionKey, 'manifest' | 'packages' | 'plugins' | 'devPlugins'>;
+
+/**
+ * "Does the stack declare anything under one of these top-level keys?" — the
+ * one relevance question protocol 18 ships.
+ *
+ * Answered over the stack as loaded, map form included: a key whose value is a
+ * non-empty array or map is PRESENT, an absent key or an empty array or map is
+ * ABSENT, and any other value (a function, a promise, a scalar) is UNKNOWN. The
+ * same key inside each `packages[].manifest` body counts too, since an
+ * assembled multi-package stack carries its collections there and not at the
+ * top level.
+ */
+export interface StackDeclaresRelevance {
+  /** The discriminant: a question about which top-level keys the stack declares. */
+  readonly kind: 'stack-declares';
+  /**
+   * Every top-level key under which the entry's surface can be authored in a
+   * source written against the step's PREVIOUS major. The surface is absent
+   * only when every one of them is: list a second key wherever the governed
+   * shape can also be written (a report a page component carries inline, a
+   * predicate a sharing rule carries as well as a permission set).
+   */
+  readonly keys: readonly [SemanticRelevanceKey, ...SemanticRelevanceKey[]];
+}
+
+/**
+ * A structured, stack-derived relevance question for a {@link SemanticMigration}
+ * — the one exit ADR-0087 D3 ("never silence") leaves a notice: an entry
+ * leaves `os migrate meta`'s default list only when this question, evaluated
+ * over the stack being migrated, PROVES the entry's surface absent. ⛔ Never
+ * free text, and never a match against the prose of `surface`.
+ *
+ * A closed union of named questions rather than a callback: a callback could do
+ * arbitrary work and could not be enumerated, reviewed or pinned. A new kind of
+ * question is a new member here, evaluated in `chain.ts`.
+ *
+ * The answer is three-valued, and only one value removes anything. `absent`
+ * (the stack provably carries no such surface) moves the entry to
+ * {@link MigrationChainResult.absentTodos}; `present` and `unknown` (a value
+ * the question cannot read, a stack that is not a plain object, or a `plugins`
+ * / `devPlugins` entry that can contribute metadata the stack does not show)
+ * keep it listed. The proof is about the definition the chain reads: metadata
+ * a deployment stores at runtime (Studio, the metadata API) is not part of it.
+ */
+export type SemanticRelevance = StackDeclaresRelevance;
+
 /**
  * One retirement family's D3 entry — owed even when a lossless D2 conversion
  * carries the data repair — surfaced as a structured TODO the consumer agent
@@ -71,6 +129,22 @@ export interface SemanticMigration {
    * names incidental analogues.
    */
   conversionIds?: readonly string[];
+  /**
+   * The structured question that can prove this entry irrelevant to a stack:
+   * when the chain evaluates it as `absent` over the stack it migrates, the
+   * entry is reported in {@link MigrationChainResult.absentTodos} instead of
+   * `todos`, and `os migrate meta` counts it rather than listing it (`--all`
+   * lists it). See {@link SemanticRelevance} for the evaluation.
+   *
+   * Omit it — the entry is then always listed — unless the surface lives ONLY
+   * under top-level stack keys the question names. Two cases keep it listed by
+   * construction: an unreadable stack answers `unknown`, and an entry whose
+   * `conversionIds` names a conversion that applied an edit in the same run is
+   * listed whatever the question answers, since the edit is itself a proof the
+   * surface is there. Every entry carrying this field is enumerated by
+   * `migrations.test.ts`, so adding one is a reviewed edit.
+   */
+  relevantWhen?: SemanticRelevance;
 }
 
 /**
@@ -119,7 +193,10 @@ export interface MigrationHopResult {
   rationale: string;
   stack: Record<string, unknown>;
   applied: MigrationApplication[];
+  /** This hop's semantic TODOs the stack may owe — every entry `absentTodos` does not hold. */
   todos: MigrationTodo[];
+  /** This hop's semantic TODOs whose surface the stack provably lacks (see {@link MigrationChainResult.absentTodos}). */
+  absentTodos: MigrationTodo[];
 }
 
 /** The full result of composing + applying a chain from `fromMajor` to `toMajor`. */
@@ -130,8 +207,21 @@ export interface MigrationChainResult {
   stack: Record<string, unknown>;
   /** Every mechanical rewrite across all hops, in application order. */
   applied: MigrationApplication[];
-  /** Every semantic TODO across all hops — the judgment delegated to the consumer. */
+  /**
+   * Every semantic TODO across all hops that this stack may owe — the judgment
+   * delegated to the consumer. That is every entry of every hop crossed except
+   * the ones in {@link absentTodos}; together the two hold each entry once, in
+   * chain order.
+   */
   todos: MigrationTodo[];
+  /**
+   * The semantic TODOs whose {@link SemanticMigration.relevantWhen} question
+   * PROVED their surface absent from the stack — absent from the stack the
+   * chain was handed and from every hop's checkpoint after it. They are
+   * reported here, never dropped (ADR-0087 D3, "never silence"): a printer
+   * counts them, and lists them on request.
+   */
+  absentTodos: MigrationTodo[];
   /** Per-hop checkpoints, in order (for `--step` bisection). */
   hops: MigrationHopResult[];
 }

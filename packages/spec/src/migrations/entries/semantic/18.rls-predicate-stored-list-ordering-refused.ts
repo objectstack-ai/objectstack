@@ -53,4 +53,5 @@ export const entry: SemanticMigration = {
     + 'multiple lookup, and rewrite each as the replacement says. Then write a record through each '
     + 'such policy: a write whose compared field holds a list now answers 400 rather than being '
     + 'admitted by string comparison, so re-check what the policy is supposed to admit.',
+  relevantWhen: { kind: 'stack-declares', keys: ['permissions'] },
 };

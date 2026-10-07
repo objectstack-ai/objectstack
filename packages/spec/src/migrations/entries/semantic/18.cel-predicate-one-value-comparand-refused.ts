@@ -64,4 +64,5 @@ export const entry: SemanticMigration = {
     + 'multiple field; rewrite each as the replacement says. Then re-check what each policy is '
     + 'supposed to admit rather than assuming what it admitted before was right: several of these '
     + 'admitted every write, and two folded to no restriction at all.',
+  relevantWhen: { kind: 'stack-declares', keys: ['permissions', 'sharingRules'] },
 };

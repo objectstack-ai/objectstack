@@ -21,4 +21,5 @@ export const entry: SemanticMigration = {
     + '`backoffMultiplier` below 1 remain, and each adjusted value was re-chosen knowing a '
     + 'retry re-runs the handler with its writes and callouts. No job fails to register '
     + 'with the retry-policy bound prescription.',
+  relevantWhen: { kind: 'stack-declares', keys: ['jobs'] },
 };

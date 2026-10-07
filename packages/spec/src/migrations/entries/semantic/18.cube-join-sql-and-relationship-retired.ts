@@ -58,4 +58,5 @@ export const entry: SemanticMigration = {
     + 'derived ON clause reads, so a join keyed after the object it REACHES never resolved at all. '
     + 'Nothing else regresses: `joins.<alias>.name` is unchanged, and it is what both the joined '
     + 'table and the per-object RLS/tenant read scope are resolved from.',
+  relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
 };

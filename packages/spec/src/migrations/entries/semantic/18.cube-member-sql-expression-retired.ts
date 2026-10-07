@@ -53,4 +53,5 @@ export const entry: SemanticMigration = {
     + 'ratio: the same value divided by 100 when the expression returned percentage points). '
     + 'Every dashboard, report or saved query that named the cube member now names the dataset '
     + 'measure. A cube member that aggregates a column parses byte-identically to before.',
+  relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
 };
