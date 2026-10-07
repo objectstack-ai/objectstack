@@ -3,6 +3,7 @@
 "@objectstack/plugin-sharing": minor
 "@objectstack/runtime": minor
 "@objectstack/plugin-hono-server": minor
+"@objectstack/hono": minor
 ---
 
 feat(sharing): a share-link password can be sent in the `X-Share-Password` header whatever its characters, under a declared encoding (`X-Share-Password-Encoding: utf-8`)
