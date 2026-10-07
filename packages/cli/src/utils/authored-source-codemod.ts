@@ -355,8 +355,22 @@ class Trail {
   readonly uses = new Set<string>();
 }
 
-const SPEC_SPECIFIER_RE = /^@objectstack\/spec(\/|$)/;
-const DEFINE_HELPER_RE = /^define[A-Z]\w*$/;
+/**
+ * The two patterns the authored-source shim (`loadConfig`'s `authoredSource`,
+ * `utils/config.ts`) wraps by: an `@objectstack/spec` entrypoint, and a
+ * `define*` export of it. A call the shim makes tolerant hands its argument
+ * through when the current schema refuses it, so the walk may follow the
+ * argument; when the schema accepts it, the subset check below catches any
+ * default or transform the real helper applied.
+ *
+ * `<spec export>.create(…)` is followed on the same terms: every `create` an
+ * `@objectstack/spec` entrypoint exports either validates (and is wrapped by
+ * the shim's `STRICT_AUTHORING_FACTORIES`) or returns its argument untouched —
+ * `test/migrate-meta-strict-factories.test.ts` holds that list to the spec
+ * surface in both directions.
+ */
+const SPEC_SPECIFIER_RE = /^@objectstack\/spec(?:\/[\w./-]+)?$/;
+const DEFINE_HELPER_RE = /^define[A-Z]/;
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
 const TS_EXT_FOR_JS: Readonly<Record<string, readonly string[]>> = {
   '.js': ['.ts', '.tsx', '.js'],
@@ -709,7 +723,7 @@ class SourceGraph {
         if (clause.isTypeOnly) refuse('computed', `\`${name}\` is a type-only import`);
         if (SPEC_SPECIFIER_RE.test(specifier)) return { k: 'spec', name: imported };
         const target = this.resolveModule(file, specifier);
-        if (!target) refuse('outside-project', `\`${name}\` is imported from the package \`${specifier}\``);
+        if (!target) refuse('outside-project', `\`${name}\` is imported through ${unresolved(specifier)}`);
         const mod = this.file(target);
         if (imported === '*') return { k: 'namespace', file: mod };
         return this.resolveExport(mod, imported, trail, new Set());
@@ -750,12 +764,12 @@ class SourceGraph {
             if (specifier === undefined) return this.resolveIdentifier(mod, local, trail);
             if (SPEC_SPECIFIER_RE.test(specifier)) return { k: 'spec', name: local };
             const target = this.resolveModule(mod, specifier);
-            if (!target) refuse('outside-project', `\`${name}\` is re-exported from the package \`${specifier}\``);
+            if (!target) refuse('outside-project', `\`${name}\` is re-exported from ${unresolved(specifier)}`);
             return this.resolveExport(this.file(target), local, trail, visiting);
           }
         } else if (clause && ts.isNamespaceExport(clause) && clause.name.text === name && specifier !== undefined) {
           const target = this.resolveModule(mod, specifier);
-          if (!target) refuse('outside-project', `\`${name}\` re-exports the package \`${specifier}\``);
+          if (!target) refuse('outside-project', `\`${name}\` re-exports ${unresolved(specifier)}`);
           return { k: 'namespace', file: this.file(target) };
         } else if (!clause && specifier !== undefined && name !== 'default') {
           const target = this.resolveModule(mod, specifier);
@@ -971,6 +985,13 @@ class SourceGraph {
     }
     return out;
   }
+}
+
+/** Why a specifier leads nowhere the walk reads. */
+function unresolved(specifier: string): string {
+  return specifier.startsWith('.') || isAbsolute(specifier)
+    ? `\`${specifier}\`, which resolves to no project file`
+    : `\`${specifier}\` — a package or a path alias, not a project file this walk reads`;
 }
 
 function hasModifier(ts: Ts, node: TS.Node, kind: TS.SyntaxKind): boolean {
