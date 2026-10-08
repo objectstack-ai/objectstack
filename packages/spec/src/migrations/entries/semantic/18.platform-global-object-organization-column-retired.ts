@@ -29,7 +29,7 @@ export const entry: SemanticMigration = {
   reason:
     'ADR-0131 D7: "an object a deployment declares platform-global gets no organization column on that '
     + 'deployment (the injected-columns plan reads the declaration), so Layer 0 and the driver agree by '
-    + 'having nothing to scope". The #12699 declaration used to stand the security layer\'s organization '
+    + 'having nothing to scope". Before this, the declaration stood the security layer\'s organization '
     + 'wall down for the object while the column stayed, so the SQL driver went on scoping a read by the '
     + 'caller organization that the wall had stopped scoping — measured on a booted kernel with a fixture '
     + 'provider, before the change. ADR-0131 retires that stand-down ("replaced by D7\'s no-column"). The '
