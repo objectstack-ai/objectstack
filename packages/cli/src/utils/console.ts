@@ -313,7 +313,7 @@ const CONSOLE_BUILD_SCRIPT = 'objectui:build';
  * the repo's layout or its `.objectui-sha` pin, so the remedy is named only
  * where it exists.
  */
-export function findConsoleBuildRoot(consolePath: string): string | null {
+function findConsoleBuildRoot(consolePath: string): string | null {
   let dir = path.dirname(consolePath);
   for (let depth = 0; depth < 8; depth++) {
     const pkgPath = path.join(dir, 'package.json');
@@ -343,8 +343,9 @@ export function findConsoleBuildRoot(consolePath: string): string | null {
  *     from the example directory `pnpm dev` runs in);
  *   - anywhere else, where the Console arrives prebuilt as
  *     `@objectstack/console`, a dependency of `@objectstack/cli` — so the
- *     remedy is that package install. (`@object-ui/console`, which this text
- *     used to name, is not a package the resolver reads at all.)
+ *     remedy is that package install. (An installed `@object-ui/console`,
+ *     which this text used to name, is never consulted: that name is matched
+ *     only as the workspace package of a sibling `../objectui` checkout.)
  */
 export function formatConsoleDistMissingWarning(consolePath: string): string {
   const dist = path.join(consolePath, 'dist');

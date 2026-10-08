@@ -169,6 +169,15 @@ const RETIRED_RUNTIME_NAMES = [
 ];
 
 /**
+ * Exports `utils/console.ts` gained after the retirement above, internal from
+ * the day they landed. Listed so the partition below still accounts for every
+ * export of that module; the two "exactly three names" checks are what keep
+ * them off the published subpath. Publishing one is the same deliberate act as
+ * re-admitting a retired name.
+ */
+const INTERNAL_SINCE_RETIREMENT = ['formatConsoleDistMissingWarning'];
+
+/**
  * Every subpath the published package resolves, in full. A subpath removed here
  * is a consumer broken in the exact shape of #15325 and #13662; a subpath added
  * here is a `minor` bump. Either way this list is edited on purpose, in the same
@@ -682,16 +691,18 @@ describe('the public surface is exactly three names', () => {
 
   it('retires exactly the names that are NOT public — the two lists partition the module, with nothing dropped', () => {
     // The census is taken from the packed INTERNAL module rather than from a
-    // constant here, so a 14th export added to `utils/console.ts` lands in
-    // neither list and fails this — instead of silently being neither published
-    // nor recorded as retired.
+    // constant here, so a new export added to `utils/console.ts` lands in no
+    // list and fails this — instead of silently being neither published nor
+    // recorded as internal.
     const internal = declaredExports(join(installedRoot, 'dist', 'utils', 'console.d.ts'));
     // ⛔ First: the census is only a partition if every export was NAMEABLE. An
     // export form this walk cannot name is missing from both lists, and the
     // equality below would still hold — green, over a surface read short.
     expectEveryExportNamed('the packed internal module `.d.ts`', internal);
     expect(internal.starReExports).toBe(0);
-    expect(internal.names).toEqual([...PUBLIC_SURFACE, ...RETIRED_FROM_THIS_SUBPATH].sort());
+    expect(internal.names).toEqual(
+      [...PUBLIC_SURFACE, ...RETIRED_FROM_THIS_SUBPATH, ...INTERNAL_SINCE_RETIREMENT].sort(),
+    );
   });
 });
 

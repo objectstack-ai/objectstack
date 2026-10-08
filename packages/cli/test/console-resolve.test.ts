@@ -20,7 +20,6 @@ import {
   isConsoleVersionCompatible,
   detectConsoleShaDrift,
   formatConsoleShaDriftWarning,
-  findConsoleBuildRoot,
   formatConsoleDistMissingWarning,
 } from '../src/utils/console.js';
 
@@ -266,11 +265,10 @@ describe('formatConsoleDistMissingWarning — the remedy named for where the ser
 
   it('names `pnpm objectui:build` and the root to run it in, inside the framework repo', () => {
     const { root, consoleDir } = makeFrameworkTree(true);
-    expect(findConsoleBuildRoot(consoleDir)).toBe(root);
 
     const message = formatConsoleDistMissingWarning(consoleDir);
     expect(message).toContain(BUILD_REMEDY);
-    expect(message).toContain(root);
+    expect(message).toContain(` in ${root} `);
     expect(message).toContain(path.join('packages', 'console', 'dist'));
     expect(message).not.toContain('@objectstack/console');
     expect(message).not.toContain(RETIRED_REMEDY);
@@ -278,7 +276,6 @@ describe('formatConsoleDistMissingWarning — the remedy named for where the ser
 
   it('control: the same layout without the script gets the install remedy — the script is the signal, not the layout', () => {
     const { consoleDir } = makeFrameworkTree(false);
-    expect(findConsoleBuildRoot(consoleDir)).toBeNull();
 
     const message = formatConsoleDistMissingWarning(consoleDir);
     expect(message).not.toContain(BUILD_REMEDY);
@@ -300,7 +297,6 @@ describe('formatConsoleDistMissingWarning — the remedy named for where the ser
         ),
       ),
     ]) {
-      expect(findConsoleBuildRoot(consoleDir)).toBeNull();
       const message = formatConsoleDistMissingWarning(consoleDir);
       expect(message).toContain('@objectstack/console');
       expect(message).toContain(path.join(consoleDir, 'dist'));
@@ -328,7 +324,8 @@ describe('formatConsoleDistMissingWarning — the remedy named for where the ser
     // Control: without the project's own manifest the walk reaches the outer
     // one — so the stop above is what kept the answer right.
     fs.rmSync(path.join(project, 'package.json'));
-    expect(findConsoleBuildRoot(consoleDir)).toBe(outer);
-    expect(formatConsoleDistMissingWarning(consoleDir)).toContain(BUILD_REMEDY);
+    const climbed = formatConsoleDistMissingWarning(consoleDir);
+    expect(climbed).toContain(BUILD_REMEDY);
+    expect(climbed).toContain(` in ${outer} `);
   });
 });
