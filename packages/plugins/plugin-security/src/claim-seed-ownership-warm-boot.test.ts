@@ -106,7 +106,24 @@ async function openEngine(file: string): Promise<any> {
   } as any);
   await engine.syncSchemas();
   cleanups.push(() => engine.destroy());
+  await ensureDefaultOrganization(engine);
   return engine;
+}
+
+/**
+ * [ADR-0131 D3] Every `single` boot finds or creates the Default Organization
+ * before any seed settles — the auth plugin's boot invariant, which this
+ * plugin-only rig does not compose. Spelled here with the columns the invariant
+ * writes, so the rig gains no dependency edge onto `@objectstack/plugin-auth`.
+ * It runs on EVERY boot, as the invariant does: the warm boot finds the row the
+ * first boot created. Without it, a system insert into `crm_case` is refused
+ * (D9) — the composition registers `sys_organization` and the install would
+ * hold none, a shape no production `single` boot reaches.
+ */
+async function ensureDefaultOrganization(engine: any): Promise<void> {
+  const found = await engine.find('sys_organization', { where: { slug: 'default' }, limit: 1 }, SYS);
+  if (Array.isArray(found) && found.length > 0) return;
+  await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' }, SYS);
 }
 
 /**

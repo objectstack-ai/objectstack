@@ -39,14 +39,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
-import { SecurityPlugin, securityDefaultPermissionSets, appDefaultPermissionSetName } from '@objectstack/plugin-security';
-import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
+import { SecurityPlugin, appDefaultPermissionSetName } from '@objectstack/plugin-security';
 
-// Mirror the CLI: pull the app-declared default profile (name + object) off the
-// stack metadata via the same helper the CLI uses.
+// Mirror the CLI: pull the app-declared default profile's name off the stack
+// metadata via the same helper the CLI uses.
 const stackPerms = ((showcaseStack as { permissions?: unknown[] }).permissions ?? []) as Array<{ name?: string }>;
 const appDefault = appDefaultPermissionSetName(stackPerms);
-const declaredDefault = stackPerms.find((p) => p?.name === appDefault) as unknown;
 
 const SYS = { isSystem: true } as const;
 
@@ -56,16 +54,15 @@ describe('showcase: app-declared default profile, CLI-wired (ADR-0056 D7)', () =
   let ql: any;
 
   beforeAll(async () => {
-    // The full CLI boot loads stack permission sets into the metadata service, so
-    // `fallbackPermissionSet: <name>` resolves there. The lightweight harness does
-    // not seed permission metadata, so we hand the declared default to the plugin
-    // directly — then wire it by NAME exactly as the CLI's appDefaultPermissionSetName
-    // path does (constructor uses the explicit name, not its own isDefault scan).
+    // Wired by NAME exactly as the CLI's appDefaultPermissionSetName path does
+    // (constructor uses the explicit name, not its own isDefault scan). The set
+    // itself is the app's: the harness's AppPlugin registers the stack's
+    // `permissions`, as the CLI boot does. ⛔ Not ALSO handed to the plugin's
+    // `defaultPermissionSets` — that declares one permission set under two
+    // packages, and the boot is refused (`NAMESPACE_CONFLICT`, both holders
+    // named): a permission set holds one name per deployment.
     stack = await bootStack(showcaseStack, {
-      security: new SecurityPlugin({
-        defaultPermissionSets: [...securityDefaultPermissionSets, PermissionSetSchema.parse(declaredDefault) as PermissionSet],
-        fallbackPermissionSet: appDefault,
-      }),
+      security: new SecurityPlugin({ fallbackPermissionSet: appDefault }),
     });
     await stack.signIn();
     memberToken = await stack.signUp('d7-showcase-member@verify.test');

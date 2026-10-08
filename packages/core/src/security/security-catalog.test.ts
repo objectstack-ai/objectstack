@@ -11,10 +11,12 @@ import { isAuthzStoreUnavailableError } from './authz-store-unavailable.js';
 /**
  * ADR-0131 D2–D4 — the catalog read's own rules, over stand-in readers.
  *
- * What the real readers answer (the registry's by-name precedence for a name
- * two packages ship, the sets a booted showcase holds) is pinned against the
- * real readers elsewhere: `packages/objectql/src/security-catalog-shared-name.test.ts`
- * and `packages/qa/dogfood/test/security-catalog-showcase.dogfood.test.ts`.
+ * What the real readers answer (a name a second package is refused, so every
+ * reader answers its one holder; the sets a booted showcase holds) is pinned
+ * against the real readers elsewhere: the `security catalog read — a name two
+ * packages ship` describe in `packages/objectql/src/protocol-boot-hydration-scoped.test.ts`
+ * (the refusal itself, door by door: `registry-security-catalog-namespace.test.ts`
+ * beside it) and `packages/qa/dogfood/test/security-catalog-showcase.dogfood.test.ts`.
  * Here: the read order, the union, the disabled-package rule, and that a read
  * which did not happen is never reported as "no such item".
  */
