@@ -253,7 +253,9 @@ beforeAll(async () => {
 
   rows = {};
   for (const t of ['sys_permission_set', 'sys_capability', 'sys_sharing_rule']) {
-    rows[t] = await ql.find(t, {});
+    // The seeded rows as the platform reads them: the explicit system opt-in.
+    // A context-less read is refused by the security middleware (ADR-0096 D5).
+    rows[t] = await ql.find(t, { context: { isSystem: true } });
   }
 }, BOOT_TIMEOUT);
 

@@ -390,6 +390,7 @@
     "ImportMappingTargetVerdict": "src/data/import-mapping-target.ts#ImportMappingTargetVerdict (type)",
     "IndexSchema": "src/data/object.zod.ts#IndexSchema (const)",
     "InjectedColumnProvenance": "src/data/injected-system-column-provenance.ts#InjectedColumnProvenance (type)",
+    "InjectedSystemColumnName": "src/data/injected-system-columns.ts#InjectedSystemColumnName (type)",
     "InjectedSystemColumnPlan": "src/data/injected-system-columns.ts#InjectedSystemColumnPlan (interface)",
     "InlineGridColumn": "src/data/field.zod.ts#InlineGridColumn (type)",
     "InlineGridColumnParsed": "src/data/field.zod.ts#InlineGridColumnParsed (type)",

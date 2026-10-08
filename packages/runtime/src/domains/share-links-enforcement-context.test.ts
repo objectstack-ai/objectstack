@@ -182,11 +182,16 @@ function makeEngine(tables: Record<string, any[]>, schemas?: Record<string, any>
         // is byte-for-byte the previous behaviour.
         getSchema: (name: string) =>
             schemas ? schemas[name] : name === OBJECT ? ACCOUNT_SCHEMA : { name },
-        async find(object: string, options: any = {}) {
+        // The engine's trailing read options carry a context too (`find(object,
+        // query, { context })`, merged as `mergeReadContext` merges them):
+        // plugin-security's permission-set loader passes its explicit system
+        // opt-in there. A double that dropped it handed that read to the
+        // middleware with no principal, which ADR-0096 D5 now refuses.
+        async find(object: string, options: any = {}, readOptions?: any) {
             const opCtx: any = {
                 object,
                 operation: 'find',
-                context: options?.context ?? {},
+                context: { ...(options?.context ?? {}), ...(readOptions?.context ?? {}) },
                 options,
                 ast: { where: options?.where },
             };

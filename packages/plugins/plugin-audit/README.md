@@ -101,7 +101,7 @@ written only by internal system hooks running under `sudo()`, never through UI f
 | `new_value` | textarea | JSON-serialized new state |
 | `ip_address` | text | Auth events only — see below |
 | `user_agent` | textarea | Auth events only — see below |
-| `tenant_id` | lookup → `sys_organization` | Tenant context for multi-tenant isolation |
+| `tenant_id` | lookup → `sys_organization` | Organization the event is about (the attribution field, ADR-0131 D7); empty for a deployment-level action |
 | `metadata` | textarea | JSON-serialized additional context |
 
 **Secret masking.** `old_value` / `new_value` are written through a ledger view that masks

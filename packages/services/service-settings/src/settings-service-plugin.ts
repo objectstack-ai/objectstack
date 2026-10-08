@@ -24,6 +24,7 @@ import { LocalCryptoProvider } from './local-crypto-provider.js';
 import { buildConfigChangeAuditSink } from './config-change-audit.js';
 import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
 import { registerSettingsRoutes } from './settings-routes.js';
+import { registerSettingsReadDoor } from './settings-read-door.js';
 import {
   settingsObjects,
   settingsPluginManifestHeader,
@@ -233,8 +234,21 @@ export class SettingsServicePlugin implements Plugin {
             secretStore: this.buildSecretStore(engine),
             auditWriter: this.buildAuditWriter(ctx, engine),
             cryptoProvider: this.opts.cryptoProvider ?? new LocalCryptoProvider(),
+            // The posture IN FORCE, read the way this plugin's HTTP door reads
+            // it — so the service and the door it sits behind agree on whether
+            // organizations are walled off. Read live at each use.
+            tenancyPosture: () => this.resolveAdmissionTenancyPosture(ctx),
           },
         );
+        // Each namespace's `readPermission`, applied at the generic data
+        // API's read of the settings stores too (see `settings-read-door.ts`).
+        if (!registerSettingsReadDoor(engine, this.service!)) {
+          ctx.logger?.warn?.(
+            'SettingsServicePlugin: the objectql engine offers no middleware seam, so the data API ' +
+              'read of sys_setting / sys_setting_audit / sys_platform_setting is NOT gated by each ' +
+              "settings namespace's readPermission — only by the objects' own grants.",
+          );
+        }
       } else {
         // No `objectql` on this kernel — the OPTIONAL dependency this plugin
         // declares is genuinely absent, so no engine is ever coming and the

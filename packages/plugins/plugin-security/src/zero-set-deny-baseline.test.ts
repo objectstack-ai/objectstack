@@ -32,9 +32,10 @@
  *
  * Controls: a signed-in member who resolves a set is admitted to the object the
  * set grants (and refused the one it does not), and a deployment that
- * registers the named set is decided by that set. The boundary: a
- * principal-less context (no position, no named set, no user id) is handed
- * through exactly as before (ADR-0096 stages it separately).
+ * registers the named set is decided by that set. The former boundary: a
+ * principal-less context (no position, no named set, no user id) used to be
+ * handed through; [#21908] ADR-0096 D5 strict mode gives it the same answers,
+ * ahead of resolution (`principal-less-strict-mode.test.ts` pins the class).
  *
  * And the same answer for the second principal of a delegated request: an
  * agent acting for a delegator who resolves no set is refused by the probes as
@@ -233,16 +234,16 @@ describe('[#21079] the controls: a caller who resolves a set is decided by that 
   });
 });
 
-describe('[#21079] the boundary: a principal-less context is handed through, unchanged (ADR-0096)', () => {
+describe('[#21908] the former boundary: a principal-less context gets the same answers (ADR-0096 D5 strict mode)', () => {
   const PRINCIPAL_LESS = { positions: [], permissions: [] };
 
-  it('the middleware admits it, the probes admit it, and its row scope is not the deny sentinel', async () => {
+  it('the middleware refuses every engine operation before it runs, the probes answer no, and its row scope is the deny sentinel', async () => {
     const booted = await boot({ sets: [MEMBER_SET] });
     for (const operation of ENGINE_OPERATIONS) {
-      expect(await run(booted.middleware, 'ledger', operation, PRINCIPAL_LESS), operation).toEqual({ admitted: true });
+      expect(await run(booted.middleware, 'ledger', operation, PRINCIPAL_LESS), operation).toEqual(REFUSED_AT_ADMISSION);
     }
-    expect(await probes(booted, 'ledger', PRINCIPAL_LESS)).toEqual(ALL_TRUE);
-    expect(await booted.security.getReadFilter('ledger', { ...PRINCIPAL_LESS })).toBeUndefined();
+    expect(await probes(booted, 'ledger', PRINCIPAL_LESS)).toEqual(ALL_FALSE);
+    expect(await booted.security.getReadFilter('ledger', { ...PRINCIPAL_LESS })).toEqual({ ...RLS_DENY_FILTER });
   });
 });
 

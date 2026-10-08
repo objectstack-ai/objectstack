@@ -91,7 +91,10 @@ const SINGLE_TENANT = {
 };
 
 const MULTI_TENANT = {
-  sys_audit_log: [...SINGLE_TENANT.sys_audit_log, 'organization_id'],
+  // [ADR-0131 D7] The ledger has no organization column on ANY posture
+  // (`systemFields: { tenant: false }`): the organization a row is about is
+  // its attribution field `tenant_id`. The activity stream keeps the column.
+  sys_audit_log: SINGLE_TENANT.sys_audit_log,
   sys_activity: [...SINGLE_TENANT.sys_activity, 'organization_id'],
 };
 
@@ -118,7 +121,7 @@ describe('audit writers — organization_id stamping (#1532)', () => {
     expect('tenant_id' in audit!.row).toBe(true);
   });
 
-  it('stamps organization_id on multi-tenant tables when the column exists', async () => {
+  it('stamps the activity row\'s organization_id, and the ledger row\'s organization into tenant_id alone (ADR-0131 D7)', async () => {
     const { engine, fire, created } = makeEngine(MULTI_TENANT);
     installAuditWriters(engine as any, 'test.audit');
 
@@ -131,7 +134,8 @@ describe('audit writers — organization_id stamping (#1532)', () => {
 
     const audit = created.find((c) => c.object === 'sys_audit_log');
     const activity = created.find((c) => c.object === 'sys_activity');
-    expect(audit?.row.organization_id).toBe('org-9');
+    expect(audit?.row.tenant_id).toBe('org-9');
+    expect('organization_id' in audit!.row).toBe(false);
     expect(activity?.row.organization_id).toBe('org-9');
   });
 });
@@ -1686,8 +1690,8 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
     });
 
     const { audit, activity } = stampOf(created);
-    expect(audit?.organization_id).toBe('org-A');
     expect(audit?.tenant_id).toBe('org-A');
+    expect('organization_id' in (audit ?? {})).toBe(false);
     // The activity mirror is read through the same wall and must agree.
     expect(activity?.organization_id).toBe('org-A');
   });
@@ -1707,7 +1711,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       session: { organizationId: 'org-B', userId: 'user-1' },
     });
 
-    expect(stampOf(created).audit?.organization_id).toBe('org-A');
+    expect(stampOf(created).audit?.tenant_id).toBe('org-A');
   });
 
   it('stamps the record\'s organization on update too', async () => {
@@ -1723,7 +1727,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       session: { organizationId: 'org-B', userId: 'user-1' },
     });
 
-    expect(stampOf(created).audit?.organization_id).toBe('org-A');
+    expect(stampOf(created).audit?.tenant_id).toBe('org-A');
   });
 
   it('agrees with the session on the ordinary write, where both name one org', async () => {
@@ -1742,7 +1746,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       session: { organizationId: 'org-A', userId: 'user-1' },
     });
 
-    expect(stampOf(created).audit?.organization_id).toBe('org-A');
+    expect(stampOf(created).audit?.tenant_id).toBe('org-A');
   });
 
   // ── the RLS fallback the flip must not weaken ──────────────────────────
@@ -1761,7 +1765,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       session: { organizationId: 'org-B', userId: 'user-1' },
     });
 
-    expect(stampOf(created).audit?.organization_id).toBe('org-B');
+    expect(stampOf(created).audit?.tenant_id).toBe('org-B');
   });
 
   it('falls back to the session tenant when the object has no organization column', async () => {
@@ -1776,7 +1780,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       session: { organizationId: 'org-B', userId: 'user-1' },
     });
 
-    expect(stampOf(created).audit?.organization_id).toBe('org-B');
+    expect(stampOf(created).audit?.tenant_id).toBe('org-B');
   });
 
   it('still uses the record\'s organization when the session carries no tenant', async () => {
@@ -1795,7 +1799,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       session: {},
     });
 
-    expect(stampOf(created).audit?.organization_id).toBe('org-A');
+    expect(stampOf(created).audit?.tenant_id).toBe('org-A');
   });
 
   // ── which column carries the organization ──────────────────────────────
@@ -1819,7 +1823,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       session: { organizationId: 'org-B', userId: 'user-1' },
     });
 
-    expect(stampOf(created).audit?.organization_id).toBe('org-B');
+    expect(stampOf(created).audit?.tenant_id).toBe('org-B');
   });
 
   it('honours a declared `tenancy.tenantField`, and only when the field exists', async () => {
@@ -1835,7 +1839,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       result: { id: 'lead-1', name: 'Acme', workspace_id: 'ws-1' },
       session: { organizationId: 'org-B', userId: 'user-1' },
     });
-    expect(stampOf(created).audit?.organization_id).toBe('ws-1');
+    expect(stampOf(created).audit?.tenant_id).toBe('ws-1');
 
     // A declared name pointing at a column the object does not have falls
     // through to the canonical one — the same guard `computeTenantField`
@@ -1851,7 +1855,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       result: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
       session: { organizationId: 'org-B', userId: 'user-1' },
     });
-    expect(stampOf(missing.created).audit?.organization_id).toBe('org-A');
+    expect(stampOf(missing.created).audit?.tenant_id).toBe('org-A');
   });
 
   it('⛔ never reads a `sys_organization` lookup that is not the tenant column', async () => {
@@ -1878,8 +1882,8 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       session: { organizationId: 'org-self', userId: 'user-1' },
     });
 
-    expect(stampOf(created).audit?.organization_id).toBe('org-self');
-    expect(stampOf(created).audit?.organization_id).not.toBe('org-parent');
+    expect(stampOf(created).audit?.tenant_id).toBe('org-self');
+    expect(stampOf(created).audit?.tenant_id).not.toBe('org-parent');
   });
 
   // ── the platform stamp column — `sys_api_key` (commit 7901b2dd2, #19054) ──
@@ -1924,7 +1928,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       session: { organizationId: 'org-actor', userId: 'user-1' },
     });
 
-    expect(stampOf(created).audit?.organization_id).toBe('org-key');
+    expect(stampOf(created).audit?.tenant_id).toBe('org-key');
   });
 
   it('honours the platform stamp column only when the field exists (#5315 guard), falling through intact', async () => {
@@ -1949,7 +1953,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       session: { organizationId: 'org-actor', userId: 'user-1' },
     });
 
-    expect(stampOf(created).audit?.organization_id).toBe('org-actor');
+    expect(stampOf(created).audit?.tenant_id).toBe('org-actor');
   });
 
   it('⛔ the stamp table is a CLOSED SET: an application object stamps from its own wall (#19054)', async () => {
@@ -1978,7 +1982,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       session: { organizationId: 'org-actor', userId: 'user-1' },
     });
 
-    expect(stampOf(created).audit?.organization_id).toBe('ws-1');
+    expect(stampOf(created).audit?.tenant_id).toBe('ws-1');
   });
 
   it('control: the stamp follows the OBJECT, not a declaration — a tenancy block is no longer part of it (#19054)', async () => {
@@ -2007,7 +2011,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       session: { organizationId: 'org-actor', userId: 'user-1' },
     });
 
-    expect(stampOf(created).audit?.organization_id).toBe('org-key');
+    expect(stampOf(created).audit?.tenant_id).toBe('org-key');
 
     // The column still has to EXIST — the #5315 guard is the half that did not
     // move. Without it the credential table falls through to the actor's org,
@@ -2021,7 +2025,7 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
       result: { id: 'key-2', name: 'ci', revoked: true },
       session: { organizationId: 'org-actor', userId: 'user-1' },
     });
-    expect(stampOf(bare.created).audit?.organization_id).toBe('org-actor');
+    expect(stampOf(bare.created).audit?.tenant_id).toBe('org-actor');
   });
 });
 
@@ -2081,8 +2085,7 @@ describe('audit writers — the writer reads the session key the engine emits (#
     const audit = created.find((c) => c.object === 'sys_audit_log')?.row;
     // The assertion the card is about, stated as the consequence rather than
     // the mechanism: a null here is the permanently-invisible ledger row.
-    expect(audit?.organization_id).not.toBeNull();
-    expect(audit?.organization_id).toBe('org-B');
+    expect(audit?.tenant_id).not.toBeNull();
     expect(audit?.tenant_id).toBe('org-B');
     // The activity mirror is read through the same wall and must agree.
     expect(created.find((c) => c.object === 'sys_activity')?.row.organization_id).toBe('org-B');
@@ -2103,8 +2106,8 @@ describe('audit writers — the writer reads the session key the engine emits (#
     });
 
     const audit = created.find((c) => c.object === 'sys_audit_log')?.row;
-    expect(audit?.organization_id).not.toBeNull();
-    expect(audit?.organization_id).toBe('org-B');
+    expect(audit?.tenant_id).not.toBeNull();
+    expect(audit?.tenant_id).toBe('org-B');
   });
 
   it('keeps #8707\'s precedence — the record\'s own organization still wins', async () => {
@@ -2124,7 +2127,7 @@ describe('audit writers — the writer reads the session key the engine emits (#
       session: { organizationId: 'org-B', userId: 'user-1' },
     });
 
-    expect(created.find((c) => c.object === 'sys_audit_log')?.row.organization_id).toBe('org-A');
+    expect(created.find((c) => c.object === 'sys_audit_log')?.row.tenant_id).toBe('org-A');
   });
 
   it('⛔ does not resolve the v16-removed `tenantId` alias', async () => {
@@ -2148,7 +2151,7 @@ describe('audit writers — the writer reads the session key the engine emits (#
       session: { tenantId: 'org-B', userId: 'user-1' } as any,
     });
 
-    expect(created.find((c) => c.object === 'sys_audit_log')?.row.organization_id).toBeNull();
+    expect(created.find((c) => c.object === 'sys_audit_log')?.row.tenant_id).toBeNull();
   });
 
   // ── the second site: the @mention notification scope ──────────────────

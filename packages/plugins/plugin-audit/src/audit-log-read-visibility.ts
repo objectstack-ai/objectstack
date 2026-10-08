@@ -9,9 +9,10 @@
  * Every door onto the compliance ledger reads it through the engine — the
  * Setup "Audit Logs" object view, the console's audit-log browser and a record
  * page's history tab all list `sys_audit_log` through the generic data API —
- * under the LEDGER's own object grant and tenant wall. The ledger has no owner
- * column and its parent is a different object on every row, so neither
- * OWD/sharing nor RLS narrows it: a reader whose sets grant the ledger read was
+ * under the LEDGER's own object grant and organization row scope (`tenant_id`,
+ * ADR-0131 D7). The ledger has no owner column and its parent is a different
+ * object on every row, so neither OWD/sharing nor RLS narrows it to the record:
+ * a reader whose sets grant the ledger read was
  * served the rows about a record the data plane answers it `404` for — the
  * record's create, update and delete rows, whose snapshots keep every field the
  * field-level redaction (`audit-log-field-redaction.ts`) does not withhold.
