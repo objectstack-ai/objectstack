@@ -58,9 +58,9 @@ export interface AuditPluginOptions {
   readAudit?: AuditPluginReadAuditOptions;
   /**
    * Host locale resolver: the language this plugin writes its reader-facing
-   * text in — `sys_activity.summary`, and the assignment / @mention
-   * notification titles it emits. Called with the write's organization
-   * (`tenantId`) and user (`userId`; for a notification title, the recipient).
+   * text in — `sys_activity.summary`, and the title of the @mention
+   * notification it emits. Called with the write's organization (`tenantId`)
+   * and user (`userId`; for an @mention title, the mentioned recipient).
    *
    * **Precedence: host first, settings second.** When given, this resolver is
    * asked first. When it answers nothing (`undefined`, `null` or a blank
@@ -98,7 +98,7 @@ function createHostLocaleReader(
   logger: PluginContext['logger'],
 ): (tenantId?: string, userId?: string) => Promise<string | undefined> {
   const fallsBack =
-    'activity summaries and notification titles fall back to the settings-derived locale (localization.locale)';
+    'activity summaries and @mention notification titles fall back to the settings-derived locale (localization.locale)';
   let throwReported = false;
   let malformedReported = false;
   return async (tenantId, userId) => {

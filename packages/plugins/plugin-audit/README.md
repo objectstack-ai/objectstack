@@ -64,11 +64,11 @@ against the engine; there is no plugin-level spelling for it.
 
 ### Activity summary language — `getLocale`
 
-`sys_activity.summary` and the assignment / @mention notification titles are written in one
-language, chosen per write. Without options it is the deployment's settings-derived
+`sys_activity.summary` and the @mention notification title are written in one language,
+chosen per write. Without options it is the deployment's settings-derived
 `localization.locale` (ADR-0053). A host that knows better per organization passes a
-resolver, which is asked first with the write's `tenantId` and `userId` (for a notification
-title, the recipient):
+resolver, which is asked first with the write's `tenantId` and `userId` (for an @mention
+title, the mentioned recipient):
 
 ```typescript
 await kernel.use(
