@@ -37,8 +37,8 @@ await kernel.use(new AuditPlugin());
 ```
 
 Write coverage is not configured per object — see
-[Coverage](#coverage-subtraction-not-an-allow-list). The one thing that *is* configured is
-**record-view auditing**, which records nothing until objects are named:
+[Coverage](#coverage-subtraction-not-an-allow-list). Of what gets recorded, the one thing that
+*is* configured is **record-view auditing**, which records nothing until objects are named:
 
 ```typescript
 await kernel.use(
@@ -48,8 +48,9 @@ await kernel.use(
 );
 ```
 
-`readAudit` is the only key `AuditPluginOptions` declares, and it accepts exactly three
-settings, no others:
+`AuditPluginOptions` declares two keys: `readAudit`, and `getLocale` (the language activity
+summaries are written in — [below](#activity-summary-language--getlocale)). `readAudit`
+accepts exactly three settings, no others:
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -60,6 +61,36 @@ settings, no others:
 ⚠️ The writer itself has one more knob — `maxBufferedEvents` (default `10000`) — that the
 plugin does **not** forward. Setting it requires calling `installReadAuditWriter` directly
 against the engine; there is no plugin-level spelling for it.
+
+### Activity summary language — `getLocale`
+
+`sys_activity.summary` and the @mention notification title are written in one language,
+chosen per write. Without options it is the deployment's settings-derived
+`localization.locale` (ADR-0053). A host that knows better per organization passes a
+resolver, which is asked first with the write's `tenantId` and `userId` (for an @mention
+title, the mentioned recipient):
+
+```typescript
+await kernel.use(
+  new AuditPlugin({
+    // (tenantId?: string, userId?: string) => string | undefined | Promise<string | undefined>
+    getLocale: async (tenantId) => organizationLocale(tenantId),
+  }),
+);
+```
+
+| The resolver… | The write's locale |
+|---|---|
+| answers a well-formed BCP-47 tag | that tag, canonicalized (`zh-cn` → `zh-CN`) |
+| answers `undefined`, `null` or a blank string | the settings-derived locale |
+| answers a malformed tag (`zh_CN`) or a non-string | the settings-derived locale, logged once at `warn` |
+| throws, or its promise rejects | the settings-derived locale, logged once at `warn` with the error; the audited write still lands |
+
+Precedence is host first, settings second, and there is no third source. The writer memoizes
+the answer per tenant/user scope for a short TTL, so a resolver may read its own storage
+directly. The locale only picks the message catalog: one the i18n service has no catalog for
+degrades the way a settings-derived locale does, to the service's declared fallback and then to
+the English literal. A summary is rendered once, when the row is written.
 
 The plugin depends on the ObjectQL engine (`com.objectstack.engine.objectql`) and resolves
 it at `kernel:ready`. If no engine is available it logs a warning and installs no writers.

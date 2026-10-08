@@ -4379,7 +4379,7 @@ describe('a blank string in a ledger predicate slot (#17493)', () => {
   it('reaches a `decision` inside an ADR-0031 region body', () => {
     const found = errorsOf(flowStack({
       id: 'sweep', type: 'loop',
-      config: { collection: '{items}', itemVariable: 'item', body: { nodes: [decision('   ')], edges: [] } },
+      config: { collection: '{items}', iteratorVariable: 'item', body: { nodes: [decision('   ')], edges: [] } },
     }));
     expect(found).toHaveLength(1);
     expect(found[0].where).toContain("loop 'sweep' body");
