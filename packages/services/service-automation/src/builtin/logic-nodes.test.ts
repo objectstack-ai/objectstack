@@ -120,7 +120,8 @@ describe('assignment node — config-shape parity (Studio + examples)', () => {
         engine.registerFlow('assign_flow', assignmentFlow({ assignments: { day: '{TODAY()}', who: '{$User.Id}' } }, ['day', 'who']));
         const result = await engine.execute('assign_flow', { userId: 'usr_1' } as any);
         expect(result.success).toBe(true);
-        expect(result.output!.who).toBe('usr_1');
-        expect(String(result.output!.day)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        const output = result.output as Record<string, unknown>;
+        expect(output.who).toBe('usr_1');
+        expect(String(output.day)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     });
 });
