@@ -48,9 +48,22 @@
 //      Scope every list assertion to records the file itself created (unique
 //      emails / name prefixes).
 // Anything else stays in the `isolated` project (plain vitest defaults).
+import { fileURLToPath } from 'node:url';
 import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
+
+/**
+ * [#22301] The showcase's own directory — the `hostRoot` its boot is anchored
+ * to. `bootStack` composes what `objectstack serve` composes (ruling A), so it
+ * mounts the showcase's `plugins` array, and with `requires: ['automation']`
+ * the automation service materializes the declarative connectors at start —
+ * one of which (`showcase_status_openapi`) reads a package-relative file.
+ * `serve` reads it from the directory holding `objectstack.config.ts`; this
+ * suite runs each file in a temporary working directory (#21914), so the boot
+ * names the app's directory instead of inheriting that one.
+ */
+const SHOWCASE_DIR = fileURLToPath(new URL('../../../../examples/app-showcase/', import.meta.url));
 
 /**
  * [#5491] The two scaffolding grants these shared fixtures add on top of the
@@ -81,7 +94,10 @@ let booted: Promise<VerifyStack> | undefined;
 
 /** Boot (once per worker) and return the shared plain-showcase stack. */
 export function getSharedShowcase(): Promise<VerifyStack> {
-  booted ??= bootStack(showcaseStack, { security: showcaseAppDefaultSecurity(SHARED_FIXTURE_GRANTS) }).then(async (stack) => {
+  booted ??= bootStack(showcaseStack, {
+    security: showcaseAppDefaultSecurity(SHARED_FIXTURE_GRANTS),
+    hostRoot: SHOWCASE_DIR,
+  }).then(async (stack) => {
     // First sign-in provisions the dev admin; later files' own signIn() calls
     // are idempotent (~0.16s) and just mint fresh admin tokens.
     await stack.signIn();
