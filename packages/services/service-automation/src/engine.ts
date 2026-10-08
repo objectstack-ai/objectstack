@@ -6054,8 +6054,9 @@ export class AutomationEngine implements IAutomationService {
      *
      * Also warns about the user-less case (#1888 follow-up, closed by #3760): a
      * flow whose effective `runAs` is `'user'` but whose trigger resolved no user
-     * has no identity to scope to, so its data nodes would run UNSCOPED (the data
-     * security middleware skips when there is no identity). Those data ops are now
+     * has no identity to scope to, so its data nodes used to run UNSCOPED (the
+     * data security middleware skipped a context with no identity; since
+     * ADR-0096 D5 it refuses one). Those data ops are now
      * REFUSED at `resolveRunDataContext`; the warning here fires at run SETUP,
      * before any node executes, so the refusal is diagnosable rather than a
      * surprise mid-flow. Authors declare `runAs:'system'` to make the elevation

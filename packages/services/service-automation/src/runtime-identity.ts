@@ -54,37 +54,16 @@ export interface RunIdentityContext {
 }
 
 /**
- * The PROVENANCE-ONLY envelope, for a run that resolves NO principal.
- *
- * It names the run that made the write and carries nothing else: no `userId`,
- * no `positions`, no `permissions`, not even `isSystem: false`. That absence is
- * the point. Every principal gate in the data security middleware keys on one
- * of those fields — the elevation short-circuit on `isSystem`, the ADR-0103
- * engine-owned write guard and the ADR-0090 D12 delegated-admin gate on
- * `context.userId`, the empty-principal fall-open on
- * `positions`/`permissions`/`userId` (and the delegated-admin gate normalizes a
- * missing context to `{}` before testing it) — so this envelope is
- * indistinguishable from passing no context at all.
- *
- * Since #3760 a principal-less run may no longer reach a DATA node at all
- * ({@link resolveRunDataContext} refuses), so this envelope is no longer the
- * carrier of the old #1888 fail-open. It survives for the non-data provenance
- * uses that motivated #3712 — a run id is still attributable without presenting
- * an identity it does not have.
- */
-export interface RunProvenanceContext {
-  /** The run performing this operation. The whole envelope (#3712). */
-  flowRunId: string;
-}
-
-/**
  * Thrown when a run whose effective identity is the #1888 *unscoped* case tries
  * to perform a data operation (#3760).
  *
  * The refusal is the point: an effective `runAs:'user'` with no resolvable
  * trigger user used to execute its data nodes UNSCOPED — the data security
- * middleware skips when there is no principal, so the run read and wrote EVERY
- * row of EVERY tenant. `runAs:'user'` is an access-NARROWING declaration, and
+ * middleware then skipped a context with no principal, so the run read and
+ * wrote EVERY row of EVERY tenant. Since ADR-0096 D5 that middleware refuses
+ * such a context itself (`403 PERMISSION_DENIED`, every verb); this refusal
+ * runs first, names the run and the remedy, and holds on a kernel with no
+ * security plugin. `runAs:'user'` is an access-NARROWING declaration, and
  * ADR-0049's standing rule is that failing to resolve a narrowing declaration
  * must never resolve to a grant. So the operation is refused instead.
  *
@@ -120,8 +99,14 @@ export class UnscopedRunDataAccessError extends Error {
   }
 }
 
-/** What a flow's data nodes pass to ObjectQL as `options.context`. */
-export type RunDataContext = RunIdentityContext | RunProvenanceContext;
+/**
+ * What a flow's data nodes pass to ObjectQL as `options.context`: exactly the
+ * envelope {@link resolveRunDataContext} returns — `isSystem: true` for a
+ * `runAs:'system'` run, the triggering user's principal for a `runAs:'user'`
+ * run. A run that resolves no principal is handed no context at all; it is
+ * refused ({@link UnscopedRunDataAccessError}).
+ */
+export interface RunDataContext extends RunIdentityContext {}
 
 /**
  * Translate a flow run's {@link AutomationContext} into the ObjectQL `context`
@@ -217,10 +202,13 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
     };
   }
   if (!context?.userId) {
-    // #3760 — FAIL CLOSED. There is no identity to present, and presenting none
-    // means the data security middleware skips every principal gate and runs the
-    // operation unscoped. `runAs:'user'` asked for restriction; silently
-    // delivering elevation is the fail-open ADR-0049 forbids. Refuse instead.
+    // #3760 — FAIL CLOSED. There is no identity to present. Presenting none
+    // used to mean the data security middleware skipped every principal gate
+    // and ran the operation unscoped; since ADR-0096 D5 it refuses that context
+    // instead, but only where a security plugin is composed, and with a 403 that
+    // names neither the run nor `runAs`. `runAs:'user'` asked for restriction;
+    // silently delivering elevation is the fail-open ADR-0049 forbids. Refuse
+    // here, on every kernel, with the remedy.
     //
     // Deliberately NOT `{ isSystem: true }`: the middleware's isSystem
     // short-circuit precedes the package-managed-row / system-row /
@@ -332,10 +320,11 @@ export function flowTouchesData(flow: { nodes?: ReadonlyArray<{ type?: string }>
  *
  * Since #3760 such a run may not touch data at all: {@link resolveRunDataContext}
  * throws {@link UnscopedRunDataAccessError} rather than handing the data engine
- * a principal-less context that the security middleware would wave straight
- * through. The engine uses this predicate to warn at run SETUP — before any node
- * executes — that a data-touching run is going to be refused, so the failure is
- * diagnosable rather than a surprise mid-flow. The build-time lint
+ * a principal-less context (which the security middleware used to wave straight
+ * through, and since ADR-0096 D5 refuses). The engine uses this predicate to
+ * warn at run SETUP — before any node executes — that a data-touching run is
+ * going to be refused, so the failure is diagnosable rather than a surprise
+ * mid-flow. The build-time lint
  * `flow-runas-unscoped` rejects the statically-decidable shapes at
  * publish time. Declaring `runAs:'system'` makes the elevation explicit and
  * intended (ADR-0049).
