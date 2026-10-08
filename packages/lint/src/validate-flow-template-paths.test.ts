@@ -932,7 +932,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
   it('judges a bracket-indexed path in a `{{ }}` hole like its dotted form', () => {
     const withTags = (title: string): AnyRec => ({
       ...scheduleFlow([FETCH_ONE, { id: 'note', type: 'notify', config: { title } }]),
-      objects: [{ ...CASE_OBJECT, fields: { ...CASE_OBJECT.fields, tags: { name: 'tags', type: 'multiselect' } } }],
+      objects: [{ ...CASE_OBJECT, fields: { ...(CASE_OBJECT.fields as AnyRec), tags: { name: 'tags', type: 'multiselect' } } }],
     });
     const findings = validateFlowTemplatePaths(withTags('First tag: {{ caseRecord.tagz[0] }}'));
     expect(findings).toHaveLength(1);
