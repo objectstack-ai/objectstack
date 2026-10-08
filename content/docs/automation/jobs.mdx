@@ -391,6 +391,11 @@ Two defaults worth knowing before you rely on the block:
   count still means *no retry*. State a count to opt in.
 - **`backoffMultiplier` defaults to `1`** — a flat delay, not exponential.
 
+Those defaults are why the block is closed: a key it does not declare — `maxRetry`
+for `maxRetries`, a `maxDelayMs` borrowed from another retry vocabulary — is
+refused at `objectstack validate` with the declared key it was near, rather than
+dropped and replaced by a default that never retries.
+
 `timeoutMs` is a **per-attempt** limit in milliseconds. An over-limit run is
 recorded with status `timeout` and, being a failure, is retried like any other.
 JavaScript cannot forcibly cancel a running function, so a `handler` attempt is
