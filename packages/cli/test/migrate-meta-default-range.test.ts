@@ -42,6 +42,32 @@
  * what does not move is that the default terminus is the highest major the
  * installed build carries a step for, so every expectation is derived from
  * `MIGRATION_MAJORS` and `PROTOCOL_MAJOR` and stays true one major later.
+ *
+ * ## Which `--from`: the tombstone's, not the runtime's (#22130)
+ *
+ * The invocation under test is the one the tombstone prints, and its `N` is
+ * the AUTHORING major: one below the `toMajor` of the step that carries the
+ * rename conversion. That is {@link AUTHORED}, read off the registry. This
+ * file used to spell it `String(PROTOCOL_MAJOR)`, which was the same number
+ * only while the runtime was still on the authoring major. At protocol 18,
+ * `--from 18` is a range above the rename, so every case here read an empty
+ * chain and failed for a reason unrelated to the defect.
+ *
+ * ## Where the default is told apart from the old one
+ *
+ * The old default was `PROTOCOL_MAJOR`, and the new one differs from it only
+ * while the registry carries a step past the runtime major. Measured at
+ * protocol 18 on #22130's branch: `MIGRATION_MAJORS` is `[17, 18]`, and no
+ * conversion registers `toMajor: 19` on that branch or on `main` at
+ * `dc4a5c6308`. The two defaults are therefore the same number, 18, and no
+ * run of the installed CLI can tell them apart. The anti-vacuity line this
+ * file carried (`TERMINUS > PROTOCOL_MAJOR`) cannot hold at protocol 18. It
+ * moved, unchanged, to `migrate-meta-default-range-window.test.ts`. That file
+ * runs the real command in-process with the runtime major set to
+ * {@link AUTHORED}, the window this card was found in, so it distinguishes the
+ * two defaults in every release and not only while the registry runs ahead.
+ * The cases below pin what a real terminal prints for the tombstone's
+ * invocation, and that pin holds whichever default is in place.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -60,9 +86,21 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
+const RENAME_CONVERSION = 'dashboard-refresh-interval-to-refresh-interval-seconds';
+
+/** The step that carries the rename: its `toMajor` is the tombstone's `N + 1`. */
+const RENAME_STEP = Object.values(MIGRATIONS_BY_MAJOR).find((s) => s.conversionIds.includes(RENAME_CONVERSION));
+
 /** What the command must now default `--to` to — derived, never written down. */
 const TERMINUS = Math.max(PROTOCOL_MAJOR, ...MIGRATION_MAJORS);
-const INSTALLED = String(PROTOCOL_MAJOR);
+
+/**
+ * The `N` the tombstone prints in `--from N`: the major the source was
+ * authored against, one below the rename step's `toMajor`. A missing step
+ * yields `NaN`, and the guard case below fails on it before any spawn result
+ * is read.
+ */
+const AUTHORED = String((RENAME_STEP?.toMajor ?? Number.NaN) - 1);
 
 /**
  * The card's reproduction: a stack on the installed line authoring the
@@ -91,8 +129,6 @@ export default {
   dashboards: [{ name: 'kpi_a', label: 'KPI A', widgets: [], refreshIntervalSeconds: 300 }],
 };
 `;
-
-const RENAME_CONVERSION = 'dashboard-refresh-interval-to-refresh-interval-seconds';
 
 interface Run { stdout: string; code: number }
 
@@ -134,21 +170,26 @@ afterAll(() => {
 });
 
 describe('os migrate meta — the invocation the tombstones prescribe (#17134)', () => {
-  it('defaults --to to the highest major this build has a step for, not the runtime major', async () => {
-    const { stdout, code } = await runMeta(['--from', INSTALLED, '--json'], retiredDir);
+  it('defaults --to to the highest major this build has a step for, which holds the rename', async () => {
+    // The subject first: without the step that carries the rename there is no
+    // tombstone invocation to run, and `AUTHORED` reads `NaN`.
+    expect(RENAME_STEP, `a registered migration step carries ${RENAME_CONVERSION}`).toBeDefined();
+    const { stdout, code } = await runMeta(['--from', AUTHORED, '--json'], retiredDir);
     const parsed = JSON.parse(stdout);
     expect(code).toBe(0);
-    expect(parsed.from).toBe(PROTOCOL_MAJOR);
+    expect(parsed.from).toBe(Number(AUTHORED));
     expect(parsed.to).toBe(TERMINUS);
-    // ⛔ Anti-vacuity. If the terminus ever equalled PROTOCOL_MAJOR the line
-    // above would hold for the very default this card exists to replace, so the
-    // premise is asserted rather than assumed: this is the line that speaks up
-    // when a major ships and the registry has no entry past it yet.
-    expect(TERMINUS, 'the registry carries a step past the runtime major').toBeGreaterThan(PROTOCOL_MAJOR);
+    // The presumption the tombstone's template makes: the default terminus is
+    // at least the conversion's own `toMajor`.
+    expect(parsed.to).toBeGreaterThanOrEqual(RENAME_STEP!.toMajor);
+    // ⛔ This run cannot tell the new default from the old one at protocol 18
+    // (both are 18, measured; see the header). The anti-vacuity line that
+    // asserts the difference lives in migrate-meta-default-range-window.test.ts,
+    // where the runtime major is held one below the rename's step.
   }, 120_000);
 
   it('lists every retired-key rewrite with no --to given at all', async () => {
-    const { stdout } = await runMeta(['--from', INSTALLED, '--json'], retiredDir);
+    const { stdout } = await runMeta(['--from', AUTHORED, '--json'], retiredDir);
     const parsed = JSON.parse(stdout);
 
     const renames = parsed.applied.filter((a: any) => a.conversionId === RENAME_CONVERSION);
@@ -170,7 +211,7 @@ describe('os migrate meta — the invocation the tombstones prescribe (#17134)',
   }, 120_000);
 
   it('the human run prints the rewrites instead of `Nothing to migrate`', async () => {
-    const { stdout, code } = await runMeta(['--from', INSTALLED], retiredDir);
+    const { stdout, code } = await runMeta(['--from', AUTHORED], retiredDir);
     expect(code).toBe(0);
     expect(stdout).toContain('Applied 5 mechanical change(s)');
     expect(stdout).toContain(RENAME_CONVERSION);
@@ -187,18 +228,19 @@ describe('os migrate meta — the invocation the tombstones prescribe (#17134)',
 
 describe('os migrate meta — an empty range answers as an empty range (#17134)', () => {
   /**
-   * The pre-fix default, now reachable only by typing it. The command is right
-   * that this range holds no conversion; what it may not do is turn that into a
-   * verdict about the metadata.
+   * The range the pre-fix default composed in the card's world, where the
+   * runtime was still on the authoring major. It is reachable now only by
+   * typing it. The command is right that this range holds no conversion; what
+   * it may not do is turn that into a verdict about the metadata.
    */
   it('refuses to call an un-migrated stack canonical when the range holds no step', async () => {
-    const { stdout, code } = await runMeta(['--from', INSTALLED, '--to', INSTALLED], retiredDir);
+    const { stdout, code } = await runMeta(['--from', AUTHORED, '--to', AUTHORED], retiredDir);
 
     expect(stdout).not.toContain('already canonical');
-    expect(stdout).toContain(`No migration step exists for protocol ${INSTALLED} → ${INSTALLED}`);
+    expect(stdout).toContain(`No migration step exists for protocol ${AUTHORED} → ${AUTHORED}`);
     // Triage's requirement: name the range that WOULD list them.
     expect(stdout).toContain(`--to ${TERMINUS}`);
-    expect(stdout).toContain(`Protocol ${INSTALLED} → ${TERMINUS} has 5 mechanical`);
+    expect(stdout).toContain(`Protocol ${AUTHORED} → ${TERMINUS} has 5 mechanical`);
     // ⛔ The exit code is deliberately unchanged. This command reports findings
     // rather than exiting on them — its schema-invalid arm beside this one has
     // always been a warning at exit 0. What changed is that the text no longer
@@ -207,7 +249,7 @@ describe('os migrate meta — an empty range answers as an empty range (#17134)'
   }, 120_000);
 
   it('no longer returns past the schema verdict that contradicts it', async () => {
-    const { stdout } = await runMeta(['--from', INSTALLED, '--to', INSTALLED], retiredDir);
+    const { stdout } = await runMeta(['--from', AUTHORED, '--to', AUTHORED], retiredDir);
     // Unreachable before the fix: the zero-change branch returned first, so the
     // same run could report `schemaValid: false` in `--json` while the human
     // output claimed the metadata was canonical and stopped.
