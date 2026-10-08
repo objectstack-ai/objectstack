@@ -3257,7 +3257,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "スコープ",
         help: "この行が属する設定解決階層のレイヤー。",
         options: {
-          global: "グローバル",
           tenant: "テナント",
           user: "ユーザー"
         }
@@ -3276,7 +3275,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       locked: {
         label: "ロック済み",
-        help: "true の場合、下位スコープの行はこの値を上書きできず、下位スコープへの書き込みは 409 を返します。プラットフォーム管理者がすべてのテナントにグローバル値を固定するために使用します（フェーズ 2 カスケード）。"
+        help: "true の場合、下位スコープの行はこの値を上書きできず、下位スコープへの書き込みは 409 を返します。テナント行は、そのテナントのユーザーに対して値を固定します（フェーズ 2 カスケード）。"
       },
       locked_reason: {
         label: "ロック理由",

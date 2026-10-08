@@ -8,7 +8,8 @@
  * `id` field's own description):
  *
  *  1. **settings** — `SettingsService` stores a bare `sec_…` handle in
- *     `sys_setting.value_enc`;
+ *     `sys_setting.value_enc`, or `sys_platform_setting.value_enc` for a
+ *     global-scope key (ADR-0131 D7);
  *  2. **object-field** — the engine's `secret`-typed field channel stores
  *     `secret:<id>` on an arbitrary business row, on every `secret` field of
  *     every REGISTERED object, tenant-authored ones included;
@@ -333,7 +334,21 @@ const describeCause = (err: unknown): string =>
   err instanceof Error ? `${err.name}: ${err.message}` : String(err);
 
 /**
- * Family 1 — handles held in `sys_setting.value_enc`.
+ * The settings producer's holder objects: every store `SettingsService` keeps a
+ * `value_enc` in. `sys_setting` holds the tenant and user rungs, and
+ * `sys_platform_setting` the global rung (ADR-0131 D7) — the deployment-wide
+ * values, which are exactly the ones that carry provider credentials (mail,
+ * SMS, storage, AI, knowledge).
+ *
+ * ⛔ Both are read, always. A union over `sys_setting` alone reads every handle
+ * a global-scope secret holds as unreferenced, and the sweep then deletes the
+ * credential in force — with no record afterwards of which one it was.
+ */
+const SETTINGS_HOLDER_OBJECTS = ['sys_setting', 'sys_platform_setting'] as const;
+
+/**
+ * Family 1 — handles held in the settings stores' `value_enc`
+ * ({@link SETTINGS_HOLDER_OBJECTS}).
  *
  * `value_enc` also carries LEGACY INLINE ciphertext on rows written before the
  * Phase-3 split, and such a row references no `sys_secret` row at all. The
@@ -341,6 +356,9 @@ const describeCause = (err: unknown): string =>
  * restated: treating inline ciphertext as a handle would inject a phantom id
  * into the union, and restating the `sec_` prefix is how the two spellings
  * would drift apart later.
+ *
+ * Either holder that cannot be read gaps the WHOLE family: a holder missing
+ * from the union is a set of live handles the sweep would read as orphans.
  */
 export async function collectSettingsSecretReferences(
   engine: SecretReferenceEngineLike,
@@ -348,40 +366,47 @@ export async function collectSettingsSecretReferences(
   const family: SecretReferenceFamily = 'settings';
   const references: SecretReference[] = [];
 
-  const driver = engine.getDriverForObject('sys_setting');
-  if (!driver) {
-    return {
-      family,
-      status: 'gap',
-      reason:
-        'no driver resolves for `sys_setting`, so the settings producer\'s holder column could '
-        + 'not be read (is the settings subsystem registered on this runtime?)',
-      references,
-    };
-  }
+  for (const holder of SETTINGS_HOLDER_OBJECTS) {
+    const driver = engine.getDriverForObject(holder);
+    if (!driver) {
+      return {
+        family,
+        status: 'gap',
+        reason:
+          `no driver resolves for \`${holder}\`, so the settings producer's holder column could `
+          + 'not be read (is the settings subsystem registered on this runtime?)',
+        references,
+      };
+    }
 
-  let result: unknown;
-  try {
-    result = await driver.find('sys_setting', { fields: ['namespace', 'key', 'scope', 'user_id', 'value_enc'] });
-  } catch (err) {
-    return {
-      family,
-      status: 'gap',
-      reason: `reading \`sys_setting\` threw — ${describeCause(err)}`,
-      references,
-    };
-  }
+    // `sys_platform_setting` has no `scope` and no `user_id`: one row per
+    // `(namespace, key)` for the deployment.
+    const fields = holder === 'sys_setting'
+      ? ['namespace', 'key', 'scope', 'user_id', 'value_enc']
+      : ['namespace', 'key', 'value_enc'];
+    let result: unknown;
+    try {
+      result = await driver.find(holder, { fields });
+    } catch (err) {
+      return {
+        family,
+        status: 'gap',
+        reason: `reading \`${holder}\` threw — ${describeCause(err)}`,
+        references,
+      };
+    }
 
-  for (const row of rowsOf(result)) {
-    const value = row.value_enc;
-    if (!isSecretHandle(value)) continue; // unset, or legacy inline ciphertext
-    references.push({
-      handleId: value,
-      family,
-      holder: `sys_setting(namespace=${String(row.namespace)},key=${String(row.key)}`
-        + `${row.scope == null ? '' : `,scope=${String(row.scope)}`}`
-        + `${row.user_id == null ? '' : `,user_id=${String(row.user_id)}`})`,
-    });
+    for (const row of rowsOf(result)) {
+      const value = row.value_enc;
+      if (!isSecretHandle(value)) continue; // unset, or legacy inline ciphertext
+      references.push({
+        handleId: value,
+        family,
+        holder: `${holder}(namespace=${String(row.namespace)},key=${String(row.key)}`
+          + `${row.scope == null ? '' : `,scope=${String(row.scope)}`}`
+          + `${row.user_id == null ? '' : `,user_id=${String(row.user_id)}`})`,
+      });
+    }
   }
 
   return { family, status: 'enumerated', references };

@@ -150,6 +150,15 @@ const sysSettingObject = {
   ),
 };
 
+/** [ADR-0131 D7] The global rung's store, the settings family's second holder. */
+const sysPlatformSettingObject = {
+  name: 'sys_platform_setting',
+  label: 'Platform Setting',
+  fields: Object.fromEntries(
+    ['id', 'namespace', 'key', 'value', 'value_enc'].map((f) => [f, textField(f)]),
+  ),
+};
+
 const sysMetadataObject = {
   name: 'sys_metadata',
   label: 'Metadata',
@@ -194,7 +203,7 @@ async function buildRuntime() {
   const engine = new ObjectQL();
   engine.registerDriver(store.driver as never, true);
   await engine.init();
-  for (const object of [sysSecretObject, sysSettingObject, sysMetadataObject, smtpObject]) {
+  for (const object of [sysSecretObject, sysSettingObject, sysPlatformSettingObject, sysMetadataObject, smtpObject]) {
     engine.registry.registerObject(object as never, TEST_PACKAGE_ID);
   }
 
@@ -424,6 +433,31 @@ describe('the classes the ruling puts out of reach', () => {
     expect(row?.attributable).toBe(false);
     expect(plan.deletable).not.toContain(rt.datasourceHandleId);
     // Positive control: the run is live and does delete something.
+    expect(plan.deletable).toEqual([rt.orphanHandleId]);
+  });
+
+  // [ADR-0131 D7] The global rung's values moved to `sys_platform_setting`.
+  // A credential held ONLY there is attributable to a declared encrypted
+  // specifier and unreferenced by `sys_setting` — the exact shape a sweep that
+  // reads one settings holder deletes, losing the credential in force.
+  it('a handle held ONLY by sys_platform_setting.value_enc is REFERENCED, never deletable', async () => {
+    const globalHandle = await rt.crypto.encrypt('relay-api-key', { scope: 'settings', namespace: 'smtp', key: 'password' });
+    rt.store.seed('sys_secret', {
+      id: globalHandle.id, namespace: 'smtp', key: 'password',
+      kms_key_id: globalHandle.kmsKeyId, alg: globalHandle.alg,
+      version: globalHandle.version, ciphertext: globalHandle.ciphertext,
+    });
+    rt.store.seed('sys_platform_setting', { id: 'ps_1', namespace: 'smtp', key: 'password', value_enc: globalHandle.id });
+    // Anti-vacuity: no `sys_setting` row names it, and the pair is attributable.
+    expect(settingRowsOf(rt).some((r: any) => r.value_enc === globalHandle.id)).toBe(false);
+
+    const { union, plan } = await planOver(rt, []);
+    expect(union.complete).toBe(true);
+    const row = plan.rows.find((r) => r.id === globalHandle.id);
+    expect(row?.attributable).toBe(true);
+    expect(row?.decision).toBe('referenced');
+    expect(plan.deletable).not.toContain(globalHandle.id);
+    // Positive control: the same run still deletes the genuine orphan.
     expect(plan.deletable).toEqual([rt.orphanHandleId]);
   });
 

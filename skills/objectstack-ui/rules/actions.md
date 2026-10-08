@@ -71,7 +71,7 @@ export const ConvertLeadAction = defineAction({
 });
 ```
 
-**Modal-typed action** (collect params, then execute server body):
+**Script-typed action** (collect params, then execute server body):
 
 <!-- os:check -->
 ```typescript
@@ -82,11 +82,9 @@ export const AddToCampaignAction = defineAction({
   label: 'Add to Campaign',
   objectName: 'lead',
   icon: 'send',
-  type: 'modal',
-  target: 'create_campaign',
+  type: 'script',
   locations: ['list_toolbar'],
   params: [
-    // Field-backed params resolve label/type/options from object metadata:
     { field: 'campaign_id', objectOverride: 'campaign', required: true },
   ],
   body: {
@@ -178,7 +176,8 @@ export const OpenInvoicePdfAction = defineAction({
   name: 'open_invoice_pdf',
   label: 'Open PDF',
   objectName: 'invoice',
-  type: 'url',
+  type: 'script',
+  target: 'open_invoice_pdf',   // registered handler; skipped while newTabUrl is set
   opensInNewTab: true,
   newTabUrl: '/api/v1/invoice/{recordId}/pdf',   // zero-roundtrip; endpoint self-auths
   locations: ['record_header'],

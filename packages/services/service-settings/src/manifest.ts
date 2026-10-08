@@ -1,12 +1,19 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
+import { SysPlatformSetting, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
 
 export const SETTINGS_PLUGIN_ID = 'com.objectstack.service.settings';
 export const SETTINGS_PLUGIN_VERSION = '0.1.0';
 
 /**
- * Objects owned by service-settings: the K/V store and its audit trail.
+ * Objects owned by service-settings: the K/V store, its tenant-less global
+ * rung, and the audit trail.
+ *
+ * [ADR-0131 D7] `sys_platform_setting` holds the cascade's global rung — one
+ * row per `(namespace, key)` for the deployment, no organization column — and
+ * `sys_setting` holds the tenant and user rungs. They register together because
+ * the resolver reads both on every resolution: a kernel with one and not the
+ * other would answer a cascade with a rung missing.
  *
  * `sys_secret` is deliberately NOT here (#4270): its producers span domains
  * (encrypted settings here, the engine's `secret`-field encryption, the
@@ -15,7 +22,7 @@ export const SETTINGS_PLUGIN_VERSION = '0.1.0';
  * infrastructure, present with or without this service (cf. `sys_migration`,
  * #4243). This service remains a producer/consumer via its secret store.
  */
-export const settingsObjects: any[] = [SysSetting, SysSettingAudit];
+export const settingsObjects: any[] = [SysSetting, SysPlatformSetting, SysSettingAudit];
 
 /** Manifest header shared by compile-time config and runtime registration. */
 export const settingsPluginManifestHeader = {

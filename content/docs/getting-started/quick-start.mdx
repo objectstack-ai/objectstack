@@ -16,12 +16,14 @@ page is a tour of the pieces so you can review an agent's work with confidence �
 and catch the things the [validation gate](/docs/deployment/validating-metadata)
 can't.
 
-<Callout type="tip">
-Want to *build* something, not just read about the pieces? Follow
-[Build with Claude Code](/docs/getting-started/build-with-claude-code) — it runs
-the whole loop (describe → agent authors → validate → verify) on a live app. New
-here? The [Example Apps](/docs/getting-started/examples) are working code you can
-run today.
+<Callout type="info">
+**The map, not a starting point.** This page is for reading metadata, whether an
+agent wrote it or you are about to. To build, take a path from
+[Start here](/docs/getting-started): want an agent to write the app →
+[Build with Claude Code](/docs/getting-started/build-with-claude-code); want to
+write it by hand and understand every file →
+[Your First Project](/docs/getting-started/your-first-project). Working code to
+run today: the [Example Apps](/docs/getting-started/examples).
 </Callout>
 
 ## What you build
@@ -112,7 +114,12 @@ reviewing an agent's work, these are the two things most worth a close read:
   `has(record.status) && record.status != 'sent'` — because a list row carries
   only the columns that view projects, and reading an absent one faults and
   hides the button. See [Actions](/docs/ui/actions) for when the guard needs
-  `&& record.x != null` on top.
+  `&& record.x != null` on top. Then check what a click **does**: a declarative
+  `operation: 'update'` with a `patch` (the tutorial's Resolve action), an
+  inline `body`, or a `target` naming a handler that something registers. A
+  `script` action whose `target` nothing registers passes `os validate` and
+  fails only when clicked; the `os dev` boot log names it under
+  `[action-governance] declared script actions with NO handler`.
 - **Views & Apps** (`defineView`, `App.create`) — the list/form lenses and the
   navigation. Reading these tells you what the user will actually see and click.
 
@@ -240,9 +247,9 @@ npx os dev --ui     # boot the app, then open http://localhost:3000/_console/
 ```
 
 `os validate` proves the metadata is *well-formed*; the **Console** at `/_console/`
-proves it does what you *meant* — create a record, watch an action show/hide,
-confirm the nav and filters. That visual check is the human's half of every build
-loop. See [Validating Metadata](/docs/deployment/validating-metadata) for what
+proves it does what you *meant* — create a record, click an action and check
+what it changed, watch an action show/hide, confirm the nav and filters. That
+visual check is the human's half of every build loop. See [Validating Metadata](/docs/deployment/validating-metadata) for what
 the gate catches, and [Build with Claude Code](/docs/getting-started/build-with-claude-code)
 for the full describe → author → validate → verify cycle.
 
