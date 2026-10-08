@@ -112,7 +112,7 @@ const insertAssignment = (ctx: any, row: any) => h.gate.assert({
 });
 
 describe('DelegatedAdminGate — tenant admins and outsiders', () => {
-  it('tenant-level admin (superuser wildcard) passes untouched', async () => {
+  it('tenant-level admin (superuser wildcard) passes — the ordinary CRUD/RLS checks decide', async () => {
     await expect(insertAssignment(h.ctxOf('tenant_admin'), {
       user_id: 'u_west_1', position: 'mixed_pos', business_unit_id: 'bu_west',
     })).resolves.toBeUndefined();
@@ -977,5 +977,74 @@ describe('DelegatedAdminGate — a position is picked by organization, not by ar
       data: { user_id: 'usr_x', position: 'closer', business_unit_id: 'bu_a_sales' },
       context: { principal: 'delegate', userId: 'usr_delegate', tenantId: ORG_A },
     })).rejects.toThrow(/position 'closer' distributes permission set 'finance_user', which is not in the scope's allowlist/);
+  });
+});
+
+// ── granted_by is the writer on every admitted insert ─────────────────────
+//
+// `granted_by` is provenance (`readonly` on both grant tables): the gate stamps
+// the writer on every non-system insert it admits, whatever the payload
+// carried — a caller-supplied granter is overwritten, not kept, and a
+// tenant-level admin's grant is stamped too. What is stored on the real engine
+// is pinned in `granted-by-writer-provenance.test.ts`; this block pins the
+// gate's own half, path by path.
+describe('DelegatedAdminGate — granted_by is the writer on every admitted insert', () => {
+  const grantRow = (extra: Record<string, unknown> = {}): any => ({ user_id: 'u_east_1', permission_set_id: 'ps_sales', ...extra });
+  const assignmentRow = (extra: Record<string, unknown> = {}): any => ({ user_id: 'u_east_1', position: 'sales_rep', business_unit_id: 'bu_es', ...extra });
+
+  for (const [object, row] of [
+    ['sys_user_position', assignmentRow],
+    ['sys_user_permission_set', grantRow],
+  ] as const) {
+    for (const principal of ['tenant_admin', 'delegate'] as const) {
+      it(`${object}: ${principal} naming another user as granter is stamped with the writer`, async () => {
+        const data = row({ granted_by: 'u_west_1' });
+        await expect(h.gate.assert({ object, operation: 'insert', data, context: h.ctxOf(principal) })).resolves.toBeUndefined();
+        expect(data.granted_by).toBe(`u_${principal}`);
+      });
+
+      it(`${object}: ${principal} naming no granter is stamped with the writer`, async () => {
+        const data = row();
+        await expect(h.gate.assert({ object, operation: 'insert', data, context: h.ctxOf(principal) })).resolves.toBeUndefined();
+        expect(data.granted_by).toBe(`u_${principal}`);
+      });
+    }
+
+    it(`${object}: every row of a batch insert is stamped`, async () => {
+      const data = [row({ granted_by: 'u_west_1' }), row()];
+      await expect(h.gate.assert({ object, operation: 'insert', data, context: h.ctxOf('tenant_admin') })).resolves.toBeUndefined();
+      expect(data.map((r: any) => r.granted_by)).toEqual(['u_tenant_admin', 'u_tenant_admin']);
+    });
+
+    it(`${object}: a refused insert is not stamped`, async () => {
+      const data = row({ granted_by: 'u_west_1' });
+      await expect(h.gate.assert({ object, operation: 'insert', data, context: h.ctxOf('crud_only') })).rejects.toThrow(/delegated adminScope/);
+      expect(data.granted_by).toBe('u_west_1');
+    });
+
+    it(`${object}: an update is not stamped — the column is readonly, so the engine's update strip owns it`, async () => {
+      const data = { id: 'a_prev', granted_by: 'u_west_1' };
+      await expect(h.gate.assert({ object, operation: 'update', data, context: h.ctxOf('tenant_admin') })).resolves.toBeUndefined();
+      expect(data.granted_by).toBe('u_west_1');
+    });
+  }
+
+  it('a self-delegation naming another user as granter is stamped with the delegator', async () => {
+    const d = makeDelegationHarness();
+    const row: any = {
+      user_id: 'u_deleg', position: 'approver', delegated_from: 'u_boss', valid_until: iso(T0 + 10 * DAY),
+      reason: 'vacation stand-in', granted_by: 'u_relay',
+    };
+    await expect(d.delegate('u_boss', row)).resolves.toBeUndefined();
+    expect(row.granted_by).toBe('u_boss');
+  });
+
+  it('a governed object with no granted_by column is never given one', async () => {
+    const member: any = { user_id: 'u_x', organization_id: 'org_1', role: 'admin' };
+    await expect(h.gate.assert({ object: 'sys_member', operation: 'insert', data: member, context: h.ctxOf('tenant_admin') })).resolves.toBeUndefined();
+    const binding: any = { position_id: 'pos_sales', permission_set_id: 'ps_sales' };
+    await expect(h.gate.assert({ object: 'sys_position_permission_set', operation: 'insert', data: binding, context: h.ctxOf('tenant_admin') })).resolves.toBeUndefined();
+    expect('granted_by' in member).toBe(false);
+    expect('granted_by' in binding).toBe(false);
   });
 });
