@@ -105,12 +105,16 @@ export type FlowNodeExpressionRole =
    * CEL, any result type). Not a predicate (no boolean expected) and not a
    * template (no `{token}` holes): the slot's *shape* decides which dialect it
    * is in. A `value` slot is a config position whose authored value is EITHER
-   * the `{token}` flow interpolation every node string already gets (a plain
-   * string — the `flow-template` dialect above, still unvalidated here) OR an
+   * a literal (a plain string is the text it spells) OR an
    * `{ dialect: 'cel', source }` expression envelope (`ExpressionSchema` in
    * `shared/expression.zod.ts`) evaluated to a value. Only the envelope form is
    * an expression to check, so {@link resolveFlowNodeExpressions} emits
-   * envelope-shaped objects — never strings — for this role (#14149).
+   * envelope-shaped objects — never strings — for this role (#14149). Until
+   * #19939 a plain string here was the `{token}` flow interpolation every node
+   * string gets; that dialect is retired from value slots, and a string still
+   * carrying a `{…}` token is refused by `flowNodeValueTemplateRefusals`
+   * (`flow-value-slot-template.ts`), which walks every value this role holds
+   * through {@link resolveFlowNodeValueSlots}.
    *
    * Declared for the `assignment` node's `assignments` map (maintainer ruling
    * 2026-09-02, #14149): that is the one slot whose whole job is to compute a
@@ -204,9 +208,10 @@ export interface FlowNodeExpressionPath {
  * 'cel', source }`, a shape no `{token}` interpolation ever produced — and only
  * that form is resolved. Three maps are such slots: the `assignment` node's
  * `assignments` (#14149) and the `create_record` / `update_record` `fields`
- * (#19938). Their `{token}` strings stay the generic text-with-holes case
- * above — a template in `fields.*` means exactly what it meant before the
- * slot was declared. Each is declared through the spec Zod channel (the map
+ * (#19938). Their strings are NOT the generic text-with-holes case above:
+ * since #19939 a `{token}` in a value slot is refused
+ * (`flow-value-slot-template.ts`), and a token-free string is a literal. Each
+ * is declared through the spec Zod channel (the map
  * value's `.meta({ xExpression: 'value' })` on `AssignmentConfigSchema` /
  * `CreateRecordConfigSchema` / `UpdateRecordConfigSchema`, exposed to the
  * ratchet through `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS` in
@@ -268,8 +273,10 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     // (`logic-nodes.ts` — the bare `{ <variable>: <value> }` config with no
     // wrapper, and the `assignments: [{ variable, value }]` array). Neither is
     // declared by the descriptor or offered for new authoring, and their
-    // values keep today's meaning (a `{token}` template or a literal — an
-    // envelope-shaped object there is a literal object, as it always was).
+    // values are literals (an envelope-shaped object there is a literal
+    // object, as it always was). Since #19939 a `{token}` in one is refused
+    // like in this map — `flowNodeValueTemplateRefusals` walks both shapes —
+    // so neither is a way around the retirement.
     nodeType: 'assignment',
     path: 'assignments.*',
     role: 'value',
@@ -279,8 +286,8 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     // The CRUD write map (#19938, the contract half of #11182 ruling D): every
     // value of `fields` — `{ <field>: <value> }`, keys authored by the flow
     // author — is a `value` slot, the same shape and dialect rules as
-    // `assignments.*`. A plain string there stays `{token}` interpolation with
-    // its 17.x meaning unchanged; only the envelope form is new. Declared
+    // `assignments.*`. Since #19939 a plain string there is a literal and a
+    // `{token}` in it is refused; the envelope is the expression form. Declared
     // through the spec Zod channel (`CreateRecordConfigSchema`'s map value,
     // `FlowValueSlotSchema`): the descriptor's own `fields` is
     // `additionalProperties: true` and carries no marker, exactly like the
@@ -317,7 +324,8 @@ export interface ResolvedFlowNodeExpression {
  * string `dialect`?
  *
  * The recognizer a `value` slot discriminates on (#14149): a plain string in
- * such a slot is `{token}` flow interpolation, a plain object is a literal, and
+ * such a slot is literal text (its `{token}` interpolation retired in #19939),
+ * a plain object is a literal, and
  * an object that names a `dialect` is an expression envelope
  * (`ExpressionSchema`) — the one form the expression engine evaluates. It is
  * deliberately looser than "a VALID envelope": `{ dialect: 'cel' }` with no
@@ -381,8 +389,9 @@ export function isExpressionEnvelopeShaped(value: unknown): value is { dialect: 
  *    reached the `predicate` slots and nothing else.
  *  - `value`: the slot holds a VALUE that may be spelled as an expression, so
  *    only envelope-shaped objects ({@link isExpressionEnvelopeShaped}) are
- *    emitted. A string there is `{token}` interpolation — the `flow-template`
- *    dialect, not an expression to parse — and every other literal is data.
+ *    emitted. A string there is a literal, not an expression to parse (a
+ *    `{token}` in it is refused by `flowNodeValueTemplateRefusals`, #19939),
+ *    and every other literal is data.
  *    Existing entries resolve byte-identically: no ledger path before #14149
  *    carries a `*` segment or the `value` role.
  */
@@ -419,11 +428,12 @@ export function resolveFlowNodeExpressions(
  * and literals included, not only envelopes (#19938).
  *
  * {@link resolveFlowNodeExpressions} emits only the envelope form for this
- * role, because only an envelope is an expression to CHECK. Tooling that
- * reasons about the other form such a slot accepts — the lint's author-time
- * hint that points a `{…}` template expression at the CEL value envelope
- * (#11182 ruling D) — needs the strings too, located by the SAME path walk, so
- * it can never disagree with the ledger about which positions are value slots.
+ * role, because only an envelope is an expression to CHECK. The judge of the
+ * other form such a slot holds — `flowNodeValueTemplateRefusals`, which
+ * refuses a `{…}` token of the retired template dialect in a literal (#19939,
+ * the C half of #11182 ruling D) — needs the strings too, located by the SAME
+ * path walk, so it can never disagree with the ledger about which positions
+ * are value slots.
  * An absent (`undefined`) value is skipped; everything else is handed over
  * verbatim, with its concrete path.
  *
