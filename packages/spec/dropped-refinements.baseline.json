@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 220,
-    "droppedRefinementSites": 678,
+    "droppedRefinementSites": 679,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -449,7 +449,8 @@
     },
     "automation/AssignmentConfig": {
       "sites": [
-        "out.assignments.out.valueType"
+        "out.assignments.out.valueType",
+        "out.catchall"
       ]
     },
     "automation/AssignmentValue": {
