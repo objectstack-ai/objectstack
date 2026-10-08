@@ -704,10 +704,10 @@ export function buildRuntimeWriteSnapshots(args: {
  * names a collection entry other than the written item (#22118).
  *
  * It answers the ruling's "located on" question for the third pass, and it
- * answers it once for every rule — ⛔ no rule name appears here, and none may:
- * a per-rule exemption would be a second policy beside the one differential
- * every door rule reads. It reads the three spellings the door's rules locate
- * an entry with:
+ * answers it once for every rule — it keys on the path's spelling, ⛔ never on
+ * which rule emitted it: a per-rule exemption would be a second policy beside
+ * the one differential every door rule reads. It reads the three spellings the
+ * door's rules locate an entry with:
  *
  *  - **positional** — `objects[3].fields.m.lookupColumns[0]`: the entry at
  *    that index of a collection the snapshot carries. The written item is the
@@ -717,10 +717,9 @@ export function buildRuntimeWriteSnapshots(args: {
  *  - **name-keyed** — `objects.acme_invoice.validations.x.regex`: the entry
  *    of that name in a collection the snapshot carries;
  *  - **an object named in prose** — `object 'fx_detail' · field 'qty'
- *    readonlyWhen`, the `path` a rule carrying its `where` as its path emits.
- *    Only the `object` spelling is read: it is the one in use, and the object
- *    collection is the one a sibling's finding most often needs the written
- *    item for.
+ *    readonlyWhen`, the `path` a rule carrying its `where` as its path emits
+ *    (`validateStackExpressions`, `lintAutonumberFormats`). Only that spelling
+ *    is read — single-quoted, `object` — because it is the one in use.
  *
  * Anything else — a path into a collection the snapshot does not carry, a
  * rule's source file on an `authoring-rule-threw` finding, prose naming
@@ -751,9 +750,9 @@ export function isLocatedOnAnotherEntry(
   if (named && Array.isArray(args.snapshot[named[1]!])) {
     return !(named[1] === args.stackKey && named[2] === args.itemName);
   }
-  const prose = /^object (['"])([A-Za-z_][A-Za-z0-9_]*)\1(?=\s|$)/.exec(path);
+  const prose = /^object '([A-Za-z_][A-Za-z0-9_]*)'(?=\s|$)/.exec(path);
   if (prose) {
-    return !(args.stackKey === stackKeyForType('object') && prose[2] === args.itemName);
+    return !(args.stackKey === stackKeyForType('object') && prose[1] === args.itemName);
   }
   return false;
 }
