@@ -23,10 +23,11 @@
  * `{{ }}` spelling of each token or, for a token no hole can spell, where to
  * compute it. The contracts compose it (`NotifyConfigSchema`,
  * `ScreenConfigSchema`, `EndConfigSchema`), and `AutomationEngine.registerFlow`
- * and `objectstack validate` call {@link flowNodeTextTemplateRefusals} — ⛔
- * never a second reading of the dialect anywhere. Those two doors also compile
- * every slot's `{{ }}` holes (`validateExpression('template', …)`), which the
- * spec cannot do itself: the template engine is a runtime.
+ * and `objectstack validate` call it on every slot
+ * {@link flowNodeTextSlotSources} finds — ⛔ never a second reading of the
+ * dialect anywhere. Those two doors then compile each slot's `{{ }}` holes
+ * (`validateExpression('template', …)`), which the spec cannot do itself: the
+ * template engine is a runtime.
  *
  * ## Refused, not converted (ADR-0087 D2)
  *
@@ -113,7 +114,7 @@ export const FLOW_NODE_TEXT_SLOTS: readonly FlowNodeTextSlot[] = [
  * for the notify pair). Anything else carries no text this judge reads: the
  * slot's own contract refuses its shape.
  */
-export function textSlotSource(value: unknown): string | undefined {
+function textSlotSource(value: unknown): string | undefined {
   if (typeof value === 'string') return value;
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
     const envelope = value as { dialect?: unknown; source?: unknown };
@@ -198,8 +199,8 @@ export interface FlowNodeTextSlotSource {
 
 /**
  * The text slots one node's `config` carries, with their template text — what
- * a door compiles as a `template` (`validateExpression('template', …)`) and
- * what {@link flowNodeTextTemplateRefusals} judges. A slot that is absent, or
+ * a door judges with {@link textSlotTemplateRefusal} and then compiles as a
+ * `template` (`validateExpression('template', …)`). A slot that is absent, or
  * whose value is neither a string nor a template envelope, is skipped.
  */
 export function flowNodeTextSlotSources(nodeType: string, config: unknown): FlowNodeTextSlotSource[] {
@@ -209,26 +210,6 @@ export function flowNodeTextSlotSources(nodeType: string, config: unknown): Flow
     if (slot.nodeType !== nodeType) continue;
     const source = textSlotSource((config as Record<string, unknown>)[slot.key]);
     if (source !== undefined) out.push({ path: slot.key, label: slot.label, source });
-  }
-  return out;
-}
-
-/** One refused text slot in a node's config, located for a door's report. */
-export interface FlowNodeTextTemplateRefusal extends FlowNodeTextSlotSource {
-  /** {@link TEXT_SLOT_TEMPLATE_REFUSAL}, then the remedy. */
-  readonly message: string;
-}
-
-/**
- * Every single-brace refusal in one node's `config` — the call the build door
- * (`objectstack validate`) and `AutomationEngine.registerFlow` share, so the
- * two give one verdict, and the one the three node contracts give at parse.
- */
-export function flowNodeTextTemplateRefusals(nodeType: string, config: unknown): FlowNodeTextTemplateRefusal[] {
-  const out: FlowNodeTextTemplateRefusal[] = [];
-  for (const slot of flowNodeTextSlotSources(nodeType, config)) {
-    const message = textSlotTemplateRefusal(slot.source);
-    if (message !== undefined) out.push({ ...slot, message });
   }
   return out;
 }

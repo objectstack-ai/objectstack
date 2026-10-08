@@ -23,8 +23,9 @@ import { EndConfigSchema } from './builtin-node-config.zod';
 import { FlowSchema, FlowNodeSchema, defineFlow, type Flow } from './flow.zod';
 import { ExecutionLogSchema, ExecutionStatus } from './execution.zod';
 import { formatZodError } from '../shared/error-map.zod';
+import { TEXT_SLOT_TEMPLATE_REFUSAL } from './flow-text-slot-template';
 
-const REFUSAL = 'Refused: {record.name} is a confirmed duplicate of {duplicate.name}';
+const REFUSAL = 'Refused: {{ record.name }} is a confirmed duplicate of {{ duplicate.name }}';
 
 /** The card-shape flow: start → end, with the end node's config under test. */
 const flowEndingWith = (config: Record<string, unknown> | undefined): Flow => ({
@@ -60,7 +61,20 @@ describe('EndConfigSchema — the `end` node contract: it may refuse the run wit
     expect(issue.code).toBe('custom');
     expect(issue.path).toEqual(['message']);
     expect(issue.message).toContain("`outcome: 'refused'` requires a `message`");
-    expect(issue.message).toContain('{record.name}');
+    expect(issue.message).toContain('{{ record.name }}');
+  });
+
+  it('REFUSES a single-brace token in the `message` — a text slot reads `{{ }}` holes (#22110)', () => {
+    const result = EndConfigSchema.safeParse({ outcome: 'refused', message: 'Refused: {record.name}' });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => [i.code, i.path])).toEqual([['custom', ['message']]]);
+    expect(result.error.issues[0]!.message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(result.error.issues[0]!.message).toContain('`Refused: {{ record.name }}`');
+    // …and the flow parse — the structural node's only door — refuses it at the node.
+    const flow = FlowSchema.safeParse(flowEndingWith({ outcome: 'refused', message: 'Refused: {record.name}' }));
+    expect(flow.success).toBe(false);
+    expect(flow.error?.issues.map((i) => i.path.join('.'))).toEqual(['nodes.1.config.message']);
   });
 
   it('REFUSES an empty `message` on a refusal — a refusal without text, spelled as an empty string', () => {
