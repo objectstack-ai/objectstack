@@ -392,9 +392,13 @@ export function artifactObjectNames(raw: unknown): string[] {
  * and touching `.shape` forces the whole graph, which the CLI pays for on every
  * invocation if it happens at import time.
  *
- * Exported for one reader besides the fold: the enumeration pin
+ * Exported for two readers besides the fold. The enumeration pin
  * (`test/normalized-call-sites.test.ts`) takes its key set from here, so a
  * package-owned key the schema gains is enumerated the day it is declared.
+ * And `os migrate meta --write` traces a package body back to the
+ * `composeStacks` input that authored it (`authored-source-codemod.ts`):
+ * composition copies exactly these keys from an input stack onto its
+ * manifest's fields.
  */
 let cachedCollectionKeys: readonly string[] | undefined;
 export function packageOwnedCollectionKeys(): readonly string[] {

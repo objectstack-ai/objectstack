@@ -1635,9 +1635,13 @@ describe('AuthPlugin', () => {
       await authPlugin.start(mockContext);
     };
 
-    it('registers an app:seeded hook alongside kernel:ready', async () => {
+    it('registers its app:seeded hook from the arming kernel:ready handler, never from start()', async () => {
+      // #22257 — the handler cannot run before the settings engine binds
+      // because it does not exist before this plugin's kernel:ready handler.
       await boot();
-      expect(mockContext.hook).toHaveBeenCalledWith('app:seeded', expect.any(Function));
+      expect(hookCapture.handlers.get('app:seeded') ?? []).toHaveLength(0);
+      await hookCapture.trigger('kernel:ready');
+      expect(hookCapture.handlers.get('app:seeded') ?? []).toHaveLength(1);
     });
 
     it('app:seeded runs the one-time pass when kernel:ready had no target organization yet', async () => {

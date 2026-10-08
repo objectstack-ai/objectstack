@@ -36,6 +36,12 @@
  *    barrel shape the example apps use, in the module namespace's sorted
  *    order), and the `@objectstack/spec` `define*` helpers and `.create`
  *    factories, which the authored-source load hands their argument through;
+ *  - through `composeStacks([…])`, only into an artifact package body:
+ *    `packages[i].manifest.<key>` is read from input i the way composition
+ *    assembles the body (see {@link packageBodyKeys}), and only when every
+ *    input up to i is a stack literal with a `manifest` and no `packages` of
+ *    its own, so entry i is input i's. A key composed from all the inputs at
+ *    once has no one literal as its source;
  *  - the literal's own statically known values must match the loaded value at
  *    that site (a helper that parsed, defaulted or rebuilt it fails the match);
  *  - every binding the walk crossed must have no reference other than the
@@ -83,6 +89,7 @@ import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from 
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ts as TS } from 'ts-morph';
 import type { MigrationApplication } from '@objectstack/spec/migrations';
+import { packageOwnedCollectionKeys } from './stack-collections.js';
 import { syntacticDiagnostics } from './emitted-source-parses.js';
 
 type Ts = typeof TS;
@@ -375,7 +382,18 @@ type SNode =
   | { k: 'scalar'; file: SourceFileRec; node: TS.Expression }
   /** A binding imported from `@objectstack/spec` (`name` is the imported name, `*` a namespace). */
   | { k: 'spec'; name: string }
-  | { k: 'specMember'; owner: string; member: string };
+  | { k: 'specMember'; owner: string; member: string }
+  /**
+   * A `composeStacks([…], …)` call, with its input list as read from the
+   * source. Its artifact's `packages[i].manifest` is input i's assembled body;
+   * every other key is composed from all the inputs at once.
+   */
+  | { k: 'composed'; describe: string; inputs: Extract<SNode, { k: 'array' } | { k: 'list' }> }
+  /** The `packages` list of a composition. */
+  | { k: 'composedPackages'; describe: string; inputs: Extract<SNode, { k: 'array' } | { k: 'list' }> }
+  /** One entry of it, `{ manifest: <body> }`, and the body itself — both input `input`'s. */
+  | { k: 'composedEntry'; describe: string; input: Extract<SNode, { k: 'object' }> }
+  | { k: 'composedBody'; describe: string; input: Extract<SNode, { k: 'object' }> };
 
 /** A module-level binding the walk crossed, and how to tell its references apart. */
 interface BindingRef {
@@ -409,6 +427,20 @@ class Trail {
  */
 const SPEC_SPECIFIER_RE = /^@objectstack\/spec(?:\/[\w./-]+)?$/;
 const DEFINE_HELPER_RE = /^define[A-Z]/;
+/** The stack composer, followed into the package bodies it assembles and nowhere else. */
+const STACK_COMPOSER = 'composeStacks';
+
+/**
+ * The keys a package body takes from its input stack rather than from the
+ * input's `manifest`: composition builds a body as `{ ...input.manifest }` and
+ * then writes each package-owned collection the input carries over it. So a
+ * body key is read from the input when it is one of these and the input
+ * writes it, and from the input's `manifest` otherwise.
+ */
+let cachedPackageBodyKeys: ReadonlySet<string> | undefined;
+function packageBodyKeys(): ReadonlySet<string> {
+  return (cachedPackageBodyKeys ??= new Set(packageOwnedCollectionKeys()));
+}
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
 const TS_EXT_FOR_JS: Readonly<Record<string, readonly string[]>> = {
   '.js': ['.ts', '.tsx', '.js'],
@@ -657,6 +689,17 @@ class SourceGraph {
       target = this.resolveExpr(file, callee, trail);
     } catch (error) {
       if (!(error instanceof Refusal)) throw error;
+    }
+    if (target?.k === 'spec' && target.name === STACK_COMPOSER) {
+      const describe = `${this.snippet(file, callee)}(…)`;
+      if (args.length < 1 || ts.isSpreadElement(args[0]!)) {
+        refuse('helper', `\`${describe}\` is not called with a list of stacks`);
+      }
+      const inputs = this.resolveExpr(file, args[0]!, trail);
+      if (inputs.k !== 'array' && inputs.k !== 'list') {
+        refuse('computed', `the stacks \`${describe}\` composes are not written as an array`);
+      }
+      return { k: 'composed', describe, inputs };
     }
     const transparent = target !== undefined
       && ((target.k === 'spec' && DEFINE_HELPER_RE.test(target.name))
@@ -1063,6 +1106,21 @@ function subsetOf(partial: unknown, rt: unknown): boolean {
   return Object.is(partial, rt);
 }
 
+/**
+ * Whether the object literal writes `key` itself: `false` only when it is
+ * provably absent there; a spread or computed key that could supply it is
+ * refused, as {@link SourceGraph.findProp} refuses it.
+ */
+function writesKey(g: SourceGraph, obj: Extract<SNode, { k: 'object' }>, key: string): boolean {
+  try {
+    g.findProp(obj, key);
+    return true;
+  } catch (error) {
+    if (error instanceof Refusal && error.refusal.kind === 'injected') return false;
+    throw error;
+  }
+}
+
 class Locator {
   private readonly cache = new Map<string, Located | Refusal>();
   private readonly configFile: SourceFileRec;
@@ -1086,6 +1144,12 @@ class Locator {
       return this.graph.resolveExport(this.configFile, 'default', trail, new Set());
     }
     return { k: 'namespace', file: this.configFile };
+  }
+
+  /** Input `index` of a composition's input list. */
+  private composedInput(inputs: Extract<SNode, { k: 'array' } | { k: 'list' }>, index: number, trail: Trail): SNode {
+    if (inputs.k === 'list') return inputs.items[index]!(trail);
+    return this.graph.resolveExpr(inputs.file, inputs.node.elements[index]!, trail);
   }
 
   private step(node: SNode, seg: Segment, trail: Trail, rtParent: unknown, atRoot: boolean): SNode {
@@ -1122,6 +1186,47 @@ class Locator {
       case 'namespace':
         if (typeof seg !== 'string') refuse('mismatch', `the module namespace of ${g.rel(node.file)} has no index ${seg}`);
         return g.resolveExport(node.file, seg, trail, new Set());
+      case 'composed':
+        if (seg === 'packages') return { k: 'composedPackages', describe: node.describe, inputs: node.inputs };
+        if (atRoot && typeof seg === 'string' && this.namedExports.includes(seg)) {
+          return g.resolveExport(this.configFile, seg, trail, new Set());
+        }
+        refuse('helper', `\`${String(seg)}\` is composed by \`${node.describe}\` from all of its inputs, so no one literal is its source`);
+      case 'composedPackages': {
+        if (typeof seg !== 'number') refuse('mismatch', `the packages of \`${node.describe}\` are a list where the loaded value is an object`);
+        const count = node.inputs.k === 'array' ? node.inputs.node.elements.length : node.inputs.items.length;
+        if (!Array.isArray(rtParent) || rtParent.length !== count || seg >= count) {
+          refuse('helper', `\`${node.describe}\` composes ${count} input(s) into ${Array.isArray(rtParent) ? rtParent.length : 'no'} package(s), so package ${seg} is not one input's body`);
+        }
+        // Entry i is input i's body only when no input before it contributes
+        // a different number of entries: each one up to i must be a stack
+        // literal with a `manifest` and no `packages` list of its own. The
+        // inputs before i are read on a trail of their own — they are not
+        // the site, so their bindings take no part in its shared check.
+        let input: SNode | undefined;
+        for (let j = 0; j <= seg; j++) {
+          input = this.composedInput(node.inputs, j, j === seg ? trail : new Trail());
+          if (input.k !== 'object') {
+            refuse('helper', `input ${j} of \`${node.describe}\` is not written as a stack literal, so the package it contributes cannot be read`);
+          }
+          g.findProp(input, 'manifest');
+          if (writesKey(g, input, 'packages')) {
+            refuse('helper', `input ${j} of \`${node.describe}\` carries its own \`packages\`, so its packages are not one body each`);
+          }
+        }
+        return { k: 'composedEntry', describe: node.describe, input: input as Extract<SNode, { k: 'object' }> };
+      }
+      case 'composedEntry':
+        if (seg !== 'manifest') refuse('injected', `a package entry \`${node.describe}\` assembles carries only \`manifest\`, not \`${String(seg)}\``);
+        return { k: 'composedBody', describe: node.describe, input: node.input };
+      case 'composedBody': {
+        if (typeof seg !== 'string') refuse('mismatch', `a package body \`${node.describe}\` assembles is an object where the loaded value is an array`);
+        if (packageBodyKeys().has(seg) && writesKey(g, node.input, seg)) {
+          return g.resolveExpr(node.input.file, g.valueOf(g.findProp(node.input, seg)), trail);
+        }
+        const manifest = g.resolveExpr(node.input.file, g.valueOf(g.findProp(node.input, 'manifest')), trail);
+        return this.step(manifest, seg, trail, rtParent, false);
+      }
       case 'scalar':
         refuse('mismatch', `the literal at ${g.at(node.file, node.node)} is a scalar where the loaded value has members`);
       default:
@@ -1166,6 +1271,9 @@ class Locator {
     if (node.k === 'list') refuse('spread', `the container is assembled by ${node.describe}, not written as one literal`);
     if (node.k === 'namespace') refuse('computed', 'the container is a module namespace, not a literal');
     if (node.k === 'scalar') refuse('mismatch', `the literal at ${g.at(node.file, node.node)} is a scalar where the loaded value is a container`);
+    if (node.k === 'composed' || node.k === 'composedPackages' || node.k === 'composedEntry' || node.k === 'composedBody') {
+      refuse('helper', `the container is assembled by \`${node.describe}\`, not written as one literal`);
+    }
     if (node.k !== 'object' && node.k !== 'array') refuse('computed', 'the value comes from `@objectstack/spec`, not from the project');
 
     const real = realpathSafe(node.file.path);

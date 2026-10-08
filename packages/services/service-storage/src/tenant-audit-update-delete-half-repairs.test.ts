@@ -130,6 +130,13 @@ function createRecordingEngine(seed: Array<{ object: string; data: any }> = []) 
     async update(object: string, data: any, options?: any) {
       assertEngineUpdateDispatch(data, options);
       updates.push({ object, data: { ...data }, options });
+      // [#22313] A by-id update lands on the row, as it does in the real
+      // engine: the chunked completion reads back the record the chunk door
+      // wrote, and assembles only an upload that holds its declared bytes.
+      const hit = rows.find(
+        (r) => r.object === object && String(r.data.id) === String(options?.where?.id),
+      );
+      if (hit) Object.assign(hit.data, data);
       return { ...data };
     },
     async delete(object: string, options?: any) {
@@ -394,6 +401,19 @@ describe('[#13178] the routes: the upload doors pass the session organization on
         const uploadId = initRes._json?.data?.uploadId ?? initRes._json?.uploadId;
         expect(uploadId).toBeTruthy();
 
+        // The declared 10 bytes: a completion assembles only an upload that
+        // holds them (#22313).
+        const chunkRes = createMockRes();
+        await server._getHandler('PUT', `${BASE}/upload/chunked/:uploadId/chunk/:chunkIndex`)!(
+          createMockReq({
+            params: { uploadId, chunkIndex: '0' },
+            headers: { 'x-resume-token': initRes._json.data.resumeToken },
+            rawBody: async () => Buffer.from('0123456789'),
+          } as any),
+          chunkRes,
+        );
+        expect(chunkRes._status).toBe(200);
+
         const res = createMockRes();
         await server._getHandler('POST', `${BASE}/upload/chunked/:uploadId/complete`)!(
           createMockReq({ params: { uploadId }, body: { parts: [] } }),
@@ -407,7 +427,9 @@ describe('[#13178] the routes: the upload doors pass the session organization on
     // cannot drift apart again: the file row and the session row are updated
     // from ONE resolved organization.
     const file = engine._updates.find((u: any) => u.object === 'sys_file');
-    const session = engine._updates.find((u: any) => u.object === 'sys_upload_session');
+    // The completion's own session write — the chunk door's progress write
+    // precedes it.
+    const session = engine._updates.find((u: any) => u.object === 'sys_upload_session' && u.data.status === 'completed');
     expect(file.options.context).toEqual({ tenantId: 'org_A', isSystem: true });
     expect(session.options.context).toEqual({ tenantId: 'org_A', isSystem: true });
     expect(engine._updates.every((u: any) => u.options.context?.tenantId === 'org_A')).toBe(true);
