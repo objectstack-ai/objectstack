@@ -207,17 +207,23 @@ describe('the upload doors on a booted organization wall (#22046)', () => {
   });
 
   describe('the commit door', () => {
-    it('a colleague and an outsider get the same 403 PERMISSION_DENIED, and the row is unchanged', async () => {
+    const commit = (token: string, fileId: string, eTag: string) =>
+      stack.apiAs(token, 'POST', '/storage/upload/complete', { fileId, eTag });
+
+    it('SAME ORGANIZATION: a colleague is refused 403 PERMISSION_DENIED, and the row is unchanged', async () => {
       const fileId = await presign();
       const before = await stored('sys_file', fileId);
-
-      const same = await answer(await stack.apiAs(colleague, 'POST', '/storage/upload/complete', { fileId, eTag: 'etag-colleague' }));
-      const cross = await answer(await stack.apiAs(outsider, 'POST', '/storage/upload/complete', { fileId, eTag: 'etag-outsider' }));
-
-      expectRefused(same, ['wall-plan', fileId, uploaderOrg], 'colleague');
-      expectRefused(cross, ['wall-plan', fileId, uploaderOrg], 'outsider');
-      expect(cross).toEqual(same);
+      expectRefused(await answer(await commit(colleague, fileId, 'etag-colleague')), ['wall-plan', fileId, uploaderOrg], 'colleague');
       expect(await stored('sys_file', fileId)).toEqual(before);
+    });
+
+    it('ANOTHER ORGANIZATION: an outsider gets the colleague’s body, and the row is unchanged', async () => {
+      const fileId = await presign();
+      const before = await stored('sys_file', fileId);
+      const cross = await answer(await commit(outsider, fileId, 'etag-outsider'));
+      expectRefused(cross, ['wall-plan', fileId, uploaderOrg], 'outsider');
+      expect(await stored('sys_file', fileId)).toEqual(before);
+      expect(cross).toEqual(await answer(await commit(colleague, fileId, 'etag-colleague')));
     });
 
     it('POSITIVE: the uploader commits', async () => {
@@ -232,20 +238,27 @@ describe('the upload doors on a booted organization wall (#22046)', () => {
   });
 
   describe('the chunked-completion door', () => {
-    it('a colleague and an outsider get the same 403 PERMISSION_DENIED, and neither row moves', async () => {
+    const complete = (token: string, uploadId: string) =>
+      stack.apiAs(token, 'POST', `/storage/upload/chunked/${uploadId}/complete`, { parts: [] });
+
+    it('SAME ORGANIZATION: a colleague is refused 403 PERMISSION_DENIED, and neither row moves', async () => {
       const { uploadId, fileId } = await startChunked();
       const sessionBefore = await stored('sys_upload_session', uploadId);
       const fileBefore = await stored('sys_file', fileId);
-
-      const path = `/storage/upload/chunked/${uploadId}/complete`;
-      const same = await answer(await stack.apiAs(colleague, 'POST', path, { parts: [] }));
-      const cross = await answer(await stack.apiAs(outsider, 'POST', path, { parts: [] }));
-
-      expectRefused(same, ['wall-chunked', fileId, uploaderOrg], 'colleague');
-      expectRefused(cross, ['wall-chunked', fileId, uploaderOrg], 'outsider');
-      expect(cross).toEqual(same);
+      expectRefused(await answer(await complete(colleague, uploadId)), ['wall-chunked', fileId, uploaderOrg], 'colleague');
       expect(await stored('sys_upload_session', uploadId)).toEqual(sessionBefore);
       expect(await stored('sys_file', fileId)).toEqual(fileBefore);
+    });
+
+    it('ANOTHER ORGANIZATION: an outsider gets the colleague’s body, and neither row moves', async () => {
+      const { uploadId, fileId } = await startChunked();
+      const sessionBefore = await stored('sys_upload_session', uploadId);
+      const fileBefore = await stored('sys_file', fileId);
+      const cross = await answer(await complete(outsider, uploadId));
+      expectRefused(cross, ['wall-chunked', fileId, uploaderOrg], 'outsider');
+      expect(await stored('sys_upload_session', uploadId)).toEqual(sessionBefore);
+      expect(await stored('sys_file', fileId)).toEqual(fileBefore);
+      expect(cross).toEqual(await answer(await complete(colleague, uploadId)));
     });
 
     it('POSITIVE: the uploader completes', async () => {
@@ -259,18 +272,23 @@ describe('the upload doors on a booted organization wall (#22046)', () => {
   });
 
   describe('the progress door', () => {
-    it('a colleague and an outsider get the same 403 PERMISSION_DENIED, are shown nothing, and the row is unchanged', async () => {
+    const progress = (token: string, uploadId: string) =>
+      stack.apiAs(token, 'GET', `/storage/upload/chunked/${uploadId}/progress`);
+
+    it('SAME ORGANIZATION: a colleague is refused 403 PERMISSION_DENIED, shown nothing, and the row is unchanged', async () => {
       const { uploadId, fileId } = await startChunked();
       const before = await stored('sys_upload_session', uploadId);
-
-      const path = `/storage/upload/chunked/${uploadId}/progress`;
-      const same = await answer(await stack.apiAs(colleague, 'GET', path));
-      const cross = await answer(await stack.apiAs(outsider, 'GET', path));
-
-      expectRefused(same, ['wall-chunked', fileId, uploaderOrg], 'colleague');
-      expectRefused(cross, ['wall-chunked', fileId, uploaderOrg], 'outsider');
-      expect(cross).toEqual(same);
+      expectRefused(await answer(await progress(colleague, uploadId)), ['wall-chunked', fileId, uploaderOrg], 'colleague');
       expect(await stored('sys_upload_session', uploadId)).toEqual(before);
+    });
+
+    it('ANOTHER ORGANIZATION: an outsider gets the colleague’s body, shown nothing, and the row is unchanged', async () => {
+      const { uploadId, fileId } = await startChunked();
+      const before = await stored('sys_upload_session', uploadId);
+      const cross = await answer(await progress(outsider, uploadId));
+      expectRefused(cross, ['wall-chunked', fileId, uploaderOrg], 'outsider');
+      expect(await stored('sys_upload_session', uploadId)).toEqual(before);
+      expect(cross).toEqual(await answer(await progress(colleague, uploadId)));
     });
 
     it('POSITIVE: the uploader reads its progress', async () => {
