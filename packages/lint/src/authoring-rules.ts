@@ -308,9 +308,10 @@ export interface AuthoringRuleContext {
    * argument.
    *
    * [#22019] One other rule reads it, on that argument: `validateStackExpressions`
-   * is one entry over several PASSES, and an `object` write is admitted for its
-   * field-formula pass and (#22032) its validation-rule, field-rule-slot and
-   * per-option `visibleWhen` passes alone (`runStackExpressionPasses`, `StackExpressionOptions`). The entry-level
+   * is one entry over several PASSES, and an `object` write is admitted for the
+   * passes over the object's own body alone — its field-formula pass and (#22032)
+   * its validation-rule, field-rule-slot, per-option `visibleWhen` and
+   * object-action passes (`runStackExpressionPasses`, `StackExpressionOptions`). The entry-level
    * `runtimeTypes` can say that an object write reaches the rule; it cannot say
    * which of the rule's passes judge that write.
    */
@@ -607,9 +608,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // NARROW by construction, not by snapshot shape: `ctx.runtimeWriteType`
     // reaches `runStackExpressionPasses` — the body `validateStackExpressions`
     // runs, whose public signature is unchanged — which on an object write runs
-    // the passes admitted there and fences every other object-borne expression
-    // pass off by name (`StackExpressionOptions.runtimeWriteType`) — each of
-    // those is a crossing of its own, not a rider on another.
+    // the passes over the object's own body, each admitted by a crossing of its
+    // own (#22032 passes 1–4, below), and reads an empty list for the passes
+    // over the stack's other collections (`StackExpressionOptions.runtimeWriteType`).
     //
     // MEASURED over the stored corpus at the door's own snapshot shape before
     // crossing: every formula field the repository ships — 29 fields on 28
@@ -658,6 +659,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // → 0 build errors and 0 warnings for the pass, and 0 door errors and 0
     // advisories at the door's own snapshot shape, against a refusal at each
     // for a bare `amount > 1` option in the same harness.
+    //
+    // [#22032, pass 4] The object's own `actions[]` pass joins the object door:
+    // every action's `visible`, and its `disabled` unless that is a boolean
+    // literal. No pass over the object's own body is fenced any more; the
+    // passes over the stack's other collections never ran on an object write.
+    // No entry-level change. MEASURED first, at both the raw and the parsed
+    // shape: every `*.object.ts` the repository ships (118 objects) carries 58
+    // action predicates on 16 objects, and the example stacks as `defineStack`
+    // composes them (33 objects, standalone actions merged in) carry 59 on 5
+    // → the build refuses 8, all `visible` on the platform's
+    // `sys_approval_request` (they read `record.viewer`, a block the approvals
+    // service attaches on read and the object does not declare; the producer
+    // fix is #22211), and the door refuses the same 8 after the lift and none
+    // before it. 0 other refusals and 0 advisories, against a refusal at each
+    // for a bare `amount > 1` action in the same harness.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object'],
     run: (stack, ctx) =>
