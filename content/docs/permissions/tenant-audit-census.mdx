@@ -122,7 +122,7 @@ are reported as `undecidable` rather than assumed either way.
 
 The same holds twice over for the context. An options argument spelled as a
 literal can be read; one spelled `options`, `{ ...opts }`, or handed through a
-forwarding shim cannot, and **54 of the 232 sites are spelled that way**. A
+forwarding shim cannot, and **52 of the 232 sites are spelled that way**. A
 context resolved from an inline literal or a local `const` can be tested for
 `isSystem`; one arriving from a helper call cannot.
 
@@ -228,7 +228,7 @@ cannot read, and they are neither in nor out.
 | …whose object name is chosen at run time | 78 |
 | …against an object with tenancy ENABLED | 153 |
 | …against an object that declares tenancy off | 1 |
-| threading a tenant context | 170 |
+| threading a tenant context | 172 |
 | PROVABLY carrying none (options read, no context key) | **8** |
 | …of those, against a decidably tenancy-enabled object | **2** |
 | options argument UNREADABLE — may or may not carry one | 52 |
@@ -297,13 +297,13 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-07 at `a93579f45`.
+Measured on 2026-10-08 at `61edbced6`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 612 |
+| tracked non-test sources scanned | 614 |
 | engine-shaped types recognised | 69 |
-| declared objects in the registry | 116 |
+| declared objects in the registry | 117 |
 | same-named calls subtracted as non-engine | 160 |
 
 {/* END GENERATED: tenant-audit-census */}
