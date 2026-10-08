@@ -355,6 +355,11 @@ export const TaskCompletionFlow: Flow = {
     // mid-flow (#1870), and the pure-function shape — takes `input`, RETURNS a
     // value, a later declarative node persists it (#4396) — is the one
     // `showcase_task_completed` already uses.
+    //
+    // (History, kept for the reasoning: since #19938 the `fields` / `assignments`
+    // value slots DO evaluate a CEL value envelope, and since #19939 they no
+    // longer read the `{…}` template dialect at all — see `create_next_task`
+    // below. The script stays: the recurrence rule is a function's job.)
     {
       id: 'compute_next_due_date', type: 'script', label: 'Compute Next Due Date',
       config: {
@@ -373,15 +378,25 @@ export const TaskCompletionFlow: Flow = {
       id: 'create_next_task', type: 'create_record', label: 'Create Next Recurring Task',
       config: {
         objectName: 'todo_task',
+        // CEL value envelopes — the `{…}` template dialect is retired from
+        // value slots. A field the completed task never set is absent from its
+        // row, and CEL refuses an absent key where the template wrote nothing,
+        // so every optional one is guarded with `has()` (a `null` on insert is
+        // "no value", and a field default still applies).
         fields: {
-          subject: '{completedTask.subject}', description: '{completedTask.description}',
-          priority: '{completedTask.priority}', category: '{completedTask.category}',
-          owner: '{completedTask.owner}', is_recurring: true,
-          recurrence_type: '{completedTask.recurrence_type}',
-          recurrence_interval: '{completedTask.recurrence_interval}',
-          // A whole-string token, so `interpolate()` hands the create the RAW
-          // value the script node returned instead of a stringified copy.
-          due_date: '{nextDueDate}',
+          subject: { dialect: 'cel', source: 'completedTask.subject' },
+          description: { dialect: 'cel', source: 'has(completedTask.description) ? completedTask.description : null' },
+          priority: { dialect: 'cel', source: 'has(completedTask.priority) ? completedTask.priority : null' },
+          category: { dialect: 'cel', source: 'has(completedTask.category) ? completedTask.category : null' },
+          owner: { dialect: 'cel', source: 'has(completedTask.owner) ? completedTask.owner : null' },
+          is_recurring: true,
+          recurrence_type: { dialect: 'cel', source: 'has(completedTask.recurrence_type) ? completedTask.recurrence_type : null' },
+          recurrence_interval: {
+            dialect: 'cel',
+            source: 'has(completedTask.recurrence_interval) ? completedTask.recurrence_interval : null',
+          },
+          // The RAW value the script node returned, type kept.
+          due_date: { dialect: 'cel', source: 'nextDueDate' },
           status: 'not_started',
         },
         outputVariable: 'newTaskId',
@@ -454,7 +469,20 @@ export const QuickAddTaskFlow: Flow = {
       id: 'create_task', type: 'create_record', label: 'Create Task',
       config: {
         objectName: 'todo_task',
-        fields: { subject: '{subject}', priority: '{priority}', due_date: '{dueDate}', category: '{category}', status: 'not_started', owner: '{$User.Id}' },
+        // CEL value envelopes — the `{…}` template dialect is retired from
+        // value slots. `subject` is a required screen field; the others may be
+        // left empty, and CEL refuses an absent variable where the template
+        // wrote nothing, so they are guarded with `has()`. `{$User.Id}` is one
+        // of the two spellings the retirement keeps until CEL can write it (the
+        // flow CEL scope binds no user yet), so it stays as authored.
+        fields: {
+          subject: { dialect: 'cel', source: 'subject' },
+          priority: { dialect: 'cel', source: 'has(vars.priority) ? vars.priority : null' },
+          due_date: { dialect: 'cel', source: 'has(vars.dueDate) ? vars.dueDate : null' },
+          category: { dialect: 'cel', source: 'has(vars.category) ? vars.category : null' },
+          status: 'not_started',
+          owner: '{$User.Id}',
+        },
         outputVariable: 'newTaskId',
       },
     },
