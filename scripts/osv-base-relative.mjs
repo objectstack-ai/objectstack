@@ -61,6 +61,8 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 
+import { isEntrypoint } from './invoked-as.mjs';
+
 const OUTCOMES = new Set(['success', 'failure']);
 const ANCHOR_PAGE_CAP = 10;
 
@@ -577,4 +579,4 @@ async function main() {
   process.exit(code);
 }
 
-await main();
+if (isEntrypoint(import.meta.url)) await main();
