@@ -145,8 +145,8 @@ export const SysDeviceCode = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['device_code'], unique: true },
-    { fields: ['user_code'], unique: true },
+    { fields: ['device_code'], unique: 'global' },
+    { fields: ['user_code'], unique: 'global' },
     { fields: ['status'], unique: false },
   ],
 

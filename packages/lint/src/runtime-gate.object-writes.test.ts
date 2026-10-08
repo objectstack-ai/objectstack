@@ -19,11 +19,15 @@
  *    authoring lineages — a lower bound, since every measured population is
  *    authored config-file metadata — with a post-launch replay of stored
  *    overlay rows as the standing audit;
- *  - the six ADVISORY-tier object rules do NOT ride. They cannot refuse a
+ *  - the ADVISORY-tier object rules do NOT ride. They cannot refuse a
  *    write at all, and the measured ~8-advisories-per-object-write designer
  *    noise they would add is a UX decision with its own card, not a
  *    `runtimeTypes` edit. The fence is pinned below BY NAME so a later
- *    widening moves this line consciously rather than by drift.
+ *    widening moves this line consciously rather than by drift. The
+ *    adjudication fenced six; one, `lintUnscopedDeclaredIndexes`, left the
+ *    advisory tier at protocol 18 (#5082 — bare `unique: true` on a declared
+ *    index became an error) and is pinned on its own below: still off this
+ *    door, because the door's own parse refuses the spelling first.
  *
  * The six refusal cases are the adjudication's own non-vacuity controls — the
  * six synthetic broken bodies the measurement round pushed through the gate
@@ -50,12 +54,15 @@ const CROSSED = [
   'validateRuleSchemaFormats',
 ] as const;
 
-/** The six advisory rules the adjudication fenced OUT, by name. */
+/**
+ * The advisory rules the adjudication fenced OUT, by name — five of its six.
+ * The sixth, `lintUnscopedDeclaredIndexes`, became gating at protocol 18
+ * (#5082) and has its own case below.
+ */
 const FENCED = [
   'validateRecordTitle',
   'validateSemanticRoles',
   'lintLivenessProperties',
-  'lintUnscopedDeclaredIndexes',
   'lintUniqueDeclarations',
   'lintLegacyOrganizationComposites',
 ] as const;
@@ -153,7 +160,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
     ]);
   });
 
-  it('the six advisory-tier object rules do NOT ride — the Q2 fence, by name', () => {
+  it('the fenced advisory-tier object rules do NOT ride — the Q2 fence, by name', () => {
     const atDoor = new Set(runtimeAuthoringRulesFor('object').map((r) => r.name));
     for (const name of FENCED) {
       expect(atDoor.has(name), `${name} reached the object write door — the #4716 adjudication `
@@ -161,7 +168,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
         + `Crossing it is a UX/volume decision with its own card, not a runtimeTypes edit.`).toBe(false);
       const entry = AUTHORING_RULES.find((r) => r.name === name);
       expect(entry, `${name} left AUTHORING_RULES — re-point this fence or retire it`).toBeDefined();
-      expect(entry!.tier, `${name} changed tier — this fence pins the ADVISORY six; a severity `
+      expect(entry!.tier, `${name} changed tier — this fence pins the ADVISORY rules; a severity `
         + `change needs its own PR and re-opens the crossing question for the rule`).toBe('advisory');
       // [#19542] The fence is about the OBJECT door, and until this card every
       // fenced rule happened to be off the runtime surface ENTIRELY, so "is
@@ -206,6 +213,22 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
         + `rules; a tier change moves it out of that ruling`).toBe('gating');
       expect(entry.runtimeTypes ?? []).toContain('object');
     }
+  });
+
+  it('`lintUnscopedDeclaredIndexes` left the fence as GATING (#5082) and still does not ride: the door parse refuses first', () => {
+    // Protocol 18 refuses bare `unique: true` on a declared index (ADR-0120
+    // D7), so the rule that reports it emits `error` and is gating — the
+    // severity change the fence above says needs its own PR. It is still NOT
+    // at the object door, for a reason that is not the advisory-volume one:
+    // `saveMetaItem` parses the body against ObjectSchema before the
+    // authoring gate runs, and `IndexSchema.unique` refuses the spelling there
+    // with the same prescription, so a crossing could never fire.
+    const entry = AUTHORING_RULES.find((r) => r.name === 'lintUnscopedDeclaredIndexes');
+    expect(entry, 'lintUnscopedDeclaredIndexes left AUTHORING_RULES').toBeDefined();
+    expect(entry!.tier).toBe('gating');
+    expect(entry!.surfaces).not.toContain('runtime-publish');
+    expect(entry!.surfaceReason ?? '').toMatch(/IndexSchema\.unique refuses bare `true`/);
+    expect(runtimeAuthoringRulesFor('object').map((r) => r.name)).not.toContain('lintUnscopedDeclaredIndexes');
   });
 
   // ── [#15495] The MEMBER surface of the reference-integrity suite ──

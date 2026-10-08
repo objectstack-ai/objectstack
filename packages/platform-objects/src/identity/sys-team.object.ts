@@ -187,7 +187,7 @@ export const SysTeam = ObjectSchema.create({
 
   indexes: [
     { fields: ['organization_id'] },
-    { fields: ['name', 'organization_id'], unique: true },
+    { fields: ['name', 'organization_id'], unique: 'global' },
   ],
 
   enable: {

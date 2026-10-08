@@ -268,7 +268,7 @@ export const HttpDelivery = ObjectSchema.create({
     },
 
     indexes: [
-        { fields: ['source', 'dedup_key'], unique: true },
+        { fields: ['source', 'dedup_key'], unique: 'global' },
         // Hot path: claim query
         { fields: ['status', 'partition_key', 'next_retry_at'] },
         // Reaper: scan stale in_flight rows by claimed_at

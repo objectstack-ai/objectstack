@@ -9,7 +9,7 @@
  *
  * ```ts
  * { name: 'idx_sys_metadata_overlay_active',
- *   fields: ['type', 'name', 'organization_id', 'package_id'], unique: true }
+ *   fields: ['type', 'name', 'organization_id', 'package_id'], unique: 'global' }
  * ```
  *
  * and `syncDeclaredIndexes` materializes it as an UNRESTRICTED, NULL-distinct
