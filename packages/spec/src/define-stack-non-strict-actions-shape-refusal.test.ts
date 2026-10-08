@@ -78,7 +78,7 @@ const nonArrays: Array<{ label: string; value: unknown }> = [
   { label: 'false', value: false },
 ];
 
-describe('#19799 — defineStack strict: false refuses a malformed top-level `actions` with an ADR-0112 envelope', () => {
+describe('defineStack strict: false refuses a malformed top-level `actions` with an ADR-0112 envelope', () => {
   for (const row of nonArrays) {
     it(`top-level \`actions\` as ${row.label} is refused at ['actions'] — never a bare TypeError`, () => {
       const refused = refusal(() => nonStrict({ objects: [obj('b_item')], actions: row.value }));
@@ -98,7 +98,7 @@ describe('#19799 — defineStack strict: false refuses a malformed top-level `ac
   });
 });
 
-describe("#19799 — defineStack strict: false refuses a malformed object's own `actions` with the same envelope", () => {
+describe("defineStack strict: false refuses a malformed object's own `actions` with the same envelope", () => {
   for (const row of nonArrays) {
     it(`an object's \`actions\` as ${row.label} is refused at ['objects', i, 'actions']`, () => {
       const refused = refusal(() => nonStrict({ objects: [obj('b_other'), obj('b_item', { actions: row.value })] }));
@@ -135,7 +135,7 @@ describe("#19799 — defineStack strict: false refuses a malformed object's own 
   });
 });
 
-describe('#19799 — the controls: well-formed `actions` are accepted, merged and ordered', () => {
+describe('the controls: well-formed `actions` are accepted, merged and ordered', () => {
   it('arrays of action objects at both sites: the bound action is merged and every group is sorted by `order`', () => {
     const stack = nonStrict({
       objects: [obj('b_item', { actions: [embedded] })],

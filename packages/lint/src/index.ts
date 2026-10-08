@@ -699,6 +699,12 @@ export type {
   FieldConsumerVerdict,
 } from './validate-field-consumers.js';
 
+// [#22161] The long-form reasoning behind an author-time rule, keyed by rule
+// id — what `os explain <rule-id>` prints. A finding carries one verdict and
+// one fix; the "why" lives here, once (see the module note).
+export { RULE_EXPLANATIONS, explainRule } from './rule-explanations.js';
+export type { RuleExplanation } from './rule-explanations.js';
+
 export {
   validateTranslationReferences,
   TRANSLATION_TARGET_UNKNOWN,

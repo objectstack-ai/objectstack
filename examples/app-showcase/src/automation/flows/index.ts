@@ -1581,9 +1581,11 @@ export const InboundTaskWebhookFlow = defineFlow({
   type: 'api',
   status: 'active',
   // An inbound webhook has no authenticated user, so the create must run as the
-  // system principal (#1888 runAs is now enforced). Without this it relies on the
-  // "no identity → security-skipped" fall-through, which breaks the moment the
-  // target object carries row-level security.
+  // system principal (#1888 runAs is now enforced). Without this the run is
+  // user-less under the default `runAs:'user'`, so its create is refused
+  // (`AUTOMATION_UNSCOPED_RUN_DATA_ACCESS`); the "no identity → security-skipped"
+  // fall-through it once relied on is gone (ADR-0096 D5 refuses a principal-less
+  // context in the security middleware too).
   runAs: 'system',
   nodes: [
     {

@@ -50,7 +50,7 @@ afterEach(() => {
 
 // ─── Rule 1 — same value passes through ─────────────────────────────
 
-describe('#5005 rule 1 — non-array top-level keys survive composition', () => {
+describe('composition rule 1 — non-array top-level keys survive composition', () => {
   it('keeps `api` when only one stack declares it (the issue\'s own repro)', () => {
     const a = raw({ manifest: manifestA, api: { enforceProjectMembership: true } });
     const b = raw({ manifest: manifestB });
@@ -61,7 +61,7 @@ describe('#5005 rule 1 — non-array top-level keys survive composition', () => 
     expect(composeStacks([b, a]).api).toEqual({ enforceProjectMembership: true });
   });
 
-  it('keeps `server` when only one stack declares it (#4910 rate limiting)', () => {
+  it('keeps `server` (the inbound rate limiting config) when only one stack declares it', () => {
     const a = raw({
       manifest: manifestA,
       server: { security: { rateLimit: { enabled: true, maxRequests: 5 } } },
@@ -101,7 +101,7 @@ describe('#5005 rule 1 — non-array top-level keys survive composition', () => 
 
 // ─── Rule 2 — conflict is an error with a prescription ──────────────
 
-describe('#5005 rule 2 — conflicting values throw a prescriptive error', () => {
+describe('composition rule 2 — conflicting values throw a prescriptive error', () => {
   it('throws naming the key, both source stacks and the fix', () => {
     const a = raw({ manifest: manifestA, api: { enforceProjectMembership: true } });
     const b = raw({ manifest: manifestB, api: { enforceProjectMembership: false } });
@@ -157,7 +157,7 @@ describe('#5005 rule 2 — conflicting values throw a prescriptive error', () =>
 
 // ─── Rule 3 — unhandled keys warn ───────────────────────────────────
 
-describe('#5005 rule 3 — a key with no declared rule warns', () => {
+describe('composition rule 3 — a key with no declared rule warns', () => {
   it('warns once, names the key and carries the declare-a-rule prescription', () => {
     // A key the schema does not declare: reaches composeStacks only via
     // `strict: false`, which is exactly how a NEW key looks before someone
@@ -188,7 +188,7 @@ describe('#5005 rule 3 — a key with no declared rule warns', () => {
     expect(warnSpy.mock.calls.map((c) => String(c[0])).some((w) => w.includes("'futureList'"))).toBe(true);
   });
 
-  it('refuses — never skips — a collection key that holds a non-array value (#19784)', () => {
+  it('refuses — never skips — a collection key that holds a non-array value', () => {
     // Skipping it (the #5005 warn-and-drop) composed an artifact that silently
     // lacked stack B's views; the full per-key census lives in
     // `compose-stacks-concat-shape-refusal.test.ts`.
@@ -217,7 +217,7 @@ describe('#5005 rule 3 — a key with no declared rule warns', () => {
 
 // ─── Control — array keys keep today's concat semantics ─────────────
 
-describe('#5005 control — array keys still concatenate', () => {
+describe('control — array keys still concatenate', () => {
   it('concatenates in stack order, unchanged', () => {
     const a = raw({
       manifest: manifestA,
@@ -294,7 +294,7 @@ describe('#5005 control — array keys still concatenate', () => {
 
 // ─── Control — the pre-existing bespoke strategies are untouched ────
 
-describe('#5005 control — manifest / objects strategies unchanged', () => {
+describe('control — manifest / objects strategies unchanged', () => {
   it('manifest still follows the `manifest` option', () => {
     const a = raw({ manifest: manifestA });
     const b = raw({ manifest: manifestB });
@@ -319,7 +319,7 @@ describe('#5005 control — manifest / objects strategies unchanged', () => {
 
 // ─── Structural pin — every declared key has a rule ─────────────────
 
-describe('#5005 structural pin — the schema and the composer cannot drift', () => {
+describe('structural pin — the schema and the composer cannot drift', () => {
   /**
    * The disposition table is typed `Record< keyof ObjectStackDefinition, … >`,
    * so a key added to the schema without a composition rule is already a

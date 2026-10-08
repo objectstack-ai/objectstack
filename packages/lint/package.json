@@ -26,6 +26,16 @@
         "types": "./dist/runtime.d.cts",
         "default": "./dist/runtime.cjs"
       }
+    },
+    "./rule-explanations": {
+      "import": {
+        "types": "./dist/rule-explanations.d.ts",
+        "default": "./dist/rule-explanations.js"
+      },
+      "require": {
+        "types": "./dist/rule-explanations.d.cts",
+        "default": "./dist/rule-explanations.cjs"
+      }
     }
   },
   "scripts": {

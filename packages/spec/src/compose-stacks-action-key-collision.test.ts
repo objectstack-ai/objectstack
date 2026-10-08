@@ -219,7 +219,7 @@ describe('composeStacks - object-scoped keys across stacks, judged on what the c
     ['embedding stack last', () => [boundToSharedB(), embeddedA()], "'com.example.b' (stack #0)", "'com.example.a' (stack #1)"],
     ['embedding stack first', () => [embeddedA(), boundToSharedB()], "'com.example.a' (stack #0)", "'com.example.b' (stack #1)"],
   ] as const)(
-    "under 'merge' the same pair is refused one step earlier, at the object merge: both objects declare a DIFFERENT `actions` (%s) — #14848, not a collision",
+    "under 'merge' the same pair is refused one step earlier, at the object merge: both objects declare a DIFFERENT `actions` (%s) — the 'merge' collection refusal, not an action-key collision",
     (_order, stacks, holder, later) => {
       // B's built object carries its bound copy (`dup_m/BOUND`), A's carries
       // the embedded declaration (`dup_m/EMB`): two different arrays on one
@@ -259,7 +259,7 @@ describe('composeStacks - object-scoped keys across stacks, judged on what the c
     expect((out.objects ?? []).find((o) => o.name === 'shared')?.actions?.[0]?.label).toBe('Dup E (b)');
   });
 
-  it("refuses the same pair under 'merge' — two different `actions` arrays on one object are no longer resolved by replacement (#14848; formerly the P3 acceptance pin)", () => {
+  it("refuses the same pair under 'merge' — two different `actions` arrays on one object are no longer resolved by replacement (formerly the P3 acceptance pin)", () => {
     const msg = refusal(() => composeStacks([embedA(), embedB()], { objectConflict: 'merge' }));
     expect(msg).toContain(
       "composeStacks conflict: object 'shared' is defined in multiple stacks and its 'actions' is declared " +

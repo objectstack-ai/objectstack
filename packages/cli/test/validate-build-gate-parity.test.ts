@@ -310,6 +310,11 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
       // keep honest.
       'printAdvisoriesOnce',
       'printAuthoringRuleErrors',
+      // [#22161] The `fix:` and `rule:` lines (with the `os explain` pointer)
+      // under a registry finding the rules already produced — the same helper
+      // `printAuthoringAdvisories` and `printAuthoringRuleErrors` render with;
+      // `validate.ts` calls it for its own `⚠` advisory lines.
+      'authoringFindingDetailLines',
       'printDocIssueErrors',
       'printMetadataStats',
       'collectMetadataStats',

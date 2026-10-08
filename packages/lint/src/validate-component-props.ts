@@ -332,12 +332,17 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
           rule: COMPONENT_PROPS_INVALID,
           where,
           path: at,
-          message: `${at.slice(base.length + 1) || 'properties'}: ${describeIssue(issue, props)}`,
+          // [#22161] `hint` is the CLI's `fix:` line, so it states the fix; the
+          // advisory posture it used to explain (judged here as a warning, and
+          // the props bag is not parsed on the storage path) is the verdict's
+          // consequence and rides the message.
+          message:
+            `${at.slice(base.length + 1) || 'properties'}: ${describeIssue(issue, props)} — ` +
+            'nothing refuses it today, so the renderer receives the props as written',
           hint:
-            `\`${type}\`'s props are declared by ComponentPropsMap (@objectstack/spec/ui) — the ` +
-            'rejection above carries the fix. Advisory for now: props are judged here, at the authoring ' +
-            'door, as a warning before they become an error, and the props bag is not parsed on the ' +
-            'storage path either, so nothing rejects this today.',
+            `Give \`${type}\` props its schema accepts (ComponentPropsMap, @objectstack/spec/ui) — the ` +
+            'rejection above names what it expects — or, if the component really does honour what is ' +
+            'written, correct the schema so the declaration and the renderer agree.',
         });
       }
     }

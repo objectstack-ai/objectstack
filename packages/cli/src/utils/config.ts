@@ -298,6 +298,33 @@ const HANDED_THROUGH_FILTER = /^objectstack:authored-source\/handed-through$/;
 const HANDED_THROUGH_NAMESPACE = 'objectstack-authored-source-record';
 
 /**
+ * The global-registry symbol name under which the shim keeps, on the stack an
+ * ACCEPTED {@link STACK_PRODUCER} call returned, the argument that call was
+ * given — and the one name {@link authoredArgumentOf} reads it back by.
+ *
+ * Owned by this CLI: ⛔ never the producer's own provenance key. The record
+ * is not a claim about who built the stack (that mark is the producer's to
+ * write); it is this loader's note of what the author wrote, read once, off
+ * the default export, by {@link loadConfig}.
+ *
+ * ## Why a property on the stack, and not the load's hand-through record
+ *
+ * The record has to cross from the bundled shim to {@link loadConfig}. The
+ * only values that cross are the config module's exports, and the default
+ * export IS the stack the call returned, so a property on it crosses with it
+ * — with no state outside the value, and no lifetime but the value's. The
+ * hand-through record ({@link HANDED_THROUGH_MODULE}) is bundled inside the
+ * load and is reachable from nothing outside it. A `Symbol.for` key because
+ * the shim's code and this module are two module graphs in one process, and
+ * the global registry is what both resolve the same symbol from.
+ *
+ * Non-enumerable, like the producer's own mark: a spread, `JSON.stringify`
+ * and a schema parse all leave it behind, and {@link loadConfig} reads it
+ * BEFORE its named-export merge spreads the default export into a new object.
+ */
+const AUTHORED_ARGUMENT_KEY = '@objectstack/cli:authored-source/accepted-argument';
+
+/**
  * One strict authoring factory that is not a `define*` helper: the function
  * `member` of the exported value `owner`, which validates its argument AT THE
  * CALL and throws on a shape the current schema refuses.
@@ -425,6 +452,12 @@ async function authoredSourceHelpersOf(
  * `composeStacks` wrap maps its inputs through: a recorded stack is produced
  * again by the real `defineStack` in its `strict: false` mode, and every other
  * input reaches the real `composeStacks` as it was passed.
+ *
+ * `__keepAuthored` is the other `defineStack`-only hook, for the call that
+ * SUCCEEDS: it keeps the argument beside the stack the real call returned,
+ * under {@link AUTHORED_ARGUMENT_KEY}. It runs outside the `try`, so it can
+ * never turn an accepted call into a refused one. A call takes exactly one of
+ * the two arms, so no argument is both handed through and kept.
  */
 const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
   `const __refusal = (label, error) =>`,
@@ -432,9 +465,10 @@ const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
   `    && typeof __specRoot.formatZodError === 'function'`,
   `    ? __specRoot.formatZodError(error, label + ' validation failed')`,
   `    : (error && error.message) || String(error);`,
-  `const __tolerant = (label, call, handOver) => (...authored) => {`,
+  `const __tolerant = (label, call, handOver, keep) => (...authored) => {`,
+  `  let built;`,
   `  try {`,
-  `    return call(...authored);`,
+  `    built = call(...authored);`,
   `  } catch (error) {`,
   `    console.warn(`,
   `      '[authored-source] ' + label + '(): the current schema refuses this '`,
@@ -444,9 +478,19 @@ const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
   `    if (handOver) handOver(authored);`,
   `    return authored[0];`,
   `  }`,
+  `  if (keep) keep(built, authored);`,
+  `  return built;`,
   `};`,
   `const __recordStack = (authored) => {`,
   `  if (authored[0] !== null && typeof authored[0] === 'object') __handedThrough.set(authored[0], authored[1]);`,
+  `};`,
+  `const __authoredKey = Symbol.for(${JSON.stringify(AUTHORED_ARGUMENT_KEY)});`,
+  `const __keepAuthored = (built, authored) => {`,
+  `  const source = authored[0];`,
+  `  if (built === null || typeof built !== 'object' || source === null || typeof source !== 'object') return;`,
+  `  if (built === source || !Object.isExtensible(built)) return;`,
+  `  if (Object.prototype.hasOwnProperty.call(built, __authoredKey)) return;`,
+  `  Object.defineProperty(built, __authoredKey, { value: source, enumerable: false, writable: false, configurable: false });`,
   `};`,
   `const __composable = (stack) => (__handedThrough.has(stack)`,
   `  ? __specRoot.${STACK_PRODUCER}(stack, { ...__handedThrough.get(stack), strict: false })`,
@@ -506,10 +550,12 @@ const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
  * The narrowness is the point, and it is what keeps this a restoration rather
  * than a widening of what the command accepts:
  *
- *  - **A source that loads today loads identically.** The real helper runs, so
- *    its defaults and transforms still apply (`defineForm` moves `schemaId`
- *    into `data`, `defineStack` merges actions into objects, …). Nothing about
- *    the existing happy path is re-decided.
+ *  - **A source that loads today evaluates identically.** The real helper
+ *    runs, so every value the module builds is the value it builds today, with
+ *    each helper's defaults and transforms (`defineForm` moves `schemaId` into
+ *    `data`, …). The one difference is which value the chain starts from: an
+ *    accepted `defineStack` call's ARGUMENT, not its result (see "An accepted
+ *    `defineStack` call" below).
  *  - **A source the current schema refuses reaches the chain as authored** —
  *    which is precisely the codemod's input. `defineX(config: z.input<typeof
  *    XSchema>)` means the authored argument is by construction a shape
@@ -524,6 +570,31 @@ const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
  * A swallowed verdict is announced on **stderr** rather than dropped: the
  * author deserves to know an artifact bypassed the parse, and stderr keeps a
  * `--json` run's stdout a single parseable document.
+ *
+ * ## An accepted `defineStack` call: the chain starts from its argument
+ *
+ * A call the current schema ACCEPTS has already run the producer's load-time
+ * ADR-0087 D2 conversion pass when it returns. That pass runs in both of its
+ * modes, and no option skips it. So its result is canonical already. Handed
+ * to the chain as it was, a conversion the load still applies
+ * (`driver: 'mongo'`) had already happened: `applied` came back empty,
+ * `--write` wrote nothing, and every later load still printed the notice
+ * that sends the author to this command.
+ *
+ * So the shim keeps the argument beside the stack the call returned
+ * ({@link AUTHORED_ARGUMENT_KEY}), and {@link loadConfig} starts the default
+ * export from it. That argument is what `defineStack(config: z.input<…>)`
+ * accepted, so it is a well-formed authoring tree. The command still parses
+ * the MIGRATED stack and reports `schemaValid`. A refused call already hands
+ * its argument through as it is, so the two arms leave the chain one input
+ * shape: the stack the author wrote.
+ *
+ * ⚠️ A composed input does not get this. `composeStacks` builds each package
+ * body from the stack the input's `defineStack` call RETURNED, so the body is
+ * converted before the chain sees it. Recovering the authored body would mean
+ * assembling it again outside the producer: a second copy of composition's
+ * rule. Inside a composed project, a conversion the load still applies is
+ * still applied before the chain runs.
  *
  * ## A composed project: the handed-through stack is produced again
  *
@@ -594,7 +665,7 @@ function authoredSourcePlugin(configPath: string): Plugin {
           ...AUTHORED_SOURCE_PRELUDE,
         ];
         for (const name of defineHelpers) {
-          const handOver = name === STACK_PRODUCER ? ', __recordStack' : '';
+          const handOver = name === STACK_PRODUCER ? ', __recordStack, __keepAuthored' : '';
           lines.push(
             `export const ${name} = __tolerant(${JSON.stringify(name)}, (...authored) => __real.${name}(...authored)${handOver});`,
           );
@@ -621,9 +692,37 @@ export interface LoadConfigOptions {
    * Read the config as AUTHORED rather than as the current schema would have
    * it — see {@link authoredSourcePlugin}. Set by `os migrate meta` only.
    *
+   * Two things follow. A refused helper call hands its argument through. And a
+   * default export that an ACCEPTED `defineStack` call built is replaced by the
+   * argument that call was given ({@link authoredArgumentOf}), before the
+   * named exports are merged onto it, so `config` is the stack as written. The
+   * producer's mark and conversion record are still read off the built stack.
+   *
    * @default false
    */
   authoredSource?: boolean;
+}
+
+/**
+ * The argument an accepted `defineStack` call was given, read off the stack
+ * it returned — or `value` itself when the authored-source shim kept none
+ * there (a refused call's hand-through, a composed stack, a plain object, a
+ * load without the shim).
+ *
+ * Followed to the end, so `defineStack(defineStack({ … }))` answers the inner
+ * literal: each accepted call's result carries its own argument, and only the
+ * innermost one is what the author wrote.
+ */
+function authoredArgumentOf(value: unknown): unknown {
+  const key = Symbol.for(AUTHORED_ARGUMENT_KEY);
+  let current = value;
+  const seen = new Set<unknown>();
+  while (current !== null && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    if (!Object.prototype.hasOwnProperty.call(current, key)) break;
+    current = (current as Record<symbol, unknown>)[key];
+  }
+  return current;
 }
 
 /**
@@ -693,6 +792,11 @@ export async function loadConfig(source?: string, options?: LoadConfigOptions): 
   // The producer's conversion record rides beside the mark and is dropped by
   // the same spread, so it is read here too, off the same value.
   const stackConversions = stackConversionsOf(baseConfig);
+  // `authoredSource`: the stack as WRITTEN. An accepted `defineStack` call has
+  // already converted its result at load, so the chain starts from the
+  // argument the shim kept beside it. Read off the same value for the same
+  // reason: the spread below drops the non-enumerable record too.
+  const authoredBase = options?.authoredSource ? authoredArgumentOf(baseConfig) : baseConfig;
 
   // Preserve named exports (e.g. the `onEnable` runtime hook and `functions`)
   // alongside the default-exported stack. Module-namespace named exports are
@@ -707,9 +811,9 @@ export async function loadConfig(source?: string, options?: LoadConfigOptions): 
   const namedExports: string[] = [];
   const shadowedNamedExports: string[] = [];
   const config = (baseConfig === mod || mod.default == null)
-    ? baseConfig
+    ? authoredBase
     : (() => {
-        const merged: any = { ...baseConfig };
+        const merged: any = { ...(authoredBase as Record<string, unknown>) };
         for (const key of Object.keys(mod)) {
           if (key === 'default') continue;
           // ⛔ `hasOwnProperty`, never `key in merged` (#18419). `in` walks the

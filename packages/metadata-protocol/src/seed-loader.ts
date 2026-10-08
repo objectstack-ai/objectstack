@@ -23,7 +23,10 @@ import {
 } from '@objectstack/spec/data';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 import { resolveSeedRecord } from '@objectstack/formula';
-import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult, runWithAdvisoryAggregation, type AdvisoryGroup } from '@objectstack/core';
+import {
+  bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult, runWithAdvisoryAggregation, type AdvisoryGroup,
+  temporalComparandKind, temporalStorageForm,
+} from '@objectstack/core';
 // [#8442] The repo's ONE recogniser for "this throw is a record-validation
 // failure" — duck-typed on `code`/`name`, the same predicate `mapDataError` and
 // both dispatcher error exits use. Imported rather than re-spelled so the seed
@@ -438,6 +441,39 @@ function seedRowNeedsOrganization(definition: unknown): boolean {
     return true;
   }
   return resolveInjectedSystemColumns(definition).tenant;
+}
+
+/**
+ * [#22301] Put every `Date` a seed row resolved to into the STORED form of its
+ * temporal field, before the row reaches the engine.
+ *
+ * `resolveSeedRecord` evaluates an Expression envelope to whatever the CEL
+ * stdlib returns, and `today()` / `daysFromNow(n)` / `daysAgo(n)` / `now()`
+ * return a JS `Date` (ADR-0053 D1). Handed on as a `Date`, what a hook saw
+ * depended on HOW the hook ran, not on the value: a hook lowered to a body runs
+ * in the sandbox, whose JSON bridge turned it into a full ISO instant
+ * (`2026-10-09T00:00:00.000Z`, even on a `date` field), and the same hook as an
+ * in-process `handler` (a source config, as `@objectstack/verify`'s `bootStack`
+ * boots it) received the `Date` object itself. A hook reading the field as a
+ * string accepted the row under `os dev` and refused it under `bootStack`.
+ * Neither is the value the column stores — the driver writes the ADR-0053 form
+ * (`YYYY-MM-DD` for a `date`) — nor the value a REST write of the same row
+ * hands the hook.
+ *
+ * So the row leaves the loader in that stored form, by the ONE rule the drivers
+ * apply on write (`temporalStorageForm`, `@objectstack/core`): every hook sees
+ * what is stored, however it runs. A non-temporal field, a field the definition
+ * does not declare, and an Invalid Date are left exactly as resolved — the rule
+ * normalizes temporal FORM and never invents a value (its own totality).
+ */
+function seedValuesInStoredForm(record: Record<string, unknown>, definition: unknown): void {
+  const fields = (definition as { fields?: Record<string, { type?: unknown } | undefined> } | null | undefined)?.fields;
+  if (!fields || typeof fields !== 'object') return;
+  for (const [key, value] of Object.entries(record)) {
+    if (!(value instanceof Date)) continue;
+    const kind = temporalComparandKind(fields[key]?.type);
+    if (kind) record[key] = temporalStorageForm(value, kind);
+  }
 }
 
 export class SeedLoaderService implements ISeedLoaderService {
@@ -1248,6 +1284,8 @@ export class SeedLoaderService implements ISeedLoaderService {
         continue;
       }
       const record = { ...(seedResult.value as Record<string, unknown>) };
+      // [#22301] The stored form, not a `Date`, before any hook can see it.
+      seedValuesInStoredForm(record, objectDefinition);
       /**
        * [commit 1cba33f16] Deferrals this row took on a column the write contract
        * requires on insert. Collected during resolution, reported once the

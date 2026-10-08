@@ -208,7 +208,7 @@ function readAt(doc: unknown, keyPath: (string | number)[]): { block: Record<str
   return { block: at as Record<string, unknown>, leaf: String(keyPath[keyPath.length - 1]) };
 }
 
-describe('[#16320] the three surviving cron-typed positions no longer exist on their schemas', () => {
+describe('the three surviving cron-typed positions no longer exist on their schemas', () => {
   for (const site of SITES) {
     it(`\`${site.qualified}\` is gone — an authored value is accepted and STRIPPED, never materialized`, () => {
       const parsed = site.schema.safeParse(site.authored);
@@ -261,7 +261,7 @@ describe('[#16320] the three surviving cron-typed positions no longer exist on t
   });
 });
 
-describe('[#16320] the one manifest-reachable position — what an upgrading stack actually gets', () => {
+describe('the one manifest-reachable position — what an upgrading stack actually gets', () => {
   // ⚠️ REWRITTEN IN PROTOCOL 18, and the direction of every assertion here
   // INVERTED. These pins used to record the 直接删 consequence — the key
   // accepted and silently stripped from `syncConfig`. The connector's
@@ -295,7 +295,7 @@ describe('[#16320] the one manifest-reachable position — what an upgrading sta
   });
 });
 
-describe('[#16320] the tsc channel: the deleted keys are not in their input types', () => {
+describe('the tsc channel: the deleted keys are not in their input types', () => {
   it('fails tsc at every authoring site', () => {
     const connector: Connector = {
       ...CONNECTOR_WELL_FORMED,
@@ -343,8 +343,8 @@ describe('[#16320] the tsc channel: the deleted keys are not in their input type
   });
 });
 
-describe('[#16320] 直接删 — the ADR-0087 surfaces carry NOTHING for these seven', () => {
-  it('[#17158] the four positions that left with their defs are covered at DEF grain, not key grain', () => {
+describe('直接删 — the ADR-0087 surfaces carry NOTHING for these seven', () => {
+  it('the four positions that left with their defs (the export-job family, `ScheduleState`, the connector `DataSyncConfig`) are covered at DEF grain, not key grain', () => {
     const retiredDefs18 = new Set(RETIRED_DEFS_BY_MAJOR[18] ?? []);
     for (const gone of LEFT_WITH_THEIR_DEFS) {
       expect(retiredDefs18.has(gone.def), `${gone.def} must be a RETIRED_DEFS_BY_MAJOR[18] entry`).toBe(true);

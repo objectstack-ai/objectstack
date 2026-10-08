@@ -85,7 +85,7 @@ const boundA = () =>
 const boundB = () =>
   defineStack({ manifest: mf('com.example.b'), objects: [obj('b_item')], actions: [act('dup_y', { objectName: 'b_item' })] });
 
-describe('composeStacks - a bound standalone action appears once in the composed object (#14847)', () => {
+describe('composeStacks - a bound standalone action appears once in the composed object', () => {
   it("carries each input's own bound action once under the default strategy, and the standalone once at the top", () => {
     const a = boundA();
     const b = boundB();
@@ -137,7 +137,7 @@ describe('composeStacks - a bound standalone action appears once in the composed
     expect(keysOf(out).embedded).toEqual({ shared: ['emb3/EMB', 'b3/BOUND', 'b1/BOUND', 'b2/BOUND'] });
   });
 
-  it("with three stacks under objectConflict: 'merge', the composition is refused at the object merge — each built object carries a different `actions` array (#14848)", () => {
+  it("with three stacks under objectConflict: 'merge', the composition is refused at the object merge — each built object carries a different `actions` array", () => {
     // s1's `shared` carries [emb1, b1/BOUND], s2's [emb2, b2/BOUND]: two
     // declarations `'merge'` used to resolve by replacement, dropping `emb1`.
     let msg: string | null = null;
@@ -173,7 +173,7 @@ describe('composeStacks - a bound standalone action appears once in the composed
 });
 
 describe('composeStacks - what the identity skip does NOT fold', () => {
-  it("refuses a hand-written twin — the same action authored standalone AND on its object — through #14686's rule, unchanged", () => {
+  it("refuses a hand-written twin — the same action authored standalone AND on its object — through defineStack's scope-qualified action-key refusal, unchanged", () => {
     const msg = refusal(() =>
       defineStack({
         manifest: mf('com.example.t'),
@@ -221,7 +221,7 @@ describe('composeStacks - round trip through defineStack', () => {
     expect(keysOf(defineStack(out))).toEqual(keysOf(out));
   });
 
-  it("with bound actions, is refused exactly as far as a lone built input is — 'declared twice' by #14686's landed pin, never '3 times'", () => {
+  it("with bound actions, is refused exactly as far as a lone built input is — 'declared twice' by defineStack's scope-qualified action-key refusal, never '3 times'", () => {
     const a = boundA();
     const LINE =
       "  ✗ Action key 'a_item:dup_x' is declared twice: stack.actions[0] (objectName 'a_item') and " +

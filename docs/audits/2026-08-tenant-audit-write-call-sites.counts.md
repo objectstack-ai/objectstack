@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 236 |
-| Object name statically decidable | 156 |
+| Write call sites | 237 |
+| Object name statically decidable | 157 |
 | Object name chosen at run time | 80 |
-| Against a tenancy-enabled object | 155 |
+| Against a tenancy-enabled object | 156 |
 | Against an object declaring tenancy off | 1 |
 | Threading a tenant context | 176 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
-| Options argument unreadable | 52 |
-| …and decidably tenancy-enabled | 31 |
+| Options argument unreadable | 53 |
+| …and decidably tenancy-enabled | 32 |
 | Threading a decidably elevated context | 125 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 103 |
+| Threading a context of undecidable elevation | 104 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-08 at `4b40ca31f`.
+Measured on 2026-10-08 at `8e432893f`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 618 |
+| tracked non-test sources scanned | 621 |
 | engine-shaped types recognised | 70 |
 | declared objects in the registry | 117 |
-| same-named calls subtracted as non-engine | 161 |
+| same-named calls subtracted as non-engine | 162 |
 
 ## Every site
 
@@ -255,4 +255,4 @@ Measured on 2026-10-08 at `4b40ca31f`.
 | `packages/services/service-storage/src/metadata-store.ts` | `update` | `sys_file` | enabled | options unreadable | 1 |
 | `packages/services/service-storage/src/metadata-store.ts` | `delete` | `sys_upload_session` | enabled | options unreadable | 1 |
 | `packages/services/service-storage/src/metadata-store.ts` | `insert` | `sys_upload_session` | enabled | options unreadable | 1 |
-| `packages/services/service-storage/src/metadata-store.ts` | `update` | `sys_upload_session` | enabled | options unreadable | 1 |
+| `packages/services/service-storage/src/metadata-store.ts` | `update` | `sys_upload_session` | enabled | options unreadable | 2 |
