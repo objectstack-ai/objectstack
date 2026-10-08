@@ -403,6 +403,20 @@ const POPULATION_PROPERTY = /^(?:[a-z][A-Za-z0-9]*Roots?|[a-z][A-Za-z0-9]*Dirs?|
  * reads the import graph `os lint` bundles from each config, so the recorded set
  * is now that graph's two shapes, measured with the bundler itself on one tree.
  *
+ * ⭐ A TWENTY-SECOND row was re-decided on 2026-10-08 (#22320), and it is the
+ * first to leave REFUSE-WIDE: `check:error-status-conformance SCAN_ROOT
+ * packages`. That verdict says a declaration would be TRUE and is refused for
+ * width, so nothing in its definition moved. What arrived is the consumer the
+ * 2026-08-26 split treats as the deciding fact: a real diff the derivation was
+ * silent for and CI failed (PR #22311). The card's triage directed the
+ * declaration and kept the extractor's bare-word refusal as designed. ⚠️ Two
+ * readings made the refusal weaker than its siblings: the population is an
+ * EXTENSION filter inside the root, never the root itself, and the
+ * check:logger-receiver-detach row already declares that shape at this root.
+ * So the row is re-measured whole and takes the escape. ⛔ This is no licence
+ * for the other REFUSE-WIDE rows at this root: each still lacks a measured
+ * consumer, so each keeps its verdict until one arrives.
+ *
  * ⭐ ATTRIBUTION was added on 2026-09-19 (#15926), and it is a widening of a
  * PIN rather than a re-decision on any row: no verdict is added, changed or
  * withdrawn, and the 46/13/14 census is the one it was measured at. The
@@ -562,6 +576,20 @@ const SPELLINGS = new Map([
     claim: 'every `.ts`, `.tsx` or `.mts` file at any depth under the packages root',
     holds: (s) => s[0] === 'packages' && s.length >= 2
       && ['.ts', '.tsx', '.mts'].some((ext) => s[s.length - 1].endsWith(ext)),
+  }],
+  ['packages TS and TSX source', {
+    // The entry above WITHOUT its third extension, and kept apart from it on
+    // purpose: the gate that declares this set walks only the two extensions
+    // here (#22320), so a `.mts` hint would name files it never opens. One
+    // entry per declared array, never the nearest wider one, which the
+    // declaration pin below would refuse in both directions anyway.
+    segments: [
+      ['packages', '**', '*.ts'],
+      ['packages', '**', '*.tsx'],
+    ],
+    claim: 'every `.ts` or `.tsx` file at any depth under the packages root',
+    holds: (s) => s[0] === 'packages' && s.length >= 2
+      && ['.ts', '.tsx'].some((ext) => s[s.length - 1].endsWith(ext)),
   }],
   ['example app configs and their source trees', {
     // What `os lint` loads when check:i18n-coverage hands it a config: the
@@ -906,6 +934,36 @@ const TRIAGE = new Map([
       + 'still not covered — no arbitrary file at the top of examples/ is reached — which is what '
       + 'this verdict says and is correct, not outstanding debt',
   }],
+  ['scripts/check-error-status-conformance.mjs SCAN_ROOT packages', {
+    verdict: 'DECLARED-NARROWER',
+    spelling: 'packages TS and TSX source',
+    why: 'RE-DECIDED 2026-10-08 (#22320) from REFUSE-WIDE, whose recorded reason was the precision '
+      + 'trade alone: a true declaration names this gate for every card that touches a package. '
+      + '#22320 is the measured consumer that trade had not priced. PR #22311 added an emit site '
+      + 'under the services tree, the derivation for its diff filed this family in the '
+      + 'artifact-roster block and printed a command list without it, and CI then failed that PR '
+      + 'here. The triage of #22320 directed a declaration in the gate rather than a weaker '
+      + 'extractor, so this row takes the escape and claims no wider authorisation. ⛔ The '
+      + 'population was never the root itself: the walk admits every .ts or .tsx file that is not '
+      + 'a test, spec or declaration file and does not sit in a skipped directory. Since #12300 the '
+      + 'extension half of that filter is spellable, and the check:logger-receiver-detach row '
+      + 'above already declares that shape at this root. RE-MEASURED at commit 4e4111ca0, every '
+      + 'term on one tree: the walk opens 2999 of the 8526 tracked files under the bare root '
+      + '(35.2%). The two hints the gate declares beside SCAN_ROOT under the ROOT_DIR_WATCH_HINTS '
+      + 'idiom cover 7847 of the 8526 (92.0%), and every walked file is among them, so the '
+      + 'declaration is complete. ⚠️ The DIRECTION it errs is stated rather than left to the ratio: '
+      + 'it errs WIDE, naming 4848 files the walk never opens (4826 test or spec files, 21 under a '
+      + 'skipped fixtures directory, one declaration file), so the walk is 38.2% of what it names. '
+      + 'That remainder is the filter no subtree glob can spell, and it is accepted on purpose: the '
+      + 'gate is a source scan with no build, so a wasted run costs one cheap command, while the '
+      + 'miss cost a CI round trip. ⛔ The previous reading, 1898 of 4903, is superseded WHOLE and '
+      + 'neither term is carried forward. The recorded set is SET-EQUAL to the gate array at this '
+      + 'root, and the gate own --self-test holds the other side: the derivation reads both hints '
+      + 'off its source, the emit site of the red diff derives the gate, a docs-only path does not, '
+      + 'and every walked file is covered. The row STAYS in the sweep because the bare root is '
+      + 'still not covered — no manifest, README or other non-source file under packages/ is '
+      + 'reached — which is what this verdict says and is correct, not outstanding debt',
+  }],
   // ── Refused: the population is the whole root, and the root is saturated ──
   ['scripts/check-skill-identifier-liveness.mjs IMPL_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
@@ -988,10 +1046,6 @@ const TRIAGE = new Map([
   ['scripts/check-error-code-casing.mjs SCAN_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
     why: 'tests included, 4408 of 4903 (90%) — same trade as engine-double-contract',
-  }],
-  ['scripts/check-error-status-conformance.mjs SCAN_ROOT packages', {
-    verdict: 'REFUSE-WIDE',
-    why: 'walks every non-test TS source under the root — 1898 of 4903 (39%)',
   }],
   ['scripts/check-optional-error-sink-contract.mjs SCAN_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
