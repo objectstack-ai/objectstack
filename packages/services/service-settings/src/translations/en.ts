@@ -114,7 +114,7 @@ export const en: PlatformTranslationData = {
         finance: { title: 'Finance' },
       },
       keys: {
-        timezone: { label: 'Default timezone', help: 'IANA zone for today()/daysFromNow, analytics date buckets, and rendered datetimes.' },
+        timezone: { label: 'Default timezone', help: 'Decides what "today" means in formulas, how reports group dates, and how dates and times are shown. Accepts any IANA time zone name (e.g. Europe/Paris).' },
         locale: { label: 'Default language', help: 'BCP-47 locale for message catalogs and number/date formatting.' },
         default_country: { label: 'Default country', help: 'ISO 3166-1 alpha-2 code (e.g. US, GB, CN).' },
         currency: { label: 'Default currency' },
