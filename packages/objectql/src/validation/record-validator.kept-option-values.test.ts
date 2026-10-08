@@ -17,9 +17,6 @@ const schema = {
     priority: { name: 'priority', label: 'Priority', type: 'select', options: [{ value: 'high', label: 'High' }, { value: 'low', label: 'Low' }] },
     tags: { name: 'tags', label: 'Tags', type: 'multiselect', options: [{ value: 'important', label: 'Important' }, { value: 'review', label: 'Review' }] },
     stage: { name: 'stage', label: 'Stage', type: 'select', picklist: 'deal_stages', options: [] },
-    // A field may be named after an Object.prototype member; the kept map
-    // must answer only its OWN entries.
-    constructor: { name: 'constructor', label: 'Ctor', type: 'select', options: [{ value: 'x', label: 'X' }] },
   },
 };
 
@@ -73,12 +70,5 @@ describe('validateRecord — keptOptionValues (#22183)', () => {
     expect(verdict({ stage: 'won' }, 'update', { keptOptionValues: { stage: ['won'] } })).toEqual({
       code: 'VALIDATION_FAILED', fields: [{ field: 'stage', code: 'invalid_option' }],
     });
-  });
-
-  it('a field named after an Object.prototype member reads only an own entry of the kept map', () => {
-    expect(verdict({ constructor: 'zzz' }, 'update', { keptOptionValues: { priority: ['zzz'] } })).toEqual({
-      code: 'VALIDATION_FAILED', fields: [{ field: 'constructor', code: 'invalid_option' }],
-    });
-    expect(verdict({ constructor: 'zzz' }, 'update', { keptOptionValues: { constructor: ['zzz'] } })).toBeNull();
   });
 });

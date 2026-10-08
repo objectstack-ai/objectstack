@@ -1889,16 +1889,13 @@ export interface ValidateRecordOptions {
 
 /**
  * [#22183] The kept values {@link ValidateRecordOptions.keptOptionValues} names
- * for one field — an OWN entry holding an array, else none. A field may be
- * called `constructor` or `to_string`, and a plain object answers an inherited
- * member for the first; that is never a list of kept values.
+ * for one field, or none. Only an array is a list of kept values.
  */
 function keptOptionsFor(
   kept: ValidateRecordOptions['keptOptionValues'],
   name: string,
 ): readonly string[] {
-  if (!kept || !Object.prototype.hasOwnProperty.call(kept, name)) return [];
-  const values = kept[name];
+  const values = kept?.[name];
   return Array.isArray(values) ? values : [];
 }
 
