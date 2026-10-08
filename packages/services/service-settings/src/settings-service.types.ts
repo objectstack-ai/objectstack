@@ -70,6 +70,14 @@ export interface SettingsRow {
   key: string;
   scope: SpecifierScope;
   user_id: string | null;
+  /**
+   * The organization a `tenant` or `user` row belongs to — part of the row
+   * identity `sys_setting` declares, `(organization_id, namespace, key, scope,
+   * user_id)`. Written from the caller's `SettingsContext.tenantId`; `null` for
+   * a row written with no organization and for every `global` row (whose store,
+   * `sys_platform_setting`, has no organization column).
+   */
+  organization_id?: string | null;
   value: unknown | null;
   value_enc: string | null;
   encrypted: boolean;
