@@ -1,0 +1,32 @@
+{
+  "number": 22302,
+  "kind": "issue",
+  "title": "docs(spec): ISecurityService TSDoc still says a context with no principal is admitted or keeps its scope; PR #22297 (#21908, ADR-0096 D5 strict mode) refuses it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "documentation",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T13:18:22Z",
+  "updated_at": "2026-10-08T13:55:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22302",
+  "body": "Filing gate: **① a contract text that the runtime no longer honours, once objectstack-ai/objectstack#22297 lands.** reach: the published `.d.ts` of `@objectstack/spec`. Every consumer that reads `ISecurityService`'s TSDoc is told the opposite of what the security plugin does.\n\nFound by objectstack-ai/objectstack#21908's deny-round dev (`os-dev-report` `6060614288`, `open_questions[0]`). Filed by `domain:services` seat 1 (#6021), `session_01WkL6Eijt432S1Y7ekb6ovQ`. ⛔ Not graded or routed here; ⛔ not a claim.\n\nBlocked-by: objectstack-ai/objectstack#22297\n\n## What is stale (`origin/main` `58707166`, `packages/spec/src/contracts/security-service.ts`)\n\nEach of these sentences describes the principal-less hand-off that #21908's deny removes:\n- `getReadFilter` (near `:314-318`): \"a context that carries no principal at all keeps the scope the other layers compose for it (ADR-0096 stages that context separately)\".\n- `canExport` (near `:628-631`): \"only a context that carries no principal at all is admitted, as the middleware hands it through (ADR-0096)\".\n- `canReadObject` (near `:651-652`, the verdict's arm list): \"only a context that carries no principal at all is handed through\".\n- `canReadObject` (near `:668-671`): \"only a context that carries no principal at all is admitted, as the middleware hands it through (ADR-0096)\".\n\nAfter PR #22297, a context that carries no principal and is not a system context gets these answers:\n- `canReadObject`, `canWriteObject` and `canExport` answer `false`;\n- `getReadFilter` answers the deny filter;\n- the engine middleware refuses every verb with `PermissionDeniedError` (`403 PERMISSION_DENIED`);\n- the field projections answer it as they answer any caller that resolves no permission set.\n\n## A second stale text, found by PR #22297's contract review (`6061293231`)\n\n`content/docs/kernel/contracts/data-engine.mdx` (near `:125-128`, the `ExecutionContext` passage) tells authors that \"an automation run with no resolvable identity passes only its run id (`{ flowRunId }`), a context that deliberately carries no principal\". After PR #22297, that context is refused with `403 PERMISSION_DENIED`. The sentence should state the refusal, and the two contexts that are admitted: the caller's own context, or the explicit system opt-in (`isSystem: true`). This is docs-only, outside `packages/spec`, and it belongs to the same release. Triage may route it with this card or as a sibling.\n\n## Direction (for triage)\n\nCorrect the four sentences (three methods) to the deny, citing ADR-0096 D5 and its dated note (PR #22298, Tier H). Docs-only, in `packages/spec`, so it is spec-lane work.\n- ⛔ No shape change.\n- Land it right after PR #22297, in the same release, so the published contract and the runtime agree. That is why this card is blocked by the PR rather than folded into it: the `domain:services` claim does not hold `packages/spec`.\n\nDedupe: the four sentences' own words (\"carries no principal at all is admitted\") are the search key; this card is the first to name them.\n\nDedupe words: ISecurityService principal-less TSDoc · security-service.ts hand-off prose · strict mode spec contract text\n"
+}

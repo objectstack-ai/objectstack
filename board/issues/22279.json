@@ -1,0 +1,34 @@
+{
+  "number": 22279,
+  "kind": "issue",
+  "title": "docs: the released text and four source comments still say an absent security service admits analytics reads; the maintainer ruled deny as measured (objectstack-ai/objectstack#22235, ruling B)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T11:21:39Z",
+  "updated_at": "2026-10-08T14:25:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22279",
+  "body": "Filing gate: **① a product defect, class (b): it states the opposite of a ruled behaviour.** This executes the docs half of the maintainer's ruling B on objectstack-ai/objectstack#22235 (`6056824332`): \"the \"absent admits\" sentence in the released text is corrected by a docs card, since that text is release-owned.\" reach: every reader of these release notes and source docs. PR #22276 (#22235) rewrote the bridge comments in `service-analytics/src/plugin.ts` and the test header. This card carries the rest.\n\nFiled by `domain:services` seat 1 (#6021), `session_01WkL6Eijt432S1Y7ekb6ovQ`, from the #22235 dev report's H4 list. ⛔ Not graded or routed here; ⛔ not a claim.\n\n## The ruled behaviour\n\nOn a deployment with no security service, the analytics read bridges deny, fail-closed, with a located error. The in-repo kernels throw on a never-registered `security` service, so the bridges take UNUSABLE. ABSENT is reached only by a context that answers a miss with nothing, and no in-repo kernel does.\n\n## Released text that says the opposite (release-owned; corrected only by the release's own process)\n\n- `packages/services/service-analytics/CHANGELOG.md`: `:583-584`, `:645-647`, `:1211-1213`, `:1926`, `:1930`, `:1936`, `:1952`, `:2773`.\n- The same lockstep entry's two sentences (service-analytics `:1926` / `:1930`) in:\n  - `packages/plugins/plugin-security/CHANGELOG.md` `:1675`, `:1679`;\n  - `packages/spec/CHANGELOG.md` `:13374`, `:13378`;\n  - `packages/verify/CHANGELOG.md` `:571`, `:575`.\n- `content/docs/releases/v17/17-5.mdx` `:482-484`.\n\nThese are line positions at `origin/main` `3513ac77`.\n\n## Source comments with the same claim, outside PR #22276's fence (not release-owned)\n\n- `packages/services/service-analytics/src/read-admission.ts` `:59-65`: the module header says an ABSENT provider keeps its pre-existing analytics behaviour.\n- `packages/services/service-analytics/src/analytics-service.ts` `:842-845` (`admitObjectRead` doc), `:862-865` (`getReadableFields` doc) and `:1897-1899` (`assertReadAdmitted` doc).\n- `packages/services/service-analytics/src/field-read-admission.ts` `:339-341`.\n\n## Not this card\n\n- The runtime UNUSABLE log text in `plugin.ts` (near `:656`, `:821`) and `read-admission.ts` (`:173-177`) says \"a security service is wired on this deployment\". That is false when none was ever registered. It is a runtime string, so it is a code change with no measured producer left after PR #22276. It is noted in PR #22276's Acceptance notes.\n- Whether ABSENT itself should deny is the #22235 dev's open question, with the four axes in that report. It is not ruled.\n\n## Done when\n\n- Each released sentence is corrected through the release-owned process, or a dated erratum names it.\n- The four source comments state the ruled behaviour.\n\nDedupe: MCP `search_issues` 「analytics released changelog sentence absent security service admits correct docs」 gave 16 hits. #22235 (the ruling's card) came back as the positive control. None is this correction."
+}

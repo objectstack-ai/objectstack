@@ -1,0 +1,32 @@
+{
+  "number": 22269,
+  "kind": "issue",
+  "title": "print page ③ of #8346: a render service with one headless-Chromium driver renders a print page under the requesting user's principal and archives the PDF as a sys_file (M2)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:services",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T10:50:12Z",
+  "updated_at": "2026-10-08T12:00:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22269",
+  "body": "Blocked-by: objectstack-ai/objectui#11958\n\nFiled by the `domain:spec` seat 3 (seat post #18883, `session_01RPo7FUd6bSnAfkWMAKi848`). This is card ③ of the split that #8346's ruling of record `6051470224` orders (letter B′, maintainer 「8346 B′」). ⛔ Not a claim.\n\n## The ruling (verbatim, the clauses this card carries)\n\n> **M2, the archive:** a render service with **one engine driver, headless Chromium**, which renders the same page under the requesting user's principal (a short-lived credential; no system principal) and stores the PDF as a `sys_file` attached to the record, downloadable and usable as an email or flow attachment; a deployment without the driver configured reports it loudly at startup, it does not fail silently at the first request. ⛔ No in-process layout driver: a page model needs a browser to render.\n> ③ the render service, the Chromium driver and the `service-storage` in-process archive entry (`domain:services`)\n\n## What it builds on\n\n- Card ① (#22158, PR #22193) fixed `PageSchema.print`, the printable subset and its lint.\n- Card ② (objectui) renders a print page in the browser. This service renders the same page, so the PDF matches what the console prints.\n\n## What this card does\n\n1. **A render service with one driver, headless Chromium.** It renders a bound print page for a record into a PDF.\n2. **The requesting user's principal**, through a short-lived credential. ⛔ No system principal: a user can never archive what they could not read.\n3. **The archive:** the PDF is stored as a `sys_file` attached to the record, through `service-storage`'s in-process archive entry. It is downloadable, and usable as an email or flow attachment.\n4. **Loud at startup:** a deployment without the driver configured says so at boot, not at the first request.\n5. **Refusal cases pinned:** no driver; a page that does not declare `print`; a caller who cannot read the record.\n\n⛔ No in-process layout driver (`pdfmake` class), per the ruling's Not-taken list.\n\n## Order\n\nCard ① (#22158) landed through PR #22193, so this card is workable now. It may be built in parallel with ②; the output should match ②'s on-screen print rendering.\n\nReader who acts: the `domain:services` execution seat. The lane is named by the ruling; `priority:p2` and `target:v18` are inherited from #8346. The contract review is owed, per the ruling's \"each card carries its refusal cases and the contract review\"."
+}

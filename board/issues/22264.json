@@ -1,0 +1,36 @@
+{
+  "number": 22264,
+  "kind": "pull_request",
+  "title": "docs(blog): link the English deck PDF from the end of 'The Ontology Is the Software'",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T10:33:28Z",
+  "updated_at": "2026-10-08T11:13:41Z",
+  "closed_at": "2026-10-08T11:13:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-08T11:13:39Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/22264",
+  "body": "Fixes #22263\nClause-②: no\n\nOne paragraph added at the end of `content/blog/the-ontology-is-the-software.mdx`, after *Further reading*: an *As a talk* note linking the English deck, \"The Ontology Is the Software — How a large model reads an enterprise\", as a PDF. Nothing else on the page changes.\n\n## Link form\n\nAbsolute, https://objectstack.ai/decks/the-ontology-is-the-software.pdf, not root-relative. The Check Documentation Links lane runs lychee `--offline` with `--root-dir` at `content/` (see `.github/workflows/check-links.yml`), so `/decks/...` would resolve to `content/decks/...` and fail, while an http(s) link is excluded by `--offline`. The file is served from `apps/docs/public/decks/` by PR #22254, ahead of this one in the merge queue.\n\n## Gates (head 8e821262, exit codes captured per command)\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack content/blog/the-ontology-is-the-software.mdx` derives 15 commands; all 15 exit 0: check-ci-filter-parity, check-closing-keyword-parity (and `--self-test`), check-comment-mask-corpus, check-doc-frontmatter (and `--self-test`), the lint package's check:doc-formula-expressions, check:cross-package-test-inputs, check:doc-anchors, check:doc-authoring, check:driver-memory-census, check:gitlink-declared, check:nul-bytes, check:refd-timer-probe, check:watch-hint-literal. The formula-expressions gate first exited 3 (PREREQUISITE NOT MET, nothing measured) in the fresh worktree; it exited 0 after `pnpm --filter \"@objectstack/lint...\" build`.\n\n## Checks\n\n- Docs-only: one file under `content/blog/`. No `packages/**`, `apps/docs/**`, README or generated ledger. Nothing publishes: `skip-changeset`.\n- No model identifier in the diff, the commit or this body.\n- Seat-executed under the maintainer's instruction quoted on the card, and landed through the merge queue on that instruction.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_011hRnra93sK5Q2gTYYTbdJR\n"
+}

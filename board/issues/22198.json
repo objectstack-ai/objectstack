@@ -2,7 +2,7 @@
   "number": 22198,
   "kind": "pull_request",
   "title": "docs(adr): ADR-0048 §3.4 narrowed — positions, permission sets and capabilities hold one name per deployment",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T05:59:49Z",
-  "updated_at": "2026-10-08T07:35:10Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-08T08:40:32Z",
+  "closed_at": "2026-10-08T08:40:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-08T08:40:29Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/22198",

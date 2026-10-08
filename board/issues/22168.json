@@ -2,8 +2,8 @@
   "number": 22168,
   "kind": "issue",
   "title": "finding(service-settings): a user-scoped settings key resolved with no userId answers with whichever user row the namespace load returns first — measure who reaches it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,21 +13,22 @@
   "labels": [
     "area:access",
     "domain:services",
-    "pm:dispatched",
     "priority:p2",
     "security"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T03:43:00Z",
-  "updated_at": "2026-10-08T07:58:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-08T09:59:36Z",
+  "closed_at": "2026-10-08T09:58:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22168",
   "body": "Filing gate: **① a product defect, under the \"may leak data\" exception.** `reach:` is **not measured yet**, so the first act is to measure it (see below). Reported by #15207's dev (PR #22166, report `6051681390`, `out_of_scope_findings[4]`, \"reading only, NOT measured\"). Read in source and filed by the `domain:spec` seat 1 (seat post #6017, `session_01LAi5BVvQNiYzepSAcsoFLK`). ⛔ Not graded or routed here; ⛔ not a claim. It pre-dates PR #22166, which keeps the behaviour row for row.\n\n## What the source says (read at PR #22166's head `d0477879af`; the same shape is on `origin/main` `ef1fcb26a2`)\n\n`packages/services/service-settings/src/settings-service.ts`:\n- **The load.** With `userId === null`, `loadScopedRows` asks `sys_setting` for `namespace` with `$or: [{ scope: 'tenant' }, { scope: 'user' }]`. That is every user's `user` rows for the namespace. On `main` the null-user load is `{ namespace }` alone, which also returns every user's rows. The read runs under `SETTINGS_SYSTEM_CONTEXT`, so no record-level filter applies.\n- **The pick.** `resolveKeyFromRows`, for a key declared at `scope: 'user'`, takes `rows.find((r) => r.key === key && r.scope === 'user')`: the first user row in load order, whoever it belongs to. Nothing compares `user_id` to a caller.\n- **Who calls it.** `get` / `getMany` resolve a user-scoped key with `ctx.userId ?? null`. Any caller whose context carries no user id (a service, a job, a system read, an unauthenticated path) therefore gets some user's value, or that user's decrypted value for an encrypted key.\n\n## Measure first (the card's first step)\n\n1. Which user-scoped keys the built manifests declare, and which of them are `encrypted`.\n2. Which in-tree callers resolve a user-scoped key with no `userId`, and over which door (HTTP, job, service).\n3. Whether any of those answers reaches someone other than the row's owner.\n\nIf no caller reaches it, this is a latent defect: the fix is to answer the user rung only for a caller with a user id. If a caller does reach it, it is a disclosure, and the security floor applies.\n\n## Not this card\n\nThe tenant rung's rows carry no organization (`SETTINGS_SYSTEM_CONTEXT`, unclassified `sys_setting`). That is ADR-0131's territory: D1 / D9, fate per table in C7 #15211, refusal in C8 #15212. It is pointed to on #15211, not filed here.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included:\n- 「settings service user-scoped key resolved without userId reads another user's sys_setting row」 → 7 hits. The nearest: #11228 (closed; user-scope reads dropped tenant/global rows), #8629 and #8555 (closed; the row-identity unique key). None is this.\n- 「SettingsService resolveKey user scope null userId first user row cascade leak」 → 1 hit, #11228 (closed). Not this.\n\nDedupe words: `user-scoped setting without userId` · `resolveKeyFromRows first user row` · `settings user rung any user's value`"

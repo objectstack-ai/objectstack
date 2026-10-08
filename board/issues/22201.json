@@ -2,8 +2,8 @@
   "number": 22201,
   "kind": "issue",
   "title": "plugin-security: sys_user_permission_set.granted_by is a plain lookup, so a granter row that no longer resolves is filed as a dangling business reference and keeps cloud's hourly integrity WARN red",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:access",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T06:06:16Z",
-  "updated_at": "2026-10-08T07:16:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-08T09:47:37Z",
+  "closed_at": "2026-10-08T09:45:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22201",
   "body": "Filing gate: ① a product defect, reach measured. Cloud's production control plane raises the hourly `[integrity] stored references that resolve to nothing (#4551)` WARN on every run. One of its findings is `sys_user_permission_set#ups_d85cfc63b091b7b1.granted_by` → `sys_user#manual:db-cutover-superadmin`, 1 of 13 rows in the 2026-09-15 reading (objectstack-ai/cloud#2274, comment 5673661010).\n\nFound by the objectstack-ai/cloud#2274 dev (os-dev-report, objectstack-ai/cloud#2274 comment 6053481678, which carries the measurement and the draft below). Filed by the `repo:cloud` seat (`repo:cloud#1`, R45, session `session_011jobP72PwN3whNm55GetXQ`), because the fix lands in this repo. ⛔ Not a claim.\n\n## The defect (read at `56bf27af`, cloud's pin)\n\n- `packages/objectql/src/integrity/dangling-reference-audit.ts` (about :470) routes a finding by `readonly === true` alone. A `readonly` reference that resolves to nothing goes to `provenance`, and the WARN condition (about :735) does not include `provenance`.\n- `packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts:84`: `granted_by` is `Field.lookup('sys_user', { required: false, … })`, not `readonly`. So a granter that is gone, or a sentinel, raises the alarm as a broken business reference.\n- This repo already treats the column as provenance: `auto-org-admin-grant.ts:785` says \"[#4586] The provenance the row already had a column for\". It also quotes ADR-0118 D1 (:786–788): \"an id or null, never a sentinel\".\n- The family shares the shape:\n  - `sys_user_position.granted_by` (`sys-user-position.object.ts:106`);\n  - plugin-sharing `sys_record_share.granted_by` (`sys-record-share.object.ts:230`).\n  Each needs its own measurement.\n\n## Fix (the dev's draft; measure first)\n\n- Add `readonly: true` to `granted_by`, and to each family member after measuring it.\n- **Measure the writer first.**\n  - `delegated-admin-gate.ts` (:645, :781, :820) stamps `granted_by = ctx.userId` only when the value is null (\"never overwrite an explicit value\").\n  - With `readonly`, an explicit caller value that the gate leaves alone is stripped by `stripReadonlyFields`, so the row lands NULL.\n  - Either the gate always stamps the writer on non-system inserts, or #14088's hook-write record must be shown to keep the gate's stamp.\n  - System-context writers keep their value: `invitation-placement.ts:204`, `auto-org-admin-grant.ts:790` and `bootstrap-platform-admin.ts:1138`.\n- **The dev's open question, for this lane to settle:**\n  - A: `readonly`, and the gate always stamps the writer on non-system inserts.\n  - B: `readonly` only, relying on #14088.\n  - C: no `readonly`, with an audit-side exemption.\n  - The dev recommends A, so that \"granted_by = writer\" becomes enforced. C is a consumer-side carve-out, which contract-first rules out. B leaves a silent NULL path.\n- **Test:** a row whose `granted_by` names a deleted user lands in `provenance`. As a positive control, a business lookup still lands in `dangling`.\n\n**Not in scope:** the production row holds a sentinel string. Nulling it is a production write, and it needs cloud's maintainer.\n\n## Done when\n\n- A `granted_by` that resolves to nothing is filed under `provenance`, and the WARN no longer fires on it.\n- A non-system caller cannot set an arbitrary granter.\n\n## Reach and timing\n\n- Cloud consumes this repo by pin and stays on `56bf27af` until v18 (#22050, ruling B), so the fix reaches cloud's alarm with v18.\n- The rest of objectstack-ai/cloud#2274 lands in cloud's PR #2678: the usage rows become provenance, and `sys_import_job` is created. After that, this column is the WARN's last finding.\n\n## Reader\n\nTriage routes it. By its package it lands in the `plugin-security` lane.\n\n## Dedupe\n\nA semantic search for `granted_by readonly provenance dangling reference audit sys_user_permission_set` finds 27 issues, all of them adjacent and none this defect (the closest are #21861, #21669 and #21455). The dev's dedupe words are: `granted_by readonly provenance`, `dangling-reference audit granted_by`, `db-cutover-superadmin` and `delegated-admin-gate granted_by explicit value`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

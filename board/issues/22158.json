@@ -2,8 +2,8 @@
   "number": 22158,
   "kind": "issue",
   "title": "spec(print page) ① of #8346: a `page` gains an optional `print` declaration, a linted printable-block subset, the list-export retirement sentence made true, and the three zero-reader document schemas retired",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p2",
     "target:v18"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T03:23:06Z",
-  "updated_at": "2026-10-08T07:30:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-08T10:48:50Z",
+  "closed_at": "2026-10-08T10:47:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22158",
   "body": "Part of #8346. This is split card ① of the ruling `6051470224` (B′, maintainer 「8346 B′」, 2026-10-08T03:18Z, recorded by the director seat). Filed by the `domain:spec` seat 3 (seat post #18883, `session_01RPo7FUd6bSnAfkWMAKi848`), the design parent's holder. ⛔ Not a claim.\n\n## The ruling this card executes (verbatim, from `6051470224`)\n\n> **B′. A document is a page with a print declaration; no new template type.**\n> - **The template is a `page`.** … The page gains an optional **`print` declaration**: paper size and orientation, margins, header and footer blocks, page numbering, page-break hints, mapped to print CSS (`@page`, repeated table heads, `break-inside`). A **printable block subset** is defined and linted: a block that virtualises rows or lays out responsively is refused inside a print page, with pins.\n> - **The 17.0 retirement stands and its text changes.** List export does not regain `'pdf'`; the retirement sentence in `packages/spec/src/ui/list-view-export-options.ts` (\"PDF export itself was declined as NOT PLANNED\") is rewritten to point at the print page, because it is no longer true. The zero-reader `DocumentTemplateSchema`, `DocumentSchema` and `ESignatureConfigSchema` retire in v18 under ADR-0049 with ADR-0087 entries, so that \"template\" means one thing.\n> - ⛔ **Not taken:** A (restoring `'pdf'` on list export …), B (a second authoring vocabulary beside pages …), C as the end state …, a Word-upload template kind, batch merging or packaged downloads …, and the in-process `pdfmake`-class driver.\n\nThe split, from the same ruling:\n- ① spec (this card);\n- ② objectui (`domain:ui`): the print CSS mapping, the printable blocks, the record page's print action;\n- ③ the render service, the Chromium driver and the `service-storage` archive entry (`domain:services`);\n- ④ the record-page \"generate PDF\" action and the attachment on the record.\n\n\"Each card carries its refusal cases and the contract review; the Studio author's skill learns the print page when ① lands.\"\n\n## Scope of ① (spec only)\n\nRead on `main` `fec87e7e0`:\n1. **`print` on `PageSchema`** (`packages/spec/src/ui/page.zod.ts:788`, a `strictObject`). Optional and closed:\n   - paper size and orientation;\n   - margins;\n   - header and footer blocks (page blocks);\n   - page numbering;\n   - page-break hints.\n\n   Every key is declared with a `.describe()` that names what it maps to in print CSS. ⛔ Nothing is declared that no renderer will honour: each key names its consumer, ② (browser print) and later ③ (the Chromium driver). Per the declared-equals-enforced rule, a key whose ② consumer does not exist yet is either left out of ① or recorded as a liveness-ledger row in `planned` naming ②.\n2. **The printable block subset and its lint.** A block that virtualises rows or lays out responsively is refused inside a page that declares `print`, with its location, at the authoring doors (`os validate` / `os build` and the save door, per the existing page-block lint family). Pinned: each refused block type, plus a print page built only from printable blocks (record field blocks, static all-rows tables, text, images) that passes.\n3. **The retirement sentence** in `packages/spec/src/ui/list-view-export-options.ts` (`:38`, \"(PDF export itself was declined as NOT PLANNED) — no renderer has ever produced a PDF …\") is rewritten to point at the print page. ⛔ `'pdf'` does not return to `exportOptions`.\n4. **Three retirements under ADR-0049**, each with its ADR-0087 entry: `DocumentTemplateSchema`, `DocumentSchema` and `ESignatureConfigSchema` (`packages/spec/src/data/document.zod.ts`).\n   - The claimant measures \"zero readers\" first, across the repo and objectui.\n   - The `spec-property-retirement` skill (`.claude/skills/`) is the kit: tombstone or removal route, the liveness-ledger discipline, generated baselines, docs and pins.\n\n## Contract notes for the claimant\n\n- `Clause-②: yes`: `print` widens `PageSchema`'s public face. The retirements and the printable-subset refusal narrow, so the arm is `(narrowing)` and BREAKING with its ADR-0087 dispositions. The contract review is owed at `CONTRACT_REVIEW_TIER`.\n- It may land in passes (for example the `print` declaration and lint first, the retirements second), each `Part of` this card.\n- **Serial:** `page.zod.ts` and `document.zod.ts` are in the spec lane's hot surface. Read open PRs' file lists at claim."

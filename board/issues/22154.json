@@ -2,8 +2,8 @@
   "number": 22154,
   "kind": "issue",
   "title": "[finding] service-analytics: every default boot logs a WARN that no \"security\" service was registered at init, although the Security plugin registers moments later — the sibling `getReadScope` path logs the same situation at `info`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:devpath",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T03:14:00Z",
-  "updated_at": "2026-10-08T08:02:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-08T09:34:31Z",
+  "closed_at": "2026-10-08T09:33:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22154",
   "body": "Filing gate: ① product defect with a named landing spot and a reproduction (`finding` class (a): a false-alarm WARN reproduced on every boot of the default composition; also the shape AGENTS.md \"Startup registry reads\" names as a defect).\nreach: public entry measured once — `npx os dev --ui` / `npx os start --artifact` on a fresh `npm create objectstack@latest` project prints the WARN under \"Boot diagnostics\" on three consecutive boots while `Plugins: 41 loaded … Security …` is on the same banner.\nReader: `domain:services` seat (`packages/services/service-analytics/src/plugin.ts`, the `admitObjectRead` branch around lines 1446–1455).\nDedup: `search_issues` \"Analytics No admitObjectRead configured and no security service registered at init warning on every boot\" (open + closed) → 0 cards on the warning itself; #3618 (closed) introduced the per-query bridge this warning describes and is the prior ruling to read.\nFiled on the maintainer's instruction in this session: 「设想你是一个新人,第一次打开 github objectstack 项目主页,了解本项目,并按照文档指引执行完整的试用流程,并对阅读文档和试用过程中遇到的问题立 issue」.\n\n## Summary\n\nA freshly scaffolded project (`npm create objectstack@latest`, blank template, default plugin set — 41 plugins loaded, `Security` among them) prints this in **Boot diagnostics** on every `os dev` / `os start`:\n\n```text\nWARN [Analytics] No admitObjectRead configured and no \"security\" service registered at init — the bridge resolves per query,\nbut if no security service ever appears, analytics queries will NOT enforce the OBJECT-LEVEL read grant. On a SQL driver\nthat means any authenticated caller can post an inline dataset and read counts and groupings for an object they hold no\ngrant on. Supply admitObjectRead or register a security service.\n```\n\nThe security service does appear on the same boot. `packages/services/service-analytics/src/plugin.ts` (around line 1420–1455) handles the two bridges differently for the identical condition \"security not registered yet at my `init`, bridge resolves per query\":\n\n- `getReadScope` bridge → `ctx.logger.info('[Analytics] getReadScope bridged to the \"security\" service; that service is not registered yet at init and will be resolved per query (plugin order is not significant).')`\n- `admitObjectRead` bridge → `ctx.logger.warn(…)` with the text above, warning about a consequence that only holds if no security service **ever** registers.\n\nSo on the default composition the WARN is a false alarm, repeated on every boot, and it is the first security-sounding line a newcomer reads in their new project. It is also the shape AGENTS.md's \"Startup registry reads — never record a verdict the boot can still contradict\" rule describes: a read of the service registry during `init()`, a terminal conclusion drawn from \"absent\", recorded as a `warn` that nothing later retracts when the provider registers.\n\n## Reproduction\n\n`@objectstack/cli@17.7.0`, `@objectstack/service-analytics@17.7.0`, Node v22.22.0.\n\n```bash\nnpm create objectstack@latest my-app && cd my-app\nnpx os dev --ui          # or: npx os start --artifact ./dist/objectstack.json after `pnpm run build`\n```\n\nBoot output: `Plugins: 41 loaded … Security … AnalyticsServicePlugin …` followed by `⚠ Boot diagnostics — 4 warnings logged during startup`, one of which is the line quoted above. Reproduced on three consecutive boots (existing SQLite DB and `--fresh`).\n\n## Expected\n\nPer-query resolution is the designed behaviour, so init-time absence of `security` is not a problem to warn about. Either log it at `info` like the `getReadScope` sibling, or defer the verdict to `kernel:ready` / `kernel:bootstrapped` and warn only if the security service is still absent then (cure 1 and cure 3 in the AGENTS.md rule).\n\n## Actual\n\nA `warn` fires on every default boot describing a data-exposure consequence that does not apply to the running composition.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -1,0 +1,31 @@
+{
+  "number": 22249,
+  "kind": "issue",
+  "title": "[finding] cli(doctor): in the source checkout `os dev` serves, the `Environment files` row still resolves the `.env*` cascade for node_env=production, directly above #22163's development row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:cli",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T09:15:05Z",
+  "updated_at": "2026-10-08T10:01:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22249",
+  "body": "Filing gate: **① a product inconsistency, class (a), measured on the public door.** Raised by #22163's dev (PR #22231, report on #22163, H4) and carried by the `domain:cli` seat in its ACCEPT (`6055243265`). Filed by that seat (seat post #6024, `session_01RWZbGvPFcRKvUqASZtunCU`). ⛔ Not a claim. Triage sets the grade and the lane. It may need the maintainer: it runs into an earlier PM ruling (#5387, below).\n\n## What a freshly scaffolded project prints now\n\nAfter PR #22231 (`b9e6e5c132`, #22163), `os doctor` in a project written by `npm create objectstack` (blank template, `NODE_ENV` unset) prints these two rows one above the other. Measured by the dev with the branch's CLI on a published-17.7.0 scaffold:\n\n```text\n✓ Environment files    No .env* files here (node_env=production) — environment read from this process only — no environment input set\n✓ NODE_ENV             Not set — os dev runs this project as development; os start forces production\n```\n\n- **The second row is #22163's fix:** beside an `objectstack.config.ts` that boots as itself, an unset `NODE_ENV` reads as development.\n- **The first row still names `node_env=production`.** That is the `.env*` cascade doctor resolves through `doctorNodeEnv()`, which is `NODE_ENV || 'production'` (`packages/cli/src/commands/doctor.ts`), the one `os serve` and `os start` load when `NODE_ENV` is unset.\n  - `os dev` loads the `development` cascade instead (`dotenv-flow` with `node_env: 'development'`, `dev.ts:330` on `main`).\n  - So in a source checkout, doctor attributes every `.env*`-derived input against `.env.production*`, while the command the project actually runs reads `.env.development*`.\n- On the facts the two rows do not contradict each other: each names what a different command does. But a newcomer still reads `production` in a dev project. That is a milder form of the confusion #22163 was filed for: the maintainer asked that, beside a config with no artifact, doctor 「按开发语义判断」.\n\n## Why this is not a straight fix\n\n- **#5387's PM ruling declined a `--dev` mode for doctor.** It made doctor resolve the cascade exactly as `os serve` does, and its docblock (`doctorNodeEnv`, `doctor.ts` about `:148`) records that. #22163 deliberately left the cascade alone and changed only the `NODE_ENV` row (claim `6054433018`).\n- Resolving the `development` cascade in the source posture would change more than wording. It would change which `.env*` files doctor reads, so it changes every env-derived verdict there, the tenancy-posture refusal among them.\n\n## The question\n\nIn the source checkout `os dev` serves (`nodeEnvSourcePosture`, `doctor.ts:316` on `main` at `b9e6e5c132`), which should doctor do?\n\n- **A. Keep the production cascade.** It is what `os serve` / `os start` would load. Reword the `Environment files` row there so it says whose cascade it is (for example `node_env=production, as os serve / os start load it`).\n- **B. Resolve the `development` cascade there,** the one `os dev` loads. That revisits #5387's ruling for this posture.\n- **C. Leave both rows as they are.**\n\n## Reader who acts\n\nTriage grades and routes. The file is `packages/cli/src/commands/doctor.ts`, `domain:cli`'s. A is a wording change in one row. B moves every env-derived doctor verdict in the source posture and probably wants the maintainer's word first.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included: 「os doctor Environment files row node_env production source checkout os dev development cascade .env.development」 gives 5 hits:\n- #22163 (the row this follows);\n- #5673 and #5387 (the rulings above);\n- #5397 (doctor's config load and the `.env*` overlay);\n- #9075 (unrelated).\n\nNone is this question.\n\nDedupe words: `doctor Environment files node_env production dev project` · `doctor source posture cascade .env.development` · `doctorNodeEnv os dev cascade`"
+}

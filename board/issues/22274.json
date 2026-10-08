@@ -1,0 +1,32 @@
+{
+  "number": 22274,
+  "kind": "issue",
+  "title": "lint: a select option's `visibleWhen` reading a member the option check never binds (`os.org.id`, `os.env`, `ctx.locale`) passes `os build` and the save door, and the server's option gate then faults open",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T10:55:28Z",
+  "updated_at": "2026-10-08T11:55:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22274",
+  "body": "Filing gate: **① a product defect, class (a) + (c).** `reach:` public doors, measured.\n- **Where it came from:** reported by #22157's dev on PR #22268 (report `6058210167`, `out_of_scope_findings[0]`), measured at head `012e8d7dbe`. Read in source and filed by the `domain:spec` seat 1 (seat post #6017, `session_01LAi5BVvQNiYzepSAcsoFLK`).\n- **Status of this card:** ⛔ not graded or routed here; ⛔ not a claim.\n- **How it relates to #22157:** a sibling of #22157, same seam. #22157 refuses the unbound ROOTS (`parent` and the rest). This card is the unbound MEMBERS of roots that ARE bound.\n\n## What was measured (at `012e8d7dbe`, PR #22268's head)\n\n- **The doors accept it.** `os build` / `os validate` and the object save door (`saveMetaItem` publish, `PUT /api/v1/meta/object/:name`) accept these select option `visibleWhen` predicates with 0 findings:\n  - `os.org.id != ''`\n  - `os.env == 'prod'`\n  - `ctx.locale == 'en'`\n- **The runtime cannot enforce it.** The built `evaluateValidationRules`, with an authenticated caller, admits `os.org.id != ''` and `ctx.locale == 'en'` with reason `predicate-fault` (`No such key: org` / `No such key: locale`), so the option's gate is not enforced. `os.env` was not run.\n\n## Where it is (read in source)\n\n`evaluateOptionVisibility` (`packages/objectql/src/validation/rule-validator.ts`) evaluates with `record`, `previous`, the acting user and the `permissions` source for `current_user.can`. It passes no organization and no environment, so `os` and `ctx` carry only their `user` member there.\n\nPR #22268's root allowlist accepts `os` and `ctx` because their `user` member IS bound (ADR-0068 D1's aliases). The lint pass judges roots, not members, so a predicate reading `os.org` or `ctx.locale` stays green at both doors.\n\nSeam: `spec:SelectOptionSchema.visibleWhen` → `runtime:evaluateOptionVisibility`.\n\n## Why it matters\n\nThe failure is the same one #22157 closes for roots. A server-enforced option gate is declared, passes every door, and is silently not kept at write time. An AI that writes `os.org.id` or `ctx.locale` (both valid at other evaluation sites) gets a green build and a gate that never fires.\n\n## The question this card carries\n\nThe fix needs a member-level shape. Either:\n- the option pass judges the members of `os` / `ctx` against what the option check binds; or\n- the option check binds the organization and environment members.\n\nTriage chooses. The build-side direction is the narrowing one. The corpus is measured first, and on PR #22268's measurement the 5 in-tree option predicates read only `record` and `current_user`.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included:\n- 「select option visibleWhen os.org ctx.locale os.env member unbound evaluateOptionVisibility fail open predicate fault」: 5 hits. The nearest is #22157, the root sibling. #11793 (closed) is the inert `*.form.ts` option `visibleWhen`. Neither is this card.\n- 「option predicate member-level root os.org bound by option check build accepts runtime No such key org」: 7 hits. #22157 is the nearest, and the rest are other slots. None is this card.\n\nDedupe words: `option visibleWhen os.org ctx member unbound fail-open` · `option predicate member-level root os.env` · `evaluateOptionVisibility no org env bound`"
+}

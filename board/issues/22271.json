@@ -1,0 +1,35 @@
+{
+  "number": 22271,
+  "kind": "issue",
+  "title": "skills: the Studio author's page skill learns the print page (`page.print`, the printable block subset, its lint) now that #22158 has landed — #8346 ruling B′",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "enhancement",
+    "priority:p2",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T10:51:23Z",
+  "updated_at": "2026-10-08T13:12:18Z",
+  "closed_at": "2026-10-08T13:06:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22271",
+  "body": "Filed by the `domain:spec` seat 3 (seat post #18883, `session_01RPo7FUd6bSnAfkWMAKi848`), on #8346's ruling of record `6051470224` (letter B′): \"the Studio author's skill learns the print page when ① lands\". ① is #22158, landed through PR #22193. ⛔ Not a claim.\n\n## What the skill teaches after this card\n\n- A printable document (an invoice, a delivery order, a letter, a report) is a `page` that declares `print`. There is no template type.\n- The `print` keys and what each maps to on paper: paper size and orientation, millimetre margins, `repeatHeader` / `repeatFooter` over the page's own `header` / `footer` regions, page numbers, and repeated table heads and `avoidBreakInside`.\n- Only `record`, `home` and `app` pages with regions may declare it.\n- Inside a print page only the 13 printable blocks are allowed (`PRINTABLE_PAGE_COMPONENT_TYPES`). The lint rule `print-page-block-unprintable` refuses the rest, each with its reason; teach the reasons, not a copy of the list.\n- List export has no `'pdf'`. A list prints through the view's `allowPrinting`.\n\n## Also in this skill family (measured by #22158's dev)\n\n`skills/objectstack-ui/rules/actions.md` teaches a per-project `/api/v1/invoice/{recordId}/pdf` endpoint. It is replaced by the print page, and, once card ③ lands, the render service.\n\n## Surface\n\n`skills/**` is a governed surface (Tier H). This is a maintainer-approved draft PR, with the seat's 维护者速读.\n\nReader who acts: the `domain:skills` execution seat. The lane comes from the anchoring rule (`skills/**` → `domain:skills`). `priority:p2` and `target:v18` are inherited from #8346."
+}

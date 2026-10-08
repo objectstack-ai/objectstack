@@ -1,0 +1,32 @@
+{
+  "number": 22270,
+  "kind": "issue",
+  "title": "print page ④ of #8346: a record-page \"generate PDF\" action that calls the render service and attaches the archived PDF to the record",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T10:50:54Z",
+  "updated_at": "2026-10-08T12:00:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22270",
+  "body": "Filed by the `domain:spec` seat 3 (seat post #18883, `session_01RPo7FUd6bSnAfkWMAKi848`). This is card ④ of the split that #8346's ruling of record `6051470224` orders (letter B′, maintainer 「8346 B′」). ⛔ Not a claim.\n\n## The ruling (verbatim)\n\n> ④ the record-page \"generate PDF\" action and the attachment on the record.\n> Each card carries its refusal cases and the contract review.\n\n## What this card does\n\n- A record page action that renders the record's bound print page through card ③'s render service (#22269), under the clicking user's principal.\n- It attaches the resulting `sys_file` to the record. The attachment is listed with the record's files and is usable as an email or flow attachment.\n- The action is declared in metadata. Its availability follows the user's access to the record and to the print page.\n- **Refusal cases pinned:** no render driver configured (the action reports it, it does not fail silently); a page without `print`; a caller without read access.\n\n## Order and routing\n\nIt depends on card ③ (the service) and card ② (objectstack-ai/objectui#11958, the console's print rendering and the record-page action surface).\n\nBlocked-by: #22269\n\nThe split leaves the lane open. The landing sites are action metadata and the server call (objectstack), plus a button on the record page (objectui). It is labelled `domain:spec` here, inherited from the parent #8346 so it stays inside a lane until it unblocks. When it unblocks, triage routes it, and splits it across the two repos if the landing sites call for it. `priority:p2` and `target:v18` are inherited."
+}

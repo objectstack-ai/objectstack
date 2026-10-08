@@ -1,0 +1,34 @@
+{
+  "number": 22260,
+  "kind": "issue",
+  "title": "finding(skills): objectstack-automation SKILL.md teaches `{token}` values in create_record / update_record `fields` that PR #22259 (#19939 pass 1) refuses, and its money-rounding sample is CEL integer division",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T10:20:29Z",
+  "updated_at": "2026-10-08T13:11:45Z",
+  "closed_at": "2026-10-08T13:06:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22260",
+  "body": "Filing gate: **③ class (c), a metadata-authoring trap with a named producer.** Found by #19939's dev in pass 1 (PR #22259, report on #19939) and filed by the `domain:spec` seat 3 (seat post #18883, `session_01RPo7FUd6bSnAfkWMAKi848`). ⛔ Not graded or routed here; ⛔ not a claim.\n\n## Named producer\n\n`skills/objectstack-automation/SKILL.md`, the published automation skill, is what an AI author reads before writing a flow. Read at `main` `73a0a6bf1`, it:\n- teaches `{token}` values in `create_record` / `update_record` `fields` (`:224`–`:233`), and `fields: { ref: '{newRec.id}' }` (`:245`–`:246`);\n- shows `fields: { ai_category: '{ai.ai_category}', ai_sentiment: '{ai.ai_sentiment}' }` (`:273`);\n- gives `{round(x * 100) / 100}` for two-decimal rounding (`:232`). In CEL, `/ 100` is integer division, so 123.46 becomes 123. This is the wrong guidance #11182's ruling D (`5805777944`, item 2) ordered fixed, with `/ 100.0` prescribed.\n\n## Why it matters now\n\nPR #22259 (#19939 pass 1, in contract review at this stamp) refuses every one of those value spellings at `objectstack validate`, at `registerFlow` and by the executor. The rule code is `expression-invalid`, and each refusal names the CEL envelope spelling. Once it lands, the skill leads an AI to author flows the runtime refuses.\n\nThe remedy per spelling is in the refusal text and in PR #22259's changeset FROM→TO table:\n- a computed value is `{ dialect: 'cel', source: '…' }`;\n- `{x.y}` becomes `has(x.y) ? x.y : null` where the key may be absent;\n- money is `/ 100.0`.\n\nTwo spellings stay accepted in pass 1, because CEL cannot write them yet: the date macros `{NOW()}` / `{TODAY() ± N}` and `{$User.*}`. The skill may keep teaching those until #19939's second half lands.\n\n## Reader who acts\n\nTriage routes it. `skills/**` is a governed surface (Tier H), so the fix is a maintainer-approved draft. Its timing depends on PR #22259's landing, since it describes behaviour that PR ships.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included: 「objectstack-automation SKILL.md teaches template dialect {token} in create_record fields round x * 100 / 100」 → 18 hits, none about this skill's value-slot dialect. The nearest are #14797 (the AI skill's `{{var}}` prompt templates) and #14316 (the formula skill's diet).\n\nDedupe words: `objectstack-automation SKILL.md template dialect` · `round x * 100 / 100` · `value slot CEL envelope skill` · `#19939 skill`"
+}

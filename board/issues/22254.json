@@ -1,0 +1,36 @@
+{
+  "number": 22254,
+  "kind": "pull_request",
+  "title": "docs(site): ship the English deck 'The Ontology Is the Software' as a vector PDF under apps/docs/public/decks",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T09:31:47Z",
+  "updated_at": "2026-10-08T10:47:14Z",
+  "closed_at": "2026-10-08T10:47:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-08T10:47:12Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/22254",
+  "body": "Fixes #22253\nClause-②: no\n\nOne new binary, nothing else: the English deck \"The Ontology Is the Software — How a large model reads an enterprise\" as a PDF the docs site serves.\n\n## What changed\n\n| File | Change |\n| :--- | :--- |\n| `apps/docs/public/decks/the-ontology-is-the-software.pdf` | new: 17 pages, 1920 x 1080, 768,057 bytes, vector text with embedded fonts (Inter, IBM Plex Mono) |\n\nServed at https://objectstack.ai/decks/the-ontology-is-the-software.pdf by the docs app, the same way `apps/docs/public/hero-cover-dark.webp` is served from the site root. No page links to it yet; where it is linked from is a separate maintainer decision (card body).\n\n## How it was made\n\nPrinted by Chromium (`page.pdf`, one 1920 x 1080 page per slide, `printBackground`) from the deck's slide HTML, after the maintainer's byline ruling: the speaker name is replaced by \"ObjectStack Team\" on the cover and the closing slide, matching the blog essay's byline. Deck order: cover · what an enterprise is · one definition, never written down · the model knows everything except your company · a brilliant new hire on day one · when execution is nearly free · ontology, the study of what there is · where it lives once written down · who is building ontologies in 2026 · an ontology written clearly enough runs directly · what the runtime does with the definition · all three, now · an agent reads an enterprise in three steps · what an enterprise truly owns · the future enterprise · what you get · three sentences to take home.\n\n## Checks\n\n- No `packages/**`, `content/**`, `README.md`, app code or generated ledger touched; nothing publishes, so `skip-changeset`.\n- `scripts/check-nul-bytes.mjs` judges binary-ness by content and skips real binaries; the PDF is one.\n- No model identifier in the PDF text, the commit or this body.\n- Seat-executed under the maintainer's direct instruction (card body quotes it); the seat does not merge its own PR, so this stays a draft for the maintainer to land.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_011hRnra93sK5Q2gTYYTbdJR\n"
+}

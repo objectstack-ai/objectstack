@@ -11,19 +11,22 @@
     "type": "User"
   },
   "labels": [
+    "area:devpath",
     "bug",
+    "domain:cli",
     "performance",
+    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T08:08:17Z",
-  "updated_at": "2026-10-08T08:08:17Z",
+  "updated_at": "2026-10-08T09:07:12Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22237",
   "body": "Filing gate: ②, a defect the cloud seat measured while working cloud#2692. The dev of that card recommended filing it here as the long-term home.\n\nDedupe: an open-issue search for `console static cache-control immutable` returned nothing.\n\n## Reading\n\n**At `origin/main`,** `packages/cli/src/utils/console.ts:605-607`, the console static plugin (`createConsoleStaticPlugin`) answers every non-HTML file under the console dist like this:\n\n```ts\nconst content = fs.readFileSync(filePath);\nreturn new Response(content, { headers: { 'content-type': mimeType(filePath) } });\n```\n\nIt sends no `cache-control`, no `etag` and no `last-modified`. With no validator and no lifetime, a browser cannot reuse a chunk, so **every console load re-downloads the whole SPA**.\n\n**Measured on hosted ObjectOS before cloud's Worker-level fix:**\n- staging `os-6hf1jq.objectos.app`: 247 chunks, 2.8 MB on the wire, every one with `transferSize > 0`;\n- `domContentLoaded` at 67 s on the maintainer's link.\n\nHosted cloud now papers over this with an edge cache in its environment Worker (objectstack-ai/cloud#2692, PR objectstack-ai/cloud#2694). **Self-hosted ObjectOS has no such layer** and pays the full re-download on every visit.\n\n## What a fix looks like\n\n- For files whose names carry a Vite content hash: `cache-control: public, max-age=31536000, immutable`.\n- **Not** for the HTML shell and SPA fallback routes. `readIndexHtml()` rewrites per request (`<base href>`, `OS_PAGE_REACT`), so those stay revalidated.\n- ⚠️ **Not** for files that are copied with stable names. objectui's `scripts/vite-maplibre-worker.ts` puts `maplibre-gl-worker.mjs` and `maplibre-gl-shared.mjs` under `assets/` with **no hash**, so a blanket `assets/*` rule would pin a changing file for a year. Gate on a hash-shaped name the way cloud#2694 does, or give those files a short lifetime plus a validator.\n\n## Acceptance\n\n- **Test pin:** a hashed asset response carries the immutable header. The shell and the two stable-named files do not.\n- **Ablation:** with the header removed, the pin fails.\n"

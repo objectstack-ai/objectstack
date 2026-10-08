@@ -1,0 +1,32 @@
+{
+  "number": 22255,
+  "kind": "issue",
+  "title": "[finding] cli(banner): flows unbound only because the deployment switched scheduled work off still print as a yellow ⚠ in the boot banner's Flows section — the last alarm lines on the showcase, none actionable",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:cli",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T09:34:11Z",
+  "updated_at": "2026-10-08T10:02:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22255",
+  "body": "Filing gate: **① a measured output defect against a maintainer's direction, class (a), public door.** Raised by #22160's dev (PR #22236, report on #22160, open question 2). Ruled by the `domain:cli` seat in its ACCEPT (`6055714562`) as a follow-up card rather than a widening of that PR. Filed by that seat (seat post #6024, `session_01RWZbGvPFcRKvUqASZtunCU`). ⛔ Not a claim. Triage sets the grade and the lane.\n\n## What the banner prints\n\n`printAutomationSummary` (`packages/cli/src/utils/format.ts` about `:1600` on `main` at `11e6fc5f2e`) prints one line per unbound-flow class (#22073). Every class prints as a yellow `⚠`:\n\n```text\n⚠ N flows declare a 'schedule' trigger but are NOT bound — disabled by deployment policy …: flow_a, flow_b, …\n```\n\n- **Measured by the dev on `examples/app-showcase` with `--seed-admin --fresh`:** after PR #22236 put the boot's one actionable record first and moved the rest under `ℹ`, these deployment-policy lines are the only alarm lines the showcase still prints. Neither needs the author.\n- **Their cause is the documented default.** `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` is unset, so scheduled work is off by deployment policy. That is the expected degradation the maintainer's noise budget on #22160 asks to be shown as information: 「预期中的降级记 info」.\n- **The glyph is the CLI's, not the producer's.** `service-automation`'s own per-flow warning is already withheld from *Boot diagnostics* (`restatedAbove`, #22073), so the line a reader sees is printed here, in this lane's file. Routing it to `service-automation` (as #22160's claim first read it) finds no lever there.\n\n## Asked for\n\n- The deployment-policy class (trigger declared, not bound because the deployment switched scheduled work off) prints under `ℹ`, dim, still listing its flows and its first sentence.\n- Every other unbound reason keeps `⚠`: a binding failure, a missing trigger, an unknown target object. Those are the author's to fix.\n- ⛔ The automation plugin's binding, the scheduled-work switch, and `service-automation`'s own log level are unchanged.\n\n## Why a card and not a line in PR #22236\n\n#22073 ruled this shape: one line per class, the class kept a warning. Changing the glyph of one class revisits that ruling, so it gets its own reading rather than riding a PR scoped to *Boot diagnostics*.\n\n## Reader who acts\n\nTriage grades and routes. The file is `packages/cli/src/utils/format.ts`, `domain:cli`'s. A pin would sit beside #22073's class pins (`format.boot-warning-classes.test.ts`). Likely `Clause-②: no`, `@objectstack/cli` `patch`.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included: 「deployment policy unbound schedule flows banner warning glyph printAutomationSummary info instead of warning」 gives 6 hits:\n- #22073 (the one-line-per-class ruling this follows);\n- #21110, #20513, #5048, #4771 (other automation warnings);\n- #21867 (unrelated).\n\nNone is this.\n\nDedupe words: `deployment policy unbound flows banner glyph` · `schedule trigger NOT bound info not warning` · `printAutomationSummary deployment-policy class`"
+}
