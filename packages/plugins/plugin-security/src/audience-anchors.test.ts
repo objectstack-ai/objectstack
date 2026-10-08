@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { describeAnchorForbiddenBits } from '@objectstack/spec/security';
 import { bootstrapBuiltinRoles } from './bootstrap-builtin-positions';
+import { securityBuiltinPositions } from './builtin-positions';
 import { describeHighPrivilegeBits } from './security-plugin';
 
 function makeQl() {
@@ -41,6 +42,15 @@ describe('audience anchors (ADR-0090 D5/D9)', () => {
     expect(res.seeded).toBe(6);
     // platform-managed, undeletable posture (A4 #2920 unified vocab; formerly 'system')
     for (const r of ql.tables.sys_position) expect(r.managed_by).toBe('platform');
+  });
+
+  // [ADR-0131 C2 S2] The seed reads the declarations — the same list the
+  // plugin registers as position metadata — and has no list of its own.
+  it('seeds exactly the declared built-in positions, with their declared label and description', async () => {
+    const ql = makeQl();
+    await bootstrapBuiltinRoles(ql);
+    const seeded = ql.tables.sys_position.map((r: any) => ({ name: r.name, label: r.label, description: r.description }));
+    expect(seeded).toEqual(securityBuiltinPositions.map(({ name, label, description }) => ({ name, label, description })));
   });
 
   it('re-seed is idempotent (updates, no duplicates)', async () => {
