@@ -412,6 +412,7 @@
     "ImportMappingTargetVerdict (type)",
     "IndexSchema (const)",
     "InjectedColumnProvenance (type)",
+    "InjectedSystemColumnName (type)",
     "InjectedSystemColumnPlan (interface)",
     "InlineGridColumn (type)",
     "InlineGridColumnParsed (type)",
