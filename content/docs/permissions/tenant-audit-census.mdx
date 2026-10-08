@@ -122,7 +122,7 @@ are reported as `undecidable` rather than assumed either way.
 
 The same holds twice over for the context. An options argument spelled as a
 literal can be read; one spelled `options`, `{ ...opts }`, or handed through a
-forwarding shim cannot, and **54 of the 234 sites are spelled that way**. A
+forwarding shim cannot, and **52 of the 234 sites are spelled that way**. A
 context resolved from an inline literal or a local `const` can be tested for
 `isSystem`; one arriving from a helper call cannot.
 
@@ -150,8 +150,8 @@ now **0**: nothing on this surface threads a context that provably lacks the fla
 
 **"No tenant context" counted sites it had not read.** An options argument the
 walker could not parse was folded into the same bucket as one it had read and
-found empty. That published **62 sites "carrying no tenant context at all"**
-when 8 said so and 54 were simply unread — an over-claim in the *alarming*
+found empty. That published **60 sites "carrying no tenant context at all"**
+when 8 said so and 52 were simply unread — an over-claim in the *alarming*
 direction, on the very figure this page tells other cards to cite. `carries` is
 now three-valued, and an unreadable argument can never contribute to the
 provable count.
@@ -228,10 +228,10 @@ cannot read, and they are neither in nor out.
 | …whose object name is chosen at run time | 80 |
 | …against an object with tenancy ENABLED | 153 |
 | …against an object that declares tenancy off | 1 |
-| threading a tenant context | 172 |
+| threading a tenant context | 174 |
 | PROVABLY carrying none (options read, no context key) | **8** |
 | …of those, against a decidably tenancy-enabled object | **2** |
-| options argument UNREADABLE — may or may not carry one | 54 |
+| options argument UNREADABLE — may or may not carry one | 52 |
 | …of those, against a decidably tenancy-enabled object | 31 |
 | threading a decidably ELEVATED (`isSystem`) context | 123 |
 | threading a context that is decidably NOT elevated | 0 |
@@ -297,13 +297,13 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-08 at `7f9500afd`.
+Measured on 2026-10-08 at `0328884e5`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 615 |
+| tracked non-test sources scanned | 617 |
 | engine-shaped types recognised | 70 |
-| declared objects in the registry | 116 |
+| declared objects in the registry | 117 |
 | same-named calls subtracted as non-engine | 160 |
 
 {/* END GENERATED: tenant-audit-census */}

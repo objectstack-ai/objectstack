@@ -1068,8 +1068,26 @@ export class AnalyticsServicePlugin implements Plugin {
         // to `string | number | boolean` (`SelectOptionSchema.value`'s real
         // runtime type). The cast is a type-only widening back to what this
         // capability's own signature promises — no value is coerced.
+        //
+        // [#22178] A picklist-bound field (`FieldSchema.picklist`) is served
+        // with its list's options resolved onto it AND `picklist` kept
+        // (`PicklistServedFieldSchema`), and its option labels translate
+        // under `picklists.<name>.options.<value>`, which every referencing
+        // field inherits. `translateObject` takes that branch only for a
+        // field that carries `picklist`, so a synthetic field holding
+        // `options` alone served the authored labels in every locale while
+        // `GET /meta/object/:name` relabelled the same field. `picklist` is
+        // read from the same served field the caller's `options` came from
+        // (`getObjectFields` above reads `getObject(objectName).fields`). A
+        // field with inline `options` carries no `picklist`, so its
+        // synthetic field is exactly what it was before.
+        const picklist = dataEngine()?.getObject?.(objectName)?.fields?.[fieldName]?.picklist;
         const fields: Record<string, ObjectFieldLike> = {
-          [fieldName]: { name: fieldName, options: options as ObjectFieldLike['options'] },
+          [fieldName]: {
+            name: fieldName,
+            options: options as ObjectFieldLike['options'],
+            ...(typeof picklist === 'string' && picklist.length > 0 ? { picklist } : {}),
+          },
         };
         const doc: ObjectLike = { name: objectName, fields };
         const translated = translateObject(doc, bundle, {

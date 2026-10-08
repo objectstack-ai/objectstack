@@ -63,14 +63,22 @@ afterEach(async () => {
   }
 });
 
-/** One declared position and one packaged permission set to seed. */
+/**
+ * One declared position and one packaged permission set to seed. The by-name
+ * read and the disabled-package question are the members the security catalog
+ * read adds to `listItems` — the declared-positions seeder reads through it
+ * (ADR-0131 C2 S2b), with {@link NO_METADATA_POSITIONS} as its metadata service.
+ */
 const STUB_REGISTRY = {
   listItems: (type: string) => {
     if (type === 'position') return [{ name: 'sales_manager', label: 'Sales Manager' }];
     if (type === 'permission') return [{ name: 'sales_readonly', label: 'Sales RO', _packageId: 'com.acme.crm', objects: {} }];
     return [];
   },
+  getItem: (type: string, name: string) => STUB_REGISTRY.listItems(type).find((item) => item.name === name),
+  isPackageDisabled: () => false,
 };
+const NO_METADATA_POSITIONS = { get: async () => undefined, list: async () => [] };
 
 /** A logger that records what the seeders said, so a LOUD guard can be asserted. */
 function recordingLogger() {
@@ -153,7 +161,7 @@ async function stored(engine: ObjectQL, table: string): Promise<any[]> {
 /** Run the three catalog seeders for one organization (walled), or none (single). */
 async function seedCatalog(engine: ObjectQL, logger: any, organizationId?: string): Promise<void> {
   const ql = withRegistry(engine);
-  await bootstrapDeclaredPositions(ql, null, { logger, organizationId });
+  await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS, { logger, organizationId });
   await bootstrapDeclaredPermissions(ql, null, { logger, organizationId });
   await bootstrapBuiltinRoles(ql, { logger, organizationId });
 }

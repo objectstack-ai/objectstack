@@ -38,10 +38,10 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 | Object name chosen at run time | 80 |
 | Against a tenancy-enabled object | 153 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 172 |
+| Threading a tenant context | 174 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
-| Options argument unreadable | 54 |
+| Options argument unreadable | 52 |
 | …and decidably tenancy-enabled | 31 |
 | Threading a decidably elevated context | 123 |
 | Threading a decidably non-elevated context | 0 |
@@ -90,13 +90,13 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-08 at `7f9500afd`.
+Measured on 2026-10-08 at `0328884e5`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 615 |
+| tracked non-test sources scanned | 617 |
 | engine-shaped types recognised | 70 |
-| declared objects in the registry | 116 |
+| declared objects in the registry | 117 |
 | same-named calls subtracted as non-engine | 160 |
 
 ## Every site
@@ -239,8 +239,8 @@ Measured on 2026-10-08 at `7f9500afd`.
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_secret` | enabled | elevated | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `update` | `sys_secret` | enabled | elevated | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_setting_audit` | enabled | elevated | 1 |
-| `packages/services/service-settings/src/settings-service.ts` | `insert` | `this.objectName` | undecidable | options unreadable | 1 |
-| `packages/services/service-settings/src/settings-service.ts` | `update` | `this.objectName` | undecidable | options unreadable | 1 |
+| `packages/services/service-settings/src/settings-service.ts` | `insert` | `object` | undecidable | context, elevation undecidable | 1 |
+| `packages/services/service-settings/src/settings-service.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-storage/src/attachment-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 3 |
 | `packages/services/service-storage/src/backfill-file-references.ts` | `update` | `object` | undecidable | options unreadable | 1 |
 | `packages/services/service-storage/src/backfill-file-references.ts` | `update` | `object` | undecidable | elevated | 1 |

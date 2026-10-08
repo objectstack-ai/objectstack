@@ -5,10 +5,12 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 /**
  * sys_setting — Generic K/V store backing the SettingsManifest contract
  *
- * Single physical table that holds *every* value for *every* settings
+ * The physical table that holds the TENANT and USER rungs of every settings
  * namespace declared by a `SettingsManifest`. Plugins MUST NOT define
  * per-namespace tables (e.g. `sys_mail_config`); they declare a manifest
- * and the value persists here.
+ * and the value persists here — or, for a key declared `scope: 'global'`, in
+ * the tenant-less `sys_platform_setting` (ADR-0131 D7: the deployment-level
+ * rung left this tenant-scoped table).
  *
  * Row identity: (organization_id, namespace, key, scope, user_id?).
  *
@@ -20,7 +22,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *
  * Resolution order (handled by `SettingsService.get`):
  *   1. process.env override                    (source='env',     locked=true)
- *   2. sys_setting WHERE scope='global'        (source='global')
+ *   2. sys_platform_setting                    (source='global')
  *   3. sys_setting WHERE scope='tenant'        (source='tenant')
  *   4. sys_setting WHERE scope='user'          (source='user')
  *   5. manifest specifier.default              (source='default')
@@ -125,18 +127,21 @@ export const SysSetting = ObjectSchema.create({
       description: 'Specifier key inside the namespace (snake_case).',
     }),
 
-    // The option list is the storage-side mirror of `SpecifierScopeSchema`
-    // (`packages/spec/src/system/settings-manifest.zod.ts`), which is the
-    // reference truth for the cascade's layers. Keep the two in step —
-    // `sys-setting.scope-options.test.ts` pins the parity, and the sibling
-    // audit object (`sys_setting_audit.scope`) mirrors the same three.
-    // A fourth option lived here declaring `runtime` (#6036): the spec enum
-    // never accepted it, `SettingsService` never mentioned it, and no write
-    // path could produce such a row — a declared-but-unenforced value domain
-    // of exactly the ADR-0049 kind. Removed rather than implemented.
+    // The option list is the storage-side mirror of the cascade layers THIS
+    // table stores: `SpecifierScopeSchema`
+    // (`packages/spec/src/system/settings-manifest.zod.ts`) minus `global`.
+    // `sys-setting.scope-options.test.ts` pins the parity. The sibling audit
+    // object (`sys_setting_audit.scope`) keeps all three, because the audit
+    // writer records a global-scope change too.
+    // `global` left with the rung itself (ADR-0131 D7): a global value is
+    // written to `sys_platform_setting`, no writer produces a `global` row
+    // here, and the resolver excludes one from its reads — so the option was a
+    // declared value no write could reach. A row a pre-v18 database still
+    // holds at `global` is moved by the v18 upgrade ceremony (ADR-0131 D14).
+    // A fourth option once lived here declaring `runtime` (#6036) and was
+    // removed for the same reason.
     scope: Field.select(
       [
-        { label: 'Global', value: 'global' },
         { label: 'Tenant', value: 'tenant' },
         { label: 'User',   value: 'user' },
       ],
@@ -169,7 +174,7 @@ export const SysSetting = ObjectSchema.create({
       defaultValue: false,
       description:
         'When true, lower-scope rows cannot override this value; writes against lower scopes return 409. ' +
-        'Used by platform administrators to pin a global value for all tenants (Phase 2 cascade).',
+        'A tenant row pins its value for that tenant\'s users (Phase 2 cascade).',
     }),
 
     locked_reason: Field.text({
@@ -228,10 +233,12 @@ export const SysSetting = ObjectSchema.create({
     // duplicates this hole permits.
     //
     // The organization key part is NULL-safe (`COALESCE(organization_id,
-    // '__global__')`, ADR-0120 D3), which is what preserves the `scope='global'`
-    // LAYER: platform rows carry no organization, so they share one bucket and
-    // stay unique among themselves — the installation-wide platform default the
-    // resolver reads at rung 2 survives, without the whole index being global.
+    // '__global__')`, ADR-0120 D3): a row that carries no organization shares
+    // one bucket and stays unique among its peers, without the whole index
+    // being global. That bucket was the `scope='global'` LAYER's until the rung
+    // moved to `sys_platform_setting` (ADR-0131 D7); it now holds tenant/user
+    // rows that carry no organization, and the `global` rows a pre-v18
+    // database keeps until the v18 ceremony moves them.
     { fields: ['namespace', 'key', 'scope', 'user_id'], unique: 'organization' },
     // Common range read: full namespace dump for SettingsService.getNamespace.
     { fields: ['namespace', 'scope'], unique: false },

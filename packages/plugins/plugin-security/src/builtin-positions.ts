@@ -22,12 +22,11 @@
  *     `is_default: false`.
  *
  * And one exclusion: `bootstrapDeclaredPositions` skips every name here
- * ({@link isBuiltinPositionName}), in its registry-first decision and in its
- * result. The six are declared now, so they appear among the registry's
- * positions; counted there, they would make the registry answer alone and
- * silence the stack-declared positions only the metadata service holds, and
- * taken there, they would get a copy without the `platform` provenance ahead
- * of the built-in pass, which then restamps it.
+ * ({@link isBuiltinPositionName}). It seeds from the security catalog read,
+ * which lists the six now that they are declared; taken there, they would get
+ * a copy without the `platform` provenance ahead of the built-in pass, which
+ * then restamps it. The exclusion is by name, so an environment-stored
+ * definition that shadows one of the six at read is skipped as well.
  *
  * ## Why the engine registry, and not the manifest's `positions` key
  *

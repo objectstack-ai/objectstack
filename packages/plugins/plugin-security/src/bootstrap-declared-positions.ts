@@ -4,8 +4,10 @@
  * bootstrapDeclaredPositions — seed stack-declared `positions` into `sys_position`
  * (ADR-0057 D6, closes #2077).
  *
- * Reads the validated `position` metadata (registered from the stack's `positions: []`
- * via `metadataService.list('position')`) and idempotently upserts each into
+ * Reads the declared `position` metadata through the security catalog read
+ * (`createSecurityCatalogReader`, `@objectstack/core` — the engine registry and
+ * the metadata service, in its one read order; see {@link readDeclaredPositions})
+ * and idempotently upserts each into
  * `sys_position` by `(name, organization_id)`, so the runtime position→permission-set resolution
  * (`resolveExecutionContext` → `sys_position` → `sys_position_permission_set`) and
  * sharing-rule position recipients stop being decorative. Runs on `kernel:ready`
@@ -25,6 +27,7 @@
  * loud guard that stands in place of a reap: `per-organization-catalog.ts`.
  */
 
+import { createSecurityCatalogReader } from '@objectstack/core';
 import { buildExistingByName } from './seed-name-lookup.js';
 import { isBuiltinPositionName } from './builtin-positions.js';
 import {
@@ -83,66 +86,65 @@ interface SeedOptions {
   organizationId?: string;
 }
 
-/**
- * Read declared metadata items of a type from the engine's SchemaRegistry.
- *
- * [#8378] No `{ name, content }` unwrap: the registered item IS the authoring
- * document. `PositionSchema` declares no `content` key and rejects one as
- * unrecognized, so the unwrap could only ever have destroyed a document —
- * see `bootstrap-declared-permissions.ts` for the full measurement.
- */
-function readDeclared(engine: any, type: string): any[] {
-  try {
-    const reg = engine?.registry;
-    if (reg?.listItems) {
-      return (reg.listItems(type) ?? []).filter(Boolean);
-    }
-  } catch { /* fall through */ }
-  return [];
-}
-
 /** A declared position this seeder owns: any name but the six built-ins. */
-function isSeededHere(item: any): boolean {
+function isSeededHere(item: { name?: unknown } | undefined): boolean {
   return !isBuiltinPositionName(item?.name);
 }
 
 /**
- * The positions this seeder projects into rows: the engine registry's, else
- * the metadata service's — the same two-step as before — with the six built-in
- * positions taken out of both the decision and the result.
+ * The positions this seeder projects into rows: every position the security
+ * catalog read lists, minus the six built-ins (ADR-0131 C2 stage S2b).
  *
- * ## Why the six are taken out (ADR-0131 C2 stage S2)
+ * ## One read, both sources (ADR-0131 D3)
  *
- * The six are declared position metadata of this plugin now
- * (`builtin-positions.ts`), registered with the engine registry on every boot.
- * Left in, they would change this read twice over:
+ * The catalog read (`createSecurityCatalogReader`, `@objectstack/core`) is the
+ * union of the engine registry and the metadata service, in its one read
+ * order: a name the registry serves is answered by the registry's own by-name
+ * precedence (a stored definition in the bare slot first, else the
+ * first-registered package's), and the metadata service answers only the names
+ * the registry does not serve. Neither source holds the whole catalog — the
+ * stack-declared positions live in the metadata service, a definition a
+ * metadata author saved through the door is hydrated into the registry — so
+ * this seeder reads both, every pass.
  *
- *  - **the decision.** The registry is read first and the metadata service only
- *    when the registry holds no position, so six registered names would make
- *    the registry answer every boot — and the stack-declared positions, which
- *    only the metadata service holds, would never be read again.
- *  - **the result.** Their rows are `bootstrapBuiltinRoles`'s, seeded from the
- *    same list with the `platform` provenance this seeder never writes. Taking
- *    them here would put a copy without that provenance ahead of the built-in
- *    pass on a fresh organization (refused outright for a reserved identity
- *    name), which the built-in pass then restamps: a second writer for six rows
- *    that have one.
+ * It replaces an either-or: the registry alone whenever it held any position
+ * besides the six, else the metadata service. One door-authored position was
+ * then enough to make the registry answer alone, and every organization
+ * created afterwards was seeded with that position and none of the stack's.
+ * For a name both sources hold, the answer is unchanged: the either-or took
+ * the registry's body for it, and so does the catalog read.
  *
- * So the registry "holds a position" only when it holds one besides the six,
- * and the six never reach the loop. With the six out, both the decision and the
- * result are exactly what they were before the six were declared — that is the
- * whole of this change; the two-step itself is not touched.
+ * ## Why the six are taken out
+ *
+ * Their rows are `bootstrapBuiltinRoles`'s, seeded from the declaration list
+ * (`builtin-positions.ts`) with the `platform` provenance this seeder never
+ * writes. The catalog read lists them — the plugin registers them with the
+ * engine registry on every boot — so taking them here would put a copy without
+ * that provenance ahead of the built-in pass on a fresh organization (refused
+ * outright for a reserved identity name), which the built-in pass then
+ * restamps: a second writer for six rows that have one. The exclusion is by
+ * NAME, never by package: an environment-stored definition saved under a
+ * built-in name before the six were declared is hydrated into the registry's
+ * bare slot with no package of this plugin's, and shadows the declaration at
+ * read. It is skipped here like the declaration it shadows, so its body never
+ * reaches a row.
+ *
+ * ## A read that did not happen is not "nothing declared"
+ *
+ * The catalog read refuses to be built over a source that lacks a member it
+ * calls (`TypeError`) and raises `AuthzStoreUnavailableError` for a source that
+ * threw or a metadata list that lost a loader. Both propagate: this seeder
+ * writes nothing for the pass rather than seeding a partial catalog as a whole
+ * one, and the caller reports the failure.
+ *
+ * [#8378] No `{ name, content }` unwrap: the catalog entry's `definition` IS the
+ * authoring document — see `bootstrap-declared-permissions.ts`. It is the
+ * reader's own object, shared with every other reader, and is only read here.
  */
 async function readDeclaredPositions(engine: any, metadataService: any): Promise<any[]> {
-  const registered = readDeclared(engine, 'position');
-  let positions: unknown = registered;
-  if (!registered.some(isSeededHere)) {
-    try {
-      const listed = metadataService?.list?.('position');
-      positions = typeof (listed as any)?.then === 'function' ? await listed : (listed ?? []);
-    } catch { positions = []; }
-  }
-  return Array.isArray(positions) ? positions.filter(isSeededHere) : [];
+  const catalog = createSecurityCatalogReader({ registry: engine?.registry, metadata: metadataService });
+  const listed = await catalog.list('position');
+  return listed.filter(isSeededHere).map((entry) => entry.definition);
 }
 
 /**
