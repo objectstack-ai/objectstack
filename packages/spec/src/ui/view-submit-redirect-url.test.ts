@@ -24,8 +24,9 @@
  * is told to write instead*. The prescriptions are the whole product for an
  * AI-authored metadata app: an agent that gets "Invalid input" retries the same
  * absolute URL, while one that gets "write the in-app path, `/thanks`" fixes it
- * on the next token. So each case pins the rule it names AND the ruling date,
- * which is what makes the refusal traceable back to the decision.
+ * on the next token. So each case pins the rule it names — and that the
+ * ruling's date is NOT in the sentence: the decision is traceable from the
+ * code comment above the checker, and the author acts on the rule (#22093).
  *
  * ## Acceptance is pinned as hard as refusal
  *
@@ -55,6 +56,13 @@ function accept(value: unknown): unknown {
 }
 
 const FORM_BASE = { type: 'simple', sections: [{ fields: ['name'] }] };
+
+/**
+ * A ruling citation by date. The refusals state the rule, why it exists and
+ * the repair; the ruling's date lives in the code comment above the checker
+ * (#22093), so no refusal below may carry one.
+ */
+const RULING_DATE = /\bruled\b|\bruling\b|\b20\d\d-\d\d-\d\d\b/i;
 
 /** A FormView whose submit behavior redirects to `url`. */
 const redirectTo = (url: unknown) => ({ ...FORM_BASE, submitBehavior: { kind: 'redirect', url } });
@@ -101,13 +109,13 @@ describe('ruled bullet 1 — relative paths only', () => {
     ['data', 'data:text/html,hi'],
     ['mailto', 'mailto:sales@example.com'],
     ['scheme-only', 'app-custom:whatever'],
-  ])('refuses an absolute URL (%s) and names the rule + the ruling', (_label, url) => {
+  ])('refuses an absolute URL (%s) and names the rule', (_label, url) => {
     const msg = reject(redirectTo(url));
     expect(msg, 'names the rule').toContain('RELATIVE path only');
     expect(msg, 'names the reason the rule exists').toContain('open');
-    expect(msg, 'cites the ruling so the refusal is traceable').toContain('ruled 2026-08-11');
-    // The negative twin: traceable by DATE, never by a tracker id a refused
-    // author cannot resolve (commit fd289be45's strip).
+    expect(msg, 'states the rule, not its ruling date (#22093)').not.toMatch(RULING_DATE);
+    // Nor a tracker id a refused author cannot resolve (commit fd289be45's
+    // strip): the provenance lives in the code comment above the checker.
     expect(msg).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
     expect(msg, 'prescribes the fix, not just the refusal').toContain('/thanks');
     expect(msg, 'points the deliberate external link at the surface that IS declared for it')
@@ -122,7 +130,7 @@ describe('ruled bullet 1 — relative paths only', () => {
     const msg = reject(redirectTo('//evil.example/thanks'));
     expect(msg).toContain('protocol-relative');
     expect(msg).toContain('ANOTHER ORIGIN');
-    expect(msg).toContain('ruled 2026-08-11');
+    expect(msg).not.toMatch(RULING_DATE);
   });
 
   it.each([
@@ -135,7 +143,7 @@ describe('ruled bullet 1 — relative paths only', () => {
     expect(msg, 'says WHY a backslash is an origin problem, not a style problem')
       .toContain('normalise');
     expect(msg, 'gives the escape for a legitimate backslash').toContain('%5C');
-    expect(msg).toContain('ruled 2026-08-11');
+    expect(msg).not.toMatch(RULING_DATE);
   });
 
   it.each([
@@ -151,7 +159,7 @@ describe('ruled bullet 1 — relative paths only', () => {
     expect(msg).toContain('whitespace or control characters');
     expect(msg, 'says why stripping is the hazard').toContain('strip');
     expect(msg, 'gives the escape for a legitimate space').toContain('%20');
-    expect(msg).toContain('ruled 2026-08-11');
+    expect(msg).not.toMatch(RULING_DATE);
   });
 
   it('refuses a document-relative path and explains what it resolves against', () => {
@@ -161,7 +169,7 @@ describe('ruled bullet 1 — relative paths only', () => {
     const msg = reject(redirectTo('thanks'));
     expect(msg).toContain('must start with `/`');
     expect(msg).toContain('document-relative');
-    expect(msg).toContain('ruled 2026-08-11');
+    expect(msg).not.toMatch(RULING_DATE);
   });
 
   it.each([
@@ -177,7 +185,7 @@ describe('ruled bullet 1 — relative paths only', () => {
     // leading-slash message would be a confusing thing to read for it.
     const msg = reject(redirectTo(''));
     expect(msg).toContain('needs a `url`');
-    expect(msg).toContain('ruled 2026-08-11');
+    expect(msg).not.toMatch(RULING_DATE);
   });
 });
 
@@ -210,7 +218,7 @@ describe('ruled bullet 2 — `{{record.<field>}}` and nothing else', () => {
     const msg = reject(redirectTo(url));
     expect(msg, 'names the vocabulary').toContain('ONLY declared record fields');
     expect(msg, 'gives the spelling verbatim').toContain('{{record.field_name}}');
-    expect(msg).toContain('ruled 2026-08-11');
+    expect(msg).not.toMatch(RULING_DATE);
   });
 
   it('the refusal states the URL-escaping half of the ruling', () => {

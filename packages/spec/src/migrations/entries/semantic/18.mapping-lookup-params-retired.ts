@@ -34,4 +34,5 @@ export const entry: SemanticMigration = {
     + '(no `import_reference_not_found` row) — or the missing referenced records are created by a '
     + 'step that runs before the import, since the import itself never creates them. Row counts '
     + 'and links match the pre-upgrade import of the same file.',
+  relevantWhen: { kind: 'stack-declares', keys: ['mappings'] },
 };

@@ -34,6 +34,15 @@ export const SysJobQueue = ObjectSchema.create({
   icon: 'inbox',
   isSystem: true,
   managedBy: 'engine-owned',
+  // [ADR-0131 D7] Deployment-level state: NO tenant column. The sole writer,
+  // `DbQueueAdapter`, writes every row under a system context carrying no
+  // organization, and no row it writes names one. Who may read is object
+  // permission (D7): the platform-only capability below. This table holds
+  // message PAYLOADS, so without the wall and without the gate a walled
+  // deployment's `organization_admin` would read other organizations' queued
+  // work.
+  systemFields: { tenant: false },
+  requiredPermissions: ['manage_platform_settings'],
 
   /**
    * [ADR-0057 §3.1/§3.3, #5179] The queue table only ever GREW: the adapter

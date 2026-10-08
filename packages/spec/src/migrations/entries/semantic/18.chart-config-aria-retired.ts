@@ -29,4 +29,5 @@ export const entry: SemanticMigration = {
     + '`description` conveying what that label was meant to announce, or the author has confirmed '
     + 'the existing description does. With a screen reader, focusing the chart graphic announces '
     + 'the description as its name.',
+  relevantWhen: { kind: 'stack-declares', keys: ['dashboards', 'reports', 'pages'] },
 };

@@ -29,6 +29,7 @@ import {
   createTimer,
   emitJson,
   errorCodeFields,
+  isExitSignal,
   isReportedError,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
@@ -37,6 +38,14 @@ import { absentTableReads } from '../../utils/absent-table-reads.js';
 import type { StoredMigrationReport } from '@objectstack/metadata-protocol';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import {
+  planAuthoredSourceWrite,
+  restoreAuthoredSources,
+  verifyAuthoredSourceWrite,
+  writeAuthoredSources,
+  type AuthoredSourceWritePlan,
+  type WriteVerification,
+} from '../../utils/authored-source-codemod.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -210,7 +219,8 @@ function printEmptyRangeAnswer(
   }
 
   const wider = applyMetaMigrations(stack, fromMajor, CHAIN_TERMINUS_MAJOR);
-  if (wider.applied.length === 0 && wider.todos.length === 0) {
+  const widerListed = listedTodos(wider.todos, wider.absentTodos);
+  if (wider.applied.length === 0 && widerListed.length === 0) {
     printInfo(
       `The widest range this build carries (protocol ${fromMajor} → ${CHAIN_TERMINUS_MAJOR}) has `
       + 'nothing for this stack either.',
@@ -220,9 +230,21 @@ function printEmptyRangeAnswer(
 
   printWarning(
     `Protocol ${fromMajor} → ${CHAIN_TERMINUS_MAJOR} has ${wider.applied.length} mechanical and `
-    + `${wider.todos.length} manual change(s) for this stack — re-run with `
+    + `${widerListed.length} manual change(s) for this stack — re-run with `
     + `\`--to ${CHAIN_TERMINUS_MAJOR}\` to list them.`,
   );
+}
+
+/**
+ * The semantic TODOs the default list prints: every entry of `todos` except
+ * the ones `absentTodos` names (ADR-0087 D3 — an entry leaves the default list
+ * only on the chain's structured, stack-derived proof). Matched by hop and id,
+ * so a copy of a TODO is recognised as well as the chain's own object.
+ */
+function listedTodos(todos: readonly MigrationTodo[], absentTodos: readonly MigrationTodo[]): MigrationTodo[] {
+  if (absentTodos.length === 0) return [...todos];
+  const absent = new Set(absentTodos.map((t) => `${t.toMajor}:${t.id}`));
+  return todos.filter((t) => !absent.has(`${t.toMajor}:${t.id}`));
 }
 
 /** Print the data-migration advice — the last thing a crossing upgrade sees. */
@@ -242,8 +264,125 @@ function printPendingDataMigrations(pending: readonly PendingDataMigration[]): v
   console.log('');
 }
 
+/**
+ * `--out`: write the migrated stack as a JSON snapshot, and print the line that
+ * names it. The one writer for both exits of {@link printMigrationReport}: the
+ * main path, and the early return of a run with nothing to migrate (#22116).
+ * An operator or a CI step keeps this file as the record of the run, so a run
+ * that returned without it left no file, or an earlier run's file read as this
+ * one's, behind an exit 0. `--json` writes the same bytes on its own branch.
+ */
+function writeStackSnapshot(out: string, stack: Record<string, unknown>): void {
+  writeFileSync(out, JSON.stringify(stack, null, 2));
+  printInfo(`Wrote migrated stack snapshot → ${chalk.white(out)}`);
+}
+
 /** One schema refusal of the migrated stack, in the shape `formatZodIssue` renders. */
 export type MigrationRefusal = Parameters<typeof formatZodIssue>[0];
+
+/** What `--write` did with the authored sources (#9591). */
+export interface WriteOutcome {
+  plan: AuthoredSourceWritePlan;
+  /**
+   * `written` — the plan's files were written and the re-run agreed with it;
+   * `restored` — they were written, the re-run disagreed, and every one was
+   * put back; `unwritten` — writing was refused before any file changed.
+   * A plan with no file to write is `written` with an empty `rewrites`.
+   */
+  status: 'written' | 'restored' | 'unwritten';
+  /** The re-run's verdict, when files were written. */
+  verification?: WriteVerification;
+  /** Why the write was refused or undone. */
+  error?: string;
+}
+
+/** The `--json` face of a {@link WriteOutcome}. */
+export function writeOutcomeJson(outcome: WriteOutcome) {
+  const { plan } = outcome;
+  return {
+    status: outcome.status,
+    files: plan.rewrites.map((r) => ({
+      file: r.file,
+      sites: plan.written.filter((w) => w.file === r.file).length,
+    })),
+    written: plan.written.map((w) => ({
+      conversionId: w.application.conversionId,
+      path: w.application.path,
+      file: w.file,
+      line: w.line,
+    })),
+    manual: plan.manual.map((m) => ({
+      conversionId: m.application.conversionId,
+      path: m.application.path,
+      kind: m.refusal.kind,
+      reason: m.refusal.reason,
+    })),
+    unexplained: plan.unexplained,
+    ...(outcome.verification ? { verification: outcome.verification } : {}),
+    ...(outcome.error ? { error: outcome.error } : {}),
+  };
+}
+
+/**
+ * The `--write` group: what was written where, what was left and why, and
+ * whether the re-run over the written sources agreed. Printed after the
+ * semantic notices and before the data-migration advice, which stays last.
+ */
+function printWriteOutcome(outcome: WriteOutcome, appliedCount: number): void {
+  const { plan } = outcome;
+  if (appliedCount === 0) {
+    printInfo('--write: the chain made no mechanical change here, so no file was written.');
+    console.log('');
+    return;
+  }
+  if (outcome.status === 'unwritten') {
+    printError(`--write wrote nothing: ${outcome.error}`);
+    console.log('');
+    return;
+  }
+  const files = plan.rewrites.length;
+  if (outcome.status === 'restored') {
+    printError(
+      `--write wrote ${files} file(s), but re-running the chain over them did not match this report, so `
+      + `every one was restored to its previous bytes: ${outcome.error}`,
+    );
+    console.log('');
+    return;
+  }
+  console.log(chalk.bold(
+    `  Wrote ${plan.written.length} of ${appliedCount} mechanical change(s) into ${files} file(s):`,
+  ));
+  for (const r of plan.rewrites) {
+    console.log(`    ${chalk.white(r.file)}`);
+    for (const w of plan.written.filter((x) => x.file === r.file)) {
+      console.log(`      ${chalk.dim(`:${w.line}`)} ${w.application.path} ${chalk.dim(`(${w.application.conversionId})`)}`);
+    }
+  }
+  console.log('');
+  if (plan.manual.length > 0) {
+    console.log(chalk.bold(chalk.yellow(`  ${plan.manual.length} mechanical change(s) left for you to apply by hand:`)));
+    for (const m of plan.manual) {
+      const a = m.application;
+      console.log(`    ${chalk.yellow('•')} ${a.path}: ${a.from} → ${a.to} ${chalk.dim(`(${a.conversionId})`)}`);
+      console.log(chalk.dim(`        not written [${m.refusal.kind}]: ${m.refusal.reason}`));
+    }
+    console.log('');
+  }
+  if (plan.unexplained.length > 0) {
+    printWarning(
+      `${plan.unexplained.length} change(s) in the migrated stack are named by no applied entry and were not `
+      + `written: ${plan.unexplained.join(', ')}`,
+    );
+  }
+  if (files > 0) {
+    printSuccess(
+      `Re-ran the chain over the written sources: ${plan.manual.length === 0
+        ? 'no mechanical change remains.'
+        : `only the ${plan.manual.length} change(s) left above remain.`}`,
+    );
+    console.log('');
+  }
+}
 
 /** Everything the human report prints after the `Config:` / `Chain:` preamble. */
 export interface MigrationReport {
@@ -258,8 +397,15 @@ export interface MigrationReport {
   dataMigrations: readonly PendingDataMigration[];
   /** `--step`: a checkpoint per hop, between the applied edits and the semantic notices. */
   step: boolean;
+  /**
+   * `--all`: list the notices the chain proved irrelevant (`absentTodos`)
+   * after the listed ones, instead of only counting them.
+   */
+  all: boolean;
   /** `--out`, resolved — the snapshot is written here so its line keeps its place. */
   out?: string;
+  /** `--write`: what was written into the authored sources (absent without the flag). */
+  write?: WriteOutcome;
   /** Printed beside a schema-valid verdict. */
   elapsed: string;
 }
@@ -343,7 +489,7 @@ function judgesByConversion(todos: readonly MigrationTodo[]): ReadonlyMap<string
  * and lines do not change (ADR-0087 D3, "never silence").
  */
 function printAppliedEdits(result: MigrationChainResult): void {
-  const judges = judgesByConversion(result.todos);
+  const judges = judgesByConversion(listedTodos(result.todos, result.absentTodos));
   console.log(chalk.bold(`  Applied ${result.applied.length} mechanical change(s):`));
   let run = 0;
   for (const [i, a] of result.applied.entries()) {
@@ -362,6 +508,58 @@ function printAppliedEdits(result: MigrationChainResult): void {
   console.log('');
 }
 
+/** One semantic notice, as ③ prints it: the headline, then `why:` and `verify:`. */
+function printNotice(t: MigrationTodo): void {
+  console.log(`    ${chalk.yellow('⚠')} [protocol ${t.toMajor}] ${t.surface} → ${t.replacement}`);
+  console.log(chalk.dim(`        why:    ${t.reason}`));
+  console.log(chalk.dim(`        verify: ${t.acceptanceCriteria}`));
+}
+
+/** The keys an absent notice's relevance question found empty, each in backticks, joined by ` / `. */
+function absentKeysText(t: MigrationTodo): string {
+  const keys = t.relevantWhen?.kind === 'stack-declares' ? t.relevantWhen.keys : [];
+  return keys.map((k) => `\`${k}\``).join(' / ');
+}
+
+/**
+ * Group ④ — the semantic entries the chain PROVED irrelevant to this stack:
+ * each carries a structured relevance question (`relevantWhen`) that the chain
+ * answered `absent` over the stack it loaded and every checkpoint it made of it
+ * (`absentTodos`).
+ *
+ * By default one line counts them and names `--all`, and a second says what
+ * the proof covers: the definition this run loaded, not the rows a deployment
+ * stores. With `--all` each is printed in full, exactly as ③ prints a notice,
+ * followed by the keys it was proven absent under. Nothing reaches this group
+ * by matching prose, and nothing in it is unreachable (ADR-0087 D3).
+ */
+function printAbsentNotices(result: MigrationChainResult, all: boolean): void {
+  const count = result.absentTodos.length;
+  if (count === 0) return;
+  if (!all) {
+    console.log(
+      chalk.dim(
+        `  ${count} more manual change(s) not listed: their surfaces are absent from this stack `
+        + '(run with --all to list them).',
+      ),
+    );
+    console.log(
+      chalk.dim(
+        '    Absent is proven over the stack this run loaded; metadata a deployment stores '
+        + '(Studio, the metadata API) is not read here.',
+      ),
+    );
+    console.log('');
+    return;
+  }
+  console.log(chalk.bold(`  ${count} manual change(s) whose surfaces are absent from this stack (listed by --all):`));
+  for (const t of result.absentTodos) {
+    printNotice(t);
+    console.log(chalk.dim(`        absent: nothing is declared under ${absentKeysText(t)}`));
+  }
+  console.log('');
+}
+
 /**
  * The human report of an authored-source run, in the order an upgrader acts on
  * it, each group under one header line that counts it (ADR-0087 D3):
@@ -371,27 +569,36 @@ function printAppliedEdits(result: MigrationChainResult): void {
  *  ② the APPLIED mechanical edits — the diff the chain has already made, with
  *    the semantic entry that judges an edit printed beside it, marked review
  *    (see {@link printAppliedEdits});
- *  ③ the SEMANTIC notices — every semantic entry of every hop crossed.
+ *  ③ the SEMANTIC notices — every semantic entry of every hop crossed that the
+ *    chain could not prove irrelevant to this stack (`todos` minus
+ *    `absentTodos`, see {@link listedTodos});
+ *  ④ the ABSENT notices — the entries whose structured relevance question
+ *    (`SemanticMigration.relevantWhen`) the chain answered `absent` over this
+ *    stack (`absentTodos`): one line counting them, or with `--all` each one
+ *    in full (see {@link printAbsentNotices});
+ *  ⑤ with `--write`, what was written into the authored sources and what was
+ *    left (see {@link printWriteOutcome}) — mechanical changes only, so it
+ *    reads `applied` and never ③ or ④.
  *
  * ## Why this order
  *
- * The chain hands the printer every semantic entry of every hop it crosses,
- * whatever the stack holds — `SemanticMigration` carries no predicate over the
- * stack — so ③ is the whole catalogue of each major crossed, 242 notices for
- * protocol 18. It used to be printed first and the verdict last, where it told
- * the author to "resolve the manual changes above"; and the refusals that block
- * the stack were printed nowhere. Measured on a real upgrade: 874 lines, whose
- * 41 refusals were buried under 240 notices about surfaces the stack never used.
+ * The chain hands the printer every semantic entry of every hop it crosses —
+ * the whole catalogue of each major crossed, 300-odd notices for protocol 18 —
+ * and only a structured question proves one irrelevant. ③ used to be printed
+ * first and the verdict last, where it told the author to "resolve the manual
+ * changes above"; and the refusals that block the stack were printed nowhere.
+ * Measured on a real upgrade: 874 lines, whose 41 refusals were buried under
+ * 240 notices about surfaces the stack never used.
  *
  * ## What it must not do
  *
  * ⛔ Drop, filter, collapse or summarise a notice. ADR-0087 D3 is "never
- * silence": an entry may leave ③ only on a structured, stack-derived proof that
- * its surface is absent, and matching the prose of `surface` against the stack
- * is not one. So the groups MOVE and nothing else does: every line ② and ③
- * printed before is printed after, byte-identical and in chain order. The one
- * addition is ②'s review lines, each a copy of an entry ③ still prints.
- * `--json` is untouched — its keys, its values and the order of its arrays.
+ * silence": an entry leaves ③ only on a structured, stack-derived proof that
+ * its surface is absent — the chain's `absentTodos`, which ④ always counts and
+ * `--all` always lists — and matching the prose of `surface` against the stack
+ * is never one. So every line ② and ③ printed is the chain's, byte-identical
+ * and in chain order. The one addition to them is ②'s review lines, each a
+ * copy of an entry ③ still prints.
  */
 export function printMigrationReport(report: MigrationReport): void {
   const { result } = report;
@@ -411,8 +618,13 @@ export function printMigrationReport(report: MigrationReport): void {
       printSuccess('Nothing to migrate — the metadata is already canonical for this range.');
     }
     // Still advertise: metadata needing no rewrite says nothing about whether
-    // this deployment's DATA has been migrated.
+    // this deployment's DATA has been migrated. And still write `--out`, in the
+    // main path's order — the snapshot, then `--write`, then the data
+    // migrations: the snapshot is this run's record whatever the run found, and
+    // `--json` writes it regardless (#22116).
     console.log('');
+    if (report.out) writeStackSnapshot(report.out, result.stack);
+    if (report.write) printWriteOutcome(report.write, 0);
     printPendingDataMigrations(report.dataMigrations);
     // Returning is safe only because ① has already printed: the schema verdict
     // is the one line that can contradict a "nothing to do" answer, and
@@ -430,26 +642,30 @@ export function printMigrationReport(report: MigrationReport): void {
     for (const hop of result.hops) {
       console.log(chalk.bold(`  ── protocol ${hop.toMajor} ──`));
       console.log(chalk.dim(`     ${hop.rationale}`));
-      console.log(chalk.dim(`     ${hop.applied.length} mechanical, ${hop.todos.length} manual`));
+      const listed = listedTodos(hop.todos, hop.absentTodos).length;
+      const absent = hop.absentTodos.length > 0 ? `, ${hop.absentTodos.length} not listed (surface absent)` : '';
+      console.log(chalk.dim(`     ${hop.applied.length} mechanical, ${listed} manual${absent}`));
     }
     console.log('');
   }
 
   // ③ The semantic TODOs (delegated to the agent — never auto-applied).
-  if (result.todos.length > 0) {
-    console.log(chalk.bold(chalk.yellow(`  ${result.todos.length} manual change(s) require your judgment:`)));
-    for (const t of result.todos) {
-      console.log(`    ${chalk.yellow('⚠')} [protocol ${t.toMajor}] ${t.surface} → ${t.replacement}`);
-      console.log(chalk.dim(`        why:    ${t.reason}`));
-      console.log(chalk.dim(`        verify: ${t.acceptanceCriteria}`));
-    }
+  const listed = listedTodos(result.todos, result.absentTodos);
+  if (listed.length > 0) {
+    console.log(chalk.bold(chalk.yellow(`  ${listed.length} manual change(s) require your judgment:`)));
+    for (const t of listed) printNotice(t);
     console.log('');
   }
 
+  // ④ The notices the chain proved irrelevant to this stack — counted, or listed under --all.
+  printAbsentNotices(result, report.all);
+
   if (report.out) {
-    writeFileSync(report.out, JSON.stringify(result.stack, null, 2));
-    printInfo(`Wrote migrated stack snapshot → ${chalk.white(report.out)}`);
+    writeStackSnapshot(report.out, result.stack);
   }
+
+  // ⑤ `--write`: the mechanical changes written into the sources, and the rest.
+  if (report.write) printWriteOutcome(report.write, result.applied.length);
 
   printPendingDataMigrations(report.dataMigrations);
 }
@@ -466,10 +682,14 @@ export function printMigrationReport(report: MigrationReport): void {
  * TODOs for the semantic changes the chain cannot apply, so the consumer agent
  * reviews a provably-valid change instead of hand-porting from prose.
  *
- * The command does not silently rewrite TS config source (that AST rewrite is
- * unsafe and lossy); `--out` writes the canonicalized stack as a JSON snapshot
- * the agent can diff and adopt. `--step` prints a per-hop checkpoint so a failure
- * can be bisected to the exact major.
+ * By default it writes no source file: `--out` writes the canonicalized stack as
+ * a JSON snapshot the agent can diff and adopt. `--write` (#9591) writes the
+ * mechanical changes into the authored sources in place — only at sites it can
+ * trace to one literal in one project file, every other byte left as it was —
+ * and lists each change it could not trace, with the reason; it never writes a
+ * semantic TODO. See `utils/authored-source-codemod.ts` for what it proves
+ * before writing and the closed set of reasons it refuses. `--step` prints a
+ * per-hop checkpoint so a failure can be bisected to the exact major.
  *
  * ## `--stored`: the same chain, over data at rest (#4327)
  *
@@ -498,8 +718,10 @@ export default class MigrateMeta extends Command {
   static override examples = [
     `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR}`,
     `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --step`,
+    `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --all`,
     `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --to ${MIGRATION_SUPPORT_FLOOR + 1} --json`,
     `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --out migrated.stack.json`,
+    `$ os migrate meta --from ${MIGRATION_SUPPORT_FLOOR} --write`,
     '$ os migrate meta --stored',
     '$ os migrate meta --stored --apply',
     '$ os migrate meta --stored --apply --yes --json',
@@ -528,6 +750,21 @@ export default class MigrateMeta extends Command {
     }),
     out: Flags.string({
       description: 'Write the migrated stack as a JSON snapshot to this path.',
+      exclusive: ['stored'],
+    }),
+    all: Flags.boolean({
+      description:
+        'Also list, in full, the manual changes whose surfaces this stack provably does not declare '
+        + '(by default they are only counted). --json always reports them in todos and names them in absentTodos.',
+      default: false,
+      exclusive: ['stored'],
+    }),
+    write: Flags.boolean({
+      description:
+        'Rewrite the authored source files in place for each mechanical change traced to one literal in one '
+        + 'project file; every other change is listed with the reason it was not written. Never writes the '
+        + 'manual (semantic) changes.',
+      default: false,
       exclusive: ['stored'],
     }),
     stored: Flags.boolean({
@@ -577,7 +814,8 @@ export default class MigrateMeta extends Command {
       const message =
         `${typed.map((f) => `--${f}`).join(', ')} only appl${typed.length > 1 ? 'y' : 'ies'} to `
         + '`os migrate meta --stored` (the pass over a deployment\'s sys_metadata rows). '
-        + 'The authored-source chain reads a config file and writes nothing but --out.';
+        + 'The authored-source chain reads a config file and writes only the --out snapshot and, '
+        + 'with --write, the authored sources.';
       if (flags.json) {
         await emitJson({ error: 'stored_only_flag', flags: typed, message }, 0, { compact: true });
         this.exit(1);
@@ -626,7 +864,7 @@ export default class MigrateMeta extends Command {
       // has no validation step of its own to move: the load is tolerant, and
       // the schema verdict is taken below on the MIGRATED stack instead
       // (`schemaValid`), which is the stack the author is being asked to adopt.
-      const { config, absolutePath } = await loadConfig(args.config, { authoredSource: true });
+      const { config, absolutePath, namedExports } = await loadConfig(args.config, { authoredSource: true });
 
       // Map→array normalization ONLY (convert:false): the chain must replay the
       // conversions itself against the raw authored source so each rewrite is
@@ -642,6 +880,20 @@ export default class MigrateMeta extends Command {
       const parsed = ObjectStackDefinitionSchema.safeParse(result.stack);
       const specChanges = composeSpecChanges(fromMajor, toMajor);
       const dataMigrations = pendingDataMigrations(result.stack, result.fromMajor, result.toMajor);
+
+      // `--write` (#9591): the mechanical changes go into the authored sources
+      // where they can be proved, and the write is held to a re-run of the chain.
+      const write = flags.write
+        ? await this.writeSources({
+            configArg: args.config,
+            configPath: absolutePath,
+            config: config as Record<string, unknown>,
+            namedExports,
+            normalized,
+            result,
+            json: Boolean(flags.json),
+          })
+        : undefined;
 
       if (flags.json) {
         await emitJson({
@@ -660,12 +912,17 @@ export default class MigrateMeta extends Command {
               protocolVersion: PROTOCOL_VERSION,
               applied: result.applied,
               todos: result.todos,
+              // `todos` keeps every semantic entry; `absentTodos` NAMES the
+              // subset the chain proved irrelevant to this stack (ADR-0087 D3),
+              // so a machine consumer reads the default list as the difference.
+              absentTodos: result.absentTodos,
               hops: flags.step
                 ? result.hops.map((h) => ({
                     toMajor: h.toMajor,
                     rationale: h.rationale,
                     applied: h.applied,
                     todos: h.todos,
+                    absentTodos: h.absentTodos,
                   }))
                 : undefined,
               specChanges,
@@ -673,9 +930,12 @@ export default class MigrateMeta extends Command {
               // Per-deployment data migrations this chain leaves to the
               // operator — the metadata is only half of a crossing upgrade.
               dataMigrations,
+              // Only with `--write`: without it the payload is what it always was.
+              ...(write ? { write: writeOutcomeJson(write) } : {}),
               duration: timer.elapsed(),
             });
         if (flags.out) writeFileSync(resolve(flags.out), JSON.stringify(result.stack, null, 2));
+        if (write && write.status !== 'written') this.exit(1);
         return;
       }
 
@@ -701,10 +961,15 @@ export default class MigrateMeta extends Command {
         refusals: parsed.success ? [] : parsed.error.issues,
         dataMigrations,
         step: flags.step,
+        all: flags.all,
         ...(flags.out ? { out: resolve(flags.out) } : {}),
+        ...(write ? { write } : {}),
         elapsed: timer.display(),
       });
+      // A write refused or undone is a failed run, reported above.
+      if (write && write.status !== 'written') this.exit(1);
     } catch (error: any) {
+      if (isExitSignal(error)) throw error;
       if (error instanceof MigrationFloorError) {
         if (flags.json) {
           await emitJson({ error: 'unsupported_from_major', message: error.message }, 0, { compact: true });
@@ -724,6 +989,69 @@ export default class MigrateMeta extends Command {
       if (!isReportedError(error)) printError(error.message || String(error));
       this.exit(1);
     }
+  }
+
+  /**
+   * `--write`: plan the source edits, write them, re-run the chain over the
+   * written sources, and restore every file when the re-run disagrees with
+   * the plan (#9591). Writes nothing when the chain applied nothing.
+   */
+  private async writeSources(input: {
+    configArg: string | undefined;
+    configPath: string;
+    config: Record<string, unknown>;
+    namedExports: readonly string[];
+    normalized: Record<string, unknown>;
+    result: MigrationChainResult;
+    json: boolean;
+  }): Promise<WriteOutcome> {
+    const { result } = input;
+    if (!input.json && result.applied.length > 0) printStep('Writing the mechanical changes into the authored sources…');
+    const plan = await planAuthoredSourceWrite({
+      configPath: input.configPath,
+      config: input.config,
+      namedExports: input.namedExports,
+      normalized: input.normalized,
+      migrated: result.stack,
+      applied: result.applied,
+    });
+    if (plan.rewrites.length === 0) return { plan, status: 'written' };
+    try {
+      writeAuthoredSources(plan);
+    } catch (error: any) {
+      return { plan, status: 'unwritten', error: error.message || String(error) };
+    }
+
+    let verification: WriteVerification;
+    // The re-load hands the remaining refused artifacts through the
+    // authored-source shim again, and it would announce each of them a second
+    // time; the first load already said so, and the verdict below is the one
+    // thing this load is for.
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      const reloaded = await loadConfig(input.configArg, { authoredSource: true });
+      const rerun = applyMetaMigrations(
+        normalizeStackInput(reloaded.config as Record<string, unknown>, { convert: false }),
+        result.fromMajor,
+        result.toMajor,
+      );
+      verification = verifyAuthoredSourceWrite(plan, rerun.applied);
+    } catch (error: any) {
+      restoreAuthoredSources(plan);
+      return { plan, status: 'restored', error: `the re-run over the written sources failed: ${error.message || String(error)}` };
+    } finally {
+      console.warn = warn;
+    }
+    if (!verification.ok) {
+      restoreAuthoredSources(plan);
+      const parts = [
+        ...(verification.stillApplied.length > 0 ? [`still converted: ${verification.stillApplied.join(', ')}`] : []),
+        ...(verification.vanished.length > 0 ? [`no longer converted: ${verification.vanished.join(', ')}`] : []),
+      ];
+      return { plan, status: 'restored', verification, error: parts.join('; ') };
+    }
+    return { plan, status: 'written', verification };
   }
 
   /**

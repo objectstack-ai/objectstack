@@ -250,6 +250,108 @@ function refOf(def: any): string | undefined {
   return referenceCarrierOf({ reference: def?.reference }, 'data-model-rules refOf');
 }
 
+// ─── R2 under controlled_by_parent ──────────────────────────────────
+
+/** The rule id R2 reports under, on both tiers. */
+const MASTER_DETAIL_REQUIRED = 'relationship/master-detail-required';
+
+/**
+ * R2's `error` tier — a `master_detail` reference on a
+ * `sharingModel: 'controlled_by_parent'` object in one of the three shapes that
+ * leave the security gate as the only thing refusing a detail record saved
+ * without its master:
+ *
+ *   1. `required` absent (or `false`);
+ *   2. `required: true` + `readonly: true`;
+ *   3. `required: true` + `system: true`.
+ *
+ * Why these three. A `controlled_by_parent` detail derives ALL of its record
+ * access from the master its `master_detail` reference names (ADR-0055: such an
+ * object "must declare exactly one required `master_detail` field"). Record
+ * validation (`validateRecord`, `@objectstack/objectql`) never checks a field
+ * that is not `required`, and skips `readonly` / `system` fields before its
+ * required check is reached — so on all three shapes an insert that omits the
+ * master FK is refused by `assertControlledByParentWrite` (plugin-security) and
+ * by nothing else. A record that lands without its master anyway is readable by
+ * nobody: the derived read filter `masterFK IN (accessible master ids)` never
+ * matches null, and every later by-id write is refused.
+ *
+ * Why `error` here and `warning` elsewhere. This is the criterion
+ * `validate-security-posture.ts` states at its head — an `error` rule mirrors a
+ * hard runtime enforcement point and moves the failure from runtime-deny to an
+ * author-time fix. Under `controlled_by_parent` the security gate's refusal
+ * stands behind every one of these shapes; outside it nothing at runtime refuses
+ * a non-required `master_detail`, so there it stays a likely-wrong choice at
+ * `warning`, unchanged. Maintainer ruling of 2026-08-16, Direction 1, scheduled
+ * for the v18 boundary — the card that carries it verbatim is #9139 (the thread
+ * the ruling was recorded on no longer resolves on the board); the runtime half
+ * of that ruling is untouched
+ * (the security gate's fallbacks stay, so metadata already at rest keeps
+ * loading and is still guarded).
+ *
+ * Scope — EVERY `master_detail` field of a `controlled_by_parent` object, not
+ * only the one the runtime resolves as the master: that is the scope the
+ * builder half of the same ruling already enforces (`ObjectSchema.create()`
+ * forces `required: true` on every `master_detail` reference under
+ * `controlled_by_parent` and refuses an explicit `required: false` —
+ * `forceCbpMasterDetailRequired` in `packages/spec/src/data/object.zod.ts`).
+ * The builder never inspects `readonly` / `system`, so shapes 2 and 3 pass
+ * through `create()` untouched, and shape 1 survives every path that does not
+ * go through `create()` (a plain object literal, raw `.parse()` of stored
+ * metadata); this rule is where all three meet a refusal at authoring time.
+ *
+ * ⚠ Reach: `lintDataModel` is `os lint`'s sweep and the metadata-generation
+ * rubric (`score.ts`), and nothing else — it is not an `AUTHORING_RULES` entry
+ * (`authoring-rule-wiring.test.ts` → `DIRECT_CALL_RATCHET`), so `os build`,
+ * `os validate` and the metadata save door do not run it. The `error` moves
+ * `os lint`'s exit code and the rubric's `valid`, not a publish verdict.
+ *
+ * One finding per field, located at the first defect it names; the `fix`
+ * names every edit the field needs.
+ *
+ * ⛔ Keep this above the first `export function`: `authoring-rule-wiring.test.ts`
+ * reads an exported rule's body as the source text up to the next `export`, so
+ * an `error`-emitting helper placed below one of the three registered advisory
+ * rules above `lintDataModel` is read as that rule emitting `error`.
+ */
+function cbpMasterReferenceFinding(
+  objectName: string,
+  fieldName: string,
+  fieldPath: string,
+  parent: string,
+  def: any,
+): LintIssue | undefined {
+  const missingRequired = def.required !== true;
+  const flags = (['readonly', 'system'] as const).filter((flag) => def[flag] === true);
+  if (!missingRequired && flags.length === 0) return undefined;
+
+  const subject = `master_detail "${objectName}.${fieldName}" → ${parent}`;
+  const derivation =
+    `"${objectName}" is controlled_by_parent, so its record access is derived through this ` +
+    `reference — a record saved without its master is readable by nobody (the derived read filter ` +
+    `never matches an empty master) and refused on every later write`;
+  const flagWords = flags.map((flag) => `\`${flag}: true\``).join(' and ');
+  const message = missingRequired
+    ? flags.length === 0
+      ? `${subject} must be required: ${derivation}`
+      : `${subject} must be required and must not be ${flagWords}: ${derivation}; record validation ` +
+        `also skips readonly and system fields before its required check`
+    : `${subject} is required but also ${flagWords}: record validation skips readonly and system ` +
+      `fields before its required check, so \`required: true\` is never enforced on it — and ` +
+      `${derivation}`;
+
+  return {
+    severity: 'error',
+    rule: MASTER_DETAIL_REQUIRED,
+    message,
+    path: `${fieldPath}.${missingRequired ? 'required' : flags[0]}`,
+    fix: [
+      ...(missingRequired ? ['required: true'] : []),
+      ...flags.map((flag) => `drop ${flag}: true`),
+    ].join(', '),
+  };
+}
+
 // ─── Uniqueness declarations (ADR-0120) ─────────────────────────────
 
 export const UNIQUE_DOUBLE_DECLARATION = 'unique/double-declaration';
@@ -736,10 +838,20 @@ export function lintDataModel(objects: any[]): LintIssue[] {
 
       if (type === 'master_detail') {
         // R2 — master-detail children should require their parent.
-        if (def.required !== true) {
+        //
+        // Two tiers, one rule id. On a `controlled_by_parent` object the master
+        // reference is what the object's whole record access is derived through,
+        // so an unsafe shape there is refused at `error`
+        // (`cbpMasterReferenceFinding`); everywhere else a non-required
+        // `master_detail` is a likely-wrong choice and stays a `warning`,
+        // byte-for-byte as before.
+        if (obj.sharingModel === 'controlled_by_parent') {
+          const finding = cbpMasterReferenceFinding(obj.name, fieldName, fieldPath, parent, def);
+          if (finding) issues.push(finding);
+        } else if (def.required !== true) {
           issues.push({
             severity: 'warning',
-            rule: 'relationship/master-detail-required',
+            rule: MASTER_DETAIL_REQUIRED,
             message: `master_detail "${obj.name}.${fieldName}" → ${parent} should be required (a detail record cannot exist without its master)`,
             path: `${fieldPath}.required`,
             fix: 'required: true',

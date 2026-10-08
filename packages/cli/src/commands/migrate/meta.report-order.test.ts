@@ -3,15 +3,18 @@
 /**
  * `os migrate meta` — the human report leads with what blocks the stack.
  *
- * The chain hands the printer every semantic entry of every hop it crosses,
- * whatever the stack holds, so the semantic group is the whole catalogue of
- * each major crossed — hundreds of notices. The report therefore prints three
- * groups in the order an upgrader acts on them, each under one header line that
- * counts it:
+ * The chain hands the printer every semantic entry of every hop it crosses —
+ * hundreds of notices — and proves only the entries carrying a structured
+ * relevance question (`relevantWhen`) irrelevant to the stack. The report
+ * therefore prints its groups in the order an upgrader acts on them, each
+ * under one header line that counts it:
  *
  *  ① the verdict, and every schema refusal left after the chain;
  *  ② the applied mechanical edits;
- *  ③ the semantic notices.
+ *  ③ the semantic notices the stack may owe (`todos` minus `absentTodos`);
+ *  ④ the notices proven absent from the stack (`absentTodos`, a subset of
+ *    `todos`) — counted on one line by default, listed in full under `--all`
+ *    (the ABSENT pins below).
  *
  * ## Two kinds of pin, kept apart on purpose
  *
@@ -45,6 +48,9 @@
  * EARLIER step replays, and none is authored yet.
  */
 
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ALL_CONVERSIONS, ObjectStackDefinitionSchema, formatZodIssue, normalizeStackInput } from '@objectstack/spec';
@@ -126,6 +132,7 @@ function run(
   fromMajor: number,
   toMajor: number,
   amend: (result: MigrationChainResult) => MigrationChainResult = (r) => r,
+  options: { all?: boolean; out?: string } = {},
 ): Run {
   const normalized = normalizeStackInput(stack, { convert: false });
   const result = amend(applyMetaMigrations(normalized, fromMajor, toMajor));
@@ -137,6 +144,8 @@ function run(
     refusals: parsed.success ? [] : parsed.error.issues,
     dataMigrations: [],
     step: false,
+    all: options.all ?? false,
+    ...(options.out ? { out: options.out } : {}),
     elapsed: '1ms',
   };
   printMigrationReport(report);
@@ -159,15 +168,42 @@ function appliedLines(result: MigrationChainResult): string[] {
   return result.applied.map((a) => `    • ${a.path}: ${a.from} → ${a.to} (${a.conversionId})`);
 }
 
-/** The lines a semantic notice prints — every field, split the way a terminal splits it. */
+/** The lines one semantic notice prints — every field, split the way a terminal splits it. */
+function blockLines(t: MigrationTodo): string[] {
+  return [
+    `    ⚠ [protocol ${t.toMajor}] ${t.surface} → ${t.replacement}`,
+    `        why:    ${t.reason}`,
+    `        verify: ${t.acceptanceCriteria}`,
+  ].join('\n').split('\n');
+}
+
+/**
+ * The notices ③ lists: every entry of `todos` the chain did not name in
+ * `absentTodos` — written from the chain's data by key, not by the printer's
+ * own filter.
+ */
+function listedOf(result: MigrationChainResult): MigrationTodo[] {
+  const absent = new Set(result.absentTodos.map((t) => `${t.toMajor}:${t.id}`));
+  return result.todos.filter((t) => !absent.has(`${t.toMajor}:${t.id}`));
+}
+
+/** The lines ③ prints — every listed notice, in chain order. */
 function noticeLines(result: MigrationChainResult): string[] {
-  return result.todos.flatMap((t) =>
-    [
-      `    ⚠ [protocol ${t.toMajor}] ${t.surface} → ${t.replacement}`,
-      `        why:    ${t.reason}`,
-      `        verify: ${t.acceptanceCriteria}`,
-    ].join('\n').split('\n'),
-  );
+  return listedOf(result).flatMap(blockLines);
+}
+
+/** ④ without `--all`: the line counting the proven-absent notices, and the line scoping the proof. */
+const ABSENT_COUNT_RE = /^ {2}(\d+) more manual change\(s\) not listed: their surfaces are absent from this stack \(run with --all to list them\)\.$/;
+const ABSENT_SCOPE_RE = /^ {4}Absent is proven over the stack this run loaded; /;
+/** ④ under `--all`: the header counting the group. */
+const ABSENT_HEADER_RE = /^ {2}(\d+) manual change\(s\) whose surfaces are absent from this stack \(listed by --all\):$/;
+
+/** The lines ④ prints under `--all` — each absent notice in full, then the keys it was proven absent under. */
+function absentListLines(result: MigrationChainResult): string[] {
+  return result.absentTodos.flatMap((t) => [
+    ...blockLines(t),
+    `        absent: nothing is declared under ${(t.relevantWhen?.keys ?? []).map((k) => `\`${k}\``).join(' / ')}`,
+  ]);
 }
 
 /** The lines the refusal group prints — one `formatZodIssue` render per refusal. */
@@ -233,7 +269,7 @@ describe('each group opens with one header line that counts it', () => {
       `  Applied ${result.applied.length} mechanical change(s):`,
     ]);
     expect(lines.filter((l) => SEMANTIC_HEADER_RE.test(l))).toEqual([
-      `  ${result.todos.length} manual change(s) require your judgment:`,
+      `  ${listedOf(result).length} manual change(s) require your judgment:`,
     ]);
   });
 });
@@ -250,8 +286,8 @@ describe('no notice, edit or refusal is dropped, merged or reworded (SET)', () =
     const expected = noticeLines(result);
     // Anti-vacuity: more than one hop's catalogue, and at least one notice
     // whose prose spans several terminal lines.
-    expect(new Set(result.todos.map((t) => t.toMajor)).size).toBeGreaterThan(1);
-    expect(expected.length).toBeGreaterThan(result.todos.length * 3);
+    expect(new Set(listedOf(result).map((t) => t.toMajor)).size).toBeGreaterThan(1);
+    expect(expected.length).toBeGreaterThan(listedOf(result).length * 3);
     const header = indexOf(lines, SEMANTIC_HEADER_RE);
     const printedNotices = lines.slice(header + 1, header + 1 + expected.length);
     expect(printedNotices).toEqual(expected);
@@ -273,6 +309,7 @@ describe('no notice, edit or refusal is dropped, merged or reworded (SET)', () =
     const { report, result, lines } = run(FINDINGS_STACK, MIGRATION_SUPPORT_FLOOR, TERMINUS);
     const accounted = [
       ...lines.filter((l) => VERDICT_RE.test(l) || APPLIED_HEADER_RE.test(l) || SEMANTIC_HEADER_RE.test(l)),
+      ...lines.filter((l) => ABSENT_COUNT_RE.test(l) || ABSENT_SCOPE_RE.test(l)),
       ...refusalLines(report),
       ...appliedLines(result),
       ...noticeLines(result),
@@ -414,11 +451,11 @@ describe('an applied edit a semantic entry judges prints that entry beside it, m
   it('keeps every semantic entry in ③ — the judge included — with the chain\'s count and bytes', () => {
     const { result, lines } = run(DECISION_STACK, MIGRATION_SUPPORT_FLOOR, TERMINUS);
     const header = indexOf(lines, SEMANTIC_HEADER_RE);
-    expect(lines[header]).toBe(`  ${result.todos.length} manual change(s) require your judgment:`);
+    expect(lines[header]).toBe(`  ${listedOf(result).length} manual change(s) require your judgment:`);
     const expected = noticeLines(result);
     expect(lines.slice(header + 1, header + 1 + expected.length)).toEqual(expected);
     const entries = lines.slice(header + 1).filter((l) => /^ {4}⚠ \[protocol \d+\] /.test(l));
-    expect(entries).toHaveLength(result.todos.length);
+    expect(entries).toHaveLength(listedOf(result).length);
     const judge = todoOf(result, DECISION_JUDGE);
     expect(entries).toContain(`    ⚠ [protocol ${judge.toMajor}] ${judge.surface} → ${judge.replacement}`);
   });
@@ -435,12 +472,13 @@ describe('an applied edit a semantic entry judges prints that entry beside it, m
       }
       runs.set(a.conversionId, (runs.get(a.conversionId) ?? 0) + 1);
     }
-    const reviews = result.todos.flatMap((t) =>
+    const reviews = listedOf(result).flatMap((t) =>
       (t.conversionIds ?? []).filter((id) => runs.has(id)).map((id) => reviewLine(t, runs.get(id)!)),
     );
     expect(reviews.length, 'anti-vacuity: the stack exercises a link').toBeGreaterThan(0);
     const accounted = [
       ...lines.filter((l) => VERDICT_RE.test(l) || APPLIED_HEADER_RE.test(l) || SEMANTIC_HEADER_RE.test(l)),
+      ...lines.filter((l) => ABSENT_COUNT_RE.test(l) || ABSENT_SCOPE_RE.test(l)),
       ...refusalLines(report),
       ...appliedLines(result),
       ...reviews,
@@ -491,5 +529,98 @@ describe('an applied edit a semantic entry judges prints that entry beside it, m
     expect(edit?.toMajor, 'anti-vacuity: the edit comes from an earlier hop').toBeLessThan(judge.toMajor);
     const { last, length } = runOf(lines, earlier);
     expect(reviewsUnder(lines, last)).toEqual([reviewLine(judge, length)]);
+  });
+});
+
+/**
+ * ④ — the notices the chain PROVED irrelevant to the stack (`absentTodos`: an
+ * entry's structured `relevantWhen` question answered `absent` over the stack).
+ * ADR-0087 D3 lets such an entry leave ③, and only such an entry, so the pins
+ * hold both halves: by default ④ is one line that counts them and names
+ * `--all`, and under `--all` every one of them is printed in full — nothing the
+ * chain reported becomes unreachable from the terminal.
+ */
+describe('the notices proven absent leave ③ for one counting line, and --all lists them (ABSENT)', () => {
+  it('counts them on one line naming --all, after ③, and lists none of them by default', () => {
+    const { result, lines } = run(FINDINGS_STACK, MIGRATION_SUPPORT_FLOOR, TERMINUS);
+    // Anti-vacuity: the stack declares no analytics cube, so the chain proved
+    // some entries absent — and still left others listed.
+    expect(result.absentTodos.length).toBeGreaterThan(0);
+    expect(result.todos.length).toBeGreaterThan(0);
+
+    const counts = lines.filter((l) => ABSENT_COUNT_RE.test(l));
+    expect(counts).toHaveLength(1);
+    expect(Number(ABSENT_COUNT_RE.exec(counts[0]!)![1])).toBe(result.absentTodos.length);
+    expect(lines.filter((l) => ABSENT_SCOPE_RE.test(l))).toHaveLength(1);
+    expect(indexOf(lines, ABSENT_COUNT_RE)).toBeGreaterThan(indexOf(lines, SEMANTIC_HEADER_RE));
+
+    const headlines = new Set(listedOf(result).map((t) => blockLines(t)[0]));
+    for (const t of result.absentTodos) {
+      const headline = blockLines(t)[0]!;
+      if (headlines.has(headline)) continue; // a listed entry sharing the headline prints it legitimately
+      expect(lines, `${t.id} is counted, not listed`).not.toContain(headline);
+    }
+  });
+
+  it('lists every one of them under --all, in full and in chain order, after ③', () => {
+    const { result, lines } = run(FINDINGS_STACK, MIGRATION_SUPPORT_FLOOR, TERMINUS, undefined, { all: true });
+    const header = indexOf(lines, ABSENT_HEADER_RE);
+    expect(header).toBeGreaterThan(indexOf(lines, SEMANTIC_HEADER_RE));
+    expect(Number(ABSENT_HEADER_RE.exec(lines[header]!)![1])).toBe(result.absentTodos.length);
+    const expected = absentListLines(result);
+    expect(lines.slice(header + 1, header + 1 + expected.length)).toEqual(expected);
+    // The counting line belongs to the default only.
+    expect(lines.filter((l) => ABSENT_COUNT_RE.test(l) || ABSENT_SCOPE_RE.test(l))).toEqual([]);
+    // ③ is unchanged by --all: the same header and the same notices.
+    const semantic = indexOf(lines, SEMANTIC_HEADER_RE);
+    expect(lines[semantic]).toBe(`  ${listedOf(result).length} manual change(s) require your judgment:`);
+    expect(lines.slice(semantic + 1, semantic + 1 + noticeLines(result).length)).toEqual(noticeLines(result));
+  });
+
+  it('③ and ④ together print every semantic entry of every hop crossed, each exactly once', () => {
+    const { result, lines } = run(FINDINGS_STACK, MIGRATION_SUPPORT_FLOOR, TERMINUS, undefined, { all: true });
+    const crossed = result.hops.flatMap((h) => MIGRATIONS_BY_MAJOR[h.toMajor]!.semantic.map((s) => `${h.toMajor}:${s.id}`));
+    // The chain's `todos` is still the whole catalogue; ④ is a subset of it.
+    expect(result.todos.map((t) => `${t.toMajor}:${t.id}`)).toEqual(crossed);
+    for (const t of result.absentTodos) expect(result.todos).toContain(t);
+    const printed = [...listedOf(result), ...result.absentTodos].map((t) => `${t.toMajor}:${t.id}`);
+    expect(printed.slice().sort()).toEqual(crossed.slice().sort());
+    expect(new Set(printed).size).toBe(printed.length);
+    // …and the terminal shows each headline as often as the chain has entries carrying it.
+    const headlineCount = (h: string) => lines.filter((l) => l === h).length;
+    for (const t of result.todos) {
+      const h = blockLines(t)[0]!;
+      expect(headlineCount(h), t.id).toBe(result.todos.filter((u) => blockLines(u)[0] === h).length);
+    }
+    // Only an entry carrying a structured question can be in ④.
+    for (const t of result.absentTodos) expect(t.relevantWhen, `${t.id} carries relevantWhen`).toBeDefined();
+  });
+
+  it('prints no ④ at all when the chain proved nothing absent', () => {
+    const { lines } = run(FINDINGS_STACK, MIGRATION_SUPPORT_FLOOR, TERMINUS, (r) => ({ ...r, absentTodos: [] }));
+    expect(lines.filter((l) => ABSENT_COUNT_RE.test(l) || ABSENT_SCOPE_RE.test(l) || ABSENT_HEADER_RE.test(l))).toEqual([]);
+  });
+
+  it('a run whose only notices are proven absent still counts them and still writes --out', () => {
+    const out = join(mkdtempSync(join(tmpdir(), 'os-migrate-meta-absent-only-')), 'migrated.stack.json');
+    try {
+      const { result, lines } = run(
+        CANONICAL_STACK,
+        MIGRATION_SUPPORT_FLOOR,
+        TERMINUS,
+        (r) => {
+          const questioned = r.todos.filter((t) => t.relevantWhen);
+          return { ...r, todos: questioned, absentTodos: questioned };
+        },
+        { out },
+      );
+      expect(result.applied).toEqual([]);
+      expect(result.absentTodos.length).toBeGreaterThan(0);
+      expect(lines.filter((l) => ABSENT_COUNT_RE.test(l))).toHaveLength(1);
+      expect(lines.some((l) => l.includes('Nothing to migrate'))).toBe(false);
+      expect(existsSync(out), 'the snapshot --out asked for is written').toBe(true);
+    } finally {
+      rmSync(dirname(out), { recursive: true, force: true });
+    }
   });
 });

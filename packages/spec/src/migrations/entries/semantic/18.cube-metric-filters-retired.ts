@@ -32,4 +32,5 @@ export const entry: SemanticMigration = {
     + 'renamed the metric if its name promised the filter. With the condition re-expressed, a query '
     + 'over a fixture where the condition excludes rows returns the filtered aggregate (strictly '
     + 'smaller for a positive sum over excluded rows), not the unfiltered one.',
+  relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
 };

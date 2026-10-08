@@ -43,7 +43,7 @@ import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
 import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
-import { DraftConflictError, SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
+import { DraftConflictError, SysMetadataRepository, packageScopedRowWhere, type SysMetadataEngine } from './sys-metadata-repository.js';
 import { isOriginGatedType, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 import {
     resolveArtifactLockLayer,
@@ -23711,7 +23711,8 @@ export class ObjectStackProtocolImplementation implements
      *
      * Use case: "I edited this app for a while and it turned out worse than
      * before — abandon all my changes." Routes through the sys_metadata path
-     * (no metadata-service dependency, unlike `POST /packages/:id/revert`).
+     * (no metadata-service dependency). {@link revertStoredPackage} takes the
+     * same per-draft step for `POST /packages/:id/revert`.
      */
     async discardPackageDrafts(request: {
         packageId: string;
@@ -23734,25 +23735,14 @@ export class ObjectStackProtocolImplementation implements
 
         for (const d of drafts) {
             try {
-                // Discard the draft in the scope it lives in (#3115). Like
-                // publish, `listDrafts` surfaces env-wide drafts to a non-null
-                // active org via `$or`; deleting under the request's active org
-                // would silently no-op on those env-wide rows.
-                const draftOrgId = d.organizationId ?? null;
-                await this.deleteMetaItem({
-                    type: d.type,
-                    name: d.name,
-                    state: 'draft',
-                    ...(draftOrgId ? { organizationId: draftOrgId } : {}),
-                    ...(request.actor ? { actor: request.actor } : {}),
-                });
+                await this.discardDraftInItsScope(d, request.actor);
                 discarded.push({ type: d.type, name: d.name });
             } catch (e: any) {
                 // [#8136] Same source, same reasoning as `deletePackage`'s
                 // `failed[]` collector below: this `try` wraps only
-                // `deleteMetaItem`, whose exits all now either declare a
-                // refusal or withhold at the source. Clean derivatively; no
-                // filter of its own.
+                // `deleteMetaItem` (through `discardDraftInItsScope`), whose
+                // exits all now either declare a refusal or withhold at the
+                // source. Clean derivatively; no filter of its own.
                 failed.push({
                     type: d.type,
                     name: d.name,
@@ -23769,6 +23759,124 @@ export class ObjectStackProtocolImplementation implements
             discarded,
             failed,
         };
+    }
+
+    /**
+     * Discard ONE pending draft in the scope it lives in — the per-draft step
+     * {@link discardPackageDrafts} and {@link revertStoredPackage} share, so
+     * the scope rule below has one home.
+     */
+    private async discardDraftInItsScope(
+        draft: { type: string; name: string; organizationId: string | null },
+        actor: string | undefined,
+    ): Promise<void> {
+        // Discard the draft in the scope it lives in (#3115). Like
+        // publish, `listDrafts` surfaces env-wide drafts to a non-null
+        // active org via `$or`; deleting under the request's active org
+        // would silently no-op on those env-wide rows.
+        const draftOrgId = draft.organizationId ?? null;
+        await this.deleteMetaItem({
+            type: draft.type,
+            name: draft.name,
+            state: 'draft',
+            ...(draftOrgId ? { organizationId: draftOrgId } : {}),
+            ...(actor ? { actor } : {}),
+        });
+    }
+
+    /**
+     * [#22090] Revert a package's STORED members to their published version —
+     * the half of `POST /packages/:id/revert` a Studio-authored package needs.
+     *
+     * ## Why the metadata service could not do this
+     *
+     * `MetadataManager.revertPackage` collects members from its in-memory
+     * registry, by an item's own `packageId` / `package` key. A Studio-authored
+     * package lives in `sys_metadata`, bound by each row's `package_id`
+     * column, and none of its rows is in that registry: a real boot gives the
+     * manager no `sys_metadata` loader, and `@objectstack/metadata` cannot
+     * reach this package (the dependency runs the other way). So the revert of
+     * a Studio package answered 404 "No metadata items found" while the
+     * package held published items and a pending draft.
+     *
+     * ## What "revert" means for a stored member
+     *
+     * A stored item's published version is its ACTIVE row, and a pending
+     * change is a separate DRAFT row beside it. Reverting the package to its
+     * published state is removing its drafts, through the per-draft step
+     * {@link discardPackageDrafts} takes ({@link discardDraftInItsScope}) —
+     * not a second revert mechanism. A draft with no active row (an item
+     * created after the last publish) is removed too: it was not part of the
+     * published state.
+     *
+     * Membership is the package's rows as {@link SysMetadataRepository.listDrafts}
+     * reads them — `package_id`, the caller's organization plus env-wide — and
+     * the active rows are read through the same predicate,
+     * {@link packageScopedRowWhere}, never a `where` of this method's own.
+     *
+     * ## Answers
+     *
+     * - No stored row bound to the package: `{ stored: false }`, and nothing
+     *   is touched. Its members, if it has any, are the metadata service's;
+     *   the caller asks that service's `revertPackage` next, so a code-shipped
+     *   package reverts exactly as it did before. An unprovisioned
+     *   `sys_metadata` answers the same way: there are genuinely no rows.
+     * - Stored rows, none of them active: `RESOURCE_CONFLICT` / 409. The
+     *   package has never been published, so there is no published version to
+     *   revert to. Nothing is touched.
+     * - Otherwise every draft is discarded. A published package with no draft
+     *   is already at its published version, which is a success too.
+     *
+     * A draft whose discard is refused fails the call with that refusal's own
+     * `code` and `status` (ADR-0112). {@link discardPackageDrafts} answers a
+     * per-item outcome report; this verb's door answers `{ success: true }` or
+     * an error, so a refusal collected into a list would reach the caller as a
+     * success. Drafts discarded before the refusal stay discarded, as they do
+     * in {@link discardPackageDrafts}.
+     */
+    async revertStoredPackage(request: {
+        packageId: string;
+        organizationId?: string;
+        actor?: string;
+    }): Promise<{
+        stored: boolean;
+        discarded: Array<{ type: string; name: string }>;
+    }> {
+        await this.ensureOverlayIndex();
+        const orgId = request.organizationId ?? null;
+        let drafts: Awaited<ReturnType<SysMetadataRepository['listDrafts']>>;
+        let publishedRows: unknown[];
+        try {
+            drafts = await this.getOverlayRepo(orgId).listDrafts({ packageId: request.packageId });
+            // [#21911] The explicit system opt-in — see findServedOverlayRow.
+            publishedRows = (await this.engine.find('sys_metadata', {
+                where: packageScopedRowWhere(orgId, 'active', { packageId: request.packageId }),
+                limit: 1,
+                context: { isSystem: true },
+            })) as unknown[];
+        } catch (error) {
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            return { stored: false, discarded: [] };
+        }
+
+        if (drafts.length === 0 && publishedRows.length === 0) return { stored: false, discarded: [] };
+
+        if (publishedRows.length === 0) {
+            const err = new Error(
+                `Package '${request.packageId}' has never been published, so there is no published version to `
+                + 'revert to. Publish the package first, or discard its drafts to drop them.',
+            ) as Error & { code?: string; status?: number };
+            err.code = 'RESOURCE_CONFLICT';
+            err.status = 409;
+            throw err;
+        }
+
+        const discarded: Array<{ type: string; name: string }> = [];
+        for (const d of drafts) {
+            await this.discardDraftInItsScope(d, request.actor);
+            discarded.push({ type: d.type, name: d.name });
+        }
+        return { stored: true, discarded };
     }
 
     /**

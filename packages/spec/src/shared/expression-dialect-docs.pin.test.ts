@@ -93,3 +93,50 @@ describe('expression.zod.ts dialect table === ExpressionDialect', () => {
     expect(ExpressionDialect.safeParse('template').success).toBe(true);
   });
 });
+
+/**
+ * [#22081] The `tmpl` docblock says which renderers read which braces.
+ *
+ * `tmpl` is the helper an author reaches for on every template slot, and its
+ * docblock used to call the envelope "Mustache-template" and show only
+ * `{{record.x}}` — the spelling a notify node's `title` / `message` renderer
+ * (the flow interpolator) leaves inside a stray pair of braces, and the build's
+ * `flow-double-brace-interpolation` rule flags. The helper judges no spelling,
+ * so its docblock has to name the renderer for each one.
+ *
+ * ⛔ Scope: the relation, not the wording — which spelling is listed against
+ * which renderer. Rewording a bullet is free.
+ */
+describe('the `tmpl` docblock names the renderer behind each brace spelling', () => {
+  /** The `/** … *\/` block directly above `export function tmpl(`, one string per `- ` bullet. */
+  function tmplBullets(): string[] {
+    const source = fs.readFileSync(SOURCE, 'utf8');
+    const at = source.indexOf('export function tmpl(');
+    const block = source.slice(source.lastIndexOf('/**', at), at);
+    const bullets: string[] = [];
+    for (const line of block.split('\n')) {
+      const text = line.replace(/^\s*\*\s?/, '');
+      if (text.startsWith('- ')) bullets.push(text.slice(2));
+      else if (bullets.length > 0 && /^\s+\S/.test(text)) bullets[bullets.length - 1] += ` ${text.trim()}`;
+    }
+    return bullets;
+  }
+
+  const bullets = tmplBullets();
+  const doubled = bullets.find((b) => b.startsWith('`{{record.x}}`'));
+  const single = bullets.find((b) => b.startsWith('`{record.x}`'));
+
+  it('finds a bullet for each spelling (anti-vacuity)', () => {
+    expect(bullets.length, 'no `- ` bullets parsed out of the `tmpl` docblock').toBeGreaterThan(0);
+    expect(doubled, 'no bullet opens with `{{record.x}}`').toBeDefined();
+    expect(single, 'no bullet opens with `{record.x}`').toBeDefined();
+  });
+
+  it('lists the double-brace renderers against `{{record.x}}`, and the notify slots against `{record.x}`', () => {
+    for (const renderer of ['messaging', 'email']) expect(doubled).toContain(renderer);
+    expect(doubled).not.toContain('notify');
+    expect(single).toContain('notify');
+    expect(single).toContain('`flow-double-brace-interpolation`');
+    for (const renderer of ['messaging', 'email']) expect(single).not.toContain(renderer);
+  });
+});

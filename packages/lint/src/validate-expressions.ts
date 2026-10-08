@@ -1182,7 +1182,7 @@ export interface StackExpressionOptions {
    * through by this rule's registry entry). ABSENT on `os build`, `os lint`
    * and `os validate`, which run every pass below.
    *
-   * On an `object` write exactly TWO passes judge, each the build's own call
+   * On an `object` write exactly THREE passes judge, each the build's own call
    * at the build's own position in the walk:
    *
    *  - the field-formula pass over `fields[].expression` — the build's
@@ -1199,16 +1199,24 @@ export interface StackExpressionOptions {
    *    `otherwise` branches included. The same sentence of `formulas.mdx`
    *    covers it, and the door gave none of it either: a rule whose
    *    `condition` called `sqrt` or read a bare `amount` saved with a 200 and
-   *    then faulted on every write the rule judged.
+   *    then faulted on every write the rule judged;
+   *  - [#22032, pass 2] the field-rule-slot pass over `fields[]` — each of
+   *    `requiredWhen` / `readonlyWhen` / `conditionalRequired` / `visibleWhen`
+   *    as a `record`-scoped predicate with its root verdict, plus the `parent`
+   *    gate (a `readonlyWhen` / `requiredWhen` reading `parent` on an object
+   *    without exactly one `master_detail`), the #4811 null-guard gate over
+   *    `requiredWhen`, and the #20078 refusal of a `requiredWhen` /
+   *    `readonlyWhen` read through a reference field. The same sentence of
+   *    `formulas.mdx` covers it, and the door gave none of it either: a
+   *    `requiredWhen` reading a bare `amount` saved with a 200, and the server
+   *    refuses a write whose requirement it cannot evaluate (ADR-0137 D2).
    *
    * Every other pass is fenced off an object write, deliberately and by name:
-   * the field-rule slots (`requiredWhen` / `readonlyWhen` /
-   * `conditionalRequired` / `visibleWhen`) with their `parent` and null-guard
-   * gates, the per-option `visibleWhen`, and the object's own `actions[]`
-   * predicates. Each is a build verdict the save door still does not give,
-   * and each would narrow the accept set further than the crossings above —
-   * a crossing of its own, measured over the stored corpus first, not a rider
-   * on either of them.
+   * the per-option `visibleWhen` (inside the field walk, by its own guard) and
+   * the object's own `actions[]` predicates. Each is a build verdict the save
+   * door still does not give, and each would narrow the accept set further
+   * than the crossings above — a crossing of its own, measured over the stored
+   * corpus first, not a rider on any of them.
    */
   runtimeWriteType?: string;
 }
@@ -1233,10 +1241,11 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
 export function runStackExpressionPasses(stack: AnyRec, options: StackExpressionOptions): ExprIssue[] {
   const issues: ExprIssue[] = [];
   // [#22019] See {@link StackExpressionOptions.runtimeWriteType}: on an object
-  // write only the field-formula pass and (#22032) the validation-rule pass
-  // judge. Every other loop below reads an empty list under it, so the claim
-  // holds by construction rather than by the shape of the snapshot the gate
-  // happens to build today.
+  // write only the field-formula pass and (#22032) the validation-rule and
+  // field-rule-slot passes judge. Every other loop below — the per-option
+  // `visibleWhen` loop inside the field walk included — reads an empty list
+  // under it, so the claim holds by construction rather than by the shape of
+  // the snapshot the gate happens to build today.
   const objectWrite = options.runtimeWriteType === 'object';
   const objects = recordsOf(stack.objects);
   const fieldIndex = buildFieldIndex(objects);
@@ -1940,10 +1949,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
 
     /**
      * The field-formula pass — one computed field's `expression`. A closure
-     * rather than inline only so the runtime publish gate's object door
-     * (#22019) runs exactly this pass and no other slot of the field walk; on
-     * the three CLI commands it is called at the same point of the field walk
-     * it always ran at, so the build's findings and their order are unchanged.
+     * since #22019, whose object door ran this pass and no other slot of the
+     * field walk; since #22032's pass 2 the door runs the field-rule slots as
+     * well, and this is called at one point only — the same point of the field
+     * walk it always ran at — so the build's findings and their order are
+     * unchanged.
      */
     const judgeFieldFormula = (fname: string, f: AnyRec): void => {
       if (f.expression) {
@@ -1984,11 +1994,14 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     };
 
     for (const [fname, f] of fieldList) {
-      // [#22019] The object write door: this field's formula, and no other slot.
-      if (objectWrite) {
-        judgeFieldFormula(fname, f);
-        continue;
-      }
+      // [#22032, pass 2] NOT fenced on an object write: the field-rule slots
+      // below — the four slots' root verdict, the `parent` gate, the
+      // `requiredWhen` null guard and the traversal refusal — are the pass the
+      // object save door runs, at the build's own position in this walk, so
+      // the door's findings and their order are the build's. The per-option
+      // `visibleWhen` loop between them is the one slot of this walk still
+      // fenced (pass 3), by its own guard.
+      //
       // Field-level conditional rules are server-enforced (rule-validator) and
       // record-scoped — a bare ref silently fails the rule (required/readonly
       // not enforced = data-integrity hole). #1928 class, same as actions.
@@ -2022,7 +2035,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // `checkFieldRuleRoot` above rejects it one level up, where nothing
       // binds it. Same helper, two verdicts, because the two surfaces have two
       // evaluators; neither verdict is a side effect of a shared root list.
-      for (const [oi, opt] of recordsOf(f.options).entries()) {
+      //
+      // [#22032] FENCED on an object write (pass 3 of that card, not lifted
+      // yet): see {@link StackExpressionOptions.runtimeWriteType}.
+      for (const [oi, opt] of (objectWrite ? [] : recordsOf(f.options)).entries()) {
         const label = typeof opt.value === 'string' ? `'${opt.value}'` : `#${oi}`;
         const optionWhere = `object '${objectName}' · field '${fname}' option ${label} visibleWhen`;
         check(optionWhere, opt.visibleWhen, objectName, 'record');

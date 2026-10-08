@@ -16,7 +16,11 @@ export const emailTemplateForm = defineForm({
   sections: [
     {
       label: 'Identity',
-      description: 'Template identifier resolved by IEmailService.sendTemplate({ template: name, locale, ... }).',
+      // Delivery resolves a template through
+      // `IEmailService.sendTemplate({ template: name, locale, ... })`. This
+      // description is form help in Studio, so it says what that means for
+      // the author and leaves the interface name here (#22093).
+      description: 'Senders address this template by its name; the locale selects which language version of it is sent.',
       columns: 2,
       fields: [
         { field: 'name', required: true, colSpan: 1, helpText: 'Dotted snake_case (e.g. auth.password_reset, crm.welcome)' },

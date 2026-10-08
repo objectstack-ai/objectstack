@@ -12,6 +12,7 @@ import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
 import type { DevLogin } from '@objectstack/spec/system';
 import { writeStdoutDirect } from './json-stdout.js';
 import { authoringRuleUnionStack } from './stack-collections.js';
+import { stripAnsi } from './boot-log-capture.js';
 
 // ─── Constants ──────────────────────────────────────────────────────
 export const CLI_NAME = 'objectstack';
@@ -1218,13 +1219,18 @@ export function printServerReady(opts: ServerReadyOptions) {
   if (opts.pluginNames && opts.pluginNames.length > 0) {
     console.error(chalk.dim(`           ${opts.pluginNames.join(', ')}`));
   }
-  if (opts.automation) printAutomationSummary(opts.automation);
+  // [#22073] Print-once: every banner section that RESTATES a boot-phase logger
+  // record hands back the record it restated, at the moment it prints its own
+  // line, and `printBootDiagnostics` withholds exactly those. See
+  // {@link BootDiagnosticsReplayOptions.restatedAbove} for the rule.
+  const restatedAbove: string[] = [];
+  if (opts.automation) restatedAbove.push(...printAutomationSummary(opts.automation));
   if (opts.seeds) printSeedSummary(opts.seeds);
   // #17329 — AFTER the settled summary, never instead of it: a bundle with two
   // config apps can have one finished (a real `Seeds:` row) and one still
   // writing, and reporting only the first is the omission this closes.
   if (opts.seedSettlement) printSeedsStillWriting(opts.seedSettlement);
-  if (opts.bootDiagnostics) printBootDiagnostics(opts.bootDiagnostics);
+  if (opts.bootDiagnostics) printBootDiagnostics(opts.bootDiagnostics, { restatedAbove });
   console.error('');
   console.error(chalk.dim('  Press Ctrl+C to stop'));
   console.error('');
@@ -1236,6 +1242,39 @@ export interface BootDiagnostics {
   lines: string[];
   /** Records dropped because the capture buffer filled. */
   dropped?: number;
+}
+
+/**
+ * How {@link printBootDiagnostics} replays when the banner has already spoken
+ * (#22073).
+ */
+export interface BootDiagnosticsReplayOptions {
+  /**
+   * The print-once rule: a boot warning prints in the banner list OR in *Boot
+   * diagnostics*, never both.
+   *
+   * Each entry is the identifying text of ONE logger record a banner section
+   * restated — handed back by that section at the moment it printed its own
+   * line (today only `printAutomationSummary`, for the
+   * `@objectstack/service-automation` bootstrap audit it summarises). A
+   * replayed record containing one is withheld here; every other record
+   * prints, exactly once, as before.
+   *
+   * So a NEW boot warning stays single without anyone touching this code: a
+   * `logger.warn` that no banner section restates is never matched and replays
+   * once, and a banner line that is not also a logger record has nothing to
+   * withhold. A banner section that starts restating a logger record must hand
+   * that record back here — otherwise it prints twice, which is exactly what
+   * this field ends.
+   *
+   * The match fails in ONE direction only: a record the claim does not
+   * recognise (a reworded producer, an escaped character in a JSON-format
+   * record) is printed, never dropped. A doubled line is noise; a dropped one
+   * would be a silent diagnostic. Empty or absent ⇒ every line replays — the
+   * failed-boot and migrate-and-exit paths in `serve`, which print no banner,
+   * pass nothing.
+   */
+  restatedAbove?: readonly string[];
 }
 
 /**
@@ -1251,20 +1290,33 @@ export interface BootDiagnostics {
  * boot and directly from serve's error path on a failed one — a boot that dies
  * is exactly when its warnings matter most.
  *
+ * [#22073] Print-once: from the banner it withholds the records a banner
+ * section already restated (`options.restatedAbove`), and its header counts
+ * them separately, so no warning appears in both places.
+ *
  * Replayed to **stderr** (#7915) — these are the kernel's own diagnostics, held
  * back and re-emitted, so they land where every other `serve` diagnostic does.
  */
-export function printBootDiagnostics(diagnostics: BootDiagnostics) {
+export function printBootDiagnostics(diagnostics: BootDiagnostics, options: BootDiagnosticsReplayOptions = {}) {
   const { lines, dropped = 0 } = diagnostics;
-  if (lines.length === 0) return;
+  const restated = options.restatedAbove ?? [];
+  const isRestated = (line: string): boolean => {
+    if (restated.length === 0) return false;
+    const text = stripAnsi(line);
+    return restated.some((record) => text.includes(record));
+  };
+  const shown = lines.filter((line) => !isRestated(line));
+  const listedAbove = lines.length - shown.length;
+  if (shown.length === 0 && dropped === 0) return;
 
   console.error('');
   console.error(
     chalk.yellow(
-      `  ⚠ Boot diagnostics — ${lines.length} warning${lines.length === 1 ? '' : 's'} logged during startup:`,
+      `  ⚠ Boot diagnostics — ${shown.length} warning${shown.length === 1 ? '' : 's'} logged during startup` +
+        `${listedAbove > 0 ? ` (${listedAbove} more already listed above)` : ''}:`,
     ),
   );
-  for (const line of lines) console.error(chalk.dim(`    ${line}`));
+  for (const line of shown) console.error(chalk.dim(`    ${line}`));
   if (dropped > 0) {
     console.error(chalk.dim(`    …and ${dropped} more (capture buffer full)`));
   }
@@ -1286,11 +1338,69 @@ function describeFlowBody(c: { source: 'package' | 'runtime'; packageId?: string
 }
 
 /**
+ * The banner's short form of one unbound-flow reason (#22073): its FIRST
+ * SENTENCE, trailing period dropped.
+ *
+ * Derived, never hand-copied: the engine owns every reason sentence
+ * (`describeUnboundReason` in `@objectstack/service-automation`, and for the
+ * deployment policy `scheduledWorkDisabledReason` in `@objectstack/types`), and
+ * a second, banner-side wording of any of them would be free to drift from it.
+ * The reasons are written cause-first, so the first sentence carries the cause
+ * and the switch it names — for the deployment policy, `disabled by deployment
+ * policy — … (OS_AUTOMATION_SCHEDULED_WORK_ENABLED is unset or not truthy), so
+ * no time trigger arms …`. What follows it (that this is not a binding failure,
+ * the default in every posture) is the long explanation, and it prints at
+ * `--log-level debug`: the boot stream is live there, and it carries
+ * `@objectstack/service-automation`'s per-flow bootstrap warning, which keeps
+ * the whole reason. A reason that is one sentence already (a missing trigger,
+ * a binding failure, a declined subflow) comes back whole.
+ *
+ * A sentence ends at a period followed by whitespace and a capital — so
+ * `e.g. foo`, `@objectstack/trigger-*` and `17.7.0` do not cut one short.
+ */
+function leadSentence(reason: string): string {
+  const text = reason.trim();
+  const end = /\.\s+(?=[A-Z])/.exec(text);
+  return (end ? text.slice(0, end.index) : text).replace(/\.$/, '');
+}
+
+/**
+ * Group the binding audit into one warning class per (trigger type, reason)
+ * (#22073), each with its flows in audit order, classes in first-seen order.
+ *
+ * Keyed on the WHOLE reason, not its short form: two reasons that share a
+ * first sentence are still two facts, and a real binding failure keeps its own
+ * line beside the deployment-policy one.
+ */
+function unboundFlowClasses(
+  unbound: AutomationReadySummary['unbound'],
+): Array<{ triggerType: string; reason: string; flowNames: string[] }> {
+  const classes = new Map<string, { triggerType: string; reason: string; flowNames: string[] }>();
+  for (const u of unbound) {
+    const key = JSON.stringify([u.triggerType, u.reason]);
+    let entry = classes.get(key);
+    if (!entry) {
+      entry = { triggerType: u.triggerType, reason: u.reason, flowNames: [] };
+      classes.set(key, entry);
+    }
+    entry.flowNames.push(u.flowName);
+  }
+  return [...classes.values()];
+}
+
+/**
  * One-glance answer to "did my flows actually arm?" — the question the
  * boot-quiet stdout window otherwise makes unanswerable (the engine's own
  * bind/registration logs are swallowed during startup).
+ *
+ * Returns the boot-phase logger records it RESTATED (#22073), for
+ * {@link BootDiagnosticsReplayOptions.restatedAbove}: the identifying text of
+ * `@objectstack/service-automation`'s `kernel:bootstrapped` audit warning for
+ * each flow this banner names as NOT bound or as shadowed. Each is handed back
+ * where its banner line prints, so a line that does not print claims nothing.
  */
-function printAutomationSummary(a: AutomationReadySummary) {
+function printAutomationSummary(a: AutomationReadySummary): string[] {
+  const restated: string[] = [];
   if (!a.enabled) {
     if (a.declaredFlowCount > 0) {
       console.error(
@@ -1300,9 +1410,9 @@ function printAutomationSummary(a: AutomationReadySummary) {
         ),
       );
     }
-    return;
+    return restated;
   }
-  if (a.flowCount === 0) return;
+  if (a.flowCount === 0) return restated;
 
   const parts = [`${a.flowCount} flow(s)`, `${a.boundCount} bound to triggers`];
   if (a.triggerTypes.length > 0) parts.push(`(${a.triggerTypes.join(', ')})`);
@@ -1321,11 +1431,33 @@ function printAutomationSummary(a: AutomationReadySummary) {
         `(ADR-0005 overlay precedence; only the armed definition dispatches)`,
       ),
     );
+    // The engine's bootstrap restatement of the same receipt. Its pull-time
+    // `Flow name collision: …` warning is a different record — it says WHICH
+    // rule armed the body — and keeps its place in Boot diagnostics.
+    restated.push(`[Automation] flow '${s.flowName}' is claimed by ${s.shadowedCount + 1} definitions`);
   }
-  for (const u of a.unbound) {
+  // [#22073] One line per warning class — (trigger type, reason) — with its
+  // flows listed, instead of one ~600-character line per flow. An app with
+  // eight package-authored scheduled flows on a deployment with scheduled work
+  // off used to print the same paragraph eight times here and eight more in
+  // Boot diagnostics; it now prints one line.
+  let shortened = false;
+  for (const c of unboundFlowClasses(a.unbound)) {
+    const n = c.flowNames.length;
+    const short = leadSentence(c.reason);
+    if (short !== c.reason.trim().replace(/\.$/, '')) shortened = true;
     console.error(
-      chalk.yellow(`  ⚠ flow '${u.flowName}' declares a '${u.triggerType}' trigger but is NOT bound — ${u.reason}`),
+      chalk.yellow(
+        `  ⚠ ${n} flow${n === 1 ? ' declares' : 's declare'} a '${c.triggerType}' trigger but ` +
+        `${n === 1 ? 'is' : 'are'} NOT bound — ${short}: ${c.flowNames.join(', ')}`,
+      ),
     );
+    for (const flowName of c.flowNames) {
+      restated.push(`[Automation] flow '${flowName}' declares a '${c.triggerType}' trigger but is NOT bound`);
+    }
+  }
+  if (shortened) {
+    console.error(chalk.dim("      reasons cut to their first sentence — --log-level debug prints each flow's full reason"));
   }
   for (const u of a.unknownObject) {
     console.error(
@@ -1335,6 +1467,7 @@ function printAutomationSummary(a: AutomationReadySummary) {
       ),
     );
   }
+  return restated;
 }
 
 /**

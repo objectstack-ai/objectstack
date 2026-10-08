@@ -46,4 +46,5 @@ export const entry: SemanticMigration = {
     + 'returns the aggregate the author chose, and every dashboard, report or saved query that read '
     + 'the measure is checked against the number it now returns. A measure typed with one of the six '
     + 'aggregates parses byte-identically to before.',
+  relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
 };

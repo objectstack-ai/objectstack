@@ -31,6 +31,7 @@ import {
   SECURITY_CBP_NO_RELATION,
   SECURITY_CBP_AMBIGUOUS_RELATION,
 } from './validate-security-posture.js';
+import { lintDataModel } from './data-model-rules.js';
 
 const rulesOf = (stack: Record<string, unknown>) =>
   validateSecurityPosture(stack).map((f) => f.rule);
@@ -814,10 +815,24 @@ describe('validateSecurityPosture · controlled_by_parent with no relation (#750
     ).toEqual([]);
   });
 
-  it('stays silent on step 2: ANY master_detail (not marked required)', () => {
-    expect(
-      cbpOnly(cbpStack({ order: { name: 'order', type: 'master_detail', reference: 'work_order' } })),
-    ).toEqual([]);
+  // Step 2 is a RUNTIME tolerance and nothing more. This pin used to read
+  // "ANY master_detail (not marked required)" as a supported shape; the v18
+  // narrowing of the authoring contract (maintainer ruling of 2026-08-16,
+  // Direction 1) retires that reading. `resolveCbpRelation` keeps resolving a
+  // non-required master_detail — metadata already at rest keeps loading — so
+  // this rule, which mirrors the resolver, stays silent; and the SAME
+  // declaration is now refused at authoring time by
+  // `relationship/master-detail-required` at `error` (data-model-rules.ts).
+  // Both halves are asserted on one stack so neither can drift unseen.
+  it('stays silent on step 2: ANY master_detail (not marked required) resolves at runtime — and lint refuses that shape at error', () => {
+    const stack = cbpStack({ order: { name: 'order', type: 'master_detail', reference: 'work_order' } });
+    expect(cbpOnly(stack)).toEqual([]);
+
+    const authoring = lintDataModel(stack.objects as any[]).filter(
+      (issue) => issue.rule === 'relationship/master-detail-required',
+    );
+    expect(authoring).toHaveLength(1);
+    expect(authoring[0]).toMatchObject({ severity: 'error', path: 'objects[1].fields.order.required' });
   });
 
   it('stays silent on step 3: a REQUIRED lookup', () => {

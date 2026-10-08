@@ -1169,10 +1169,10 @@ export const RowHeightSchema = lazySchema(() => z.enum([
  * ---------------------------------------------------------------------------
  */
 
-// The ruling is objectui#7347 ruling C (decision batch #110 item 5) — internal
-// readers get the ids here; the author-facing sentence carries the date only,
-// which is what a refused author can act on.
-const GROUPING_FIELD_RULING = 'ruled 2026-09-10';
+// The ruling is objectui#7347 ruling C (decision batch #110 item 5), ruled
+// 2026-09-10. Internal readers get the ids and the date here; the author-facing
+// sentence carries neither — it states the rule and the repair, which is what a
+// refused author can act on (#22093).
 
 /**
  * A field-reference name with no leading and no trailing whitespace.
@@ -1218,7 +1218,7 @@ function checkGroupingFieldName(raw: string): string | undefined {
     + 'the server answers under the unpadded name, so a padded spelling makes every renderer\'s '
     + 'per-row lookup miss: the grid and the gallery show a single `(empty)` group and the kanban '
     + 'a single `Uncategorized` lane holding every record — a wrong answer that reads as a true '
-    + `statement about the data. ${remedy} (${GROUPING_FIELD_RULING}.)`;
+    + `statement about the data. ${remedy}`;
 }
 
 /*
@@ -3441,7 +3441,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * this one is ENFORCED: see {@link checkFormViewPredicateFeaturesRoot} for
    * the ruling and the scanner.
    */
-  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here — CLIENT-SIDE only: nothing server-side evaluates a form-view field `visibleWhen`, so a role test here hides the control and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'`"),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here — CLIENT-SIDE only: nothing server-side evaluates a form-view field `visibleWhen`, so a role test here hides the control and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse: the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'`"),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
@@ -3652,7 +3652,7 @@ export const FormSectionSchema = lazySchema(() => strictObject({
     'Whether the section renders a disclosure control, so a reader can close it and open it again. '
     + 'Default `false`: a section declaring neither collapse key is always open and shows no control. '
     + '⚠️ `collapsed: true` IMPLIES this key — an explicit `collapsible: false` beside it does NOT take '
-    + 'the control away (ruled 2026-09-18). The renderer resolves that from the DECLARATION; parse never '
+    + 'the control away. The renderer resolves that from the DECLARATION; parse never '
     + 'rewrites the pair, so a parsed section still reports the `false` that was authored. Only `true` is '
     + 'refused on a wizard step and beside `group`; `false` is accepted in both, because it declares '
     + 'exactly what those surfaces already deliver.',
@@ -3660,9 +3660,8 @@ export const FormSectionSchema = lazySchema(() => strictObject({
   collapsed: z.boolean().default(false).describe(
     'Whether the section starts closed. Default `false`. ⚠️ `collapsed: true` IMPLIES `collapsible` and is '
     + 'sufficient ON ITS OWN — a section that starts closed always carries the disclosure control that '
-    + 'reopens it, and it outranks an explicit `collapsible: false` (ruled 2026-09-18; refusing the '
-    + 'combination at the declaration, and warning on it, were both rejected — nobody can depend on a '
-    + 'section that cannot be opened). The implication is a renderer rule, never a parse-time rewrite: '
+    + 'reopens it, and it outranks an explicit `collapsible: false`, so writing `collapsed: true` alone is '
+    + 'a correct way to say "collapsed by default". The implication is a renderer rule, never a parse-time rewrite: '
     + '`{ collapsed: true }` still parses to `collapsible: false, collapsed: true`, so the parsed '
     + '`collapsible` must never be read as "a control renders". Only `true` is refused on a wizard step (steps do not '
     + 'collapse) and beside `group`, whose field group declares the pair.',
@@ -3712,7 +3711,7 @@ export const FormSectionSchema = lazySchema(() => strictObject({
    * refused at parse (ruled 2026-08-27, objectui#6262; see
    * {@link checkFormViewPredicateFeaturesRoot}).
    */
-  visibleWhen: EvaluatedExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open.'),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse: unbound on the standalone form routes, where the predicate would fault open.'),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse.'),
   columns: z.union([
@@ -3953,10 +3952,10 @@ function foldFormGroupsIntoSections<T extends WithFormSectionAlias>(
  * `@objectstack/lint`, which already resolves field references against object
  * declarations. Enforcing half loudly beats enforcing none.
  */
-// The ruling is #7496 on the tracker — internal readers get the id here; the
-// customer-facing sentence carries the date only, which is what a refused
-// author can act on.
-const SUBMIT_REDIRECT_RULING = 'ruled 2026-08-11';
+// The ruling is #7496 on the tracker, ruled 2026-08-11. Internal readers get
+// the id and the date here; the customer-facing sentences carry neither — each
+// states the rule, why it exists and the repair, which is what a refused author
+// can act on (#22093).
 
 /** The ONE interpolation `submitBehavior.url` accepts. Global — used to strip. */
 const SUBMIT_REDIRECT_URL_TOKEN_RE = /\{\{record\.[a-z_][a-z0-9_]*\}\}/g;
@@ -3985,12 +3984,12 @@ const URL_SMUGGLE_RE = /[\s\u0000-\u001f\u007f]/;
 function checkSubmitRedirectUrl(raw: string): string | undefined {
   if (raw === '') {
     return 'A `redirect` submit behavior needs a `url` — an empty string is not a destination. '
-      + `Write the in-app path the submitter should land on, e.g. \`/thanks\` (${SUBMIT_REDIRECT_RULING}).`;
+      + 'Write the in-app path the submitter should land on, e.g. `/thanks`.';
   }
 
   if (URL_SCHEME_RE.test(raw)) {
-    return '`submitBehavior.url` accepts a RELATIVE path only, and this is an absolute URL '
-      + `(${SUBMIT_REDIRECT_RULING}). A post-submit redirect that can leave the app is an open `
+    return '`submitBehavior.url` accepts a RELATIVE path only, and this is an absolute URL. '
+      + 'A post-submit redirect that can leave the app is an open '
       + 'redirect, so the scheme form is refused at the authoring door rather than sanitized at the '
       + 'renderer. Write the in-app path instead — `/thanks`, not `https://example.com/thanks`. '
       + 'To send the browser OUT of the app deliberately, that is an app navigation item '
@@ -4000,14 +3999,14 @@ function checkSubmitRedirectUrl(raw: string): string | undefined {
   if (raw.startsWith('//')) {
     return '`submitBehavior.url` accepts a RELATIVE path only, and a leading `//` is '
       + `protocol-relative — the browser reads \`//example.com/thanks\` as ANOTHER ORIGIN despite `
-      + `the leading slash (${SUBMIT_REDIRECT_RULING}). Use a single leading slash for an in-app `
+      + 'the leading slash. Use a single leading slash for an in-app '
       + 'path; for a deliberate external link use an app navigation item (`{ type: \'url\', url }`).';
   }
 
   if (raw.includes('\\')) {
     return '`submitBehavior.url` must not contain a backslash — browsers normalise `\\` to `/` '
       + 'while resolving, so `/\\example.com` navigates off-origin exactly like `//example.com` '
-      + `and would walk straight past the relative-only rule (${SUBMIT_REDIRECT_RULING}). `
+      + 'and would walk straight past the relative-only rule. '
       + 'Write the path with forward slashes; percent-encode a backslash that is genuinely part of '
       + 'a path segment (`%5C`).';
   }
@@ -4015,7 +4014,7 @@ function checkSubmitRedirectUrl(raw: string): string | undefined {
   if (URL_SMUGGLE_RE.test(raw)) {
     return '`submitBehavior.url` must not contain whitespace or control characters — browsers strip '
       + 'them before resolving, so a leading one hides what the address really starts with and '
-      + `defeats the relative-only rule (${SUBMIT_REDIRECT_RULING}). Percent-encode a space that `
+      + 'defeats the relative-only rule. Percent-encode a space that '
       + 'belongs in the path (`%20`).';
   }
 
@@ -4026,7 +4025,7 @@ function checkSubmitRedirectUrl(raw: string): string | undefined {
   if (withoutTokens.includes('{') || withoutTokens.includes('}')) {
     const offender = withoutTokens.match(/\{\{?[^{}]*\}?\}?/)?.[0] ?? '{';
     return '`submitBehavior.url` interpolates ONLY declared record fields, spelled '
-      + `\`{{record.field_name}}\` — \`${offender}\` is not that shape (${SUBMIT_REDIRECT_RULING}). `
+      + `\`{{record.field_name}}\` — \`${offender}\` is not that shape. `
       + 'The record just submitted is the whole scope a post-submit redirect has, and the field '
       + 'segment takes the same lowercase snake_case grammar fields are declared under. Every '
       + 'interpolated value is URL-escaped when the redirect is built, so a token is a value in the '
@@ -4036,7 +4035,7 @@ function checkSubmitRedirectUrl(raw: string): string | undefined {
   if (!raw.startsWith('/')) {
     return '`submitBehavior.url` must start with `/` — a document-relative path like `thanks` '
       + 'resolves against whichever console route the form happened to be opened from, so one form '
-      + `lands in different places depending on how it was reached (${SUBMIT_REDIRECT_RULING}). `
+      + 'lands in different places depending on how it was reached. '
       + 'Write the rooted in-app path: `/thanks`.';
   }
 
@@ -4092,9 +4091,9 @@ function checkSubmitRedirectUrl(raw: string): string | undefined {
  * authoring shape is the source string, and build emits the AST from sources
  * this gate has already accepted.
  */
-// The ruling is objectui#6262 on the tracker — internal readers get the id
-// here; the customer-facing sentence carries the date only.
-const FORM_VIEW_FEATURES_RULING = 'ruled 2026-08-27';
+// The ruling is objectui#6262 on the tracker, ruled 2026-08-27. Internal
+// readers get the id and the date here; the customer-facing sentence carries
+// neither (#22093).
 
 /** CEL string literals (both quote styles, with escapes) — stripped before the root scan. */
 const CEL_STRING_LITERAL_RE = /'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g;
@@ -4119,8 +4118,8 @@ function checkFormViewPredicateFeaturesRoot(predicate: unknown): string | undefi
   const { dialect, source } = predicate as { dialect?: unknown; source?: unknown };
   if (dialect !== 'cel' || typeof source !== 'string') return undefined;
   if (!FEATURES_ROOT_RE.test(source.replace(CEL_STRING_LITERAL_RE, ''))) return undefined;
-  return 'Form-view predicates may not name the `features.*` scope root '
-    + `(${FORM_VIEW_FEATURES_RULING}). A form view also renders on routes with no app context `
+  return 'Form-view predicates may not name the `features.*` scope root. '
+    + 'A form view also renders on routes with no app context '
     + '(the console\'s standalone `/forms/:name` and the public `/f/:slug`), where `features` is '
     + 'UNBOUND: the predicate faults and `visibleWhen` fails OPEN, so the field or section a '
     + 'feature flag was meant to hide is shown to everyone. Gate by record state instead '
@@ -4441,7 +4440,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
           if (refusal) ctx.addIssue({ code: 'custom', message: refusal });
         })
         .describe(
-          'Where the browser goes after a successful submit. Ruled 2026-08-11: '
+          'Where the browser goes after a successful submit. '
           + '(1) RELATIVE paths only — it must start with `/`, and absolute or protocol-relative '
           + 'URLs are refused, which is what closes the open-redirect face; '
           + '(2) interpolation ONLY from declared record fields, spelled `{{record.field_name}}`, '
@@ -4469,10 +4468,16 @@ export const FormViewSchema = lazySchema(() => strictObject({
         message: 'The `next-record` behavior takes no options — it advances to the next record. For a confirmation panel use `{ kind: "thank-you", title, message }`.',
       },
     }, { kind: z.literal('next-record') }),
-  // The `url` describe below carries the ruling in full, but it reaches only
+  // The `url` describe below carries the rule in full, but it reaches only
   // the generated JSON Schema: the references page renders a union as one type
   // expression, so a member's inner key gets no row of its own. The headline
   // therefore rides HERE, where the reference table does have a row (#7496).
+  //
+  // ⚠️ This describe still carries its ruling date, deliberately left for a
+  // separate change (#22093): its text is projected into the published skill
+  // `skills/objectstack-ui/references/react-blocks.md` (`gen:react-blocks`), a
+  // governed surface, so editing it here would make this wording sweep land
+  // the way a governed PR does.
   ]).optional().describe(
     "Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates "
     + 'only declared record fields as `{{record.field_name}}`, URL-escaped (ruled 2026-08-11).',

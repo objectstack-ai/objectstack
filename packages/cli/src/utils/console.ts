@@ -53,6 +53,14 @@ import { pathToFileURL, fileURLToPath } from 'url';
 /** URL mount path for the Console portal inside the ObjectStack server */
 export const CONSOLE_PATH = '/_console';
 
+/**
+ * The anonymous form door the Console's public form page (`/f/:slug`) reads:
+ * the page fetches `GET /api/v1/forms/<slug>` and renders what it answers.
+ * The `/forms/:slug` redirect below asks this same door, so it redirects
+ * exactly when the page it redirects to would be served the form.
+ */
+const PUBLIC_FORM_DOOR = '/api/v1/forms';
+
 /** Canonical npm package name that ships the Console SPA. */
 const CONSOLE_PACKAGE = '@objectstack/console';
 
@@ -478,6 +486,13 @@ async function resolveHttpServer(ctx: any): Promise<any> {
  *   - Hashed asset paths under `/_console/assets/*` never SPA-fallback —
  *     a real 404 surfaces a rebuild/deploy mismatch instead of the
  *     dreaded "asset returns text/html" silent failure.
+ *
+ * It also answers the path an author writes as a public form's
+ * `sharing.publicLink`: `GET /forms/<slug>` redirects (302) to the Console's
+ * public form page, `/_console/f/<slug>` with the request's query string, when
+ * the anonymous form door serves that slug, and otherwise gets the same
+ * not-found answer as before. Mounted
+ * only with the Console, because without it there is no page to send anyone to.
  */
 export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: boolean; rootRedirect?: boolean }) {
   return {
@@ -547,6 +562,27 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
 
       // Redirect bare path to trailing-slash (SPA convention)
       app.get(CONSOLE_PATH, (c: any) => c.redirect(`${CONSOLE_PATH}/`));
+
+      // The path an author writes as a public form's `sharing.publicLink`
+      // (`/forms/<slug>`) is served by the Console at `/f/<slug>`. Redirect it
+      // there only when the anonymous form door serves that slug to this
+      // request; anything else falls through to the unmatched-request answer
+      // every other unrouted path gets.
+      //
+      // The request's query string travels with it: the public form page reads
+      // `?prefill_<field>=` to seed its fields, so a link that carries one must
+      // land with it. The path is built from `CONSOLE_PATH` and the encoded
+      // slug alone; the query, as the URL parser holds it (it cannot carry a
+      // `#`, a control character or a path), is appended after it, so it can
+      // change nothing but the query of the page the visitor lands on.
+      app.get('/forms/:slug', async (c: any, next: () => Promise<void>) => {
+        const slug = String(c.req.param('slug') ?? '');
+        if (slug && (await anonymousFormDoorServes(app, c, slug))) {
+          const query = new URL(c.req.url).search;
+          return c.redirect(`${CONSOLE_PATH}/f/${encodeURIComponent(slug)}${query}`, 302);
+        }
+        await next();
+      });
 
       // Serve static files with SPA fallback
       app.get(`${CONSOLE_PATH}/*`, async (c: any) => {
@@ -810,6 +846,38 @@ export function createRuntimeAssetsPlugin(distPath: string, dirSource: 'OS_RUNTI
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
+
+/**
+ * Does the anonymous form door serve `slug` to this request?
+ *
+ * The door is asked, not copied. Whether a slug is open is one decision, made
+ * inside `@objectstack/rest`'s form doors: the form's `sharing` switches, a
+ * withdrawal in another metadata layer, the organization an anonymous request
+ * reads, and whether the deployment's tenancy posture lets the form take an
+ * anonymous submission. A second copy of any of that here would drift from the
+ * doors, and the redirect would then send a visitor to a page that answers
+ * not-found. So the visitor's own request is re-addressed to the door and
+ * dispatched in-process through the same app: same headers (the host and
+ * cookies that pick the environment), same connection (`c.env`), same
+ * middleware. Only a `200` counts as served; any other answer, a thrown
+ * dispatch included, is not.
+ */
+async function anonymousFormDoorServes(app: any, c: any, slug: string): Promise<boolean> {
+  let res: Response;
+  try {
+    const url = new URL(`${PUBLIC_FORM_DOOR}/${encodeURIComponent(slug)}`, c.req.url);
+    const probe = new Request(url, { method: 'GET', headers: new Headers(c.req.raw.headers) });
+    res = await app.fetch(probe, c.env);
+  } catch {
+    return false;
+  }
+  try {
+    await res.body?.cancel();
+  } catch {
+    // The body is never read; a stream that cannot be cancelled changes nothing.
+  }
+  return res.status === 200;
+}
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
