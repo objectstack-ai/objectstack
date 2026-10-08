@@ -296,7 +296,7 @@ export const esES: PlatformTranslationData = {
         finance: { title: 'Finanzas' },
       },
       keys: {
-        timezone: { label: 'Zona horaria predeterminada', help: 'Zona IANA usada para resolver today()/daysFromNow, los buckets de fecha de analítica y las fechas/horas renderizadas.' },
+        timezone: { label: 'Zona horaria predeterminada', help: 'Determina qué significa «hoy» en las fórmulas, cómo agrupan las fechas los informes y cómo se muestran las fechas y horas. Acepta cualquier nombre de zona horaria IANA (p. ej. Europe/Madrid).' },
         locale: { label: 'Idioma predeterminado', help: 'Configuración regional BCP-47 para los catálogos de mensajes y el formato de números/fechas.' },
         default_country: { label: 'País predeterminado', help: 'Código ISO 3166-1 alfa-2 (p. ej. US, GB, CN). Se usa para los valores por defecto de dirección y teléfono.' },
         currency: { label: 'Moneda predeterminada', help: 'Código ISO 4217 aplicado cuando un campo de moneda no indica la suya.' },

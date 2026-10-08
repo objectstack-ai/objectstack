@@ -309,8 +309,8 @@ export interface AuthoringRuleContext {
    *
    * [#22019] One other rule reads it, on that argument: `validateStackExpressions`
    * is one entry over several PASSES, and an `object` write is admitted for its
-   * field-formula pass and (#22032) its validation-rule and field-rule-slot
-   * passes alone (`runStackExpressionPasses`, `StackExpressionOptions`). The entry-level
+   * field-formula pass and (#22032) its validation-rule, field-rule-slot and
+   * per-option `visibleWhen` passes alone (`runStackExpressionPasses`, `StackExpressionOptions`). The entry-level
    * `runtimeTypes` can say that an object write reaches the rule; it cannot say
    * which of the rule's passes judge that write.
    */
@@ -646,6 +646,18 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // errors and 0 warnings for the pass, and 0 door errors and 0 advisories
     // at the door's own snapshot shape, against a refusal at each for the
     // card's body in the same harness.
+    //
+    // [#22032, pass 3] The per-option `visibleWhen` pass joins the object
+    // door: every `fields[].options[].visibleWhen`, with the reference-traversal
+    // refusal, and `current_user` accepted there as the build accepts it. The
+    // object's own `actions[]` predicates stay fenced. No entry-level change.
+    // MEASURED first, at both the raw and the parsed shape: every option
+    // predicate the repository ships — 5 options on 2 fields of 1 object
+    // (examples: app-showcase `showcase_cascade`, four `record.country`
+    // cascades and one `current_user.positions` role gate), over 118 objects
+    // → 0 build errors and 0 warnings for the pass, and 0 door errors and 0
+    // advisories at the door's own snapshot shape, against a refusal at each
+    // for a bare `amount > 1` option in the same harness.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object'],
     run: (stack, ctx) =>

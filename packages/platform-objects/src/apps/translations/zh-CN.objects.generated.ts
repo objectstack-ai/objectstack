@@ -2602,7 +2602,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       is_system: {
         label: "系统模板",
-        help: "由插件 / 平台提供；租户可编辑但不应删除"
+        help: "由插件 / 平台提供"
       },
       variables_json: {
         label: "变量（JSON）",
@@ -2619,7 +2619,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       customized: {
         label: "已自定义",
-        help: "管理员编辑包声明的模板时设置；启动种子将不再覆盖该记录（改写过的密码重置邮件在重新部署后得以保留）。对 admin 记录无意义。"
+        help: "标记在组织级模板编辑关闭之前被管理员编辑过的包声明模板；启动种子从不覆盖此类记录。此后不再有任何操作设置该标记。对 admin 记录无意义。"
       },
       created_at: {
         label: "创建时间"

@@ -986,18 +986,11 @@ export class AuthPlugin implements Plugin {
           // settings service is optional — keep the configured appName.
         }
 
-        // #2815 — seed the built-in bilingual auth SMS templates into
-        // sys_notification_template (insert-if-missing; tenant edits are
-        // never overwritten). Only meaningful when phone sign-in is on;
-        // the table may not exist yet on a fresh env (messaging provisions
-        // it at kernel:ready), so failures log-and-continue.
-        if (this.authManager.isPhoneNumberEnabled()) {
-          const engine = this.authManager.getDataEngine();
-          if (engine) {
-            const { seedPhoneSmsTemplates } = await import('./phone-sms-texts.js');
-            await seedPhoneSmsTemplates(engine, ctx.logger);
-          }
-        }
+        // The built-in auth SMS texts are NOT seeded into
+        // sys_notification_template: a rung with no row there renders the
+        // built-in text itself (`resolvePhoneSmsTemplateBody`), and a row an
+        // operator authored still wins (ADR-0131 — a row exists only when an
+        // organization authored it).
       }
     });
 

@@ -152,7 +152,7 @@ export const zhCN: PlatformTranslationData = {
       keys: {
         timezone: {
           label: '默认时区',
-          help: '用于 today()/daysFromNow、分析日期分桶和 datetime 渲染的 IANA 时区。',
+          help: '决定公式中的"今天"是哪一天、报表如何按日期分组,以及日期和时间如何显示。可填写任意 IANA 时区名称(如 Asia/Shanghai)。',
           options: {
             UTC: 'UTC',
             'America/Los_Angeles': '(UTC−08/−07) 洛杉矶',

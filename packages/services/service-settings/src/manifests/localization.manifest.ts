@@ -45,7 +45,11 @@ export const localizationSettingsManifest: SettingsManifest = {
     { type: 'group', id: 'region', label: 'Region', required: false },
     {
       type: 'select', key: 'timezone', label: 'Default timezone', required: false, default: 'UTC',
-      description: 'IANA zone used to resolve today()/daysFromNow, analytics date buckets, and rendered datetimes.',
+      // Written for the administrator who reads it under the field (Settings →
+      // Localization and the first-run timezone prompt), so it names effects,
+      // not formula functions; `localization-timezone-help.pin.test.ts` holds
+      // every served locale to that.
+      description: 'Decides what "today" means in formulas, how reports group dates, and how dates and times are shown. Accepts any IANA time zone name (e.g. Europe/Paris).',
       // The description has always promised the IANA domain; since #5712 the
       // declaration matches it: any valid IANA zone is accepted on the write
       // and env doors, and the curated options below are a UI convenience

@@ -156,10 +156,14 @@ export interface AppEndpointExecutionInput {
     /** The `callData` binding and the `automation` slot occupant. */
     deps: EndpointExecutorDeps;
     /**
-     * The identity envelope the dispatcher resolved for this request, or
-     * `undefined` for anonymous. Threaded into every delegated call so RLS/FLS
-     * and the ADR-0049 exposure gate apply exactly as on the built-in route
-     * (#5040 §4's red line; #4936 is what its absence looks like).
+     * The identity envelope the dispatcher resolved for this request. Threaded
+     * into every delegated call so RLS/FLS and the ADR-0049 exposure gate apply
+     * exactly as on the built-in route (#5040 §4's red line; #4936 is what its
+     * absence looks like). For an anonymous request admitted by an
+     * `authRequired: false` endpoint this is the GUEST principal, never
+     * `undefined` (#22147, ruling C) — see
+     * `BuildEndpointExecutionContextInput.executionContext` in
+     * `endpoint-executor.ts`.
      */
     executionContext?: ExecutionContext;
     /** Environment scoping for service resolution. */
