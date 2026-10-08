@@ -97,7 +97,7 @@ const rows: Array<{ label: string; build: () => ObjectStackDefinition }> = [
   { label: 'a hand-built stack whose `objects` is false', build: () => handBuilt({ manifest: mf('com.example.b'), objects: false }) },
 ];
 
-describe('#18239 — composeStacks refuses a non-array `objects` with an ADR-0112 envelope', () => {
+describe('composeStacks refuses a non-array `objects` with an ADR-0112 envelope', () => {
   for (const row of rows) {
     describe(row.label, () => {
       it('is refused with code STACK_SCHEMA_INVALID and status 422 — never a bare TypeError, never a skip', () => {

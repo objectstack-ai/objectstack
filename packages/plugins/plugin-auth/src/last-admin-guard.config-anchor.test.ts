@@ -112,6 +112,8 @@ const sysUserPermissionSet = {
     id: { name: 'id', type: 'text' as const, primaryKey: true },
     user_id: { name: 'user_id', type: 'text' as const },
     permission_set_id: { name: 'permission_set_id', type: 'text' as const },
+    // [ADR-0131 D4] The grant's set BY NAME — the column the guard reads.
+    permission_set: { name: 'permission_set', type: 'text' as const },
     organization_id: { name: 'organization_id', type: 'text' as const },
     valid_from: { name: 'valid_from', type: 'datetime' as const },
     valid_until: { name: 'valid_until', type: 'datetime' as const },
@@ -236,7 +238,7 @@ describe('[#11663 L2] the enumeration counts CONFIG-derived administrators', () 
     await engine.insert('sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true }, SYSTEM);
     await engine.insert(
       'sys_user_permission_set',
-      { id: 'ups_1', user_id: 'usr_grant', permission_set_id: 'ps_a' },
+      { id: 'ups_1', user_id: 'usr_grant', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
       SYSTEM,
     );
 
@@ -311,7 +313,7 @@ describe('[#11663 L2] the FIFTH write shape is judged', () => {
     await engine.insert('sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true }, SYSTEM);
     await engine.insert(
       'sys_user_permission_set',
-      { id: 'ups_1', user_id: 'usr_owner', permission_set_id: 'ps_a' },
+      { id: 'ups_1', user_id: 'usr_owner', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
       SYSTEM,
     );
 
@@ -403,7 +405,7 @@ describe('[#11663 L5] under a WALLED posture the legacy grant is not an administ
     await engine.insert('sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true }, SYSTEM);
     await engine.insert(
       'sys_user_permission_set',
-      { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a' },
+      { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
       SYSTEM,
     );
     return engine;
@@ -455,7 +457,7 @@ describe('[#11663 L5] under a WALLED posture the legacy grant is not an administ
     await engine.insert('sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true }, SYSTEM);
     await engine.insert(
       'sys_user_permission_set',
-      { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a' },
+      { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
       SYSTEM,
     );
 
@@ -476,7 +478,7 @@ describe('[#11663 L5] under a WALLED posture the legacy grant is not an administ
     await engine.insert('sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true }, SYSTEM);
     await engine.insert(
       'sys_user_permission_set',
-      { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a' },
+      { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
       SYSTEM,
     );
 
@@ -518,7 +520,7 @@ describe('[#11663 L5] under a WALLED posture the legacy grant is not an administ
     await engine.insert('sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: false }, SYSTEM);
     await engine.insert(
       'sys_user_permission_set',
-      { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a' },
+      { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
       SYSTEM,
     );
 
@@ -537,7 +539,7 @@ describe('[#11663 L5] under a WALLED posture the legacy grant is not an administ
     await engine.insert('sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: false }, SYSTEM);
     await engine.insert(
       'sys_user_permission_set',
-      { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a' },
+      { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
       SYSTEM,
     );
 

@@ -189,7 +189,7 @@ const composedShared = (left: Record<string, unknown>, right: Record<string, unk
 const refuse = (key: string, left: unknown, right: unknown) =>
   refusal(() => composedShared({ [key]: left }, { [key]: right }));
 
-describe('#19150 — the probe keys are the shapes this pin is about (anti-vacuity)', () => {
+describe('the probe keys are the shapes this pin is about (anti-vacuity)', () => {
   it('the preprocess probe is a pipe whose IN is a transform and whose OUT is the array', () => {
     const def = defOf(defOf(probe(NAMES.preprocess))?.innerType);
     expect(def?.type).toBe('pipe');
@@ -208,7 +208,7 @@ describe('#19150 — the probe keys are the shapes this pin is about (anti-vacui
   });
 });
 
-describe('#19150 BRIGHT CONTROL — the pre-fix reading of the preprocess probe', () => {
+describe('BRIGHT CONTROL — the preprocess probe as read before the `pipe` arm took the authored side', () => {
   it('reading IN alone answers "not a collection" — the silent direction', () => {
     expect(inOnlyWalk(probe(NAMES.preprocess))).toBe(false);
   });
@@ -230,7 +230,7 @@ describe('#19150 BRIGHT CONTROL — the pre-fix reading of the preprocess probe'
   });
 });
 
-describe('#19150 MAIN — the preprocess-wrapped collection key is IN the refusal set', () => {
+describe('MAIN — the preprocess-wrapped collection key is IN the refusal set', () => {
   it('refuses two differing declarations, naming the object, the key and both stacks', () => {
     const msg = refuse(NAMES.preprocess, ['a'], ['b']);
     expect(msg).toContain(
@@ -264,7 +264,7 @@ describe('#19150 MAIN — the preprocess-wrapped collection key is IN the refusa
   });
 });
 
-describe('#19150 DARK CONTROL — keys whose verdict must not move', () => {
+describe('DARK CONTROL — keys whose verdict must not move', () => {
   it('a genuine `.pipe()` authored as a scalar composes by later-wins, and is NOT refused', () => {
     expect(refuse(NAMES.pipeScalar, 'a', 'b')).toBeNull();
     expect(composedShared({ [NAMES.pipeScalar]: 'a' }, { [NAMES.pipeScalar]: 'b' })?.[NAMES.pipeScalar]).toBe('b');
@@ -287,7 +287,7 @@ describe('#19150 DARK CONTROL — keys whose verdict must not move', () => {
   });
 });
 
-describe("#19150 TODAY-INVARIANCE — the fix moves no key on today's ObjectSchema", () => {
+describe("TODAY-INVARIANCE — the fix moves no key on today's ObjectSchema", () => {
   const realShape = async (): Promise<Record<string, unknown>> => {
     const actual = await vi.importActual<typeof import('./data/object.zod')>('./data/object.zod');
     return shapeOf(actual.ObjectSchema);

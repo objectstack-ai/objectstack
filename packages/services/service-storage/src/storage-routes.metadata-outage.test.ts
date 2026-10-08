@@ -93,6 +93,19 @@ function createFakeEngine(opts: { failing?: EngineMethod[] } = {}) {
       boom('update', object);
       const id = String(options?.where?.id ?? data?.id);
       const t = table(object);
+      // [#22332] A declared predicate update — the chunk door's conditional
+      // progress write — lands only on a row holding every `where` term (an
+      // absent column holds `null`) and answers the matched-row count, as the
+      // real engine's does.
+      if (options?.multi) {
+        const row = t.get(id);
+        const holds =
+          row !== undefined &&
+          Object.entries(options.where ?? {}).every(([k, v]) => k === 'id' || (row[k] ?? null) === (v ?? null));
+        if (!holds) return 0;
+        t.set(id, { ...row, ...data });
+        return 1;
+      }
       if (!t.has(id)) return null;
       t.set(id, { ...t.get(id), ...data });
       return { ...t.get(id) };

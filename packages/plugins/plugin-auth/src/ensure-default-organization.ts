@@ -82,6 +82,7 @@
 import { matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from '@objectstack/core';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { resolveTenancyPosture } from '@objectstack/types';
+import { GRANT_SET_NAME_FIELD } from './grant-set-name.js';
 
 interface BootstrapLogger {
   info: (message: string, meta?: Record<string, any>) => void;
@@ -465,11 +466,18 @@ export async function ensureDefaultOrganization(
     if (adminPs.length === 0 || !adminPs[0].id) {
       return { defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' };
     }
-    const adminPsId = adminPs[0].id;
+    // [ADR-0131 D4] The grants NAMING the set (`permission_set`), not the
+    // grants carrying the row's id. A grant that names nothing yet — an
+    // upgraded deployment's, before the one-time backfill names it at
+    // `kernel:bootstrapped` — is not read as the admin: this helper CONFERS
+    // (an owner membership and the seeded rows), and a grant that names no set
+    // confers nothing. The answer is then `no_admin`, which decides nothing
+    // (`default-org-bootstrap-once.ts` records no decision on it), so a later
+    // trigger binds once the grant names its set.
     const adminGrants = await tryFind(
       ql,
       'sys_user_permission_set',
-      { permission_set_id: adminPsId, organization_id: null },
+      { [GRANT_SET_NAME_FIELD]: 'admin_full_access', organization_id: null },
       50,
     );
     if (adminGrants.length === 0) {

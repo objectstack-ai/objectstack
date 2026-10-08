@@ -76,7 +76,7 @@ function makeQl(seed: Partial<Record<string, Row[]>> = {}) {
   const tables: Record<string, Row[]> = {
     sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access' }],
     sys_user_permission_set: [
-      { id: 'ups1', user_id: 'u1', permission_set_id: 'ps_admin', organization_id: null },
+      { id: 'ups1', user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
     ],
     sys_member: [],
     sys_organization: [],
@@ -135,8 +135,8 @@ describe('ensureDefaultOrganization (plugin-auth home)', () => {
   it('picks the OLDEST cross-tenant admin grant', async () => {
     const ql = makeQl({
       sys_user_permission_set: [
-        { id: 'b', user_id: 'u_newer', permission_set_id: 'ps_admin', organization_id: null, created_at: '2026-01-02T00:00:00Z' },
-        { id: 'a', user_id: 'u_older', permission_set_id: 'ps_admin', organization_id: null, created_at: '2026-01-01T00:00:00Z' },
+        { id: 'b', user_id: 'u_newer', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null, created_at: '2026-01-02T00:00:00Z' },
+        { id: 'a', user_id: 'u_older', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null, created_at: '2026-01-01T00:00:00Z' },
       ],
     });
     await ensureDefaultOrganization(ql);

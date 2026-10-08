@@ -115,7 +115,7 @@ const MODE_PROBES: Record<string, string> = {
 
 const ENTRIES = publishedSourceEntries();
 
-describe('#19930 — every published entry imports first under OS_EAGER_SCHEMAS=1', () => {
+describe('every published entry imports first under OS_EAGER_SCHEMAS=1', () => {
   it('maps every published module subpath to a source entry that exists', () => {
     // A subpath this cannot map would drop out of the loop below silently.
     expect(ENTRIES.map((e) => e.subpath)).toEqual(expect.arrayContaining(['.', './data', './api']));

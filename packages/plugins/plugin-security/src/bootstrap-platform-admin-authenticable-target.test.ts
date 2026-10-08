@@ -334,6 +334,7 @@ describe('#14348 — the promotion target is the oldest human that can AUTHENTIC
         id: 'ups_legacy',
         user_id: 'usr_person0',
         permission_set_id: adminPsId,
+        permission_set: 'admin_full_access',
         organization_id: null,
       },
       { context: SYSTEM_CTX },
