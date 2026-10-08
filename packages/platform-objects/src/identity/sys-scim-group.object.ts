@@ -126,10 +126,10 @@ export const SysScimGroup = ObjectSchema.create({
 
   indexes: [
     // UNIQUE mirrors @better-auth/scim's own declarations.
-    { fields: ['display_name_key'], unique: true },
+    { fields: ['display_name_key'], unique: 'global' },
     // Nullable — repeated NULLs are admitted when the IdP sends no externalId.
-    { fields: ['external_id_key'], unique: true },
-    { fields: ['order_key'], unique: true },
+    { fields: ['external_id_key'], unique: 'global' },
+    { fields: ['order_key'], unique: 'global' },
     { fields: ['connection_id'] },
   ],
 

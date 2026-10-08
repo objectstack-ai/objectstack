@@ -159,17 +159,24 @@ export const FLOW_PAUSE_CAPABLE_NODE_TYPES: readonly string[] = [
  * note). One type-specific exception to the open slot (#14945): the structural
  * `end` node has no executor and no descriptor, so the flow parse is the ONLY
  * door its config passes through — {@link parseEndNodeConfig} applies
- * {@link EndConfigSchema} to it. Every other type's `config` stays the
- * executor's to close. One VALUE rule reaches into an open `config` at the
- * flow level without closing its key set (#17493): a blank string in a slot
- * the expression ledger declares with the `predicate` role is refused by the
- * `FlowSchema` superRefine — see the block there for its scope. A PRESENCE
- * rule reaches in beside it, still without closing the key set (#20316): a
- * key the node's executor contract requires, left out, and a `decision`
- * branch list the executor cannot read — `flowNodeConfigRefusals`, in the
- * same superRefine — and (#21898) a VALUE rule with it, again without closing
- * the key set: a value a builtin node's executor contract refuses, where the
- * build can know what the run will parse.
+ * {@link EndConfigSchema} to it. For every other type the `config` SHAPE
+ * stays open here (`FlowNodeSchema.config` is a `z.record`) and the executor's
+ * contract is what closes it; the flow level reads into it through one judge,
+ * `flowNodeConfigRefusals`, in the `FlowSchema` superRefine, and never
+ * re-declares a type's shape. A VALUE rule reaches in (#17493): a blank string
+ * in a slot the expression ledger declares with the `predicate` role is
+ * refused — see the block there for its scope. A PRESENCE rule beside it
+ * (#20316): a key the node's executor contract requires, left out, and a
+ * `decision` branch list the executor cannot read. A builtin VALUE rule with
+ * it (#21898): a value a builtin node's executor contract refuses, where the
+ * build can know what the run will parse. And KEY MEMBERSHIP only where the
+ * build is the one door before the run: the declared `approval` contract is
+ * judged whole (#21850), and a key a `script` or `subflow` executor contract
+ * does not declare is refused (#21982) — those two descriptors publish no
+ * `configSchema` for registration's undeclared-key walk to read. Every other
+ * builtin's undeclared key is judged at `registerFlow` against its descriptor,
+ * and so is a plugin type's whose contract the spec does not declare; the
+ * flow parse does not judge those keys.
  */
 
 /**

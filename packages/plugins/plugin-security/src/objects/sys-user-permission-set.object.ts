@@ -210,7 +210,7 @@ export const SysUserPermissionSet = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['user_id', 'permission_set_id', 'organization_id'], unique: true },
+    { fields: ['user_id', 'permission_set_id', 'organization_id'], unique: 'global' },
     { fields: ['user_id'] },
     { fields: ['organization_id'] },
     { fields: ['permission_set_id'] },

@@ -67,11 +67,15 @@ Two rules make the choice safe to write and safe to deploy:
 valid indefinitely — `email: Field.email({ unique: true })` is correct, and the
 explicit spelling is simply preferred in new code.
 
-On a **declared index** it is the deprecated spelling of `'global'`: it
-materializes over exactly the listed columns. Because that reads like the
-field-level meaning but does the opposite, `os lint` / `os build` / `os validate`
-report it as `unique/unscoped-declared-index`, and it is rejected outright at
-protocol 18. State the scope.
+On a **declared index** it is refused since protocol 18. It was the positional
+spelling of `'global'` — it materialized over exactly the listed columns —
+which reads like the field-level meaning but does the opposite. `os validate`,
+`os build` and the runtime save door refuse it at the schema, `os lint`
+reports it as `unique/unscoped-declared-index`, and every refusal names both
+replacements. State the scope: `'global'` builds exactly the index bare `true`
+built. Metadata already stored or built with the bare spelling converts to
+`'global'` when it loads — the same physical index, no migration — and
+`os migrate meta --from 17` lists the edits for your sources.
 </Callout>
 
 <Callout type="warn">
@@ -105,7 +109,8 @@ constraint by listing the column itself:
 
 ```typescript
 // the legacy spelling — still valid, still materialized exactly as written
-indexes: [{ fields: ['name', 'organization_id'], unique: true }]
+// (bare `true` before protocol 18, which converts to 'global')
+indexes: [{ fields: ['name', 'organization_id'], unique: 'global' }]
 ```
 
 This keeps working forever and forces no migration, so `os lint` only *suggests*

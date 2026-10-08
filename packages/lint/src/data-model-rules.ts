@@ -387,11 +387,12 @@ function fieldUniqueScope(u: unknown): 'organization' | 'global' {
 }
 
 /**
- * Which boundary does a DECLARED-index `unique` ask for? Bare `true` is the
- * DEPRECATED positional spelling of `'global'` (verbatim columns — today's
- * behavior; warned by `unique/unscoped-declared-index`, rejected at protocol
- * 18, #5082). `'organization'` asks for the NULL-safe organization key part
- * to be prepended at registration (ADR-0120 D1/D3).
+ * Which boundary does a DECLARED-index `unique` ask for? `'organization'` asks
+ * for the NULL-safe organization key part to be prepended at registration
+ * (ADR-0120 D1/D3); `'global'` is the verbatim column list. Bare `true` — the
+ * positional spelling of `'global'`, refused since protocol 18 (#5082) — still
+ * reads as `'global'` here, because this rule also runs over the unparsed
+ * stack `os lint` sees, where R11 reports the spelling itself.
  */
 function indexUniqueScope(u: unknown): 'organization' | 'global' {
   return u === 'organization' ? 'organization' : 'global';
@@ -411,13 +412,20 @@ function indexUniqueScope(u: unknown): 'organization' | 'global' {
  * checkable at authoring time, which is what makes this the first gate in the
  * #4986 saga that can actually run here.
  *
- * 17.x: warning. Protocol 18 rejects the spelling at validate/publish (#5082).
- * Advisory — never fails a build in 17.x.
+ * Protocol 18 (#5082, ADR-0120 D7): an ERROR. 17.x warned; the spelling is
+ * now refused, and this rule is one of its two refusal channels. The other is
+ * the schema itself — `IndexSchema.unique` refuses bare `true` with the same
+ * prescription, at every door that parses (`os validate` / `os build`,
+ * `ObjectSchema.create`, the runtime save door). This rule is what refuses it
+ * where nothing parses: `os lint` is the cheap pre-flight and runs every rule
+ * over the NORMALIZED, unparsed stack.
  *
  * Concrete harm: #8323 measured the cross-tenant 409-vs-201 oracle end to end.
  *
- * Wiring: own AUTHORING_RULES entry (validate/build), and `lintDataModel`
- * calls it for `os lint` — each command reports each finding exactly once.
+ * Wiring: one AUTHORING_RULES entry on all three commands (a gating rule must
+ * run on all three). `lintDataModel` no longer calls it — the registry entry
+ * is what reports it under `os lint`, so each command reports each finding
+ * exactly once.
  */
 export function lintUnscopedDeclaredIndexes(objects: any[]): LocatedLintIssue[] {
   const issues: LocatedLintIssue[] = [];
@@ -436,20 +444,20 @@ export function lintUnscopedDeclaredIndexes(objects: any[]): LocatedLintIssue[] 
       const cols = colList.join(', ');
       const indexLabel = typeof idx?.name === 'string' && idx.name.trim() ? ` '${idx.name.trim()}'` : '';
       issues.push({
-        severity: 'warning',
+        severity: 'error',
         rule: UNIQUE_UNSCOPED_DECLARED_INDEX,
         where: indexWhere(obj, idx, j, colList),
         message:
           `"${obj.name}" declares index${indexLabel} [${cols}] with bare \`unique: true\` — a unique index whose scope is ` +
-          `unstated (ADR-0120). Today the bare spelling materializes over exactly its \`fields\`, i.e. installation-wide; ` +
-          `an author who meant "unique per organization" gets no per-organization constraint and no error. ` +
-          `Protocol 18 rejects this spelling, and stored metadata that still carries it converts to ` +
-          `\`unique: 'global'\`, which builds the same physical index.`,
+          `unstated (ADR-0120). Protocol 18 refuses this spelling on a declared index: it built the index over ` +
+          `exactly its \`fields\`, i.e. installation-wide, while reading like "unique per organization". ` +
+          `Stored metadata that still carries it converts to \`unique: 'global'\`, which builds the same physical index.`,
         path: `objects[${i}].indexes[${j}]`,
         fix:
-          `State the scope: \`unique: 'global'\` (installation-wide — exactly today's behavior) or ` +
+          `State the scope: \`unique: 'global'\` (installation-wide — the exact index bare \`true\` built) or ` +
           `\`unique: 'organization'\` (one holder per organization — the driver prepends the NULL-safe ` +
-          `organization key part at registration).`,
+          `organization key part at registration). Run \`os migrate meta --from 17\` to list the mechanical ` +
+          `edits for existing sources; apply them by hand.`,
       });
     }
   }
@@ -570,7 +578,8 @@ export function lintUniqueDeclarations(objects: any[]): LocatedLintIssue[] {
  * predating the vocabulary that can now say so.
  *
  * Why this is worth a nudge rather than left alone. The legacy spelling
- * `{ fields: ['organization_id', 'name'], unique: true }` says "per
+ * `{ fields: ['organization_id', 'name'], unique: 'global' }` (bare `true`
+ * before protocol 18 — the conversion respells it, zero drift) says "per
  * organization" to a reader and materializes as a plain composite — and SQL
  * UNIQUE is NULL-distinct, so on every row where the organization column is
  * NULL it enforces **nothing** (#5030, measured). On a single-organization
@@ -645,11 +654,13 @@ export function lintLegacyOrganizationComposites(objects: any[]): LocatedLintIss
  * metadata-generation scorer.
  */
 export function lintDataModel(objects: any[]): LintIssue[] {
-  // R10/R11/R12 live in their own exported functions so `os validate`/`os build`
+  // R10/R12 live in their own exported functions so `os validate`/`os build`
   // can run those rules without pulling in the whole best-practice sweep
-  // (#3991, ADR-0120 D5a/D5b/D5c) — here `os lint` picks all three up.
+  // (#3991, ADR-0120 D5b/D5c) — here `os lint` picks both up. R11 is not
+  // called here since it became an error at protocol 18 (#5082): a gating
+  // rule runs on all three commands through its own registry entry, which is
+  // what reports it under `os lint`, exactly once.
   const issues: LintIssue[] = [
-    ...lintUnscopedDeclaredIndexes(objects),
     ...lintUniqueDeclarations(objects),
     ...lintLegacyOrganizationComposites(objects),
   ];

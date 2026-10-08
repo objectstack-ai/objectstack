@@ -516,6 +516,24 @@ const RUNTIME_OBJECT_ADVISORY_VOLUME =
   'the gating object rules alone; crossing an advisory one is a separate UX decision.';
 
 /**
+ * A gating rule whose whole finding the runtime write door already refuses ONE
+ * STEP EARLIER, in its own parse (#5082).
+ *
+ * `saveMetaItem` validates the body against the type's schema
+ * (`getMetadataTypeSchema` — `ObjectSchema` for an `object` write) and throws
+ * `INVALID_METADATA` / 422 before the authoring gate is reached. Where that
+ * schema refuses exactly what the rule reports — with the same prescription —
+ * a runtime crossing could never fire: every body it would judge has already
+ * been refused, so the entry would be wiring that reads as coverage and runs
+ * nothing.
+ */
+const RUNTIME_REFUSED_BY_THE_DOOR_PARSE =
+  'Refused one step earlier at this surface: the runtime write door parses an object body against ' +
+  'ObjectSchema before the authoring gate runs, and IndexSchema.unique refuses bare `true` there ' +
+  'with the same prescription (INVALID_METADATA / 422), so a crossing could never fire. The rule ' +
+  'gates `os lint`, which never parses.';
+
+/**
  * `ExprIssue` is the one rule finding that carries no rule id of its own — it
  * predates the `{ rule, path, hint }` shape every other rule settled on. Given
  * one here so `os lint --json` and the docs can name it like any other.
@@ -1781,20 +1799,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   },
   // ADR-0120 D5a — a declared index with bare `unique: true` states no scope
   // at all (`unique/unscoped-declared-index` — the #4986 trap). Fires on the
-  // spelling alone, no tenancy inference; 17.x warns, protocol 18 rejects the
-  // spelling (#5082).
+  // spelling alone, no tenancy inference. 17.x warned; protocol 18 refuses the
+  // spelling (#5082, ADR-0120 D7), so the rule is GATING and runs on all three
+  // commands — `lintDataModel` stopped calling it in the same change, so
+  // `os lint` reports it here, once. Under `os validate` / `os build` the
+  // parse (`IndexSchema.unique`) refuses the spelling first with the same
+  // prescription; under `os lint`, which never parses, this entry is the
+  // refusal.
   {
     name: 'lintUnscopedDeclaredIndexes',
-    tier: 'advisory',
+    tier: 'gating',
     input: 'parsed',
-    commands: ['validate', 'build'],
+    commands: ALL,
     source: 'packages/lint/src/data-model-rules.ts',
     surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
-    scopeReason:
-      '`os lint` already reports this rule through `lintDataModel`, which calls it directly ahead of ' +
-      'R10 in its best-practice sweep — registering it for `lint` as well would report every finding ' +
-      'twice. This is coverage recorded, not coverage missing: all three commands report the rule.',
+    surfaceReason: RUNTIME_REFUSED_BY_THE_DOOR_PARSE,
     run: (stack) =>
       lintUnscopedDeclaredIndexes(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
         severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,

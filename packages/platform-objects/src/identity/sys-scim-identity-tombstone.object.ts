@@ -100,7 +100,7 @@ export const SysScimIdentityTombstone = ObjectSchema.create({
 
   indexes: [
     // UNIQUE mirrors @better-auth/scim's own declaration.
-    { fields: ['external_id_key'], unique: true },
+    { fields: ['external_id_key'], unique: 'global' },
     { fields: ['connection_id'] },
     { fields: ['user_id'] },
   ],

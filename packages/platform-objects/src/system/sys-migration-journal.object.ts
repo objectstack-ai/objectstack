@@ -176,7 +176,7 @@ export const SysMigrationJournal = ObjectSchema.create({
     // ERROR rather than a silently double-recorded event. A resumed run that
     // miscomputed its next sequence must fail loudly — a journal that quietly
     // accepts two "chunk 7 done" rows cannot be trusted to say what committed.
-    { fields: ['run_id', 'seq'], unique: true },
+    { fields: ['run_id', 'seq'], unique: 'global' },
     // The recovery scan's access path: all events for a run, and the
     // open-run sweep that looks for run_started without run_done.
     { fields: ['run_id', 'kind'], unique: false },

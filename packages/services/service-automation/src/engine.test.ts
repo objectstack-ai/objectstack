@@ -2337,8 +2337,11 @@ describe('AutomationEngine - Parallel Branch Execution', () => {
         // sequential engine satisfies just as well.
         const trace: string[] = [];
 
+        // A test double under a type of its own, never the builtin `script`:
+        // `delay` is this double's key, and the `script` contract refuses an
+        // undeclared key at the flow parse that `registerFlow` runs first.
         engine.registerNodeExecutor({
-            type: 'script',
+            type: 'probe_step',
             async execute(node) {
                 trace.push(`enter:${node.id}`);
                 const delay = (node.config as any)?.delay ?? 0;
@@ -2355,8 +2358,8 @@ describe('AutomationEngine - Parallel Branch Execution', () => {
             type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'branch_a', type: 'script', label: 'Branch A', config: { function: 'noop', delay: 10 } },
-                { id: 'branch_b', type: 'script', label: 'Branch B', config: { function: 'noop', delay: 10 } },
+                { id: 'branch_a', type: 'probe_step', label: 'Branch A', config: { delay: 10 } },
+                { id: 'branch_b', type: 'probe_step', label: 'Branch B', config: { delay: 10 } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -2442,8 +2445,11 @@ describe('AutomationEngine - Node Input Schema Validation', () => {
     });
 
     it('should fail when parameter type is wrong', async () => {
+        // A test double under a type of its own: `inputSchema` reads TOP-LEVEL
+        // config keys, and the builtin `script` contract refuses an undeclared
+        // `count` at the flow parse before this check could run.
         engine.registerNodeExecutor({
-            type: 'script',
+            type: 'probe_step',
             async execute() {
                 return { success: true };
             },
@@ -2457,9 +2463,9 @@ describe('AutomationEngine - Node Input Schema Validation', () => {
                 { id: 'start', type: 'start', label: 'Start' },
                 {
                     id: 'validated',
-                    type: 'script',
+                    type: 'probe_step',
                     label: 'Validated',
-                    config: { function: 'noop', count: 'not_a_number' },
+                    config: { count: 'not_a_number' },
                     inputSchema: {
                         count: { type: 'number', required: true },
                     },

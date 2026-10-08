@@ -148,12 +148,12 @@ export const SysTeamMember = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['team_id', 'user_id'], unique: true },
+    { fields: ['team_id', 'user_id'], unique: 'global' },
     { fields: ['user_id'] },
     // UNIQUE mirrors better-auth's own declaration — the constraint is what
     // makes its concurrent-add recovery work. Nullable columns admit repeated
     // NULLs on sqlite / postgres / mysql, so pre-upgrade rows are unaffected.
-    { fields: ['membership_key'], unique: true },
+    { fields: ['membership_key'], unique: 'global' },
   ],
   
   enable: {
