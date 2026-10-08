@@ -2437,6 +2437,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/organizations/src/walled-default-org-owner-bind-in-flight.pin.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/admin-exemption-retired.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2773,6 +2778,16 @@
     },
     {
       "file": "packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/default-org-bootstrap-once.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/default-org-bootstrap-once.test.ts",
       "verb": "update",
       "pinned": 1
     },

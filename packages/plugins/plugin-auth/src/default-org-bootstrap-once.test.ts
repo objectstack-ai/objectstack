@@ -30,7 +30,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
-import { assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import {
   ensureDefaultOrganization,
   type EnsureDefaultOrganizationOptions,
@@ -87,9 +87,11 @@ function rig(seed: Partial<Record<string, Row[]>> = {}) {
       const rows = (tables[object] ?? []).filter((r) => matches(r, query?.where));
       return rows.slice(0, query?.limit ?? rows.length);
     }),
-    findOne: vi.fn(async (object: string, query: any) =>
-      (tables[object] ?? []).find((r) => r.id === query?.where?.id) ?? null,
-    ),
+    findOne: vi.fn(async (object: string, query: any) => {
+      // Pinned to ObjectQL.findOne's predicate contract (the ledger reads by id).
+      assertEngineFindOnePredicate(object, query);
+      return (tables[object] ?? []).find((r) => r.id === query?.where?.id) ?? null;
+    }),
     insert: vi.fn(async (object: string, data: Row) => {
       if (object === 'sys_migration') {
         ledgerInserts.push(data);
