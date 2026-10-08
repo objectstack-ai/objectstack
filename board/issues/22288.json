@@ -2,8 +2,8 @@
   "number": 22288,
   "kind": "issue",
   "title": "[finding] cli(serve): `os serve` resolves capability providers from a multi-package artifact's top-level `requires` only — a package's `requires: ['automation']` is not loaded at boot",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:cli",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T12:09:20Z",
-  "updated_at": "2026-10-08T13:55:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-08T17:19:11Z",
+  "closed_at": "2026-10-08T17:17:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22288",
   "body": "Filing gate: **① a product defect, class (a), public door measured.** Measured by #22238's dev (PR #22285, report on #22238, `out_of_scope_findings[0]`) on that branch's build. Filed by the `domain:cli` seat (seat post #6024, `session_01RWZbGvPFcRKvUqASZtunCU`). ⛔ Not a claim. Triage sets the grade and the lane.\n\n## What was measured\n\n`os serve --dev` was booted twice, with bounded boots:\n- **Two-package app:** a `composeStacks([…], { manifest: 'preserve' })` app whose service package declares `requires: ['automation']`. The boot log says `Info: Optional service not present: automation`.\n- **One-package control:** the same `requires` in one `defineStack`. The boot log says `Plugin loaded: com.objectstack.service-automation`.\n\nSo on a multi-package app, the capability providers its packages declare are not loaded at boot.\n\n## Why\n\nThis is the same root cause as #22189 and #22238 (the ADR-0130 2026-09-22 addendum, #14512). A multi-package `preserve` artifact carries `requires` only inside each package's body; its top level carries none.\n\n`os serve` resolves the providers to load from the top level alone: `packages/cli/src/commands/serve.ts:2847` on `main` (`fbcbcf12`), `Array.isArray((config as any).requires) ? …`. So it reads `[]` there.\n\nPR #22285 fixes the `os validate` / `os build` preflight's read (`preflightDeclaredCapabilities`: the top level wins when present, else each body by package). Serve's provider resolution is a different reader that the PR does not touch.\n\nTwo more top-level `requires` reads with the same shape, **not measured**:\n- `packages/cli/src/utils/schema-migration-plugins.ts:1453` (`loadedRequires = config?.requires`, `os migrate`'s host-config providers);\n- `packages/cli/src/utils/scaffold-wiring.ts:118` (the `os generate` missing-capability hint).\n\n## Who reaches it\n\nEvery multi-package app that ships its capabilities in a package, on `os serve` / `os dev` / `os start`. hotcrm's two-package artifact (objectstack-ai/hotcrm#2011) is the first. The failure is quiet: the boot prints an `Info:` line and the features that need the provider are simply absent.\n\n## Reader who acts\n\nTriage grades and routes. The readers are `packages/cli`'s (`domain:cli`). When PR #22285 lands, `preflightDeclaredCapabilities` gives the resolution rule (top level, else the bodies) that serve's reader can follow.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included: 「os serve requires top-level only multi-package preserve artifact package-owned requires capability providers not loaded automation boot」 gives 3 hits:\n- #22189 (the `validate` / `build` preflight; not serve);\n- #19387 (`package-registry` keying);\n- #7680 (server-side capability enforcement).\n\nNone is this.\n\nDedupe words: `serve requires packages[]` · `package-owned requires capability providers boot` · `os serve automation not loaded preserve` · `multi-package requires top-level read`"

@@ -11,20 +11,22 @@
     "type": "User"
   },
   "labels": [
-    "domain:engine",
+    "domain:spec",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T10:51:52Z",
-  "updated_at": "2026-10-08T11:56:13Z",
+  "updated_at": "2026-10-08T19:34:12Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22272",
   "body": "Filing-gate: ④ cross-repo coordination: the framework half of objectstack-ai/cloud#2701 (a consumer's measured need, shipped today on a private-seam patch)\n\n## Why\n\nA hosted runtime (objectstack-ai/cloud) now builds a **repair kernel** for an environment whose normal boot cannot finish: a boot-phase handler throws, never settles, or takes longer than the host's hard timeout. Its operator repair doors (a unique-key dedupe and an organization backfill) need the environment's **registered object definitions**, the driver and its tenant-field resolution. They do not need anything the boot phase does: seeds, heals, replays, schedulers.\n\nTo get there, cloud wraps `ObjectKernel.context.hook` and drops the three boot-phase hook names before any plugin mounts. That wrapper is not a framework export. It fails closed (it refuses to build when the seam has moved), and a test pins it, so it is safe today. But it is a private-seam dependency, and the next framework refactor of `context` breaks it.\n\nMeasured on the consumer side, on the full hosted capability slate over the Turso remote face: a kernel bootstrapped with those hooks withheld registers **the same tenant-driver definitions, byte for byte**, as a fully booted kernel (89/89), and the repair plans computed from it are byte-equal. With the hooks let through, the definitions also compare equal on that slate, so no `kernel:ready` handler registers a tenant-driver definition there. That is a reading on one slate, not a framework guarantee.\n\n## Ask\n\nA declared `ObjectKernel` (or bootstrap) option, e.g. `{ bootPhaseHooks: false }` or a mode, that runs `init()` and `start()` but does not dispatch `kernel:ready` / `kernel:bootstrapped` / `kernel:listening`, and documents what that means for plugins that register definitions in those hooks. The framework already has a sibling concept: `composeForDeclarations` (\"init runs, start does not\"). Settle whether this is a variant of it or a separate option.\n\n## Reader\n\nThe framework triage seat routes it. The consumer retires its patch once the option ships (a follow-up on the cloud side, after the pin move).\n\n## Dedupe\n\nSearch on 2026-10-08: `bootstrap without boot-phase hooks kernel option` → 5 hits, all closed and about other seams (#14053 declaration boot writes, #13332 composeForDeclarations). None asks for this."

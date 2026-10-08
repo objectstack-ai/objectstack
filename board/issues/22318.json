@@ -1,0 +1,35 @@
+{
+  "number": 22318,
+  "kind": "issue",
+  "title": "plugin-audit: AuditPluginOptions gains an optional host locale resolver, consulted before the settings-derived locale, so a multi-organization host writes activity summaries in each organization's language",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "domain:services",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T15:34:34Z",
+  "updated_at": "2026-10-08T19:06:43Z",
+  "closed_at": "2026-10-08T19:02:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22318",
+  "body": "Filing gate: a ruled enhancement with a named, measured consumer. The ruling is objectstack-ai/cloud#2435 item 14, letter **D** (director seat, batch #293 item 3, comment `6063207364`), which the maintainer approved with 「同意」 on 2026-10-08T15:23Z. Filed by the `repo:cloud` seat (`repo:cloud#1`, R45, session `session_011jobP72PwN3whNm55GetXQ`), because the option lands in this repo. ⛔ Not a claim.\n\n## The ruling, as quoted\n\n> **D.** `plugin-audit` gains one optional host option, a locale resolver (`getLocale(tenantId, userId)`), consulted first and falling back to today's settings-derived locale when it returns nothing; the writer layer already takes `getLocale`, so the option only exposes what the plugin builds internally.\n\n⛔ Not taken: read-time rendering (a change to the storage shape) and per-organization plane settings (they would reopen cloud's D1, under which the control plane's `localization` is one deployment-wide namespace).\n\n## The seam reading (cloud#2435 dev report `6060072840`, taken at cloud's pin `56bf27af`; the lines below are re-read on `main` `4e4111ca`)\n\n- **No host option exists.** `AuditPluginOptions` is `{ readAudit }` only (`packages/plugins/plugin-audit/src/audit-plugin.ts:56-59`). Every `this.options` read in the file is `readAudit`.\n- **The locale is a closure the plugin builds itself** (`audit-plugin.ts:218-228`): `resolveLocalizationContext({ ql, settings, tenantId, userId }).locale`, handed to `installAuditWriters(engine, this.name, { getMessaging, getI18n, getLocale })`.\n- **The writer layer already takes the seam:** the `getLocale` option on `installAuditWriters` (`audit-writers.ts:130`), read through `resolveWriteLocale` (`:1148-1156`), which the summary writers call (`:1779`, `:2086`).\n- **The two near-seams are monkey-patches,** and the ruling refuses both:\n  - re-calling the exported `installAuditWriters` under the plugin's package id (it unregisters the plugin's hooks by package, `audit-writers.ts:1183-1184`);\n  - wrapping the `settings` service (it falsifies the settings read contract for every reader).\n\n## The shape\n\n- `AuditPluginOptions` gains one optional member. The ruling's wording is a resolver `(tenantId?: string, userId?: string) => Promise<string | undefined>`; this lane names it.\n- When given, its answer is used first. `undefined` (or a throw, if this lane decides a throw falls through) falls back to today's `resolveLocalizationContext` result. With the option absent, behaviour is byte-identical to today.\n- The precedence (host first, settings second) is documented on the option. ⛔ No second locale source is added anywhere else.\n\n## The consumer (measured)\n\n- **Who:** cloud's control plane builds `new AuditPlugin()` with no options (`packages/service-cloud/src/control-plane-preset.ts:762-765` at cloud `main`).\n- **What it will pass:** cloud already has `resolveWorkspaceLocale(driver, organizationId)` (`workspace-invitation-locale.ts:113`, cloud#2649). It returns the organization's `observed_locale`, else its `localeSeed`, validated, and `undefined` otherwise.\n- **Today:** a zh-CN workspace owner reads control-plane 活动动态 rows in English (`Created Team \"悦来商贸\"`).\n- **When cloud gets it:** cloud consumes the framework through a pin (`.objectstack-sha` `56bf27af`, held until v18 by objectstack#22050 ruling B). The plane wiring is one line plus its test, dispatched by the cloud seat once the pin moves (cloud#2709).\n\n## Tests\n\n- **Pin:** with the option given, a create on a tracked object writes `sys_activity.summary` in the resolver's locale (the zh-CN `activityCreated` template exists, `translations/messages.ts:26`).\n- **Fallback:** a resolver returning `undefined` gives today's settings-derived locale.\n- **Absent:** with no option, the summaries are unchanged (an existing-behaviour control).\n- **Ablation:** ignore the option on the committed head, and show the pin going red.\n\n## 查重词\n\n`AuditPlugin locale resolver option` · `plugin-audit getLocale host` · `activity summary locale multi-org` · `control plane activity summary language`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -11,20 +11,22 @@
     "type": "Bot"
   },
   "labels": [
-    "domain:engine",
-    "pm:queue",
+    "domain:spec",
+    "pm:dispatched",
     "priority:p2",
     "target:v18"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-litant"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T11:16:26Z",
-  "updated_at": "2026-10-08T11:57:13Z",
+  "updated_at": "2026-10-08T19:38:49Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22277",
   "body": "Filing gate: **a prerequisite the ruling names, not a new finding.** #11182's ruling of record `5805777944` (letter D, maintainer 「11182 D 其他同意」) refuses the template dialect in flow value slots with per-spelling remedies, including \"a string form for `NOW()` / `TODAY()`\". #19939's body names the contingency: \"the round measured that CEL yields a Timestamp and this engine has no `string(timestamp)` — a `packages/formula` sub-card if v18 needs it\". v18 needs it, so this is that sub-card. It was filed by the `domain:spec` seat 3 (seat post #18883, `session_01RPo7FUd6bSnAfkWMAKi848`) at #19939 pass 1's landing. ⛔ Not graded or routed here; ⛔ not a claim.\n\n## What is measured (by #19939's dev, pass 1, PR #22259)\n\n- `now()`, `today()`, `daysFromNow(N)` and `addDays(today(), N)` in a flow value slot yield a Timestamp. It reaches the data engine as a `Date`; this was measured through ObjectQL with a recording driver.\n- `{TODAY()}` in the template dialect writes ISO date text; `{NOW()}` writes ISO date-time text.\n- `string(today())` is refused for want of an overload (probe D6 / X13 in the pass-1 report on #19939).\n- So pass 1 (PR #22259 → `0e9e7b706`) deliberately **keeps** the date macros `{NOW()}`, `{TODAY()}` and `{TODAY() ± N}` in value slots. Their refusal has no remedy to name until CEL can spell the same value.\n\n## What this card adds\n\nA string form for a CEL Timestamp in `packages/formula`'s CEL environment: a `string(Timestamp)` overload, or a named date-text function. Either way it writes what the template wrote:\n- ISO date text for a date (`{TODAY()}`);\n- ISO date-time text for a date-time (`{NOW()}`).\n\nPin the two shapes. Pin that it is the same text `interpolateString` produces for the date macros today, over the same instants. Pin that no envelope that returns a Timestamp today changes what it writes, because this adds a spelling and changes no write path.\n\n## Then\n\n#19939's date-macro half refuses `{NOW()}` / `{TODAY() ± N}` with this spelling as the remedy. That card names this one as its prerequisite.\n\n## Reader who acts\n\nTriage grades and routes it. The landing site is `packages/formula`, so by the anchoring table it is `domain:engine`. It is graded with #19939 (`priority:p2`, `target:v18`).\n\nDedupe words: `string(Timestamp) overload CEL` · `date text function formula` · `TODAY() NOW() value slot remedy` · `#19939 date macros`"

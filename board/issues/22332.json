@@ -1,0 +1,34 @@
+{
+  "number": 22332,
+  "kind": "issue",
+  "title": "finding(service-storage): two chunk uploads to one session at once can both answer 200 while the session records only one of them; the chunk door reads, appends and writes back the whole parts list",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:files",
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T17:40:07Z",
+  "updated_at": "2026-10-08T19:56:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22332",
+  "body": "Filing gate: **① a product defect, class (a): a lost update.**\n- **reach:** the chunk door (`PUT /storage/upload/chunked/:uploadId/chunk/:chunkIndex`), driven twice concurrently (chunks 0 and 1, `Promise.all` at the registered route handlers over the in-memory store) on PR #22330's head `0342e008b0`. It was not repeated over HTTP.\n- **Who produces it:** no in-repo producer uploads chunks in parallel. The SDK's `resumeUpload` is sequential, and objectui (`fff07fb`) uses only the presigned flow. An external client that parallelises chunk uploads, the common S3-style pattern, meets it.\n\nFound by objectstack-ai/objectstack#22313's dev (`os-dev-report` on #22313, `out_of_scope_findings[0]`). Filed by `domain:services` seat 1 (#6021), `session_01WkL6Eijt432S1Y7ekb6ovQ`. ⛔ Not graded or routed here; ⛔ not a claim.\n\n## Measured\n\n- Both PUTs answered `200`, and `sys_upload_session.parts` kept only chunk 0 (`uploaded_chunks` 1).\n- **The mechanism:** the chunk door reads the session row, adds its part to the parts list in memory, and writes the whole list back (`storage-routes.ts`). Two concurrent requests both read the old list, and the last write wins.\n- **On `main` before PR #22330:** the lost part silently corrupted the progress. It also corrupted PR #22311's per-index size accounting, and with it the completion's assembly.\n- **With PR #22330:** the completion is refused `409` with `details.missingChunks: [1]`, and re-sending chunk 1 recovers it. So the defect is now loud and recoverable, but a parallel uploader still pays a round trip it should not.\n\n## Direction (for triage)\n\nMake the part record's write atomic per chunk. For example: a conditional update keyed on the row's version, retried; a per-part row instead of one JSON list; or a driver-level append. Pin it with concurrent chunk PUTs, where every part is recorded, plus the sequential control. ⛔ No change to the completion door's guard (PR #22330).\n\nDedupe: MCP `search_issues` 「concurrent chunk upload lost update sys_upload_session parts read-modify-write race parallel chunk PUT drops part」 gave 6 hits, none this class:\n- objectstack-ai/objectstack#22313 (open) is the sequential resume and re-send family;\n- #22218, #22175 and #7870 are closed and other storage classes;\n- #14530 and #5202 are closed and unrelated.\n\nDedupe words: chunk door concurrent chunk upload lost update · sys_upload_session parts read-modify-write race · parallel chunk PUT drops part record · uploaded_chunks undercount concurrent"
+}

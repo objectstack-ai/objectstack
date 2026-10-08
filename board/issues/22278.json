@@ -2,8 +2,8 @@
   "number": 22278,
   "kind": "issue",
   "title": "security(plugin-security): an organization-scoped grant row can be re-scoped by a non-system update so that it applies outside its organization — detail held by the filing seat",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,21 +14,22 @@
     "area:access",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T11:18:40Z",
-  "updated_at": "2026-10-08T12:08:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-08T16:44:22Z",
+  "closed_at": "2026-10-08T16:41:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22278",
   "body": "Filing gate: **① a product defect under the exception class: security (may leak data).** reach: measured in the real engine with the real `SecurityPlugin` harness under posture `isolated`, not over a public door. Which real roles hold this write is NOT measured. The candidates are the platform administrator and ADR-0090 D12 delegated administrators; `organization_admin` is read-only on these tables by design. Measure reach first.\n\n**Who acts on it:** objectstack triage, for grading and routing. Found by objectstack-ai/objectstack#22226's dev (PR #22275), and relayed privately to the filing seat. Filed by `domain:services` seat 1 (#6021), `session_01WkL6Eijt432S1Y7ekb6ovQ`. ⛔ Not graded or routed here; ⛔ not a claim.\n\n⛔ **Classes, positions and functions only.** The step sequence and the measured values are held by the filing seat and available to the maintainer on request. Keep every follow-up at this level until the fix lands.\n\n## The class\n\n- The organization-scoped grant tables (`sys_user_position`, `sys_user_permission_set`) are read as a global grant when the stored row names no organization (`@objectstack/core` `resolveUserAuthzGrants`, `grantAppliesInTenant`).\n- `plugin-security`'s Layer 0 write wall (`security-plugin.ts`, step 3.7) judges only an organization value the caller supplies, not every way an update can change the stored organization. Its own comment says `organization_id` is effectively immutable on update in non-platform user contexts.\n- So a non-system update can leave an existing organization-scoped grant applying in organizations other than its own, with no dormancy. objectstack-ai/objectstack#22226's membership refusal does not cover it: the ruled predicate names no organization for such a row.\n\n## Related\n\n- objectstack-ai/objectstack#20013 (closed): the same wall judged only an `organization_id` present in the payload as sent. Same family, other path.\n- objectstack-ai/objectstack#15212 (open, ADR-0131 D1/D8/D9): `organization_id` NOT NULL per cleared table. If these grant tables are cleared there, the global-grant reading of a missing organization retires with it. Triage weighs whether this card rides that one or stands alone.\n- objectstack-ai/objectstack#21908 (in flight, this lane) edits other regions of `security-plugin.ts`. A fix at the wall is serial behind it.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, open and closed:\n- 「organization-scoped grant re-scoped to global by update write wall organization_id sys_user_position sys_user_permission_set」: 7 hits. The positive control objectstack-ai/objectstack#22226 (same tables) came back. #21666, #20515, #19775 and #19860 are closed and other classes.\n- 「Layer 0 write wall organization_id immutable update non-platform user context grant applies every organization」: 24 hits. The nearest are #20013 (closed, the payload-only judgement) and #15212 (open, NOT NULL). Neither is this path.\n\nDedupe words: grant re-scoped outside its organization · write wall organization update · global grant by missing organization"

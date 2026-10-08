@@ -1,0 +1,35 @@
+{
+  "number": 22313,
+  "kind": "issue",
+  "title": "finding(service-storage, client): a resumed chunked upload can complete with 200 while the stored file holds only the parts the resuming client sent, and a re-sent chunk is counted twice in the session progress",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:files",
+    "bug",
+    "domain:services",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T15:08:59Z",
+  "updated_at": "2026-10-08T18:50:23Z",
+  "closed_at": "2026-10-08T18:49:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22313",
+  "body": "Filing gate: **① a product defect, class (a): data integrity.** reach: public doors, measured on the build of PR #22311's branch. The accounting and completion lines are unchanged from `main`. The doors were driven in the order the SDK's `resumeUpload` drives them.\n\nFound by objectstack-ai/objectstack#22283's dev (`os-dev-report` `6062816879`, `out_of_scope_findings[0]` and `[1]`). Filed by `domain:services` seat 1 (#6021), `session_01WkL6Eijt432S1Y7ekb6ovQ`. ⛔ Not graded or routed here; ⛔ not a claim.\n\n## Measured\n\n1. **A resumed upload completes short.** A two-chunk upload stored chunk 0 (5 MiB) in a first pass, then resumed. `resumeUpload` (`packages/client/src/index.ts`) reads the progress door and sends the remaining chunk. Its completion call then lists only the parts it uploaded itself.\n   - The completion door (`storage-routes.ts`, `POST …/upload/chunked/:uploadId/complete`) assembles only the listed parts and answers **200**, with the file's declared size 5,242,890.\n   - The stored object is 10 bytes.\n   - The caller is told the upload succeeded, and the file is not what was uploaded.\n2. **A re-sent chunk is counted twice.** Sending chunk 0 (600 KiB) of a 1 MiB session twice makes the progress door answer `uploadedSize` 1,228,800 and `percentComplete` 100, while 600 KiB is held. `uploaded_chunks` is inflated the same way.\n   - `resumeUpload` resumes from `uploadedChunks`, so an inflated count makes it skip chunks that were never stored.\n   - That is the path into finding 1.\n\n## The seam\n\n- The consumer is `packages/client`, `resumeUpload` and the parts list it sends at completion.\n- The doors are `service-storage`'s chunk door accounting (`uploaded_size` and `uploaded_chunks` on `sys_upload_session`) and the completion door, which trusts the request's parts list over the session's stored parts.\n- PR #22311 makes the size limit sum the latest size per chunk index, so the limit is not fooled by a retry. It leaves the progress accounting and the completion door untouched, as fenced.\n\n## Direction (for triage)\n\nThe session already knows which parts it holds. Choose between:\n- the completion door completes from the session's stored parts, or refuses a parts list that omits a stored part;\n- the progress door counts each chunk index once, at its latest size.\n\nWhich door owns the fix, and whether `resumeUpload` changes as well, is triage's call. The SDK half is in `packages/client`.\n\nDedupe: MCP `search_issues` 「chunked upload resume completes with partial parts list stored file truncated progress retried chunk counted twice uploaded_size」 gave 3 hits, all closed and other classes:\n- #7870: `resumeUpload` ignored an expired session's status, a different defect in the same function;\n- #22175: the organization-change 500;\n- #21528: `os migrate` resume.\n\nDedupe words: resumeUpload drops earlier chunks · chunked upload resume completes with partial parts list · completeChunkedUpload parts omit stored chunks · chunked upload progress retried chunk double count · uploaded_size uploaded_chunks retry overstates"
+}

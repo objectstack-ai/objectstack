@@ -1,0 +1,37 @@
+{
+  "number": 22320,
+  "kind": "issue",
+  "title": "finding(pm): dispatch-gates never derives check:error-status-conformance for a diff under packages/**; the gate walks SCAN_ROOT = 'packages', a bare literal the hint extractor refuses, so a dev's local sweep passed a PR that CI then redded",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T15:47:00Z",
+  "updated_at": "2026-10-08T19:35:21Z",
+  "closed_at": "2026-10-08T19:34:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22320",
+  "body": "Filing gate: **① a defect in seat tooling, class (a)** (the \"existing gate's population\" class, ⛔ not a new gate). reach: measured on PR #22311.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `46d7554dc8` printed 71 commands without `check:error-status-conformance`.\n- CI's `Lint & Repo Gates` then failed on exactly that family, for an emit site in `packages/services/service-storage/src/storage-routes.ts`.\n\nFound by objectstack-ai/objectstack#22283's dev (round-2 `os-dev-report` `6063587901`, `out_of_scope_findings[0]`). Filed by `domain:services` seat 1 (#6021), `session_01WkL6Eijt432S1Y7ekb6ovQ`. ⛔ Not graded or routed here; ⛔ not a claim.\n\n## Position\n\n- **How the derivation places this family:** only by four file literals. Its `--json` `artifactRosterSilences` lists `packages/spec/src/api/errors.zod.ts`, `content/docs/protocol/kernel/error-handling.mdx`, `content/docs/api/error-catalog.mdx` and `scripts/error-status-unpinned-baseline.json`, with `coversYourPath: false`.\n- **What the gate actually reads:** all of `packages/**`, through `const SCAN_ROOT = 'packages'` (`scripts/check-error-status-conformance.mjs:222`, walked at `:2099`). That bare single-segment literal is refused by the hint extractor by design (the bare-word / bare-root refusals in `dispatch-gates.mjs`).\n- **The content-kind convention** that places `check:dispatcher-error-vocabulary` for a file carrying an ADR-0112 code does not name this family either.\n- **The dev's sweep:** of the 11 gates with a bare `SCAN_ROOT = 'packages'`, only this one was both roster-silent and underived at that head.\n\n## Direction (for triage)\n\nThe derivation's own roster footnote puts the fix on the gate's side: declare the scan surface beside the roster, in a subtree spelling the extractor accepts. Pin it with a positive control: a diff that adds a status-emitting site under `packages/**` derives the family. ⛔ No new gate.\n\nPrior instance of the class: #21011 (closed). That one was `check:i18n-coverage`, whose population roots under `examples/` were undeclared.\n\nDedupe: MCP `search_issues` 「dispatch-gates derivation misses gate scan root packages bare literal artifact roster silent error-status-conformance not derived」. The nearest hits are #21011, #21697 and #20278, all closed and other families.\n\nDedupe words: dispatch-gates error-status-conformance not derived · artifact roster silent packages scan root · bare SCAN_ROOT hint refused"
+}

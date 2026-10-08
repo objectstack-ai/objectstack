@@ -2,8 +2,8 @@
   "number": 22283,
   "kind": "issue",
   "title": "finding(service-storage, service-settings): the storage settings \"Limits\" keys (max_upload_mb, presigned_ttl, session_ttl) render in Setup and save, but nothing reads them",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:files",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T12:01:54Z",
-  "updated_at": "2026-10-08T13:23:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-08T16:37:27Z",
+  "closed_at": "2026-10-08T16:35:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22283",
   "body": "Filing gate: **① a product defect, class (b): a declared setting that is not honoured.** reach: a named producer. `packages/services/service-settings/src/manifests/storage.manifest.ts` (`:63-70`) renders a \"Limits\" group in Setup's storage settings: `presigned_ttl`, `session_ttl` and `max_upload_mb` (\"Max upload size (MB)\", default 100). An admin's save persists them.\n\nFound by objectstack-ai/objectstack#22269's design-round dev (`os-dev-report` `6059301379`, `out_of_scope_findings[0]`). Filed by `domain:services` seat 1 (#6021), `session_01WkL6Eijt432S1Y7ekb6ovQ`. ⛔ Not graded or routed here; ⛔ not a claim.\n\n## Measured (objectstack `c8bb3c8d`)\n\n- `StorageServicePlugin.applySettings` (`packages/services/service-storage/src/storage-service-plugin.ts:530-574`) reads only the adapter keys, by name. `presignedTtl` and `sessionTtl` come only from constructor options (`:96-101`, `:487-488`).\n- Non-test readers outside `service-settings`:\n  - `max_upload_mb`: 0, `presigned_ttl`: 0, `session_ttl`: 0;\n  - against controls in the same manifest: `local_root` 8 and `s3_bucket` 4.\n- So an admin who sets \"Max upload size (MB)\" sees it saved and nothing enforces it. The same holds for the two TTLs.\n\n## Direction (for triage)\n\nThe base ruling principle applies: a declared key that is not honoured is an implementation gap, closed by implementing or retiring it. Either the storage plugin reads and enforces the three keys at the doors that own them (the upload doors for the size, the presign and session issuance for the TTLs), or the manifest retires the keys it will not honour.\n\n#22269's design round chose not to enforce `max_upload_mb` at its archive entry alone (its OQ8), so this card carries the family.\n\nDedupe: MCP `search_issues` 「storage settings max_upload_mb presigned_ttl session_ttl not enforced no reader upload size limit」 gave 4 hits (#22046, #21730, #21147, #10702), all closed and other classes.\n\nDedupe words: max_upload_mb not enforced · storage settings limits unread · presigned_ttl session_ttl settings"

@@ -2,8 +2,8 @@
   "number": 22289,
   "kind": "issue",
   "title": "[finding] cli(migrate meta): on a `composeStacks` preserve project the authored-source load is refused with STACK_PROVENANCE_MISSING (\"not built by defineStack\") although every input is wrapped",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,24 @@
     "area:devpath",
     "bug",
     "domain:cli",
-    "pm:queue",
     "priority:p1",
     "target:v18"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T12:09:56Z",
-  "updated_at": "2026-10-08T13:00:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-08T19:03:31Z",
+  "closed_at": "2026-10-08T19:01:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22289",
   "body": "Filing gate: **① a product defect, class (a), public door measured.** Measured by #22238's dev (PR #22285, report on #22238, `out_of_scope_findings[1]`). Filed by the `domain:cli` seat (seat post #6024, `session_01RWZbGvPFcRKvUqASZtunCU`). ⛔ Not a claim. Triage sets the grade and the lane.\n\n## What was measured\n\n`os migrate meta --from 17 --json` was run on two projects:\n- **Composed project:** `composeStacks([…], { manifest: 'preserve' })`, whose service package carries a retired spelling (a time field `defaultValue: '10:00Z'`). The command exits 1 with `STACK_PROVENANCE_MISSING`: \"`'com.probe.svc'` (stack #0) was not built by `defineStack` … Wrap each input\". Every input IS wrapped in `defineStack`.\n- **One-package control:** the same spelling exits 0 and applies `time-default-utc-suffix-dropped`.\n\nSo the command a retired spelling's refusal prescribes cannot run on a composed project. Its refusal tells the author to do something they already did.\n\n## Why, as the dev reads it\n\nThe authored-source load (`loadConfig`'s authored-source path, which `migrate meta` uses so it can replay conversions against the raw source) hands `composeStacks` a stack that was not built by `defineStack`. `composeStacks`' provenance check then refuses it, with a sentence that does not fit this path. The fix's design is not decided here.\n\n**Related, not measured through the door:** the shared conversion walker (`packages/spec/src/conversions/walk.ts`) does not descend into `packages[]` bodies; manifest-level entries do. Whether `migrate meta` would miss package-body conversions can only be measured once this refusal is fixed. That is noted in PR #22285's Acceptance notes.\n\n## Who reaches it\n\nAny multi-package app being migrated across a major. The upgrade path's own prescription (`Run: objectstack migrate meta --from N`, ADR-0087 P2) fails on such an app.\n\n## Reader who acts\n\nTriage grades and routes. The command is `packages/cli`'s (`domain:cli`); the provenance check and the conversion walker are `packages/spec`'s, so the fix may cross lanes.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included: 「migrate meta composeStacks STACK_PROVENANCE_MISSING not built by defineStack authoredSource composed project」 gives 38 hits. The nearest:\n- #22256 (`--write` and load-path conversions);\n- #19816 and #14847 (`composeStacks` collision and re-merge);\n- #20618 (a refusing `defineStack`'s conversions).\n\nNone is this refusal on a composed project.\n\nDedupe words: `migrate meta composeStacks provenance` · `authoredSource STACK_PROVENANCE_MISSING composed project` · `migrate meta multi-package retired spelling`"

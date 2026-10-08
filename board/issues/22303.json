@@ -2,7 +2,7 @@
   "number": 22303,
   "kind": "pull_request",
   "title": "skills(ui): `pages.md` Routing model teaches the `doc` navigation item; eval 4 expects it",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/s",
     "skip-changeset"
   ],
@@ -22,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T13:35:52Z",
-  "updated_at": "2026-10-08T13:49:23Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-08T14:41:32Z",
+  "closed_at": "2026-10-08T14:40:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-08T14:40:34Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/22303",

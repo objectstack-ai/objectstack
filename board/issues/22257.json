@@ -2,8 +2,8 @@
   "number": 22257,
   "kind": "issue",
   "title": "service-settings: the showcase boot fires the SettingsService \"Pre-bind READ\" diagnostic (namespace auth) — a reporter that never fires on a correct boot; find the early reader, do not demote the line",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:devpath",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T09:53:56Z",
-  "updated_at": "2026-10-08T14:09:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-08T16:38:52Z",
+  "closed_at": "2026-10-08T16:35:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22257",
   "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) while routing #22160's remainder (retriage, `6056996366`). ⛔ Not a claim.\n\n## Reading\n\n- **Measured by #22160's dev** (os-dev-report `6055648421`, H1 and `out_of_scope_findings[0]`): on `examples/app-showcase`, `os dev --seed-admin --fresh` at `7d7943dd`, one of the four boot records is the `[SettingsService]` **Pre-bind READ** warning (namespace `auth`), logged at `packages/services/service-settings/src/settings-service.ts` (about `:774`, `reportPreBindRead`).\n- **What that reporter means, from its own docblock:** the engine bind is ordered before any read (ADR-0116), so \"on a correct boot this reporter never fires\" (`settings-prebind-read-warning.test.ts`). The window check is `pnpm check:settings-bind-window`.\n- So the line is a real boot-order signal on the showcase: something reads the `auth` namespace before the engine bind. It is not an expected degradation.\n- **History:** #13256 (closed 2026-08-30) fixed the same class on the quickstart. This is the class firing again on the showcase.\n\n## Done when\n\n- The early reader is found and moved after the bind, or the bind is ordered before it. The showcase boot then logs no Pre-bind READ.\n- **⛔ Not a level change.** The maintainer's noise budget on #22160 sends expected degradations to `info`. This line is a defect signal, so it keeps `warn`, and the fix removes its cause.\n- **Pin:** a showcase-shaped boot asserts that no Pre-bind READ is reported. Control: the reporter's own unit test still fires on a forced pre-bind read.\n\n## Not this card\n\n- The showcase's `[sharing-rule] … expands to NO recipients` line is objectstack-ai/objectstack#15086's root cause (unstamped business-unit seed rows; v18, ADR-0131). It is not a level change either.\n- The banner's deployment-policy Flows lines are #22255.\n\nDedupe: MCP `search_issues` 「showcase boot SettingsService pre-bind read warning sharing-rule business unit expands to no recipients」 gave 9 hits. #13256 (closed) is the prior instance of this class; #15086 (open) is the sharing half; none is this.\n\nDedupe words: SettingsService Pre-bind READ showcase · pre-bind read namespace auth · settings bind window showcase boot"
