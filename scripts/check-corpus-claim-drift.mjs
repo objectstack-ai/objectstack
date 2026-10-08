@@ -675,7 +675,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The dispatch-gates declaration (#9964\'s pattern)': 4,
   'At the PROGRAM level': 10,
   // #22059 step ①: cases registered by scripts/skill-example-probe.mjs
-  // (`registerProbeSelfTest`), named by its PROBE_SELF_TEST_BATTERIES.
+  // (`registerProbeCases`), named by its PROBE_SELF_TEST_BATTERIES.
   'Probe extractor: fences, languages, markers, census (#22059)': 14,
   'Probe transform: the supported shapes and the coverage miss (#22059)': 18,
   'Probe mapping and judge, over synthetic schemas (#22059)': 21,
@@ -1401,7 +1401,7 @@ function selfTest(probe) {
   // Loaded by the dispatch below and handed in, so this function stays
   // synchronous. A probe that failed to load registers nothing, and its four
   // batteries then name themselves at the floor.
-  if (probe) probe.module.registerProbeSelfTest({ battery, expect }, { ts: probe.ts, yaml: probe.yaml });
+  if (probe) probe.module.registerProbeCases({ battery, expect }, { ts: probe.ts, yaml: probe.yaml });
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
@@ -1508,7 +1508,7 @@ if (process.argv.includes('--probe-examples')) {
 /* The probe's cases need the TypeScript parser and `yaml` — root dev
  * dependencies — but no build. A load failure is reported, never swallowed:
  * the probe batteries then fail the floor by name. */
-async function loadProbeForSelfTest() {
+async function loadProbeModule() {
   try {
     const module = await import('./skill-example-probe.mjs');
     const { default: ts } = await import('typescript');
@@ -1521,7 +1521,7 @@ async function loadProbeForSelfTest() {
 }
 
 if (process.argv.includes('--self-test')) {
-  selfTest(await loadProbeForSelfTest());
+  selfTest(await loadProbeModule());
   if (!selfTestReachedVerdict) {
     console.error(
       '\n✗ check-corpus-claim-drift self-test: selfTest() returned without reaching its verdict,\n'

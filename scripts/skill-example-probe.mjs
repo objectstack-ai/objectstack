@@ -1530,7 +1530,7 @@ function fakeObject(shape) {
  * @param {{battery:(name:string)=>void, expect:(label:string, cond:boolean)=>void}} harness
  * @param {{ts:any, yaml:any}} deps
  */
-export function registerProbeSelfTest({ battery, expect }, { ts, yaml }) {
+export function registerProbeCases({ battery, expect }, { ts, yaml }) {
   const B = PROBE_SELF_TEST_BATTERIES;
   const fence = (lang, body, extra = {}) => ({ line: 1, endLine: 1, indent: 0, info: lang, lang, family: LANG_FAMILY[lang] ?? null, body, heading: null, marker: null, unclosed: false, ...extra });
   const deps = { ts, yaml, helpers: { Field: { text: (c = {}) => ({ type: 'text', ...c }) } } };
