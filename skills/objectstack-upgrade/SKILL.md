@@ -59,7 +59,7 @@ The id is the commit's subject line and its justification.
 grep -rn "protocol" objectstack.config.ts package.json | head
 node -p "require('@objectstack/spec/package.json').version"
 
-# 1 · mechanical — replay the chain (reads the config, writes nothing but --out)
+# 1 · mechanical — replay the chain (writes only --out; --write also rewrites the sites it can prove)
 os validate > .upgrade/validate-before.txt 2>&1 || true   # the control, kept
 os migrate meta --from 16 --step
 os migrate meta --from 16 --json > .upgrade/migrate.json
@@ -128,6 +128,7 @@ os migrate meta --from 16 --step                # per-hop checkpoint (bisect a f
 os migrate meta --from 16 --to 17               # stop at a specific major
 os migrate meta --from 16 --json                # machine-readable result
 os migrate meta --from 16 --out migrated.json   # write the canonicalized stack
+os migrate meta --from 16 --write               # rewrite the proven sites in place
 os migrate meta --from 16 apps/crm/objectstack.config.ts   # pick the stack explicitly
 ```
 
@@ -148,19 +149,15 @@ it prints:
 
 ### ⚠ The one fact that surprises every operator
 
-**`os migrate meta` does not rewrite your source files.** It rewrites the
-loaded stack *in memory* and reports the diff. The only file it writes is
-`--out`, a JSON snapshot.
+**By default `os migrate meta` rewrites no source file.** It lists the
+mechanical edits and writes only the `--out` JSON snapshot. `--write` rewrites
+in place each edit it can trace to one literal in one project file, lists every
+other with the reason it was not written, never writes a semantic change, and
+if re-running the chain over the written files disagrees, restores every file
+and exits 1.
 
-Porting the printed edits into the project's own sources is yours. Work from
-that list, one `conversionId` at a time; use `--out` as the oracle you diff
-against, never as the file you ship.
-
-```bash
-os migrate meta --from 16 --out .upgrade/migrated.stack.json
-# then, after porting the edits into the real sources:
-os migrate meta --from 17 --out .upgrade/recheck.json   # should apply 0 changes
-```
+Porting the edits left unwritten is yours, one `conversionId` at a time; use
+`--out` as the oracle you diff against, never as the file you ship.
 
 ### Stored rows: rehydration replays the same conversions
 
@@ -186,8 +183,7 @@ and you never hand-edit `sys_metadata`. To make it durable, run the stored pass
   exiting 1 with `confirmation_required`.
 
   `--stored` takes no `--from`: a stored row carries its own history, so the
-  pass replays the whole chain. The authored-source flags and the stored-only
-  flags are mutually exclusive, and mixing them is refused rather than ignored.
+  pass replays the whole chain.
 
 ### Data migrations are not metadata migrations
 
@@ -466,13 +462,13 @@ guarantee.
 
 | Symptom | What it actually is | Fix |
 |:--|:--|:--|
-| `migrate meta` reports changes, but the files are unchanged | Working as designed — the command writes nothing but `--out`. | Port the printed edits into the sources, then replay from the target major to confirm 0 changes. |
+| `migrate meta` reports changes, but the files are unchanged | Working as designed — the default run only lists. | Pass `--write`, or port the printed edits by hand; then replay from the target major to confirm 0 changes. |
 | Replay from the target major still applies changes | The port is incomplete, or a source builds metadata at runtime from a shape the chain never saw. | Diff against `--out`; grep for the `conversionId`'s surface in code that constructs metadata dynamically. |
 | `validate` green, but a feature silently stopped working | An R2 residue item: code reading a renamed key now reads `undefined`. | Exercise the path for real. A green parse says nothing about a `??` chain in the project's own code. |
 | `validate` green from the start, so "there was nothing to upgrade" | A migration-chain-only conversion — no tombstone rejects it, so nothing complains. | Replay the chain anyway. `validate` green is necessary, not sufficient; see [3.3](#33-validate). |
 | `validate` reports findings that have nothing to do with retired keys | The author-time rule pass, not the schema pass. | Diff against the pre-upgrade `validate` control. Pre-existing findings are not this upgrade's scope. |
 | A retired key round-trips without error | The schema carrying it is not strict and the key is being stripped, or the key still has a live load-path window. | Determine which — the two need different acceptance evidence. See [the reverse check](#reverse-check). |
-| `--apply` refused / stored-only flag rejected | `--apply`, `--yes`, `--force`, `--type`, `--database-url` mean something only with `--stored`. | Add `--stored`, or drop the flag; the authored-source chain has nothing to write to. |
+| `--apply` refused / stored-only flag rejected | `--apply`, `--yes`, `--force`, `--type`, `--database-url` mean something only with `--stored`. | Add `--stored`, or drop the flag; the authored-source chain writes only `--out` and, with `--write`, the sources. |
 | `MigrationFloorError` | `--from` is older than the chain's support floor. | Upgrade to the floor by an older route first; the floor is a release-policy boundary, not an oversight. |
 
 Scripting the run instead of reading it? Every `--json` failure above carries a
