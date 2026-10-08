@@ -18,8 +18,9 @@ import type {
   StorageWriteContext,
 } from './metadata-store.js';
 // [#22175] Whether a door's scoped by-id write can reach the row it names —
-// the store's own answer, asked before the write.
-import { organizationOutOfWriteReach } from './metadata-store.js';
+// the store's own answer, asked before the write. [#22332] And the chunk
+// door's conditional progress write.
+import { organizationOutOfWriteReach, updateSessionProgressIfUnchanged } from './metadata-store.js';
 import type { LocalStorageAdapter } from './local-storage-adapter.js';
 // [#22046] The ONE upload ownership rule. Declared in its own module and only
 // CALLED here — the three doors below share it rather than each carrying a
@@ -113,6 +114,27 @@ function uploadTooLargeMessage(measured: string, maxUploadBytes: number): string
  */
 const INCOMPLETE_UPLOAD_STATUS = 409;
 const INCOMPLETE_UPLOAD_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
+
+/**
+ * [#22332] How many times the chunk door tries to record a stored chunk in the
+ * upload's progress before it refuses.
+ *
+ * The record is written with a compare-and-set
+ * (`updateSessionProgressIfUnchanged`), and a write only loses to a write
+ * that landed between the door's read and its own — so each lost attempt is
+ * another chunk recorded, and a chunk loses at most once per chunk recorded
+ * alongside it. Sixteen covers parallel uploaders well beyond the four to ten
+ * lanes they commonly run; past it the door refuses rather than spin.
+ *
+ * The refusal is `409` / `RESOURCE_CONFLICT` (ADR-0112's standard member for
+ * HTTP 409, the code the completion door answers too): the chunk's bytes are
+ * stored but the upload does not record it, and sending the chunk again
+ * resolves it — a re-sent chunk replaces its slot. ⛔ Never a `200`: a chunk
+ * answered as stored and missing from the record is the loss this guards.
+ */
+export const CHUNK_RECORD_ATTEMPTS = 16;
+const CHUNK_NOT_RECORDED_STATUS = 409;
+const CHUNK_NOT_RECORDED_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
 
 /**
  * The request's declared `content-length`, or `undefined` when it carries none
@@ -945,16 +967,60 @@ export function registerStorageRoutes(
       // replaces its bytes in the backend, so a retry is counted once in
       // `uploaded_chunks` and `uploaded_size` — the counts `resumeUpload`
       // resumes from (see `recordChunk`).
-      const progress = recordChunk(currentParts, { chunkIndex, eTag, size: data.byteLength }, session.uploaded_size ?? 0);
-      await store.updateSession(
-        uploadId,
-        {
-          uploaded_chunks: progress.uploadedChunks,
-          uploaded_size: progress.uploadedSize,
-          parts: JSON.stringify(progress.parts),
-        },
-        writeContext,
-      );
+      //
+      // [#22332] The record is merged from the row this door READ, so it is
+      // written only while the row still holds that progress: a chunk PUT
+      // running alongside this one may have recorded its part in between, and
+      // an unconditional write erased it — both answered `200` and the upload
+      // held one chunk. When the write does not land, the door re-reads the
+      // row and merges again, up to CHUNK_RECORD_ATTEMPTS.
+      const part = { chunkIndex, eTag, size: data.byteLength };
+      let seen = session;
+      let parts = currentParts;
+      for (let attempt = 1; ; attempt++) {
+        const progress = recordChunk(parts, part, seen.uploaded_size ?? 0);
+        const landed = await updateSessionProgressIfUnchanged(
+          store,
+          uploadId,
+          seen,
+          {
+            uploaded_chunks: progress.uploadedChunks,
+            uploaded_size: progress.uploadedSize,
+            parts: JSON.stringify(progress.parts),
+          },
+          writeContext,
+        );
+        if (landed) break;
+        if (attempt >= CHUNK_RECORD_ATTEMPTS) {
+          sendError(
+            res,
+            CHUNK_NOT_RECORDED_STATUS,
+            CHUNK_NOT_RECORDED_CODE,
+            `Chunk ${chunkIndex} was stored, but recording it in the upload's progress lost to another write on each of ` +
+              `${CHUNK_RECORD_ATTEMPTS} attempts, so the upload does not hold it: send this chunk again.`,
+            { details: { chunkIndex, attempts: CHUNK_RECORD_ATTEMPTS } },
+          );
+          return;
+        }
+        const fresh = await store.getSession(uploadId);
+        if (!fresh) {
+          sendError(res, 404, 'UPLOAD_SESSION_NOT_FOUND', 'Upload session not found');
+          return;
+        }
+        // A write that did not land on a row still holding the progress it
+        // was conditioned on lost to no other write: it cannot reach the row.
+        // Trying again would answer the same, and a `409` would tell the
+        // uploader to retry what cannot succeed.
+        if (sameProgress(fresh, seen)) {
+          throw new Error(
+            `Chunk ${chunkIndex} was stored, but its progress write to upload session '${uploadId}' matched no row ` +
+              'although the row still holds the progress the write was conditioned on: the write cannot reach the ' +
+              'row, and the upload does not hold the chunk.',
+          );
+        }
+        seen = fresh;
+        parts = JSON.parse(fresh.parts ?? '[]');
+      }
 
       sendOk(res, {
         chunkIndex,
@@ -1374,6 +1440,18 @@ function recordChunk(
     uploadedChunks: next.length,
     uploadedSize: sized ? next.reduce((sum, p) => sum + (p.size as number), 0) : runningTotal + part.size,
   };
+}
+
+/**
+ * [#22332] Whether two reads of one session row hold the same progress — the
+ * three columns the chunk door's conditional write is compared on.
+ */
+function sameProgress(a: UploadSessionRecord, b: UploadSessionRecord): boolean {
+  return (
+    (a.parts ?? null) === (b.parts ?? null) &&
+    (a.uploaded_chunks ?? null) === (b.uploaded_chunks ?? null) &&
+    (a.uploaded_size ?? null) === (b.uploaded_size ?? null)
+  );
 }
 
 /** One entry of a completion request's `parts` list. */

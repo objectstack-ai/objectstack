@@ -1534,10 +1534,22 @@ function declaredMultiValued(field: { type?: unknown; multiple?: unknown } | nul
   });
 }
 
+/**
+ * Plan the formula pass of a read: which formula fields to evaluate, and —
+ * when the caller named a projection — the projection the DRIVER is asked for.
+ *
+ * A projection naming a formula field is widened to every stored column (plus
+ * `id`), because CEL's `record.<field>` reads whatever the formula needs off
+ * the full row. That widening is a means of EVALUATING the formula and never
+ * an answer: [#22300] `widened` lists the columns it added beyond what the
+ * caller named, and {@link withoutFormulaWidening} cuts them back off the rows
+ * once the read is done, so the caller gets the projection it declared plus
+ * the formula's value. `widened` is absent whenever nothing was widened.
+ */
 function planFormulaProjection(
   schema: any,
   requestedFields: string[] | undefined
-): { plan: FormulaPlanEntry[]; projected?: string[] } {
+): { plan: FormulaPlanEntry[]; projected?: string[]; widened?: string[] } {
   if (!schema?.fields) return { plan: [] };
   const allFieldNames = Object.keys(schema.fields);
   // When no explicit projection, evaluate every formula field on the schema —
@@ -1578,11 +1590,67 @@ function planFormulaProjection(
       if (fdef?.type === 'formula') continue;
       projected.add(fname);
     }
-    return { plan, projected: Array.from(projected) };
+    // [#22300] What the widening added — `id` included when the caller did not
+    // name it — is what the read cuts back off once the formulas are computed.
+    const named = new Set(requestedFields);
+    const widened = Array.from(projected).filter((f) => !named.has(f));
+    return { plan, projected: Array.from(projected), ...(widened.length > 0 ? { widened } : {}) };
   }
   // Implicit/full projection — leave projected undefined so the driver
   // returns its default columns (typically *).
   return { plan };
+}
+
+/**
+ * [#22300] Cut the columns {@link planFormulaProjection} widened a projection
+ * by back off what a read RETURNS — the formula saw the full row, the caller
+ * does not. Without it, a projection naming a formula field answered with every
+ * stored column (tenant, owner, owning unit, audit actors and timestamps, every
+ * unnamed field): a flow's `get_record`, whose `config.fields` is declared as
+ * "only these fields are read", passed all of them on to whatever its later
+ * nodes sent out.
+ *
+ * ## The answer it restores
+ *
+ * The same projection without the formula, plus the formula's value: measured
+ * on driver-sql (a projection is exactly the named columns — no `id` unless it
+ * is named) and pinned against it in `engine-formula-projection-trim.test.ts`.
+ * `id` is cut like any other widened column when the caller did not name it.
+ *
+ * ## Where it runs, and why there
+ *
+ * On the result `find` / `findOne` hand back, AFTER the middleware chain —
+ * the last internal consumer. Everything before it keeps reading the widened
+ * row exactly as before: the formula pass, `expand`, file-reference
+ * resolution, the `afterFind` hooks, the secret mask and the `__search`
+ * strip, and the middlewares' post-phase (field-level security's result mask,
+ * the audit redactions that judge a row by columns the caller did not name).
+ * Cutting earlier would starve those of a column they read today.
+ *
+ * It REMOVES the widened columns rather than keeping a list: a key an
+ * `afterFind` hook derives, or an expanded relation the caller named, is not
+ * the widening's and survives. A widened column a hook re-assigns is cut — the
+ * caller never named it.
+ *
+ * Never mutates a row: a row carrying a widened column is replaced by a copy
+ * without it, in the row's own key order; a row carrying none is returned as
+ * is.
+ */
+function withoutFormulaWidening<T>(row: T, widened: ReadonlySet<string> | undefined): T {
+  if (!widened || !row || typeof row !== 'object' || Array.isArray(row)) return row;
+  const source = row as unknown as Record<string, unknown>;
+  if (!Object.keys(source).some((key) => widened.has(key))) return row;
+  const cut: Record<string, unknown> = {};
+  for (const key of Object.keys(source)) {
+    if (!widened.has(key)) cut[key] = source[key];
+  }
+  return cut as unknown as T;
+}
+
+/** {@link withoutFormulaWidening} over a `find` result; anything but an array passes through. */
+function rowsWithoutFormulaWidening<T>(rows: T, widened: ReadonlySet<string> | undefined): T {
+  if (!widened || !Array.isArray(rows)) return rows;
+  return rows.map((row) => withoutFormulaWidening(row, widened)) as unknown as T;
 }
 
 /**
@@ -2883,9 +2951,11 @@ export interface OperationContext {
    * to stamp `BulkDataEvent.organizationId`.
    *
    * The seam ruled on #15706: the wall is computed ONCE, where every input is
-   * visible (the posture in force, the caller's organization scope, the
-   * object's tenancy clauses AND the deployment's #12699 carve-out, which no
-   * schema carries), and its decision travels here as a value. A reader
+   * visible (the posture in force, the caller's organization scope and the
+   * object's tenancy clauses — which, since ADR-0131 D7, include the
+   * deployment's #12699 platform-global declaration, recorded on the
+   * registered object as `systemFields.tenant: false`), and its decision
+   * travels here as a value. A reader
    * answers from this member ALONE and re-derives nothing — a re-derivation
    * is a mirror of the wall, and a mirror structurally sees only the clauses
    * it was taught (the #15706 mislabel).
@@ -3545,10 +3615,14 @@ function eventOrganizationValue(value: unknown): string | undefined {
  * re-derived the wall here — from the enforced posture, the execution
  * context's `tenantId` / `accessible_org_ids` / `posture` rung, and the
  * object schema's tenancy clauses. It could not see the third clause
- * plugin-security folds into `tenancyDisabled` — the deployment-declared
- * `platformGlobalObjects` carve-out (#12699), which no schema carries — and
+ * plugin-security then folded into `tenancyDisabled` — the deployment-declared
+ * `platformGlobalObjects` carve-out (#12699), which no schema carried — and
  * stamped the caller's organization onto a batch Layer 0 had never
- * constrained: a WRONG key, the #13566 leak shape. The ruling's acceptance
+ * constrained: a WRONG key, the #13566 leak shape. (ADR-0131 D7 has since
+ * made that declaration total: a declared object is registered with no
+ * organization column and declaring `systemFields.tenant: false`, so the fold
+ * is retired — but the rule below does not lean on that; the ruling's
+ * acceptance criterion is about the seam, not one clause.) The ruling's acceptance
  * criterion, verbatim: the verdict recorded must be what the wall decided,
  * not a re-statement of its inputs; if the recorded value can be derived by
  * the reader from anything else on the context, the mirror has not been
@@ -12091,6 +12165,9 @@ export class ObjectQL implements IObjectQLEngine {
     assertProjectionHasNoDottedPaths(object, 'find', _findSchema, ast.fields);
     const _findFormula = planFormulaProjection(_findSchema, ast.fields);
     if (_findFormula.projected) ast.fields = _findFormula.projected;
+    // [#22300] The columns that widening added, cut back off the answer at the
+    // `return` — see `withoutFormulaWidening`.
+    const _findWidened = _findFormula.widened ? new Set(_findFormula.widened) : undefined;
 
     // Drop any requested PLAIN field that doesn't exist on the schema.
     // Without this, drivers (notably SqlDriver) emit `SELECT unknown_col
@@ -12227,7 +12304,9 @@ export class ObjectQL implements IObjectQLEngine {
       }
     });
 
-    return opCtx.result as any[];
+    // [#22300] The formula widening is cut back off the answer here, after the
+    // middleware chain — every internal consumer above read the full row.
+    return rowsWithoutFormulaWidening(opCtx.result as any[], _findWidened);
   }
 
   /**
@@ -12394,6 +12473,8 @@ export class ObjectQL implements IObjectQLEngine {
     const _findOneRequestedFields = Array.isArray(ast.fields) ? [...ast.fields] : undefined;
     const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields);
     if (_findOneFormula.projected) ast.fields = _findOneFormula.projected;
+    // [#22300] Same as `find`: what the widening added is cut at the `return`.
+    const _findOneWidened = _findOneFormula.widened ? new Set(_findOneFormula.widened) : undefined;
 
     // Drop unknown PLAIN fields — see the equivalent block in `find()` for
     // the rationale, and for why this tolerance is plain-columns-only ([#7589]
@@ -12496,7 +12577,8 @@ export class ObjectQL implements IObjectQLEngine {
       return hookContext.result;
     });
 
-    return opCtx.result;
+    // [#22300] Same cut as `find`, same position: after the middleware chain.
+    return withoutFormulaWidening(opCtx.result, _findOneWidened);
   }
 
   /**

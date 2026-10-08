@@ -1097,6 +1097,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.package-door-before-gates.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.package-publish-audit-rows.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2322,6 +2327,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/registry-deployment-platform-global.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/registry-deployment-platform-global.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/registry-deployment-platform-global.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/registry-tenant-index-author-declared-column.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2434,6 +2454,11 @@
     {
       "file": "packages/plugins/organizations/src/org-creation-no-cross-org-copy.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/organizations/src/walled-default-org-owner-bind-in-flight.pin.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -2773,6 +2798,16 @@
     },
     {
       "file": "packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/default-org-bootstrap-once.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/default-org-bootstrap-once.test.ts",
       "verb": "update",
       "pinned": 1
     },

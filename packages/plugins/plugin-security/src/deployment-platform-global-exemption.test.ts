@@ -1,26 +1,31 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#12699 / cloud#1653] Deployment-declared platform-global exemption.
+ * [#12699 → ADR-0131 D7] The deployment-declared platform-global carve-out, as
+ * plugin-security sees it now that the declaration is total.
  *
  * The mounted `org-scoping` service may declare
- * `OrgScopingEntitlement.platformGlobalObjects` — objects THIS deployment
- * owns platform-globally, which Layer 0 must not wall HERE even though the
- * same objects genuinely wall on tenant runtimes (which is why the per-object
- * `tenancy: { enabled: false }` authoring channel cannot express the fact:
- * that declaration travels with the object into every deployment).
+ * `OrgScopingEntitlement.platformGlobalObjects`. This plugin used to fold that
+ * list into `tenancyDisabled` — a Layer 0 STAND-DOWN on an object that still
+ * carried its organization column, so the driver went on scoping what the wall
+ * had stopped scoping. ADR-0131 D7 retires that stand-down ("replaced by D7's
+ * no-column"): the declaration is the injected-columns plan's input, and the
+ * engine's registry registers a declared object with no `organization_id` and
+ * declaring `systemFields.tenant: false`. What this plugin promises after that:
  *
- * These cases pin the four properties the contract promises:
+ *   1. it reads NO `platformGlobalObjects`: an object that still carries its
+ *      column is walled, whatever the service declares — on reads and on the
+ *      ADR-0123 D2 write path (the same choke point);
+ *   2. an object registered the way the registry registers a declared one is
+ *      not walled — through its own `systemFields.tenant: false`, the clause
+ *      every deployment-level object answers from;
+ *   3. a junk `platformGlobalObjects` is the engine's to refuse (it consumes
+ *      it); this plugin warns only for the key it reads,
+ *      `suppressUnboundedOrgAdminGrant`, once per boot;
+ *   4. the arming log announces the grant suppression, not the list.
  *
- *   1. an exempted object is not walled on this deployment — on the read path
- *      AND on the ADR-0123 D2 write-refusal path, because both are the same
- *      `computeLayeredRlsFilter().layer0` (the single choke point);
- *   2. a non-exempted object walls exactly as before (the exemption is a
- *      carve-out, never a widening);
- *   3. an ABSENT declaration is byte-identical to today (fail closed) — and so
- *      is a JUNK one, refused loudly per the `MembershipPolicy` precedent;
- *   4. the exemption composes with, never replaces, the object-level
- *      `tenancy: { enabled: false }` channel.
+ * The booted-kernel end of the same contract — the provider, the plan, the
+ * DDL, the driver — is `platform-global-no-organization-column.test.ts`.
  *
  * Harness pattern: `federated-tenant-layer0.test.ts` — a SecurityPlugin over a
  * fake ObjectQL, asserting the composed FilterCondition before any driver sees
@@ -44,21 +49,22 @@ const MEMBER_CTX = { userId: 'u1', tenantId: 'org-1', positions: [], permissions
 /** The same member with NO active organization — the ADR-0123 D2 write case. */
 const NO_ORG_CTX = { userId: 'u1', positions: [], permissions: [] };
 
-/** Two ordinary local tenant objects — identical shapes, different names. */
-const localSchema = (name: string, extra: Record<string, unknown> = {}) => ({
+/** An ordinary local tenant object, still carrying its organization column. */
+const walledSchema = (name: string) => ({
   name,
   fields: {
     organization_id: { type: 'text', label: 'Organization' },
     title: { type: 'text', label: 'Title' },
   },
-  ...extra,
 });
 
-/**
- * Boot a SecurityPlugin over per-name schemas, with the `org-scoping` service
- * carrying `entitlement` (the deployment's declaration). Returns the plugin and
- * the fake logger so cases can assert the loud-refusal channel.
- */
+/** The same object as the registry registers it on a deployment that declares it. */
+const plannedSchema = (name: string) => ({
+  name,
+  systemFields: { tenant: false },
+  fields: { title: { type: 'text', label: 'Title' } },
+});
+
 async function boot(
   schemas: Record<string, Record<string, unknown>>,
   opts: { entitlement?: Record<string, unknown>; tenancy?: { posture: string } } = {},
@@ -91,91 +97,63 @@ async function boot(
   return { plugin, logger };
 }
 
-const TWO_OBJECTS = {
-  sys_widget_registry: localSchema('sys_widget_registry'),
-  crm_task: localSchema('crm_task'),
-};
-
-describe('[#12699] platformGlobalObjects — the deployment carve-out', () => {
-  it('an exempted object is NOT walled on this deployment (`isolated`)', async () => {
-    const { plugin } = await boot(TWO_OBJECTS, {
-      entitlement: { platformGlobalObjects: ['sys_widget_registry'] },
-    });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const filter = await (plugin as any).getReadFilter('sys_widget_registry', MEMBER_CTX);
-    expect(filter).toBeUndefined();
-  });
-
-  it('a NON-exempted object still walls exactly as before', async () => {
-    const { plugin } = await boot(TWO_OBJECTS, {
-      entitlement: { platformGlobalObjects: ['sys_widget_registry'] },
-    });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const filter = await (plugin as any).getReadFilter('crm_task', MEMBER_CTX);
-    expect(filter).toEqual({ organization_id: 'org-1' });
-  });
-
-  it('`group` posture: the exemption holds and the union wall stays on the sibling', async () => {
-    const { plugin } = await boot(TWO_OBJECTS, {
-      entitlement: { platformGlobalObjects: ['sys_widget_registry'] },
-      tenancy: { posture: 'group' },
-    });
-    const groupCtx = { ...MEMBER_CTX, accessible_org_ids: ['org-1', 'org-2'] };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(await (plugin as any).getReadFilter('sys_widget_registry', groupCtx)).toBeUndefined();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(await (plugin as any).getReadFilter('crm_task', groupCtx)).toEqual({
-      organization_id: { $in: ['org-1', 'org-2'] },
-    });
-  });
-
-  it('the ADR-0123 D2 write wall derives from the SAME choke point: an exempted object escapes the no-active-org refusal, a sibling does not', async () => {
-    const { plugin } = await boot(TWO_OBJECTS, {
-      entitlement: { platformGlobalObjects: ['sys_widget_registry'] },
-    });
-    // computeWriteTenantCheckFilter IS computeLayeredRlsFilter().layer0 — the
-    // derivation the middleware's refusal reads. Null = Layer 0 contributes
-    // nothing (the write may land); the deny sentinel = refusal.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const exempted = await (plugin as any).computeWriteTenantCheckFilter(
-      [PLAIN_MEMBER], 'sys_widget_registry', 'insert', NO_ORG_CTX,
+describe('[ADR-0131 D7] plugin-security reads no platformGlobalObjects — the stand-down is retired', () => {
+  it('a declared object that still carries its column is WALLED (`isolated`) — reads', async () => {
+    const { plugin } = await boot(
+      { sys_widget_registry: walledSchema('sys_widget_registry') },
+      { entitlement: { platformGlobalObjects: ['sys_widget_registry'] } },
     );
-    expect(exempted).toBeNull();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const walled = await (plugin as any).computeWriteTenantCheckFilter(
-      [PLAIN_MEMBER], 'crm_task', 'insert', NO_ORG_CTX,
-    );
-    expect(walled).toEqual({ ...RLS_DENY_FILTER });
-  });
-
-  it('REGRESSION PIN — no declaration ⇒ byte-identical to today: both objects wall', async () => {
-    const { plugin, logger } = await boot(TWO_OBJECTS);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(await (plugin as any).getReadFilter('sys_widget_registry', MEMBER_CTX)).toEqual({
       organization_id: 'org-1',
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(await (plugin as any).getReadFilter('crm_task', MEMBER_CTX)).toEqual({
-      organization_id: 'org-1',
-    });
-    // And nothing to refuse means nothing to warn about.
-    const warned = logger.warn.mock.calls.map((c) => String(c[0]));
-    expect(warned.filter((m) => m.includes('org-scoping entitlement key'))).toEqual([]);
   });
 
-  it('composes with, never replaces, the object-level channel: `tenancy.enabled:false` stays exempt with no deployment declaration', async () => {
+  it('…and `group`: the union wall stands on it', async () => {
+    const { plugin } = await boot(
+      { sys_widget_registry: walledSchema('sys_widget_registry') },
+      { entitlement: { platformGlobalObjects: ['sys_widget_registry'] }, tenancy: { posture: 'group' } },
+    );
+    const groupCtx = { ...MEMBER_CTX, accessible_org_ids: ['org-1', 'org-2'] };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(await (plugin as any).getReadFilter('sys_widget_registry', groupCtx)).toEqual({
+      organization_id: { $in: ['org-1', 'org-2'] },
+    });
+  });
+
+  it('…and the ADR-0123 D2 write wall (the same choke point) refuses an org-less insert on it', async () => {
+    const { plugin } = await boot(
+      { sys_widget_registry: walledSchema('sys_widget_registry') },
+      { entitlement: { platformGlobalObjects: ['sys_widget_registry'] } },
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const walled = await (plugin as any).computeWriteTenantCheckFilter(
+      [PLAIN_MEMBER], 'sys_widget_registry', 'insert', NO_ORG_CTX,
+    );
+    expect(walled).toEqual({ ...RLS_DENY_FILTER });
+  });
+
+  it('the object as the registry registers it on the declaring deployment is NOT walled — its own clause answers', async () => {
     const { plugin } = await boot({
-      sys_catalog: localSchema('sys_catalog', { tenancy: { enabled: false } }),
+      sys_widget_registry: plannedSchema('sys_widget_registry'),
+      crm_task: walledSchema('crm_task'),
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(await (plugin as any).getReadFilter('sys_catalog', MEMBER_CTX)).toBeUndefined();
+    expect(await (plugin as any).getReadFilter('sys_widget_registry', MEMBER_CTX)).toBeUndefined();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(await (plugin as any).computeWriteTenantCheckFilter(
+      [PLAIN_MEMBER], 'sys_widget_registry', 'insert', NO_ORG_CTX,
+    )).toBeNull();
+    // CONTROL — a sibling on the same deployment walls as today.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(await (plugin as any).getReadFilter('crm_task', MEMBER_CTX)).toEqual({ organization_id: 'org-1' });
   });
 
-  it('`single` posture: the declaration decides nothing (Layer 0 is inert either way)', async () => {
-    const { plugin } = await boot(TWO_OBJECTS, {
-      entitlement: { platformGlobalObjects: ['sys_widget_registry'] },
-      tenancy: { posture: 'single' },
-    });
+  it('`single` posture: Layer 0 is inert on both, declaration or not', async () => {
+    const { plugin } = await boot(
+      { sys_widget_registry: walledSchema('sys_widget_registry'), crm_task: walledSchema('crm_task') },
+      { entitlement: { platformGlobalObjects: ['sys_widget_registry'] }, tenancy: { posture: 'single' } },
+    );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(await (plugin as any).getReadFilter('sys_widget_registry', MEMBER_CTX)).toBeUndefined();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -183,71 +161,43 @@ describe('[#12699] platformGlobalObjects — the deployment carve-out', () => {
   });
 });
 
-describe('[#12699] junk declarations are REFUSED loudly, never coerced (MembershipPolicy precedent)', () => {
-  it('a bare string is refused: warn names the key, and the named object STILL walls', async () => {
-    const { plugin, logger } = await boot(TWO_OBJECTS, {
-      entitlement: { platformGlobalObjects: 'sys_widget_registry' },
-    });
-    const warned = logger.warn.mock.calls.map((c) => String(c[0]));
-    expect(warned.some((m) => m.includes("'platformGlobalObjects' REFUSED"))).toBe(true);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(await (plugin as any).getReadFilter('sys_widget_registry', MEMBER_CTX)).toEqual({
-      organization_id: 'org-1',
-    });
-  });
-
-  it('one junk ENTRY voids the whole key (no partial honouring): a wildcard poisons the list', async () => {
-    const { plugin, logger } = await boot(TWO_OBJECTS, {
-      entitlement: { platformGlobalObjects: ['sys_widget_registry', '*'] },
-    });
-    const warned = logger.warn.mock.calls.map((c) => String(c[0]));
-    expect(warned.some((m) => m.includes("'platformGlobalObjects' REFUSED"))).toBe(true);
-    // The well-formed entry is NOT honoured — refusal is whole-key, fail closed.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(await (plugin as any).getReadFilter('sys_widget_registry', MEMBER_CTX)).toEqual({
-      organization_id: 'org-1',
-    });
-  });
-
-  it('junk in one key does not void the other: a bad suppress flag leaves a valid exemption standing', async () => {
-    const { plugin, logger } = await boot(TWO_OBJECTS, {
-      entitlement: {
-        platformGlobalObjects: ['sys_widget_registry'],
-        suppressUnboundedOrgAdminGrant: 'yes',
-      },
-    });
-    const warned = logger.warn.mock.calls.map((c) => String(c[0]));
-    expect(warned.some((m) => m.includes("'suppressUnboundedOrgAdminGrant' REFUSED"))).toBe(true);
-    expect(warned.some((m) => m.includes("'platformGlobalObjects' REFUSED"))).toBe(false);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(await (plugin as any).getReadFilter('sys_widget_registry', MEMBER_CTX)).toBeUndefined();
-  });
-
-  it('the refusal is warned ONCE per boot, not once per read', async () => {
-    const { plugin, logger } = await boot(TWO_OBJECTS, {
-      entitlement: { platformGlobalObjects: 42 },
-    });
+describe('[#12699] refusals: this plugin warns only for the key it reads', () => {
+  it('a junk platformGlobalObjects is not this plugin\'s to warn about (the engine consumes and refuses it)', async () => {
+    const { plugin, logger } = await boot(
+      { sys_widget_registry: walledSchema('sys_widget_registry') },
+      { entitlement: { platformGlobalObjects: 'sys_widget_registry' } },
+    );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (plugin as any).getReadFilter('sys_widget_registry', MEMBER_CTX);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (plugin as any).getReadFilter('crm_task', MEMBER_CTX);
+    const warned = logger.warn.mock.calls.map((c) => String(c[0]));
+    expect(warned.filter((m) => m.includes('org-scoping entitlement key'))).toEqual([]);
+  });
+
+  it('a junk suppressUnboundedOrgAdminGrant is warned ONCE per boot, naming the key', async () => {
+    const { logger } = await boot(
+      { sys_widget_registry: walledSchema('sys_widget_registry') },
+      { entitlement: { suppressUnboundedOrgAdminGrant: 'yes' } },
+    );
     const refusals = logger.warn.mock.calls
       .map((c) => String(c[0]))
-      .filter((m) => m.includes("'platformGlobalObjects' REFUSED"));
+      .filter((m) => m.includes("'suppressUnboundedOrgAdminGrant' REFUSED"));
     expect(refusals).toHaveLength(1);
   });
 });
 
-describe('[#12699] the arming log surfaces the declaration', () => {
-  it('a walled boot with exemptions logs the carve-out (count + names)', async () => {
-    const { logger } = await boot(TWO_OBJECTS, {
-      entitlement: {
-        platformGlobalObjects: ['sys_widget_registry'],
-        suppressUnboundedOrgAdminGrant: true,
+describe('[#12699] the arming log', () => {
+  it('announces the grant suppression; the platform-global list is the engine\'s to announce', async () => {
+    const { logger } = await boot(
+      { sys_widget_registry: walledSchema('sys_widget_registry') },
+      {
+        entitlement: {
+          platformGlobalObjects: ['sys_widget_registry'],
+          suppressUnboundedOrgAdminGrant: true,
+        },
       },
-    });
+    );
     const infos = logger.info.mock.calls.map((c) => String(c[0]));
-    expect(infos.some((m) => m.includes('1 platform-global'))).toBe(true);
     expect(infos.some((m) => m.includes('suppresses the unbounded organization_admin auto-grant'))).toBe(true);
+    expect(infos.some((m) => m.includes('platform-global'))).toBe(false);
   });
 });
