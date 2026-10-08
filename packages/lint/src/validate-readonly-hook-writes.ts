@@ -73,8 +73,10 @@
 //   - Only a NON-ELEVATED `ctx.api`. `ScopedContext.sudo()` returns a context
 //     with `isSystem: true`, which the strip skips entirely. A `.sudo()` chain
 //     is structurally invisible to the extractor (its `api-crud-literal`
-//     matcher requires a literal `ctx.api` receiver, and `ctx.api.sudo()` is a
-//     CallExpression), so elevated writes cannot be flagged even by accident.
+//     matcher requires a `ctx.api` receiver - or, since #22212, a local bound
+//     to exactly `ctx.api` - and `ctx.api.sudo()` is a CallExpression, so
+//     neither `ctx.api.sudo().object(...)` nor `const api = ctx.api.sudo()`
+//     yields a write), so elevated writes cannot be flagged even by accident.
 //     Measured, not assumed - `validate-readonly-hook-writes.test.ts` pins it.
 //
 //     ⚠️ [#14010] What that exclusion must NOT become is a recommendation, and
@@ -106,7 +108,11 @@
 //
 //   - Only a LITERAL object name and a LITERAL payload key. A dynamic object
 //     (`ctx.api.object(name)`) or a non-literal payload yields no extraction at
-//     all, so nothing is guessed.
+//     all, so nothing is guessed. The RECEIVER may be a local alias of `ctx.api`
+//     (#22212) - an app whose conventions mandate `const api = ctx.api` had
+//     every one of its hook writes outside this rule until then; the aliases
+//     the extractor follows, and the ones it leaves opaque, are listed at
+//     `collectCtxApiAliases` (validate-hook-body-writes.ts).
 //
 //   - Only a field the named object DECLARES. A name that resolves to no field
 //     is `hook-body-write-unknown-field`'s question (a different failure with a

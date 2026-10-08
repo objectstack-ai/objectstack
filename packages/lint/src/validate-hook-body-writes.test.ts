@@ -312,6 +312,25 @@ describe('validateHookBodyWrites — ctx.api writes', () => {
     expect(finding.message).not.toMatch(/write-path validator skips/);
   });
 
+  // [#22212] The firing control and the aliased spelling, side by side: the
+  // reporting app's conventions mandate the alias, so before this every one of
+  // its writes reached neither hook write-set rule.
+  it('reads a local bound to ctx.api as the same receiver (#22212)', () => {
+    const WRITE = "object('crm_deal').update({ id, stag: 'won' });";
+    const control = validateHookBodyWrites(stackWith(`await ctx.api.${WRITE}`));
+    expect(control).toHaveLength(1);
+    expect(control[0].rule).toBe(HOOK_BODY_WRITE_UNKNOWN_FIELD);
+    for (const source of [
+      `const api = ctx.api as HookApi | undefined;\nif (!api) return;\nawait api.${WRITE}`,
+      `const api = ctx.api!;\nawait api?.${WRITE}`,
+      `const { api } = ctx;\nawait api.${WRITE}`,
+    ]) {
+      expect(validateHookBodyWrites(stackWith(source)), source).toEqual(control);
+    }
+    // ...and an alias the extractor cannot prove is ctx.api stays unjudged.
+    expect(validateHookBodyWrites(stackWith(`let api = ctx.api;\napi = other;\nawait api.${WRITE}`))).toEqual([]);
+  });
+
   it('checks updateById payloads at argument 1, not 0', () => {
     const findings = validateHookBodyWrites(
       stackWith("await ctx.api.object('crm_deal').updateById(ctx.input.id, { stag: 'won' });"),
