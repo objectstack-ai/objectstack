@@ -114,13 +114,15 @@ describe('ObjectKernel process signal listeners', () => {
         }
         const live = newKernel();
         await live.bootstrap();
-        expect(growth()).toEqual(ONE_EACH);
+        const listening = growth();
 
         deliver('SIGTERM');
         await vi.waitFor(() => expect(live.getState()).toBe('stopped'));
         await quiesce();
 
         expect(exits).toEqual([0]);
+        // Only the live kernel was listening, and it gave its listeners back too.
+        expect(listening).toEqual(ONE_EACH);
         expect(growth()).toEqual(NONE);
     });
 
