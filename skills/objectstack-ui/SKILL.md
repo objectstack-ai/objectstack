@@ -146,7 +146,7 @@ authoring non-trivial CEL.
 - [List, Kanban & Gantt Views](./rules/list-views.md) — `defineView`, `data`, columns, filtering, `userFilters`, toolbar search, sorting, kanban, gantt.
 - [Navigation & Run Modes](./rules/navigation.md) — `App.create`, the three run modes, record presentation.
 - [Dashboards, Reports & Cubes](./rules/dashboards.md) — widgets, dataset binding, filters, `compareTo`, bucketing, `options`, drilldown, report config, cubes.
-- [Pages & Docs](./rules/pages.md) — page types, regions, components, the html/react source tiers, styling, package docs.
+- [Pages & Docs](./rules/pages.md) — page types, regions, components, print pages, the html/react source tiers, styling, package docs.
 - [Actions](./rules/actions.md) — `locations`, visibility, examples, `ctx`, new tab, params.
 
 ---
