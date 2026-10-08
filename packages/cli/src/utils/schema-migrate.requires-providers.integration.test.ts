@@ -1,11 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { bootSchemaStack } from './schema-migrate.js';
-import { linkSpec } from '../../test/helpers/define-stack-fixture.js';
 
 /**
  * #21732 — `os migrate plan` / `apply` boot a config whose plugins hard-depend
@@ -141,7 +141,12 @@ describe('os migrate plan/apply resolve a provider a PACKAGE requires (#22288)',
         '',
       ].join('\n'),
     );
-    linkSpec(dir);
+    // The config imports `@objectstack/spec` from its own directory; link the
+    // workspace package there (`test/helpers/define-stack-fixture.ts` does the
+    // same, out of reach of this `src` program's `rootDir`).
+    const specRoot = dirname(createRequire(import.meta.url).resolve('@objectstack/spec/package.json'));
+    mkdirSync(join(dir, 'node_modules', '@objectstack'), { recursive: true });
+    symlinkSync(specRoot, join(dir, 'node_modules', '@objectstack', 'spec'), 'dir');
     savedEnv.OS_ARTIFACT_PATH = process.env.OS_ARTIFACT_PATH;
     process.env.OS_ARTIFACT_PATH = join(dir, 'dist', 'objectstack.json');
   });
