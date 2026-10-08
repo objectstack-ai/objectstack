@@ -28,9 +28,9 @@
  *   3. The `ESignatureConfig` deadline-key entries in `RETIRED_KEYS_BY_MAJOR[18]`
  *      stay as history (gate (b2) accepts an entry naming a key the build no
  *      longer emits).
- *   4. The family's exports are gone from `@objectstack/spec/data` and from the
- *      root `Data` namespace, while the unrelated `DocumentSchemaValidation`
- *      survives (the lit control).
+ *   4. The family's exports are gone from `@objectstack/spec/data` (and the
+ *      root entry carries none of them), while the unrelated
+ *      `DocumentSchemaValidation` survives (the lit control).
  *   5. Tree-scoped absence: nothing inside the declared radius still imports a
  *      retired export from a spec specifier or reaches one through `Data.`.
  */
@@ -42,7 +42,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import * as data from './index';
-import { Data } from '../index';
+import * as root from '../index';
 import {
   MIGRATIONS_BY_MAJOR,
   RETIRED_DEFS_BY_MAJOR,
@@ -78,14 +78,13 @@ describe('the document family is retired whole, and registered', () => {
 });
 
 describe('the family\'s exports are gone from every entry that carried them', () => {
-  it.each(RETIRED_VALUE_EXPORTS)('`%s` is exported neither from `@objectstack/spec/data` nor through `Data`', (name) => {
+  it.each(RETIRED_VALUE_EXPORTS)('`%s` is exported neither from `@objectstack/spec/data` nor from the root entry', (name) => {
     expect(Object.keys(data)).not.toContain(name);
-    expect(Object.keys(Data)).not.toContain(name);
+    expect(Object.keys(root)).not.toContain(name);
   });
 
   it('the unrelated `DocumentSchemaValidationSchema` (the NoSQL driver block) survives — the lit control', () => {
     expect(Object.keys(data)).toContain('DocumentSchemaValidationSchema');
-    expect(Object.keys(Data)).toContain('DocumentSchemaValidationSchema');
   });
 });
 
@@ -102,7 +101,8 @@ describe('the family\'s exports are gone from every entry that carried them', ()
 //   - an `import` / `export … from` naming a retired export from an
 //     `@objectstack/spec` specifier — the type aliases included, since inside a
 //     spec import even the generic `Document` names the retired type;
-//   - a `Data.<retired value export>` namespace access.
+//   - a `Data.<retired value export>` access through the documented
+//     `import * as Data from '@objectstack/spec/data'` namespace.
 // Inline code is prose and is stripped before judging. The bound, stated:
 // `docs/**`, `.claude/**`, `.github/**` and the repo-root files are outside what
 // this walk sees.
@@ -126,7 +126,7 @@ describe('tree-scoped absence: nothing inside the declared radius still imports 
   const USES = [
     // An import or re-export naming a retired export from a spec specifier.
     new RegExp(`\\b(import|export)\\s+(type\\s+)?\\{[^}]*\\b${RETIRED_NAMES}\\b[^}]*\\}\\s*from\\s*['"]@objectstack/spec`, 'm'),
-    // A namespace access through the root `Data` export.
+    // An access through the documented `import * as Data` namespace.
     new RegExp('\\bData\\.(DocumentTemplateSchema|DocumentSchema|ESignatureConfigSchema|DocumentVersionSchema)\\b', 'm'),
   ];
 
