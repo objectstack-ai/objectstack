@@ -26,9 +26,10 @@
  *
  * - the refusals: a by-id update that empties the organization of an
  *   organization-scoped grant row, on both grant tables, with `null` and with
- *   an empty string; the same on a predicate update and on an ordinary tenant
- *   object; and an empty organization written by a `beforeUpdate` hook (the
- *   stored-row half);
+ *   an empty string; the same from a platform administrator, whom the grant
+ *   tables' posture does not exempt; the same on a predicate update and on an
+ *   ordinary tenant object; and an empty organization written by a
+ *   `beforeUpdate` hook (the stored-row half);
  * - the controls: the same caller's update that does not touch the column is
  *   admitted and keeps the row's organization, on both grant tables and on an
  *   ordinary tenant object; the same update as a system write lands; a
@@ -268,6 +269,15 @@ for (const [driverName, makeDriver] of DRIVERS) {
         expect(await b.table(object)).toEqual(SEEDED);
       });
     }
+
+    it('a platform administrator is walled on the grant tables (no posture exemption there): the same update is refused', async () => {
+      const b = await boot(makeDriver);
+
+      for (const object of GRANT_TABLES) {
+        expectRefused(await attempt(() => byId(b, object, { id: 'r1', organization_id: null }, PLATFORM_CTX)), object);
+        expect(await b.table(object)).toEqual(SEEDED);
+      }
+    });
 
     it('an ordinary tenant object: an update that sends an empty organization is refused on both update paths', async () => {
       const b = await boot(makeDriver);
