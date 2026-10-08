@@ -10758,8 +10758,8 @@ export class AutomationEngine implements IAutomationService {
             throw new Error(
                 `Flow '${flowName}' has ${failures.length} invalid expression${failures.length > 1 ? 's' : ''} (ADR-0032 §1a). ` +
                 `Predicates — conditions and declared bare-CEL slots such as a screen field's \`visibleWhen\` — ` +
-                `must not wrap references in \`{…}\` template braces, nor may a value slot (a \`fields\` or ` +
-                `\`assignments\` value); template slots (e.g. \`loop.collection\`) require them:\n` +
+                `must not wrap references in \`{…}\` template braces, and neither may a value slot (a computed ` +
+                `value is a CEL envelope); template slots (e.g. \`loop.collection\`) require them:\n` +
                 `${failures.join('\n')}`,
             );
         }

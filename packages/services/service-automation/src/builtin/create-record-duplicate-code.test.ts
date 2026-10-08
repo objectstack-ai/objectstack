@@ -319,7 +319,7 @@ describe('#14419 (PR #14948 patch round 1) — a stale $error.code must not leak
                 {
                   id: 'tc', type: 'try_catch', label: 'Guarded create',
                   config: {
-                    try: { nodes: [{ id: 'mk', type: 'create_record', label: 'Create', timeoutMs: 20, config: { objectName: 'lead', fields: { email: '{row.email}' } } }], edges: [] },
+                    try: { nodes: [{ id: 'mk', type: 'create_record', label: 'Create', timeoutMs: 20, config: { objectName: 'lead', fields: { email: { dialect: 'cel', source: 'row.email' } } } }], edges: [] },
                     catch: { nodes: [{ id: 'handle', type: 'swallow_duplicate_else_reraise', label: 'Handle' }], edges: [] },
                   },
                 },
