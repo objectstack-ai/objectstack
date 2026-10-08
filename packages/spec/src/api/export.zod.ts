@@ -300,7 +300,14 @@ export const ImportRequestSchema = lazySchema(() => z.object({
   nullValues: z.array(z.string()).optional()
     .describe('Strings treated as null/blank (besides empty string)'),
   createMissingOptions: z.boolean().default(false)
-    .describe('Keep unmatched select values instead of failing the row'),
+    .describe(
+      'Keep a select / radio / multiselect cell that matches none of the field\'s options instead of ' +
+      'failing the row. The cell is stored as written (trimmed; for a multi-value cell, each unmatched item), ' +
+      'and the engine\'s option check admits exactly the values this import kept, on this import\'s writes ' +
+      '(dry run included). The field\'s option list is not changed: a later write that sends the field is ' +
+      'judged against the options again, while one that leaves the field out is not affected. A field bound ' +
+      'to a shared picklist that did not resolve is still refused.',
+    ),
   skipBlankMatchKey: z.boolean().default(false)
     .describe('Skip rows whose matchFields are blank (default: upsert creates them, update skips them)'),
 }).refine((body) => !(body.mappingName && body.mapping), {

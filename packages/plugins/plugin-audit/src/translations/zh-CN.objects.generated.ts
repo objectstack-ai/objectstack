@@ -70,7 +70,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       tenant_id: {
         label: "租户",
-        help: "用于多租户隔离的租户上下文"
+        help: "此事件所涉及的组织；部署级操作为空"
       },
       metadata: {
         label: "元数据",

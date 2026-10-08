@@ -38,6 +38,9 @@ import {
 // one thing about one domain; every other refusal here still carries its own
 // hand-written sentence, unchanged.
 import { renderValidationMessage } from '@objectstack/spec/system';
+// The one predicate every layer asks "does this posture wall organizations
+// off from each other?" with (`group` / `isolated`), never a re-spelled list.
+import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { SETTINGS_SECRET_MASK } from './settings-secret-redaction.js';
 import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
 import {
@@ -120,6 +123,76 @@ const SETTINGS_SYSTEM_CONTEXT = Object.freeze({ isSystem: true as const });
 function callerUserIdOf(ctx: SettingsContext): string | null {
   return typeof ctx.userId === 'string' && ctx.userId !== '' ? ctx.userId : null;
 }
+
+/**
+ * The caller's organization, or `null` when the context names none.
+ *
+ * `sys_setting` declares its row identity as `(organization_id, namespace,
+ * key, scope, user_id)`: a `tenant` row is one row PER ORGANIZATION, and a
+ * `user` row belongs to one user in one organization. This service reads and
+ * writes that table under its own system context, which carries no
+ * organization, so neither the driver's tenant scope nor the security layer's
+ * organization wall ever reaches those calls. The organization therefore has
+ * to be carried here, explicitly, in every `where` and every written row — it
+ * is taken from `SettingsContext.tenantId`, which the HTTP door fills from the
+ * vetted authorization context. An absent or empty id names no organization.
+ */
+function callerOrganizationIdOf(ctx: SettingsContext): string | null {
+  return typeof ctx.tenantId === 'string' && ctx.tenantId !== '' ? ctx.tenantId : null;
+}
+
+/** A row's organization, with "no organization" spelled one way. */
+function organizationOf(row: SettingsRow): string | null {
+  return typeof row.organization_id === 'string' && row.organization_id !== ''
+    ? row.organization_id
+    : null;
+}
+
+/**
+ * Which `sys_setting` rows a caller's `tenant` and `user` rungs may draw on.
+ *
+ *  - `own` — the caller names an organization: that organization's rows, plus
+ *    the rows written with no organization. The cascade prefers the
+ *    organization's own row ({@link SettingsService.preferredRow}); an
+ *    organization-less row is only the fallback, the way the global rung is
+ *    for every organization.
+ *  - `organization-less` — no organization, under a posture that walls
+ *    organizations off from each other (`group` / `isolated`): only the rows
+ *    written with no organization. Another organization's row has no claim on
+ *    a caller that is in none of them.
+ *  - `unwalled` — no organization, under `single` (or with no posture source
+ *    wired): every row, as before. A single-organization deployment has no
+ *    boundary to keep, and its process-wide readers (an email brand name, a
+ *    boot-time locale) read without naming the one organization they serve.
+ */
+type OrganizationReach =
+  | { kind: 'own'; organizationId: string }
+  | { kind: 'organization-less' }
+  | { kind: 'unwalled' };
+
+/**
+ * The reach a read of a `global` key is made with: it has no tenant or user
+ * rung, so which organization's rows the load returns cannot change its answer.
+ */
+const ANY_ORGANIZATION: OrganizationReach = Object.freeze({ kind: 'unwalled' as const });
+
+/**
+ * Where the service learns the tenancy posture IN FORCE — the `tenancy`
+ * service's answer, which the plugin supplies at bind time. `undefined` means
+ * the composition reports no posture (no `tenancy` service registered).
+ */
+export type SettingsTenancyPostureSource = () =>
+  | TenancyPosture
+  | undefined
+  | Promise<TenancyPosture | undefined>;
+
+/**
+ * The capability a namespace's read requires when its manifest declares no
+ * `readPermission` — and therefore the one a row of a namespace with NO
+ * registered manifest requires at the generic read door. One constant, read by
+ * both, so the two defaults cannot drift apart.
+ */
+const DEFAULT_READ_CAPABILITY = 'setup.access';
 
 /**
  * Value-bearing specifier types — drives which entries we expect to
@@ -632,6 +705,12 @@ export class SettingsService {
    * before this flag existed.
    */
   private engineBindPending: boolean;
+  /**
+   * The tenancy posture source, bound with the engine. Unset — a service
+   * constructed directly, or one whose host reports no posture — reads as a
+   * deployment with no organization wall. See {@link organizationWallStands}.
+   */
+  private tenancyPosture?: SettingsTenancyPostureSource;
   /** Change subscribers, optionally scoped to a namespace. */
   private readonly subscribers = new Set<{
     ns?: string;
@@ -667,6 +746,12 @@ export class SettingsService {
       secretStore?: import('./settings-service.types.js').SettingsSecretStore;
       auditWriter?: import('./settings-service.types.js').SettingsAuditWriter;
       cryptoProvider?: import('@objectstack/spec/contracts').ICryptoProvider;
+      /**
+       * The tenancy posture IN FORCE. Read when a caller names no
+       * organization: under a walled posture such a caller reads only the
+       * organization-less rows and may not write a `tenant` key at all.
+       */
+      tenancyPosture?: SettingsTenancyPostureSource;
     },
   ): void {
     this.engine = engine;
@@ -677,6 +762,7 @@ export class SettingsService {
     if (extras?.secretStore) this.secretStore = extras.secretStore;
     if (extras?.auditWriter) this.auditWriter = extras.auditWriter;
     if (extras?.cryptoProvider) this.cryptoProvider = extras.cryptoProvider;
+    if (extras?.tenancyPosture) this.tenancyPosture = extras.tenancyPosture;
 
     // Notify subscribers that the persistent store is now available so
     // late-binders (e.g. AIServicePlugin's adapter rebuild on saved
@@ -1212,8 +1298,8 @@ export class SettingsService {
    */
   private requiredCapability(m: SettingsManifest, op: 'read' | 'write'): string {
     return op === 'read'
-      ? (m.readPermission ?? 'setup.access')
-      : (m.writePermission ?? m.readPermission ?? 'setup.access');
+      ? (m.readPermission ?? DEFAULT_READ_CAPABILITY)
+      : (m.writePermission ?? m.readPermission ?? DEFAULT_READ_CAPABILITY);
   }
 
   /**
@@ -1240,6 +1326,41 @@ export class SettingsService {
     // unauthenticated request previously enumerated every namespace).
     if (perms.size === 0 && !ctx.enforced) return all;
     return all.filter((m) => perms.has(this.requiredCapability(m, 'read')));
+  }
+
+  /**
+   * The `namespace` predicate the generic read door ANDs onto a principal's
+   * read of a settings store (`sys_setting`, `sys_setting_audit`,
+   * `sys_platform_setting`), given the capabilities the principal holds — or
+   * `null` when it may read every namespace there is.
+   *
+   * The settings door has always applied a namespace's `readPermission`
+   * ({@link assertPermitted}); the data API's read of the same rows did not, so
+   * a principal the settings door refuses could list the namespace's rows, and
+   * its audit trail, there instead. This is the same rule, from the same
+   * {@link requiredCapability}, at the other door.
+   *
+   * A predicate rather than a filter over the result, so `count`, `aggregate`
+   * and paging see exactly the rows a `find` returns. Two spellings, both total:
+   *
+   *  - the principal holds {@link DEFAULT_READ_CAPABILITY}: every namespace
+   *    EXCEPT the registered ones whose capability it lacks. A row whose
+   *    namespace has no registered manifest declares no `readPermission`, so it
+   *    reads at the default — the one a manifest without the property gets.
+   *  - it does not: ONLY the registered namespaces whose capability it holds.
+   *    An empty list is the deny answer (`$in: []` matches no row).
+   */
+  namespaceReadScope(held: Iterable<string>): Record<string, unknown> | null {
+    const capabilities = new Set(held);
+    const readable: string[] = [];
+    const withheld: string[] = [];
+    for (const [namespace, reg] of this.registry) {
+      (capabilities.has(this.requiredCapability(reg.manifest, 'read')) ? readable : withheld).push(namespace);
+    }
+    if (capabilities.has(DEFAULT_READ_CAPABILITY)) {
+      return withheld.length === 0 ? null : { namespace: { $nin: withheld } };
+    }
+    return { namespace: { $in: readable } };
   }
 
   /** Register a handler for an `action_button` declared in a manifest. */
@@ -1298,10 +1419,15 @@ export class SettingsService {
     const scope = reg.scopes.get(key)!;
     // For 'user' scope we pre-filter by user_id; for 'tenant' and 'global'
     // we load everything for the namespace and pick the right row below.
-    // The user rung's pick compares the owner too (see `resolveKeyFromRows`).
+    // The user rung's pick compares the owner too (see `resolveKeyFromRows`),
+    // and both rungs read only the rows the caller's organization reaches.
     const userId = scope === 'user' ? callerUserIdOf(ctx) : null;
-    const rows = await this.loadRows(namespace, userId);
-    return this.resolveKeyFromRows<T>(reg, key, scope, rows, userId);
+    // A `global` key has no tenant or user rung, so no reach changes its
+    // answer — and its readers (boot-time plugins, mostly) do not wait on the
+    // posture for one.
+    const reach = scope === 'global' ? ANY_ORGANIZATION : await this.organizationReachOf(ctx);
+    const rows = await this.loadRows(namespace, userId, reach);
+    return this.resolveKeyFromRows<T>(reg, key, scope, rows, userId, reach);
   }
 
   /**
@@ -1401,14 +1527,20 @@ export class SettingsService {
         ...(userKeys.length > 0 ? [userId] : []),
         ...(otherKeys.length > 0 ? [null] : []),
       ];
-      const sets = await this.loadRowSets(namespace, groups);
+      // ONE organization reach for the whole call — every key is resolved for
+      // the same caller, so the grouping above is by user only. Asked only
+      // when a key below the global rung needs it (see `get`).
+      const reach = pending.some((p) => p.scope !== 'global')
+        ? await this.organizationReachOf(ctx)
+        : ANY_ORGANIZATION;
+      const sets = await this.loadRowSets(namespace, groups, reach);
       const userRows = userKeys.length > 0 ? sets[0] : [];
       const otherRows = otherKeys.length > 0 ? sets[sets.length - 1] : [];
       for (const { key, scope } of userKeys) {
-        out[key] = await this.resolveKeyFromRows(reg, key, scope, userRows, userId);
+        out[key] = await this.resolveKeyFromRows(reg, key, scope, userRows, userId, reach);
       }
       for (const { key, scope } of otherKeys) {
-        out[key] = await this.resolveKeyFromRows(reg, key, scope, otherRows, null);
+        out[key] = await this.resolveKeyFromRows(reg, key, scope, otherRows, null, reach);
       }
     }
     return out;
@@ -1424,6 +1556,11 @@ export class SettingsService {
    * that names no user and for every key not declared `scope: 'user'`. The user
    * rung answers only a row whose `user_id` equals it; with `null` there is no
    * user rung at all.
+   *
+   * `reach` is the caller's organization reach ({@link organizationReachOf}).
+   * The tenant and user rungs each take ONE row, the caller organization's own
+   * when it has one ({@link preferredRow}) — never whichever row a positional
+   * `find` happens to meet first.
    */
   private async resolveKeyFromRows<T = unknown>(
     reg: RegisteredManifest,
@@ -1431,6 +1568,7 @@ export class SettingsService {
     scope: SpecifierScope,
     rows: SettingsRow[],
     userId: string | null,
+    reach: OrganizationReach,
   ): Promise<ResolvedSettingValue<T>> {
     // 2. cascade walk — OS_* env (handled by callers) > global > tenant > user > default
     //
@@ -1451,7 +1589,10 @@ export class SettingsService {
     }
 
     if (scope === 'tenant' || scope === 'user') {
-      const tenantRow = rows.find((r) => r.key === key && r.scope === 'tenant');
+      const tenantRow = this.preferredRow(
+        rows.filter((r) => r.key === key && r.scope === 'tenant'),
+        reach,
+      );
       if (tenantRow) {
         chain.push({
           scope: 'tenant',
@@ -1467,7 +1608,10 @@ export class SettingsService {
     // that names no user gets no user rung: the walk falls through to tenant,
     // global, then the default, exactly as if no user row existed.
     if (scope === 'user' && userId !== null) {
-      const userRow = rows.find((r) => r.key === key && r.scope === 'user' && r.user_id === userId);
+      const userRow = this.preferredRow(
+        rows.filter((r) => r.key === key && r.scope === 'user' && r.user_id === userId),
+        reach,
+      );
       if (userRow) {
         chain.push({
           scope: 'user',
@@ -1492,6 +1636,60 @@ export class SettingsService {
       lockedReason: lockedEntry?.lockedReason,
       cascadeChain: chain,
     };
+  }
+
+  /**
+   * The ONE row a rung takes from its candidates (rows of one key on one rung,
+   * already narrowed to the caller's owner for the user rung), by the caller's
+   * organization reach:
+   *
+   *  - `own` — the caller organization's row; failing that, the row written
+   *    with no organization. The organization is compared HERE, not trusted to
+   *    the load's filter, the same way the user rung compares its owner.
+   *  - `organization-less` — only a row written with no organization.
+   *  - `unwalled` — a row an organization wrote, ahead of one written with
+   *    none: on a single-organization deployment that is the one organization's
+   *    current value, while an organization-less row predates its first write.
+   *
+   * Shared by the cascade walk and the lock pre-flight in {@link setMany}, so
+   * the row that answers a read is the row whose lock refuses a write.
+   */
+  private preferredRow(candidates: SettingsRow[], reach: OrganizationReach): SettingsRow | undefined {
+    if (reach.kind === 'own') {
+      return (
+        candidates.find((r) => organizationOf(r) === reach.organizationId) ??
+        candidates.find((r) => organizationOf(r) === null)
+      );
+    }
+    if (reach.kind === 'organization-less') {
+      return candidates.find((r) => organizationOf(r) === null);
+    }
+    return candidates.find((r) => organizationOf(r) !== null) ?? candidates[0];
+  }
+
+  /** The caller's organization reach — see {@link OrganizationReach}. */
+  private async organizationReachOf(ctx: SettingsContext): Promise<OrganizationReach> {
+    const organizationId = callerOrganizationIdOf(ctx);
+    if (organizationId !== null) return { kind: 'own', organizationId };
+    return (await this.organizationWallStands()) ? { kind: 'organization-less' } : { kind: 'unwalled' };
+  }
+
+  /**
+   * Does the tenancy posture IN FORCE wall organizations off from each other?
+   *
+   * Asked only for a caller that names no organization — a caller that names
+   * one is read and written as that organization under every posture. No
+   * posture source, or a source that reports none, is a deployment with no
+   * wall this service can know of: it keeps the reading it always had. A
+   * source that THROWS is not caught: the posture is an input to what this
+   * caller may read and write, and a decision taken without it would be a
+   * guess.
+   */
+  private async organizationWallStands(): Promise<boolean> {
+    const source = this.tenancyPosture;
+    if (!source) return false;
+    const posture = await source();
+    return posture !== undefined && postureEnforcesWall(posture);
   }
 
   /** Resolve every value in a namespace + return the manifest. */
@@ -1726,6 +1924,31 @@ export class SettingsService {
     };
   }
 
+  /**
+   * The per-key entry {@link setMany} refuses a `tenant`-scoped key with when
+   * the caller names no organization under a walled posture. Same vocabulary
+   * as {@link ownerlessUserKeyError}, for the same reason one level up: a
+   * `tenant` row is one row per organization, and under a wall a row naming
+   * none belongs to no organization's settings — it would only ever be read as
+   * every organization's fallback, which is not what any caller asked to write.
+   */
+  private organizationlessTenantKeyError(reg: RegisteredManifest, key: string): FieldError {
+    const spec = ((reg.manifest.specifiers ?? []) as Array<Record<string, unknown>>)
+      .find((s) => s.key === key);
+    const label = typeof spec?.label === 'string' ? spec.label : key;
+    return {
+      field: key,
+      code: 'invalid_value',
+      message:
+        `${label} is a per-organization setting, and this write names no organization to store ` +
+        'it for. Make the write from inside the organization it belongs to (the caller\'s active ' +
+        "organization, `SettingsContext.tenantId`); a value meant for every organization belongs " +
+        "on a key declared at scope 'global'.",
+      label,
+      constraint: { scope: 'tenant' },
+    };
+  }
+
   /** Persist a single key. Throws SettingsLockedError when env-locked. */
   async set(
     namespace: string,
@@ -1762,9 +1985,16 @@ export class SettingsService {
     // missing — the write path previously trusted a spoofable header identity).
     this.assertPermitted(reg.manifest, 'write', ctx);
 
-    // Pre-flight: reject the whole batch if any key is locked or unknown, or
-    // is user-scoped while the caller names no user (collected, refused below).
+    // Pre-flight: reject the whole batch if any key is locked or unknown, is
+    // user-scoped while the caller names no user, or is tenant-scoped while the
+    // caller names no organization under a walled posture (both collected,
+    // refused below).
     const callerUserId = callerUserIdOf(ctx);
+    const callerOrganizationId = callerOrganizationIdOf(ctx);
+    // The reach every load below reads with — resolved once for the batch, and
+    // only when a key below the global rung asks for it: a `global` key has no
+    // upper rung to be locked by and no organization to be stored for.
+    let reach: OrganizationReach | undefined;
     const ownerless: FieldError[] = [];
     for (const key of Object.keys(patch)) {
       if (!reg.scopes.has(key)) throw new UnknownKeyError(namespace, key);
@@ -1784,14 +2014,29 @@ export class SettingsService {
       // scope as the lock is still permitted (i.e. a platform admin
       // can edit a globally-locked value; a tenant admin cannot).
       const scope = reg.scopes.get(key)!;
+      if (scope === 'global') continue;
       if (scope === 'user' && callerUserId === null) {
         ownerless.push(this.ownerlessUserKeyError(reg, key));
         continue;
       }
-      const rows = await this.loadRows(namespace, scope === 'user' ? callerUserId : null);
-      const upper = rows.find(
-        (r) =>
-          r.key === key &&
+      reach ??= await this.organizationReachOf(ctx);
+      // Under a walled posture an organization-less caller reaches only the
+      // organization-less rows (see `organizationReachOf`), so `reach` already
+      // carries the posture answer: no second read of it per key.
+      if (scope === 'tenant' && callerOrganizationId === null && reach.kind === 'organization-less') {
+        ownerless.push(this.organizationlessTenantKeyError(reg, key));
+        continue;
+      }
+      const rows = await this.loadRows(namespace, scope === 'user' ? callerUserId : null, reach);
+      // The upper rungs THIS caller's cascade reads — the global row and the
+      // tenant row it prefers — so another organization's lock locks nothing
+      // here, and the row that answers the read is the row whose lock counts.
+      const upper = [
+        rows.find((r) => r.key === key && r.scope === 'global'),
+        this.preferredRow(rows.filter((r) => r.key === key && r.scope === 'tenant'), reach),
+      ].find(
+        (r): r is SettingsRow =>
+          r !== undefined &&
           r.locked === true &&
           this.scopeRank(r.scope) < this.scopeRank(scope),
       );
@@ -1833,9 +2078,13 @@ export class SettingsService {
       // global rows are deployment-wide and land in `sys_platform_setting`,
       // which has no organization and no user column (ADR-0131 D7, see
       // `rowIdentity`); user rows pin to the caller's user id, which the
-      // pre-flight above guarantees is present; tenant rows leave user_id
-      // null and let the engine's tenant scoping fill in tenant_id from ctx.
+      // pre-flight above guarantees is present. Tenant and user rows both
+      // carry the caller's organization, HERE: this write runs under the
+      // service's system context, which names no organization, so nothing
+      // downstream would stamp one — the row would land organization-less, in
+      // the one bucket every organization reads and writes.
       const userId = scope === 'user' ? callerUserId : null;
+      const organizationId = scope === 'global' ? null : callerOrganizationId;
       const isEncrypted = reg.encryptedKeys.has(key);
       const isNull = rawValue === null || typeof rawValue === 'undefined';
 
@@ -1897,6 +2146,7 @@ export class SettingsService {
         key,
         scope,
         user_id: userId,
+        organization_id: organizationId,
         value: storedValue,
         value_enc: storedEnc,
         encrypted: isEncrypted,
@@ -2424,8 +2674,12 @@ export class SettingsService {
   // ---------------------------------------------------------------------
 
   /** The namespace's rows every rung of one key's cascade can draw on. */
-  private async loadRows(namespace: string, userId: string | null): Promise<SettingsRow[]> {
-    return (await this.loadRowSets(namespace, [userId]))[0];
+  private async loadRows(
+    namespace: string,
+    userId: string | null,
+    reach: OrganizationReach,
+  ): Promise<SettingsRow[]> {
+    return (await this.loadRowSets(namespace, [userId], reach))[0];
   }
 
   /**
@@ -2442,11 +2696,12 @@ export class SettingsService {
   private async loadRowSets(
     namespace: string,
     userIds: ReadonlyArray<string | null>,
+    reach: OrganizationReach,
   ): Promise<SettingsRow[][]> {
     if (this.engine) {
       const [globalRows, ...scopedSets] = await Promise.all([
         this.loadGlobalRows(namespace),
-        ...userIds.map((userId) => this.loadScopedRows(namespace, userId)),
+        ...userIds.map((userId) => this.loadScopedRows(namespace, userId, reach)),
       ]);
       return scopedSets.map((scoped) => [...globalRows, ...scoped]);
     }
@@ -2460,14 +2715,25 @@ export class SettingsService {
     // scope), so it must not be reported.
     this.reportPreBindRead(namespace);
     // The in-memory fallback is ONE store for every rung: rows keep their
-    // `scope` tag, and there is no table split to mirror.
+    // `scope` tag, and there is no table split to mirror. The organization
+    // reach is applied to the tenant and user rungs exactly as the engine
+    // query applies it; a global row belongs to no organization.
     return userIds.map((userId) =>
       this.memory.filter(
         (r) =>
           r.namespace === namespace &&
-          (userId === null || r.user_id === userId || r.scope === 'tenant' || r.scope === 'global'),
+          (userId === null || r.user_id === userId || r.scope === 'tenant' || r.scope === 'global') &&
+          (r.scope === 'global' || SettingsService.withinReach(r, reach)),
       ),
     );
+  }
+
+  /** Whether a `tenant` / `user` row is one the reach may draw on. */
+  private static withinReach(row: SettingsRow, reach: OrganizationReach): boolean {
+    const organizationId = organizationOf(row);
+    if (reach.kind === 'own') return organizationId === null || organizationId === reach.organizationId;
+    if (reach.kind === 'organization-less') return organizationId === null;
+    return true;
   }
 
   /**
@@ -2493,24 +2759,40 @@ export class SettingsService {
    * `sys_setting` must not answer as a second one — the v18 upgrade ceremony
    * moves it (ADR-0131 D14), and until then it is simply not a rung.
    */
-  private async loadScopedRows(namespace: string, userId: string | null): Promise<SettingsRow[]> {
+  private async loadScopedRows(
+    namespace: string,
+    userId: string | null,
+    reach: OrganizationReach,
+  ): Promise<SettingsRow[]> {
     // A user-keyed load must still see the tenant rows (user_id NULL):
     // resolveKey's user→tenant→global cascade and the Phase-2 upper-scope lock
     // check both search THIS one result set, so a bare user_id equality starves
     // them of every upper-scope row on engine-bound deployments while the
     // in-memory branch includes them (#11228). The global rung is not in this
     // table any more; `loadRowSets` adds it.
+    const rungs: Array<Record<string, unknown>> = userId !== null
+      ? [{ user_id: userId }, { scope: 'tenant' }]
+      : [{ scope: 'tenant' }, { scope: 'user' }];
+    // The organization filter, explicit in the query itself. NOTHING else
+    // scopes this read: it runs under SETTINGS_SYSTEM_CONTEXT, which carries no
+    // organization, so neither the driver's tenant scope nor the security
+    // layer's organization wall applies to it — every organization's row came
+    // back, and the cascade answered with whichever it met first. Each rung is
+    // crossed with the organizations the caller reaches (`OrganizationReach`):
+    // its own and the organization-less, or the organization-less alone.
+    const organizations: Array<string | null> | null =
+      reach.kind === 'own' ? [reach.organizationId, null]
+        : reach.kind === 'organization-less' ? [null]
+          : null;
     const where: Record<string, unknown> = {
       namespace,
-      $or: userId !== null
-        ? [{ user_id: userId }, { scope: 'tenant' }]
-        : [{ scope: 'tenant' }, { scope: 'user' }],
+      $or: organizations === null
+        ? rungs
+        : rungs.flatMap((rung) => organizations.map((organization_id) => ({ ...rung, organization_id }))),
     };
     // Bypass the tenant-scoping audit warning so loads work uniformly across
-    // the tenant and user rungs without log noise. Per-tenant isolation for
-    // `tenant`-scope rows is still enforced by the engine once an
-    // ExecutionContext.tenantId is plumbed through (Phase 2+).
-    // The explicit system opt-in: see SETTINGS_SYSTEM_CONTEXT.
+    // the tenant and user rungs without log noise; the organization scope is
+    // the `where` above. The explicit system opt-in: see SETTINGS_SYSTEM_CONTEXT.
     const rows = await this.engine!.find(this.objectName, {
       where,
       bypassTenantAudit: true,
@@ -2526,6 +2808,7 @@ export class SettingsService {
       key: r.key,
       scope,
       user_id: scope === 'global' ? null : r.user_id ?? null,
+      organization_id: scope === 'global' ? null : r.organization_id ?? null,
       value: r.value ?? null,
       value_enc: r.value_enc ?? null,
       encrypted: Boolean(r.encrypted),
@@ -2588,12 +2871,18 @@ export class SettingsService {
    * looking correct — and the answer decides whether a ciphertext is deleted.
    *
    * [ADR-0131 D7] The rung picks the store. A `global` row lives in
-   * `sys_platform_setting`, keyed `(namespace, key)` and written WITHOUT `scope`
-   * or `user_id` — that object declares neither, and no organization column
-   * either. A `tenant` / `user` row lives in `sys_setting`, keyed
-   * `(namespace, key, scope, user_id)` exactly as before. Neither carries a
-   * tenant-audit bypass: the global rung's object has no tenant field to audit,
-   * and the tenant/user rungs keep the warning for a write missing its tenant.
+   * `sys_platform_setting`, keyed `(namespace, key)` and written WITHOUT `scope`,
+   * `user_id` or `organization_id` — that object declares none of them. A
+   * `tenant` / `user` row lives in `sys_setting`, keyed by the identity that
+   * object declares, `(organization_id, namespace, key, scope, user_id)`.
+   *
+   * The organization is IN the key, not left to the engine: this write runs
+   * under SETTINGS_SYSTEM_CONTEXT, which carries none, so the existence probe
+   * keyed without it found ANOTHER organization's row and the update rewrote
+   * that row in place — one organization's save replacing another's value.
+   * Neither carries a tenant-audit bypass: the global rung's object has no
+   * tenant field to audit, and the tenant/user rungs keep the warning for a
+   * write missing its tenant.
    */
   private rowIdentity(row: SettingsRow): {
     object: string;
@@ -2601,7 +2890,7 @@ export class SettingsService {
     data: Record<string, unknown>;
   } {
     if (row.scope === 'global') {
-      const { scope: _scope, user_id: _userId, ...data } = row;
+      const { scope: _scope, user_id: _userId, organization_id: _organizationId, ...data } = row;
       return {
         object: PLATFORM_SETTING_OBJECT,
         where: { namespace: row.namespace, key: row.key },
@@ -2615,8 +2904,9 @@ export class SettingsService {
         key: row.key,
         scope: row.scope,
         user_id: row.user_id ?? null,
+        organization_id: organizationOf(row),
       },
-      data: { ...row },
+      data: { ...row, organization_id: organizationOf(row) },
     };
   }
 
@@ -2627,7 +2917,8 @@ export class SettingsService {
         r.namespace === row.namespace &&
         r.key === row.key &&
         r.scope === row.scope &&
-        (r.user_id ?? null) === (row.user_id ?? null),
+        (r.user_id ?? null) === (row.user_id ?? null) &&
+        (row.scope === 'global' || organizationOf(r) === organizationOf(row)),
     );
   }
 

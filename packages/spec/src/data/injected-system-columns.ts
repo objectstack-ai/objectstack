@@ -73,6 +73,24 @@ const OWNING_BUSINESS_UNIT_COLUMN = 'owning_business_unit_id';
 const TENANT_SCOPE_COLUMN = 'organization_id';
 
 /**
+ * Every name {@link resolveInjectedSystemColumns} can put in a plan's `names`,
+ * on ANY object: the upper bound of the per-object answer, read off the same
+ * constants the function adds. A compile-time consumer that cannot evaluate
+ * the plan for a given object (the `defineSeed` record type) admits these
+ * names, and leaves the per-object verdict to the plan at call time.
+ *
+ * The sync is the compiler's: the function builds `names` as a
+ * `Set<InjectedSystemColumnName>`, so a column it starts adding without
+ * widening this union is a compile error, not a second list that drifts.
+ */
+export type InjectedSystemColumnName =
+  | typeof PRIMARY_KEY_COLUMN
+  | typeof TENANT_SCOPE_COLUMN
+  | (typeof AUDIT_PROVENANCE_FIELDS)[number]
+  | typeof OWNER_COLUMN
+  | typeof OWNING_BUSINESS_UNIT_COLUMN;
+
+/**
  * Which system columns an object carries, as the four independent decisions the
  * injection pass makes plus the resolved name set.
  *
@@ -144,7 +162,7 @@ export function resolveInjectedSystemColumns(def: unknown): InjectedSystemColumn
 
   // The primary key is the driver's, not the injection pass's — it is present
   // even on the two "nothing is injected" rows below.
-  const names = new Set<string>([PRIMARY_KEY_COLUMN]);
+  const names = new Set<InjectedSystemColumnName>([PRIMARY_KEY_COLUMN]);
   const nothing: InjectedSystemColumnPlan = {
     tenant: false, audit: false, owner: false, owningBusinessUnit: false, names,
   };

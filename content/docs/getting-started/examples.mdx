@@ -6,7 +6,7 @@ description: Run and explore the built-in example applications to learn ObjectSt
 
 import { CheckSquare, Building2, BarChart3, Server } from 'lucide-react';
 
-The monorepo ships three ready-to-run examples in `examples/` that progressively demonstrate ObjectStack features — from a simple Todo app to a full CRM and a kitchen-sink reference. For a larger external enterprise reference, see the [HotCRM repository](https://github.com/objectstack-ai/hotcrm).
+The monorepo ships five examples in `examples/`. Three are ready-to-run apps that progressively demonstrate ObjectStack features — from a simple Todo app to a full CRM and a kitchen-sink reference — and each has its own `pnpm dev:*` script. The other two demonstrate a shape rather than a feature set: `app-multi-package` is one release artifact carrying two packages that share a namespace ([below](#a-project-is-a-multi-package-artifact)), and `embed-objectql` uses ObjectQL as a plain library, with no kernel and no plugins. For a larger external enterprise reference, see the [HotCRM repository](https://github.com/objectstack-ai/hotcrm).
 
 <Callout type="tip">
 **Read these as reference, then build your own with an agent.** Each example is the same
@@ -50,7 +50,7 @@ The fastest way to explore all examples at once:
 ```bash
 git clone https://github.com/objectstack-ai/objectstack.git
 cd objectstack
-pnpm install        # Node 22+, pnpm 8+ (corepack enable)
+pnpm install        # Node 22+, pnpm 10 (corepack enable)
 pnpm build          # REQUIRED — nothing builds the workspace implicitly
 pnpm dev:showcase   # or: pnpm dev:todo / pnpm dev:crm
 ```

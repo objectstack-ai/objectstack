@@ -10,6 +10,8 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { LocaleSchema } from '../system/translation.zod';
+import { findClosestMatches, formatSuggestion } from '../shared/suggestions.zod';
+import { resolveInjectedSystemColumns, type InjectedSystemColumnName } from './injected-system-columns';
 export const SeedMode = z.enum([
   'insert',    // Try to insert, fail on duplicate
   'update',    // Only update found records, ignore new
@@ -184,17 +186,97 @@ type SeedFieldValue<TFieldDef> =
       : string | null
     : unknown;
 
-/** Shape of a single seed record, derived from the object's field definitions. */
+/**
+ * Shape of a single seed record, derived from the object's field definitions.
+ *
+ * Its keys are the object's declared `fields`, each typed by
+ * {@link SeedFieldValue}, plus the system columns the platform injects without
+ * the author declaring them ({@link InjectedSystemColumnName}: `created_at`,
+ * `owner_id` and the rest), typed `unknown`. The injected half is the union
+ * over EVERY object, because a type cannot evaluate an object's opt-outs
+ * (`systemFields`, `ownership`, `managedBy`); {@link defineSeed} narrows it to
+ * this object's own plan when it runs. A field the object declares under one of
+ * those names keeps its declared value type.
+ */
 type SeedRecord<TFields> = {
   [K in keyof TFields]?: SeedFieldValue<TFields[K]>;
+} & {
+  [K in Exclude<InjectedSystemColumnName, keyof TFields>]?: unknown;
 };
 
 /**
- * Type-safe factory for creating seed definitions.
- * Infers valid field keys from the object definition passed in,
- * so typos in record field names are caught at compile time. Reference
- * fields (lookup/master_detail) are additionally constrained to the
- * natural-key string the loader resolves — see {@link SeedFieldValue}.
+ * The call-time half of {@link defineSeed}'s key check: every key of every
+ * record must name a column the target object has, which is a field it
+ * declares or a system column the platform injects on THIS object. The injected
+ * set is {@link resolveInjectedSystemColumns}, the per-object answer the
+ * registry's own injection consumes, so a seed may write `created_at` (the
+ * seed loader keeps an authored one on insert) on an object that carries the
+ * audit columns, and is refused it on one built with `systemFields: false`.
+ *
+ * It judges what the type cannot see: a record that does not reach the call as
+ * a fresh object literal (a variable, a `.map()` result, a spread of
+ * `Record<string, unknown>[]`, which also silences TypeScript's check on every
+ * inline record beside it), and an object whose `fields` type is a
+ * string-keyed record (`ServiceObject`, an `ObjectSchema.parse()` result).
+ *
+ * All findings are collected and refused together, one line per key, in the
+ * shape `ObjectSchema.create()` refuses an unknown object key: the object and
+ * the key named, a near-miss suggested, the fix stated.
+ *
+ * No opinion without a field map: a caller outside the type that passes no
+ * `fields` object is not judged here.
+ */
+function assertSeedRecordKeysDeclared(
+  objectDef: { name: string; fields: unknown },
+  records: ReadonlyArray<Record<string, unknown>>,
+): void {
+  const { fields } = objectDef;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return;
+  const known = [...Object.keys(fields), ...resolveInjectedSystemColumns(objectDef).names];
+  const knownSet = new Set(known);
+  const lines: string[] = [];
+  const unknownKeys = new Set<string>();
+  records.forEach((record, index) => {
+    for (const key of Object.keys(record)) {
+      if (knownSet.has(key)) continue;
+      unknownKeys.add(key);
+      const suggestion = formatSuggestion(
+        findClosestMatches(key, known, Math.max(2, Math.floor(key.length / 3)), 1),
+      );
+      lines.push(
+        `  • records[${index}]: \`${key}\` is not a field of \`${objectDef.name}\`.`
+        + (suggestion ? ` ${suggestion}` : ''),
+      );
+    }
+  });
+  if (lines.length === 0) return;
+  throw new Error(
+    `defineSeed('${objectDef.name}'): unknown field(s) in records — ${[...unknownKeys].join(', ')}.\n`
+    + `A seed record key must name a field \`${objectDef.name}\` declares or a system column the platform `
+    + 'injects on it (`created_at`, `owner_id` and the rest, unless the object opts out of them).\n\n'
+    + `${lines.join('\n')}\n\n`
+    + `Fix the key's spelling, declare the field on \`${objectDef.name}\`, or remove the key from the record.`,
+  );
+}
+
+/**
+ * Type-safe factory for creating seed definitions. Every record key is checked
+ * against the object definition passed in, twice:
+ *
+ * - **At compile time**, for a record written as an object literal directly in
+ *   `records`: its keys must be the object's declared `fields` or a system
+ *   column the platform can inject (`created_at`, `owner_id`, … — see
+ *   {@link SeedRecord}), and a reference field (lookup/master_detail) takes the
+ *   natural-key string the loader resolves (see {@link SeedFieldValue}). This
+ *   is TypeScript's excess-property check, so it sees only fresh literals on an
+ *   object whose field keys are literal (`ObjectSchema.create()`): a record
+ *   from a variable, a `.map()` or a spread, and an object typed `ServiceObject`,
+ *   are not checked here.
+ * - **When it runs** (module load: `os validate`, `os build`, boot), for every
+ *   record whatever its shape: each key must be a field the object declares or
+ *   a system column the platform injects on THIS object
+ *   ({@link resolveInjectedSystemColumns}). A key that is neither is refused,
+ *   naming the object, the record and the key, with a near-miss suggestion.
  *
  * @example
  * ```ts
@@ -202,7 +284,8 @@ type SeedRecord<TFields> = {
  *   externalId: 'email',
  *   records: [
  *     { first_name: 'Alice', lead_source: 'web' },   // ✅ type-checked
- *     { source: 'web' },                              // ❌ compile error (unknown field)
+ *     { source: 'web' },                              // ❌ compile error (unknown field), and refused when it runs
+ *     { first_name: 'Bob', created_at: cel`daysAgo(3)` }, // ✅ an injected system column
  *     { first_name: 'Bob', account: 'Acme Corp' },   // ✅ reference by natural key
  *     { first_name: 'Bob', account: { externalId: 'Acme Corp' } }, // ❌ object not allowed
  *   ],
@@ -217,5 +300,7 @@ export function defineSeed<
     records: Array<SeedRecord<TObj['fields']>>;
   }
 ): Seed {
-  return SeedSchema.parse({ ...config, object: objectDef.name });
+  const seed = SeedSchema.parse({ ...config, object: objectDef.name });
+  assertSeedRecordKeysDeclared(objectDef, seed.records);
+  return seed;
 }

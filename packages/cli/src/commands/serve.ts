@@ -4450,14 +4450,69 @@ export default class Serve extends Command {
       }
 
       // Register REST API and Dispatcher plugins (consume http.server + protocol services)
+      //
+      // [#22202] The REST API plugin is composed on EVERY boot; only the
+      // dispatcher and the no-auth refusal below ride `flags.server`. The REST
+      // plugin is not only a route mounter: its `init()` registers
+      // `sys_import_job`, the object its async-import routes persist to, and
+      // schema sync creates tables only for the objects registered in THIS
+      // boot. While the whole plugin rode the listener flag, a `--no-server`
+      // `OS_MIGRATE_AND_EXIT=1` run provisioned one table fewer than the server
+      // boot it prepares for (measured on `examples/app-todo`: 69 tables
+      // against 70, `sys_import_job` the only difference), so a deployment that
+      // migrated "kernel only" and then served with schema sync off had no
+      // import-job table at all.
+      //
+      // Composed here, it behaves like the service plugins composed above
+      // (storage, settings, sharing, auth, i18n …): its object registers
+      // whatever the flag says, and with no `http.server` its `start()` mounts
+      // nothing and says so in one `warn`. `--no-server` still means "kernel
+      // only": no HTTP server plugin, no dispatcher, no route.
+      // `test/serve-migrate-exit-schema-parity.integration.test.ts` pins the
+      // table-set equality.
+      //
+      // Read environment-scoping config from the stack's top-level `api` field
+      // (e.g. { api: { enableProjectScoping: true, projectResolution: 'auto' } }).
+      // Forwarded to both REST and Dispatcher plugins so they mount scoped
+      // routes consistently.
+      const apiConfig = (config as any).api ?? {};
+      const enableProjectScoping = apiConfig.enableProjectScoping ?? false;
+      const projectResolution = apiConfig.projectResolution ?? 'auto';
+      // [#3963] Anonymous access to object data is denied unconditionally —
+      // there is no `api.requireAuth` opt-out any more (auth is a kernel
+      // concern; every legitimately session-less surface derives its own narrow
+      // authorization from a declaration instead).
+      //
+      // The CLI used to hand an EXPLICIT fail-open to a stack with no auth at
+      // all, reasoning that nobody could authenticate against it so denying
+      // would brick its data API. Under A1 that inverts the conclusion: a stack
+      // with no auth has no security model, so it must not serve a data API —
+      // and it should say so at boot instead of quietly serving object data to
+      // the internet. Auth availability = the tier auto-registers it OR the
+      // stack mounts AuthPlugin explicitly.
+      if (flags.server && !(tierEnabled('auth') || hasAuthPlugin)) {
+        throw new Error(
+          'This stack mounts no auth, so no caller can authenticate — and anonymous access to object '
+          + 'data is always denied, with no setting that turns that off, which would leave the data API unusable.\n'
+          + 'Fix it one of two ways:\n'
+          + `  • enable auth — add the 'auth' tier (or mount AuthPlugin in \`plugins\`);\n`
+          + '  • or serve without the data API — run with --no-server, or drop the REST/dispatcher plugins.\n'
+          + "Publishing a genuinely public surface does not need anonymous data access: use a public form "
+          + "view, a share link, or `book.audience: 'public'`.",
+        );
+      }
+
+      try {
+        const { createRestApiPlugin } = await import('@objectstack/rest');
+        await kernel.use(
+          createRestApiPlugin({ api: { api: { enableProjectScoping, projectResolution } } as any }),
+        );
+        trackPlugin('RestAPI');
+      } catch (e: any) {
+        // @objectstack/rest is optional
+      }
+
       if (flags.server) {
-        // Read environment-scoping config from the stack's top-level `api` field
-        // (e.g. { api: { enableProjectScoping: true, projectResolution: 'auto' } }).
-        // Forwarded to both REST and Dispatcher plugins so they mount scoped
-        // routes consistently.
-        const apiConfig = (config as any).api ?? {};
-        const enableProjectScoping = apiConfig.enableProjectScoping ?? false;
-        const projectResolution = apiConfig.projectResolution ?? 'auto';
         // Per-project membership (sys_environment_member 403 gate) is, by
         // default, ON whenever project-scoping is on. A host can opt OUT
         // (env-native auth IS the membership — ADR-0135 D9) by setting
@@ -4465,8 +4520,8 @@ export default class Serve extends Command {
         const enforceProjectMembership = apiConfig.enforceProjectMembership;
         // [#4910] The stack's top-level `server:` block — deliberately narrow:
         // only keys with a consumer are declared, and both of these have one in
-        // the dispatcher's inbound rate limiter. Read here, next to `api:`, for
-        // the same reason that one is: this is the single place the authored
+        // the dispatcher's inbound rate limiter. Read here, like the `api:` block
+        // above and for the same reason: this is the single place the authored
         // stack is turned into plugin configuration.
         //
         // NOTE the budget is deliberately NOT validated here. An unusable one
@@ -4481,39 +4536,6 @@ export default class Serve extends Command {
             ...(serverConfig.security?.rateLimit ? { budget: serverConfig.security.rateLimit } : {}),
             trustProxy: serverConfig.trustProxy === true,
         };
-        // [#3963] Anonymous access to object data is denied unconditionally —
-        // there is no `api.requireAuth` opt-out any more (auth is a kernel
-        // concern; every legitimately session-less surface derives its own narrow
-        // authorization from a declaration instead).
-        //
-        // The CLI used to hand an EXPLICIT fail-open to a stack with no auth at
-        // all, reasoning that nobody could authenticate against it so denying
-        // would brick its data API. Under A1 that inverts the conclusion: a stack
-        // with no auth has no security model, so it must not serve a data API —
-        // and it should say so at boot instead of quietly serving object data to
-        // the internet. Auth availability = the tier auto-registers it OR the
-        // stack mounts AuthPlugin explicitly.
-        if (flags.server && !(tierEnabled('auth') || hasAuthPlugin)) {
-          throw new Error(
-            'This stack mounts no auth, so no caller can authenticate — and anonymous access to object '
-            + 'data is always denied, with no setting that turns that off, which would leave the data API unusable.\n'
-            + 'Fix it one of two ways:\n'
-            + `  • enable auth — add the 'auth' tier (or mount AuthPlugin in \`plugins\`);\n`
-            + '  • or serve without the data API — run with --no-server, or drop the REST/dispatcher plugins.\n'
-            + "Publishing a genuinely public surface does not need anonymous data access: use a public form "
-            + "view, a share link, or `book.audience: 'public'`.",
-          );
-        }
-
-        try {
-          const { createRestApiPlugin } = await import('@objectstack/rest');
-          await kernel.use(
-            createRestApiPlugin({ api: { api: { enableProjectScoping, projectResolution } } as any }),
-          );
-          trackPlugin('RestAPI');
-        } catch (e: any) {
-          // @objectstack/rest is optional
-        }
 
         // Register Dispatcher plugin (auth, graphql, analytics, packages, hub, storage, automation)
         try {

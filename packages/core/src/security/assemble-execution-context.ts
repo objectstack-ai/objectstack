@@ -73,8 +73,9 @@ import type { ResolvedAuthzContext } from './resolve-authz-context.js';
  * - `rlsMembership` — engine-side RLS scoping cache.
  * - `transaction` / `traceId` — per-operation handles.
  * - `flowRunId`, `skipTriggers`, `skipAutomations`, `seedReplay`,
- *   `skipStateMachine`, `preserveAudit` — per-write behaviour flags,
- *   server-constructed at the call site.
+ *   `skipStateMachine`, `preserveAudit`, `keptOptionValues` — per-write
+ *   behaviour flags, server-constructed at the call site (`keptOptionValues`
+ *   by the import runner, from the cells one import kept).
  */
 type NonEntryExecutionContextField =
   | 'actor'
@@ -87,7 +88,8 @@ type NonEntryExecutionContextField =
   | 'skipAutomations'
   | 'seedReplay'
   | 'skipStateMachine'
-  | 'preserveAudit';
+  | 'preserveAudit'
+  | 'keptOptionValues';
 
 /**
  * The CLOSED field set every transport entry point must decide. Derived from
