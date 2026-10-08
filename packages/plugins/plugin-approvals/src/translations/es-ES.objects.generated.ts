@@ -124,6 +124,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       approval_approve: {
         label: "Aprobar",
+        description: "¿Aprobar esta solicitud? Su aprobación queda registrada y la solicitud avanza cuando este paso reúne las aprobaciones que requiere.",
         successMessage: "Aprobada.",
         params: {
           comment: {

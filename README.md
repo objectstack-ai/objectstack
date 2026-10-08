@@ -16,9 +16,9 @@
 `Executable` · `AI-writable` · `Agent-operable` · `You own it` · Apache-2.0
 
 <p align="center">
-  <a href="https://youtu.be/CX_FlOoOtr0">
-    <img src="docs/screenshots/hero-cover-dark.png" width="900" alt="ObjectStack in 90 Seconds — watch the overview on YouTube">
-  </a>
+  <img src="docs/screenshots/readme-demo.gif" alt="A 30-second recording of a real run of the showcase example app, in three beats. One: the Team object's typed definition, then pnpm dev:showcase booting it on a fresh database, then the Console listing two teams. Two: an agent's MCP tools/call create_record request to /api/v1/mcp with the dev admin's API key, the real response carrying the new Data Guild record, then the Console showing that row and its record page saying Created by Dev Admin. Three: the same call sent with a read-only Auditor key, refused with isError true and a permission message, then the Console still showing three rows. It closes on: The ontology is the software. Executable, AI-writable, Agent-operable, You own it.">
+  <br>
+  <sub><b>1</b> · One definition, and the app runs &nbsp;·&nbsp; <b>2</b> · An agent creates a record over MCP &nbsp;·&nbsp; <b>3</b> · A read-only identity is refused</sub>
   <br>
   <a href="https://youtu.be/CX_FlOoOtr0"><b>▶&nbsp; Watch: ObjectStack in 90 Seconds</b></a>
 </p>
@@ -222,11 +222,39 @@ to run the whole loop end-to-end.
 ```bash
 git clone https://github.com/objectstack-ai/objectstack.git
 cd objectstack
-pnpm install     # Node 22+, pnpm 10 (corepack enable)
-pnpm build       # build all packages
-pnpm dev         # showcase example: REST + Console on :3000
-pnpm test        # run the test suite
+pnpm install          # Node 22+, pnpm 10 (corepack enable)
+pnpm build            # build all packages
+pnpm objectui:build   # build the Console SPA (not part of pnpm build)
+pnpm dev              # showcase example: REST + Console on :3000
 ```
+
+`pnpm objectui:build` builds [objectui](https://github.com/objectstack-ai/objectui)
+at the commit pinned in `.objectui-sha` into `packages/console/dist`
+(gitignored). It builds from a `../objectui` checkout if one sits next to this
+repo, otherwise from a shallow clone of objectui into `.cache/`; either way it
+installs objectui's dependencies, so it needs network. Skip it and `pnpm dev`
+still serves the REST API, without the Console. Rerun it when `.objectui-sha`
+moves.
+
+A first run is slow, not stuck. Measured once on a fresh clone of `main`
+(4-vCPU container, Node 22.22, pnpm 10.31):
+
+| Command | Time | |
+|:---|---:|:---|
+| `pnpm install` | 16 s | |
+| `pnpm build` | 6 m 54 s | 72 turbo tasks |
+| `pnpm objectui:build` | 10 m 36 s | clones objectui and builds the Console |
+| `pnpm test` | 54 m 03 s | the full suite: 135 turbo tasks |
+
+For your own change, test what it reaches instead of the full suite:
+
+```bash
+pnpm turbo run test --affected          # packages your branch changes, and their dependents
+pnpm --filter @objectstack/<pkg> test   # one package
+```
+
+`--affected` compares your branch with your local `main`, so a stale `main`
+widens the set; keep it current, or set `TURBO_SCM_BASE=origin/main`.
 
 Other examples: `pnpm dev:crm`, `pnpm dev:todo`. Docs site: `pnpm docs:dev`.
 [AGENTS.md](./AGENTS.md) is the working rulebook for both humans and agents;

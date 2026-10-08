@@ -126,7 +126,7 @@ describe('unique scope rejection message — the two surfaces disagree about bar
     expect(issue.message).toContain("`unique: 'organization'` (one holder per organization");
     expect(issue.message).toContain('Field-level `unique: true` is unaffected.');
     expect(issue.message).toContain(
-      'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+      'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
     );
     expect(issue.message).not.toMatch(/#\d{3,5}\b/);
   });

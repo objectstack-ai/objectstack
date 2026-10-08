@@ -86,7 +86,7 @@ const POINTS_AT = {
 } as const;
 
 const MIGRATE_SENTENCE =
-  /Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand\.$/;
+  /Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\.$/;
 
 const KEYS = ['syncConfig', 'fieldMappings'] as const;
 const AUTHORED: Record<(typeof KEYS)[number], unknown> = {

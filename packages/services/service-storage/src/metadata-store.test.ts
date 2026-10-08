@@ -22,6 +22,7 @@ import type { IDataEngine } from '@objectstack/spec/contracts';
 import {
   StorageMetadataStore,
   StorageMetadataStoreError,
+  organizationOutOfWriteReach,
   type FileRecord,
   type UploadSessionRecord,
 } from './metadata-store.js';
@@ -357,5 +358,49 @@ describe('StorageMetadataStore: engine wired and failing (#5216)', () => {
     await expect(store.updateSession('s1', { status: 'completed' })).rejects.toBeInstanceOf(
       StorageMetadataStoreError,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. #22175 — does the scoped by-id write reach the row? Asked before writing.
+// ---------------------------------------------------------------------------
+
+describe('organizationOutOfWriteReach (#22175)', () => {
+  const inOrgA = { organization_id: 'org_a' };
+
+  it('names the starting organization when the acting one differs, on an engine-backed store', () => {
+    const store = new StorageMetadataStore(createFakeEngine());
+    expect(organizationOutOfWriteReach(store, inOrgA, { organizationId: 'org_b' })).toBe('org_a');
+  });
+
+  it('answers null when the row is in reach: same organization', () => {
+    const store = new StorageMetadataStore(createFakeEngine());
+    expect(organizationOutOfWriteReach(store, inOrgA, { organizationId: 'org_a' })).toBeNull();
+  });
+
+  it('answers null when no organization is threaded — the write is unscoped', () => {
+    const store = new StorageMetadataStore(createFakeEngine());
+    expect(organizationOutOfWriteReach(store, inOrgA)).toBeNull();
+    expect(organizationOutOfWriteReach(store, inOrgA, {})).toBeNull();
+    expect(organizationOutOfWriteReach(store, inOrgA, { organizationId: '' })).toBeNull();
+    expect(organizationOutOfWriteReach(store, inOrgA, { organizationId: null })).toBeNull();
+  });
+
+  it('answers null for a row stamped with no organization — it stays in reach', () => {
+    const store = new StorageMetadataStore(createFakeEngine());
+    for (const row of [{}, { organization_id: null }, { organization_id: '' }]) {
+      expect(organizationOutOfWriteReach(store, row, { organizationId: 'org_b' })).toBeNull();
+    }
+  });
+
+  it('answers null for a missing row — there is nothing for it to refuse', () => {
+    const store = new StorageMetadataStore(createFakeEngine());
+    expect(organizationOutOfWriteReach(store, null, { organizationId: 'org_b' })).toBeNull();
+    expect(organizationOutOfWriteReach(store, undefined, { organizationId: 'org_b' })).toBeNull();
+  });
+
+  it('answers null on the engine-absent stand-in, which does not scope its writes', () => {
+    const store = new StorageMetadataStore(null);
+    expect(organizationOutOfWriteReach(store, inOrgA, { organizationId: 'org_b' })).toBeNull();
   });
 });

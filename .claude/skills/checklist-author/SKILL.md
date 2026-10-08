@@ -2,7 +2,7 @@
 name: checklist-author
 description: >
   Re-audit the platform test checklist (docs/qa/platform-checklist/) for coverage
-  gaps and author the missing items — the five-angle capability sweep. Use whenever
+  gaps and author the missing items — the six-angle capability sweep. Use whenever
   the maintainer says "跑一轮 coverage sweep", "run a coverage sweep", "排查测试清单
   遗漏", "审计测试覆盖", or asks whether some platform surface "有测试吗" and the
   answer needs verifying rather than recalling. Also the right tool after a large
@@ -52,11 +52,11 @@ priority · personas,`since: null` 或目标 release,⛔ 无 steps);注释没有
 
 ## 规模指引
 
-一轮全量 sweep ≈ 5 个 hunter + 8 个 writer agent。范围化的问题(「X 有测试吗?」)
+一轮全量 sweep ≈ 6 个 hunter + 8 个 writer agent。范围化的问题(「X 有测试吗?」)
 只在相关角度跑**一个** hunter,对清单核验后只补缺的 —— 契约相同,舰队更小。
 
 **没有子代理工具时,按角度顺序跑 —— 并在交付里声明这一轮是顺序执行的。** 会话里不
-存在 Task/子代理工具是允许的退化路径,不是阻塞;五个角度仍要逐个走完,一个都不省。
+存在 Task/子代理工具是允许的退化路径,不是阻塞;六个角度仍要逐个走完,一个都不省。
 但 SWEEP.md 的全部主张是「不同角度捕获不同的遗漏类,**因为读者彼此独立**」:塌缩成
 一个读者后,补上的测试项依然成立,**「没有别的遗漏」这个结论不再成立** —— 不声明,就
 没人分得清一轮降级的 sweep 和一轮完整的 sweep。

@@ -50,7 +50,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
-import { SysSecret, SysSetting } from '@objectstack/platform-objects/system';
+import { SysPlatformSetting, SysSecret, SysSetting } from '@objectstack/platform-objects/system';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { SettingsService } from './settings-service.js';
 import { SettingsServicePlugin, wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
@@ -99,6 +99,9 @@ function makeMemoryDriver() {
   const matches = (row: Record<string, unknown>, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
     return Object.entries(where).every(([k, v]) => {
+      // `$or` is the one combinator the settings reads emit (ADR-0131 D7: every
+      // `sys_setting` read names its rungs); anything else still refuses.
+      if (k === '$or') return (v as any[]).some((b) => matches(row, b));
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       return (row[k] ?? null) === (v ?? null);
     });
@@ -224,7 +227,11 @@ async function bootKernel(opts: {
   readerFirst: boolean;
   declareSettingsOrder?: boolean;
   withEngine?: boolean;
-  /** Row seeded into `sys_setting` before boot — the value an in-window read misses. */
+  /**
+   * Row seeded before boot — the value an in-window read misses. The probe
+   * manifest is `scope: 'global'`, so the row is seeded where that rung is
+   * stored: `sys_platform_setting` (ADR-0131 D7).
+   */
   seedPersisted?: string;
 }) {
   const withEngine = opts.withEngine !== false;
@@ -232,15 +239,13 @@ async function bootKernel(opts: {
   const engine = new ObjectQL();
   engine.registerDriver(driver, true);
   await engine.init();
-  for (const o of [SysSetting, SysSecret]) engine.registry.registerObject(o as any, OWNER_PACKAGE);
+  for (const o of [SysSetting, SysPlatformSetting, SysSecret]) engine.registry.registerObject(o as any, OWNER_PACKAGE);
 
   if (opts.seedPersisted !== undefined) {
-    rowsOf('sys_setting').set('seed_1', {
+    rowsOf('sys_platform_setting').set('seed_1', {
       id: 'seed_1',
       namespace: 'read_probe',
       key: 'provider',
-      scope: 'global',
-      user_id: null,
       value: opts.seedPersisted,
       value_enc: null,
       encrypted: false,
@@ -424,7 +429,7 @@ describe('the report is scoped to the window, not to engine-less-ness', () => {
     const engine = new ObjectQL();
     engine.registerDriver(driver, true);
     await engine.init();
-    for (const o of [SysSetting, SysSecret]) engine.registry.registerObject(o as any, OWNER_PACKAGE);
+    for (const o of [SysSetting, SysPlatformSetting, SysSecret]) engine.registry.registerObject(o as any, OWNER_PACKAGE);
 
     const warn = vi.fn<(message: string) => void>();
     const svc = new SettingsService({ env: {}, engineBindPending: true, logger: { warn } });

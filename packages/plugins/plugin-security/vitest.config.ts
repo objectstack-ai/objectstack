@@ -14,6 +14,12 @@ export default defineConfig({
     disableConsoleIntercept: true,
     globals: true,
     environment: 'node',
+    // #13517: quiet the registry's per-item registration chatter — the
+    // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
+    // default. Enforced by scripts/check-registry-log-declared.mjs: the
+    // declared-positions seeder's suite constructs a `SchemaRegistry` to read
+    // the registry's own by-name precedence.
+    env: { OS_REGISTRY_LOG: 'warn' },
   },
   resolve: {
     // [#8577] Both entries exist for `suggested-audience-bindings-install-path.test.ts`,

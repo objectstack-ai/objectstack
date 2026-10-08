@@ -140,10 +140,15 @@ const PLANTED_KEY = 'zzzUndeclaredProbeKey';
 
 /**
  * A stack raising ONE advisory of each of the four classes while parsing
- * cleanly: a bare `unique: true` index (authoring-RULE advisory), an unknown
- * `requires` token (#3366 capability hint), an undeclared key inside
+ * cleanly: `title` unique twice — per organization on the field, `'global'` on
+ * a declared index (authoring-RULE advisory, `unique/double-declaration`), an
+ * unknown `requires` token (#3366 capability hint), an undeclared key inside
  * `visibleWhen` (#3786 finding), plus — via `plantDocs` — a doc whose `tags:`
  * scalar the reader cannot parse (ADR-0046 doc advisory).
+ *
+ * The rule advisory was a bare declared `unique: true` until protocol 18 refused
+ * that spelling at the parse (ADR-0120 D7, PR #22103), which then stopped every
+ * run at step 3, before the gate under test.
  *
  * The key sits inside `visibleWhen` rather than on the object or field itself:
  * an undeclared key in either of those positions has been a hard PARSE error
@@ -162,11 +167,12 @@ export default defineStack({
       name: '${ns}_ticket',
       label: 'Ticket',
       sharingModel: 'private',
-      indexes: [{ name: '${ns}_title_idx', fields: ['title'], unique: true }],
+      indexes: [{ name: '${ns}_title_idx', fields: ['title'], unique: 'global' }],
       fields: {
         title: {
           type: 'text',
           label: 'Title',
+          unique: true,
           visibleWhen: { dialect: 'cel', source: 'true', ${PLANTED_KEY}: 1 },
         },
       },
@@ -289,7 +295,7 @@ export default defineStack({
 `);
 
   // 3b — an author-time rule ERROR (a `record.<field>` that does not resolve),
-  //      raised alongside the bare-`unique` advisory.
+  //      raised alongside the `unique/double-declaration` advisory.
   make('rulefail', `
 import { defineStack } from '@objectstack/spec';
 
@@ -297,8 +303,8 @@ export default defineStack({
   manifest: { id: 'com.example.rfail', name: 'rfail', version: '1.0.0', type: 'app', namespace: 'rfail' },
   requires: ['${PLANTED_TOKEN}'],
   objects: [{ name: 'rf_ticket', label: 'Ticket', sharingModel: 'private',
-    indexes: [{ name: 'rf_title_idx', fields: ['title'], unique: true }],
-    fields: { title: { type: 'text', label: 'Title',
+    indexes: [{ name: 'rf_title_idx', fields: ['title'], unique: 'global' }],
+    fields: { title: { type: 'text', label: 'Title', unique: true,
       visibleWhen: { dialect: 'cel', source: 'record.zzz_no_such_field' } } } }],
 }, { strict: false });
 `);

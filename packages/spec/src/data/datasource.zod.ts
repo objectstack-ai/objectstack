@@ -54,7 +54,7 @@ const RETIRED_CAPABILITIES: Record<string, string> = {
     + 'metadata, so declaring a capability here never changed which engine path ran. Delete the '
     + 'block. If you wrote `readOnly: true`, read its note below — it did NOT make anything '
     + 'read-only. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   readOnly:
     CAPABILITIES_REMOVED_PREFIX
     + '`readOnly` in particular NEVER made a datasource read-only: no write path consulted it, '
@@ -87,7 +87,7 @@ const RETIRED_DATASOURCE_BLOCKS: Record<string, string> = {
     + 'enforced, but they are a DIFFERENT key on a different type and spell the delay `backoffMs`, '
     + 'not `baseDelayMs`. Moving these values onto a hook or a job only makes sense if you '
     + 'actually want that hook or job retried. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   healthCheck:
     '`datasource.healthCheck` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no '
     + 'health-check loop ever read it, so `enabled: true` scheduled nothing and the two timeouts '
@@ -95,12 +95,12 @@ const RETIRED_DATASOURCE_BLOCKS: Record<string, string> = {
     + '(`ping()` / `checkHealth()`), which the datasource admin service calls for "Test '
     + 'connection". The only recurring datasource timer is `external.validation.checkIntervalMs`, '
     + 'which checks SCHEMA DRIFT — a different concern, not a liveness probe. Delete the block. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   externalLabel:
     '`external.label` was removed in @objectstack/spec 17.0.0 (ADR-0049) — nothing read '
     + "the federation block's own label. Use the datasource's TOP-LEVEL `label`, which is what "
     + 'Setup → Datasources actually renders. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   externalRequirePermission:
     '`external.requirePermission` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no '
     + 'authorization check ever consulted it, so a permission named here gated nothing. Access to '
@@ -108,7 +108,7 @@ const RETIRED_DATASOURCE_BLOCKS: Record<string, string> = {
     + 'exactly as for a managed datasource. Naming a permission that is never required is the '
     + 'false-compliance shape ADR-0049 exists to remove — grant or withhold the object '
     + 'permissions instead. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
 };
 
 /**
@@ -166,7 +166,7 @@ const RETIRED_READ_REPLICAS =
   + 'Delete the key. There is no read-replica routing to migrate to — if your database fronts '
   + 'its replicas behind one endpoint (pgpool, ProxySQL, an RDS reader endpoint), point '
   + '`config` at that endpoint, which is the only read-scaling path that works today. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * Driver Identifier

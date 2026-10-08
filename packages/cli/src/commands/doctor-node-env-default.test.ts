@@ -36,6 +36,17 @@
  *
  * The `/discovery` half of the same ruling lives in
  * `packages/runtime/src/discovery-schema-conformance.test.ts`.
+ *
+ * ── #22163: one posture where the row reads as development ──────────────
+ *
+ * The maintainer's direction on #22163: beside an `objectstack.config.ts` with
+ * no artifact from elsewhere — the source checkout `os dev` serves — an unset
+ * `NODE_ENV` reads as development; everywhere else #5673's row stands. So the
+ * cases below that pin the `warning` are the cases OUTSIDE that posture (an
+ * empty temp directory, or an explicit `sourcePosture: false`), and the
+ * `#22163` blocks pin the posture itself and the row it selects. The new row's
+ * wording is pinned only by the subjects it names (`os dev`, `os start`) and by
+ * the production sentence being absent.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -44,7 +55,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import Doctor, { nodeEnvCheck, doctorNodeEnv } from './doctor.js';
+import Doctor, { nodeEnvCheck, nodeEnvSourcePosture, doctorNodeEnv } from './doctor.js';
 
 /** `packages/cli` — the oclif root the real command is loaded against below. */
 const CLI_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -124,6 +135,98 @@ describe('[#5673] nodeEnvCheck — the row, and when it exists', () => {
     // load. Doctor's whole environment block is about `.env*` provenance, so
     // omitting this invites exactly the wrong fix.
     expect(text).toContain('.env*');
+  });
+});
+
+describe('[#22163] nodeEnvCheck — which row the posture selects', () => {
+  it('in the source posture: `ok`, naming `os dev` and `os start`, with no fix', () => {
+    const finding = nodeEnvCheck({} as NodeJS.ProcessEnv, { sourcePosture: true })!;
+
+    expect(finding.name).toBe('NODE_ENV');
+    // `ok` renders `✓` and can never reach `hasWarnings` / `hasErrors`.
+    expect(finding.status).toBe('ok');
+    expect(finding.message).toContain('os dev');
+    expect(finding.message).toContain('os start');
+    expect(finding.message).not.toContain('treated as production');
+    // Nothing to fix, so nothing for `--verbose` to expand.
+    expect(finding.fix).toBeUndefined();
+  });
+
+  it("outside it: the #5673 warning and its fix, exactly what every existing caller gets", () => {
+    // The default IS "outside": a caller that never asked about the posture —
+    // every caller before #22163 — keeps the conservative row. The describe
+    // block above pins that row's halves; this pins that the explicit `false`
+    // is the same object, field for field.
+    const explicit = nodeEnvCheck({} as NodeJS.ProcessEnv, { sourcePosture: false });
+    expect(explicit).toEqual(nodeEnvCheck({} as NodeJS.ProcessEnv));
+    expect(explicit!.status).toBe('warning');
+    expect(explicit!.fix).toBeDefined();
+  });
+
+  it('a SET NODE_ENV prints no row in either posture', () => {
+    for (const sourcePosture of [true, false]) {
+      for (const value of ['production', 'development']) {
+        expect(nodeEnvCheck({ NODE_ENV: value } as NodeJS.ProcessEnv, { sourcePosture }), `${value}/${sourcePosture}`)
+          .toBeUndefined();
+      }
+    }
+  });
+});
+
+describe('[#22163] nodeEnvSourcePosture — the source checkout `os dev` serves', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'os-doctor-22163-posture-'));
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const write = (rel: string, body: string) => {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), body);
+  };
+  const NO_ENV = {} as NodeJS.ProcessEnv;
+  const CONFIG = 'export default {};\n';
+
+  it('a config alone is the source posture', () => {
+    write('objectstack.config.ts', CONFIG);
+    expect(nodeEnvSourcePosture(dir, NO_ENV)).toBe(true);
+  });
+
+  it('…and stays so beside its OWN compiled `dist/objectstack.json` — the file the first `os dev` writes', () => {
+    write('objectstack.config.ts', CONFIG);
+    write('dist/objectstack.json', '{}\n');
+    expect(nodeEnvSourcePosture(dir, NO_ENV)).toBe(true);
+  });
+
+  it('a config beside a NAMED artifact is not: OS_ARTIFACT_PATH elsewhere, or OS_ARTIFACT_URL', () => {
+    write('objectstack.config.ts', CONFIG);
+    const elsewhere = path.join(dir, 'release', 'objectstack.json');
+    expect(nodeEnvSourcePosture(dir, { OS_ARTIFACT_PATH: elsewhere } as NodeJS.ProcessEnv)).toBe(false);
+    expect(nodeEnvSourcePosture(dir, { OS_ARTIFACT_URL: 'https://example.invalid/a.json' } as NodeJS.ProcessEnv))
+      .toBe(false);
+  });
+
+  it('an artifact with no config, and a directory with neither, are not', () => {
+    expect(nodeEnvSourcePosture(dir, NO_ENV)).toBe(false);
+    write('dist/objectstack.json', '{}\n');
+    expect(nodeEnvSourcePosture(dir, NO_ENV)).toBe(false);
+  });
+
+  it('reads the artifact variables where `os dev` does: over the node_env=development `.env*` cascade', () => {
+    // `os dev` loads `.env*` for development BEFORE it resolves the rungs, so a
+    // reference committed to `.env.development` drives its boot — and is a named
+    // artifact here too.
+    write('objectstack.config.ts', CONFIG);
+    write('.env.development', 'OS_ARTIFACT_URL=https://example.invalid/a.json\n');
+    expect(nodeEnvSourcePosture(dir, NO_ENV)).toBe(false);
+  });
+
+  it('…and not over the production one, which `os dev` never loads', () => {
+    write('objectstack.config.ts', CONFIG);
+    write('.env.production', 'OS_ARTIFACT_URL=https://example.invalid/a.json\n');
+    expect(nodeEnvSourcePosture(dir, NO_ENV)).toBe(true);
   });
 });
 
@@ -224,4 +327,91 @@ describe('[#5673] os doctor, end to end — the row reaches the report', () => {
     expect(verbose.out).toContain('NODE_ENV=development');
     expect(verbose.out).toContain('NODE_ENV=production');
   }, E2E_TIMEOUT);
+
+  // ── #22163 — the posture decides which row, in the real report ──────────
+  //
+  // The case above IS the "empty directory" leg: its temp cwd holds only
+  // `node_modules/`, so it is outside the source posture and keeps the
+  // `warning`. The legs below add a config to the same cwd.
+  describe('[#22163] the source checkout `os dev` serves reads as development', () => {
+    const ARTIFACT_VARS = ['OS_ARTIFACT_URL', 'OS_ARTIFACT_PATH'] as const;
+    let savedArtifactVars: Record<string, string | undefined> = {};
+
+    beforeEach(() => {
+      savedArtifactVars = Object.fromEntries(ARTIFACT_VARS.map((k) => [k, process.env[k]]));
+      for (const k of ARTIFACT_VARS) delete process.env[k];
+      // The scaffold's own first line. Nothing under this temp cwd can resolve
+      // it (its `node_modules/` is empty), so the config LOAD fails — on
+      // purpose: the posture is read from the file's presence, never from a
+      // load, and these legs prove it by passing beside a failed one.
+      fs.writeFileSync(
+        path.join(tmp, 'objectstack.config.ts'),
+        "import { defineStack } from '@objectstack/spec';\nexport default defineStack({});\n",
+      );
+    });
+
+    afterEach(() => {
+      for (const k of ARTIFACT_VARS) {
+        if (savedArtifactVars[k] === undefined) delete process.env[k];
+        else process.env[k] = savedArtifactVars[k];
+      }
+    });
+
+    /** The report rows whose name column is `NODE_ENV`. */
+    const nodeEnvRows = (out: string) => out.split('\n').filter((line) => /^\s*\S+\s+NODE_ENV {2,}/.test(line));
+
+    it('(a) a config alone: the development row, beside a config that did not load', async () => {
+      delete process.env.NODE_ENV;
+
+      const run = await runDoctor();
+
+      const rows = nodeEnvRows(run.out);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toContain('✓');
+      expect(rows[0]).toContain('os dev');
+      expect(rows[0]).toContain('os start');
+      expect(run.out).not.toContain('treated as production');
+      // The load really failed, so the row above was not decided by it.
+      expect(run.out).toContain('Could not load config for analysis');
+      expect(run.exitCode).toBeUndefined();
+    }, E2E_TIMEOUT);
+
+    it('(b) …and still after the first `os dev` compiled it to `dist/objectstack.json`', async () => {
+      delete process.env.NODE_ENV;
+      fs.mkdirSync(path.join(tmp, 'dist'));
+      fs.writeFileSync(path.join(tmp, 'dist', 'objectstack.json'), '{}\n');
+
+      const run = await runDoctor();
+
+      const rows = nodeEnvRows(run.out);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toContain('os dev');
+      expect(run.out).not.toContain('treated as production');
+      expect(run.exitCode).toBeUndefined();
+    }, E2E_TIMEOUT);
+
+    it('(c) a config beside an OS_ARTIFACT_PATH naming another artifact: the #5673 warning', async () => {
+      delete process.env.NODE_ENV;
+      process.env.OS_ARTIFACT_PATH = path.join(tmp, 'release', 'objectstack.json');
+
+      const run = await runDoctor();
+
+      const rows = nodeEnvRows(run.out);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toContain('⚠');
+      expect(rows[0]).toContain('treated as production');
+      expect(run.exitCode).toBeUndefined();
+    }, E2E_TIMEOUT);
+
+    it('(e) NODE_ENV set in the source posture: no row at all', async () => {
+      for (const value of ['development', 'production']) {
+        process.env.NODE_ENV = value;
+
+        const run = await runDoctor();
+
+        expect(nodeEnvRows(run.out), value).toHaveLength(0);
+        expect(run.exitCode).toBeUndefined();
+      }
+    }, E2E_TIMEOUT * 2);
+  });
 });

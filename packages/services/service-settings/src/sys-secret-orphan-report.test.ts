@@ -43,7 +43,7 @@ import { describe, expect, it } from 'vitest';
 // devDependency here and `vitest.config.ts` already aliases it to SOURCE, so
 // this adds no dependency and no new alias.
 import { assertEngineUpdateDispatch, ObjectQL } from '@objectstack/objectql';
-import { SysSecret, SysSetting } from '@objectstack/platform-objects/system';
+import { SysPlatformSetting, SysSecret, SysSetting } from '@objectstack/platform-objects/system';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import type { CryptoHandle, ICryptoProvider } from '@objectstack/spec/contracts';
 import { SettingsService } from './settings-service.js';
@@ -241,7 +241,7 @@ async function boot(opts: { forwardContext?: boolean; withDelete?: boolean } = {
   const { driver, rowsOf } = makeMemoryDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  for (const o of [SysSetting, SysSecret]) {
+  for (const o of [SysSetting, SysPlatformSetting, SysSecret]) {
     engine.registry.registerObject(o as any, OWNER_PACKAGE);
   }
 
@@ -366,7 +366,7 @@ describe('#8103 reachability fact 2 — `sys_setting.value_enc` is NOT the only 
     const { driver, rowsOf } = makeMemoryDriver();
     engine.registerDriver(driver, true);
     await engine.init();
-    for (const o of [SysSetting, SysSecret]) {
+    for (const o of [SysSetting, SysPlatformSetting, SysSecret]) {
       engine.registry.registerObject(o as any, OWNER_PACKAGE);
     }
     // A perfectly ordinary business object carrying a `secret` field — the kind

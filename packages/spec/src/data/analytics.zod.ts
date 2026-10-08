@@ -172,7 +172,7 @@ function timeUpdateIntervalRefusalMessage(input: unknown): string {
       + `${declared}, so the name resolved to a refusal or to one group per distinct timestamp. `
       + `Ask for the coarsest interval that still answers your question (${declared}), or drop `
       + 'the key and group on the raw timestamp deliberately. '
-      + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.'
+      + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.'
     );
   }
   return (
@@ -229,7 +229,7 @@ export type TimeUpdateInterval = z.input<typeof TimeUpdateInterval>;
  * value still owes its author.
  */
 const CUBE_MEMBER_NAME_MIGRATE =
-  'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 const cubeMemberNameRemoved = (qualifiedKey: string, bag: 'measures' | 'dimensions', member: string) =>
   `\`${qualifiedKey}\` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — `
@@ -373,7 +373,7 @@ export const MetricSchema = lazySchema(() => strictObject(
         + '(canonical Query DSL FilterCondition), or declare the measure on an ADR-0021 dataset, whose '
         + 'measure takes a structured `filter` — a metric\'s own `sql` is a column reference and '
         + 'carries no condition. '
-        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
     },
   },
   {
@@ -517,7 +517,7 @@ const CUBE_JOIN_DERIVED_ON =
   + 'joined object and is the whole of the contract.';
 
 const CUBE_JOIN_MIGRATE =
-  'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 const CUBE_JOIN_SQL_REMOVED =
   '`joins.<alias>.sql` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it '
@@ -622,7 +622,7 @@ const CUBE_REFRESH_KEY_REMOVED =
   + 'nothing read it: no analytics result is cached, so neither `every` nor `sql` ever refreshed '
   + 'anything. Delete the key; every analytics query is computed when it is asked. A refresh cadence '
   + 'is declared again when a result cache exists. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * Cube Schema

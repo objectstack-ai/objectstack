@@ -141,7 +141,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       invite_user: {
         label: "邀请用户",
-        successMessage: "邀请已发送"
+        description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
+        successMessage: "已向 ${result.email} 发送邀请"
       },
       ban_user: {
         label: "封禁用户",
@@ -633,7 +634,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       invite_user: {
         label: "邀请用户",
-        successMessage: "邀请已发送"
+        description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
+        successMessage: "已向 ${result.email} 发送邀请"
       },
       add_member: {
         label: "添加成员",
@@ -734,7 +736,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       invite_user: {
         label: "邀请用户",
-        successMessage: "邀请已发送"
+        description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
+        successMessage: "已向 ${result.email} 发送邀请"
       },
       cancel_invitation: {
         label: "取消邀请",
@@ -3257,7 +3260,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "范围",
         help: "该记录所属的配置解析层级。",
         options: {
-          global: "全局",
           tenant: "租户",
           user: "用户"
         }
@@ -3276,7 +3278,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       locked: {
         label: "已锁定",
-        help: "为 true 时，较低范围的记录无法覆盖该值；对较低范围的写入会返回 409。平台管理员可借此为所有租户固定全局值（Phase 2 级联）。"
+        help: "为 true 时，较低范围的记录无法覆盖该值；对较低范围的写入会返回 409。租户行借此为该租户的用户固定其值（Phase 2 级联）。"
       },
       locked_reason: {
         label: "锁定原因",

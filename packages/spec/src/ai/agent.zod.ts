@@ -67,7 +67,7 @@ const JSON_ONLY_FORMAT_FIX =
   + 'Schema in `schema`, or `json_object` — or delete the `structuredOutput` block if the agent needs '
   + 'no output contract; at `agent.structuredOutput.fallbackFormat`, name one of those two or delete '
   + 'the key. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 const STRUCTURED_OUTPUT_FORMAT_RETIRED = {
   regex:
@@ -93,7 +93,7 @@ const COERCE_TYPES_RETIRED =
   + 'whose `agent.structuredOutput.transformPipeline` lists it before its first turn. Delete the '
   + 'step and declare the exact types in `schema`, so the answer is validated as the model wrote '
   + 'it; `trim`, `parse_json` and `validate` are unchanged. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * Structured Output Format
@@ -200,7 +200,7 @@ const LONG_TERM_STORE_RETIRED =
   + '`vector` store (the old default) and `redis` before an agent\'s first turn. Delete the key; '
   + 'long-term memory is configured by `enabled`, `maxEntries` and '
   + '`agent.memory.reflectionInterval`, and where the notes are kept is the platform\'s choice. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 const LONG_TERM_STORE_SPELLING_RETIRED =
   'there is no storage-backend key on long-term memory — where the notes are kept is the '
@@ -366,7 +366,7 @@ export const AgentSchema = lazySchema(() => strictObject({
     + '`instructions` and `tools`, selected by its `triggerConditions` (ADR-0064); multi-step '
     + 'process orchestration is a Flow (ADR-0019); a record\'s status transitions are a '
     + '`state_machine` validation rule on the object (ADR-0020). '
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   /**
@@ -416,7 +416,7 @@ export const AgentSchema = lazySchema(() => strictObject({
     'RUNTIME half (tool resolution, which lives in cloud `service-ai`), not this ' +
     'rejection: the authoring invariant binds you here, and ADR-0109 ' +
     '(Accepted — implemented) is the in-repo record that carries it. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   /** Knowledge */
@@ -432,7 +432,7 @@ export const AgentSchema = lazySchema(() => strictObject({
     'the agent record. Delete the block. Restrict retrieval at the knowledge-service / ' +
     'source level (per-source permissions), and describe intended grounding in ' +
     '`instructions` so the model asks for the right sources. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   /** Interface */

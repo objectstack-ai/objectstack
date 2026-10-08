@@ -40,7 +40,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
-import { SysSecret, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
+import { SysPlatformSetting, SysSecret, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import {
@@ -51,6 +51,7 @@ import {
 import {
   buildConfigChangeAuditSink,
   CONFIG_CHANGE_ACTION,
+  CONFIG_CHANGE_GLOBAL_OBJECT_NAME,
   CONFIG_CHANGE_OBJECT_NAME,
 } from './config-change-audit.js';
 import { registerSettingsRoutes } from './settings-routes.js';
@@ -122,6 +123,9 @@ function makeMemoryDriver() {
   const matches = (row: Record<string, unknown>, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
     return Object.entries(where).every(([k, v]) => {
+      // `$or` is the one combinator the settings reads emit (ADR-0131 D7: every
+      // `sys_setting` read names its rungs); anything else still refuses.
+      if (k === '$or') return (v as any[]).some((b) => matches(row, b));
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       return (row[k] ?? null) === (v ?? null);
     });
@@ -227,6 +231,7 @@ async function bootPlugin(opts: BootOptions = {}) {
   engine.registerDriver(driver, true);
   await engine.init();
   engine.registry.registerObject(SysSetting as any, OWNER_PACKAGE);
+  engine.registry.registerObject(SysPlatformSetting as any, OWNER_PACKAGE);
   engine.registry.registerObject(SysSettingAudit as any, OWNER_PACKAGE);
   // [#21516] A secret-typed setting writes through `sys_secret`; the engine
   // refuses a name its registry does not hold, so the harness registers it as
@@ -306,8 +311,14 @@ async function bootPlugin(opts: BootOptions = {}) {
     ledgerOpts: () => ledgerInserts.map((i) => i.opts),
     /** REAL `sys_setting_audit` rows, read out of the driver's store. */
     settingAuditRows: () => [...rowsOf('sys_setting_audit').values()],
-    /** REAL `sys_setting` rows. */
-    settingRows: () => [...rowsOf('sys_setting').values()],
+    /**
+     * REAL settings rows of this file's manifest. It is `scope: 'global'`, so
+     * they are `sys_platform_setting` rows — the global rung's own store
+     * (ADR-0131 D7) — and `sys_setting` stays empty.
+     */
+    settingRows: () => [...rowsOf('sys_platform_setting').values()],
+    /** REAL `sys_setting` rows — the tenant and user rungs. */
+    scopedSettingRows: () => [...rowsOf('sys_setting').values()],
     logged,
     /** [#18368] Every captured line with the channel it arrived on. */
     loggedAt,
@@ -358,7 +369,11 @@ describe('#8145 — a settings write reaches sys_audit_log as `config_change`', 
     expect(rows).toHaveLength(1);
     expect(rows[0].action).toBe(CONFIG_CHANGE_ACTION);
     expect(rows[0].action).toBe('config_change');
-    expect(rows[0].object_name).toBe(CONFIG_CHANGE_OBJECT_NAME);
+    // [ADR-0131 D7] This manifest is global, so the row names the global
+    // rung's own store; a tenant-scope change names `sys_setting` (pinned below).
+    expect(rows[0].object_name).toBe(CONFIG_CHANGE_GLOBAL_OBJECT_NAME);
+    expect(rows[0].object_name).toBe('sys_platform_setting');
+    expect(boot.scopedSettingRows()).toHaveLength(0);
     // A settings row has no single id — the composite key is in `metadata`.
     expect(rows[0].record_id).toBeNull();
     // Attribution: both channels, per ADR-0014 D2.
@@ -383,6 +398,22 @@ describe('#8145 — a settings write reaches sys_audit_log as `config_change`', 
       key: 'workspace_name',
       scope: 'global',
     });
+  });
+
+  it('[ADR-0131 D7] a TENANT-scope change names `sys_setting`, where its row landed', async () => {
+    const boot = await bootPlugin({ userId: 'usr_admin', tenantId: 'org_1' });
+    boot.service.registerManifest({ ...manifest, namespace: 'branding_tenant_test', scope: 'tenant' });
+
+    await boot.service.setMany('branding_tenant_test', { workspace_name: 'ObjectStack' }, boot.writeCtx);
+
+    const rows = boot.ledgerRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].object_name).toBe(CONFIG_CHANGE_OBJECT_NAME);
+    expect(rows[0].object_name).toBe('sys_setting');
+    // …and the two stores agree with the ledger: the row is a `sys_setting`
+    // row, and the global rung's store took nothing.
+    expect(boot.scopedSettingRows()).toHaveLength(1);
+    expect(boot.settingRows()).toHaveLength(0);
   });
 
   it('records one row per CHANGED KEY, not one per request', async () => {
@@ -581,6 +612,7 @@ describe('#8145 — a refused write emits NO config_change row', () => {
     engine.registerDriver(driver, true);
     await engine.init();
     engine.registry.registerObject(SysSetting as any, OWNER_PACKAGE);
+    engine.registry.registerObject(SysPlatformSetting as any, OWNER_PACKAGE);
     engine.registry.registerObject(SysSettingAudit as any, OWNER_PACKAGE);
     // [#21516] A secret-typed setting writes through `sys_secret`; the engine
     // refuses a name its registry does not hold, so the harness registers it as
