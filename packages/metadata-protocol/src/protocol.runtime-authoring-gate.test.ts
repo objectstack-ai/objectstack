@@ -1617,9 +1617,10 @@ describe('public-form intake advisory on save and publish (#21476)', () => {
  *
  * The read-path half — a row stored before the gate still reads `null`, and
  * the engine says so once per (object, field) — is `@objectstack/objectql`'s
- * `engine-formula-fault-log.test.ts`. The fence that keeps every OTHER
- * object-borne expression pass off this door is pinned in `@objectstack/lint`'s
- * `runtime-gate.object-formula-writes.test.ts`.
+ * `engine-formula-fault-log.test.ts`. Every other pass over the object's body
+ * joined this door in #22032's passes 1–4 (the blocks below), and the pin that
+ * all of them judge here — and no pass over another collection of the stack —
+ * is in `@objectstack/lint`'s `runtime-gate.object-formula-writes.test.ts`.
  *
  * ⚠️ This package's tests reach `@objectstack/lint` through its `exports`, i.e.
  * its built `dist/` (no vitest alias pulls it back to source — the pair is on
@@ -1745,8 +1746,9 @@ describe('runtime authoring gate on OBJECT writes — the formula field verdict 
  *  (d) for each refused body the door's issues and the build's findings are
  *      the same findings: rule, location, message and hint.
  *
- * The `when` / nested `then` / `otherwise` reach and the fence over the other
- * object-borne passes are pinned in `@objectstack/lint`'s
+ * The `when` / nested `then` / `otherwise` reach and the pin over every
+ * object-borne pass (the others joined in passes 2–4, the blocks below) are
+ * pinned in `@objectstack/lint`'s
  * `runtime-gate.object-validation-writes.test.ts` and
  * `runtime-gate.object-formula-writes.test.ts`.
  *
@@ -1885,11 +1887,12 @@ describe('runtime authoring gate on OBJECT writes — the validation-rule verdic
  *      the same findings: rule, location, message and hint.
  *
  * Every gate of the pass (the root verdict, the null guard, the traversal
- * refusal, the retired `conditionalRequired`) and the fence over the object's
- * action predicates are pinned in `@objectstack/lint`'s
+ * refusal, the retired `conditionalRequired`) and the pin over every
+ * object-borne pass are pinned in `@objectstack/lint`'s
  * `runtime-gate.object-field-rule-writes.test.ts` and
- * `runtime-gate.object-formula-writes.test.ts`; option `visibleWhen` joined
- * the door in pass 3 (the block below).
+ * `runtime-gate.object-formula-writes.test.ts`; option `visibleWhen` and the
+ * object's own action predicates joined the door in passes 3 and 4 (the
+ * blocks below).
  *
  * ⚠️ As in the #22019 block above: this package reaches `@objectstack/lint`
  * through its built `dist/`, so an edit to the rule is invisible here until
@@ -2053,10 +2056,10 @@ describe('runtime authoring gate on OBJECT writes — the field-rule-slot verdic
  *      the same findings: rule, location, message and hint.
  *
  * The rest of the pass's findings, the `current_user` contrast with the
- * field's own slot, and the fence over the object's action predicates are
- * pinned in `@objectstack/lint`'s
- * `runtime-gate.object-option-visibility-writes.test.ts` and
- * `runtime-gate.object-formula-writes.test.ts`.
+ * field's own slot, and the pin over every object-borne pass are pinned in
+ * `@objectstack/lint`'s `runtime-gate.object-option-visibility-writes.test.ts`
+ * and `runtime-gate.object-formula-writes.test.ts`; the object's own action
+ * predicates joined the door in pass 4 (the last block of this file).
  *
  * ⚠️ As in the #22019 block above: this package reaches `@objectstack/lint`
  * through its built `dist/`, so an edit to the rule is invisible here until
@@ -2482,5 +2485,201 @@ describe('runtime authoring gate on OBJECT writes — a conditional rule\'s nest
         }
         // And the valid rule is clean at the build too, not just at the door.
         expect(buildFindings(fxNested(VALID))).toEqual([]);
+    });
+});
+
+/**
+ * [#22032, pass 4] The object save door gives the build's verdict on the
+ * object's own action predicates.
+ *
+ * The same `formulas.mdx` sentence covers an action's `visible` and
+ * `disabled`: the shared validator backs `os build` and metadata registration.
+ * After pass 3 the build's expression rule ran every other pass over the
+ * object's body on this door and kept the object action loop fenced, so an
+ * action whose `visible` read a bare field (`amount > 1`) still saved with a
+ * 200, while `os build` refused it at `error`.
+ *
+ * The lift is in `@objectstack/lint` (the object action loop's object-write
+ * guard is gone); no code here moves. Pinned through the REAL `saveMetaItem` /
+ * `publishMetaItem` / `publishPackageDrafts`:
+ *
+ *  (a) the door refuses a bare reference and an unregistered function in
+ *      `visible`, and a bare reference in `disabled` — a 422
+ *      `INVALID_METADATA` carrying the build's located finding — on an active
+ *      save, on a draft's promotion and on a package's draft publish, and
+ *      nothing lands;
+ *  (b) the shapes the platform and the examples ship still save: a `record`
+ *      comparison, a `current_user.positions` role gate, a
+ *      `current_user.isPlatformAdmin` check, a `features.*` switch and a
+ *      boolean `disabled`;
+ *  (c) a stored sibling whose actions the build refuses does not block a clean
+ *      save of this object (#22118's baseline);
+ *  (d) for each refused object body the door's issues and the build's findings
+ *      are the same findings: rule, location, message and hint.
+ *
+ * The rest of the pass's findings, the location an action also declared
+ * top-level takes at each door, and the stored-self cases are pinned in
+ * `@objectstack/lint`'s `runtime-gate.object-action-predicate-writes.test.ts`;
+ * the pin over every object-borne pass is in
+ * `runtime-gate.object-formula-writes.test.ts`.
+ *
+ * ⚠️ As in the #22019 block above: this package reaches `@objectstack/lint`
+ * through its built `dist/`, so an edit to the rule is invisible here until
+ * `pnpm --filter @objectstack/lint build` has run.
+ */
+describe('runtime authoring gate on OBJECT writes — the object action predicate verdict (#22032 pass 4)', () => {
+    /** `sharingModel` is authored so `security-owd-unset` stays quiet and the refusal is the action's. */
+    const fxAction = (visible: unknown, disabled?: unknown, name = 'fx_action') => ({
+        name,
+        label: 'Action Probe',
+        sharingModel: 'private',
+        fields: {
+            name: { type: 'text', label: 'Name' },
+            amount: { type: 'number', label: 'Amount' },
+            status: { type: 'text', label: 'Status' },
+        },
+        actions: [
+            {
+                name: 'fx_close',
+                label: 'Close',
+                type: 'script',
+                target: 'close',
+                visible,
+                ...(disabled === undefined ? {} : { disabled }),
+            },
+        ],
+    });
+    /** The clean `visible` every `disabled` body rides beside. */
+    const OPEN = "record.status == 'open'";
+    /** One refused body per key and finding kind, each refused by `os build` at `error`; the first is the card's shape. */
+    const REFUSED = [
+        { key: 'visible', body: 'amount > 1', subject: 'bare reference `amount`' },
+        { key: 'visible', body: 'sqrt(record.amount) > 1', subject: '`sqrt`' },
+        { key: 'disabled', body: 'amount > 1', subject: 'bare reference `amount`' },
+    ] as const;
+    const bodyFor = ({ key, body }: { key: 'visible' | 'disabled'; body: unknown }) =>
+        key === 'visible' ? fxAction(body) : fxAction(OPEN, body);
+    /** Where the build locates the refused action's finding — the action the author edits. */
+    const whereOf = (key: 'visible' | 'disabled') => `object 'fx_action' · action 'fx_close' ${key}`;
+    /** The shapes the platform's objects and the examples ship. */
+    const ACCEPTED = [
+        fxAction(OPEN, "record.status == 'closed'"),
+        fxAction("'org_admin' in current_user.positions", true),
+        fxAction('current_user.isPlatformAdmin == true'),
+        fxAction('features.organization != false'),
+    ];
+
+    const actionRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'object' && r.name === 'fx_action');
+
+    /** The build's findings for one object, through the build's own entry. */
+    const buildFindings = (obj: unknown) => {
+        const stack = { objects: [obj] };
+        return runAuthoringRules('build', { normalized: stack, parsed: stack })
+            .filter((f) => f.rule === EXPRESSION_INVALID);
+    };
+
+    for (const refused of REFUSED) {
+        const { key, body, subject } = refused;
+        it(`(a) REFUSES an active save of an action's \`${key}: ${body}\` with a 422 carrying the build's located finding`, async () => {
+            const { protocol, rows } = makeProtocol();
+
+            const err = await protocol
+                .saveMetaItem({ type: 'object', name: 'fx_action', item: bodyFor(refused) })
+                .catch((e: any) => e);
+
+            expect(err, 'the save resolved — the door still accepts the action predicate').toBeInstanceOf(Error);
+            expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            expect(err.rulesRun).toContain('validateStackExpressions');
+            const issues = err.issues.filter((i: any) => i.rule === EXPRESSION_INVALID);
+            expect(issues, `issues: ${JSON.stringify(err.issues)}`).toHaveLength(1);
+            expect(issues[0].path).toBe(whereOf(key));
+            expect(issues[0].where).toBe(whereOf(key));
+            expect(issues[0].severity).toBe('error');
+            // The named subject: what the author typed, as the build names it.
+            expect(issues[0].message).toContain(subject);
+            // And nothing landed — a gate that refuses after persisting is a log line.
+            expect(actionRows(rows)).toEqual([]);
+        });
+    }
+
+    it("(a) REFUSES the card-shaped body on a draft's PROMOTION — the draft door is not a bypass", async () => {
+        const { protocol } = makeProtocol();
+        // A draft save is never gated (#4463 D1): the author may keep a half-finished object.
+        await expect(
+            protocol.saveMetaItem({ type: 'object', name: 'fx_action', item: bodyFor(REFUSED[0]), mode: 'draft' }),
+        ).resolves.toMatchObject({ success: true });
+
+        const err = await protocol.publishMetaItem({ type: 'object', name: 'fx_action' }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID);
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(issue.path).toBe(whereOf('visible'));
+    });
+
+    it("(a) REFUSES the card-shaped body on a PACKAGE's draft publish — nothing goes live", async () => {
+        const { protocol, rows } = makeProtocol();
+        await expect(
+            protocol.saveMetaItem({
+                type: 'object', name: 'fx_action', item: bodyFor(REFUSED[0]), mode: 'draft', packageId: 'app.fx',
+            }),
+        ).resolves.toMatchObject({ success: true });
+
+        const res = await protocol.publishPackageDrafts({ packageId: 'app.fx' });
+
+        expect(res.outcome, JSON.stringify(res)).toBe('refused');
+        expect(res.publishedCount).toBe(0);
+        expect(res.failed).toEqual([expect.objectContaining({ type: 'object', name: 'fx_action', code: 'INVALID_METADATA' })]);
+        expect(actionRows(rows).map((r) => r.state)).toEqual(['draft']);
+    });
+
+    for (const [i, item] of ACCEPTED.entries()) {
+        it(`(b) a shipped action shape still saves, and the row lands (#${i}: ${JSON.stringify(item.actions[0].visible)})`, async () => {
+            const { protocol, rows } = makeProtocol();
+
+            const result = await protocol.saveMetaItem({ type: 'object', name: 'fx_action', item });
+
+            expect(result.success).toBe(true);
+            expect(actionRows(rows).map((r) => r.state)).toEqual(['active']);
+            // Clean at the build too, not only at this door.
+            expect(buildFindings(item)).toEqual([]);
+        });
+    }
+
+    it("(c) a stored sibling whose actions the build refuses does not block a clean save", async () => {
+        const sibling = fxAction(REFUSED[0].body, REFUSED[2].body, 'fx_sibling');
+        // Non-vacuous: the sibling is refused at the build.
+        expect(buildFindings(sibling).length).toBeGreaterThan(0);
+        const { engine, rows } = makeStubEngine();
+        engine.registry.listItems = (type: string) => (type === 'object' ? [sibling] : []);
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+
+        const result = await protocol.saveMetaItem({ type: 'object', name: 'fx_action', item: fxAction(OPEN) });
+
+        expect(result.success).toBe(true);
+        expect(actionRows(rows).map((r) => r.state)).toEqual(['active']);
+    });
+
+    it('(d) the door and `os build` give the SAME findings for each refused object body', async () => {
+        for (const refused of REFUSED) {
+            const { protocol } = makeProtocol();
+            const err = await protocol
+                .saveMetaItem({ type: 'object', name: 'fx_action', item: bodyFor(refused) })
+                .catch((e: any) => e);
+            const atDoor = (err.issues ?? []).filter((i: any) => i.rule === EXPRESSION_INVALID);
+
+            const atBuild = buildFindings(bodyFor(refused));
+
+            // Non-vacuous on both sides: one finding each, and an error at the build.
+            expect(atBuild, `${refused.key}: ${refused.body}`).toHaveLength(1);
+            expect(atBuild[0]!.severity).toBe('error');
+            expect(atDoor, `${refused.key}: ${refused.body}`).toHaveLength(1);
+            // Compared key by key — the door reuses the build's call, so a reworded
+            // or relocated door verdict is a second dialect, and red.
+            for (const k of ['rule', 'where', 'path', 'message', 'hint'] as const) {
+                expect(atDoor[0][k], `door and build disagree on '${k}' for ${refused.key}: ${refused.body}`).toBe(atBuild[0]![k]);
+            }
+        }
     });
 });
