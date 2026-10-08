@@ -39,6 +39,7 @@ import {
   registerGrantPermissionSetNameHooks,
   unregisterGrantPermissionSetNameHooks,
 } from './grant-permission-set-name.js';
+import { runOneTimeGrantPermissionSetNameBackfill } from './grant-permission-set-name-backfill.js';
 import {
   explainAccess,
   buildContextForUser,
@@ -96,7 +97,7 @@ import {
   PLATFORM_OWNER_WALL_BYPASS_EVENT,
   isVerifiedPlatformOwnerRow,
 } from './platform-owner-wall-bypass.js';
-import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim } from '@objectstack/core';
+import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim, createSecurityCatalogReader } from '@objectstack/core';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
 import {
   isPlatformOwnershipFloorPolicy,
@@ -4810,6 +4811,34 @@ export class SecurityPlugin implements Plugin {
       (ctx as any).hook('kernel:ready', runBootstrap);
     } else {
       void runBootstrap();
+    }
+
+    // [ADR-0131 D4] Name the permission set on every grant written before
+    // `sys_user_permission_set.permission_set` existed — once per deployment,
+    // recorded in `sys_migration`. At `kernel:bootstrapped`, not `kernel:ready`:
+    // every `kernel:ready` handler has settled by then (the bootstrap above that
+    // seeds the catalog rows among them), so the security catalog read each
+    // name is verified through sees every definition this boot registers. A
+    // name it still does not resolve leaves the verdict unrecorded, so the next
+    // boot tries again. See `grant-permission-set-name-backfill.ts`.
+    const runGrantNameBackfill = async (): Promise<void> => {
+      try {
+        await runOneTimeGrantPermissionSetNameBackfill(ql as any, {
+          catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
+          logger: ctx.logger,
+        });
+      } catch (e) {
+        ctx.logger.warn(
+          '[security] the sys_user_permission_set name backfill did not run — grants written before the ' +
+            'permission_set column existed keep no name until a later boot runs it',
+          { error: (e as Error)?.message },
+        );
+      }
+    };
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('kernel:bootstrapped', runGrantNameBackfill);
+    } else {
+      void runGrantNameBackfill();
     }
 
     // ── Project the permission sets of a package that arrives AFTER the boot ──
