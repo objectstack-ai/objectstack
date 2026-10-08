@@ -52,7 +52,9 @@
  *                   scale: 2` refuses `1234.5`. A fraction-stored `percent` is
  *                   always counted two places further right. No column change.
  *  - format         email / url / phone   (lightweight RFC-aware regex)
- *  - select / multiselect: value must appear in `options`
+ *  - select / multiselect: value must appear in `options`, or be one the write
+ *                   names for the field in `keptOptionValues` (an import's kept
+ *                   cell, #22183)
  *  - boolean / toggle: must coerce to boolean
  *  - date / datetime: must be ISO-parsable, naming a year from 0001 to 9999
  *                   for a `date` and from 1000 to 9999 for a `datetime` (#20280);
@@ -992,6 +994,10 @@ function validateOne(
   // constraint — see {@link ReadonlyValueScope}. Each `if (shapeOnly) return
   // null` below sits where an arm's shape test ends and its constraints begin.
   shapeOnly = false,
+  // [#22183] The values outside `def.options` this write admits for this field
+  // — the cells an import kept (`ValidateRecordOptions.keptOptionValues`).
+  // Read by the two option arms only; every other arm ignores it.
+  keptOptions: readonly string[] = [],
 ): FieldValidationError | null {
   const fail = (
     code: FieldErrorCode,
@@ -1496,7 +1502,9 @@ function validateOne(
     if (shapeOnly) return null;
     const allowed = optionValues(def.options);
     if (picklist !== undefined && allowed.length === 0) return picklistUnresolved();
-    if (allowed.length > 0 && !allowed.includes(String(value))) {
+    // [#22183] A value an import kept is admitted on that write; the list is
+    // not widened, so the refusal below still names the declared options.
+    if (allowed.length > 0 && !allowed.includes(String(value)) && !keptOptions.includes(String(value))) {
       return fail(
         'invalid_option',
         { allowed: allowed.join(', ') },
@@ -1528,7 +1536,8 @@ function validateOne(
       return picklist !== undefined && value.length > 0 ? picklistUnresolved() : null;
     }
     for (const v of value) {
-      if (!allowed.includes(String(v))) {
+      // [#22183] Each item an import kept is admitted on that write, and only it.
+      if (!allowed.includes(String(v)) && !keptOptions.includes(String(v))) {
         return fail(
           'invalid_option',
           { allowed: allowed.join(', ') },
@@ -1861,6 +1870,33 @@ export interface ValidateRecordOptions {
    * truthiness test on a path that is already building an error message.
    */
   onAdmittedValueShapeViolation?: AdmittedValueShapeViolationSink;
+
+  /**
+   * [#22183] Per field name, the values outside the field's options that THIS
+   * write admits: the cells a data import kept because they matched no option
+   * (`ImportRequest.createMissingOptions`). The engine passes the write's
+   * `ExecutionContext.keptOptionValues` here; the import runner is its one
+   * producer.
+   *
+   * Read by the `select` / `radio` and multi-value option arms only, and only
+   * as "this exact value is admitted": every other value outside the options is
+   * refused as before, the refusal still names the declared options, and a
+   * picklist that did not resolve stays refused. Omitted — every write but an
+   * import that kept a value — means no value is admitted beyond the options.
+   */
+  keptOptionValues?: Readonly<Record<string, readonly string[]>>;
+}
+
+/**
+ * [#22183] The kept values {@link ValidateRecordOptions.keptOptionValues} names
+ * for one field, or none. Only an array is a list of kept values.
+ */
+function keptOptionsFor(
+  kept: ValidateRecordOptions['keptOptionValues'],
+  name: string,
+): readonly string[] {
+  const values = kept?.[name];
+  return Array.isArray(values) ? values : [];
 }
 
 /**
@@ -1911,6 +1947,7 @@ export function validateRecordInScope(
   const valueStrict = options.valueShapeStrict === true;
   const messages = options.messages;
   const onAdmitted = options.onAdmittedValueShapeViolation;
+  const kept = options.keptOptionValues;
 
   if (mode === 'insert') {
     // Walk all declared fields — required check applies even when
@@ -1920,7 +1957,7 @@ export function validateRecordInScope(
       // [#21663] A readonly value: its SHAPE, never required (the engine owns
       // its presence) and never a constraint — see ReadonlyValueScope.
       const shapeOnly = def.readonly === true;
-      const err = validateOne(name, def, data[name], shapeOnly, mediaStrict, messages, valueStrict, onAdmitted, shapeOnly);
+      const err = validateOne(name, def, data[name], shapeOnly, mediaStrict, messages, valueStrict, onAdmitted, shapeOnly, keptOptionsFor(kept, name));
       if (err) errors.push(err);
     }
   } else {
@@ -1955,7 +1992,7 @@ export function validateRecordInScope(
       // skipRequired: PATCH-omitted fields must not 400. (No def clone — the
       // registry's own field object flows through so the ADR-0104 value-shape
       // schema cache, keyed on def identity, hits.)
-      const err = validateOne(name, def, value, true, mediaStrict, messages, valueStrict, onAdmitted);
+      const err = validateOne(name, def, value, true, mediaStrict, messages, valueStrict, onAdmitted, false, keptOptionsFor(kept, name));
       if (err) errors.push(err);
     }
   }

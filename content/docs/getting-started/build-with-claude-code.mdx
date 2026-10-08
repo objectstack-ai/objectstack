@@ -96,8 +96,8 @@ language:
 > description, a `priority` select (low/normal/high/urgent) and a `status` select
 > (open/pending/resolved/closed). Add a **Resolve** action that only shows on
 > tickets that aren't already resolved or closed. Add a list view (subject,
-> status, priority) with an "Open tickets" filter, and an app with a Support nav
-> group. Run `npm run validate` when you're done.
+> status, priority) with an "Open tickets" filter, a form for entering tickets,
+> and an app with a Support nav group. Run `npm run validate` when you're done.
 
 You don't specify field types in TypeScript, wire barrel exports, or remember the
 CEL scoping rules — the agent does, because the skills told it how.
@@ -198,6 +198,17 @@ export const TicketViews = defineView({
       sort: [{ field: 'priority', order: 'desc' }],
     },
   },
+  form: {
+    type: 'simple',
+    data,
+    sections: [
+      {
+        name: 'ticket',
+        label: 'Ticket',
+        fields: [{ field: 'subject' }, { field: 'description' }, { field: 'priority' }, { field: 'status' }],
+      },
+    ],
+  },
 });
 ```
 
@@ -237,6 +248,12 @@ passes an unregistered one, the `os dev` boot log warns
 `[action-governance] declared script actions with NO handler`, and the button
 fails when clicked (the
 [two paths](/docs/ui/actions#give-it-server-behavior--two-paths) a handler takes).
+
+The view file also declares the create and edit **form**, and the form is where the
+long-text `description` is entered and shown. The list columns leave it out, so the
+form is the only metadata that names it. A field that no consumer names (a view, a form, a
+flow, a formula or an action, among the others the rule counts) gets an advisory
+`field-no-consumers` warning from `os validate`.
 
 The agent also **exports each new file from its directory's barrel** — the object
 from `src/objects/index.ts`, and the action, view and app from
@@ -313,6 +330,8 @@ Once it's clean:
 
   Data: 2 Objects  6 Fields
   UI: 1 Apps  1 Views  1 Actions
+  Logic: 0 Flows
+  Security: 0 Positions  0 Permissions
   Runtime: 3 plugins
 ```
 

@@ -136,10 +136,16 @@ export const Ticket = ObjectSchema.create({
 });
 ```
 
-The REST API exists the moment the object does — no controllers to write:
+The REST API exists the moment the object does — no controllers to write. It
+runs under the same permissions as the UI, so a data call needs a session: sign
+in once as the dev admin `os dev` seeds on an empty database, then call it.
 
 ```bash
-curl http://localhost:3000/api/v1/data/support_desk_ticket
+curl -c cookies.txt -X POST http://localhost:3000/api/v1/auth/sign-in/email \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@objectos.ai","password":"admin123"}'
+
+curl -b cookies.txt http://localhost:3000/api/v1/data/support_desk_ticket
 ```
 
 In the browser, the typed client SDK and React hooks (`useQuery`, `useMutation`,

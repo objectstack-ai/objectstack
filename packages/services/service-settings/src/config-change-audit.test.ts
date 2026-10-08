@@ -95,9 +95,8 @@ const manifest: SettingsManifest = {
  * So the registry gets a declaration under that name and nothing more. The ROW
  * is still asserted at the engine seam, where the real object's absence does not
  * matter; what this buys is that `getSchema('sys_audit_log')` answers, which is
- * the only thing the mount probe reads. It deliberately declares NO
- * `organization_id`, so `makeFieldProbe`'s answer — and therefore every row
- * asserted in this file — is byte-for-byte what it was before this existed.
+ * the only thing the mount probe reads. Like the shipped ledger (ADR-0131 D7)
+ * it declares NO `organization_id`, and the sink stamps none.
  */
 const LEDGER_MOUNT_STANDIN = {
   name: 'sys_audit_log',
@@ -379,8 +378,12 @@ describe('#8145 — a settings write reaches sys_audit_log as `config_change`', 
     // Attribution: both channels, per ADR-0014 D2.
     expect(rows[0].user_id).toBe('usr_admin');
     expect(rows[0].actor).toBe('usr_admin');
-    // Tenant context — without it RLS hides the row from non-platform readers.
-    expect(rows[0].tenant_id).toBe('org_1');
+    // [ADR-0131 D7] A global-scope change is about no organization, so its row
+    // carries no `tenant_id` although the writing session has `org_1` active:
+    // the ledger's organization row scope keeps it from that organization's
+    // readers. A tenant-scope change keeps the organization (pinned below).
+    expect(rows[0].tenant_id).toBeNull();
+    expect('organization_id' in rows[0]).toBe(false);
     // Written as the platform, on an append-only, all-`readonly` table.
     expect(boot.ledgerOpts()[0]?.context).toMatchObject({ isSystem: true });
 
@@ -410,6 +413,9 @@ describe('#8145 — a settings write reaches sys_audit_log as `config_change`', 
     expect(rows).toHaveLength(1);
     expect(rows[0].object_name).toBe(CONFIG_CHANGE_OBJECT_NAME);
     expect(rows[0].object_name).toBe('sys_setting');
+    // CONTROL for the global case above: a tenant-scope change IS about the
+    // writing organization, so its row keeps it in the attribution field.
+    expect(rows[0].tenant_id).toBe('org_1');
     // …and the two stores agree with the ledger: the row is a `sys_setting`
     // row, and the global rung's store took nothing.
     expect(boot.scopedSettingRows()).toHaveLength(1);

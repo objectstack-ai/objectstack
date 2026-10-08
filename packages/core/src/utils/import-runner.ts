@@ -5,6 +5,7 @@ import { coerceRow, type RefResolver, type RefMatch } from './import-coerce.js';
 import type { ExportFieldMeta } from './import-field-meta.js';
 import type { ValidationMessageTranslator } from '@objectstack/spec/system';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { CreateDataRequest, FindDataRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from './bulk-write.js';
 import { isUniqueViolationError, uniqueViolationColumn, isEngineDuplicateRecordEnvelope, mapDataError } from '@objectstack/types';
@@ -232,6 +233,9 @@ export interface RunImportOptions {
   treatAsHistorical?: boolean;
   trimWhitespace: boolean;
   nullValues?: string[];
+  /** #22183 — keep a select / multiselect cell that matches no option. Each
+   *  write carries the values its rows kept as `keptOptionValues` on the write
+   *  context, the one signal the engine's option check admits them by. */
   createMissingOptions: boolean;
   skipBlankMatchKey: boolean;
   /**
@@ -667,6 +671,27 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   };
 
   /**
+   * [#22183] The write context for rows whose coercion KEPT option values
+   * (`createMissingOptions`): {@link writeCtx} plus exactly those values, per
+   * field, as `keptOptionValues` — the declared signal the engine's option
+   * check admits them by, on that write only. A batch write carries the union
+   * of its rows' values, because one call carries one context. Rows that kept
+   * nothing (every row, when the option is off) get `writeCtx` itself, so a
+   * normal import's writes are unchanged.
+   */
+  const writeCtxFor = (kept: ReadonlyArray<Record<string, string[]> | undefined>) => {
+    const union: NonNullable<ExecutionContext['keptOptionValues']> = {};
+    for (const rowKept of kept) {
+      if (!rowKept) continue;
+      for (const [field, values] of Object.entries(rowKept)) {
+        const into = Object.prototype.hasOwnProperty.call(union, field) ? union[field] : (union[field] = []);
+        for (const v of values) if (!into.includes(v)) into.push(v);
+      }
+    }
+    return Object.keys(union).length > 0 ? { ...writeCtx, keptOptionValues: union } : writeCtx;
+  };
+
+  /**
    * The dry run's verdict for one coerced row — asked of the engine, never
    * derived here (#4633 ruling D). `null` means this protocol offers no
    * validate-only operation, so no engine verdict exists to report; the caller
@@ -686,14 +711,16 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   const previewVerdict = async (
     data: Record<string, any>,
     mode: 'insert' | 'update',
+    rowCtx: typeof writeCtx,
   ): Promise<NonNullable<ValidateDataResponse['results']>[number] | null> => {
     if (typeof p.validateData !== 'function') return null;
     const res = await p.validateData({
       object: objectName, data, mode,
       // The SAME context the write would carry, so a historical import's
-      // `skipStateMachine` and the caller's locale reach validation here
-      // exactly as they reach it on the write path.
-      context: writeCtx,
+      // `skipStateMachine`, the caller's locale and the row's kept option
+      // values (#22183) reach validation here exactly as they reach it on the
+      // write path.
+      context: rowCtx,
       ...(environmentId ? { environmentId } : {}),
     });
     return res?.results?.[0] ?? null;
@@ -732,7 +759,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   // batch call, so a bad row never forces the whole-batch degradation that
   // re-runs beforeInsert hooks on its siblings.
   const canPartialCreate = typeof p.insertManyData === 'function';
-  const pendingCreates: Array<{ index: number; rowNo: number; data: Record<string, any> }> = [];
+  const pendingCreates: Array<{ index: number; rowNo: number; data: Record<string, any>; kept: Record<string, string[]> }> = [];
   // bulkWrite is at-least-once: a retry (or a mismatch-driven degradation) may
   // re-run a create whose prior attempt already committed. Every buffered
   // CREATE row is therefore pre-assigned a client-generated id at flush time
@@ -782,6 +809,11 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
     for (const b of batch) {
       if (b.data.id == null || b.data.id === '') b.data.id = randomUUID();
     }
+    // [#22183] Each row's kept option values, keyed by the row object itself
+    // (the same objects `bulkWrite` hands the closures), so every write call
+    // below carries the values of exactly the rows it writes.
+    const keptByRow = new Map<Record<string, any>, Record<string, string[]>>(batch.map((b) => [b.data, b.kept]));
+    const ctxForRows = (chunkRows: ReadonlyArray<Record<string, any>>) => writeCtxFor(chunkRows.map((r) => keptByRow.get(r)));
     // [#20701] Each row's drop report, recorded by the write call that wrote
     // it and keyed by the row object itself (`bulkWrite` hands the closures
     // the same objects it was given), because `bulkWrite`'s per-row result
@@ -824,7 +856,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               } else {
                 try {
                   freshOutcomes = (await p.insertManyData!({
-                    object: objectName, records: toCreate, context: writeCtx,
+                    object: objectName, records: toCreate, context: ctxForRows(toCreate),
                     ...(environmentId ? { environmentId } : {}),
                   })).outcomes;
                 } catch (e) {
@@ -869,7 +901,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
             } else {
               try {
                 createdRecords = (await p.createManyData!({
-                  object: objectName, records: toCreate, context: writeCtx,
+                  object: objectName, records: toCreate, context: ctxForRows(toCreate),
                   ...(environmentId ? { environmentId } : {}),
                 })).records;
               } catch (e) {
@@ -906,7 +938,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
           }
           try {
             const res = await p.createData({
-              object: objectName, data: row, context: writeCtx,
+              object: objectName, data: row, context: ctxForRows([row]),
               ...(environmentId ? { environmentId } : {}),
             });
             dropsByRow.set(row, responseDrops(res)); // [#20701] one row's response, so the row's report
@@ -940,7 +972,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       const rowNo = i + 1;
       try {
         // 1. Coerce every cell to its storage value (+ resolve lookups).
-        const { data, errors } = await coerceRow(rows[i], metaMap, {
+        const { data, errors, keptOptionValues } = await coerceRow(rows[i], metaMap, {
           trimWhitespace, nullValues, createMissingOptions, resolveRef,
           // Cell-coercion failures land in the same row report as the engine's
           // validation errors, so they speak the same language (#3957).
@@ -958,6 +990,8 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
           errCount++;
           results[i] = { row: rowNo, ok: false, action: 'failed', field: first.field, code: first.code, error: first.message };
         } else {
+          // [#22183] This row's write context: the kept option values ride along.
+          const rowCtx = writeCtxFor([keptOptionValues]);
           // 2. Decide create vs update vs skip.
           let existing: Record<string, any> | 'blank' | 'none' | 'ambiguous' = 'none';
           let handled = false;
@@ -988,7 +1022,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               // The write path needs no counterpart: `validateRecord` runs
               // there for real, after the hooks, and the row report is built
               // from the very same findings by `toFailedResult`.
-              const verdict = await previewVerdict(data, willUpdate ? 'update' : 'insert');
+              const verdict = await previewVerdict(data, willUpdate ? 'update' : 'insert', rowCtx);
               if (verdict && !verdict.valid) {
                 errCount++;
                 const first = verdict.errors[0];
@@ -1015,7 +1049,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               let updateSummaryStale = false;
               let updateDrops: readonly DroppedFieldsEvent[] | undefined;
               try {
-                res2 = await withTransientRetry(() => p.updateData({ object: objectName, id: target.id, data, context: writeCtx, ...(environmentId ? { environmentId } : {}) }));
+                res2 = await withTransientRetry(() => p.updateData({ object: objectName, id: target.id, data, context: rowCtx, ...(environmentId ? { environmentId } : {}) }));
                 updateDrops = responseDrops(res2); // [#20701] read off the response, never off a recovered record
               } catch (e) {
                 // Record updated but summary recompute failed (framework#3147):
@@ -1034,14 +1068,14 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
                 ...rowDrops(updateDrops) };
             } else if (canBulkCreate) {
               // Buffer — the actual write happens in a batched flush below.
-              pendingCreates.push({ index: i, rowNo, data });
+              pendingCreates.push({ index: i, rowNo, data, kept: keptOptionValues });
             } else {
               // No bulk-create primitive on this protocol: original inline path.
               // Wrap in transient retry to match the update path above (L352)
               // and the batched create path (bulkWrite's internal retry) — a
               // single `fetch failed` blip must not silently drop the row
               // (framework#3150).
-              const res2 = await withTransientRetry(() => p.createData({ object: objectName, data, context: writeCtx, ...(environmentId ? { environmentId } : {}) }));
+              const res2 = await withTransientRetry(() => p.createData({ object: objectName, data, context: rowCtx, ...(environmentId ? { environmentId } : {}) }));
               const id = extractRecordId(res2);
               okCount++; created++;
               if (collectUndo && id != null) undoLog.created.push(id);

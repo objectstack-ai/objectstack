@@ -12928,6 +12928,9 @@ export class ObjectQL implements IObjectQLEngine {
         // in a second pass after its own strip).
         validateRecordInScope(schemaForValidation, row, mode, 'include', {
           mediaValueShapeStrict, valueShapeStrict, messages, onAdmittedValueShapeViolation,
+          // [#22183] The option values an import kept for this write — the
+          // preview admits exactly what the write would.
+          keptOptionValues: options?.context?.keptOptionValues,
         });
         evaluateValidationRules(schemaForValidation as any, row, mode, {
           logger: this.logger, currentUser, skipStateMachine, messages,
@@ -13742,7 +13745,8 @@ export class ObjectQL implements IObjectQLEngine {
             // its SHAPE is judged here like any other field's. See
             // `ReadonlyValueScope` (record-validator.ts).
             normalizeMultiValueFields(schemaForValidation, rows[i], 'include');
-            validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation });
+            // [#22183] `keptOptionValues`: the option values an import kept for this write.
+            validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
             evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) });
             await this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
@@ -15100,7 +15104,8 @@ export class ObjectQL implements IObjectQLEngine {
                // become a refusal. Readonly values are judged after the strip
                // (`validateRecordInScope(…, 'only')`, below).
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'skip');
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
+               // [#22183] `keptOptionValues`: the option values an import kept for this write.
+               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
                // [#5284] Demand-driven, and the demand is asked PER OBJECT.
                //
                // This gate used to ask `this.hooks.get('afterUpdate').length > 0`
@@ -15435,7 +15440,8 @@ export class ObjectQL implements IObjectQLEngine {
                // become a refusal. Readonly values are judged after the strip
                // (`validateRecordInScope(…, 'only')`, below).
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'skip');
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
+               // [#22183] `keptOptionValues`: the option values an import kept for this write.
+               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
                // [#2982] The middleware-composed AST — asserted present and
                // bound to the memoized row read in the pre-phase above, so the
                // injected row-scoping (RLS write filter, sharing's

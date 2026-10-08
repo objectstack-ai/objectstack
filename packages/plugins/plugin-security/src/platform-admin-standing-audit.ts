@@ -158,9 +158,7 @@ export interface PlatformAdminStandingRowInput {
   snapshot: readonly PlatformAdminStandingSnapshotEntry[];
   /** The last recorded snapshot's stored string, or `null` on the baseline row. */
   previousSerialized: string | null;
-  /** Does the registered `sys_audit_log` schema declare `organization_id`? */
-  declaresOrganizationId: boolean;
-  /** Does it declare `actor`? */
+  /** Does the registered `sys_audit_log` schema declare `actor`? */
   declaresActor: boolean;
 }
 
@@ -194,8 +192,8 @@ export function buildPlatformAdminStandingRow(
     // answerable from the row itself rather than from a scan of the ledger.
     old_value: input.previousSerialized,
     new_value: serialized,
-    // ⛔ NULL, deliberately — see the block on `organization_id` below. This is
-    // the schema-declared "tenant context" lookup and this fact has no tenant.
+    // ⛔ NULL, deliberately — see the block below. This is the ledger's
+    // attribution field (ADR-0131 D7), and this fact is about no organization.
     tenant_id: null,
     metadata: serializePlatformAdminStandingMetadata({
       event: baseline
@@ -206,17 +204,17 @@ export function buildPlatformAdminStandingRow(
     }),
   };
 
-  // ⭐ THE DECLARED EXCEPTION — ⛔ do not "repair" this to a non-NULL value.
+  // ⭐ THE DECLARED EXCEPTION — ⛔ do not "repair" `tenant_id` to a non-NULL value.
   //
-  // This row carries `organization_id: null`, and that is the RULED shape, not
-  // an oversight and not a gap waiting for an owner.
+  // This row is about no organization, and that is the RULED shape, not an
+  // oversight and not a gap waiting for an owner.
   //
   // ADR-0131 §1.5 「The rejected middle: a platform organization」 considered
   // inventing an organization to own deployment-level rows and rejected it in
   // its own words: 「it is the natural repair and the wrong one … exists only to
   // give NULL a new name」. There is no platform organization on this tree, by
   // that decision. Stamping some tenant's id instead would be a lie — this is a
-  // fact about the whole deployment, filed behind one tenant's wall — and one
+  // fact about the whole deployment, served to one tenant's readers — and one
   // row per organization is the fan-out §1.5 names as wrong. The first-boot
   // BASELINE settles it structurally: it is written before any `sys_organization`
   // row exists, so at that instant there is no id in the world to stamp.
@@ -224,18 +222,16 @@ export function buildPlatformAdminStandingRow(
   // The maintainer ruled this directly (#18412, director batch #153 item 2,
   // 「其他同意」 2026-09-18): the earlier clause requiring a non-NULL
   // organization was WITHDRAWN as an error, and this entry 「follows the tree's
-  // existing deployment-level writing (`organization` NULL), exactly as the four
-  // writers above do」 — `plugin-audit`'s `audit-writers.ts` and `read-audit.ts`,
-  // its `auth-event-audit.ts`, and `service-settings`' `config-change-audit.ts`,
-  // every one of which stamps `tenantId ?? null`. ADR-0131 D7 will later drop
-  // this column from `sys_audit_log` outright; NULL is how that shape is
-  // expressed until it does.
+  // existing deployment-level writing (`organization` NULL)」. ADR-0131 D7 has
+  // since dropped the ledger's injected organization column outright: the
+  // organization a row is about is the attribution field `tenant_id` alone, and
+  // a NULL there is served to platform administrators only under a wall
+  // (plugin-security's `sys_audit_log_org` row policy), which is the audience
+  // this record is for.
   //
-  // Conditionally stamped for the same mechanical reason every other writer
-  // states: the SchemaRegistry injects `organization_id` only where the object
-  // and the posture admit it, and stamping a column the table lacks makes the
-  // INSERT fail outright.
-  if (input.declaresOrganizationId) row.organization_id = null;
+  // `actor` is conditionally stamped for the mechanical reason every other
+  // writer states: older ledger tables predate the column, and stamping a
+  // column the table lacks makes the INSERT fail outright.
   if (input.declaresActor) row.actor = null;
 
   return row;

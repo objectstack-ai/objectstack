@@ -228,7 +228,7 @@ export default class Dev extends Command {
       description: 'Kernel logger level forwarded to `serve` (overrides $OS_LOG_LEVEL / $LOG_LEVEL; default `warn`). One of: debug | info | warn | error | fatal | silent.',
       options: ['debug', 'info', 'warn', 'error', 'fatal', 'silent'],
     }),
-    port: Flags.string({ char: 'p', description: 'Server port (overrides $PORT)' }),
+    port: Flags.string({ char: 'p', description: 'Server port (overrides $OS_PORT; $PORT is the legacy alias)' }),
     // #16804 — developer-supplied TLS, forwarded to the `serve` child. Declared
     // through the shared contract so the two commands cannot drift on the flag
     // names, the prose, or what half a pair means.

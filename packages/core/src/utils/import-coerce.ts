@@ -119,8 +119,11 @@ export interface CoerceContext {
   nullValues?: string[];
   /**
    * When a select/multiselect cell matches no known option, keep the raw value
-   * instead of failing. Note: the engine still validates option membership, so
-   * this only helps when the option is (or will be) present in the schema.
+   * (trimmed; each unmatched item of a multi-value cell) instead of failing.
+   * The kept values are reported on the result (`keptOptionValues`), and the
+   * import runner hands exactly those to the engine write as
+   * `ExecutionContext.keptOptionValues`, whose option check admits them on that
+   * write only (#22183). The field's option list is never changed.
    */
   createMissingOptions?: boolean;
   /** Async reference resolver (name/email/id → record id). Optional. */
@@ -646,7 +649,7 @@ export async function coerceFieldValue(
   raw: unknown,
   meta: ExportFieldMeta | undefined,
   ctx: CoerceContext,
-): Promise<{ value?: unknown } | { error: FieldCoerceError }> {
+): Promise<{ value?: unknown; keptOptionValues?: string[] } | { error: FieldCoerceError }> {
   const trim = ctx.trimWhitespace !== false;
   const field = meta?.name ?? '';
 
@@ -691,22 +694,30 @@ export async function coerceFieldValue(
   // (multiselect/…) OR a select/radio is flagged `multiple: true`; split then
   // and match each token, else match the whole cell as one option.
   if (OPTION_TYPES.has(t) || MULTI_OPTION_TYPES.has(t)) {
+    // [#22183] A kept cell is reported as well as stored: the engine's option
+    // check refuses a value outside the options unless the write names it in
+    // `ExecutionContext.keptOptionValues`, and only coercion knows which values
+    // it kept rather than matched.
     if (isMultiValueField(meta)) {
       const parts = splitMulti(raw);
       const out: unknown[] = [];
+      const kept: string[] = [];
       for (const part of parts) {
         const v = matchOption(part, meta?.options);
         if (v === undefined) {
-          if (ctx.createMissingOptions) { out.push(part); continue; }
+          if (ctx.createMissingOptions) { out.push(part); kept.push(part); continue; }
           return coerceError(meta, field, 'invalid_option', 'import_unknown_option', part, ctx);
         }
         out.push(v);
       }
-      return { value: out };
+      return kept.length > 0 ? { value: out, keptOptionValues: kept } : { value: out };
     }
     const v = matchOption(raw, meta?.options);
     if (v === undefined) {
-      if (ctx.createMissingOptions) return { value: String(raw).trim() };
+      if (ctx.createMissingOptions) {
+        const keptValue = String(raw).trim();
+        return { value: keptValue, keptOptionValues: [keptValue] };
+      }
       return coerceError(meta, field, 'invalid_option', 'import_unknown_option', raw, ctx);
     }
     return { value: v };
@@ -797,9 +808,20 @@ export async function coerceRow(
   rawRow: Record<string, unknown>,
   metaMap: Map<string, ExportFieldMeta>,
   ctx: CoerceContext,
-): Promise<{ data: Record<string, unknown>; errors: FieldCoerceError[] }> {
+): Promise<{
+  data: Record<string, unknown>;
+  errors: FieldCoerceError[];
+  /**
+   * [#22183] Per field, the option values `createMissingOptions` kept on this
+   * row — empty unless that option is on and a cell matched no option. The
+   * import runner hands it to the row's write as
+   * `ExecutionContext.keptOptionValues`.
+   */
+  keptOptionValues: Record<string, string[]>;
+}> {
   const data: Record<string, unknown> = {};
   const errors: FieldCoerceError[] = [];
+  const keptOptionValues: Record<string, string[]> = {};
   for (const [key, raw] of Object.entries(rawRow)) {
     const meta = metaMap.get(key);
     const res = await coerceFieldValue(raw, meta ? meta : undefined, ctx);
@@ -809,6 +831,7 @@ export async function coerceRow(
       continue;
     }
     if (res.value !== undefined) data[key] = res.value;
+    if (res.keptOptionValues && res.keptOptionValues.length > 0) keptOptionValues[key] = res.keptOptionValues;
   }
-  return { data, errors };
+  return { data, errors, keptOptionValues };
 }

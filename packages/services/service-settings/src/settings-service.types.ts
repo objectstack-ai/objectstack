@@ -184,10 +184,9 @@ export interface SettingsAuditSink {
     userId?: string;
     /**
      * [#8145] Tenant context of the caller, when known. Recorded on the ledger
-     * row's `tenant_id` (and, where the deployment declares the column,
-     * `organization_id`) — without it the SecurityPlugin's RLS predicate hides
-     * every `config_change` row from non-platform-admin readers, leaving the
-     * `config_changes` view as empty as the defect this fixes.
+     * row's `tenant_id`, the column the ledger's organization row scope reads,
+     * for a tenant- or user-scope change. A GLOBAL-scope change is about no
+     * organization, so its row carries none (ADR-0131 D7).
      */
     tenantId?: string;
     actor?: string;

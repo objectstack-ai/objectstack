@@ -177,6 +177,7 @@
     "kernel/ExecutionContext:email",
     "kernel/ExecutionContext:flowRunId",
     "kernel/ExecutionContext:isSystem",
+    "kernel/ExecutionContext:keptOptionValues",
     "kernel/ExecutionContext:locale",
     "kernel/ExecutionContext:oauthScopes",
     "kernel/ExecutionContext:onBehalfOf",

@@ -56,7 +56,10 @@ const COMMANDS_DIR = join(__dirname, '..', 'src', 'commands');
  */
 const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // [#3366] Resolves each `requires` token's provider in the active edition.
-  'preflightRequiredCapabilities',
+  // [#22189] Over every place the stack declares `requires` — its top level,
+  // or each `packages[]` body by name — so the row names the stack-level entry
+  // both doors call, not the per-list classifier it runs.
+  'preflightDeclaredCapabilities',
   // [#3786] The pre-parse undeclared-key diff, both halves.
   'lintUnknownStackKeys',
   'lintUnknownAuthoringKeys',
@@ -241,7 +244,9 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   // inside the shared pass now, by neither command directly — and
   // `artifactPackages` stays, on its own reason, because it is no longer input
   // to a gap: both commands read it to COUNT the packages for the step line.
-  'Reads the artifact\'s `packages[]` for a count both commands print; the pass that judges them is a gate above':
+  // [#22189] Both commands also hand its entries to the capability preflight,
+  // which names the package a finding came from; that preflight is the gate.
+  'Reads the artifact\'s `packages[]` for a count both commands print and as the package list the capability preflight names; the passes that judge them are gates above':
     ['artifactPackages'],
   // [#20158] Builds the engine judge BOTH commands hand the registry
   // (`AuthoringRuleContext.judgeFilter`): an INPUT to `runAuthoringRules` /

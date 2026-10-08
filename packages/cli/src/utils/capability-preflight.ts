@@ -65,8 +65,19 @@ export function makeProviderResolver(projectDir: string): (pkg: string) => boole
  * build/validate preflight and the serve boot error so both read identically.
  * Only `installable` / `unavailable` / `unknown` produce a message; `ok` is
  * satisfied and never surfaced.
+ *
+ * A finding a PACKAGE declared (see {@link preflightDeclaredCapabilities}) is
+ * prefixed with that package, in the `package '<id>' — ` spelling the
+ * per-package author-time rule pass puts on its findings. Without a package the
+ * text is exactly what it was.
  */
-export function renderCapabilityMessage(c: CapabilityClassification): string {
+export function renderCapabilityMessage(c: DeclaredCapabilityClassification): string {
+  const text = renderTokenMessage(c);
+  return c.package === undefined ? text : `package '${c.package}' — ${text}`;
+}
+
+/** {@link renderCapabilityMessage} without the package prefix. */
+function renderTokenMessage(c: CapabilityClassification): string {
   const p = c.provider;
   switch (c.status) {
     case 'installable': {
@@ -145,6 +156,76 @@ export function preflightRequiredCapabilities(opts: {
     const c = classifyRequiredCapability(token, isInstalled);
     if (c.status === 'unavailable') errors.push(c);
     else if (c.status === 'installable' || c.status === 'unknown') warnings.push(c);
+  }
+  return { errors, warnings };
+}
+
+/**
+ * A classified capability, and the package whose `requires` declared it.
+ * `package` is absent when the stack's own top level declared it.
+ */
+export interface DeclaredCapabilityClassification extends CapabilityClassification {
+  readonly package?: string;
+}
+
+/** {@link CapabilityPreflightResult}, each finding attributed to where it was declared. */
+export interface DeclaredCapabilityPreflightResult {
+  readonly errors: DeclaredCapabilityClassification[];
+  readonly warnings: DeclaredCapabilityClassification[];
+}
+
+/**
+ * The `os validate` / `os build` preflight over every place a stack DECLARES
+ * capabilities: its own top level, or each `packages[]` body.
+ *
+ * A multi-package `composeStacks(…, { manifest: 'preserve' })` artifact carries
+ * `requires` once, inside the body of the package that declared it (ADR-0130
+ * D4, 2026-09-22 addendum), and nothing at its top level. A preflight that read
+ * only the top level read `[]` there, so a capability with no installable
+ * provider passed both doors with exit 0, while the same token in one
+ * `defineStack` exits 1.
+ *
+ * The resolution rule is `resolveStackCollection`'s (`stack-collections.ts`):
+ * a top-level `requires` WINS whenever it is present. In the additive shape
+ * that array already is the union of the bodies, and a single-package stack has
+ * nothing else, so every stack that declares `requires` at its top level is
+ * judged exactly as before, unattributed. The bodies are read only when the top
+ * level does not carry the key, and each finding there names its package,
+ * because a token is removed from the package that declared it. The same token
+ * in two packages is reported once per package for that reason.
+ *
+ * @param opts.requires - The stack's top-level `requires`, as declared.
+ * @param opts.packages - The stack's `packages[]` entries, as `artifactPackages`
+ *   (`artifact-packages.ts`) names them. Passed in, never derived here: that
+ *   module carries the one package-id rule, and importing it would load
+ *   `@objectstack/lint` into `os serve`, which imports this module.
+ */
+export function preflightDeclaredCapabilities(opts: {
+  requires: unknown;
+  packages: ReadonlyArray<{ readonly id: string; readonly body: Record<string, unknown> }>;
+  projectDir: string;
+  /** Injectable for tests; defaults to on-disk `require.resolve` resolution. */
+  isInstalled?: (pkg: string) => boolean;
+}): DeclaredCapabilityPreflightResult {
+  const isInstalled = opts.isInstalled ?? makeProviderResolver(opts.projectDir);
+  if (Array.isArray(opts.requires) || opts.packages.length === 0) {
+    return preflightRequiredCapabilities({
+      requires: Array.isArray(opts.requires) ? opts.requires : [],
+      projectDir: opts.projectDir,
+      isInstalled,
+    });
+  }
+  const errors: DeclaredCapabilityClassification[] = [];
+  const warnings: DeclaredCapabilityClassification[] = [];
+  for (const pkg of opts.packages) {
+    const declared = pkg.body.requires;
+    const result = preflightRequiredCapabilities({
+      requires: Array.isArray(declared) ? declared : [],
+      projectDir: opts.projectDir,
+      isInstalled,
+    });
+    errors.push(...result.errors.map((c) => ({ ...c, package: pkg.id })));
+    warnings.push(...result.warnings.map((c) => ({ ...c, package: pkg.id })));
   }
   return { errors, warnings };
 }
