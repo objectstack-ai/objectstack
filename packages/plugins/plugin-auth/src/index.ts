@@ -9,6 +9,10 @@
  */
 
 export * from './auth-plugin.js';
+// plugin-auth's identity objects as a plugin of their own, for a kernel that
+// mounts ObjectQL without AuthPlugin (an app's or a plugin's test kit).
+// AuthPlugin registers the same manifest from the same builder.
+export * from './identity-objects-plugin.js';
 export * from './auth-manager.js';
 export * from './ensure-default-organization.js';
 // ADR-0093 D7 — the default-org bootstrap with its owner bind decided once;

@@ -37,8 +37,8 @@ type AnyRecord = Record<string, any>;
 // ── doubles ────────────────────────────────────────────────────────────────
 
 /**
- * Row store with the slice of ObjectQL the template bridge and the provenance
- * stamp touch. `update` routes through `assertEngineUpdateDispatch` so this
+ * Row store with the slice of ObjectQL the template bridge and the organization
+ * door touch. `update` routes through `assertEngineUpdateDispatch` so this
  * double cannot accept a dispatch shape the real engine would refuse.
  */
 function fakeEngine(seed: AnyRecord[] = []) {
@@ -68,7 +68,7 @@ function fakeEngine(seed: AnyRecord[] = []) {
       if (target) Object.assign(target, data);
       return { affected: target ? 1 : 0 };
     },
-    registerHook() { /* provenance stamp */ },
+    registerHook() { /* organization door */ },
     unregisterHooksByPackage() { return 0; },
   };
 }

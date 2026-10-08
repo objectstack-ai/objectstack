@@ -115,11 +115,6 @@ export {
   type OutboxSweepService,
   type SweepStrandedOutboxOptions,
 } from './outbox-sweep.js';
-export {
-  bindEmailTemplateProvenanceStamp,
-  unbindEmailTemplateProvenanceStamp,
-  EMAIL_TEMPLATE_PROVENANCE_PACKAGE,
-} from './email-template-provenance.js';
 // [#8149] The `internal: true` header readback seam.
 export {
   readInternalHeadersJson,

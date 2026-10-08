@@ -38,6 +38,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { createIdentityObjectsPlugin } from '@objectstack/plugin-auth';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
@@ -243,6 +244,10 @@ describe('the #5494 admission flip: row content, not caller, decides (real Secur
     kernel = new ObjectKernel({ logger: { level: 'fatal' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin({ suspendedRunStore: 'memory' }));
+    // SecurityPlugin refuses a kernel without the identity objects its
+    // authorization store reads; with no auth plugin here, plugin-auth's preset
+    // registers them.
+    await kernel.use(createIdentityObjectsPlugin());
     await kernel.use(
       new SecurityPlugin({
         defaultPermissionSets: [...securityDefaultPermissionSets, taskDeleteSet],

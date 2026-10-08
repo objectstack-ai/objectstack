@@ -24,7 +24,7 @@
     {
       "id": 3,
       "prompt": "Add a Convert action on `lead` — only for qualified, not-yet-converted leads, from the record header and each list row, launching the `lead_conversion` flow — and a bulk 'Add to campaign' that asks which campaign, for the selected rows.",
-      "expected_output": "Two `defineAction` items. Convert: `type: 'flow'`, `target: 'lead_conversion'`, `locations: ['record_header', 'list_item']`, `visible: P`record.status == \"qualified\" && record.is_converted == false`` (bare CEL, never brace-wrapped), `confirmText`, `successMessage`, `refreshAfter: true`. Bulk: `type: 'modal'`, `locations: ['list_toolbar']`, a field-backed `params: [{ field: 'campaign_id', objectOverride: 'campaign', required: true }]`, and a `body` that reads `input.selectedIds`.",
+      "expected_output": "Two `defineAction` items. Convert: `type: 'flow'`, `target: 'lead_conversion'`, `locations: ['record_header', 'list_item']`, `visible: P`record.status == \"qualified\" && record.is_converted == false`` (bare CEL, never brace-wrapped), `confirmText`, `successMessage`, `refreshAfter: true`. Bulk: `type: 'script'`, `locations: ['list_toolbar']`, a field-backed `params: [{ field: 'campaign_id', objectOverride: 'campaign', required: true }]`, and a `body` that reads `input.selectedIds`.",
       "files": [],
       "assertions": {
         "must_contain": ["defineAction", "locations", "record_header", "list_toolbar", "visible", "successMessage", "selectedIds"],

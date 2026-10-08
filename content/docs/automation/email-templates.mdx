@@ -219,12 +219,17 @@ schema first, so a malformed template is a warning rather than a broken boot.
 Runtime saves are materialized on the same seam, so a Studio edit takes effect
 without a restart.
 
+Change a template's wording in **Studio** — the `email_template` metadata. The
+`sys_email_template` rows themselves are closed to organization writes: a create
+or an edit through the data API is refused `403 PERMISSION_DENIED`, and only the
+platform writes them, from the built-in templates and the `email_template`
+metadata.
+
 Materialization is **seed-not-clobber**. Declared templates carry package
 provenance and are re-seeded on every boot, but a row an administrator created
-or edited is never overwritten. A reworded transactional mail survives your next
-deploy — which is the intended behaviour, and also the reason a source change
-that "does not take effect" is usually a customized row winning, not a failed
-seed.
+or edited before that door closed is never overwritten. That is also the reason
+a source change that "does not take effect" is usually such a customized row
+winning, not a failed seed.
 
 `bodyText` is optional: when you omit it the service derives a plain-text
 alternative by stripping tags from the rendered HTML. Authoring one explicitly
