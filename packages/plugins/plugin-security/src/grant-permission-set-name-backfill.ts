@@ -247,7 +247,8 @@ async function scanUnnamedGrants(engine: GrantNameBackfillEngine): Promise<Recor
       if (rows.length < SCAN_PAGE_SIZE) break;
     }
   }
-  return [...byId.values()].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  // Code-unit order — the order the driver's id sort gives, independent of locale.
+  return [...byId.values()].sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
 }
 
 /** What the set row `setId` comes to for a grant of `grantOrganizationId`. */
