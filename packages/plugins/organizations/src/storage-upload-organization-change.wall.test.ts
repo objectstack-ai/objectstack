@@ -16,6 +16,15 @@
  * organization an upload belongs to is NOT changed: switching back finishes it,
  * from where it started.
  *
+ * #22218 asks the same question at two more doors. The chunk door
+ * (`PUT …/upload/chunked/:uploadId/chunk/:chunkIndex`) writes the session's
+ * progress after every chunk, and the progress door
+ * (`GET …/upload/chunked/:uploadId/progress`) stamps a session past its
+ * `expires_at` as `expired`. Both writes are scoped the same way and used to
+ * answer the same `500`. The progress door asks only when that stamp is due: a
+ * live session's progress is a read, and it still answers the uploader from
+ * any organization.
+ *
  * Same boot as `storage-upload-door-ownership.wall.test.ts` (and the same
  * reason this file lives in this package: the wall is raised by THIS
  * package's `OrganizationsPlugin`, which ADR-0132 forbids every other
@@ -88,7 +97,7 @@ describe('the upload doors after the uploader switches organization, on a booted
     expect(res.status).toBe(200);
     return res.body.data.fileId;
   };
-  const startChunked = async (): Promise<{ uploadId: string; fileId: string }> => {
+  const startChunked = async (): Promise<{ uploadId: string; fileId: string; resumeToken: string }> => {
     const res = await answer(
       await stack.apiAs(uploader, 'POST', '/storage/upload/chunked', {
         filename: 'org-change-chunked.bin',
@@ -97,7 +106,40 @@ describe('the upload doors after the uploader switches organization, on a booted
       }),
     );
     expect(res.status).toBe(200);
-    return { uploadId: res.body.data.uploadId, fileId: res.body.data.fileId };
+    return {
+      uploadId: res.body.data.uploadId,
+      fileId: res.body.data.fileId,
+      resumeToken: res.body.data.resumeToken,
+    };
+  };
+  /** One binary chunk, with the resume token the start door handed back. */
+  const putChunk = (uploadId: string, resumeToken: string) =>
+    stack.api(`/storage/upload/chunked/${uploadId}/chunk/0`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${uploader}`,
+        'Content-Type': 'application/octet-stream',
+        'x-resume-token': resumeToken,
+      },
+      body: new TextEncoder().encode('chunk-0'),
+    });
+  const progress = (uploadId: string) =>
+    stack.apiAs(uploader, 'GET', `/storage/upload/chunked/${uploadId}/progress`);
+  /**
+   * Moves a session's own `expires_at` into the past, as SYSTEM and in the
+   * organization it was started in, so its expiry stamp is due. The row's
+   * organization is untouched.
+   */
+  const pastDeadline = async (uploadId: string): Promise<void> => {
+    await ql.update(
+      'sys_upload_session',
+      { expires_at: new Date(Date.now() - 60_000).toISOString() },
+      { where: { id: uploadId }, context: { isSystem: true, tenantId: startOrg } },
+    );
+    const row = await stored('sys_upload_session', uploadId);
+    expect(Date.parse(row.expires_at)).toBeLessThan(Date.now());
+    expect(row.status).toBe('in_progress');
+    expect(row.organization_id).toBe(startOrg);
   };
 
   /**
@@ -250,5 +292,65 @@ describe('the upload doors after the uploader switches organization, on a booted
     expect(progress.body.data.fileId).toBe(fileId);
     expect(progress.body.data.status).toBe('in_progress');
     await switchTo(startOrg);
+  });
+
+  describe('the chunk door (#22218)', () => {
+    it('ORGANIZATION CHANGED: 409 RESOURCE_CONFLICT naming the change, not 500; the session is unchanged; switching back lands the chunk', async () => {
+      await switchTo(startOrg);
+      const { uploadId, resumeToken } = await startChunked();
+      const before = await stored('sys_upload_session', uploadId);
+
+      await switchTo(otherOrg);
+      expectOrganizationChanged(await answer(await putChunk(uploadId, resumeToken)), 'chunk after switching');
+      expect(await stored('sys_upload_session', uploadId)).toEqual(before);
+
+      // The upload still belongs where it started, and takes its chunks there.
+      await switchTo(startOrg);
+      const home = await answer(await putChunk(uploadId, resumeToken));
+      expect(home.status, JSON.stringify(home.body)).toBe(200);
+      const row = await stored('sys_upload_session', uploadId);
+      expect(row.uploaded_chunks).toBe(1);
+      expect(row.organization_id).toBe(startOrg);
+    });
+
+    it('CONTROL — SAME ORGANIZATION: the uploader sends a chunk exactly as before', async () => {
+      await switchTo(startOrg);
+      const { uploadId, resumeToken } = await startChunked();
+      const own = await answer(await putChunk(uploadId, resumeToken));
+      expect(own.status, JSON.stringify(own.body)).toBe(200);
+      expect(own.body.data.chunkIndex).toBe(0);
+      expect((await stored('sys_upload_session', uploadId)).uploaded_chunks).toBe(1);
+    });
+  });
+
+  describe('the progress door, once the expiry stamp is due (#22218)', () => {
+    it('ORGANIZATION CHANGED: 409 RESOURCE_CONFLICT naming the change, not 500; the session is not stamped; switching back reports it expired', async () => {
+      await switchTo(startOrg);
+      const { uploadId } = await startChunked();
+      await pastDeadline(uploadId);
+      const before = await stored('sys_upload_session', uploadId);
+
+      await switchTo(otherOrg);
+      expectOrganizationChanged(await answer(await progress(uploadId)), 'progress past the deadline after switching');
+      expect(await stored('sys_upload_session', uploadId)).toEqual(before);
+
+      await switchTo(startOrg);
+      const home = await answer(await progress(uploadId));
+      expect(home.status, JSON.stringify(home.body)).toBe(200);
+      expect(home.body.data.status).toBe('expired');
+      const row = await stored('sys_upload_session', uploadId);
+      expect(row.status).toBe('expired');
+      expect(row.organization_id).toBe(startOrg);
+    });
+
+    it('CONTROL — SAME ORGANIZATION: the uploader is told `expired`, and the session is stamped, exactly as before', async () => {
+      await switchTo(startOrg);
+      const { uploadId } = await startChunked();
+      await pastDeadline(uploadId);
+      const own = await answer(await progress(uploadId));
+      expect(own.status, JSON.stringify(own.body)).toBe(200);
+      expect(own.body.data.status).toBe('expired');
+      expect((await stored('sys_upload_session', uploadId)).status).toBe('expired');
+    });
   });
 });
