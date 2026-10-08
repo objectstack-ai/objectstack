@@ -27,7 +27,10 @@
  *    organization is refused whole, and writes nothing; under `single` it is
  *    not;
  *  - `single`: the default organization keeps its answers, including for a
- *    process-wide reader that names no organization.
+ *    process-wide reader that names no organization;
+ *  - the posture is asked only for a caller that names no organization, on a
+ *    key below the global rung — and when it cannot be read, that read or
+ *    write fails rather than guessing.
  *
  * Driven over a REAL `ObjectQL` engine through the plugin's own adapter
  * (`wrapEngineAsSettingsEngine`); only the driver is a Map. Its matcher is
@@ -296,6 +299,33 @@ describe('a tenant-scope write that names no organization', () => {
 
     await seed({ key: 'motto', scope: 'tenant', value: 'Legacy', organization_id: null });
     expect((await svc.get(NS, 'motto', {})).value).toBe('Legacy');
+  });
+});
+
+describe('the posture is read only where it decides something', () => {
+  function withFailingPosture(): SettingsService {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(MANIFEST);
+    svc.bindEngine(wrapEngineAsSettingsEngine(engine as any), undefined, {
+      tenancyPosture: () => { throw new Error('tenancy unreadable'); },
+    });
+    return svc;
+  }
+
+  it('a caller that names an organization, and any read of a global key, never ask it', async () => {
+    await settings('isolated').set(NS, 'banner', 'Everyone', {});
+    const svc = withFailingPosture();
+    await svc.set(NS, 'motto', 'Alpha', inOrg(ORG_A));
+    expect((await svc.get(NS, 'motto', inOrg(ORG_A))).value).toBe('Alpha');
+    expect((await svc.get(NS, 'banner', {})).value).toBe('Everyone');
+    expect((await svc.getMany(NS, ['banner'], {})).banner.value).toBe('Everyone');
+  });
+
+  it('an unreadable posture is not guessed at for a caller that names no organization: the read and the write fail', async () => {
+    const svc = withFailingPosture();
+    await expect(svc.get(NS, 'motto', {})).rejects.toThrow('tenancy unreadable');
+    await expect(svc.set(NS, 'motto', 'Nobody', {})).rejects.toThrow('tenancy unreadable');
+    expect(settingRows()).toHaveLength(0);
   });
 });
 

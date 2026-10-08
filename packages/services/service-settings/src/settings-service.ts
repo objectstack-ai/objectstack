@@ -171,6 +171,12 @@ type OrganizationReach =
   | { kind: 'unwalled' };
 
 /**
+ * The reach a read of a `global` key is made with: it has no tenant or user
+ * rung, so which organization's rows the load returns cannot change its answer.
+ */
+const ANY_ORGANIZATION: OrganizationReach = Object.freeze({ kind: 'unwalled' as const });
+
+/**
  * Where the service learns the tenancy posture IN FORCE — the `tenancy`
  * service's answer, which the plugin supplies at bind time. `undefined` means
  * the composition reports no posture (no `tenancy` service registered).
@@ -1416,7 +1422,10 @@ export class SettingsService {
     // The user rung's pick compares the owner too (see `resolveKeyFromRows`),
     // and both rungs read only the rows the caller's organization reaches.
     const userId = scope === 'user' ? callerUserIdOf(ctx) : null;
-    const reach = await this.organizationReachOf(ctx);
+    // A `global` key has no tenant or user rung, so no reach changes its
+    // answer — and its readers (boot-time plugins, mostly) do not wait on the
+    // posture for one.
+    const reach = scope === 'global' ? ANY_ORGANIZATION : await this.organizationReachOf(ctx);
     const rows = await this.loadRows(namespace, userId, reach);
     return this.resolveKeyFromRows<T>(reg, key, scope, rows, userId, reach);
   }
@@ -1519,8 +1528,11 @@ export class SettingsService {
         ...(otherKeys.length > 0 ? [null] : []),
       ];
       // ONE organization reach for the whole call — every key is resolved for
-      // the same caller, so the grouping above is by user only.
-      const reach = await this.organizationReachOf(ctx);
+      // the same caller, so the grouping above is by user only. Asked only
+      // when a key below the global rung needs it (see `get`).
+      const reach = pending.some((p) => p.scope !== 'global')
+        ? await this.organizationReachOf(ctx)
+        : ANY_ORGANIZATION;
       const sets = await this.loadRowSets(namespace, groups, reach);
       const userRows = userKeys.length > 0 ? sets[0] : [];
       const otherRows = otherKeys.length > 0 ? sets[sets.length - 1] : [];
