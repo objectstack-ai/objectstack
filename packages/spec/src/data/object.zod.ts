@@ -411,7 +411,7 @@ const DECLARED_INDEX_BARE_TRUE_RETIRED =
   + "nothing on disk changes) or `unique: 'organization'` (one holder per organization — the "
   + 'driver prepends the NULL-safe organization key part to `fields` at registration). '
   + 'Field-level `unique: true` is unaffected. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * Prescriptive rejection for a mis-spelled `unique` scope **on a DECLARED

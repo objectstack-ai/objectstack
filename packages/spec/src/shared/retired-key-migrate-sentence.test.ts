@@ -65,6 +65,11 @@
  * not tombstone prescriptions an author meets in a parse error. That is a
  * scope bound on the spec corpus, not a per-site exemption: every
  * prescription string in every scanned file is judged, with no allowlist.
+ * The scan reads single- and double-quoted literals only: inside a template
+ * literal the backticks are escaped, so `MARKER` never matches there. A
+ * sentence that should be judged is therefore written plain-quoted, as the
+ * lint corpus's two sites are (`validate-expressions.ts`,
+ * `data-model-rules.ts`).
  *
  * What this pin deliberately does NOT check: a tombstone whose prescription
  * carries no `os migrate meta` sentence at all (#6914's worklist) — absence of
