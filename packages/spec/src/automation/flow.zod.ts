@@ -169,14 +169,15 @@ export const FLOW_PAUSE_CAPABLE_NODE_TYPES: readonly string[] = [
  * (#20316): a key the node's executor contract requires, left out, and a
  * `decision` branch list the executor cannot read. A builtin VALUE rule with
  * it (#21898): a value a builtin node's executor contract refuses, where the
- * build can know what the run will parse. And KEY MEMBERSHIP only where the
- * build is the one door before the run: the declared `approval` contract is
- * judged whole (#21850), and a key a `script` or `subflow` executor contract
- * does not declare is refused (#21982) — those two descriptors publish no
- * `configSchema` for registration's undeclared-key walk to read. Every other
- * builtin's undeclared key is judged at `registerFlow` against its descriptor,
- * and so is a plugin type's whose contract the spec does not declare; the
- * flow parse does not judge those keys.
+ * build can know what the run will parse. And KEY MEMBERSHIP: the declared
+ * `approval` contract is judged whole (#21850), and a key a builtin's executor
+ * contract does not declare is refused (#21982) for every builtin
+ * `builtinNodeConfigKeysJudged` names — all but `try_catch` — so this parse is
+ * the one judge of those keys at every door, and `registerFlow`'s descriptor
+ * walk stands aside for them. `try_catch`'s undeclared key is judged at
+ * `registerFlow` against its descriptor (its contract's `retry` strips an
+ * unknown key where the descriptor closes it), and so is a plugin type's whose
+ * contract the spec does not declare; the flow parse does not judge those keys.
  */
 
 /**
@@ -1487,19 +1488,21 @@ export const FlowSchema = lazySchema(() => strictObject(
   //    refuses is refused too (`create_record` `outputVariable: 42`, a screen
   //    field `min: '1'`), where the build can know what the run parses — never
   //    a value carrying a `{token}`, a region slot, a ledger predicate or
-  //    value slot, or `http`'s run-resolved `signingSecret`; an undeclared key
-  //    stays where it is judged today. The one plugin node contract the spec
-  //    declares, `approval` (#21850), is judged WHOLE — its executor refuses
-  //    the node on any contract finding — so its undeclared keys are refused
-  //    here too;
+  //    value slot, or `http`'s run-resolved `signingSecret`. A KEY its
+  //    contract does not declare is refused too (#21982), for every builtin
+  //    `builtinNodeConfigKeysJudged` names (all but `try_catch`, whose keys
+  //    `registerFlow`'s descriptor walk keeps), a body-less legacy `loop`
+  //    included. The one plugin node contract the spec declares, `approval`
+  //    (#21850), is judged WHOLE — its executor refuses the node on any
+  //    contract finding — so its undeclared keys are refused here too;
   //  - a `decision` branch list the executor cannot read — `conditions` not an
   //    array, a branch that is not an object, and a branch whose `label` is
   //    absent, blank or not text. The last one never failed a run at all: the
   //    matched branch reported no label, and traversal took EVERY out-edge.
   //
-  // A PRESENCE and VALUE rule for a builtin, never a key-set closure: the node
-  // `config` stays the open record the header of this module describes, and
-  // only the approval node's declared contract closes its key set. Walked with
+  // The node `config` stays the open record the header of this module
+  // describes: the executor contracts close its key set through this one
+  // judge, never a re-declared shape here. Walked with
   // `collectFlowGraphs`, so a node inside an ADR-0031 region body is judged at
   // the path the author wrote; a container's own judgement skips its regions'
   // insides, which this same walk reaches as graphs of their own.
