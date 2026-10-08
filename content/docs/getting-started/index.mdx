@@ -173,7 +173,8 @@ scaffolds a project with its own TypeScript toolchain and npm scripts.
 **pnpm and TypeScript versions only matter for the framework monorepo.** If you
 clone [`objectstack-ai/objectstack`](https://github.com/objectstack-ai/objectstack)
 itself (to contribute, or to run the bundled examples), you'll additionally need
-pnpm 8+ (`corepack enable` pulls the pinned 10.x) — and the repo builds against
+pnpm 10 (`corepack enable` installs the version the repo pins in `packageManager`;
+pnpm 8 and 9 cannot install the workspace) — and the repo builds against
 TypeScript 6.x.
 </Callout>
 
