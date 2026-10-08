@@ -169,7 +169,9 @@ import {
   securityObjects,
   securityDefaultPermissionSets,
   securityPluginManifestHeader,
+  SECURITY_PLUGIN_ID,
 } from './manifest.js';
+import { registerBuiltinPositions } from './builtin-positions.js';
 
 /**
  * [ADR-0095 D3 / Finding 2 / #2937] Platform-admin-EXCLUSIVE capabilities — the
@@ -1621,6 +1623,26 @@ export class SecurityPlugin implements Plugin {
     // engine middleware AND the public getReadFilter service method.
     this.metadata = metadata;
     this.ql = ql;
+
+    // [ADR-0131 D2, C3's built-ins slice pulled into C2] The six built-in
+    // positions — the identity names and the `everyone` / `guest` anchors — are
+    // declared metadata of THIS plugin, as its permission sets are. Not through
+    // the manifest registration in `init()`: measured, a manifest `positions`
+    // key reaches no registry (see `builtin-positions.ts`), so they go to the
+    // engine registry by the registry's own seam, under this plugin's package
+    // id — the provenance the manifest stamps on `permissions`. Here, on the
+    // engine handle `start()` already holds, before `kernel:ready` runs the
+    // seeders and before any request reaches the metadata door. Rows keep
+    // seeding from the same list (`bootstrapBuiltinRoles`); nothing here writes
+    // a row or moves a grant.
+    if (registerBuiltinPositions((ql as { registry?: unknown }).registry, SECURITY_PLUGIN_ID) === 0) {
+      ctx.logger.warn(
+        '[security] the built-in positions (platform_admin, org_owner, org_admin, org_member, everyone, guest) '
+          + 'were NOT declared as position metadata: the ObjectQL engine exposes no registry that can register '
+          + 'them. Their sys_position rows still seed and no grant changes, but the security catalog read and '
+          + 'GET /api/v1/meta/position will not list them.',
+      );
+    }
 
     // [#18682] Answer the engine's create/update gate question for `validate()`.
     //

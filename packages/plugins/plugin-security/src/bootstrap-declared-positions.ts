@@ -26,6 +26,7 @@
  */
 
 import { buildExistingByName } from './seed-name-lookup.js';
+import { isBuiltinPositionName } from './builtin-positions.js';
 import {
   createSeedWriteRefusals,
   seedCtx,
@@ -83,10 +84,8 @@ interface SeedOptions {
 }
 
 /**
- * Read declared metadata items of a type. The engine's SchemaRegistry
- * (populated by `manifest.register` from the stack's `positions`/`sharingRules`
- * arrays) is the reliable source in every boot path; the metadata-service
- * facade only surfaces these once the compiled-artifact loader runs (serve.ts).
+ * Read the items of a type the engine's SchemaRegistry holds — one of the two
+ * sources {@link readDeclaredPositions} unions.
  *
  * [#8378] No `{ name, content }` unwrap: the registered item IS the authoring
  * document. `PositionSchema` declares no `content` key and rejects one as
@@ -101,6 +100,52 @@ function readDeclared(engine: any, type: string): any[] {
     }
   } catch { /* fall through */ }
   return [];
+}
+
+/**
+ * The positions this seeder projects into rows: every declared position the
+ * engine registry or the metadata service holds, one entry per name, MINUS the
+ * six built-ins.
+ *
+ * ## A union, not "the registry, else the metadata service"
+ *
+ * Neither source holds every declared position. The metadata service holds the
+ * stack-declared ones an app registers in memory; the engine registry holds the
+ * built-ins this plugin declares (`builtin-positions.ts`) and every position a
+ * metadata author saved through the metadata door. This read used to take the
+ * registry ALONE whenever it held any position, and consult the metadata
+ * service only when the registry was empty — so the first position to reach
+ * the registry silenced every stack-declared one. Measured at objectstack
+ * `51290bca2c`, walled showcase: after one `PUT /api/v1/meta/position/<name>`,
+ * an organization created next was seeded the six built-ins and the
+ * door-authored position, and none of the stack's ten. A name both sources
+ * hold takes the registry's body, the order the security catalog read
+ * (`createSecurityCatalogReader`) answers in.
+ *
+ * ## Why the six built-ins are skipped
+ *
+ * They are declared metadata now, so they are among the registry's positions —
+ * but their rows are `bootstrapBuiltinRoles`'s, seeded from the same list with
+ * the `platform` provenance this seeder never writes. Taking them here would
+ * insert a copy without that provenance ahead of the built-in pass on a fresh
+ * organization (refused outright for a reserved identity name), which the
+ * built-in pass then restamps: a second writer for six rows that have one.
+ */
+async function readDeclaredPositions(engine: any, metadataService: any): Promise<any[]> {
+  const registered = readDeclared(engine, 'position');
+  let listed: any[] = [];
+  try {
+    const result = metadataService?.list?.('position');
+    const resolved = typeof (result as any)?.then === 'function' ? await result : result;
+    listed = Array.isArray(resolved) ? resolved : [];
+  } catch { listed = []; }
+  const byName = new Map<string, any>();
+  for (const item of [...registered, ...listed]) {
+    const name = item?.name;
+    if (typeof name !== 'string' || name === '' || byName.has(name)) continue;
+    byName.set(name, item);
+  }
+  return [...byName.values()].filter((item) => !isBuiltinPositionName(item.name));
 }
 
 /**
@@ -126,14 +171,8 @@ export async function bootstrapDeclaredPositions(
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') {
     return { seeded: 0, updated: 0, unchanged: 0, unreadable: 0 };
   }
-  let positions: any[] = readDeclared(ql, 'position');
-  if (positions.length === 0) {
-    try {
-      const listed = metadataService?.list?.('position');
-      positions = typeof (listed as any)?.then === 'function' ? await listed : (listed ?? []);
-    } catch { positions = []; }
-  }
-  if (!Array.isArray(positions) || positions.length === 0) return { seeded: 0, updated: 0, unchanged: 0, unreadable: 0 };
+  const positions = await readDeclaredPositions(ql, metadataService);
+  if (positions.length === 0) return { seeded: 0, updated: 0, unchanged: 0, unreadable: 0 };
 
   // [#10946] ONE existence read for the whole declaration, before the loop.
   // See `seed-name-lookup.ts` for why a read that cannot ANSWER must never be
