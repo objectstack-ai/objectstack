@@ -52,7 +52,13 @@ const STORED: Row = {
  * copies only: the formula pass writes onto the rows a driver returns.
  */
 function makeDriver() {
-  const rows = new Map<string, Row>([[String(STORED.id), { ...STORED }]]);
+  const stores = new Map<string, Map<string, Row>>();
+  const storeFor = (o: string) => {
+    let s = stores.get(o);
+    if (!s) { s = new Map(); stores.set(o, s); }
+    return s;
+  };
+  storeFor(OBJECT).set(String(STORED.id), { ...STORED });
   const projections: Array<string[] | undefined> = [];
   const matches = (row: Row, where: unknown): boolean => {
     if (!where || typeof where !== 'object') return true;
@@ -78,22 +84,22 @@ function makeDriver() {
   const driver: any = {
     name: 'sql-shaped', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
-    async find(_object: string, ast: any) {
-      projections.push(Array.isArray(ast?.fields) ? [...ast.fields] : undefined);
-      const matched = Array.from(rows.values()).filter((r) => matches(r, ast?.where));
+    async find(object: string, ast: any) {
+      const matched = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
       // Hold the caller's bound (`check:objectql-double-limit`).
       const bounded = typeof ast?.limit === 'number' ? matched.slice(0, ast.limit) : matched;
+      projections.push(Array.isArray(ast?.fields) ? [...ast.fields] : undefined);
       return bounded.map((r) => project(r, ast?.fields));
     },
-    async findOne(_object: string, ast: any) {
+    async findOne(object: string, ast: any) {
+      const hit = Array.from(storeFor(object).values()).find((r) => matches(r, ast?.where));
       projections.push(Array.isArray(ast?.fields) ? [...ast.fields] : undefined);
-      for (const r of rows.values()) if (matches(r, ast?.where)) return project(r, ast?.fields);
-      return null;
+      return hit ? project(hit, ast?.fields) : null;
     },
     async create() { throw new Error('test driver: reads only'); },
     async update() { throw new Error('test driver: reads only'); },
     async delete() { throw new Error('test driver: reads only'); },
-    async count() { return rows.size; },
+    async count(object: string) { return storeFor(object).size; },
   };
   return { driver, projections };
 }
