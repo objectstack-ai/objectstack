@@ -21,14 +21,6 @@ defineSeed('crm_case'): unknown field(s) in records — created_atx.
 
 **What is admitted that was not.** The record type adds every injectable system column name (the new exported type `InjectedSystemColumnName`) to the keys a record literal may carry, typed `unknown`. A literal writing `created_at` or `owner_id` now passes `tsc`. The type cannot evaluate an object's opt-outs, so the call narrows it: `created_at` on a `systemFields: false` object, or `owner_id` on an `ownership: 'org'` object, is refused when the call runs. A declared field of the same name keeps its declared value type.
 
-## FROM → TO
-
-| you wrote | write instead |
-|:--|:--|
-| a misspelled field key (`lead_sorce`, `created_atx`) | the declared field (`lead_source`) or the system column (`created_at`) the refusal suggests |
-| a key for a field the object does not declare | declare the field on the object, or remove the key |
-| a system column the object opts out of (`created_at` on `systemFields: false`, `owner_id` on `ownership: 'org'`) | remove the key: that column does not exist on the object |
-
-**The one-line fix: correct, declare or remove the key the refusal names.** The key named no column of the object, so no value it carried could be stored under it, and no working seed depends on it.
+**Remedy.** Correct, declare or remove the key the refusal names. A misspelled key takes the spelling the refusal suggests (the declared field, or the system column such as `created_at`). A key for a field the object does not declare needs that field declared on the object, or the key removed. A system column the object opts out of (`created_at` on `systemFields: false`, `owner_id` on `ownership: 'org'`) does not exist on that object, so the key is removed. The key named no column of the object, so no value it carried could be stored under it, and no working seed depends on it.
 
 **Who is affected, measured.** At `0767335c`, every `defineSeed` call in this repository passes: `examples/app-crm` (5 seeds, 28 records), `examples/app-showcase` (19 seeds, 132 records) and `examples/app-todo` (1 seed, 8 records), evaluated against the built package. A misspelled key in the same context is refused, which is the control. Every seed module in hotcrm at `99d290a` passes too (8 modules, 354 records, including the `created_at` its case seeds author), and its `crm_case` with the misspelled `created_atx` is refused. Other repositories and deployed packages were not measured.
