@@ -556,10 +556,13 @@ export interface FlowSlotRefusalParams {
     readonly objectName: string;
   };
   /**
-   * (#21850) A key a WHOLE-judged node contract does not declare, or a value it
-   * refuses, at the key the author wrote — today the `approval` node's, the one
-   * plugin node contract the spec declares. Its message is the contract's own
-   * sentence, inside one naming the node type and the key.
+   * A node's executor contract refuses what the author wrote, at the key they
+   * wrote it: (#21850) a key the WHOLE-judged `approval` contract — the one
+   * plugin node contract the spec declares — does not declare, or a value it
+   * refuses; (#21898) a value a builtin node's executor contract refuses; and
+   * (#21982) a key a `script` or `subflow` executor contract does not declare.
+   * Its message is the contract's own sentence, inside one naming the node type
+   * and the key.
    */
   'node-config-refused-by-contract': { readonly nodeType: string; readonly key: string };
 }

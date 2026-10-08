@@ -471,7 +471,8 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * the collection half. The other half is
    * `ManifestSchema.permissions` (`kernel/manifest.zod.ts`): at the AUTHORING
    * stage the same key is the ADR-0025 §3.2 capability GRANT a plugin requests
-   * (`string[]`, or `{ services, hooks, network, fs }`). When a stack is
+   * (`{ services, hooks, network, fs }`; its legacy flat `string[]` form is
+   * retired). When a stack is
    * assembled, the flatten order puts this collection on top — the stage table
    * at {@link AssembledPackageBodySchema} states that precedence — so a
    * manifest-stage `permissions` has no expression in an assembled body, and
@@ -1246,7 +1247,7 @@ function assembledPackageBodyShape(): Pick<typeof STACK_DEFINITION_COLLECTIONS_S
  * | --- | --- | --- |
  * | `objects` | glob patterns | object definitions |
  * | `datasources` | glob patterns | datasource definitions |
- * | `permissions` | required-capability list (ADR-0025) | permission sets |
+ * | `permissions` | required-capability grant block (ADR-0025) | permission sets |
  *
  * That precedence is not chosen here: it is `AppPlugin`'s flatten order
  * (`{ ...manifest, ...bundle }`) stated as a declaration. A manifest key the

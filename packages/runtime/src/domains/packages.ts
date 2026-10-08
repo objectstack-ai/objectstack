@@ -378,6 +378,12 @@ function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolCon
  * authoring one ("switch to a writable package in the package selector") names
  * a remedy that makes no sense for a delete.
  *
+ * [#22113] `POST /packages/:id/publish` and `POST /packages/:id/revert` ask it
+ * too, with the same predicate and refusal: publishing or reverting a code
+ * package's shipped items is an authoring write into a read-only package
+ * (ADR-0070 D2). Revert asks it only after the protocol's stored-row answer, so
+ * a `sys_metadata` row bound to the package keeps its own answer.
+ *
  * [#14451] The remedy it names is ADR-0005 org overlay, and it used to name
  * `POST /packages/:id/duplicate` instead. That sentence sent a caller holding a
  * read-only package at a route which — for exactly the packages this refusal
@@ -1459,6 +1465,16 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'publish' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
+            // [#22113] ADR-0070 D2: a code or installed package is read-only, so
+            // this door refuses it BEFORE `publishPackage`, which would otherwise
+            // snapshot and re-register the package's items as published (measured:
+            // a platform package's objects, and the showcase's capabilities, at
+            // 200). The metadata service has no package-kind concept to refuse
+            // with; the door's one predicate does. An organization overlay draft
+            // on a code package is not published here: it is a `sys_metadata` row
+            // the protocol publishes through `publish-drafts` and the per-item
+            // publish door, neither of which passes this branch.
+            const readOnly = requireWritablePackage(deps, qlService, id, 'publish'); if (readOnly) return readOnly;
             const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
             if (metadataService && typeof (metadataService as any).publishPackage === 'function') {
                 const result = await (metadataService as any).publishPackage(id, body || {});
@@ -1917,6 +1933,14 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
+            // [#22113] ADR-0070 D2: a code or installed package has nothing of its
+            // own to revert, so it is refused here, AFTER the protocol's stored-row
+            // answer above. A stored row bound to it (an organization overlay
+            // draft) is still answered by the protocol, exactly as before; only the
+            // metadata service's revert of the package's shipped items is refused.
+            // "Has never been published" would point the caller at publishing,
+            // which the publish door above refuses for the same package.
+            const readOnly = requireWritablePackage(deps, qlService, id, 'revert'); if (readOnly) return readOnly;
             const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
             if (metadataService && typeof (metadataService as any).revertPackage === 'function') {
                 await (metadataService as any).revertPackage(id);
