@@ -13,8 +13,10 @@
  *     the verdict AND the injected `ast.where` off ONE middleware pass, so a
  *     verdict that disagreed with the predicate would fail here first.
  *  2. The populations the engine could never answer are answered HERE, from
- *     inputs only this plugin sees: the deployment's #12699 carve-out (`none`
- *     under an armed wall — the #15706 population), a `PLATFORM_ADMIN` rung
+ *     inputs only this plugin sees: the deployment's #12699 platform-global
+ *     object (`none` under an armed wall — the #15706 population; since
+ *     ADR-0131 D7 it reaches the wall as the object's own
+ *     `systemFields.tenant: false`), a `PLATFORM_ADMIN` rung
  *     on a PUBLIC tenant object (`organization` — the wall stands), a
  *     `PLATFORM_ADMIN` on a posture-permitting object (`none` — the wall was
  *     crossed), and a hand-built context carrying no rung whose exemption
@@ -92,7 +94,14 @@ const withFields = (
 
 const SCHEMAS: Record<string, Record<string, unknown>> = {
   crm_task: localSchema('crm_task'),
-  sys_widget_registry: localSchema('sys_widget_registry'),
+  // [ADR-0131 D7] As the registry registers it on a deployment that declares it
+  // platform-global (#12699 made total): no organization column, and declaring
+  // `systemFields.tenant: false`. Unregistered anywhere else in this file.
+  sys_widget_registry: {
+    name: 'sys_widget_registry',
+    systemFields: { tenant: false },
+    fields: { status: { type: 'text', label: 'Status' } },
+  },
   sys_catalog: localSchema('sys_catalog', { tenancy: { enabled: false } }),
   crm_secret: localSchema('crm_secret', { access: { default: 'private' } }),
 
@@ -372,7 +381,7 @@ describe('[#15813] the middleware records the Layer 0 verdict it composed — on
 });
 
 describe('[#15813] the populations the engine could never answer are answered where the wall is computed', () => {
-  it('the deployment\'s #12699 carve-out: an exempted object under an armed wall records `none` — the #15706 population', async () => {
+  it('the deployment\'s #12699 declaration (no organization column, ADR-0131 D7) under an armed wall records `none` — the #15706 population', async () => {
     const { middleware } = await boot({ entitlement: { platformGlobalObjects: ['sys_widget_registry'] } });
     const exempted = sweep('sys_widget_registry', 'update', MEMBER_CTX);
     await middleware(exempted, engineTerminal(exempted));
