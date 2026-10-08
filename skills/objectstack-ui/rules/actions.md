@@ -184,6 +184,9 @@ export const OpenInvoicePdfAction = defineAction({
 });
 ```
 
+> A printable document (an invoice) is a page that declares `print` — [Print pages](./pages.md#print-pages):
+> validated today, rendered once the console's print rendering ships.
+
 > ⚠️ **Never express new-tab behavior via `params`.** `params` is exclusively
 > `ActionParam[]` for collecting **user input**. Writing an object form like
 > `params: { newTab: true }` fails the zod build outright; the array form
@@ -200,8 +203,4 @@ and widget mapping from object metadata. Use `objectOverride` to reference a
 field from a different object. Set `defaultFromRow: true` to pre-fill from
 the selected row in `list_item` contexts.
 
-> **Best practices:**
-> - Always add `confirmText` for destructive actions.
-> - Use `visible` (CEL) so buttons appear only when actionable.
-> - Set `refreshAfter: true` whenever the action mutates the current record.
-> - For bulk actions, read `input.selectedIds` inside `body.source`.
+> **Best practice:** set `refreshAfter: true` whenever the action mutates the current record.

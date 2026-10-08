@@ -91,7 +91,7 @@ export default class Start extends Command {
 
   static override flags = {
     // Server
-    port: Flags.integer({ char: 'p', description: 'Port to listen on (overrides $PORT, default 3000)' }),
+    port: Flags.integer({ char: 'p', description: 'Port to listen on, default 3000 (overrides $OS_PORT; $PORT is the legacy alias)' }),
     ui: Flags.boolean({
       description: 'Mount the Console portal at /_console/ (default: true so you can install marketplace apps)',
       default: true,

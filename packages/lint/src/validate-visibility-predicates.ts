@@ -315,16 +315,37 @@
  * silently answers a different question), and the AST it does read comes from
  * `parseCelToAst`, the canonical entry.
  *
- * The checker alone is not enough, because cel-js reports every undeclared
- * top-level identifier — including the ROOT of a dotted path nobody binds
- * (`my_record.x`). Those are deliberately out of scope here: the set of legal
- * roots is not yet trustworthy enough to gate on (#6146 measured `current_user`
- * as documented-but-unbound at both ends), and the two ADR-0089 rules above
- * already own the wrong-root directions the spec DOES state. So the AST is
- * walked first for every identifier used in a **receiver position** (`a.b`,
- * `a?.b`, `a['b']`, `a.exists(…)`) and those names are declared before the
- * check runs. What survives is an identifier used as a bare VALUE — the one
- * shape that cannot resolve under any binding convention.
+ * cel-js reports every undeclared top-level identifier — a bare value AND the
+ * ROOT of a dotted path nobody binds (`foo.x`). The AST is walked only to say
+ * which of the two the author wrote, so the finding can speak the right
+ * sentence; the verdict is the checker's for both.
+ *
+ * ### Unbound namespace roots (#22212)
+ *
+ * Until #22212 every receiver-position name was DECLARED before the check, so
+ * `has(record.duplicate_of_type) && foo.duplicate_of_type == 'crm_lead'`
+ * published clean while the console's engine answered `Unknown variable: foo`
+ * and fell open — the same failure the bare spelling of that predicate gated
+ * on. The reason recorded for the exclusion was that the set of legal roots was
+ * not trustworthy enough to gate on (#6146: `current_user` documented but
+ * unbound). That doubt is about MEMBERS of the set — whether a documented root
+ * really binds — and this rule still adjudicates none of them. What it judges
+ * now is only the COMPLEMENT of a set that is generous by contract:
+ *
+ * - the checker declares `@objectstack/formula`'s `SCOPE_ROOTS`, a published
+ *   "never faults" baseline whose own contract is that a root missing from it
+ *   is a false build error, so every root any surface binds must be in it;
+ * - plus {@link VIEW_PAGE_EXTRA_ROOTS} (`current_user`, `page`).
+ *
+ * Measured against what the renderers bind, objectui `main` at the time of
+ * #22212: a form field gets `record` + `previous` + the host's predicate scope
+ * (`current_user`, `user`, `ctx`, `os`, `features` — `buildExpressionScope`); a
+ * page component additionally `page` and the data-source adapter `data`; the
+ * metadata-admin form `data` + the same identity roots. Every one is in the
+ * union, so a root outside it binds on NO layer — the same "no reading under
+ * which it was going to work" bar the bare spelling meets. Wrong-but-BOUND
+ * roots (`data.` on a runtime view, `record.` on a metadata form) are still the
+ * two ADR-0089 rules' to judge, at `warning`.
  *
  * ### What this rule deliberately does NOT reject
  *
@@ -742,15 +763,18 @@ function isNode(v: unknown): v is AnyNode & CelAstNode {
 
 /**
  * Every identifier the source uses in a **receiver position** — `a.b`, `a?.b`,
- * `a['b']`, `a.exists(…)`. The author is treating each of these as a namespace,
- * so an unbound one is a wrong-ROOT defect (ADR-0089 D3b's territory, or an
- * undocumented root this rule deliberately does not adjudicate), never the bare
- * field name #5149 Repro 1 is about.
+ * `a['b']`, `a.exists(…)`. The author is treating each of these as a namespace.
  *
- * Declaring them before the strict check is what narrows this rule to bare
- * VALUE references. It is uniformly the conservative direction: every name it
- * adds can only remove a finding, so the widening costs coverage and can never
- * produce a false build error.
+ * [#22212] This set no longer DECLARES anything — it CLASSIFIES. It used to be
+ * declared before the strict check, which narrowed the rule to bare VALUE
+ * references and left every unbound namespace (`foo.duplicate_of_type`) to
+ * publish clean while the console's engine refused it with `Unknown variable:
+ * foo` and fell open. The verdict is now the checker's alone, against the
+ * roots it already declares plus {@link VIEW_PAGE_EXTRA_ROOTS}; this set only
+ * decides which of the two sentences the finding speaks — a name the author
+ * wrote as a namespace gets the unbound-ROOT wording, any other the
+ * bare-identifier one. See §Unbound namespace roots in the module note for why
+ * the checker's root set is now a sound basis for an `error`.
  */
 function namespaceRoots(node: unknown, out: Set<string>): void {
   if (Array.isArray(node)) {
@@ -850,10 +874,12 @@ function maskHasCalls(source: string, ast: unknown): string {
 }
 
 /**
- * The first identifier in `source` that no binding root can resolve, or `null`
- * when every reference is rooted. See the module note for why this is two
- * oracles (the canonical AST for namespace roots, the shared strict-environment
- * checker for the verdict) and for the shapes it deliberately leaves alone.
+ * The first identifier in `source` that no binding root can resolve — a bare
+ * value or, since #22212, the root of a namespace nobody binds — or `null` when
+ * every reference resolves. See the module note for why this is two oracles
+ * (the canonical AST to classify how a name was written, the shared
+ * strict-environment checker for the verdict) and for the shapes it
+ * deliberately leaves alone.
  *
  * The source reaching the checker is {@link maskHasCalls}'s rewrite, not the
  * author's bytes: a `has(…)` argument is excluded per OCCURRENCE, and every
@@ -866,23 +892,60 @@ function maskHasCalls(source: string, ast: unknown): string {
  * (#7659) is the rule that says so, with the two spellings this surface
  * actually accepts. Standing down here is what makes that ONE finding instead
  * of two that prescribe opposite fixes (#7696). It is fed through the DECLARED
- * list rather than post-filtering the verdict, which is the same conservative
- * direction {@link namespaceRoots} takes: a name added there can only remove a
- * finding, never invent one.
+ * list rather than post-filtering the verdict — the conservative direction: a
+ * name added there can only remove a finding, never invent one. A DOTTED chain
+ * on the right stands down the same way ({@link rhsChainRoots}).
  */
-function firstBareIdentifier(source: string, literalRhs: boolean): string | null {
+function firstUnboundReference(source: string, literalRhs: boolean): UnboundReference | null {
   const ast = parseCelToAst(source);
   // Not parseable through the canonical front end (syntax fault, or over
   // DEFAULT_LIMITS) — not this rule's verdict to give.
   if (!ast) return null;
   const rooted = new Set<string>();
   namespaceRoots(ast, rooted);
-  const literalSlot = literalRhs ? bareRhsOnlyIdentifiers(ast) : [];
-  return firstUndeclaredReference(maskHasCalls(source, ast), [
+  const literalSlot = literalRhs ? [...bareRhsOnlyIdentifiers(ast), ...rhsChainRoots(ast)] : [];
+  const name = firstUndeclaredReference(maskHasCalls(source, ast), [
     ...VIEW_PAGE_EXTRA_ROOTS,
-    ...rooted,
     ...literalSlot,
   ]);
+  return name === null ? null : { name, rooted: rooted.has(name) };
+}
+
+/** The first reference no binding root resolves, and how the author wrote it. */
+interface UnboundReference {
+  name: string;
+  /** `true` when the author used it as a namespace (`name.x`), not as a value. */
+  rooted: boolean;
+}
+
+/**
+ * [#22212] Roots of a DOTTED chain in the right-hand slot of `==` / `!=` —
+ * `data.type == foo.bar` yields `foo`. Fed to the declared list on a
+ * metadata-editing form only, for #7696's reason one step further: there a
+ * path on the right is `predicate-rhs-path-shaped`'s `error` arm, which
+ * prescribes a quoted literal, and an unbound-root finding prescribing a
+ * different root for the same token would send the author between two fixes.
+ * Over-approximate on purpose (any occurrence on the right counts, macro
+ * bodies included): a name added here can only remove a finding.
+ */
+function rhsChainRoots(node: unknown, out: Set<string> = new Set()): Set<string> {
+  if (Array.isArray(node)) {
+    for (const child of node) rhsChainRoots(child, out);
+    return out;
+  }
+  if (!isNode(node)) return out;
+  const args = node.args;
+  if ((node.op === '==' || node.op === '!=') && Array.isArray(args) && args.length === 2) {
+    let cur: unknown = args[1];
+    let dotted = false;
+    while (isNode(cur) && (cur.op === '.' || cur.op === '.?' || cur.op === '[]') && Array.isArray(cur.args)) {
+      dotted = true;
+      cur = cur.args[0];
+    }
+    if (dotted && isNode(cur) && cur.op === 'id' && typeof cur.args === 'string') out.add(cur.args);
+  }
+  rhsChainRoots(args, out);
+  return out;
 }
 
 /**
@@ -1111,8 +1174,33 @@ function checkElement(
   // where that replacement rule actually fires, so the token is never silenced,
   // only diagnosed once.
   if (source && !refusal) {
-    const bare = firstBareIdentifier(source, literalRhs);
-    if (bare) {
+    const unbound = firstUnboundReference(source, literalRhs);
+    if (unbound?.rooted) {
+      // [#22212] The same failure through a namespace: `foo.x` resolves to
+      // nothing exactly as bare `x` does, because nothing on any layer binds
+      // `foo` — the engine answers `Unknown variable: foo` and the console falls
+      // open. Same id, same gate; only the sentence and the fix differ, since
+      // the author DID write a namespace, just not one that exists.
+      const root = CANONICAL_ROOT_BY_LAYER[layer];
+      findings.push({
+        severity: 'error',
+        rule: VISIBILITY_BARE_IDENTIFIER,
+        where,
+        path,
+        message:
+          `visibility predicate reads through \`${unbound.name}.\`, a namespace no binding on this surface ` +
+          `provides — so \`${unbound.name}\` resolves to nothing, the predicate can never evaluate, and the ` +
+          `console falls OPEN: the element renders unconditionally and looks exactly like one with no ` +
+          `predicate at all (failing open is the console's settled behaviour).`,
+        hint:
+          `Root the path at a namespace this surface binds — e.g. \`${root}.<field>\` instead of ` +
+          `\`${unbound.name}.<field>\`` +
+          (layer === 'runtime'
+            ? ' (runtime view/page surfaces bind `record` + `current_user`; a page component also exposes page state as `page.<var>`).'
+            : ' (a metadata-editing form binds the row under edit as `data`, plus `current_user`).'),
+      });
+    } else if (unbound) {
+      const bare = unbound.name;
       const root = CANONICAL_ROOT_BY_LAYER[layer];
       findings.push({
         severity: 'error',

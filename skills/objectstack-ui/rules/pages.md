@@ -1,7 +1,7 @@
 # Pages & Docs
 
 - [Pages — Lightning-Style Page Layouts](#pages--lightning-style-page-layouts) · [Page Types](#page-types) · [Templates & Regions](#templates--regions)
-- [Component Catalogue](#component-catalogue-selection) · [Example — Record Detail Page](#example--record-detail-page)
+- [Component Catalogue](#component-catalogue-selection) · [Print pages](#print-pages)
 - [AI-authored source pages](#ai-authored-source-pages--kindhtml-and-kindreact-adr-00800081) · [Styling a page](#styling-a-page-adr-0065--responsivestyles-not-classname)
 - [Docs — Package Documentation](#docs--package-documentation-adr-0046) · [Authoring rules](#authoring-rules-each-enforced-by-os-build)
 - [Routing model](#routing-model--platform-level-viewer-opt-in-entry) · [Inline metadata views](#inline-metadata-views--the-metadata-fence-adr-0051) · [Example](#example)
@@ -9,8 +9,7 @@
 ## Pages — Lightning-Style Page Layouts
 
 A **Page** is a Salesforce-Lightning-style layout composed of **regions**
-populated with **components**. Pages let designers assemble record details,
-home pages, app launchers, and utility bars without writing React.
+populated with **components**.
 
 Register under `defineStack({ pages: [...] })`.
 
@@ -47,82 +46,82 @@ which contain components.
 
 | `type`               | Use |
 |:---------------------|:----|
-| `page:header`        | Title + subtitle + `actions: string[]` (action ids) |
+| `page:header`        | `title` / `subtitle` templates + `actions: string[]` — ids of the bound object's actions, never a sibling action node |
 | `page:card`          | Bordered/un-bordered card with `children: Component[]` (plus an optional `footer: Component[]` slot) |
 | `flex`               | Generic styleable box (`properties.children`) — the workhorse for custom layout; style via `responsiveStyles` (see Styling below) |
 | `element:text`       | Text node — `properties.content`; style via `responsiveStyles` |
 | `element:button`     | Button — `properties.label` + `variant`/`size` + optional `action` |
-| `record:highlights`  | Salesforce highlights panel — strip of key fields |
-| `record:path`        | Stage progress bar driven by a status field |
+| `record:highlights`  | Salesforce highlights panel — strip of key fields (`properties.fields`) |
+| `record:path`        | Stage progress bar — `statusField` + `stages: [{ value, label }]` |
 | `record:related_list` | Related-list (child records via lookup) |
 | `nav:menu`           | Quick-create / nav menu bound to current context |
 | `object-metric`      | Single KPI widget (count/sum/avg) |
 | `object-chart`       | Embedded chart |
 
-### Example — Record Detail Page
-
-<!-- os:check -->
-```typescript
-import { defineAction, definePage } from '@objectstack/spec/ui';
-
-// Normally lives in its own `*.action.ts`; inlined so this block stands alone.
-const ConvertLeadAction = defineAction({
-  name: 'convert_lead', label: 'Convert Lead', objectName: 'lead',
-  type: 'flow', target: 'lead_conversion', locations: ['record_header'],
-});
-
-export const LeadDetailPage = definePage({
-  name: 'lead_detail_page',
-  label: 'Lead Detail',
-  type: 'record',
-  object: 'lead',
-  template: 'three-column',
-  regions: [
-    {
-      name: 'header', width: 'full',
-      components: [
-        {
-          type: 'page:header', id: 'lead_header', label: 'Lead Information',
-          properties: {
-            title: '{first_name} {last_name}',
-            subtitle: '{company}',
-            actions: ['convert_lead'],   // ids of `lead`'s actions
-          },
-        },
-        {
-          type: 'record:highlights', id: 'lead_highlights',
-          properties: { fields: ['status', 'rating', 'lead_source', 'owner', 'email', 'phone'] },
-        },
-        {
-          type: 'record:path', id: 'lead_path',
-          properties: {
-            statusField: 'status',
-            stages: [
-              { value: 'new',         label: 'New' },
-              { value: 'contacted',   label: 'Contacted' },
-              { value: 'qualified',   label: 'Qualified' },
-              { value: 'unqualified', label: 'Unqualified' },
-            ],
-          },
-        },
-      ],
-    },
-    // left_sidebar / main / right_sidebar regions follow…
-  ],
-});
-```
-
 > **Variable substitution** — `{first_name}`, `{current_user.first_name}`,
 > `{current_quarter_start}` etc. resolve from the page's `variables` block,
 > the bound record, and the runtime context. Declare `variables: [...]` at
-> the page root for any non-record value. For relative-date placeholders
-> (`{today}`, `{30_days_ago}`, `{N_<unit>_(ago|from_now)}` …) see the
-> [Date Macros](../SKILL.md#date-macros--filter-placeholders) reference below — the
-> full token list is published as `DATE_MACRO_TOKENS` in `@objectstack/spec/data`.
+> the page root for any non-record value; relative-date placeholders:
+> [Date Macros](../SKILL.md#date-macros--filter-placeholders).
 
-> **Actions in header** — `properties.actions` takes the **ids** of actions
-> declared on the bound object (`'convert_lead'`; no built-in id registry);
-> do **not** create a sibling action node.
+### Print pages
+
+An invoice, a delivery order, a letter or a report is an ordinary page with a
+**`print`** declaration — there is no template type; the page's own blocks are
+the document. Only a `kind: 'full'` page of `type: 'record'`, `'home'` or
+`'app'` with its blocks in `regions` may declare it: the parse refuses `print`
+on a `list` page (its switch is `interfaceConfig.allowPrinting`), a `utility`
+panel, a `slotted` / `html` / `react` page and a `full` page with no regions.
+
+`print` keys, each mapped to print CSS: `paperSize` (`'A4'` default, `'A5'`,
+`'Letter'`, `'Legal'`) and `orientation` (`'portrait'` default, `'landscape'`);
+`margins: { top, right, bottom, left }` in **millimetres**; `repeatHeader` /
+`repeatFooter` repeat the page's own `header` / `footer` region on every sheet
+(refused without that region; off = printed once); `pageNumbers` prints sheet
+number and count; the page-break hints `repeatTableHeaders` (on by default)
+and `avoidBreakInside` (keep each block whole).
+
+Every block, at any depth, must draw all it declares, in full, the same at
+any width: the containers `page:section` / `page:card` /
+`page:footer`, the field blocks `record:details` / `record:highlights`, the
+all-lines child table `record:line_items`, `element:text` / `element:image` /
+`element:divider` / `element:definition-list` / `element:repeater`, and the
+single values `element:number` / `object-metric`. `os validate` / `os build`
+and the page save door refuse any other block (`print-page-block-unprintable`)
+with its reason: it **draws a window of its rows** (`record:related_list`,
+`object-grid` — use `record:line_items`), it **lays itself out to the screen**
+(`page:header`, sidebars, kanban / calendar / gantt / map), it has **nothing
+to print** (`record:path`, tabs, buttons, inputs, forms — values print through
+`record:details`), or it is **outside the vocabulary** (`flex`, `object-chart`,
+a plugin widget), so nothing answers for how it prints.
+
+Validated today; the console's print rendering that applies it follows, so
+`os validate` warns the layout is not yet applied. List export has no `'pdf'`;
+a list prints as shown via the view's `allowPrinting`.
+
+<!-- os:check -->
+```typescript
+import { definePage } from '@objectstack/spec/ui';
+
+export const InvoicePrintPage = definePage({
+  name: 'invoice_print', label: 'Invoice', type: 'record', object: 'invoice',
+  print: { paperSize: 'A4', margins: { top: 15, right: 12, bottom: 15, left: 12 },
+           repeatHeader: true, repeatFooter: true, pageNumbers: true },
+  regions: [
+    { name: 'header', components: [
+      { type: 'element:text', properties: { content: 'ACME Ltd' } },
+    ] },
+    { name: 'main', components: [
+      { type: 'record:details' },
+      { type: 'record:line_items', properties: { childObject: 'invoice_line', relationshipField: 'invoice',
+          columns: [{ name: 'product' }, { name: 'quantity' }, { name: 'unit_price' }, { name: 'amount' }] } },
+    ] },
+    { name: 'footer', components: [
+      { type: 'element:text', properties: { content: 'Due within 30 days.' } },
+    ] },
+  ],
+});
+```
 
 ### AI-authored *source* pages — `kind:'html'` and `kind:'react'` (ADR-0080/0081)
 
@@ -192,19 +191,13 @@ The source is real React executed at render by the runtime. The injected scope a
   itself? Author the page as `type:'record'`, where the context exists
 - `data` / `variables` / `page`
 
-Compose **layout with inline `style={{…}}`** (real CSS); use the injected blocks
-for data. **Do NOT use Tailwind `className`** — see *Styling a page* below for
-why it silently does nothing.
-
 > **Do not guess props — read the contract.** Each injected block's full prop set
 > (name, type, `data`/`controlled`/`callback` kind, required, description) is the
 > **[React-tier component contract](../references/react-blocks.md)**, generated from
 > the block→schema index in `@objectstack/spec`.
-> It is the authoritative answer to "what props does `<ObjectForm>`/`<ListView>`/…
-> take?" — author against it, not from memory. The `data` props are sourced from the platform's spec schemas (FormView,
+> The `data` props are sourced from the platform's spec schemas (FormView,
 > ListView, Chart, …) — the same protocol the server validates;
 > `binding`/`controlled`/`callback` are the React overlay.
-> (Maintainers: regenerate with `pnpm --filter @objectstack/spec gen:react-blocks`.)
 
 Master/detail (click a row → edit it → save refreshes the list):
 
@@ -294,8 +287,7 @@ Rules:
 ```
 
 The spec field is `PageComponentSchema.responsiveStyles` (`ResponsiveStylesSchema` —
-see `node_modules/@objectstack/spec/src/ui/responsive.zod.ts`). See ADR-0065
-(SDUI styling model).
+see `node_modules/@objectstack/spec/src/ui/responsive.zod.ts`).
 
 **In the source tiers (`kind:'html'` / `kind:'react'`) the same rule holds — no
 Tailwind `className` — but the primitive differs:**
@@ -327,12 +319,6 @@ author plain Markdown in a flat `src/docs/` directory; `os build`
 compiles each `*.md` into a `doc` item that travels inside the package
 artifact and renders in the console at `/docs/<name>`. Docs are also the
 grounding the AI assistant reads about a package.
-
-```
-src/docs/
-  crm_index.md         → doc "crm_index"      → /docs/crm_index
-  crm_user_guide.md    → doc "crm_user_guide" → /docs/crm_user_guide
-```
 
 ### Authoring rules (each enforced by `os build`)
 
@@ -382,15 +368,10 @@ navigation: [
 ]
 ```
 
-A platform-level "Documentation" portal (browse/search all docs by
-package) is a later, additive concern — author-side, nothing to model now.
-
-> **Live instances vs. structural views.** For a *live, interactive
+> **Live instances.** For a *live, interactive
 > instance* — a dashboard, a report, a record table — **don't embed it**:
 > link to it by URL and let the platform render it (one source, never a
-> stale copy). But for *structural metadata that no single screen shows as
-> one picture* — a state machine, a flow, a permission matrix — embed a
-> read-only view inline with a `metadata` fence (below).
+> stale copy).
 
 ### Inline metadata views — the `metadata` fence (ADR-0051)
 
@@ -424,8 +405,7 @@ package** — a dead same-package reference fails the build (same posture as
 a broken link). At render time a missing or forbidden reference degrades to
 a placeholder, never a crash.
 
-Scope is deliberately narrow: **only** `state_machine`, `flow`,
-`permission`. Embedding an `object` (data model) or an arbitrary SDUI
+Embedding an `object` (data model) or an arbitrary SDUI
 component is **not** supported. **`permission` caveat:** the matrix is not
 yet projected to the reader's own permissions (ADR-0051 P3) — do not place a
 `permission` embed in a doc reachable by less-privileged or anonymous

@@ -398,6 +398,31 @@ function resolveCbpRelation(obj: AnyRec): CbpRelation | undefined {
 }
 
 /**
+ * [#22212] The relation that makes an object a CHILD whose record-level access
+ * is derived from a master — the subject of `security-master-detail-ungranted`.
+ *
+ * A `controlled_by_parent` object is answered by {@link resolveCbpRelation},
+ * the runtime's own precedence (required master_detail, then any master_detail,
+ * then a required LOOKUP): that is the field the platform derives the child's
+ * record access through, so a lookup-bound child is as much a child as a
+ * master-detail one. Keyed on `firstMasterDetailField` alone, the rule was
+ * silent on exactly that shape — a `controlled_by_parent` object bound through
+ * a required lookup and granted in no set — while object-level CRUD is never
+ * derived for it either, so the role-bound 403 is the same.
+ *
+ * Every other object keeps the reading this rule always had: a master_detail
+ * field makes it a detail whatever its sharingModel says.
+ */
+function derivedAccessParent(obj: AnyRec): { name: string; type: string; parent?: string } | undefined {
+  if (owdOf(obj) === 'controlled_by_parent') {
+    const rel = resolveCbpRelation(obj);
+    if (rel) return { name: rel.field, type: rel.type, parent: rel.master };
+  }
+  const md = firstMasterDetailField(obj);
+  return md ? { ...md, type: 'master_detail' } : undefined;
+}
+
+/**
  * Does a per-object permission entry open the object-level CRUD gate at all?
  * Any of the four CRUD bits, or a super-user bypass (View/Modify All Data),
  * counts — this mirrors the runtime `checkObjectPermission` gate (ADR-0066 D2):
@@ -911,7 +936,9 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   // 403 *before* the parent-derived access is ever consulted, surfacing as the
   // silent "can't fill in / can't submit the subtable" trap (framework#2700,
   // downstream os-tianshun-mtc#43). Statically detectable: a detail (has a
-  // master_detail field) that NO authored permission set grants.
+  // master_detail field, or — #22212 — is `controlled_by_parent` and resolves
+  // its master the way the runtime does, a required lookup included) that NO
+  // authored permission set grants.
   //
   // Advisory `warning` — it does not gate the build. Two deliberate silences
   // keep the false-positive rate near zero: (a) if the package authors no
@@ -939,7 +966,8 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         if (!obj || typeof obj !== 'object' || isSystemObject(obj)) continue;
         const objName = typeof obj.name === 'string' ? obj.name : '';
         if (!objName || grantedObjects.has(objName)) continue;
-        const md = firstMasterDetailField(obj);
+        // [#22212] The runtime's parent, not only a master_detail field.
+        const md = derivedAccessParent(obj);
         if (!md) continue;
         const parentText = md.parent ? ` → "${md.parent}"` : '';
         findings.push({
@@ -948,7 +976,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           where: `object "${objName}"`,
           path: `objects[${i}].fields.${md.name}`,
           message:
-            `detail object "${objName}" (master_detail "${md.name}"${parentText}) has no object-level ` +
+            `detail object "${objName}" (${md.type} "${md.name}"${parentText}) has no object-level ` +
             `CRUD grant in any permission set. A master-detail child derives its RECORD-level access ` +
             `from the master (ADR-0055 controlled_by_parent), but object-level CRUD is a SEPARATE gate ` +
             `that is never derived — role-bound non-admin users are denied (403) before the ` +

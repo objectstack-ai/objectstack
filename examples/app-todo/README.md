@@ -98,7 +98,7 @@ examples/app-todo/
 ## 💡 How to Run
 
 ### Prerequisites
-- Node.js 22+ and pnpm 8+
+- Node.js 22+ and pnpm 10 (`corepack enable`)
 - Install from monorepo root: `corepack enable && pnpm install`
 
 ### Type Check

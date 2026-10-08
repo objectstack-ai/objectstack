@@ -462,6 +462,7 @@ describe('#6216 — the field set is CLOSED', () => {
     'seedReplay',
     'skipStateMachine',
     'preserveAudit',
+    'keptOptionValues',
   ];
 
   it('every ExecutionContext field is either assembled at the entry or declared non-entry', () => {
