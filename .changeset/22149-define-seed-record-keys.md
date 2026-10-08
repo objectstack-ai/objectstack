@@ -4,7 +4,7 @@
 
 `defineSeed()` refuses a seed record key that names no column of the target object, whatever shape the records arrive in, and its record type now admits the system columns the platform injects (`created_at`, `owner_id` and the rest), which it used to refuse in a record literal.
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten or converted, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the define helper's verdict on record keys: a key that names neither a field the object declares nor a system column the platform injects on it is refused when `defineSeed` runs, at module load, which `os validate`, `os build` and boot all reach. The repair is the author's edit of a misspelled key, which no ledger entry can derive. The only export change is an added type, `InjectedSystemColumnName`. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this helper and this diff adds none (not registered / already-registered); and the refusal is a call-time verdict reached at the build doors, not a type surface alone (not type-surface-only). -->
 
