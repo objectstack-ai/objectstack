@@ -35,6 +35,7 @@ const BASE = '/api/v1/storage';
 const COMMIT = `${BASE}/upload/complete`;
 const CHUNKED_COMPLETE = `${BASE}/upload/chunked/:uploadId/complete`;
 const PROGRESS = `${BASE}/upload/chunked/:uploadId/progress`;
+const CHUNK = `${BASE}/upload/chunked/:uploadId/chunk/:chunkIndex`;
 
 /** The uploader. */
 const ALICE: StorageUploadSession = { userId: 'u_alice', organizationId: 'org_a' };
@@ -160,12 +161,30 @@ async function alicePresigns(filename = 'alice-plan.txt'): Promise<string> {
 /** Alice starts a chunked upload through the real start door. */
 async function aliceStartsChunked(
   filename = 'alice-chunked.bin',
-): Promise<{ uploadId: string; fileId: string }> {
+): Promise<{ uploadId: string; fileId: string; resumeToken: string }> {
   const res = await call(routes, 'POST', `${BASE}/upload/chunked`, 'alice', {
     body: { filename, mimeType: 'application/octet-stream', totalSize: 10 },
   });
   expect(res.status).toBe(200);
-  return { uploadId: res.body.data.uploadId, fileId: res.body.data.fileId };
+  return { uploadId: res.body.data.uploadId, fileId: res.body.data.fileId, resumeToken: res.body.data.resumeToken };
+}
+
+/**
+ * The declared 10 bytes, as chunk 0 — what a completion needs the upload to
+ * HOLD before it assembles anything (#22313).
+ */
+async function sendTheChunk(
+  on: Map<string, RouteHandler>,
+  who: Who | null,
+  uploadId: string,
+  resumeToken: string,
+): Promise<void> {
+  const res = await call(on, 'PUT', CHUNK, who, {
+    params: { uploadId, chunkIndex: '0' },
+    headers: { 'x-resume-token': resumeToken },
+    rawBody: async () => Buffer.from('0123456789'),
+  } as Partial<IHttpRequest>);
+  expect(res.status).toBe(200);
 }
 
 // ---------------------------------------------------------------------------
@@ -260,7 +279,8 @@ describe('the commit door (POST /upload/complete)', () => {
 
 describe('the chunked-completion door (POST /upload/chunked/:uploadId/complete)', () => {
   it('POSITIVE: the uploader completes their own upload', async () => {
-    const { uploadId, fileId } = await aliceStartsChunked();
+    const { uploadId, fileId, resumeToken } = await aliceStartsChunked();
+    await sendTheChunk(routes, 'alice', uploadId, resumeToken);
     const res = await call(routes, 'POST', CHUNKED_COMPLETE, 'alice', {
       params: { uploadId },
       body: { parts: [] },
@@ -396,6 +416,7 @@ describe('open mode (no session resolver) is unchanged', () => {
     expect(start.status).toBe(200);
     const uploadId = start.body.data.uploadId;
     expect((await call(open, 'GET', PROGRESS, null, { params: { uploadId } })).status).toBe(200);
+    await sendTheChunk(open, null, uploadId, start.body.data.resumeToken);
     expect(
       (await call(open, 'POST', CHUNKED_COMPLETE, null, { params: { uploadId }, body: { parts: [] } })).status,
     ).toBe(200);

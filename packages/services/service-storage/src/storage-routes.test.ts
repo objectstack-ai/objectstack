@@ -271,7 +271,10 @@ describe('Storage REST Routes', () => {
     }
 
     it("stamps 'failed' on the row when the backend completion throws", async () => {
-      const { uploadId } = await initSession();
+      const { uploadId, resumeToken } = await initSession();
+      // The upload holds its declared bytes, so the completion reaches the
+      // backend: one that does not is refused before it (#22313).
+      await putChunk(uploadId, resumeToken);
       vi.spyOn(adapter, 'completeChunkedUpload').mockRejectedValue(new Error('NoSuchUpload'));
 
       const res = await complete(uploadId);
