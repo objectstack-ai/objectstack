@@ -1,11 +1,12 @@
 ---
 '@objectstack/spec': minor
 '@objectstack/service-automation': patch
+'@objectstack/metadata-protocol': minor
 ---
 
 A key a builtin flow node's executor contract does not declare is refused at parse, with a location, on every builtin but `try_catch`: a `notify` `bogusKey`, a screen field's `visibleIf`, a `create_record` `fieldValues`, an `http` `outputVariable` and the like no longer pass `objectstack validate` and `objectstack compile` and then get the whole flow refused at registration.
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing: an undeclared config key on 10 more builtins, every strict-contract builtin but try_catch, is refused at the build doors and the save door, where it passed; widening: a save door with no flow canonicalizer judges the D2-converted body, so a D2 alias spelling it refuses today, script functionName / input and subflow flow, is accepted again, as at every other door)
 
 <!-- adr-0087: registered flow-builtin-node-config-undeclared-keys-refused -->
 
@@ -16,6 +17,8 @@ Clause-②: no (narrowing)
 **What is refused.** A `get_record`, `create_record`, `update_record`, `delete_record`, `notify`, `http`, `screen`, `map`, `loop` or `parallel` node, at any depth, whose config carries a key its executor contract does not declare: at the config itself, on a `screen` field, or on one of a field's `options`. That includes a body-less legacy `loop`, which is judged on key membership alone. The refusal is the existing closed-set code `node-config-refused-by-contract`, `params: { nodeType, key }`, one per undeclared key, anchored at the key (`nodes.N.config.bogusKey`, `nodes.N.config.fields.0.visibleIf`). It comes from the one judge `flowNodeConfigRefusals` that `FlowSchema.parse`, `AutomationEngine.registerFlow` (which parses first), `objectstack validate` and the metadata save door share. Its message carries the contract's own sentence, with the contract's prescription for a known slip (`fieldValues` → `fields`, `bulk` → `multi: true`, `visibleIf` → `visibleWhen`, a did-you-mean for a near miss), and closes with the remedy: rename the key to one the contract declares there, or remove it. The issue's `code` is `custom`. That covers `FlowSchema`, `defineFlow()`, `defineStack` (`STACK_SCHEMA_INVALID`, 422, at `flows.N.nodes.M.config.<key>`), `os validate`, `os compile`, an artifact's parse, `registerFlow` and the save door. `script` and `subflow` keys were already refused this way. The new `builtinNodeConfigKeysJudged(nodeType)` export names exactly the builtins the spec judges.
 
 **`@objectstack/service-automation`.** `registerFlow`'s descriptor walk (`validateNodeConfigKeys`) stands aside for every type `builtinNodeConfigKeysJudged` names, so each node type has one judge. Before the move, the declared key sets were measured equal: on each of these types the descriptor's declared keys, at every position the walk descends to, equal the keys the contract accepts there. So registration refuses exactly what it refused before. The refusal now arrives as the parse's located issue instead of the walk's `Flow '…' rejected: N undeclared config key(s)` text.
+
+**`@objectstack/metadata-protocol`.** The save door judges a flow in its canonical spelling on every path. When no flow canonicalizer resolved (a host with no automation service), or the canonicalizer threw (a draft with a temporary cycle), the schema gate now judges the body with the ADR-0087 D2 conversions applied (`applyConversionsToFlow`), for the verdict only. The stored body stays the raw request body, exactly as before. A D2 spelling the load path still rewrites (`filters` on a CRUD node; `to`, `subject`, `body` and `url` on a `notify`; `flow` on a `map`; `functionName` and `input` on a `script`; `flow` on a `subflow`) is therefore accepted at that door, as at every other one, and a key no conversion rewrites is refused there, located. This widens the fallback path back for the `script` and `subflow` aliases the previous key arm had begun refusing there. `duplicatePackage` re-saves through the same gate.
 
 **What stays as it was.**
 
