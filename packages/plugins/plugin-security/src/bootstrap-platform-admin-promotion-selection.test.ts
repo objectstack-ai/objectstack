@@ -755,6 +755,7 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
           id: 'ups_legacy',
           user_id: 'usr_person0',
           permission_set_id: sets[0].id,
+          permission_set: 'admin_full_access',
           organization_id: null,
         },
         { context: SYSTEM_CTX },

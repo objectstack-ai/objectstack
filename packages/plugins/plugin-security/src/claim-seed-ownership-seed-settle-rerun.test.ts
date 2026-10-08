@@ -281,6 +281,7 @@ describe('seed-ownership claim — the one-shot pass and the seed it races', () 
       id: 'ups_existing',
       user_id: ADMIN,
       permission_set_id: 'ps_admin_full_access',
+      permission_set: 'admin_full_access',
       organization_id: null,
     });
     rig.tables.sys_permission_set.push({ id: 'ps_admin_full_access', name: 'admin_full_access' });

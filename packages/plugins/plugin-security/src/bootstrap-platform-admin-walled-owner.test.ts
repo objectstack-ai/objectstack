@@ -371,7 +371,7 @@ describe('walled posture — the legacy grant is no longer an anchor (#11663 L5)
     makeQl({
       sets: [{ id: 'ps_admin', name: 'admin_full_access', active: true }],
       users: [user('u_legacy', 'legacy-admin@corp.example', '2026-01-01T00:00:00Z', { email_verified: true })],
-      grants: [{ id: 'ups_1', user_id: 'u_legacy', permission_set_id: 'ps_admin', organization_id: null }],
+      grants: [{ id: 'ups_1', user_id: 'u_legacy', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null }],
     });
 
   it('⛔ a seeded legacy grant produces NO deprecation line any more — the window is closed', async () => {
@@ -434,7 +434,7 @@ describe('walled posture — the legacy grant is no longer an anchor (#11663 L5)
     const log = logger();
     const ql = makeQl({
       sets: [{ id: 'ps_admin', name: 'admin_full_access', active: true }],
-      grants: [{ id: 'ups_1', user_id: SystemUserId.SYSTEM, permission_set_id: 'ps_admin', organization_id: null }],
+      grants: [{ id: 'ups_1', user_id: SystemUserId.SYSTEM, permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null }],
     });
     const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: log });
     expect(r.reason).toBe('walled_owner_email_undeclared');
@@ -540,7 +540,7 @@ describe('single posture — "first user is owner" is ruled reasonable and UNCHA
     const ql = makeQl({
       sets: [{ id: 'ps_admin', name: 'admin_full_access', active: true }],
       users: [user('u_admin', 'admin@corp.example', '2026-08-23T01:00:00Z')],
-      grants: [{ id: 'ups_1', user_id: 'u_admin', permission_set_id: 'ps_admin', organization_id: null }],
+      grants: [{ id: 'ups_1', user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null }],
     });
     const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: logger() });
     expect(r.adminPromoted).toBe(false);
