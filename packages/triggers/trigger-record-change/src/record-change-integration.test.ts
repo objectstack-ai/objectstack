@@ -393,7 +393,8 @@ const beforeHookObjectDef = (name: string) => ({
  * node — fires the record-change flows bound to that object with
  * `userId: undefined`. A flow left at the spec default
  * `runAs:'user'` then presented NO principal to ObjectQL, and the data security
- * middleware skips when there is no principal: the flow read and wrote every row.
+ * middleware then skipped a context with no principal (since ADR-0096 D5 it
+ * refuses one): the flow read and wrote every row.
  *
  * Nothing flags this at authoring time and nothing can — whether a given write
  * carries a user is only knowable at run time — so the runtime refusal is the

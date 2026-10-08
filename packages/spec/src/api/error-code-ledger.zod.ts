@@ -511,6 +511,16 @@ export const ERROR_CODE_LEDGER = {
     'INTERNAL',
     'INVALID_REQUEST',
     'INVALID_RESUME_TOKEN',
+    // [#22314] 413 from every upload door over the resolved `max_upload_mb`
+    // (#22283): the presigned door's declared `size`, the chunked start's
+    // declared `totalSize`, the local raw PUT body and each chunk's running
+    // total, by `content-length` before the body is read and by the bytes read
+    // — `storage-routes.ts`, refused before a row is written or a byte stored.
+    // Second EMITTER of the code `@objectstack/rest` already registers for its
+    // import row ceilings (both import routes); one condition — the request
+    // carries more than the door accepts — one code a client branches on
+    // without reading the status. Provenance, not identity (see above).
+    'PAYLOAD_TOO_LARGE',
     'UPLOAD_SESSION_EXPIRED',     // chunk/complete against a session past its own expires_at (#7667)
     'UPLOAD_SESSION_NOT_FOUND',
   ],

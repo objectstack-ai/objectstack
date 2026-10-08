@@ -217,7 +217,8 @@ describe('resolveRunDataContext (#1888 unit)', () => {
   // #3760 — a user-mode run with NO user is REFUSED, not resolved. Previously
   // this returned `undefined` (or, after #3712, a provenance-only envelope) and
   // let the op proceed with no principal — which the data security middleware
-  // waves straight through, running it UNSCOPED. That was the #1888 fail-open.
+  // then waved straight through, running it UNSCOPED (since ADR-0096 D5 it
+  // refuses one). That was the #1888 fail-open.
   it('THROWS for a user-mode run with no user (with or without a run id)', () => {
     for (const ctx of [{ runAs: 'user' as const }, { runAs: 'user' as const, flowRunId: 'run_1' }, undefined]) {
       expect(() => resolveRunDataContext(ctx)).toThrow(UnscopedRunDataAccessError);
@@ -256,7 +257,8 @@ describe('resolveRunDataContext (#1888 unit)', () => {
  * #1888 FOLLOW-UP, CLOSED BY #3760 — the user-less fail-open. A run with no
  * trigger user and an effective `runAs:'user'` (the default) resolves no
  * identity → CRUD nodes present no principal → the data security middleware
- * skips → the run used to execute UNSCOPED (effectively elevated).
+ * skipped (it refuses since ADR-0096 D5) → the run used to execute UNSCOPED
+ * (effectively elevated).
  *
  * #2308 made that AUDIBLE (a warning) but left it working, on the grounds that
  * denying would break legitimate scheduled CRUD. That rationale expired: the
