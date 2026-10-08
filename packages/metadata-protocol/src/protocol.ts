@@ -18039,24 +18039,33 @@ export class ObjectStackProtocolImplementation implements
     /**
      * [#22114] The stored head a `/meta` save at one address compares a
      * caller's version token against: the `state` row at `ref`'s organization
-     * partition, bound to `packageId` (`null` = the package-unbound row), as
-     * the repository reads and serves it ({@link SysMetadataRepository.get}).
-     * `null` when no such row exists.
+     * partition that a save naming `packageId` (`null` = no package) upserts,
+     * as the repository serves it. `null` when that save would create.
      *
      * The ONE head read both halves of the ADR-0008 chain make. The save door
-     * judges an inbound token against it ({@link storedParentForToken}), and
-     * the item read serves its keyed form as `version`
-     * ({@link readVersionToken}). So the token a read hands out is the token a
-     * save at the same address accepts, and the one a receipt serves for that
-     * row — ⛔ never a second derivation of either.
+     * takes its expected parent from it — the inbound token judged against it
+     * ({@link storedParentForToken}), or, unpinned, the head itself — and the
+     * item read serves its keyed form as `version` ({@link readVersionToken}).
+     * So the token a read hands out is the token a save at the same address
+     * accepts, and the one a receipt serves for that row — ⛔ never a second
+     * derivation of either.
+     *
+     * [#22128] Resolved by the repository's own write-address resolution
+     * ({@link SysMetadataRepository.headAt}), the one its lock judges with —
+     * ⛔ never {@link SysMetadataRepository.get} at the named key. A draft
+     * save that names no package is stored in the package of the item's
+     * active row (#11087), so the row at the package-unbound key is not the
+     * row that save overwrites: read there, the parent of an existing draft
+     * was `null`, the repository's lock refused the unpinned save 409, and the
+     * `?state=draft` read served `version: null` while the draft existed.
      */
     private async storedHeadAt(
         repo: SysMetadataRepository,
-        ref: Parameters<SysMetadataRepository['get']>[0],
+        ref: Parameters<SysMetadataRepository['headAt']>[0],
         state: 'active' | 'draft',
         packageId: string | null,
     ): Promise<string | null> {
-        return (await repo.get(ref, { state, packageId }))?.hash ?? null;
+        return (await repo.headAt(ref, { state, packageId }))?.hash ?? null;
     }
 
     /**
@@ -18075,7 +18084,11 @@ export class ObjectStackProtocolImplementation implements
      * and from a package's own row to the package-less one (ADR-0048); a save
      * does not, it writes its own partition. A token of a row the save would
      * not overwrite would be refused by that save every time, so such a read
-     * serves `null` rather than the served row's token.
+     * serves `null` rather than the served row's token. [#22128] And the
+     * other way round: a `?state=draft` read that names no package serves the
+     * token of the draft a package-less draft save overwrites, which is the
+     * draft bound to the package of the item's active row when there is one
+     * (#11087) — the address the save resolves, not the key it was handed.
      */
     private async readVersionToken(
         request: { type: string; name: string; packageId?: string },
@@ -18088,7 +18101,7 @@ export class ObjectStackProtocolImplementation implements
             type: PLURAL_TO_SINGULAR[request.type] ?? request.type,
             name: request.name,
             org: organizationId ?? 'env',
-        } as Parameters<typeof repo.get>[0];
+        } as Parameters<typeof repo.headAt>[0];
         const stored = await this.storedHeadAt(repo, ref, state, request.packageId ?? null);
         return stored === null ? null : this.receiptVersion(stored);
     }
@@ -20932,7 +20945,9 @@ export class ObjectStackProtocolImplementation implements
             // package the upsert targets so a collision's other-package
             // row is never read as this item's parent.
             // [#22114] The head the item read's `version` is the keyed form of
-            // — one read for both halves ({@link storedHeadAt}).
+            // — one read for both halves ({@link storedHeadAt}). [#22128] The
+            // row the repository's `put` resolves for this address and locks
+            // against, the inherited draft binding included.
             const currentStored = await this.storedHeadAt(
                 repo, ref, mode === 'draft' ? 'draft' : 'active', request.packageId ?? null,
             );
