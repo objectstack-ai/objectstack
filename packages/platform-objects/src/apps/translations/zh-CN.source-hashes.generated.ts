@@ -52,5 +52,4 @@ export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_sso_provider._actions.register_sso_provider.params.mapName.placeholder": "a484c34aaf624bd6",
   "objects.sys_sso_provider._actions.register_sso_provider.params.scopes.placeholder": "58ac90cde28c764d",
   "objects.sys_sso_provider.fields.id.label": "00b0385c9c152888",
-  "objects.sys_view_definition.fields.id.label": "00b0385c9c152888",
 };
