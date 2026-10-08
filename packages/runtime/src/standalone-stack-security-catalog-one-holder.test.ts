@@ -75,7 +75,7 @@ describe('a package\'s security catalog name another holder holds refuses the bo
     }
   });
 
-  async function artifactStack(artifact: unknown) {
+  async function artifactStack(artifact: unknown, databaseUrl = ':memory:') {
     const dir = mkdtempSync(join(tmpdir(), 'os-catalog-one-holder-'));
     dirs.push(dir);
     const artifactPath = join(dir, 'objectstack.json');
@@ -83,7 +83,7 @@ describe('a package\'s security catalog name another holder holds refuses the bo
     return createStandaloneStack({
       artifactPath,
       projectRoot: dir,
-      databaseUrl: ':memory:',
+      databaseUrl,
       skipSeedData: true,
       runPlatformMigrations: false,
     });
@@ -163,6 +163,40 @@ describe('a package\'s security catalog name another holder holds refuses the bo
     const { refusal } = await boot([...stack.plugins, security]);
     // The app's `AppPlugin` registers first here, so the plugin's is the second holder.
     expectRefusal(refusal, SECURITY_PLUGIN_ID, { kind: 'package', packageId: 'com.test.dup' });
+  }, BOOT_TIMEOUT);
+
+  // The cold-boot half (ADR-0048 N.3; maintainer ruling letter A on #22307):
+  // on an artifact boot as on any other, every package registers before the
+  // environment catalog hydrates from `sys_metadata`, so the package door
+  // cannot see the environment's names; the engine plugin judges them right
+  // after hydration and refuses the boot. The refusal leaves `start()`, so the
+  // kernel wraps it, and the envelope is the wrapper's `cause`.
+  it('artifact boot over one database: a package declaring a position and a permission set the environment catalog already holds', async () => {
+    const dbDir = mkdtempSync(join(tmpdir(), 'os-catalog-cold-boot-'));
+    dirs.push(dbDir);
+    const databaseUrl = `file:${join(dbDir, 'catalog.db')}`;
+    const base = body('com.test.env-base', { position: 'base_position', permission: 'base_set', capability: 'base.export' });
+
+    const first = await boot((await artifactStack({ manifest: manifestOf('com.test.env-project'), packages: [{ manifest: base }] }, databaseUrl)).plugins);
+    expect(first.refusal).toBeUndefined();
+    const protocol = first.kernel.getService('protocol');
+    await protocol.saveMetaItem({ type: 'permission', name: 'env_held_set', item: { name: 'env_held_set', label: 'saved in the environment', objects: {} } });
+    await protocol.saveMetaItem({ type: 'position', name: 'env_held_position', item: { name: 'env_held_position', label: 'saved in the environment' } });
+    await first.kernel.shutdown();
+    kernels.splice(kernels.indexOf(first.kernel), 1);
+
+    const added = body('com.test.env-added', { position: 'env_held_position', permission: 'env_held_set', capability: 'env_added.export' });
+    const { refusal } = await boot(
+      (await artifactStack({ manifest: manifestOf('com.test.env-project'), packages: [{ manifest: base }, { manifest: added }] }, databaseUrl)).plugins,
+    );
+    const cause = (refusal as Error & { cause?: Refusal & { conflicts?: unknown[] } } | undefined)?.cause;
+    expect(cause, 'the boot was refused with the one-holder envelope').toBeDefined();
+    expect(cause!.code).toBe(NAMESPACE_CONFLICT_CODE);
+    expect(cause!.status).toBe(422);
+    expect(cause!.conflicts).toEqual([
+      { catalogType: 'position', name: 'env_held_position', incomingPackageId: 'com.test.env-added', existingHolder: { kind: 'environment' } },
+      { catalogType: 'permission', name: 'env_held_set', incomingPackageId: 'com.test.env-added', existingHolder: { kind: 'environment' } },
+    ]);
   }, BOOT_TIMEOUT);
 
   it('CONTROL: the same two-package artifact with distinct names boots, and the door registers each package\'s position under its own package', async () => {
