@@ -1,10 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [ADR-0131 D2, C2 stage S2] The six built-in positions as declared metadata,
- * read off a REAL boot of this plugin: what the catalog read lists, what the
- * boot writes into `sys_position`, what every principal is granted, and which
- * position writes are still refused.
+ * [ADR-0131 D2, C2 stages S2 and S2b] The six built-in positions as declared
+ * metadata, and the declared-positions seeder reading through the security
+ * catalog read, read off a REAL boot of this plugin: what the catalog read
+ * lists, what the boot writes into `sys_position`, what every principal is
+ * granted, and which position writes are still refused.
  *
  * The stage moves where the six come from — one declaration list, registered
  * with the engine registry and read by the built-in seeder — and keeps the
@@ -19,26 +20,40 @@
  *
  * ## The scenarios
  *
+ * Three postures:
+ *
  *  - `single` — the organization-less pass, no organization at boot;
  *  - `single + organization` — the same pass with an organization and its
  *    memberships present (the shape a `single` deployment with the Default
  *    Organization has);
  *  - `walled` — one pass per organization at boot, then one more organization
  *    created after it (the organization-creation path);
- *  - `walled, a door-authored position in the registry` — the same, with one
- *    position already registered the way a metadata author's saved definition
- *    is hydrated (no package). It is the state in which the declared-positions
- *    seeder's registry-first two-step takes the registry, so it is where a
- *    seeder that took the six would show it.
+ *
+ * each booted three ways:
+ *
+ *  - as it is;
+ *  - with `a door-authored position in the registry` — one position registered
+ *    the way a metadata author's saved definition is hydrated (no package);
+ *  - with `a stored definition under a built-in name` — `org_admin` and
+ *    `everyone` saved the same way before the six were declared, so each
+ *    shadows its declaration at read (the registry's bare slot answers first).
  *
  * ## The goldens
  *
- * The row census, the `sys_position` write ledger and the grant envelopes
- * were recorded from the tree BEFORE the declarations existed (objectstack
- * `51290bca2c`, this file run against that tree's sources; the PR record
- * carries the run) and are unchanged after them. The catalog listing is the
- * one reading that changes: before, the catalog read listed the stack's
- * position and nothing else.
+ * The row census, the `sys_position` write ledger and the grant envelopes of
+ * the three postures as they are were recorded from the tree BEFORE the
+ * declarations existed (objectstack `51290bca2c`, this file run against that
+ * tree's sources; S2's PR record carries the run) and are unchanged since.
+ *
+ * S2b changes the census and the ledger in one place, the door-authored
+ * scenarios: the declared-positions seeder took the registry ALONE whenever it
+ * held a position besides the six, so the door-authored position silenced the
+ * stack's `field_rep` in every pass — and in every organization created later.
+ * It now reads both sources, so `field_rep` is seeded beside it. The
+ * door-authored position's own rows are what the registry-only read wrote
+ * (a separate pin, green on both sides of S2b), the stored definitions under
+ * a built-in name change no row and no write, and no principal's grants move
+ * in any scenario: none of them holds a position S2b newly seeds.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -94,7 +109,10 @@ const APP_DEFAULT = {
   _packageId: 'com.example.field',
 } as unknown as PermissionSet;
 
-type ScenarioName = 'single' | 'single + organization' | 'walled' | 'walled, a door-authored position in the registry';
+type PostureName = 'single' | 'single + organization' | 'walled';
+const DOOR = 'a door-authored position in the registry';
+const SHADOW = 'a stored definition under a built-in name';
+type ScenarioName = PostureName | `${PostureName}, ${typeof DOOR}` | `${PostureName}, ${typeof SHADOW}`;
 interface Scenario {
   readonly posture: 'single' | 'isolated';
   /** Organizations (with the memberships) present before `kernel:ready`. */
@@ -103,15 +121,32 @@ interface Scenario {
   readonly lateOrganization: boolean;
   /** A package-less position in the registry before the boot (a hydrated door-authored definition). */
   readonly authoredPosition: boolean;
+  /** Package-less definitions under built-in names in the registry before the boot ({@link SHADOWING_DEFINITIONS}). */
+  readonly shadowedBuiltins: boolean;
 }
-const SCENARIOS: Record<ScenarioName, Scenario> = {
-  single: { posture: 'single', organizationAtBoot: false, lateOrganization: false, authoredPosition: false },
-  'single + organization': { posture: 'single', organizationAtBoot: true, lateOrganization: false, authoredPosition: false },
-  walled: { posture: 'isolated', organizationAtBoot: true, lateOrganization: true, authoredPosition: false },
-  'walled, a door-authored position in the registry': {
-    posture: 'isolated', organizationAtBoot: true, lateOrganization: true, authoredPosition: true,
-  },
+const POSTURES: Record<PostureName, Omit<Scenario, 'authoredPosition' | 'shadowedBuiltins'>> = {
+  single: { posture: 'single', organizationAtBoot: false, lateOrganization: false },
+  'single + organization': { posture: 'single', organizationAtBoot: true, lateOrganization: false },
+  walled: { posture: 'isolated', organizationAtBoot: true, lateOrganization: true },
 };
+const SCENARIOS = Object.fromEntries(
+  (Object.keys(POSTURES) as PostureName[]).flatMap((name) => [
+    [name, { ...POSTURES[name], authoredPosition: false, shadowedBuiltins: false }],
+    [`${name}, ${DOOR}`, { ...POSTURES[name], authoredPosition: true, shadowedBuiltins: false }],
+    [`${name}, ${SHADOW}`, { ...POSTURES[name], authoredPosition: false, shadowedBuiltins: true }],
+  ]),
+) as Record<ScenarioName, Scenario>;
+
+/**
+ * Environment-wide definitions a metadata author saved under two built-in
+ * names before the six were declared — one identity name, one audience
+ * anchor — stated tenant-authored, as the door's hydration states every stored
+ * body. In the registry's bare slot they shadow the declarations at read.
+ */
+const SHADOWING_DEFINITIONS = [
+  { name: 'org_admin', label: 'Repurposed Org Admin', description: 'Saved at the door', _provenance: 'org' },
+  { name: 'everyone', label: 'Repurposed Everyone', description: 'Saved at the door', _provenance: 'org' },
+];
 
 const sortDeep = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(sortDeep).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
@@ -175,6 +210,11 @@ async function boot(scenario: Scenario): Promise<Booted> {
   if (scenario.authoredPosition) {
     // How a metadata author's saved definition is hydrated: no package.
     (engine as any).registry.registerItem('position', { name: 'door_authored', label: 'Door Authored' }, 'name');
+  }
+  if (scenario.shadowedBuiltins) {
+    for (const definition of SHADOWING_DEFINITIONS) {
+      (engine as any).registry.registerItem('position', { ...definition }, 'name');
+    }
   }
 
   // The write ledger: every `sys_position` insert and update, refused ones
@@ -394,20 +434,42 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
       const { engine, metadata } = booted.get(name)!;
       const reader = createSecurityCatalogReader({ registry: engine.registry as any, metadata: metadata as any });
       const listed = (await reader.list('position')).map((e) => `${e.name}@${e.source}${e.packageId ? `:${e.packageId}` : ''}`).sort();
+      const shadowed = new Set(scenario.shadowedBuiltins ? SHADOWING_DEFINITIONS.map((d) => d.name) : []);
       expect(listed).toEqual([
         ...(scenario.authoredPosition ? ['door_authored@registry'] : []),
-        ...BUILTIN_NAMES.map((n) => `${n}@registry:${SECURITY_PLUGIN_ID}`),
+        ...BUILTIN_NAMES.map((n) => (shadowed.has(n) ? `${n}@registry` : `${n}@registry:${SECURITY_PLUGIN_ID}`)),
         'field_rep@metadata',
       ].sort());
+      // The shadowing state is real: the catalog read answers the stored body
+      // for the two names, not the declaration.
+      if (scenario.shadowedBuiltins) {
+        for (const definition of SHADOWING_DEFINITIONS) {
+          expect((await reader.resolve('position', definition.name))?.definition.label).toBe(definition.label);
+        }
+      }
     });
 
-    // P2.2 — the rows, and who wrote them, are what they were before.
-    it('seeds the same sys_position rows, written by the same seeders, as before the declarations', () => {
+    // P2.2 — the rows, and who wrote them: the built-ins, every stack-declared
+    // position and every door-authored one, in every organization (S2b).
+    it('seeds the built-ins, the stack-declared positions and the door-authored ones', () => {
       const { census, ledger } = booted.get(name)!;
       expect({ census, ledger }).toEqual(CATALOG_GOLDEN[name]);
     });
 
-    if (scenario.organizationAtBoot && !scenario.authoredPosition) {
+    if (scenario.authoredPosition) {
+      // S2b moves which positions seed beside the door-authored one, never
+      // that one's own rows: the same row, written once per pass, with what the
+      // registry-only read wrote.
+      it('writes the door-authored position’s rows as the registry-only read wrote them', () => {
+        const { census, ledger } = booted.get(name)!;
+        expect({
+          census: census.filter((line) => line.startsWith('door_authored ')),
+          ledger: ledger.filter((line) => line.includes(' door_authored@')),
+        }).toEqual(DOOR_AUTHORED_ROWS[scenario.lateOrganization ? 'walled' : 'single']);
+      });
+    }
+
+    if (scenario.organizationAtBoot) {
       it('grants every principal what it was granted before the declarations', async () => {
         const { engine } = booted.get(name)!;
         expect(await grantsByPrincipal(engine, scenario.posture)).toEqual(GRANT_GOLDEN[scenario.posture]);
@@ -474,8 +536,8 @@ const TEXT: Record<string, string> = {
     'Door Authored | -',
 };
 
-/** Recorded before the declarations (module doc). */
-const CATALOG_GOLDEN: Record<ScenarioName, { census: string[]; ledger: string[] }> = {
+/** The three postures as they are: recorded before the declarations (module doc), unchanged by S2b. */
+const PLAIN_GOLDEN: Record<PostureName, { census: string[]; ledger: string[] }> = {
   single: {
     census: [
       `everyone | - | platform | true | false | ${TEXT.everyone}`,
@@ -550,25 +612,43 @@ const CATALOG_GOLDEN: Record<ScenarioName, { census: string[]; ledger: string[] 
       'insert guest@org_late managed_by=platform',
     ],
   },
-  'walled, a door-authored position in the registry': {
+};
+
+/**
+ * The door-authored scenarios after S2b: the posture's own rows plus the
+ * door-authored position's, `field_rep` included in every pass — before S2b it
+ * was missing from all of them (module doc).
+ */
+const DOOR_GOLDEN: Record<PostureName, { census: string[]; ledger: string[] }> = {
+  single: {
+    census: [
+      `door_authored | - | admin | true | false | ${TEXT.door_authored}`,
+      ...PLAIN_GOLDEN.single.census,
+    ],
+    ledger: [
+      'insert door_authored@-',
+      ...PLAIN_GOLDEN.single.ledger,
+    ],
+  },
+  'single + organization': {
+    census: [
+      `door_authored | - | admin | true | false | ${TEXT.door_authored}`,
+      ...PLAIN_GOLDEN['single + organization'].census,
+    ],
+    ledger: [
+      'insert door_authored@-',
+      ...PLAIN_GOLDEN['single + organization'].ledger,
+    ],
+  },
+  walled: {
     census: [
       `door_authored | org_eq | admin | true | false | ${TEXT.door_authored}`,
       `door_authored | org_late | admin | true | false | ${TEXT.door_authored}`,
-      `everyone | org_eq | platform | true | false | ${TEXT.everyone}`,
-      `everyone | org_late | platform | true | false | ${TEXT.everyone}`,
-      `guest | org_eq | platform | true | false | ${TEXT.guest}`,
-      `guest | org_late | platform | true | false | ${TEXT.guest}`,
-      `org_admin | org_eq | platform | true | false | ${TEXT.org_admin}`,
-      `org_admin | org_late | platform | true | false | ${TEXT.org_admin}`,
-      `org_member | org_eq | platform | true | false | ${TEXT.org_member}`,
-      `org_member | org_late | platform | true | false | ${TEXT.org_member}`,
-      `org_owner | org_eq | platform | true | false | ${TEXT.org_owner}`,
-      `org_owner | org_late | platform | true | false | ${TEXT.org_owner}`,
-      `platform_admin | org_eq | platform | true | false | ${TEXT.platform_admin}`,
-      `platform_admin | org_late | platform | true | false | ${TEXT.platform_admin}`,
+      ...PLAIN_GOLDEN.walled.census,
     ],
     ledger: [
       'insert door_authored@org_eq',
+      'insert field_rep@org_eq',
       'insert platform_admin@org_eq managed_by=platform',
       'insert org_owner@org_eq managed_by=platform',
       'insert org_admin@org_eq managed_by=platform',
@@ -576,6 +656,7 @@ const CATALOG_GOLDEN: Record<ScenarioName, { census: string[]; ledger: string[] 
       'insert everyone@org_eq managed_by=platform',
       'insert guest@org_eq managed_by=platform',
       'insert door_authored@org_late',
+      'insert field_rep@org_late',
       'insert platform_admin@org_late managed_by=platform',
       'insert org_owner@org_late managed_by=platform',
       'insert org_admin@org_late managed_by=platform',
@@ -583,6 +664,38 @@ const CATALOG_GOLDEN: Record<ScenarioName, { census: string[]; ledger: string[] 
       'insert everyone@org_late managed_by=platform',
       'insert guest@org_late managed_by=platform',
     ],
+  },
+};
+
+/**
+ * The census and the ledger, per scenario. A stored definition under a
+ * built-in name changes neither: the declared seeder writes no row for the
+ * name and restamps none, and the built-in rows are exactly what
+ * `bootstrapBuiltinRoles` writes from the declarations.
+ */
+const CATALOG_GOLDEN = Object.fromEntries(
+  (Object.keys(POSTURES) as PostureName[]).flatMap((name) => [
+    [name, PLAIN_GOLDEN[name]],
+    [`${name}, ${DOOR}`, DOOR_GOLDEN[name]],
+    [`${name}, ${SHADOW}`, PLAIN_GOLDEN[name]],
+  ]),
+) as Record<ScenarioName, { census: string[]; ledger: string[] }>;
+
+/**
+ * The door-authored position's own rows and writes — the same before S2b
+ * (the registry-only read) and after it.
+ */
+const DOOR_AUTHORED_ROWS: Record<'single' | 'walled', { census: string[]; ledger: string[] }> = {
+  single: {
+    census: [`door_authored | - | admin | true | false | ${TEXT.door_authored}`],
+    ledger: ['insert door_authored@-'],
+  },
+  walled: {
+    census: [
+      `door_authored | org_eq | admin | true | false | ${TEXT.door_authored}`,
+      `door_authored | org_late | admin | true | false | ${TEXT.door_authored}`,
+    ],
+    ledger: ['insert door_authored@org_eq', 'insert door_authored@org_late'],
   },
 };
 

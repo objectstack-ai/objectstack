@@ -533,7 +533,8 @@ const isChangesetFile = (p) => p.startsWith('.changeset/') && p.endsWith('.md') 
  * audit surfaces is a readability fix; filtering the verdict would be a bypass,
  * and `PRE2` in the self-test pins the difference.
  */
-const isConsumedPrerelease = (p) => p.startsWith('.changeset/pre/');
+const CONSUMED_PRERELEASE_EXCLUDED = '.changeset/pre/';
+const isConsumedPrerelease = (p) => p.startsWith(CONSUMED_PRERELEASE_EXCLUDED);
 
 /**
  * Split a changeset into its frontmatter bump entries and its body.

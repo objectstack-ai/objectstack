@@ -14,8 +14,9 @@
  * deep-equals what per-key `get()` returns — same value, same source, same
  * lock, same cascadeChain — across env overrides, scope mixes, and the
  * unknown-key refusal. Plus the read-count contract itself, measured at the
- * engine: same-scope keys collapse to ONE find, mixed scopes to TWO, and a
- * fully env-overridden set to ZERO.
+ * engine: same-scope keys collapse to ONE `sys_setting` find, mixed scopes to
+ * TWO, and a fully env-overridden set to ZERO — with the global rung's own
+ * store (`sys_platform_setting`, ADR-0131 D7) read once per call on top.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -35,15 +36,24 @@ function matches(row: Record<string, unknown>, where: Record<string, unknown>): 
   });
 }
 
-function makeEngine(rows: Array<Record<string, unknown>>) {
-  const find = vi.fn(async (_obj: string, opts: any) =>
-    rows.filter((r) => matches(r, opts?.where ?? {})),
+// [ADR-0131 D7] Rows live in the object that stores their rung: the global rung
+// in `sys_platform_setting`, the tenant and user rungs in `sys_setting`. The
+// double answers each object from its own rows, so a read aimed at the wrong
+// store finds nothing.
+type Stores = Record<string, Array<Record<string, unknown>>>;
+function makeEngine(stores: Stores) {
+  const find = vi.fn(async (obj: string, opts: any) =>
+    (stores[obj] ?? []).filter((r) => matches(r, opts?.where ?? {})),
   );
   return {
     find,
     insert: vi.fn(), update: vi.fn(), delete: vi.fn(), count: vi.fn(),
   };
 }
+
+/** Finds the engine received on `object`. */
+const findsOn = (engine: ReturnType<typeof makeEngine>, object: string) =>
+  engine.find.mock.calls.filter(([o]) => o === object).length;
 
 const MANIFEST = {
   namespace: 'localization',
@@ -64,11 +74,15 @@ const MANIFEST = {
 // below skips that codec and returns rows exactly as written, so anything
 // spelled '"America/New_York"' here would resolve one JSON encoding deep.
 // (Matches the sibling fixture in `settings-loadrows-scope.test.ts`.)
-const ROWS = [
-  { namespace: 'localization', key: 'timezone', scope: 'global', value: 'America/New_York', user_id: null },
-  { namespace: 'localization', key: 'locale', scope: 'user', value: 'zh-CN', user_id: 'u1' },
-  { namespace: 'localization', key: 'currency', scope: 'tenant', value: 'USD', user_id: null },
-];
+const ROWS: Stores = {
+  sys_platform_setting: [
+    { namespace: 'localization', key: 'timezone', value: 'America/New_York' },
+  ],
+  sys_setting: [
+    { namespace: 'localization', key: 'locale', scope: 'user', value: 'zh-CN', user_id: 'u1' },
+    { namespace: 'localization', key: 'currency', scope: 'tenant', value: 'USD', user_id: null },
+  ],
+};
 
 async function makeService(rows = ROWS) {
   const engine = makeEngine(rows);
@@ -95,19 +109,25 @@ describe('[#10826] SettingsService.getMany', () => {
     }
   });
 
-  it('collapses same-namespace reads: mixed scopes → TWO engine finds, not one per key', async () => {
+  it('collapses same-namespace reads: mixed scopes → TWO sys_setting finds, not one per key', async () => {
     const { svc, engine } = await makeService();
     engine.find.mockClear();
     await svc.getMany('localization', ['timezone', 'locale', 'currency'], { userId: 'u1' });
-    // user-scoped keys share one load, the tenant-scoped key the other.
-    expect(engine.find).toHaveBeenCalledTimes(2);
+    // user-scoped keys share one load, the tenant-scoped key the other…
+    expect(findsOn(engine, 'sys_setting')).toBe(2);
+    // …and the global rung, which no grouping argument changes, is read ONCE
+    // for both groups (ADR-0131 D7), not once per group.
+    expect(findsOn(engine, 'sys_platform_setting')).toBe(1);
+    expect(engine.find).toHaveBeenCalledTimes(3);
   });
 
-  it('same-scope keys → ONE engine find', async () => {
+  it('same-scope keys → ONE sys_setting find, plus the global rung once', async () => {
     const { svc, engine } = await makeService();
     engine.find.mockClear();
     await svc.getMany('localization', ['timezone', 'locale'], { userId: 'u1' });
-    expect(engine.find).toHaveBeenCalledTimes(1);
+    expect(findsOn(engine, 'sys_setting')).toBe(1);
+    expect(findsOn(engine, 'sys_platform_setting')).toBe(1);
+    expect(engine.find).toHaveBeenCalledTimes(2);
   });
 
   it('an env-overridden key answers without any row load, exactly like get()', async () => {
@@ -177,7 +197,8 @@ describe('[#10826] SettingsService.getMany', () => {
     // and it no longer costs one load per key
     engine.find.mockClear();
     await svc.getNamespace('localization', ctx);
-    expect(engine.find.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(findsOn(engine, 'sys_setting')).toBeLessThanOrEqual(2);
+    expect(findsOn(engine, 'sys_platform_setting')).toBe(1);
   });
 
   // [#12172] The ENCODING pin — the one assertion in this file that reads a

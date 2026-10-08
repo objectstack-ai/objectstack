@@ -31,6 +31,8 @@
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
     "@objectstack/rest": "workspace:*",
+    "@objectstack/service-storage": "workspace:*",
+    "@objectstack/verify": "workspace:*",
     "@types/node": "^26.6.3",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",

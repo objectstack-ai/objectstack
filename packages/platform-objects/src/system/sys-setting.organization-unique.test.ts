@@ -134,8 +134,11 @@ describe('sys_setting — declared uniqueness is organization-scoped (#8555)', (
     expect([...layers].sort()).toEqual(['global', 'tenant', 'user']);
     expect(layers).not.toContain('organization_id');
 
+    // [ADR-0131 D7] This table stores every layer but `global`, which moved to
+    // the tenant-less `sys_platform_setting`; the remaining layers are the
+    // spec's, in the spec's order.
     const scopeField = (SysSetting.fields as any).scope;
-    expect(scopeField.options.map((o: any) => o.value)).toEqual([...layers]);
+    expect(scopeField.options.map((o: any) => o.value)).toEqual(layers.filter((l) => l !== 'global'));
     // …and the unique key lists `scope` as an ordinary key column, so it
     // partitions the ladder, not the tenants.
     expect((uniqueIndexes[0] as any).fields).toContain('scope');
