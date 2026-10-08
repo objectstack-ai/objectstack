@@ -47,7 +47,7 @@
     "packages/runtime/src/action-execution.ts": 1,
     "packages/runtime/src/domains/share-links.ts": 3,
     "packages/runtime/src/http-dispatcher.ts": 1,
-    "packages/services/service-settings/src/settings-service.ts": 2
+    "packages/services/service-settings/src/settings-service.ts": 1
   },
   "testSurface": {
     "sites": 236

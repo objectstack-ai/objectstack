@@ -86,8 +86,10 @@ function makeMemoryDriver() {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async execute() { return null; },
     async find(object: string, ast: any) {
-      const hits = [...rowsOf(object).values()].filter((r) => matches(r, ast?.where)).map(copy);
-      return typeof ast?.limit === 'number' ? hits.slice(0, ast.limit) : hits;
+      // The caller's bound by PRESENCE, after the filter and before the copy.
+      const hits = [...rowsOf(object).values()].filter((r) => matches(r, ast?.where));
+      const page = typeof ast?.limit === 'number' ? hits.slice(0, ast.limit) : hits;
+      return page.map(copy);
     },
     async findOne(object: string, ast: any) {
       for (const r of rowsOf(object).values()) if (matches(r, ast?.where)) return copy(r);
