@@ -251,8 +251,9 @@ fails when clicked (the
 
 The view file also declares the create and edit **form**, and the form is where the
 long-text `description` is entered and shown. The list columns leave it out, so the
-form is the only metadata that names it. A field that no view, form, flow, formula or
-action names gets an advisory `field-no-consumers` warning from `os validate`.
+form is the only metadata that names it. A field that no consumer names (a view, a form, a
+flow, a formula or an action, among the others the rule counts) gets an advisory
+`field-no-consumers` warning from `os validate`.
 
 The agent also **exports each new file from its directory's barrel** — the object
 from `src/objects/index.ts`, and the action, view and app from
