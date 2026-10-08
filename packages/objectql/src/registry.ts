@@ -371,7 +371,10 @@ export interface SchemaRegistryOptions {
    * explicitly. Same-package reinstall and shareable platform namespaces
    * (`base`/`system`/`sys`) are never treated as conflicts. (The per-item
    * cross-package collision throw was retired in ADR-0048 §3.4 — distinct
-   * package ids are always disambiguable by package-scoped resolution.)
+   * package ids are always disambiguable by package-scoped resolution — except
+   * for positions, permission sets and capabilities, whose second-holder
+   * refusal ({@link SecurityCatalogNameConflictError}) this policy does NOT
+   * downgrade: no ruling extends `warn` to it.)
    */
   collisionPolicy?: 'error' | 'warn';
 
