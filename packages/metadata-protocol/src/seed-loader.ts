@@ -14,7 +14,13 @@ import type {
   Seed,
   EngineQueryOptions,
 } from '@objectstack/spec/data';
-import { SeedLoaderConfigSchema, isMultiValueField, referenceTargetOf } from '@objectstack/spec/data';
+import {
+  SeedLoaderConfigSchema,
+  isMultiValueField,
+  isTenancyDisabled,
+  referenceTargetOf,
+  resolveInjectedSystemColumns,
+} from '@objectstack/spec/data';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 import { resolveSeedRecord } from '@objectstack/formula';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult, runWithAdvisoryAggregation, type AdvisoryGroup } from '@objectstack/core';
@@ -405,17 +411,57 @@ function perOrganizationSeedRowId(authoredId: string, organizationId: string): s
  * or drop the record loudly. See the 15.1.x replay corruption incident:
  * every restart used to sever one lookup per replayed child record.
  */
+/**
+ * What the sole-organization read found ({@link SeedLoaderService} — see
+ * `resolveSoleOrganizationId` for each answer's meaning).
+ */
+type SoleOrganizationReading =
+  | { kind: 'sole'; organizationId: string }
+  | { kind: 'unowned'; organizationCount: number }
+  | { kind: 'no-organization-object' };
+
+/**
+ * [ADR-0131 D9] Does a seed row of this object need an organization?
+ *
+ * The object carries an `organization_id` column on its REGISTERED schema —
+ * authored, or injected by the system-column pass — and has not opted out of
+ * tenancy. The injected half is `resolveInjectedSystemColumns`, the single
+ * source `applySystemFields` itself consumes, so this answers what the engine
+ * will register, not what the author happened to type. `organization_id` and
+ * only it, because that is the column this loader stamps.
+ */
+function seedRowNeedsOrganization(definition: unknown): boolean {
+  if (!definition || typeof definition !== 'object') return false;
+  if (isTenancyDisabled(definition)) return false;
+  const fields = (definition as { fields?: unknown }).fields;
+  if (fields && typeof fields === 'object' && Object.prototype.hasOwnProperty.call(fields, 'organization_id')) {
+    return true;
+  }
+  return resolveInjectedSystemColumns(definition).tenant;
+}
+
 export class SeedLoaderService implements ISeedLoaderService {
   private engine: IDataEngine;
   private metadata: IMetadataService;
   private logger: Logger;
   /**
-   * Tenant org to stamp BUSINESS seed rows with when the caller pinned no
+   * Organization to stamp EVERY seed row with when the caller pinned no
    * explicit `config.organizationId` (resolved per {@link resolveSoleOrganizationId}).
-   * Set once per {@link load}; never applied to `sys_`/`cloud_`/`ai_` platform
-   * seeds (those stay intentionally global/cross-tenant).
+   * Set once per {@link load}.
+   *
+   * [ADR-0131 D3] `sys_` / `cloud_` / `ai_` seeds take it too. They used to be
+   * exempt as "intentionally global/cross-tenant"; there are no platform-global
+   * seeds left, and a seeded `sys_business_unit` is the organization's own.
    */
   private fallbackOrgId?: string;
+  /**
+   * [ADR-0131 D9] Why {@link fallbackOrgId} is unset, when it is: the install
+   * registers the organization object and holds no organization, or several
+   * (`unowned`), versus a composition with no organization object at all
+   * (`undefined` here — today's branch, unchanged). Only `unowned` refuses the
+   * rows of an organization-owned object. Set once per {@link load}.
+   */
+  private unownedOrganizationCount?: number;
   /**
    * Roll-up summary values left stale so far in the CURRENT {@link load} —
    * bumped by {@link reportStaleSummaries}, sampled by {@link loadDataset}
@@ -616,14 +662,24 @@ export class SeedLoaderService implements ISeedLoaderService {
     this.replayIdByAuthoredId.clear();
 
     // When the caller pinned no target org (an in-process publish has no active
-    // user session — the AI build agent's publish path), BUSINESS seed rows
-    // would land `organization_id = NULL` and then vanish under strict
-    // org-scoping. If the tenant has exactly ONE organization, adopt it as a
-    // fallback so business seeds carry the tenant key like a normal write.
-    // Zero/many orgs → leave unset (genuinely ambiguous → keep the historical
-    // global/cross-tenant behavior; the publisher must scope explicitly).
-    this.fallbackOrgId =
-      config.organizationId == null ? await this.resolveSoleOrganizationId() : undefined;
+    // user session — the AI build agent's publish path; the `single`-posture
+    // boot seed), seed rows would land `organization_id = NULL`. If the install
+    // has exactly ONE organization, adopt it so every seed row carries the
+    // tenant key like a normal write.
+    //
+    // [ADR-0131 D9] Zero or several organizations no longer mean "keep the
+    // historical NULL": in a composition that registers the organization object
+    // there is no owner to derive, and the rows of an organization-owned object
+    // are REFUSED (see `loadDataset`). Under `single` the Default Organization
+    // is created at boot before seeds load (D3), so a boot seed never meets the
+    // zero case. A composition with no organization object keeps today's branch.
+    this.fallbackOrgId = undefined;
+    this.unownedOrganizationCount = undefined;
+    if (config.organizationId == null) {
+      const reading = await this.resolveSoleOrganizationId();
+      if (reading.kind === 'sole') this.fallbackOrgId = reading.organizationId;
+      else if (reading.kind === 'unowned') this.unownedOrganizationCount = reading.organizationCount;
+    }
 
     // 1. Filter datasets by the scope axes (environment AND locale)
     const datasets = this.filterDatasets(request.seeds, config);
@@ -1107,6 +1163,28 @@ export class SeedLoaderService implements ISeedLoaderService {
       }
     };
 
+    // [ADR-0131 D3 / D9] Does a row of this object carry an organization at
+    // all? Read once per dataset, from the object definition the loader
+    // resolves every dataset through. Since the namespace exemption is gone,
+    // this is the ONLY thing that keeps the stamp off an object with no
+    // `organization_id` column — `tenancy: { enabled: false }` (ADR-0066), or a
+    // platform object whose injected column was dropped (ADR-0131 D7) — where
+    // the engine refuses the stamped row as an unknown field and the seed row
+    // is lost. A definition the loader cannot resolve keeps the stamp (the
+    // behaviour before this read existed): the column is then the engine's to
+    // judge, and nothing here refuses a row for an owner it cannot prove.
+    const objectDefinition = await this.resolveObjectDefinition(objectName);
+    const rowsCarryOrganization = objectDefinition == null || seedRowNeedsOrganization(objectDefinition);
+    // [ADR-0131 D9] With no organization pinned and none derivable on an install
+    // that registers the organization object, a row of an organization-owned
+    // object has no owner: it is REFUSED below, never written NULL.
+    const refuseUnownedRows =
+      config.organizationId == null &&
+      this.fallbackOrgId === undefined &&
+      this.unownedOrganizationCount !== undefined &&
+      seedRowNeedsOrganization(objectDefinition);
+    let unownedRefusalLogged = false;
+
     // Pin a single `now()` snapshot for the entire dataset so multi-pass
     // loads see one logical clock — the M9 determinism guarantee for seeds.
     const seedNow = new Date();
@@ -1179,15 +1257,47 @@ export class SeedLoaderService implements ISeedLoaderService {
        */
       const requiredDeferrals: Array<{ field: string; targetObject: string; attemptedValue: unknown }> = [];
 
-      // Per-tenant tagging: stamp every seeded row with the target org — the
-      // caller's explicit `config.organizationId`, or (when none was pinned) the
-      // single-org fallback for BUSINESS objects only. A `sys_`/`cloud_`/`ai_`
-      // platform seed never takes the fallback: those stay global/cross-tenant.
-      // A record that supplies its own `organization_id` always wins; objects
-      // without the column ignore the extra key at the engine.
-      const tenantOrg =
-        config.organizationId ??
-        (/^(sys_|cloud_|ai_)/.test(objectName) ? undefined : this.fallbackOrgId);
+      // Per-tenant tagging: stamp every seeded row of an object that carries an
+      // organization with the target org — the caller's explicit
+      // `config.organizationId`, or (when none was pinned) the install's sole
+      // organization. [ADR-0131 D3] `sys_` / `cloud_` / `ai_` seeds take it
+      // too: their exemption ("intentionally global") is withdrawn, since no
+      // platform-global seeds remain. A record that supplies its own
+      // `organization_id` always wins. An object with no organization column
+      // gets no stamp (`rowsCarryOrganization` above): the engine refuses an
+      // undeclared field, so a stamp there would drop the row.
+      const tenantOrg = rowsCarryOrganization ? (config.organizationId ?? this.fallbackOrgId) : undefined;
+      if (refuseUnownedRows && tenantOrg === undefined && record['organization_id'] == null) {
+        // [ADR-0131 D9] No owner to stamp — refuse the row, loudly, by name.
+        errored++;
+        const count = this.unownedOrganizationCount ?? 0;
+        const error: ReferenceResolutionError = {
+          sourceObject: objectName,
+          field: 'organization_id',
+          targetObject: 'sys_organization',
+          targetField: 'id',
+          attemptedValue: null,
+          recordIndex: i,
+          message:
+            `Seed record #${i} of '${objectName}' was REFUSED: '${objectName}' carries an organization_id ` +
+            `column, this seed load names no organization (config.organizationId) and none can be derived — ` +
+            `the install holds ${count === 0 ? 'no organization at all' : 'several organizations'}. Every seed ` +
+            `row of an organization-owned object is stamped with its organization or refused; writing it would ` +
+            `store a row no organization owns. Fix it by passing the organization the seed populates as ` +
+            `config.organizationId, or by setting organization_id on the record. Under the 'single' tenancy ` +
+            `posture the Default Organization is created at boot, before seeds load, so a single-tenant ` +
+            `deployment that reaches this has lost that organization.`,
+        };
+        errors.push(error);
+        allErrors.push(error);
+        // `error`, not `warn` (#4632): the record is dropped. Said once per
+        // dataset; every refused row is still counted in `allErrors`.
+        if (!unownedRefusalLogged) {
+          unownedRefusalLogged = true;
+          this.logger.error(`[SeedLoader] ${error.message}`, undefined, { object: objectName, recordIndex: i });
+        }
+        continue;
+      }
       // Remember that WE wrote this value, so the reference pass below leaves it
       // alone. `tenantOrg` is an ID by construction — the caller's target org,
       // or a resolved `sys_organization.id` — never a natural key. But
@@ -1706,18 +1816,27 @@ export class SeedLoaderService implements ISeedLoaderService {
   // ==========================================================================
 
   /**
-   * Best-effort resolve the tenant's SOLE organization id — used to stamp
-   * business seed rows when the caller pinned no `config.organizationId` (an
-   * in-process publish has no active user session). A fresh env has exactly one
-   * org, so its seeds should carry it like a normal write instead of landing
-   * org-less (→ invisible under strict org-scoping). Returns undefined when
-   * there are zero or several orgs (genuinely ambiguous — keep the historical
-   * global/cross-tenant NULL) or when `sys_organization` is absent.
+   * Resolve the install's SOLE organization — used to stamp every seed row
+   * when the caller pinned no `config.organizationId` (an in-process publish
+   * has no active user session; the `single`-posture boot seed passes none).
+   * A `single` install has exactly one organization, so its seeds carry it like
+   * a normal write instead of landing org-less.
+   *
+   * Three answers ({@link SoleOrganizationReading}):
+   *  - `sole` — exactly one organization; stamp with it.
+   *  - `unowned` — [ADR-0131 D9] the composition registers the organization
+   *    object and holds zero organizations (a missing table included: it can
+   *    hold no row) or several: no owner is derivable, and the caller refuses
+   *    the rows of an organization-owned object rather than writing NULL.
+   *  - `no-organization-object` — the composition registers no organization
+   *    object at all (a lean runtime); today's branch, unchanged: nothing is
+   *    stamped and nothing refused (ADR-0131 C8 decides whether D9 reaches it).
    *
    * [#12852] A read that FAILED for any other reason PROPAGATES — it is not
    * an emptiness. See the catch below.
    */
-  private async resolveSoleOrganizationId(): Promise<string | undefined> {
+  private async resolveSoleOrganizationId(): Promise<SoleOrganizationReading> {
+    let count: number;
     try {
       const rows = await this.engine.find('sys_organization', {
         fields: ['id'],
@@ -1726,8 +1845,9 @@ export class SeedLoaderService implements ISeedLoaderService {
       } as any);
       if (Array.isArray(rows) && rows.length === 1) {
         const id = (rows[0] as { id?: unknown; _id?: unknown })?.id ?? (rows[0] as { _id?: unknown })?._id;
-        return id ? String(id) : undefined;
+        if (id) return { kind: 'sole', organizationId: String(id) };
       }
+      count = Array.isArray(rows) ? rows.length : 0;
     } catch (error) {
       // [#12852] Discriminate by error TYPE, the same repair commit 855591fe7 made to
       // `ObjectQL.probeInstallOrganizations` — the sibling probe with this
@@ -1769,11 +1889,28 @@ export class SeedLoaderService implements ISeedLoaderService {
       // seen. It propagates, envelope intact: the seed run fails loudly instead
       // of writing a batch of rows nobody will be able to see. No new error code
       // and no new result field — the caller receives the read's own failure.
+      //
+      // [ADR-0131 D9] Those two benign causes now answer differently. The
+      // engine's refusal names a composition with NO organization object —
+      // today's branch. A missing table is an organization object whose table
+      // holds nothing, so it is the zero case, decided below by the same
+      // registration read as an empty answer.
       const refused = error as { code?: unknown; object?: unknown } | null | undefined;
       const refusedThisObject = refused?.code === 'OBJECT_NOT_FOUND' && refused.object === 'sys_organization';
-      if (!isMissingTableError(error, 'sys_organization') && !refusedThisObject) throw error;
+      if (refusedThisObject) return { kind: 'no-organization-object' };
+      if (!isMissingTableError(error, 'sys_organization')) throw error;
+      count = 0;
     }
-    return undefined;
+    // Zero, or several (the read is capped at 2): no owner is derivable — but
+    // only a composition that REGISTERS the organization object makes that an
+    // unowned install. The registration read is the same one the engine's own
+    // decision takes (`resolveSystemWriteOrganization`'s
+    // `organizationObjectRegistered`), answered from the object definition the
+    // loader resolves every dataset's object through.
+    const organizationObject = await this.resolveObjectDefinition('sys_organization');
+    return organizationObject
+      ? { kind: 'unowned', organizationCount: count }
+      : { kind: 'no-organization-object' };
   }
 
   /**

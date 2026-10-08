@@ -220,7 +220,12 @@ describe('seed reference graph — engine schema fallback (marketplace objects)'
     expect(result.success).toBe(true);
     const acmeId = store.crm_account.find((r) => r.name === 'Acme Corporation')!.id;
     expect(store.crm_contact.find((r) => r.email === 'john.smith@acme.example.com')!.crm_account).toBe(acmeId);
-    expect((engine as any).getSchema).not.toHaveBeenCalled();
+    // No engine probe for any SEEDED object. (The only engine question asked is
+    // the ADR-0131 D9 registration read for `sys_organization`, which this
+    // metadata double does not know: does the composition register an
+    // organization object at all? It answers from the same resolver.)
+    const probed = (engine as any).getSchema.mock.calls.map((c: unknown[]) => c[0]);
+    expect(probed.filter((name: string) => name !== 'sys_organization')).toEqual([]);
   });
 
   it('survives an engine without getSchema (contract-minimal engines keep the old behavior)', async () => {

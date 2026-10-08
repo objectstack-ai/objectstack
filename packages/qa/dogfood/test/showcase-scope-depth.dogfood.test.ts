@@ -78,7 +78,7 @@ async function bootScopeWorld(scope: 'unit' | 'unit_and_below' | 'own_and_report
   // proofs blind to the contradiction they were supposed to cover: a resolver
   // obeying the old unconditional "null org ⇒ fail closed" obligation would
   // have returned owner-only on every single one of these calls (the showcase
-  // stack boots org-less), and this suite would still have been green. It now
+  // stack booted org-less then), and this suite would still have been green. It now
   // implements the posture-conditional rule verbatim, so the guarantee that
   // enterprise DEPTH works under `single` is actually pinned by the assertions
   // below rather than assumed.
