@@ -29,10 +29,15 @@ import { createAuthEventAuditSink } from './auth-event-audit.js';
 
 const OWNER_PACKAGE = 'com.objectstack.test.auth-event-audit';
 
-/** The ledger, in the shape a MULTI-tenant stack registers it. */
+/**
+ * The ledger, in the shape a MULTI-tenant stack registers it — which since
+ * ADR-0131 D7 is the shape every stack registers: no organization column
+ * (`systemFields: { tenant: false }`); `tenant_id` is the attribution field.
+ */
 const sysAuditLogMultiTenant = {
   name: 'sys_audit_log',
   label: 'Audit Log',
+  systemFields: { tenant: false },
   fields: {
     id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
     action: { name: 'action', label: 'Action', type: 'text' as const },
@@ -46,36 +51,22 @@ const sysAuditLogMultiTenant = {
     user_agent: { name: 'user_agent', label: 'UA', type: 'textarea' as const },
     tenant_id: { name: 'tenant_id', label: 'Tenant', type: 'text' as const },
     metadata: { name: 'metadata', label: 'Metadata', type: 'textarea' as const },
-    organization_id: { name: 'organization_id', label: 'Org', type: 'text' as const },
   },
 };
 
 /**
- * An OLDER ledger table: no `actor` column, and none declared for
- * `organization_id` either.
+ * An OLDER ledger table: no `actor` column.
  *
- * Both columns are stamped conditionally by the writer, for the same reason and
- * with different fates today — worth stating because the fixture looks
- * redundant otherwise:
- *
- *  - `organization_id` comes BACK. `applySystemFields` provisions the tenant
- *    column unconditionally now (only `systemFields: false` / `managedBy:
- *    'better-auth'` / `tenancy.enabled: false` opt out) — precisely so "sudo
- *    writers (audit / messaging / inbox / outbox …)" stop failing with "no
- *    column named organization_id" on single-tenant stacks. So this fixture
- *    measures that the probe reads the REGISTERED schema (post-injection),
- *    not the document an author wrote.
- *  - `actor` does NOT. It is a plain declared field that older audit tables
- *    predate, so it is the live half of the conditional stamp: writing it into
- *    a table that lacks it fails the INSERT, and the writer swallows — audit
- *    logging would just stop, with nothing in the response to show it.
+ * `actor` is a plain declared field that older audit tables predate, so it is
+ * the conditionally stamped column: writing it into a table that lacks it
+ * fails the INSERT, and the writer swallows — audit logging would just stop,
+ * with nothing in the response to show it. (`organization_id` is no longer
+ * stamped at all: the ledger has no organization column, ADR-0131 D7.)
  */
 const sysAuditLogNoActor = {
   ...sysAuditLogMultiTenant,
   fields: Object.fromEntries(
-    Object.entries(sysAuditLogMultiTenant.fields).filter(
-      ([k]) => k !== 'organization_id' && k !== 'actor',
-    ),
+    Object.entries(sysAuditLogMultiTenant.fields).filter(([k]) => k !== 'actor'),
   ),
 };
 
@@ -206,7 +197,8 @@ describe('[#8144] createAuthEventAuditSink writes a login row that names its act
     expect(row.action).toBe('login');
     expect(row.user_id).toBe('usr_1');
     expect(row.tenant_id).toBe('org_1');
-    expect(row.organization_id).toBe('org_1');
+    // [ADR-0131 D7] The attribution field is the row's only organization column.
+    expect(row.organization_id).toBeUndefined();
     // ADR-0014 D2's principal label — the subject acted for themselves here.
     expect(row.actor).toBe('usr_1');
     // Navigable back to the session it is about.
@@ -274,11 +266,8 @@ describe('[#8144] createAuthEventAuditSink writes a login row that names its act
     const rows = await ledgerRows(engine, { action: 'login' });
     expect(rows).toHaveLength(1);
     expect(rows[0].user_id).toBe('usr_1');
-    // The declared lookup carries the tenant either way…
+    // The declared lookup carries the organization the event is about.
     expect(rows[0].tenant_id).toBe('org_1');
-    // …and the probe reads the REGISTERED schema, so the unconditionally
-    // provisioned tenant column is stamped even though the fixture omits it.
-    expect(rows[0].organization_id).toBe('org_1');
     // The one column that really is absent is left alone.
     expect(rows[0].actor).toBeUndefined();
   });

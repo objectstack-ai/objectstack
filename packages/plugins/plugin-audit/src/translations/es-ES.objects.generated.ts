@@ -70,7 +70,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       tenant_id: {
         label: "Inquilino",
-        help: "Contexto del tenant para el aislamiento multi-tenant."
+        help: "Organización a la que se refiere este evento; vacío en una acción a nivel de despliegue."
       },
       metadata: {
         label: "Metadatos",

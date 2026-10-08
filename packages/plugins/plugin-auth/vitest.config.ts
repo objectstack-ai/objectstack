@@ -48,6 +48,14 @@ export default defineConfig({
         find: /^@objectstack\/formula$/,
         replacement: path.resolve(here, '../../formula/src/index.ts'),
       },
+      // [#22257] `auth-settings-seeded-boot.pin.test.ts` boots the REAL
+      // `SettingsServicePlugin` beside `AuthPlugin`: the pre-bind window it
+      // pins is that plugin's bind hook and that service's reporter. Same
+      // reason and the same anchoring as the entries above.
+      {
+        find: /^@objectstack\/service-settings$/,
+        replacement: path.resolve(here, '../../services/service-settings/src/index.ts'),
+      },
     ],
   },
 });

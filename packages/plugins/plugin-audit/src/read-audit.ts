@@ -646,14 +646,11 @@ export function installReadAuditWriter(
       // `{}` would be a claim about a record that never changed.
       old_value: null,
       new_value: null,
+      // [ADR-0131 D7] The ledger's attribution field, and the column its
+      // `sys_audit_log_org` row policy scopes organization readers on.
       tenant_id: tenantId,
     };
-    // Both columns are conditionally present — see `createFieldPresenceProbe`.
-    // `organization_id` is what the SecurityPlugin's RLS predicate gates on, so
-    // an unstamped row is a row non-admin members can never see.
-    if (objectHasField('sys_audit_log', 'organization_id')) {
-      row.organization_id = tenantId;
-    }
+    // `actor` is conditionally present — see `createFieldPresenceProbe`.
     if (objectHasField('sys_audit_log', 'actor')) {
       row.actor = event.actor ?? event.userId ?? null;
     }
@@ -740,14 +737,15 @@ export function installReadAuditWriter(
  * Deliberately the same precedence the CRUD writer settled on under the #8287
  * ruling: the audited RECORD'S organization wins, the acting session's active
  * organization is the fallback. An audit row is read through `sys_audit_log`'s
- * own tenant wall, so a row about an org-A record stamped with the viewer's
- * active org B lands behind B's wall — invisible to the one tenant admin the
- * row concerns.
+ * own organization row scope, so a row about an org-A record stamped with the
+ * viewer's active org B lands in B's scope — invisible to the one tenant admin
+ * the row concerns.
  *
  * Read straight off the returned record rather than through
  * `resolveRecordOrganizationField`: a read result is the materialized row, so
- * the column is either on it or it is not, and the platform-default
- * `organization_id` is the only spelling `sys_audit_log`'s own wall gates on.
+ * the column is either on it or it is not. What is read is the audited
+ * record's `organization_id`; it lands in the ledger's attribution field
+ * `tenant_id`, which the ledger's row policy scopes on (ADR-0131 D7).
  */
 function readRecordOrganization(record: unknown): string | undefined {
   if (!record || typeof record !== 'object' || Array.isArray(record)) return undefined;

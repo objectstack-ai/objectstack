@@ -49,16 +49,19 @@ describe('showcase: external datasource auto-connects with no onEnable bridge (A
     // What it does NOT cover: the organization wall. `bootStack(showcaseStack)`
     // above passes NO options, and `bootStack` requests
     // `OS_TENANCY_POSTURE = 'isolated'` only when `opts.multiTenant` is truthy
-    // (`packages/verify/src/harness.ts`, `requestIsolatedPosture`). It also
-    // boots AuthPlugin with `autoDefaultOrganization: false` and registers no
-    // organization plugin. So this fixture boots posture `single` — the boot
-    // log says so: `[security] tenancy posture 'single' — Layer 0 is inert` —
-    // with no active org. `execCtx.tenantId` is therefore undefined, which is
-    // the FIRST conjunct of `hasTenant` in `ObjectQLEngine.buildDriverOptions`
-    // (`packages/objectql/src/engine.ts`); it short-circuits false before the
-    // `isFederated` exemption is even reached, and the driver is handed no
-    // `tenantId` to scope by. **The org predicate is never emitted here, in
-    // either direction.** Measured on #7738: `engine.ts` was checked back out
+    // (`packages/verify/src/harness.ts`, `requestIsolatedPosture`), and it
+    // registers no organization plugin. So this fixture boots posture `single`
+    // — the boot log says so: `[security] tenancy posture 'single' — Layer 0
+    // is inert` — and no organization wall is in force. [ADR-0131 D3] Since
+    // every `single` boot binds the admin to the Default Organization, the
+    // session carries an active org, `execCtx.tenantId` is defined, and
+    // `ObjectQLEngine.buildDriverOptions` (`packages/objectql/src/engine.ts`)
+    // reaches its `isFederated` exemption, which withholds `tenantId` from the
+    // federated object's driver. When #7738 was measured the harness booted
+    // org-less: `tenantId` was undefined, the FIRST conjunct of `hasTenant`
+    // short-circuited before that exemption, and **the org predicate was never
+    // emitted, in either direction.** Measured on #7738 (that org-less boot):
+    // `engine.ts` was checked back out
     // at pre-fix `main`, `@objectstack/objectql` rebuilt, and this file re-run
     // — 3 passed / 3 both WITH the fix and WITHOUT it. This assertion sat green
     // while a correctly-bound federated object answered 0 rows under a real

@@ -149,23 +149,15 @@ const READERS: Record<string, Row> = {
   },
   'lifecycle/lifecycle-service.ts#tenantWindowsFor :: organization_id': {
     disposition: 'skips',
-    why: 'the column the partition predicates name, asked about before any partition is built',
+    why:
+      'the column the partition predicates name, asked about before any partition is built; the reap and ' +
+      'archive passes name only the column this decision returns (#15207), so they hold no seam of their own',
   },
   'lifecycle/lifecycle-service.ts#tenantWindowsFor :: resolveInjectedColumnProvenance()': {
     disposition: 'skips',
     why:
       "an object with no organization_id at all (provenance 'absent': no injection, no declaration), " +
       'federated or local, has no tenant partition either',
-  },
-  'lifecycle/lifecycle-service.ts#reap :: organization_id': {
-    disposition: 'skips',
-    via: 'tenantWindowsFor',
-    why: 'the per-tenant reap passes, built only from the windows the shared decision returns',
-  },
-  'lifecycle/lifecycle-service.ts#archiveObject :: organization_id': {
-    disposition: 'skips',
-    via: 'tenantWindowsFor',
-    why: 'the per-tenant archive passes, built only from the windows the shared decision returns',
   },
 
   // ── Readers that already asked whether the object is federated ──────────
@@ -548,8 +540,6 @@ describe('[#21918] every engine reader of an injected column has a disposition t
     expect([...skipping].sort()).toEqual([
       'engine.ts#cascadeDeleteRelations',
       'engine.ts#planCascadeAtomicity',
-      'lifecycle/lifecycle-service.ts#archiveObject',
-      'lifecycle/lifecycle-service.ts#reap',
       'lifecycle/lifecycle-service.ts#tenantWindowsFor',
     ]);
   });

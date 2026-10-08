@@ -147,7 +147,7 @@ describe('[#21918] business-unit and user deletes with the showcase federated fi
     await ql.insert(
       'sys_business_unit',
       { id: 'bu_21918', name: 'Doomed Unit', kind: 'department', organization_id: orgId, active: true },
-      SYSTEM_CTX,
+      { context: SYSTEM_CTX },
     );
     expect(await findRows(ql, 'sys_business_unit', { id: 'bu_21918' }, 1)).toHaveLength(1);
     const before = await findRows(ql, FEDERATED, {}, 500);

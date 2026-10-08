@@ -48,21 +48,32 @@
  *
  * ## Fail direction
  *
- * The provider is access-NARROWING, so it fails CLOSED — but "closed" is a
- * claim about a WIRED provider, and it is worth saying which states are which:
+ * The provider is access-NARROWING, so it fails CLOSED, and it is worth saying
+ * which states are which:
  *
  *   - a wired provider that THROWS, or answers `false`, denies (this module);
  *   - a `security` service that is wired but cannot be used — resolving it
  *     throws, or it exposes neither `canReadObject` nor `explain` — denies at
  *     the bridge, because `/data`'s middleware does not fall open in those
  *     states either (`plugin.ts`);
- *   - an ABSENT provider is a different state altogether. No security service
- *     answered at all, which is the same deployment in which `/data` has no
- *     object-level gate either, so the two doors still AGREE — and agreement is
- *     the property being defended, not refusal for its own sake. Such a
- *     deployment keeps its pre-existing analytics behaviour, and
- *     `AnalyticsServicePlugin` logs that state loudly at init, the same posture
- *     it already takes for a missing `getReadScope`.
+ *   - [#22235] a deployment that registers NO security service denies at the
+ *     bridge too, by declaration: the in-repo kernels (`ObjectKernel`,
+ *     `LiteKernel`) throw on a `security` service nothing ever registered, so
+ *     the bridge takes its UNUSABLE branch and refuses with a located error.
+ *     `/data` carries no object-level gate on such a deployment, so there the
+ *     two doors do NOT agree: a loud deny is preferred over a silent admit. A
+ *     composition that wants analytics to answer registers a security service,
+ *     or its host supplies its own `admitObjectRead`;
+ *   - a context that answers the `security` lookup with NOTHING (ABSENT) is a
+ *     different state, reached only by such a context: the package's test
+ *     doubles do, and no in-repo kernel does. What the bridge does there is
+ *     documented at the bridge (`plugin.ts`); it is not a statement about
+ *     deployments;
+ *   - a host that constructs `AnalyticsService` itself with no provider at all
+ *     gets no object-level gate (`assertReadAdmitted` is a no-op). That is the
+ *     host's composition, not a deployment with no security service:
+ *     `AnalyticsServicePlugin` always wires a provider — the host's
+ *     `admitObjectRead`, or the bridge.
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
