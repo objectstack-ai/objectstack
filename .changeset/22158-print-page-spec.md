@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': minor
+'@objectstack/spec': major
 '@objectstack/lint': minor
 ---
 
@@ -9,7 +9,7 @@ Clause-②: yes (narrowing)
 
 <!-- adr-0087: registered document-schemas-retired -->
 
-**BREAKING** — the document family's exports leave `@objectstack/spec/data` (an export removal on a published entry), shipped as `minor` under the launch-window convention for accept-set narrowings (Changesets pre mode is not yet in on `main`). The `print` declaration itself is additive.
+**BREAKING** — the document family's exports leave `@objectstack/spec/data` (an export removal on a published entry), graded `major` on `@objectstack/spec`: Changesets is in pre mode on `main` (tag `next`), where the launch-window `major` guard stands aside for the line's breaking changes, so the level says what the change is. The v18 opening marker already takes the fixed group to `18.0.0-next.N`, so this grade moves no version on its own. `@objectstack/lint` is `minor`: its new rule refuses blocks only inside a page that declares `print`, which no page could carry before this release, and it adds exports. The `print` declaration itself is additive.
 
 Card ① of the ruling on PDF and print documents (letter B′): **a document is a page with a print declaration; there is no separate template type.**
 
