@@ -269,6 +269,7 @@
     "WebhookTriggerType (type)",
     "analyzeRegion (function)",
     "approverTypeIsOrgScoped (function)",
+    "builtinNodeConfigKeysJudged (function)",
     "canonicalApproverType (function)",
     "collectFlowGraphs (function)",
     "defineActionDescriptor (function)",

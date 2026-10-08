@@ -175,17 +175,22 @@ describe('what stays accepted (lit controls)', () => {
     expect(issuesOf(flowWith({ approvers: APPROVERS }))).toEqual([]);
   });
 
-  it('CONTROL: the builtin arm judges no key membership — an undeclared key on a builtin node still parses', () => {
+  it('CONTROL: the approval contract judges no builtin node — a builtin\'s undeclared key is the builtin key arm\'s', () => {
+    // [#21982] A builtin's undeclared key is refused now too, but by the builtin
+    // arm, in the builtin contract's words — never by the approval contract.
+    const config = { url: 'https://example.test', bogusKey: 1 };
     const flow = {
       ...flowWith(VALID),
       nodes: [
         { id: 'start', type: 'start', label: 'Start' },
-        { id: 'call', type: 'http', label: 'Call', config: { url: 'https://example.test', bogusKey: 1 } },
+        { id: 'call', type: 'http', label: 'Call', config },
         { id: 'done', type: 'end', label: 'Done' },
       ],
       edges: [{ id: 'e1', source: 'start', target: 'call' }, { id: 'e2', source: 'call', target: 'done' }],
     };
-    expect(issuesOf(flow)).toEqual([]);
+    const [builtinRefusal] = flowNodeConfigRefusals('http', config);
+    expect(builtinRefusal!.params).toEqual({ nodeType: 'http', key: 'bogusKey' });
+    expect(issuesOf(flow)).toEqual([{ code: 'custom', path: 'nodes.1.config.bogusKey', message: builtinRefusal!.message }]);
     // …and the builtin map, the executor-reconciled one, did not gain the plugin type.
     expect(getBuiltinNodeConfigContracts().has('approval')).toBe(false);
   });

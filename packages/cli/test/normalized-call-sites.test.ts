@@ -136,9 +136,9 @@ const SITES: Readonly<Record<string, { reads: Reads; why: string }>> = {
     why: 'the keys extracted and the bundles merged against; moved onto the union by #22238.',
   },
   // ── os migrate meta ────────────────────────────────────────────────────
-  'migrate/meta.ts :: applyMetaMigrations(normalized': {
-    reads: 'top-level',
-    why: 'replays the conversion chain over the AUTHORED stack, and `--write` edits the authored source at the paths it reports. A folded union would report paths no source file holds. Which bodies a conversion reaches is the chain\'s own walk.',
+  'migrate/meta.ts :: applyMetaMigrationsToPackages(normalized': {
+    reads: 'packages',
+    why: 'replays the conversion chain over the AUTHORED stack and over each `packages[i].manifest` body as a stack, reporting a body\'s edits under that body\'s own path, which `--write` traces to the `composeStacks` input that authored it. A folded union would report paths no source file holds. Measured on a two-package `preserve` app in `migrate-meta-composed.test.ts`.',
   },
   'migrate/meta.ts :: planProtocolRange(normalized': {
     reads: 'top-level',

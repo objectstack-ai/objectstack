@@ -275,6 +275,28 @@ const SPEC_ROOT_MODULE = '@objectstack/spec';
 /** `defineStack`, `defineView`, … — the authoring helpers, by naming convention. */
 const DEFINE_HELPER_RE = /^define[A-Z]/;
 
+/** The stack producer: the one `define*` helper whose refused input {@link STACK_COMPOSER} may receive. */
+const STACK_PRODUCER = 'defineStack';
+
+/**
+ * The stack composer. Not a `define*` helper and not strict at the call about
+ * its inputs' contents, so the shim never makes it tolerant — but it REFUSES an
+ * input no producer built, and the input the shim hands through for a refused
+ * {@link STACK_PRODUCER} call is exactly that. See {@link authoredSourcePlugin}.
+ */
+const STACK_COMPOSER = 'composeStacks';
+
+/**
+ * The one module every generated shim module imports its hand-through record
+ * from. It is bundled once per load, so a stack handed through by one
+ * entrypoint's `defineStack` is recognised by another entrypoint's
+ * `composeStacks`; and each `loadConfig` bundles afresh, so no record outlives
+ * the load that made it.
+ */
+const HANDED_THROUGH_MODULE = 'objectstack:authored-source/handed-through';
+const HANDED_THROUGH_FILTER = /^objectstack:authored-source\/handed-through$/;
+const HANDED_THROUGH_NAMESPACE = 'objectstack-authored-source-record';
+
 /**
  * One strict authoring factory that is not a `define*` helper: the function
  * `member` of the exported value `owner`, which validates its argument AT THE
@@ -344,6 +366,8 @@ interface AuthoredSourceHelpers {
   readonly defineHelpers: readonly string[];
   /** Its {@link STRICT_AUTHORING_FACTORIES}, as owner export → factory members. */
   readonly factories: ReadonlyMap<string, readonly string[]>;
+  /** Whether it exports {@link STACK_COMPOSER}. */
+  readonly composer: boolean;
 }
 
 /**
@@ -376,9 +400,9 @@ async function authoredSourceHelpersOf(
       if (typeof (value as Record<string, unknown>)[member] !== 'function') continue;
       factories.set(owner, [...(factories.get(owner) ?? []), member]);
     }
-    return { defineHelpers, factories };
+    return { defineHelpers, factories, composer: typeof ns[STACK_COMPOSER] === 'function' };
   } catch {
-    return { defineHelpers: [], factories: new Map() };
+    return { defineHelpers: [], factories: new Map(), composer: false };
   }
 }
 
@@ -394,6 +418,13 @@ async function authoredSourceHelpersOf(
  * JSON array — through the project's own `formatZodError`, so the swallowed
  * verdict reads like the loader's `defineStack validation failed` block rather
  * than as a JSON dump. An error that already carries prose keeps its message.
+ *
+ * `__recordStack` is the hand-over hook the `defineStack` wrap alone passes:
+ * it records the stack it hands through, with the options it was called
+ * with, in the load's one hand-through record. `__composable` is what the
+ * `composeStacks` wrap maps its inputs through: a recorded stack is produced
+ * again by the real `defineStack` in its `strict: false` mode, and every other
+ * input reaches the real `composeStacks` as it was passed.
  */
 const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
   `const __refusal = (label, error) =>`,
@@ -401,7 +432,7 @@ const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
   `    && typeof __specRoot.formatZodError === 'function'`,
   `    ? __specRoot.formatZodError(error, label + ' validation failed')`,
   `    : (error && error.message) || String(error);`,
-  `const __tolerant = (label, call) => (...authored) => {`,
+  `const __tolerant = (label, call, handOver) => (...authored) => {`,
   `  try {`,
   `    return call(...authored);`,
   `  } catch (error) {`,
@@ -410,9 +441,16 @@ const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
   `      + 'artifact, so it is handed to the migration chain exactly as authored. '`,
   `      + __refusal(label, error),`,
   `    );`,
+  `    if (handOver) handOver(authored);`,
   `    return authored[0];`,
   `  }`,
   `};`,
+  `const __recordStack = (authored) => {`,
+  `  if (authored[0] !== null && typeof authored[0] === 'object') __handedThrough.set(authored[0], authored[1]);`,
+  `};`,
+  `const __composable = (stack) => (__handedThrough.has(stack)`,
+  `  ? __specRoot.${STACK_PRODUCER}(stack, { ...__handedThrough.get(stack), strict: false })`,
+  `  : stack);`,
   `const __tolerantMembers = (owner, ownerName, members) => {`,
   `  const wrapped = new Map(members.map((member) => [`,
   `    member,`,
@@ -487,6 +525,33 @@ const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
  * author deserves to know an artifact bypassed the parse, and stderr keeps a
  * `--json` run's stdout a single parseable document.
  *
+ * ## A composed project: the handed-through stack is produced again
+ *
+ * `composeStacks` is not a `define*` helper, so it runs for real, and its
+ * first step refuses every input no producer built (`STACK_PROVENANCE_MISSING`,
+ * ADR-0130 / #20367 ruling B). The stack a refused `defineStack` call hands
+ * through is such an input — unmarked, though the author wrapped it — so
+ * without this step a `composeStacks([defineStack({ … }), …])` project with a
+ * retired spelling in ANY input was refused with a prescription the author had
+ * already followed.
+ *
+ * So the shim records each stack it hands through for `defineStack`, and wraps
+ * `composeStacks` to hand each RECORDED input to the real `defineStack` again
+ * in its own `strict: false` mode before the real `composeStacks` runs. The
+ * producer marks its own output (`strict: false` is a choice made inside it),
+ * so nothing here writes the mark; and an input the shim did not hand through
+ * — a plain object the author never wrapped, a spread of a built stack —
+ * reaches the real `composeStacks` untouched and is refused there exactly as
+ * before.
+ *
+ * ⚠️ The one-package path keeps handing the authored argument through RAW,
+ * on purpose. `strict: false` still runs the load-time ADR-0087 D2 conversion
+ * pass, so a conversion the load still applies (`driver: 'mongo'`) would be
+ * applied before the chain runs — unlisted in `applied`, unwritten by
+ * `--write`. Measured on a refused one-package stack: the raw hand-back lists
+ * and writes it, a `strict: false` fallback does neither. A composed input
+ * pays that cost because the composer cannot take it any other way.
+ *
  * ⚠️ Deliberately NOT the default for `loadConfig()`. Every other command —
  * `os build`, `os validate`, `os serve` — must keep hearing the rejection: the
  * tombstone IS their upgrade channel. Only the codemod is entitled to read
@@ -509,23 +574,40 @@ function authoredSourcePlugin(configPath: string): Plugin {
         return { path: args.path, namespace: AUTHORED_SOURCE_NAMESPACE };
       });
 
+      build.onResolve({ filter: HANDED_THROUGH_FILTER }, (args) => ({
+        path: args.path,
+        namespace: HANDED_THROUGH_NAMESPACE,
+      }));
+      build.onLoad({ filter: /.*/, namespace: HANDED_THROUGH_NAMESPACE }, () => ({
+        contents: 'export const handedThrough = new WeakMap();',
+        loader: 'js',
+      }));
+
       build.onLoad({ filter: /.*/, namespace: AUTHORED_SOURCE_NAMESPACE }, async (args) => {
-        const { defineHelpers, factories } = await authoredSourceHelpersOf(args.path, requireFromConfig);
+        const { defineHelpers, factories, composer } = await authoredSourceHelpersOf(args.path, requireFromConfig);
         const spec = JSON.stringify(args.path);
         const lines = [
           `import * as __real from ${spec};`,
           `import * as __specRoot from ${JSON.stringify(SPEC_ROOT_MODULE)};`,
+          `import { handedThrough as __handedThrough } from ${JSON.stringify(HANDED_THROUGH_MODULE)};`,
           `export * from ${spec};`,
           ...AUTHORED_SOURCE_PRELUDE,
         ];
         for (const name of defineHelpers) {
+          const handOver = name === STACK_PRODUCER ? ', __recordStack' : '';
           lines.push(
-            `export const ${name} = __tolerant(${JSON.stringify(name)}, (...authored) => __real.${name}(...authored));`,
+            `export const ${name} = __tolerant(${JSON.stringify(name)}, (...authored) => __real.${name}(...authored)${handOver});`,
           );
         }
         for (const [owner, members] of factories) {
           lines.push(
             `export const ${owner} = __tolerantMembers(__real.${owner}, ${JSON.stringify(owner)}, ${JSON.stringify(members)});`,
+          );
+        }
+        if (composer) {
+          lines.push(
+            `export const ${STACK_COMPOSER} = (stacks, ...rest) => __real.${STACK_COMPOSER}(`
+              + `Array.isArray(stacks) ? stacks.map(__composable) : stacks, ...rest);`,
           );
         }
         return { contents: lines.join('\n'), loader: 'js' };

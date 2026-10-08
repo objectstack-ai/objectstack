@@ -109,7 +109,7 @@ describe('the upload doors on a booted organization wall (#22046)', () => {
     expect(res.status).toBe(200);
     return res.body.data.fileId;
   };
-  const startChunked = async (): Promise<{ uploadId: string; fileId: string }> => {
+  const startChunked = async (): Promise<{ uploadId: string; fileId: string; resumeToken: string }> => {
     const res = await answer(
       await stack.apiAs(uploader, 'POST', '/storage/upload/chunked', {
         filename: 'wall-chunked.bin',
@@ -118,7 +118,20 @@ describe('the upload doors on a booted organization wall (#22046)', () => {
       }),
     );
     expect(res.status).toBe(200);
-    return { uploadId: res.body.data.uploadId, fileId: res.body.data.fileId };
+    return { uploadId: res.body.data.uploadId, fileId: res.body.data.fileId, resumeToken: res.body.data.resumeToken };
+  };
+  /** The upload's declared 10 bytes, as chunk 0 — a completion assembles only an upload that holds them (#22313). */
+  const holdTheDeclaredBytes = async (uploadId: string, resumeToken: string) => {
+    const res = await stack.api(`/storage/upload/chunked/${uploadId}/chunk/0`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${uploader}`,
+        'Content-Type': 'application/octet-stream',
+        'x-resume-token': resumeToken,
+      },
+      body: new TextEncoder().encode('0123456789'),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
   };
 
   /** The one refusal: code and status, and nothing about the row. */
@@ -262,7 +275,8 @@ describe('the upload doors on a booted organization wall (#22046)', () => {
     });
 
     it('POSITIVE: the uploader completes', async () => {
-      const { uploadId, fileId } = await startChunked();
+      const { uploadId, fileId, resumeToken } = await startChunked();
+      await holdTheDeclaredBytes(uploadId, resumeToken);
       const own = await answer(await stack.apiAs(uploader, 'POST', `/storage/upload/chunked/${uploadId}/complete`, { parts: [] }));
       expect(own.status).toBe(200);
       expect(own.body.data.fileId).toBe(fileId);

@@ -1352,16 +1352,28 @@ export class AuthPlugin implements Plugin {
       runBackfillOnDefaultOrg = runBackfill;
       ctx.hook('kernel:ready', () => {
         backfillArmed = true;
+        // #2996: app seeds insert `sys_user` via raw engine.insert, bypassing
+        // better-auth's `user.create.after` reconciler. A seed that overruns
+        // OS_INLINE_SEED_BUDGET_MS finishes in the background AFTER kernel:ready,
+        // so its users would miss a kernel:ready pass that had no target yet.
+        // The trigger stays; the ledger makes it a no-op once the one-time pass
+        // has been recorded. An in-budget seed settles during Phase 2, before the
+        // pass is armed, and the `kernel:ready` pass covers its rows.
+        //
+        // [#22257] Registered HERE, in the same synchronous step that arms the
+        // pass, never from `start()`: a handler that does not exist before the
+        // bind cannot run before it. Every `app:seeded` that fires before this
+        // point was already a no-op through `backfillArmed`, and every one after
+        // it reaches this handler — the kernel's hook map is read at dispatch
+        // time, so an emit still in flight picks it up too. The structure is
+        // what `check:settings-bind-window` can see; a flag is not.
+        // `backfillArmed` stays: the `default-org-created` trigger
+        // (`runBackfillOnDefaultOrg`) can still reach `runBackfill` from the
+        // `objectql` middleware during Phase 2 and from the bootstrap's own
+        // `kernel:ready` hook, which runs before this one.
+        ctx.hook('app:seeded', () => runBackfill('app:seeded'));
         return runBackfill('kernel:ready');
       });
-      // #2996: app seeds insert `sys_user` via raw engine.insert, bypassing
-      // better-auth's `user.create.after` reconciler. A seed that overruns
-      // OS_INLINE_SEED_BUDGET_MS finishes in the background AFTER kernel:ready,
-      // so its users would miss a kernel:ready pass that had no target yet.
-      // The trigger stays; the ledger makes it a no-op once the one-time pass
-      // has been recorded. An in-budget seed settles during Phase 2, before the
-      // pass is armed, and the `kernel:ready` pass covers its rows.
-      ctx.hook('app:seeded', () => runBackfill('app:seeded'));
     }
 
     // Identity-source provenance for accounts created OUTSIDE better-auth's
