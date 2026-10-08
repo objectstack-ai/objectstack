@@ -33,9 +33,10 @@
  *
  * ## Transform — what a fence becomes before a schema can judge it
  *
- * TypeScript and JSON fences are parsed with the TypeScript compiler's parser
- * (never executed) and object/array literals are STATICALLY EVALUATED; YAML
- * fences go through `yaml`. The supported shapes, by name:
+ * TypeScript and JSON fences are parsed with the TypeScript parser through
+ * `scripts/ts-parse.mjs` (never executed; a body that does not parse is a
+ * reported miss, never a recovered tree) and object/array literals are
+ * STATICALLY EVALUATED; YAML fences go through `yaml`. Supported shapes:
  *
  *   factory-call    `defineX({...})` anywhere in the fence (outermost only)
  *   create-call     `X.create({...})`, `XSchema.parse({...})`
@@ -45,6 +46,8 @@
  *   bare-literal    a fragment that IS one object/array literal (`{...}`)
  *   yaml-doc        each YAML document
  *
+ * A fence that reads as none of them whole is split at blank lines and each
+ * chunk tried alone (the catalog writes alternatives one after another).
  * Inside a literal: same-fence `const` bindings are followed; `Field.<kind>(…)`
  * is called for real on the spec's own pure helper; everything else that is not
  * a literal (a call, a function, a template with substitutions, a property
@@ -59,13 +62,22 @@
  * ## Mapping — which schema judges which example
  *
  * In order: (1) the code's own claim — the factory or constructor it calls,
- * or the type it is annotated with (FACTORY_TARGETS; a type `T` → the exported
- * `TSchema`); (2) an explicit `os:check-yaml <decl>` marker; (3) for a fragment,
- * KEY OWNERSHIP — the one registry metadata type (or the stack) whose object
- * shape declares every top-level key; zero or several owners is a coverage
- * miss. A fragment is judged PARTIALLY: each present key against that key's
- * own member schema, so an omitted required key is never a red there. Headings
- * are not used: they name topics, not shapes.
+ * or the spec type it is annotated with (FACTORY_TARGETS; a type `T` → the
+ * exported `TSchema`, unless `T` is imported from outside the spec or listed in
+ * TYPE_NOT_A_SPEC_SHAPE); (2) an explicit `os:check-yaml <decl>` marker; (3) for
+ * a fragment, KEY OWNERSHIP (`resolveOwner`): tier 1, the one registry
+ * metadata type (a union kind through each option; tombstone keys claim
+ * nothing) or the stack whose shape declares every top-level key, judged
+ * PARTIALLY so an omitted key is never a red; tier 2, only when tier 1 finds no
+ * owner, the one exported named object schema the fragment is a COMPLETE
+ * instance of, judged whole. Zero or several owners is a coverage miss.
+ * Headings are not used for mapping: they name topics, not shapes.
+ *
+ * Two pre-parse steps mirror what the runtime itself does, so the judge does
+ * not report a shape the platform accepts: a stack's map-format collections are
+ * normalized to arrays (`normalizeStackInput`), and every component node's
+ * `properties` is judged by its `ComponentPropsMap` row — the dispatch
+ * `check-yaml-examples` ports from the authoring gate, ported here unchanged.
  *
  * ## Verdicts kept apart
  *
@@ -73,7 +85,10 @@
  *                    (a wrong or retired key), `invalid_type`/`invalid_union`
  *                    (wrong nesting or shape), `invalid_value`, `too_small`, a
  *                    refinement (`custom`) — reported per Zod code.
- *   COVERAGE MISS    the transform could not produce a judgeable value.
+ *   COUNTER-EXAMPLE  code the text shows to say it is wrong (`isCounterExample`)
+ *                    — counted as refused (the text confirmed) or accepted (a
+ *                    semantic ❌), never a red and never a replay signature.
+ *   COVERAGE MISS    the transform or the mapping produced nothing to judge.
  *
  * ## The replay (REPLAY_SET)
  *
