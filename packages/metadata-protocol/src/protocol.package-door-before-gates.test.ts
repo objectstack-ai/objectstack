@@ -127,6 +127,7 @@ function harness(environmentId: string | undefined) {
 const gateRefusedObject = (name: string) => ({
     name,
     label: name,
+    sharingModel: 'private',
     fields: {
         title: { type: 'text', label: 'Title' },
         task_no: { type: 'autonumber', label: 'Task No', autonumberFormat: '{plan_no}{000}' },
@@ -136,7 +137,13 @@ const gateRefusedObject = (name: string) => ({
 /** A body the spec-conformance parse refuses: an undeclared top-level key. */
 const specRefused = (body: Record<string, unknown>) => ({ ...body, zz_undeclared_key: 1 });
 
-const servedObject = (name: string) => ({ name, label: name, fields: { title: { type: 'text', label: 'Title' } } });
+/** A body every check before the store accepts (the `sharingModel` keeps `security-owd-unset` quiet). */
+const servedObject = (name: string) => ({
+    name,
+    label: name,
+    sharingModel: 'private',
+    fields: { title: { type: 'text', label: 'Title' } },
+});
 
 interface Probe {
     envelope: Envelope;
@@ -250,8 +257,9 @@ describe('[#22220] controls: the gates still judge what the door does not refuse
             const result = await probe(environmentId, { type: 'object', name: 'local_object', item: gateRefusedObject('local_object') });
             expect(result.envelope, kernel).toEqual(INVALID_METADATA);
             expect(result.gateReached, kernel).toBe(true);
+            // The ONE finding, so the rest of the body is gate-clean: the packaged rows above are refused for the door alone.
             const rules = (result.issues as Array<{ rule?: string }>).map((i) => i.rule);
-            expect(rules, kernel).toContain('autonumber-references-unknown-field');
+            expect(rules, kernel).toEqual(['autonumber-references-unknown-field']);
             expect(result.persistedRows, kernel).toBe(0);
         }
     });
