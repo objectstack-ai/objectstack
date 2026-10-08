@@ -69,7 +69,12 @@ export interface ObjectKernelConfig {
     /** Default plugin startup timeout in milliseconds */
     defaultStartupTimeout?: number;
     
-    /** Whether to enable graceful shutdown */
+    /**
+     * Whether to enable graceful shutdown. When true (the default) the kernel
+     * listens for SIGINT, SIGTERM and SIGQUIT from construction until it stops:
+     * a signal drains it and then exits the process. Its listeners are removed
+     * when it reaches `stopped`, so a stopped kernel never handles a signal.
+     */
     gracefulShutdown?: boolean;
     
     /** Graceful shutdown timeout in milliseconds */
@@ -116,6 +121,23 @@ export class ObjectKernel {
      */
     private pluginStartupDurations: Map<string, number> = new Map();
     private shutdownHandlers: Array<() => Promise<void>> = [];
+    /**
+     * The process signal listeners this kernel installed (`gracefulShutdown`),
+     * kept so the kernel can take them back (#22286). Filled by
+     * `registerShutdownSignals()` and emptied by `releaseShutdownSignals()` at
+     * every transition into `stopped`. Before this map the listeners were
+     * anonymous and never removed: every kernel a process built left three of
+     * them behind, and each ran `process.exit(0)` on the next signal, so one
+     * SIGTERM in a process that had built six kernels exited it six times —
+     * the first exit landing while the live kernels were still draining.
+     */
+    private signalListeners: Map<NodeJS.Signals, () => void> = new Map();
+    /**
+     * Set by this kernel's own signal handler when IT starts the shutdown. Only
+     * that handler exits the process, and only once (a repeated signal during
+     * its drain is absorbed, not acted on).
+     */
+    private signalShutdownStarted = false;
     /**
      * Name of the plugin whose init() is currently executing (Phase 1 is
      * sequential, so at most one). Lets a getService miss during init name
@@ -513,6 +535,9 @@ export class ObjectKernel {
             this.logger.info('✅ Bootstrap complete');
         } catch (error) {
             this.state = 'stopped';
+            // A kernel whose boot failed is stopped for good (`shutdown()` on it
+            // is a no-op), so this is the only place its listeners can go.
+            this.releaseShutdownSignals();
             throw error;
         }
     }
@@ -566,9 +591,11 @@ export class ObjectKernel {
             );
 
             this.state = 'stopped';
+            this.releaseShutdownSignals();
             this.logger.info('✅ Graceful shutdown complete');
         } catch (error) {
             this.state = 'stopped';
+            this.releaseShutdownSignals();
 
             if (error === shutdownTimeoutError) {
                 // GENUINE timeout: `performShutdown()` is still running and has
@@ -899,32 +926,64 @@ export class ObjectKernel {
         return resolvePluginOrder(this.plugins);
     }
 
+    /**
+     * Listen for the shutdown signals for as long as this kernel lives (#22286).
+     * Each listener is kept in `signalListeners`, so `releaseShutdownSignals()`
+     * can remove exactly the ones this kernel added and nobody else's.
+     */
     private registerShutdownSignals(): void {
+        if (!isNode) return;
         const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGQUIT'];
-        let shutdownInProgress = false;
-        
-        const handleShutdown = async (signal: string) => {
-            if (shutdownInProgress) {
-                this.logger.warn(`Shutdown already in progress, ignoring ${signal}`);
-                return;
-            }
-            
-            shutdownInProgress = true;
-            this.logger.info(`Received ${signal} - initiating graceful shutdown`);
-            
-            try {
-                await this.shutdown();
-                safeExit(0);
-            } catch (error) {
-                this.logger.error('Shutdown failed', error as Error);
-                safeExit(1);
-            }
-        };
-        
-        if (isNode) {
-            for (const signal of signals) {
-                process.on(signal, () => handleShutdown(signal));
-            }
+        for (const signal of signals) {
+            const listener = () => { void this.handleShutdownSignal(signal); };
+            this.signalListeners.set(signal, listener);
+            process.on(signal, listener);
+        }
+    }
+
+    /**
+     * Give the process's signals back: remove every listener this kernel added.
+     * Idempotent. Called at each transition into `stopped` and deliberately NOT
+     * when the drain begins — while the kernel is `stopping` its listener is
+     * what absorbs a repeated signal (a terminal's Ctrl-C can arrive twice: once
+     * to the process group and once from a parent that forwards it). With no
+     * listener left, Node's default action would end the process mid-drain.
+     */
+    private releaseShutdownSignals(): void {
+        for (const [signal, listener] of this.signalListeners) {
+            process.removeListener(signal, listener);
+        }
+        this.signalListeners.clear();
+    }
+
+    /**
+     * One signal, at most one exit — and only from the handler that started
+     * the drain. A kernel that is already `stopping` or `stopped` when the
+     * signal arrives was stopped by someone else (the host calling
+     * `shutdown()`), who owns what happens next: exiting here would cut that
+     * drain short, which is how the first of six exits used to land.
+     */
+    private async handleShutdownSignal(signal: NodeJS.Signals): Promise<void> {
+        if (this.signalShutdownStarted) {
+            this.logger.warn(`Shutdown already in progress, ignoring ${signal}`);
+            return;
+        }
+        if (this.state === 'stopping' || this.state === 'stopped') {
+            this.logger.warn(
+                `Received ${signal} while the kernel is already ${this.state} — whoever is stopping it decides what follows; this kernel will not exit the process`,
+            );
+            return;
+        }
+
+        this.signalShutdownStarted = true;
+        this.logger.info(`Received ${signal} - initiating graceful shutdown`);
+
+        try {
+            await this.shutdown();
+            safeExit(0);
+        } catch (error) {
+            this.logger.error('Shutdown failed', error as Error);
+            safeExit(1);
         }
     }
 
