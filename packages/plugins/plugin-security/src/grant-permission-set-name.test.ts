@@ -87,7 +87,9 @@ async function boot(opts: { walled?: boolean } = {}) {
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet],
+    // `sys_member` is provisioned: an organization-scoped grant must name a
+    // member of its organization (`grant-holder-membership-refusal.ts`).
+    objects: [SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet, SysMember],
   } as any);
   await engine.syncSchemas();
   // The authz resolver reads these; the auth plugin registers them in a deployment.
@@ -340,6 +342,8 @@ describe("walled posture, two organizations — the name is read from the WRITER
       { id: 'ps_b_only', name: 'qa_b_only', label: 'B only', object_permissions: '{}', field_permissions: '{}', system_permissions: '[]', active: true },
       { context: { isSystem: true, tenantId: 'org_b' } } as any);
 
+    await h.engine.insert('sys_member', { user_id: 'u_wa', organization_id: 'org_a', role: 'member' },
+      { context: { isSystem: true, tenantId: 'org_a' } } as any);
     await h.engine.insert('sys_user_permission_set', { user_id: 'u_wa', permission_set_id: 'ps_alpha' }, { context: ORG_A_ADMIN } as any);
     expect((await grantsOf(h, 'u_wa'))[0]).toMatchObject({ permission_set: 'qa_alpha', organization_id: 'org_a' });
 

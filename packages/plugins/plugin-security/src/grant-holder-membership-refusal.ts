@@ -139,11 +139,13 @@ export const MEMBERSHIP_JUDGED_GRANT_OBJECTS: readonly string[] = Object.keys(GR
 export const GRANT_HOLDER_MEMBERSHIP_HOOK_PACKAGE = 'plugin-security:grant-holder-membership';
 
 /**
- * After the guards that refuse a write on authority or standing (10, 20), so a
- * write they refuse costs no membership read; before the grant-name derivation
- * (30) and the default-priority hooks (100).
+ * After the guards that refuse a write on authority or standing (10, 20) and
+ * after the grant-name derivation (30), before the default-priority hooks
+ * (100). So on both tables the value a row names is judged before its holder:
+ * `sys_user_position.position` by the catalog refusal (a middleware, ahead of
+ * every hook), `sys_user_permission_set.permission_set` by the derivation.
  */
-const HOOK_PRIORITY = 25;
+const HOOK_PRIORITY = 40;
 
 /** One `fields[]` entry of the refusal, typed to the closed ADR-0114 catalog. */
 interface HolderFieldError {

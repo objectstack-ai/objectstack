@@ -35,6 +35,10 @@ import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysPermissionSet } from './objects/sys-permission-set.object.js';
 import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
+import {
+  GRANT_HOLDER_MEMBERSHIP_HOOK_PACKAGE,
+  registerGrantHolderMembershipRefusal,
+} from './grant-holder-membership-refusal.js';
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -101,12 +105,16 @@ afterEach(async () => {
 interface BootOptions {
   /** `isolated` posture (the organization wall armed) instead of `single`. */
   walled?: boolean;
-  /** Provision `sys_member` (default) — `false` registers no membership object at all. */
-  members?: boolean;
+  /**
+   * `sys_member`: provisioned (default); `false` registers no membership
+   * object at all; `'unprovisioned'` registers it with no table behind it, so
+   * every membership read fails.
+   */
+  members?: boolean | 'unprovisioned';
 }
 
 async function boot(opts: BootOptions = {}) {
-  const withMembers = opts.members !== false;
+  const withMembers = opts.members === undefined || opts.members === true;
   const engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
@@ -129,6 +137,7 @@ async function boot(opts: BootOptions = {}) {
   // the engine's own `user_id` existence probe then cannot run and stands
   // down, so what is measured here is the membership predicate alone.
   if (!engine.registry.getObject(SysUser.name)) engine.registry.registerObject(SysUser as never, 'qa.authz-read-set');
+  if (opts.members === 'unprovisioned') engine.registry.registerObject(SysMember as never, 'qa.authz-read-set');
   engines.push(engine);
 
   const services: Record<string, unknown> = {
@@ -397,11 +406,39 @@ describe('single posture', () => {
     )));
   });
 
+  it('a membership read that fails refuses the write rather than admitting it unchecked', async () => {
+    const h = await boot({ members: 'unprovisioned' });
+    const err = await refusalOf(() => h.engine.insert(
+      'sys_user_position', { user_id: 'u_member_a', position: 'qa_rep' }, { context: ADMIN_A } as any,
+    ));
+    // Not the membership verdict — the read never answered, so no verdict is claimed.
+    expect(envelopeOf(err).code).not.toBe('VALIDATION_FAILED');
+    expect(await rowsOf(h, 'sys_user_position', { user_id: 'u_member_a' })).toHaveLength(0);
+  });
+
   it('a composition with no membership object registered has no membership to judge, and stands down', async () => {
     const h = await boot({ members: false });
     const created = await h.engine.insert(
       'sys_user_position', { user_id: 'u_member_b', position: 'qa_rep' }, { context: ADMIN_A } as any,
     );
     expect(created).toMatchObject({ user_id: 'u_member_b' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Registration
+// ---------------------------------------------------------------------------
+
+describe('registration', () => {
+  it('both hooks bind under one package when the plugin starts, and a re-registration replaces them', async () => {
+    const h = await boot();
+    expect(registerGrantHolderMembershipRefusal(h.engine as any)).toBe(true);
+    expect((h.engine as any).unregisterHooksByPackage(GRANT_HOLDER_MEMBERSHIP_HOOK_PACKAGE)).toBe(2);
+  });
+
+  it('an engine with no hook registry is reported, not silently left unguarded', () => {
+    const warn = vi.fn();
+    expect(registerGrantHolderMembershipRefusal({} as any, { warn })).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 });
