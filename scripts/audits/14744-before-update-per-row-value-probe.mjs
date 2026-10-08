@@ -54,7 +54,6 @@
 import { writeFileSync } from 'node:fs';
 import { ObjectQL } from '../../packages/objectql/src/engine.ts';
 import { MultiUpdateHookKeyDivergenceError } from '../../packages/objectql/src/multi-update-hook-key-divergence.ts';
-import { bindEmailTemplateProvenanceStamp } from '../../packages/plugins/plugin-email/src/email-template-provenance.ts';
 import { bindRuleProvenanceStamp } from '../../packages/plugins/plugin-sharing/src/sharing-rule-provenance.ts';
 import { bindWebhookProvenanceStamp } from '../../packages/plugins/plugin-webhooks/src/webhook-provenance.ts';
 import taskHookImported from '../../examples/app-todo/src/objects/task.hook.ts';
@@ -303,17 +302,6 @@ const SUBJECTS = [
                 { id: 'b', status: 'completed', completed_date: '2026-01-01', subject: 's', priority: 'normal' }],
     uniform: [{ id: 'a', status: 'in_progress', completed_date: null, subject: 's', priority: 'normal' },
               { id: 'b', status: 'in_progress', completed_date: null, subject: 's', priority: 'normal' }],
-  },
-  {
-    id: 'REAL: plugin-email template provenance stamp',
-    real: true, note: 'bindEmailTemplateProvenanceStamp, unmodified.',
-    object: 'sys_email_template', fields: ['managed_by', 'customized', 'subject'],
-    payload: { subject: 'edited' },
-    bind: (t) => bindEmailTemplateProvenanceStamp(t, silentLogger, 'sys_email_template'),
-    divergent: [{ id: 'a', managed_by: 'package', customized: false, subject: 's' },
-                { id: 'b', managed_by: 'user', customized: false, subject: 's' }],
-    uniform: [{ id: 'a', managed_by: 'package', customized: false, subject: 's' },
-              { id: 'b', managed_by: 'package', customized: false, subject: 's' }],
   },
   {
     id: 'REAL: plugin-sharing rule provenance stamp',

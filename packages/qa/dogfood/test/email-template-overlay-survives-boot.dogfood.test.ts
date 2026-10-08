@@ -30,9 +30,12 @@
 //   - the metadata-door edit is org-scoped and projected at once (preconditions);
 //   - after a cold boot the sending row, `GET /meta` and a real `sendTemplate`
 //     all carry the admin's wording;
-//   - control: a data-door edit (`customized: true`) still survives the next
-//     cold boot — seed-not-clobber is unchanged, and the overlay projection does
-//     not override a row the admin edited directly.
+//   - control: the organization DATA door is closed (ADR-0131 D6, ruling C on
+//     §6 Q1) — an edit and a create through `/data/sys_email_template` are
+//     refused 403 `PERMISSION_DENIED`, nothing is marked `customized`, and the
+//     metadata-door wording still survives the next cold boot. Before the door
+//     closed this case pinned the opposite: a data-door edit stamped
+//     `customized: true` that survived the boot.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
@@ -150,17 +153,30 @@ describe('[#21785] a metadata-door email template edit survives a cold boot (sho
         expect(sent.at(-1)?.subject).toBe('Done (reworded by the admin): Ship it');
     }, 180_000);
 
-    it('control: a data-door edit is stamped customized and survives the next cold boot', async () => {
+    it('control: the organization data door is closed — an edit and a create are refused, and the metadata-door wording survives the next cold boot', async () => {
+        const closedDoor = /^PERMISSION_DENIED: sys_email_template is closed to organization writes/;
         const [row] = await sendingRows();
         const patched = await call('PATCH', `/data/sys_email_template/${row.id}`, { subject: DATA_DOOR_SUBJECT });
-        expect(patched.status, JSON.stringify(patched.json)).toBe(200);
-        const [edited] = await sendingRows();
-        expect({ subject: edited.subject, customized: edited.customized })
-            .toEqual({ subject: DATA_DOOR_SUBJECT, customized: true });
+        expect(patched.status, JSON.stringify(patched.json)).toBe(403);
+        expect(patched.json?.code).toBe('PERMISSION_DENIED');
+        expect(String(patched.json?.error)).toMatch(closedDoor);
+
+        const created = await call('POST', '/data/sys_email_template', {
+            name: 'org_owned_template', label: 'Org owned', category: 'custom', locale: 'en-US',
+            subject: 'Org owned', body_html: '<p>Org owned</p>', active: true,
+        });
+        expect(created.status, JSON.stringify(created.json)).toBe(403);
+        expect(created.json?.code).toBe('PERMISSION_DENIED');
+        expect(String(created.json?.error)).toMatch(closedDoor);
+
+        const ql: any = await stack!.kernel.getServiceAsync('objectql');
+        expect(await ql.find('sys_email_template', { where: { name: 'org_owned_template' }, context: SYS })).toEqual([]);
+        expect((await sendingRows()).map((r: any) => ({ subject: r.subject, customized: r.customized })))
+            .toEqual([{ subject: ADMIN_SUBJECT, customized: false }]);
 
         await restart();
 
         expect((await sendingRows()).map((r: any) => ({ subject: r.subject, customized: r.customized })))
-            .toEqual([{ subject: DATA_DOOR_SUBJECT, customized: true }]);
+            .toEqual([{ subject: ADMIN_SUBJECT, customized: false }]);
     }, 180_000);
 });

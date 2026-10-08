@@ -91,9 +91,21 @@ export interface BuildEndpointExecutionContextInput {
     /** The matcher's verdict — endpoint with schema defaults MATERIALIZED. */
     match: ApiEndpointMatch;
     /**
-     * The identity envelope the dispatcher resolved for this request, or
-     * `undefined` for anonymous. Threaded into every delegated call so RLS/FLS
-     * and the ADR-0049 exposure gate apply as they do on the built-in route.
+     * The identity envelope the dispatcher resolved for this request. Threaded
+     * into every delegated call so RLS/FLS and the ADR-0049 exposure gate apply
+     * as they do on the built-in route.
+     *
+     * An ANONYMOUS request (one an `authRequired: false` endpoint admitted)
+     * arrives here as the GUEST principal, not as `undefined`: the dispatcher's
+     * scope resolution (`HttpDispatcher.resolveRequestScope` →
+     * `resolveExecutionContext`) takes the explicit guest entry,
+     * `assembleExecutionContextOrGuest` (`principalKind: 'guest'`,
+     * `positions: ['guest']`, `isSystem: false`). That is the ruled posture for
+     * this door (#22147, ruling C): never principal-less, never system. With no
+     * grant bound to the guest, the security middleware refuses it like any
+     * ungranted caller (`403 PERMISSION_DENIED`). Pinned over a socket in
+     * `dispatcher-plugin.endpoint-fallback.integration.test.ts` and on a real
+     * boot in `declarative-endpoint-anonymous-guest.dogfood.test.ts`.
      *
      * #5040 §4 makes this a red line, and names the defect it guards against:
      * the dead `handleApiEndpoint` code removed in #4936 called
