@@ -496,8 +496,11 @@ export default class Explain extends Command {
 
     // ── Lookup: a schema name first (as before), then an author-time rule id ──
     // The two sets are disjoint (pinned in test/explain-rule-id.test.ts), so the
-    // order decides nothing today; it keeps every schema lookup exactly as it was.
-    const schema = SCHEMAS[schemaName.toLowerCase()];
+    // order decides nothing today. Both are OWN-key lookups: a bare index read
+    // answered `constructor` / `__proto__` with Object's own members and the
+    // pretty printer then threw `schema.required is not iterable`.
+    const schemaKey = schemaName.toLowerCase();
+    const schema = Object.prototype.hasOwnProperty.call(SCHEMAS, schemaKey) ? SCHEMAS[schemaKey] : undefined;
     const ruleExplanation = schema ? undefined : explainRule(schemaName);
     if (!schema && ruleExplanation) {
       if (flags.json) {

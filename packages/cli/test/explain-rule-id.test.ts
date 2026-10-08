@@ -126,6 +126,26 @@ describe('os explain — one positional, schema names and rule ids (#22161)', ()
     );
   }, 60_000);
 
+  it('a prototype key is neither a schema nor a rule: refused, not crashed', async () => {
+    for (const key of ['constructor', '__proto__', 'toString']) {
+      vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+        throw new Error(`exit:${code}`);
+      }) as never);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      let thrown: unknown;
+      const out = await captureStdout(async () => {
+        try {
+          await Explain.run([key, '--json'], { root: CLI_ROOT });
+        } catch (e) {
+          thrown = e;
+        }
+      });
+      expect(String((thrown as Error)?.message), key).toBe('exit:1');
+      expect(JSON.parse(out), key).toEqual({ error: `Unknown schema or rule id: ${key}` });
+      vi.restoreAllMocks();
+    }
+  }, 60_000);
+
   it('an id that is neither refuses with exit 1 and names both lists', async () => {
     const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
       throw new Error(`exit:${code}`);
