@@ -17,6 +17,12 @@
  *   - the unique index correctly enforces `(COALESCE(organization_id,
  *     '__global__'), <field>)`, which is what the declaration asks for.
  *
+ * [ADR-0131 D3/D9] The first bullet no longer holds on a fresh install: the
+ * Default Organization exists before the seeds load under `single`, and a seed
+ * with no derivable owner is refused rather than written NULL. The cases below
+ * therefore reproduce the split from the residue an install seeded BEFORE that
+ * change carries (`landPreC1SeedResidue`), which is what the repair still owes.
+ *
  * Three correct components, one broken outcome. A test built on doubles would
  * have to encode the very disagreement it is meant to detect, so this file uses
  * the real `SeedLoaderService`, a real `ObjectQL` engine and a real `SqlDriver`
@@ -106,7 +112,14 @@ async function bootInstall() {
   return { driver, engine };
 }
 
-/** Seed the app's declared data on a FRESH database — zero organizations exist. */
+/**
+ * Seed the app's declared data on a FRESH database — zero organizations exist.
+ *
+ * [ADR-0131 D9] Since the Default Organization became a boot invariant under
+ * `single` (D3), this load is REFUSED row by row: the install registers the
+ * organization object and holds none of it, so no owner is derivable. Pinned in
+ * `[ADR-0131 D9] a fresh install's seed is refused` below.
+ */
 async function seedFreshInstall(engine: ObjectQL) {
   const loader = new SeedLoaderService(
     engine as any,
@@ -123,6 +136,20 @@ async function seedFreshInstall(engine: ObjectQL) {
     ],
     config: {},
   } as any);
+}
+
+/**
+ * The RESIDUE an install seeded before ADR-0131 carries: the same rows the
+ * pre-C1 loader wrote when no organization existed yet, through the very driver
+ * call the engine made for them — no `tenantId`, so the driver mints each
+ * number on the `__global__` counter. The loader and the engine now refuse that
+ * write; an install that made it before keeps the rows, and repairing them is
+ * what the backfill and the handoff below exist for (ADR-0131 C7's residue).
+ */
+async function landPreC1SeedResidue(driver: SqlDriver, count = SEEDED_ROWS) {
+  for (let i = 0; i < count; i++) {
+    await (driver as any).create('crm_case', { subject: `seeded ${i + 1}` });
+  }
 }
 
 /** The sign-up that first brings an organization into existence. */
@@ -176,11 +203,23 @@ afterEach(async () => {
 });
 
 describe('#8686 seed/API tenancy split — autonumber scope', () => {
-  it('[the defect] a fresh install splits one object across two counters and two partitions', async () => {
+  it('[ADR-0131 D9] a fresh install\'s seed is REFUSED at zero organizations — nothing can split', async () => {
     const { driver, engine } = await bootInstall();
-    await seedFreshInstall(engine);
+    const result = await seedFreshInstall(engine);
 
-    // The seed landed untenanted, because at seed time no organization exists.
+    // Every row refused, by name; nothing written, no counter minted.
+    expect(result.summary.totalInserted).toBe(0);
+    expect(result.summary.totalErrored).toBe(SEEDED_ROWS);
+    expect(result.errors[0].message).toContain('no organization at all');
+    expect(await countUntenanted(driver)).toBe(0);
+    expect(await readSequences(driver)).toEqual([]);
+  });
+
+  it('[the defect, pre-ADR-0131] a fresh install split one object across two counters and two partitions', async () => {
+    const { driver, engine } = await bootInstall();
+    await landPreC1SeedResidue(driver);
+
+    // The seed landed untenanted, because at seed time no organization existed.
     expect(await countUntenanted(driver)).toBe(SEEDED_ROWS);
     expect(await readSequences(driver)).toEqual([{ tenant: GLOBAL_TENANT, lastValue: SEEDED_ROWS }]);
 
@@ -201,7 +240,7 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
 
   it('[ruling: option 1] the handoff adopts the seed rows, and the fresh install never duplicates', async () => {
     const { driver, engine } = await bootInstall();
-    await seedFreshInstall(engine);
+    await landPreC1SeedResidue(driver);
     await createOrganization(engine);
 
     // The fix: the moment an organization exists, the untenanted seed rows are
@@ -233,7 +272,7 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
 
   it('[ruling: shape 2] an install that ALREADY minted duplicates is repaired, and they are reported not renumbered', async () => {
     const { driver, engine } = await bootInstall();
-    await seedFreshInstall(engine);
+    await landPreC1SeedResidue(driver);
     await createOrganization(engine);
     // The damage the card measured on 17.0.0 GA, reproduced before repairing it.
     for (let i = 0; i < 4; i++) await apiCreate(engine, `api ${i + 1}`);
@@ -270,8 +309,8 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
   });
 
   it('[ruling: idempotent] a second run of the backfill is a no-op', async () => {
-    const { engine } = await bootInstall();
-    await seedFreshInstall(engine);
+    const { driver, engine } = await bootInstall();
+    await landPreC1SeedResidue(driver);
     await createOrganization(engine);
 
     await backfillSeedTenancy(resolveSeedTenancySeam(engine), createLogger() as any);
@@ -286,7 +325,7 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
 
   it('[ruling: multi-tenant] a walled install is SKIPPED loudly and its data is left untouched', async () => {
     const { driver, engine } = await bootInstall();
-    await seedFreshInstall(engine);
+    await landPreC1SeedResidue(driver);
     await createOrganization(engine);
 
     // The posture the boot banner prints — read from the one protocol-level
@@ -312,7 +351,7 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
 
   it('[ruling: no guessing] a single-tenant install with several organizations is skipped too', async () => {
     const { driver, engine } = await bootInstall();
-    await seedFreshInstall(engine);
+    await landPreC1SeedResidue(driver);
     await createOrganization(engine);
     await engine.insert(
       'sys_organization',
@@ -337,7 +376,7 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     // `sys_organization` gaining its first row is what triggers the adoption, with
     // no restart and no explicit call — the fresh-install half of the fix.
     const { driver, engine } = await bootInstall();
-    await seedFreshInstall(engine);
+    await landPreC1SeedResidue(driver);
 
     const { AppPlugin } = await import('./app-plugin.js');
     const ctx = { logger: createLogger() } as any;
@@ -376,7 +415,7 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
    */
   it('[#12394] a burned number survives the handoff — the merged counter is written, not destroyed', async () => {
     const { driver, engine } = await bootInstall();
-    await seedFreshInstall(engine);
+    await landPreC1SeedResidue(driver);
 
     // Burn the top number. The counter stays at 38; the data max is now 37.
     await (driver as any).knex('crm_case').where({ case_number: 'CASE-00038' }).delete();
@@ -440,13 +479,11 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     engine.registry.registerObject(ORG_OBJECT, '#12394');
     await driver.initObjects([ticketObject, ORG_OBJECT]);
 
-    // Seed-shaped writes: untenanted, because no organization exists yet.
+    // Seed-shaped writes: untenanted, because no organization existed yet —
+    // the pre-ADR-0131 residue, landed through the driver call the engine made
+    // for it then (the engine now refuses it at zero organizations, D9).
     const seed = (region: string, n: number) =>
-      engine.insert(
-        'crm_ticket',
-        { subject: `seeded ${region} ${n}`, region },
-        { context: { isSystem: true } } as any,
-      );
+      (driver as any).create('crm_ticket', { subject: `seeded ${region} ${n}`, region });
     for (let i = 1; i <= 3; i++) await seed('EU', i);
     for (let i = 1; i <= 2; i++) await seed('US', i);
 

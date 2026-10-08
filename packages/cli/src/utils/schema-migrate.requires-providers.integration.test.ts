@@ -1,9 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { bootSchemaStack } from './schema-migrate.js';
 
 /**
@@ -85,6 +86,87 @@ describe('os migrate plan/apply resolve the requires-supplied provider a plugin 
       // The provider's own tables are in the plan, as `os serve` creates them.
       const objects = boot.allObjects().map((o: any) => o?.name);
       expect(objects).toEqual(expect.arrayContaining(['sys_automation_run', 'sys_flow_dispatch', 'os21732_thing']));
+      expect(boot.composition.notes.join(' ')).toContain(
+        "Composed AutomationServicePlugin for `requires: ['automation']`",
+      );
+    } finally {
+      await boot.shutdown();
+    }
+  }, 60_000);
+});
+
+/**
+ * #22288 — the same boot when `requires` is declared by ONE PACKAGE of a
+ * multi-package config, not at its top level.
+ *
+ * `composeStacks([a, b], { manifest: 'preserve' })` carries `requires` only in
+ * the body of the package that declared it. The composition read the top level
+ * alone, so the token was never searched and the kernel refused the order —
+ * measured through the door on `6729e107`: `os migrate plan` exited 1 with
+ * `Dependency 'com.objectstack.service-automation' not found for plugin …`,
+ * while the same definitions in one `defineStack` planned and exited 0. It now
+ * reads the tokens by `os serve`'s rule (`stackDeclaredCapabilities`).
+ */
+describe('os migrate plan/apply resolve a provider a PACKAGE requires (#22288)', () => {
+  let dir: string;
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'os-22288-'));
+    writeFileSync(
+      join(dir, 'objectstack.config.ts'),
+      [
+        "import { defineStack, composeStacks } from '@objectstack/spec';",
+        'class DependentConnector {',
+        "  name = 'com.example.os22288.connector';",
+        "  dependencies = ['com.objectstack.service-automation'];",
+        '  async init(ctx: any) {',
+        "    ctx.getService('automation').registerConnectorProvider('os22288', () => ({}));",
+        '  }',
+        "  async start() { throw new Error('a host start() must not run under os migrate'); }",
+        '}',
+        // The SERVICE package declares the capability; the APP package carries
+        // the plugin that hard-depends on its provider.
+        'const svc = defineStack({',
+        "  manifest: { id: 'com.example.os22288.svc', name: 'svc', namespace: 'osa', version: '0.0.0', type: 'module' },",
+        "  requires: ['automation'],",
+        "  objects: [{ name: 'osa_thing', label: 'Thing', fields: { title: { type: 'text', label: 'Title' } } }],",
+        '} as any);',
+        'const app = defineStack({',
+        "  manifest: { id: 'com.example.os22288.app', name: 'app', namespace: 'osb', version: '0.0.0', type: 'app' },",
+        "  objects: [{ name: 'osb_other', label: 'Other', fields: { title: { type: 'text', label: 'Title' } } }],",
+        '  plugins: [new DependentConnector()],',
+        '} as any);',
+        "export default composeStacks([svc, app], { manifest: 'preserve' });",
+        '',
+      ].join('\n'),
+    );
+    // The config imports `@objectstack/spec` from its own directory; link the
+    // workspace package there (`test/helpers/define-stack-fixture.ts` does the
+    // same, out of reach of this `src` program's `rootDir`).
+    const specRoot = dirname(createRequire(import.meta.url).resolve('@objectstack/spec/package.json'));
+    mkdirSync(join(dir, 'node_modules', '@objectstack'), { recursive: true });
+    symlinkSync(specRoot, join(dir, 'node_modules', '@objectstack', 'spec'), 'dir');
+    savedEnv.OS_ARTIFACT_PATH = process.env.OS_ARTIFACT_PATH;
+    process.env.OS_ARTIFACT_PATH = join(dir, 'dist', 'objectstack.json');
+  });
+
+  afterAll(() => {
+    if (savedEnv.OS_ARTIFACT_PATH === undefined) delete process.env.OS_ARTIFACT_PATH;
+    else process.env.OS_ARTIFACT_PATH = savedEnv.OS_ARTIFACT_PATH;
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('boots and orders the dependent plugin after the provider the package declared', async () => {
+    const boot = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${join(dir, 'plan.db')}`,
+      deferSchemaDdl: true,
+      composeHostStack: true,
+      projectRoot: dir,
+    });
+    try {
+      expect(boot.kernel.getService('automation').getConnectorProvider('os22288')).toBeTypeOf('function');
       expect(boot.composition.notes.join(' ')).toContain(
         "Composed AutomationServicePlugin for `requires: ['automation']`",
       );

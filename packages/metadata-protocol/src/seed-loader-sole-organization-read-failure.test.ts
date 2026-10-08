@@ -229,7 +229,13 @@ describe('[#12852] seed loader — a sole-organization read that FAILED is not "
         expect(widgets(store)[0].organization_id).toBe('org_solo');
     });
 
-    it('control: a probe that RUNS and finds NO org leaves the row org-less — the declared ambiguity', async () => {
+    // [ADR-0131 D9] `createMetadata` answers every object name, so this
+    // composition REGISTERS the organization object. With no owner derivable,
+    // the row of an organization-owned object is REFUSED — it used to be
+    // written org-less as "the declared ambiguity". A composition with no
+    // organization object keeps that branch: `seed-loader-organization-stamp.test.ts`.
+
+    it('control: a probe that RUNS and finds NO org REFUSES the row — no owner to derive', async () => {
         const { engine, store, findCalls } = createEngine();
 
         const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load({
@@ -238,20 +244,24 @@ describe('[#12852] seed loader — a sole-organization read that FAILED is not "
         });
 
         expect(findCalls).toContain('sys_organization');
-        expect(result.summary.totalInserted).toBe(1);
-        expect(widgets(store)[0].organization_id).toBeUndefined();
+        expect(result.summary.totalInserted).toBe(0);
+        expect(result.summary.totalErrored).toBe(1);
+        expect(result.errors[0].message).toContain('no organization at all');
+        expect(widgets(store)).toHaveLength(0);
     });
 
-    it('control: a probe that RUNS and finds SEVERAL orgs leaves the row org-less — the declared ambiguity', async () => {
+    it('control: a probe that RUNS and finds SEVERAL orgs REFUSES the row — no owner to derive', async () => {
         const { engine, store } = createEngine();
         store.sys_organization = [{ id: 'org_a' }, { id: 'org_b' }];
 
-        await new SeedLoaderService(engine, createMetadata(), createLogger()).load({
+        const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load({
             seeds: seedOf([{ name: 'Fresh', sku: 'W-A' }]),
             config: CONFIG,
         });
 
-        expect(widgets(store)[0].organization_id).toBeUndefined();
+        expect(result.summary.totalErrored).toBe(1);
+        expect(result.errors[0].message).toContain('several organizations');
+        expect(widgets(store)).toHaveLength(0);
     });
 
     // ── THE FIX — a probe that could not run must surface, not invent "none".
@@ -297,10 +307,11 @@ describe('[#12852] seed loader — a sole-organization read that FAILED is not "
     });
 
     // ── THE ONE BENIGN CASE — an unprovisioned table can hold no org, so
-    //    "no sole organization" IS the truth and the historical
-    //    global/cross-tenant NULL is the right answer.
+    //    "no sole organization" IS the truth: the load PROCEEDS (it is not an
+    //    outage) and reads it as the zero case. [ADR-0131 D9] The zero case
+    //    no longer writes the historical NULL: the row is refused by name.
 
-    it('an UNPROVISIONED sys_organization is truthful emptiness: the seed writes its rows org-less', async () => {
+    it('an UNPROVISIONED sys_organization is truthful emptiness: the load proceeds and refuses the unowned row', async () => {
         const { engine, store, findCalls, failReadsOf } = createEngine();
         failReadsOf('sys_organization', tableNotProvisioned());
 
@@ -309,14 +320,13 @@ describe('[#12852] seed loader — a sole-organization read that FAILED is not "
             config: CONFIG,
         });
 
-        expect(result.summary.totalInserted).toBe(1);
-        expect(result.summary.totalErrored).toBe(0);
+        expect(result.summary.totalInserted).toBe(0);
+        expect(result.summary.totalErrored).toBe(1);
+        expect(result.errors[0].message).toContain('no organization at all');
         // Proof the benign branch was actually EXERCISED — the probe ran and
-        // threw. Without this, the passing insert above would be consistent
-        // with a harness that never probes at all.
+        // threw, and the load still RESOLVED (an outage rejects; see above).
         expect(findCalls).toContain('sys_organization');
-        expect(widgets(store)).toHaveLength(1);
-        expect(widgets(store)[0].organization_id).toBeUndefined();
+        expect(widgets(store)).toHaveLength(0);
     });
 
     it('an UNPROVISIONED sys_organization in the postgres phrasing (42P01) is benign too', async () => {
@@ -331,9 +341,9 @@ describe('[#12852] seed loader — a sole-organization read that FAILED is not "
             config: CONFIG,
         });
 
-        expect(result.summary.totalInserted).toBe(1);
+        expect(result.summary.totalErrored).toBe(1);
         expect(findCalls).toContain('sys_organization');
-        expect(widgets(store)[0].organization_id).toBeUndefined();
+        expect(widgets(store)).toHaveLength(0);
     });
 
     it('a missing COLUMN on an existing sys_organization stays loud (the superstring case)', async () => {

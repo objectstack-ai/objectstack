@@ -220,6 +220,25 @@ export function resolveStackCollection(stack: unknown, key: string): unknown[] {
 }
 
 /**
+ * The capability tokens a stack DECLARES in `requires`, by
+ * {@link resolveStackCollection}'s rule: the top-level list when the stack
+ * carries one, otherwise every package body's, in package order. String
+ * entries only, duplicates kept (each caller dedupes in its own order).
+ *
+ * A multi-package `composeStacks(…, { manifest: 'preserve' })` stack carries
+ * `requires` only inside the body of the package that declared it (ADR-0130
+ * D4, 2026-09-22 addendum). A reader of the top level alone read `[]` there:
+ * `os serve` did not mount the provider a package declared, `os migrate plan`
+ * could not order a plugin that hard-depends on it, and `os generate` told the
+ * author to declare a token a package already declares (#22288). The build
+ * doors attribute each token to its package instead
+ * (`preflightDeclaredCapabilities`), on the same rule.
+ */
+export function stackDeclaredCapabilities(stack: unknown): string[] {
+  return resolveStackCollection(stack, 'requires').filter((token): token is string => typeof token === 'string');
+}
+
+/**
  * Does this stack declare any objects?
  *
  * The predicate behind BOTH `os serve` auto-registration gates. See the module
@@ -372,9 +391,13 @@ export function artifactObjectNames(raw: unknown): string[] {
  * Computed on first use, never at module load: both schemas are lazy proxies
  * and touching `.shape` forces the whole graph, which the CLI pays for on every
  * invocation if it happens at import time.
+ *
+ * Exported for one reader besides the fold: the enumeration pin
+ * (`test/normalized-call-sites.test.ts`) takes its key set from here, so a
+ * package-owned key the schema gains is enumerated the day it is declared.
  */
 let cachedCollectionKeys: readonly string[] | undefined;
-function packageOwnedCollectionKeys(): readonly string[] {
+export function packageOwnedCollectionKeys(): readonly string[] {
   if (cachedCollectionKeys) return cachedCollectionKeys;
   const bodyKeys = new Set(shapeKeys(AssembledPackageBodySchema, 'AssembledPackageBodySchema'));
   cachedCollectionKeys = shapeKeys(ObjectStackDefinitionSchema, 'ObjectStackDefinitionSchema')
