@@ -258,6 +258,17 @@ unchanged), and **same-package re-registration** simply overwrites (idempotent
 reload). Authoring-time hygiene — an author shipping two `page/home` in one
 package — stays covered by the `naming/namespace-prefix` lint in `os lint`.
 
+> **Narrowed (2026-10-08) — the security catalog is out of §3.4.** Positions,
+> permission sets and capabilities each hold ONE namespace per deployment: a
+> package whose position, permission set or capability bears a name an installed
+> package, the environment catalog or a built-in already holds is refused at
+> registration, and the error names both holders. §3.4 rests on every caller
+> carrying its package id; an assignment carries a bare position or
+> permission-set name with no package context (ADR-0131 D4), so for these three
+> types a shared name is a real ambiguity, not the disambiguable one described
+> above. Every other type keeps §3.4 as written. See
+> [Addendum (2026-10-08)](#addendum-2026-10-08-the-security-catalog-holds-one-name-per-deployment--34-narrowed).
+
 ### 3.5 Namespace rename-on-install is deferred (non-goal)
 
 Renaming a colliding namespace on install would require rewriting **every**
@@ -749,3 +760,90 @@ Status legend as in §5.
 - **Open-source deployments lose nothing.** They keep the gate that prevents
   corruption; what they do not get is the global authority that would have told
   them earlier.
+
+---
+
+## Addendum (2026-10-08): the security catalog holds one name per deployment — §3.4 narrowed
+
+> **Status of this addendum: Accepted** — it records a maintainer ruling. It
+> **narrows §3.4 for three metadata types and supersedes no other text**: §§1–6
+> and the 2026-08-08 addendum stand verbatim.
+>
+> **Ruling this addendum records** — Q4 on #15196, answered by the maintainer
+> 「15196 Q3 A Q4 A」 (ruling record 6050490870, 2026-10-08); the ruled option's
+> text, verbatim:
+>
+> > The three security catalog types (positions, permission sets, capabilities)
+> > each hold one namespace per deployment. Installing or registering a package
+> > whose position, permission set or capability bears a name an installed
+> > package, the environment catalog or a built-in already holds is refused, the
+> > error naming both holders. ADR-0048 §3.4's retirement of the cross-package
+> > throw is narrowed to leave these three types out: an assignment carries a
+> > bare name with no package context, so for the security catalog a shared name
+> > is a real ambiguity, not the disambiguable one §3.4 describes for UI metadata.
+>
+> Not taken: **B** (assignments carrying `package + name`, which rewrites the
+> ADR-0131 D4 reference syntax and puts a prefix on every assignment) and **C**
+> (resolution by registration order: who holds a permission would depend on load
+> order).
+
+### N.1 Why §3.4's premise does not hold for these three types
+
+§3.4 retires the cross-package throw because "prefer-local always disambiguates
+two different packages": every routed UI surface carries the package id of the
+caller, so two packages' `page/home` never compete for one caller. The security
+catalog has no such caller. A user holds the position `sales_manager`, a position
+binds the permission set `sales_user`, a permission set grants the capability
+`export_data` — each reference is a **bare name** (ADR-0131 D4), stored in
+assignment rows and junction rows with no package coordinate, and resolved by a
+read that takes no package context. Two holders of one name therefore leave the
+grant to whichever definition that read happens to reach first.
+
+That is not hypothetical. Measured before the ruling, on a booted kernel with two
+packages sharing one name per type: the by-name catalog read resolved the
+permission set and the capability to the **first**-registered package and the
+position to the **last**-registered one — two different precedence rules inside
+one catalog. An app declaring a permission set named `admin_full_access` beside
+the platform's own was accepted, and the by-name read answered the app's set.
+
+### N.2 What is refused
+
+A package registration is refused when a position, permission set or capability
+it declares names something another holder already holds. The holders:
+
+- **an installed package** — including a disabled one, which is still installed
+  and still holds its names;
+- **the environment catalog** — an item authored in this environment rather than
+  shipped by a package;
+- **a built-in** — the platform's built-in identity positions and audience
+  anchors, and its curated capabilities. The platform's permission sets are
+  declared by the security plugin's own package and are held by it like any
+  other package's.
+
+The error names both holders and carries an ADR-0112 envelope (`422`, with the
+code the §3.2 namespace gate already uses): the condition is the same one — a
+name in a deployment-wide namespace is already taken — and so is the remedy:
+rename, or uninstall the other holder.
+
+### N.3 What stays as §3.4 has it
+
+- **Same-package re-registration** — an idempotent reload, a re-install, a hot
+  reload — is one holder, not two, and simply overwrites.
+- **Every other metadata type** keeps §3.4's coexistence: two packages' `page/home`
+  still coexist under distinct composite keys.
+- **A write with no package provenance** — an environment save over a
+  package-held name, which is how every `sys_metadata` hydration arrives — stays
+  under ADR-0005 overlay precedence. The ruling covers installing or registering a
+  package, not a metadata author's save; that path is unchanged by this addendum.
+- **No downgrade.** `OS_METADATA_COLLISION=warn` softens the §3.2 namespace gate
+  only; no ruling extends it to this refusal.
+
+### N.4 Where it is implemented
+
+`@objectstack/objectql`: the rule and its holders in `security-catalog-namespace.ts`;
+the package door in `SchemaRegistry.installPackage` (ahead of every mutation, so a
+refused package leaves no record) and the item seam in `SchemaRegistry.registerItem`
+for a package-bound registration that reaches the registry directly. Every package
+registration reaches the package door before any in-memory registrar runs, so the
+boot of a conflicting composition — an artifact boot included — is refused in its
+first phase.
