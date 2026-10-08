@@ -2883,9 +2883,11 @@ export interface OperationContext {
    * to stamp `BulkDataEvent.organizationId`.
    *
    * The seam ruled on #15706: the wall is computed ONCE, where every input is
-   * visible (the posture in force, the caller's organization scope, the
-   * object's tenancy clauses AND the deployment's #12699 carve-out, which no
-   * schema carries), and its decision travels here as a value. A reader
+   * visible (the posture in force, the caller's organization scope and the
+   * object's tenancy clauses — which, since ADR-0131 D7, include the
+   * deployment's #12699 platform-global declaration, recorded on the
+   * registered object as `systemFields.tenant: false`), and its decision
+   * travels here as a value. A reader
    * answers from this member ALONE and re-derives nothing — a re-derivation
    * is a mirror of the wall, and a mirror structurally sees only the clauses
    * it was taught (the #15706 mislabel).
@@ -3545,10 +3547,14 @@ function eventOrganizationValue(value: unknown): string | undefined {
  * re-derived the wall here — from the enforced posture, the execution
  * context's `tenantId` / `accessible_org_ids` / `posture` rung, and the
  * object schema's tenancy clauses. It could not see the third clause
- * plugin-security folds into `tenancyDisabled` — the deployment-declared
- * `platformGlobalObjects` carve-out (#12699), which no schema carries — and
+ * plugin-security then folded into `tenancyDisabled` — the deployment-declared
+ * `platformGlobalObjects` carve-out (#12699), which no schema carried — and
  * stamped the caller's organization onto a batch Layer 0 had never
- * constrained: a WRONG key, the #13566 leak shape. The ruling's acceptance
+ * constrained: a WRONG key, the #13566 leak shape. (ADR-0131 D7 has since
+ * made that declaration total: a declared object is registered with no
+ * organization column and declaring `systemFields.tenant: false`, so the fold
+ * is retired — but the rule below does not lean on that; the ruling's
+ * acceptance criterion is about the seam, not one clause.) The ruling's acceptance
  * criterion, verbatim: the verdict recorded must be what the wall decided,
  * not a re-statement of its inputs; if the recorded value can be derived by
  * the reader from anything else on the context, the mirror has not been
