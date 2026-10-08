@@ -1714,8 +1714,15 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           // #4343): this pass may be handed a pre-conversion source, and that
           // check reads what such a source spells — the `functionName` alias,
           // the retired dispatch keys — and names each, where the judge would
-          // only see `function` absent.
-          .filter((configRefusal) => !(nodeType === 'script' && configRefusal.path === 'function'));
+          // only see `function` absent. Since the judge also refuses a key a
+          // `script`'s contract does not declare (#21982), it would name that
+          // same `functionName` alias undeclared too, so that one refusal is
+          // the callable check's as well: the pass keeps the pre-conversion
+          // tolerance it declares. Every other undeclared key stays refused.
+          .filter((configRefusal) => !(nodeType === 'script' && (
+            configRefusal.path === 'function'
+            || (configRefusal.code === 'node-config-refused-by-contract' && configRefusal.path === 'functionName')
+          )));
         for (const configRefusal of configRefusals) {
           issues.push({
             where: `${at} · node '${node.id}' (${nodeType}) config.${configRefusal.path}`,

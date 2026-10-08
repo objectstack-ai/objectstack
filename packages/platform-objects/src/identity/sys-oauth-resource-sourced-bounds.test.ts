@@ -71,7 +71,7 @@ describe('#12313 — sys_oauth_resource.identifier and its referrer carry a sour
     expect(SysOauthClientResource.name).toBe('sys_oauth_client_resource');
     expect(identifier()).toBeTypeOf('object');
     expect(resourceId()).toBeTypeOf('object');
-    expect(SysOauthResource.indexes).toContainEqual({ fields: ['identifier'], unique: true });
+    expect(SysOauthResource.indexes).toContainEqual({ fields: ['identifier'], unique: 'global' });
   });
 
   it('the referent declares the width its sole producer can store', () => {

@@ -59,9 +59,9 @@ exactly two, and the same words work on a field and on a declared index:
 // ✅ platform-wide — a hostname, an external id, an engine dedup key
 { fields: ['source', 'dedup_key'], unique: 'global' }
 
-// ❌ scope unstated — this is the DEPRECATED spelling of 'global'.
+// ❌ scope unstated — REFUSED since protocol 18 (it spelled 'global' by position).
 //    It reads like "per organization" and does the opposite.
-//    `os lint` reports unique/unscoped-declared-index; protocol 18 rejects it.
+//    `os validate` refuses it at the schema; `os lint`: unique/unscoped-declared-index.
 { fields: ['code'], unique: true }
 ```
 
@@ -73,7 +73,7 @@ Notes an author has to know:
   because SQL `UNIQUE` treats every `NULL` as distinct.
 - **On a FIELD, `unique: true` means `'organization'`** and stays valid forever;
   `'organization'` is just the preferred spelling in new code. Only on a
-  *declared index* is bare `true` deprecated.
+  *declared index* is bare `true` refused (stored metadata converts it to `'global'`).
 - **You never write the posture.** The same declaration is correct under every
   tenancy posture — state the business boundary, not the deployment shape.
 - **`'tenant'` and `'org'` are rejected.** The word is `'organization'`.

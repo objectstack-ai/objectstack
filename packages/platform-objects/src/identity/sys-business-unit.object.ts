@@ -259,7 +259,7 @@ export const SysBusinessUnit = ObjectSchema.create({
   indexes: [
     { fields: ['organization_id'] },
     { fields: ['parent_business_unit_id'] },
-    { fields: ['code', 'organization_id'], unique: true },
+    { fields: ['code', 'organization_id'], unique: 'global' },
     { fields: ['active'] },
   ],
 

@@ -239,7 +239,7 @@ export const SysTwoFactor = ObjectSchema.create({
   },
   
   indexes: [
-    { fields: ['user_id'], unique: true },
+    { fields: ['user_id'], unique: 'global' },
   ],
   
   enable: {

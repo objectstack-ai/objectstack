@@ -85,7 +85,7 @@ export const SysScimSubject = ObjectSchema.create({
 
   indexes: [
     // UNIQUE mirrors @better-auth/scim's own declaration — one row per user.
-    { fields: ['user_id'], unique: true },
+    { fields: ['user_id'], unique: 'global' },
   ],
 
   enable: {

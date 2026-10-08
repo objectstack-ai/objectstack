@@ -528,7 +528,10 @@ describe('批 20, unknown keys refused — curation is anchored to the sibling c
 describe('批 20 — `IndexSchema` is closed (the held 14th site, once the console index editor converged on it)', () => {
   it('declared keys still parse, at every spelling ADR-0120 declares', () => {
     accept(IndexSchema, { fields: ['name'] });
-    accept(IndexSchema, { name: 'idx_probe', fields: ['name'], unique: true });
+    // Bare `true` is no longer one of them on a declared index (refused at
+    // protocol 18 — `unique-scope-message.test.ts` pins the prescription);
+    // `false` is, with a name beside it.
+    accept(IndexSchema, { name: 'idx_probe', fields: ['name'], unique: false });
     accept(IndexSchema, { fields: ['code'], unique: 'global' });
     accept(IndexSchema, { fields: ['code'], unique: 'organization' });
     // …and through the carrier, which is how the console PUTs it.

@@ -104,12 +104,12 @@ describe('ManifestSchema', () => {
         version: '1.0.0',
         type: 'plugin',
         name: 'Admin Tools',
-        permissions: [
-          'system.user.read',
-          'system.user.write',
-          'system.data.read',
-          'system.data.write',
-        ],
+        // The structured ADR-0025 §3.2 block — the only form since the flat
+        // string list retired (`manifest-permissions-string-list.test.ts`).
+        permissions: {
+          services: ['object', 'auth'],
+          hooks: ['record.beforeInsert'],
+        },
       };
 
       expect(() => ManifestSchema.parse(manifest)).not.toThrow();
@@ -143,17 +143,9 @@ describe('ManifestSchema', () => {
         type: 'app',
         name: 'ObjectStack CRM',
         description: 'Complete customer relationship management solution with sales, marketing, and service modules',
-        permissions: [
-          'app.access.crm',
-          'crm.lead.read',
-          'crm.lead.write',
-          'crm.opportunity.read',
-          'crm.opportunity.write',
-          'crm.account.read',
-          'crm.account.write',
-          'crm.contact.read',
-          'crm.contact.write',
-        ],
+        // No `permissions`: an app's record access is its permission SETS, in the
+        // stack's own `permissions` collection — the manifest-stage key is a
+        // plugin's capability grant, and an app ships no code that needs one.
         objects: [
           './objects/lead.object.ts',
           './objects/opportunity.object.ts',
@@ -202,10 +194,10 @@ describe('ManifestSchema', () => {
         type: 'plugin',
         name: 'SAML Authentication Plugin',
         description: 'Enables SAML 2.0 single sign-on authentication',
-        permissions: [
-          'system.auth.configure',
-          'system.user.create',
-        ],
+        permissions: {
+          services: ['auth'],
+          network: ['idp.example.com'],
+        },
         // `extensions` retired (commit dce5cd4f0) — nothing ever read the container.
       };
 
@@ -219,9 +211,9 @@ describe('ManifestSchema', () => {
         type: 'driver',
         name: 'PostgreSQL Driver',
         description: 'PostgreSQL database driver with advanced features',
-        permissions: [
-          'system.datasource.manage',
-        ],
+        permissions: {
+          network: ['db.internal'],
+        },
         // `extensions` retired (commit dce5cd4f0) — nothing ever read the container.
       };
 
@@ -259,9 +251,9 @@ describe('ManifestSchema', () => {
         type: 'gateway',
         name: 'GraphQL Gateway',
         description: 'GraphQL API protocol gateway for ObjectStack',
-        permissions: [
-          'system.api.configure',
-        ],
+        permissions: {
+          services: ['object', 'http'],
+        },
       };
 
       expect(() => ManifestSchema.parse(graphqlGateway)).not.toThrow();

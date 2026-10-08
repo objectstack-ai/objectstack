@@ -36,7 +36,7 @@ const result = ManifestSchema.parse(data);
 | **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
 | **name** | `string` | ✅ | Human-readable package name |
 | **description** | `string` | optional | Package description |
-| **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions at the AUTHORING stage: legacy string[] or structured plugin block (ADR-0025 §3.2) — at the assembled stage the same key is the ADR-0090 `PermissionSet[]` collection instead (`AssembledPackageBodySchema`) |
+| **permissions** | `{ services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions at the AUTHORING stage: the structured plugin block `{ services, hooks, network, fs }` (ADR-0025 §3.2) — the legacy flat string list is retired — and at the assembled stage the same key is the ADR-0090 `PermissionSet[]` collection instead (`AssembledPackageBodySchema`) |
 | **objects** | `string[]` | optional | Glob patterns for ObjectQL schemas files |
 | **datasources** | `string[]` | optional | Glob patterns for Datasource definitions |
 | **dependencies** | `Record<string, string>` | optional | Package dependencies |
@@ -55,8 +55,6 @@ const result = ManifestSchema.parse(data);
 | **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
 
 ### Nested Shape: `Manifest.permissions`
-
-Structured plugin permission grants (ADR-0025 §3.2)
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -128,18 +126,6 @@ A navigation contribution: a package injecting nav items into an app it does not
 
 ## ManifestPermissions
 
-### Union Options
-
-This schema accepts one of the following structures:
-
-#### Option 1
-
-Type: `string[]`
-
----
-
-#### Option 2
-
 Structured plugin permission grants (ADR-0025 §3.2)
 
 ### Properties
@@ -150,8 +136,6 @@ Structured plugin permission grants (ADR-0025 §3.2)
 | **hooks** | `string[]` | optional | Lifecycle hooks the plugin may register (e.g. "record.beforeInsert") |
 | **network** | `string[]` | optional | Network hosts the plugin may reach (e.g. "api.acme.com") |
 | **fs** | `string[]` | optional | Filesystem paths the plugin may access |
-
----
 
 
 ---

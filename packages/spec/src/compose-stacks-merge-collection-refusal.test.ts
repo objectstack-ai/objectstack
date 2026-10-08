@@ -119,7 +119,7 @@ describe("composeStacks objectConflict: 'merge' — a collection both objects de
 
   it("refuses two objects declaring different 'indexes' (strict-parsed inputs)", () => {
     const a = defineStack({ manifest: mf('com.example.a'), objects: [obj('shared', { indexes: [{ fields: ['title'] }] })] });
-    const b = defineStack({ manifest: mf('com.example.b'), objects: [obj('shared', { indexes: [{ fields: ['title'], unique: true }] })] });
+    const b = defineStack({ manifest: mf('com.example.b'), objects: [obj('shared', { indexes: [{ fields: ['title'], unique: 'global' }] })] });
     const msg = refusal(() => composeStacks([a, b], { objectConflict: 'merge' }));
     expect(msg).toContain(REFUSED('indexes', A0, B1));
     expect(msg).toContain(FIX('indexes'));
@@ -148,7 +148,7 @@ describe("composeStacks objectConflict: 'merge' — a collection both objects de
     const idx = [{ fields: ['title'] }];
     const a = defineStack({ manifest: mf('com.example.a'), objects: [obj('shared', { indexes: idx })] });
     const b = defineStack({ manifest: mf('com.example.b'), objects: [obj('shared', { indexes: [{ fields: ['title'] }] })] });
-    const c = defineStack({ manifest: mf('com.example.c'), objects: [obj('shared', { indexes: [{ fields: ['title'], unique: true }] })] });
+    const c = defineStack({ manifest: mf('com.example.c'), objects: [obj('shared', { indexes: [{ fields: ['title'], unique: 'global' }] })] });
     const msg = refusal(() => composeStacks([a, b, c], { objectConflict: 'merge' }));
     expect(msg).toContain(REFUSED('indexes', A0, "'com.example.c' (stack #2)"));
   });

@@ -64,10 +64,17 @@ describe('UniqueScope (ADR-0120) — bare `true` on a field is unique per organi
   });
 
   describe('IndexSchema.unique', () => {
-    it("accepts true / false / 'global' / 'organization'", () => {
-      for (const unique of [true, false, 'global', 'organization'] as const) {
+    it("accepts false / 'global' / 'organization'", () => {
+      for (const unique of [false, 'global', 'organization'] as const) {
         expect(IndexSchema.parse({ fields: ['a'], unique }).unique).toBe(unique);
       }
+    });
+
+    it('refuses bare true — the positional spelling retired at protocol 18 (ADR-0120 D1/D7)', () => {
+      // The prescription itself is pinned in `unique-scope-message.test.ts`;
+      // this is the accept-set half, beside its three surviving members.
+      const result = IndexSchema.safeParse({ fields: ['a'], unique: true });
+      expect(result.success).toBe(false);
     });
 
     it('defaults to false', () => {

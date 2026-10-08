@@ -114,7 +114,7 @@ export const SysFlowCredential = ObjectSchema.create({
 
   indexes: [
     // One credential per position per state — the channel's upsert key.
-    { fields: ['flow_name', 'state', 'position'], unique: true },
+    { fields: ['flow_name', 'state', 'position'], unique: 'global' },
   ],
 
   enable: {

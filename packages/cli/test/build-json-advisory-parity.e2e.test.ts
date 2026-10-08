@@ -126,9 +126,13 @@ const PLANTED_DOC = 'advparity_guide.md';
  *
  *  - `requires` names an unknown token   -> one #3366 capability hint (RECORD);
  *  - `src/docs/*.md` has unreadable tags -> one ADR-0046 doc advisory (RECORD);
- *  - a bare `unique: true` index         -> one authoring-rule advisory, so a
- *    regression that REPLACED `ruleAdvisories` while folding the new lists in
- *    goes red here instead of passing quietly.
+ *  - one column unique twice, per organization on the field and `'global'`
+ *    on a declared index                -> one authoring-rule advisory
+ *    (`unique/double-declaration`), so a regression that REPLACED
+ *    `ruleAdvisories` while folding the new lists in goes red here instead of
+ *    passing quietly. (It used to be a bare declared `unique: true`, R11's
+ *    warning; protocol 18 refuses that spelling outright, so it can no longer
+ *    sit in a stack that builds.)
  */
 const CONFIG_PLANTED = `
 import { defineStack } from '@objectstack/spec';
@@ -141,8 +145,8 @@ export default defineStack({
       name: 'ap_thing',
       label: 'Thing',
       sharingModel: 'private',
-      indexes: [{ name: 'ap_title_idx', fields: ['title'], unique: true }],
-      fields: { title: { type: 'text', label: 'Title' } },
+      indexes: [{ name: 'ap_title_idx', fields: ['title'], unique: 'global' }],
+      fields: { title: { type: 'text', label: 'Title', unique: true } },
     },
   ],
 }, { strict: false });
@@ -172,7 +176,7 @@ export default defineStack({
       name: 'ac_thing',
       label: 'Thing',
       sharingModel: 'private',
-      indexes: [{ name: 'ac_title_idx', fields: ['title'], unique: true }],
+      indexes: [{ name: 'ac_title_idx', fields: ['title'], unique: 'global' }],
       fields: { title: { type: 'text', label: 'Title' } },
     },
   ],
@@ -300,7 +304,7 @@ describe('#11727 — `os build --json` carries the capability-provider and packa
     expect(
       records.map((r) => r.rule),
       'the authoring-rule advisory records were lost from `warnings`',
-    ).toContain('unique/unscoped-declared-index');
+    ).toContain('unique/double-declaration');
   }, 120_000);
 
   it('adds NO new top-level key to the payload — this fills a declared key, it is not a new surface', async () => {

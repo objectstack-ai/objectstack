@@ -60,10 +60,41 @@
     },
     "permissions": {
       "status": "live",
-      "evidence": "packages/plugins/plugin-security/src/suggested-audience-bindings.ts#collectDeclaredSuggestions (declared permission strings from every enabled installed package feed the suggested audience bindings — `Array.isArray(manifest?.permissions) ? manifest.permissions : []`, which is also where the legacy-arm-only reading below is measured)",
-      "verifiedAt": "2026-08-28",
+      "evidence": "objectui: packages/app-shell/src/console/marketplace/PluginDisclosure.tsx#PluginDisclosure @a58626c88dc8 (the install-consent disclosure reads the marketplace version's `permissions` and renders its four lists — `services`, `hooks`, `network`, `fs` — under \"This package requests:\", one group per list)",
+      "producer": "packages/cli/src/commands/plugin/publish.ts#PluginPublish (`os plugin publish` uploads the compiled manifest whole as `plugin_manifest`; the cloud control plane's projection of it onto the version row the disclosure reads was NOT measured from this seat — see the note)",
+      "verifiedAt": "2026-10-07",
       "evidenceScope": "cross-repo",
-      "note": "LIVE ON ONE ARM ONLY, and the split matters. `ManifestPermissionsSchema` (manifest.zod.ts:54) is a union of the legacy flat `string[]` and the structured `PluginPermissionsSchema` (services / hooks / network / fs, ADR-0025 §3.2). The single reader is guarded by `Array.isArray(manifest?.permissions)`, so it reads the LEGACY arm and skips the structured one entirely; no other reader exists in objectstack or objectui. PluginPermissionEnforcer (packages/core/src/security/plugin-permission-enforcer.ts:94-104) is not the missing consumer — it registers the set the install-time consent flow persisted to `sys_package_installation.granted_permissions`, explicitly \"independent of whatever the manifest *requested*\", and nothing in this repo feeds the manifest declaration into it. The verdict is `live` because the key is read; the structured arm's zero is recorded apart (commit aaacf1d5c, the `PluginPermissionsSchema` docblock) rather than being flattened into this one-level row. Cloud unmeasured (see `_note`) — the consent flow ADR-0025 §3.5 describes lives there. 2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) — the citation was still ACCURATE (`suggested-audience-bindings.ts:252` names the read), so this is a grammar migration. What the anchor buys here is specific to this row's shape: the whole `live` verdict rests on ONE reader, so if `collectDeclaredSuggestions` is deleted or renamed the entry now goes red instead of pointing at whatever line 252 has become. Re-closed by hand against c459da6bc."
+      "note": "RE-VERDICTED 2026-10-07 by the retirement of the legacy flat-list arm (ADR-0049 enforce-or-remove, ruled option A; ADR-0087 conversion `manifest-permissions-string-list-removed`): `ManifestPermissionsSchema` is now the structured `PluginPermissionsSchema` block itself (services / hooks / network / fs, ADR-0025 §3.2), and a list is refused at parse with its prescription. The verdict stays `live`, on CORRECTED evidence. This row used to rest on `collectDeclaredSuggestions` (plugin-security) reading the legacy arm — a misattribution: that reader wants the ASSEMBLED stage's `PermissionSet[]` collection, which shares this key (the two-readings collision `AssembledPackageBodySchema`'s stage table records), and it, like `AppPlugin`'s security registrar, only REPORTS an authoring-stage value as skipped. LOCAL HALF, measured at e67ba80049: every `manifest.permissions` / `manifest?.permissions` / `manifest[...]` spelling and every `ManifestPermissions*` / `PluginPermissions*` importer — zero runtime consumers of the manifest-stage value. The permission enforcer is not one: it registers `grantedPermissions` from the environment artifact (the CONSENTED set, whose values are this same schema), never the manifest's request. Control on the same instrument: it finds those two drop reports and the assembled-stage read in the CLI's permission-set-name-collisions test, so the zero is about this key's readers, not the pattern. FOREIGN HALF: objectui at the `.objectui-sha` pin a58626c88dc8 reads the structured block in the marketplace install dialog (`PluginDisclosure`) and shows the installer each requested service, hook, host and path — 0 reads of `manifest.permissions` there, control 91 `manifest.(id|name|version)` reads at the same pin. A flat list carries none of the four lists, so the retired arm disclosed nothing there either. PRODUCER: `os plugin publish` uploads the manifest; the cloud control plane's projection onto the version row is the unmeasured hop — `add_repo` on cloud was denied from this seat on 2026-10-07, so a cloud-capable seat re-reads that projection and pins its commit. NOT ENFORCED AT LOAD: the block records a consent request and REFUSES NOTHING (the `PluginPermissionsSchema` docblock), so `live` here means authoring it changes what an installer is shown, not what the plugin may touch.",
+      "children": {
+        "services": {
+          "status": "live",
+          "evidence": "objectui: packages/app-shell/src/console/marketplace/PluginDisclosure.tsx#PluginDisclosure @a58626c88dc8 (`perms.services` — counted into the disclosure's has-any test and rendered as its \"Platform services\" group)",
+          "verifiedAt": "2026-10-07",
+          "evidenceScope": "cross-repo",
+          "note": "Drilled 2026-10-07 when the retirement of the flat-list arm left this block the whole of `permissions`, so the walk began to see it as a container. Shown to the installer, NOT enforced at load — the container's note carries the producer hop and the not-enforced half."
+        },
+        "hooks": {
+          "status": "live",
+          "evidence": "objectui: packages/app-shell/src/console/marketplace/PluginDisclosure.tsx#PluginDisclosure @a58626c88dc8 (`perms.hooks` — counted into the disclosure's has-any test and rendered as its \"Lifecycle hooks\" group)",
+          "verifiedAt": "2026-10-07",
+          "evidenceScope": "cross-repo",
+          "note": "Drilled 2026-10-07 when the retirement of the flat-list arm left this block the whole of `permissions`, so the walk began to see it as a container. Shown to the installer, NOT enforced at load — the container's note carries the producer hop and the not-enforced half."
+        },
+        "network": {
+          "status": "live",
+          "evidence": "objectui: packages/app-shell/src/console/marketplace/PluginDisclosure.tsx#PluginDisclosure @a58626c88dc8 (`perms.network` — counted into the disclosure's has-any test and rendered as its \"Network access\" group)",
+          "verifiedAt": "2026-10-07",
+          "evidenceScope": "cross-repo",
+          "note": "Drilled 2026-10-07 when the retirement of the flat-list arm left this block the whole of `permissions`, so the walk began to see it as a container. Shown to the installer, NOT enforced at load — the container's note carries the producer hop and the not-enforced half."
+        },
+        "fs": {
+          "status": "live",
+          "evidence": "objectui: packages/app-shell/src/console/marketplace/PluginDisclosure.tsx#PluginDisclosure @a58626c88dc8 (`perms.fs` — counted into the disclosure's has-any test and rendered as its \"Filesystem access\" group)",
+          "verifiedAt": "2026-10-07",
+          "evidenceScope": "cross-repo",
+          "note": "Drilled 2026-10-07 when the retirement of the flat-list arm left this block the whole of `permissions`, so the walk began to see it as a container. Shown to the installer, NOT enforced at load — the container's note carries the producer hop and the not-enforced half."
+        }
+      }
     },
     "objects": {
       "status": "live",
