@@ -10,9 +10,10 @@
  *  - the SCIM bearer verifier (`verifyScimBearerToken`): its credential probe
  *    carries the opt-in in the read's trailing options.
  *
- * A context with neither a principal nor `isSystem` is the security
- * middleware's principal-less hand-off (ADR-0096), which is not an
- * authorization: each of these calls is already authorized by its own door
+ * A context with neither a principal nor `isSystem` was the security
+ * middleware's principal-less hand-off (ADR-0096 E1) and is refused since
+ * ADR-0096 D5; it was never an authorization: each of these calls is already
+ * authorized by its own door
  * (the platform-admin judge; the bearer digest). The opt-in names that.
  *
  * Measured on a REAL engine: a middleware registered on it records the context

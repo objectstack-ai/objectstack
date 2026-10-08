@@ -549,11 +549,12 @@ describe('the wired chain — policies, then the real pipeline (#5129)', () => {
     // An unauthenticated request an `authRequired: false` endpoint admits
     // executes as the GUEST principal the runtime face's explicit guest entry
     // (`assembleExecutionContextOrGuest`) builds — never principal-less (which
-    // the security middleware hands straight through, ADR-0096 E1) and never
-    // the system principal. These pin the context the delegated call CARRIES,
-    // which is the one fact a status code cannot show: this boot composes no
-    // security plugin, and once a principal-less context is denied too, a
-    // guest and a principal-less call answer the same 403. The real-boot
+    // the security middleware used to hand straight through, ADR-0096 E1, and
+    // since ADR-0096 D5 refuses) and never the system principal. These pin the
+    // context the delegated call CARRIES, which is the one fact a status code
+    // cannot show: this boot composes no security plugin, and now that a
+    // principal-less context is denied too, a guest and a principal-less call
+    // answer the same 403. The real-boot
     // counterpart, with the deny it earns, is
     // `declarative-endpoint-anonymous-guest.dogfood.test.ts`.
 

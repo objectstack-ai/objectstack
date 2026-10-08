@@ -46,9 +46,10 @@ export const SysSecret = ObjectSchema.create({
   // store (settings/datasource credentials). Not covered by the wildcard `'*'`
   // grant — ordinary members get 403 from the generic data layer. Platform
   // admins retain access via the posture-gated superuser bypass. Internal
-  // readers are unaffected: `engine.resolveSecret` reads at DRIVER level,
-  // SettingsService / the datasource secret-binder read with no principal
-  // (middleware falls open for principal-less internal calls).
+  // readers are unaffected: `engine.resolveSecret` reads at DRIVER level, and
+  // SettingsService / the datasource secret-binder read with the explicit system
+  // opt-in (`isSystem: true`), which the middleware short-circuits. A
+  // principal-less read is refused (ADR-0096 D5).
   access: { default: 'private' },
   description:
     'Cipher store written by three privileged producers (see managedBy); each holds its handle in its own column. Never holds plaintext.',

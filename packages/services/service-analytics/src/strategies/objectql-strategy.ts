@@ -408,7 +408,8 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // layer's own scoping; handing the engine the context makes ITS middleware
       // inject RLS too, so a future strategy that forgets `withReadScope` still
       // cannot read across tenants. Without it the operation reaches the engine
-      // principal-less and plugin-security falls open — the #3597 shape.
+      // principal-less, which plugin-security used to let through — the #3597
+      // shape — and since ADR-0096 D5 refuses.
       context: ctx.context,
     });
 
