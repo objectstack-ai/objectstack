@@ -39,6 +39,14 @@ import { ensureDefaultOrganization } from './ensure-default-organization.js';
 
 const SYS = { context: { isSystem: true } } as any;
 const NAME_HOOKS = 'plugin-security:grant-permission-set-name';
+const GUARD_PACKAGE = 'test.grant-readers-unnamed';
+
+function registerGuard(engine: ObjectQL): void {
+  registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, {
+    packageId: GUARD_PACKAGE,
+    logger: { info: () => undefined, warn: () => undefined },
+  });
+}
 
 const engines: ObjectQL[] = [];
 afterEach(async () => {
@@ -51,8 +59,6 @@ afterEach(async () => {
 
 interface Rig {
   engine: ObjectQL;
-  /** Re-bind the plugin's name hooks after `unname` (a fresh start of the plugin's hook half). */
-  plugin: SecurityPlugin;
 }
 
 /** `single` posture; the first user is promoted to platform administrator — the sole administrator. */
@@ -101,10 +107,7 @@ async function soleGrantAnchoredAdmin(): Promise<Rig> {
   await engine.syncSchemas();
   await plugin.start(ctx);
   vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
-  registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, {
-    packageId: 'test.grant-readers-unnamed',
-    logger: { info: () => undefined, warn: () => undefined },
-  });
+  registerGuard(engine);
   for (const [id, createdAt] of [['usr_admin', '2025-01-01T00:00:00.000Z'], ['usr_member', '2025-03-01T00:00:00.000Z']]) {
     await engine.insert(
       'sys_user', { id, email: `${id}@un.example`, name: id, created_at: createdAt, email_verified: true, banned: false }, SYS,
@@ -115,15 +118,23 @@ async function soleGrantAnchoredAdmin(): Promise<Rig> {
   }
   const boot = await bootstrapPlatformAdmin(engine, (manifest.permissions ?? []) as any[]);
   expect(boot).toMatchObject({ adminPromoted: true });
-  return { engine, plugin };
+  return { engine };
 }
 
 const adminGrant = async (engine: ObjectQL): Promise<any> =>
   ((await engine.find('sys_user_permission_set', { where: { user_id: 'usr_admin' }, ...SYS })) as any[])[0];
 
+/**
+ * The state the backfill leaves on a grant it has not named. Written past both
+ * hooks that would refuse it: the name hooks, and the guard itself — clearing
+ * the sole administrator's grant name takes the standing away, which the guard
+ * refuses like any other revocation. The guard is bound again afterwards.
+ */
 async function unnameAdminGrant(engine: ObjectQL): Promise<void> {
   (engine as any).unregisterHooksByPackage(NAME_HOOKS);
+  (engine as any).unregisterHooksByPackage(GUARD_PACKAGE);
   await engine.update('sys_user_permission_set', { permission_set: null }, { where: { user_id: 'usr_admin' }, multi: true, ...SYS });
+  registerGuard(engine);
   expect((await adminGrant(engine)).permission_set ?? null).toBeNull();
 }
 
@@ -142,6 +153,14 @@ describe('[ADR-0131 D4] a grant that names nothing — the last-administrator gu
     await expect(ban(engine, 'usr_admin')).rejects.toThrow(/not the bootstrap window/i);
     await expect(ban(engine, 'usr_admin')).rejects.toThrow(/no permission-set name yet/);
     await expect(ban(engine, 'usr_member')).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+  });
+
+  it('clearing the sole administrator’s grant name is refused — the name is what the standing rides on', async () => {
+    const { engine } = await soleGrantAnchoredAdmin();
+    const grant = await adminGrant(engine);
+    await expect(engine.update('sys_user_permission_set', { id: grant.id, permission_set: null }, SYS))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect((await adminGrant(engine)).permission_set).toBe('admin_full_access');
   });
 
   it('re-pointing the sole administrator’s grant by id is read as taking the standing away', async () => {
