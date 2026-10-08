@@ -1636,9 +1636,10 @@ export function installAuditWriters(
     // flip this back to `sess.organizationId ?? recordOrgId`.
     //
     // An audit row describes a change to a RECORD, and it is read through
-    // `sys_audit_log`'s own tenant wall. Stamped with the ACTOR's active
-    // organization, a row about an org-A record written by someone whose active
-    // org is B lands behind B's wall: the tenant admin of A — the one party the
+    // `sys_audit_log`'s own organization row scope (`tenant_id`, ADR-0131 D7).
+    // Stamped with the ACTOR's active organization, a row about an org-A record
+    // written by someone whose active org is B lands in B's scope: the tenant
+    // admin of A — the one party the
     // row concerns and the only one who can act on it — cannot see it, while B,
     // which has no claim to the record, can. That is the same
     // invisible-audit-row defect the fallback below was added for, one layer
@@ -1647,9 +1648,10 @@ export function installAuditWriters(
     //
     // The fallback's ORIGINAL rationale is unchanged and still load-bearing —
     // flipping the order strengthens it rather than competing with it. Audit
-    // rows must never be written with `organization_id = NULL`, or the
-    // SecurityPlugin's RLS predicate hides them forever and the audit log UI
-    // reads permanently empty while writes succeed. The session tenant still
+    // rows about an organization's record must never be written with a NULL
+    // `tenant_id`, or the ledger's row policy hides them from that
+    // organization's readers and the audit log UI reads empty while writes
+    // succeed. The session tenant still
     // answers whenever the record has no organization of its own:
     //   1. objects with no organization column at all (single-tenant stacks,
     //      and ADR-0066 platform-global objects — see
@@ -1714,23 +1716,15 @@ export function installAuditWriters(
       record_id: recordId ?? null,
       old_value: oldValue ? safeStringify(oldValue) : null,
       new_value: newValue ? safeStringify(newValue) : null,
-      // `tenant_id` is the schema-declared "tenant context" lookup.
+      // [ADR-0131 D7] The organization this row is ABOUT — the ledger's plain
+      // attribution field and its ONLY organization column (`systemFields:
+      // { tenant: false }`, so no `organization_id` is injected). The
+      // `sys_audit_log_org` row policy scopes organization readers on it, so
+      // an unstamped row is served under a wall to platform admins only.
       tenant_id: tenantId ?? null,
     };
-    // The platform-default `organization_id` column is what RLS gates on
-    // (`organization_id = current_user.organization_id`). The audit writer
-    // runs through `api.sudo()` which bypasses the SecurityPlugin's
-    // auto-stamping of `organization_id`, so we stamp it explicitly here —
-    // without it, non-admin members would see 0 rows on Setup dashboards
-    // because RLS would deny every audit row as wrong-tenant. But the column
-    // only exists in multi-tenant deployments (the SchemaRegistry auto-injects
-    // it conditionally); stamping it on a single-tenant table that lacks the
-    // column made every audit INSERT fail. Only stamp it when declared.
-    if (objectHasField('sys_audit_log', 'organization_id')) {
-      auditRow.organization_id = tenantId ?? null;
-    }
-    // First-class principal label (ADR-0014 D2). Conditionally stamped — same
-    // rationale as organization_id: older audit tables predate the column.
+    // First-class principal label (ADR-0014 D2). Conditionally stamped: older
+    // audit tables predate the column.
     if (objectHasField('sys_audit_log', 'actor')) {
       auditRow.actor = actorLabel;
     }

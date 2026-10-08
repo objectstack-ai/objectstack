@@ -85,13 +85,15 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
   // read seams and field-level security still apply. The activity stream's
   // gate does not honour it. Held by default by platform administrators
   // (`ADMIN_FULL_ACCESS_CAPABILITIES`); every other position only by explicit
-  // grant. `org`, measured rather than assumed: the ledger carries the
-  // registry-provisioned `organization_id`, its writers stamp the record's
-  // organization, and under a wall-enforcing tenancy posture the tenant wall
-  // still bounds a holder to its own organization's rows (only the
-  // parent-record gate is lifted). A platform administrator reaches every
-  // organization through its own wall bypass, not through this capability.
-  { name: 'view_all_audit_log', label: 'View All Audit Log', description: 'Read every compliance-ledger (sys_audit_log) row the ledger grant reaches in the caller’s organization, past the parent-record read gate: rows about deleted records, ended sessions and records the holder cannot open. Field-level security still narrows each row’s before/after snapshots.', scope: 'org' },
+  // grant. `org`, measured rather than assumed: the ledger carries no
+  // organization column (ADR-0131 D7); its writers stamp the organization a
+  // row is about in the attribution field `tenant_id`, and under a
+  // wall-enforcing tenancy posture the platform row policy on that field
+  // (`sys_audit_log_org`, plugin-security's default sets) still bounds a holder
+  // to its own organization's rows (only the parent-record gate is lifted). A
+  // platform administrator reaches every row, deployment-level rows included,
+  // through its superuser read bypass, not through this capability.
+  { name: 'view_all_audit_log', label: 'View All Audit Log', description: 'Read every compliance-ledger (sys_audit_log) row the holder’s ledger grant and row scope reach, past the parent-record read gate: rows about deleted records, ended sessions and records the holder cannot open. Under an organization wall an organization reader’s row scope is the rows about its organization (tenant_id); a platform administrator reads every row, deployment-level rows included. Field-level security still narrows each row’s before/after snapshots.', scope: 'org' },
 ];
 
 /** Set of built-in capability names, for fast membership checks (lint, gating). */

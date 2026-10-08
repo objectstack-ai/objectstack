@@ -33,9 +33,11 @@
  * through the public-form grant, which admits ahead of object admission; that
  * door is pinned in `public-form-grant-masking.test.ts`.
  *
- * The last block pins the class's boundary: a principal-less context (no
- * position, no named set, no user id) is handed straight through by the
- * middleware, and the projections answer the same full set for it.
+ * The last block pins the class's former boundary: a principal-less context
+ * (no position, no named set, no user id) used to be handed straight through
+ * by the middleware, with the full field set from the projections. [#21908]
+ * ADR-0096 D5 strict mode refuses it at object admission, before any field
+ * guard, and its field answers are the zero-set ones above.
  *
  * Fixtures are synthetic. Harness mirrors `get-queryable-fields.test.ts`.
  */
@@ -187,29 +189,30 @@ describe('[#20995] a caller who resolves no permission set: every masking rule a
   }
 });
 
-describe('[#20995] the class boundary: a principal-less context is handed through untouched, and the projections agree', () => {
+describe('[#21908] the former class boundary: a principal-less context is refused at object admission (ADR-0096 D5), and the projections give it the zero-set answers', () => {
   const PRINCIPAL_LESS = { positions: [], permissions: [] };
 
-  it('the middleware serves every field as stored and admits a query on any field', async () => {
+  it('the middleware refuses the read and every query at object admission; nothing is served', async () => {
     const { middleware } = await boot();
     const opCtx: Record<string, any> = {
-      object: 'ledger', operation: 'find', context: { ...PRINCIPAL_LESS }, options: {}, ast: { where: {} }, result: [{ ...ROW }],
+      object: 'ledger', operation: 'find', context: { ...PRINCIPAL_LESS }, options: {}, ast: { where: {} },
     };
-    expect(await run(middleware, opCtx)).toEqual({ admitted: true });
-    expect(opCtx.result[0]).toEqual(ROW);
+    expect(await run(middleware, opCtx)).toEqual(REFUSED_AT_ADMISSION);
+    expect(opCtx.result).toBeUndefined();
     for (const field of FIELDS) {
       for (const [position, operation, ast] of PROBES) {
         const verdict = await run(middleware, {
           object: 'ledger', operation, context: { ...PRINCIPAL_LESS }, options: {}, ast: ast(field),
         });
-        expect(verdict, `${field} as ${position}`).toEqual({ admitted: true });
+        expect(verdict, `${field} as ${position}`).toEqual(REFUSED_AT_ADMISSION);
       }
     }
   });
 
-  it('the read and query projections answer the full field set for it', async () => {
+  it('its row scope is the deny sentinel, and the projections are the zero-set ones: masked fields served, not queryable', async () => {
     const { plugin } = await boot();
+    expect(await plugin.getReadFilter('ledger', { ...PRINCIPAL_LESS })).toEqual({ ...RLS_DENY_FILTER });
     expect(await plugin.getReadableFields('ledger', { ...PRINCIPAL_LESS })).toEqual(FIELDS);
-    expect(await plugin.getQueryableFields('ledger', { ...PRINCIPAL_LESS })).toEqual(FIELDS);
+    expect(await plugin.getQueryableFields('ledger', { ...PRINCIPAL_LESS })).toEqual(FIELDS.filter((f) => !MASKED.includes(f)));
   });
 });

@@ -740,6 +740,69 @@ describe('validateSecurityPosture · master-detail detail ungranted (framework#2
     ).toEqual([]);
   });
 
+  // [#22212] The child the RUNTIME derives access for, not only a master_detail
+  // one: a `controlled_by_parent` object resolves its master through a required
+  // lookup too (ADR-0055's third tier), and object-level CRUD is never derived
+  // for it either. The incident-shape control above stays the firing control.
+  describe('a controlled_by_parent child bound through a required lookup (#22212)', () => {
+    const lookupChild = (fieldOverrides: Record<string, unknown> = {}, childGrant?: Record<string, unknown>) => ({
+      objects: [
+        { name: 'crm_campaign', label: 'Campaign', sharingModel: 'private', fields: { name: { name: 'name', label: 'Name' } } },
+        {
+          name: 'crm_campaign_member',
+          label: 'Campaign Member',
+          sharingModel: 'controlled_by_parent',
+          fields: {
+            campaign: { name: 'campaign', type: 'lookup', reference: 'crm_campaign', required: true, ...fieldOverrides },
+          },
+        },
+      ],
+      permissions: [
+        {
+          name: 'marketing',
+          objects: {
+            crm_campaign: { allowRead: true, readScope: 'unit' },
+            ...(childGrant ? { crm_campaign_member: childGrant } : {}),
+          },
+        },
+      ],
+    });
+
+    it('warns when the lookup-bound child is granted by no permission set', () => {
+      const md = mdOnly(lookupChild());
+      expect(md).toHaveLength(1);
+      expect(md[0]).toMatchObject({ severity: 'warning', where: 'object "crm_campaign_member"' });
+      expect(md[0].path).toBe('objects[1].fields.campaign');
+      expect(md[0].message).toContain('lookup "campaign" → "crm_campaign"');
+      expect(md[0].hint).toContain('permissions[i].objects.crm_campaign_member');
+    });
+
+    it('stays silent once the child is granted', () => {
+      expect(mdOnly(lookupChild({}, { allowRead: true }))).toEqual([]);
+    });
+
+    it('an OPTIONAL lookup resolves no master — the no-relation error speaks, not this advisory', () => {
+      const findings = validateSecurityPosture(lookupChild({ required: false }));
+      expect(findings.filter((f) => f.rule === SECURITY_MASTER_DETAIL_UNGRANTED)).toEqual([]);
+      expect(findings.map((f) => f.rule)).toContain('security-controlled-by-parent-no-relation');
+    });
+
+    it('a required lookup on an object that does not derive its access is still not a detail', () => {
+      const stack = lookupChild();
+      (stack.objects[1] as Record<string, unknown>).sharingModel = 'private';
+      expect(mdOnly(stack)).toEqual([]);
+    });
+
+    it('names the master the runtime picks, not the first master_detail declared', () => {
+      const stack = lookupChild();
+      (stack.objects[1] as Record<string, unknown>).fields = {
+        loose: { name: 'loose', type: 'master_detail', reference: 'crm_campaign' },
+        owner_campaign: { name: 'owner_campaign', type: 'master_detail', reference: 'crm_campaign', required: true },
+      };
+      expect(mdOnly(stack).map((f) => f.path)).toEqual(['objects[1].fields.owner_campaign']);
+    });
+  });
+
   it('exempts system detail objects (sys_ prefix or isSystem:true)', () => {
     expect(
       mdOnly({
@@ -1327,7 +1390,10 @@ function shapeKeysOf(schema: unknown, depth = 0): string[] {
  */
 const NOT_SCHEMA_RECEIVERS: Record<string, string> = {
   rec: 'a seed RECORD — its keys are COLUMNS of `sys_user_position` / `sys_user_permission_set` (ADR-0091), not keys of a metadata schema.',
-  md: "this file's own `firstMasterDetailField` return type, not an authored surface.",
+  md: "this file's own `derivedAccessParent` / `firstMasterDetailField` return type, not an authored surface.",
+  // [#22212] `derivedAccessParent` reads the runtime's winner through
+  // `resolveCbpRelation`, whose `CbpRelation` is this file's own derived shape.
+  rel: 'a `CbpRelation` — `resolveCbpRelation`\'s winner, the same derived shape as `winner` / `cand`.',
   // [#14747] `cbpMasterCandidates` folds each winning-tier field into a
   // `CbpRelation` ({ field, type, master }) BEFORE the rule reads it, so these
   // three receivers carry this file's own vocabulary, not FieldSchema's. The

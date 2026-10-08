@@ -214,6 +214,58 @@ describe('validateReadonlyHookWrites - GREEN: the elevated channel', () => {
   });
 });
 
+describe('validateReadonlyHookWrites - #22212: a local bound to ctx.api is the same channel', () => {
+  // An app whose conventions mandate `const api = ctx.api as HookApi |
+  // undefined` (the reporting app had 25 such declarations, 73 `api.object(`
+  // writes and no direct `ctx.api.object(` call) had every hook write outside
+  // this rule: `os lint --strict` exited 0 on a readonly write the byte-identical
+  // `ctx.api.object(…)` statement failed. The firing control stays beside every
+  // probe, so a green probe can never be a broken fixture.
+  const WRITE = "object('crm_account').update({ id: accountId, last_activity_date: now });";
+  const control = validateReadonlyHookWrites(crmStack(`await ctx.api.${WRITE}`));
+
+  it('the firing control: the ctx.api spelling fails the build', () => {
+    expect(control).toHaveLength(1);
+    expect(control[0].rule).toBe(HOOK_API_UPDATE_READONLY_FIELD);
+    expect(control[0].severity).toBe('error');
+  });
+
+  it.each([
+    ['const api = ctx.api', `const api = ctx.api;\nawait api.${WRITE}`],
+    [
+      'const api = ctx.api as HookApi | undefined (the mandated spelling)',
+      `const api = ctx.api as HookApi | undefined;\nif (!api) return;\nawait api.${WRITE}`,
+    ],
+    ['const api = ctx.api!', `const api = ctx.api!;\nawait api.${WRITE}`],
+    ['an optional call api?.object(…)', `const api = ctx.api;\nawait api?.${WRITE}`],
+    ['a non-null receiver api!.object(…)', `const api = ctx.api as HookApi | undefined;\nawait api!.${WRITE}`],
+    ['const { api } = ctx', `const { api } = ctx;\nawait api.${WRITE}`],
+    ['const { api: db } = ctx', `const { api: db } = ctx;\nawait db.${WRITE}`],
+    ['var api = ctx.api, used in a nested block', `var api = ctx.api;\nif (ok) { await api.${WRITE} }`],
+  ])('fires exactly as the control does through %s', (_label, source) => {
+    expect(validateReadonlyHookWrites(crmStack(source))).toEqual(control);
+  });
+
+  it.each([
+    ['a reassigned alias', `let api = ctx.api;\napi = ctx.other;\nawait api.${WRITE}`],
+    ['an alias shadowed by a nested parameter', `const api = ctx.api;\nconst f = (api) => api.${WRITE}`],
+    ['an alias declared twice', `const api = ctx.api;\nif (ok) { const api = elsewhere; await api.${WRITE} }`],
+    ['a reference outside the declaring block', `if (ok) { const api = ctx.api; }\nawait api.${WRITE}`],
+    ['a non-alias initializer (ctx.api ?? fallback)', `const api = ctx.api ?? fallback;\nawait api.${WRITE}`],
+    ['an alias of an alias', `const a = ctx.api;\nconst api = a;\nawait api.${WRITE}`],
+    ['a destructure with a default', `const { api = fallback } = ctx;\nawait api.${WRITE}`],
+  ])('leaves %s opaque — not provably ctx.api, so not judged', (_label, source) => {
+    expect(validateReadonlyHookWrites(crmStack(source))).toEqual([]);
+  });
+
+  // The elevated channel stays invisible through an alias too: a body binding
+  // `ctx.api.sudo()` is not binding `ctx.api`, so the one shape the platform
+  // recommends for an elevated write is never gated by accident.
+  it('never flags an alias bound to ctx.api.sudo()', () => {
+    expect(validateReadonlyHookWrites(crmStack(`const api = ctx.api.sudo();\nawait api.${WRITE}`))).toEqual([]);
+  });
+});
+
 describe('validateReadonlyHookWrites - RED: insert() of a static-readonly field is the same certain no-op (#15394)', () => {
   // This block used to be titled "INSERT is engine-exempt" and rested on
   // exactly that sentence ("a create may legitimately seed read-only columns",

@@ -23,7 +23,7 @@ import { stackFilterJudge } from '../utils/authoring-filter-judge.js';
 import { buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manifest.js';
-import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
+import { preflightDeclaredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
 import { attachPackageDocs, collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
 import { buildRuntimeBundle, cleanupOldRuntimeBundles } from '../utils/build-runtime.js';
 import {
@@ -750,11 +750,15 @@ export default class Compile extends Command {
       //     `os start` crash. Absent-but-installable is a `pnpm add` hint.
       //
       //     Not a registry rule: it reads `node_modules`, not the stack.
+      //
+      //     [#22189] Read wherever the stack declares `requires`: its top
+      //     level, or each `packages[]` body, naming the package. A
+      //     multi-package `preserve` artifact carries `requires` only in its
+      //     bodies, so a top-level read passed it with exit 0.
       if (!flags.json) printStep('Checking that every required capability has a provider installable in this edition...');
-      const capPreflight = preflightRequiredCapabilities({
-        requires: Array.isArray((config as { requires?: unknown[] }).requires)
-          ? ((config as { requires?: unknown[] }).requires as unknown[])
-          : [],
+      const capPreflight = preflightDeclaredCapabilities({
+        requires: (config as { requires?: unknown }).requires,
+        packages: packageEntries,
         projectDir: path.dirname(absolutePath),
       });
       // [#11727] MAPPED HERE, once, and consumed by BOTH faces — the text block
@@ -816,9 +820,13 @@ export default class Compile extends Command {
       //     its own `normalized` — so hoisting the formatting rather than
       //     restating it at the payload is what keeps the two faces from
       //     reporting different sets. One list cannot drift from itself.
+      //
+      //     [#22238] The item walk reads the package-union stack, as
+      //     `os validate`'s does; the stack-key lint stays on the envelope.
+      //     See `validate.ts` step 2 for why each.
       unknownKeyWarnings = [
         ...lintUnknownStackKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
-        ...lintUnknownAuthoringKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
+        ...lintUnknownAuthoringKeys(authoringRuleUnionStack(normalized as Record<string, unknown>), ObjectStackDefinitionSchema),
       ].map(formatUnknownAuthoringKey);
       if (unknownKeyWarnings.length > 0 && !flags.json) {
         printWarning(`Undeclared authoring keys (${unknownKeyWarnings.length}) — dropped at load; reported here, never refused`);

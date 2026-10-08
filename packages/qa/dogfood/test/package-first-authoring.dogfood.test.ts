@@ -179,7 +179,7 @@ describe('dogfood: adopt orphaned metadata into a base (ADR-0070 D5 migration)',
       state: 'draft',
       package_id: null,
       metadata: JSON.stringify({ name: ORPHAN, label: 'Legacy', fields: { name: { type: 'text' } } }),
-    });
+    }, { context: { isSystem: true } });
     // Precondition: it is NOT owned by the base yet.
     expect(await ownedNames(ql, BASE)).not.toContain(ORPHAN);
 

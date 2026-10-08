@@ -70,6 +70,14 @@ export interface SettingsRow {
   key: string;
   scope: SpecifierScope;
   user_id: string | null;
+  /**
+   * The organization a `tenant` or `user` row belongs to — part of the row
+   * identity `sys_setting` declares, `(organization_id, namespace, key, scope,
+   * user_id)`. Written from the caller's `SettingsContext.tenantId`; `null` for
+   * a row written with no organization and for every `global` row (whose store,
+   * `sys_platform_setting`, has no organization column).
+   */
+  organization_id?: string | null;
   value: unknown | null;
   value_enc: string | null;
   encrypted: boolean;
@@ -184,10 +192,9 @@ export interface SettingsAuditSink {
     userId?: string;
     /**
      * [#8145] Tenant context of the caller, when known. Recorded on the ledger
-     * row's `tenant_id` (and, where the deployment declares the column,
-     * `organization_id`) — without it the SecurityPlugin's RLS predicate hides
-     * every `config_change` row from non-platform-admin readers, leaving the
-     * `config_changes` view as empty as the defect this fixes.
+     * row's `tenant_id`, the column the ledger's organization row scope reads,
+     * for a tenant- or user-scope change. A GLOBAL-scope change is about no
+     * organization, so its row carries none (ADR-0131 D7).
      */
     tenantId?: string;
     actor?: string;

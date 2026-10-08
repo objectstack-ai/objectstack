@@ -25,12 +25,12 @@
   "population": "every object registered by a tracked packages/**/*.object.ts module whose name carries a platform prefix (sys_ / cloud_ / ai_). The cloud repository's own cloud_ objects are not in this tree and so not in this census.",
   "totals": {
     "registered": 84,
-    "inReach": 50,
-    "outOfReach": 34
+    "inReach": 49,
+    "outOfReach": 35
   },
   "reasonTotals": {
     "managedBy: 'better-auth'": 25,
-    "systemFields.tenant: false": 9,
+    "systemFields.tenant: false": 10,
     "tenancy.enabled: false": 2
   },
   "unexplained": [],
@@ -113,9 +113,11 @@
     {
       "name": "sys_audit_log",
       "file": "packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
+      ]
     },
     {
       "name": "sys_automation_run",

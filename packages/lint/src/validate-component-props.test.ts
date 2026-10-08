@@ -224,6 +224,51 @@ describe('validateComponentProps — value verdicts', () => {
   });
 
   /**
+   * [#22212] A NESTED component with NO `properties` bag at all. The top-level
+   * firing control parses through `PageComponentSchema`, whose default makes the
+   * absent bag `{}`; a nested node sits in an untyped slot and never gets that
+   * default, so it reached this rule as `undefined` and was skipped — measured
+   * on nested `record:related_list`, `page:accordion` and `element:text` in the
+   * reporting app. The control and the probe are the same node, one level apart.
+   */
+  describe('a nested component whose `properties` are absent (#22212)', () => {
+    const required = (f: ReturnType<typeof validateComponentProps>) => invalid(f).map((x) => x.path);
+
+    it('the firing control: a top-level node with an empty bag reports its required props', () => {
+      expect(required(validateComponentProps(stackWith([{ type: 'record:related_list', properties: {} }]))))
+        .toContain('pages[0].regions[0].components[0].properties.relationshipField');
+    });
+
+    it('the parsed door: the top-level node with NO bag reports the same (the schema default)', () => {
+      const parsed = normalizeStackInput(stackWith([{ type: 'record:related_list' }])) as AnyRec;
+      expect(required(validateComponentProps(parsed)))
+        .toContain('pages[0].regions[0].components[0].properties.relationshipField');
+    });
+
+    it.each([
+      ['a container\'s `children`', { type: 'page:section', properties: { children: [{ type: 'record:related_list' }] } },
+        'pages[0].regions[0].components[0].properties.children[0].properties.relationshipField'],
+      ['a tab panel\'s `items[].children`',
+        { type: 'page:tabs', properties: { items: [{ label: 'T', value: 't', children: [{ type: 'record:related_list' }] }] } },
+        'pages[0].regions[0].components[0].properties.items[0].children[0].properties.relationshipField'],
+    ])('the probe: a nested node with NO bag in %s reports the same required prop', (_label, node, path) => {
+      expect(required(validateComponentProps(stackWith([node])))).toContain(path);
+    });
+
+    it('a present bag that is not an object is still left to the parse that owns its shape', () => {
+      expect(validateComponentProps(
+        stackWith([{ type: 'page:section', properties: { children: [{ type: 'record:related_list', properties: 'x' }] } }]),
+      )).toEqual([]);
+    });
+
+    it('a nested node whose required props are all optional stays silent with no bag', () => {
+      expect(validateComponentProps(
+        stackWith([{ type: 'page:section', properties: { children: [{ type: 'page:header' }] } }]),
+      )).toEqual([]);
+    });
+  });
+
+  /**
    * #7702 — `PageHeaderProps.title` used to be required while the platform's
    * own synthesizer (objectui `buildDefaultHeader`) emits every seeded
    * `page:header` with NO `title` at all: `{ type: 'page:header', recordChrome
@@ -415,12 +460,16 @@ describe('validateComponentProps — value verdicts', () => {
    * tab items' `value`/`count` are the same shape one level down.
    */
   it('reports nothing on the container/child keys the renderers honour (#5775)', () => {
+    // The child is filler: the subject is the CONTAINER keys. Since #22212 a
+    // nested node is judged even with no `properties` bag, so the filler carries
+    // the one prop `element:text` requires instead of omitting it.
+    const TEXT_CHILD = { type: 'element:text', properties: { content: 'Hi' } };
     const findings = validateComponentProps(
       stackWith([
-        { type: 'page:card', properties: { title: 'Shortcuts', children: [{ type: 'element:text' }] } },
-        { type: 'page:section', properties: { children: [{ type: 'element:text' }] } },
-        { type: 'page:footer', properties: { children: [{ type: 'element:text' }] } },
-        { type: 'page:sidebar', properties: { children: [{ type: 'element:text' }] } },
+        { type: 'page:card', properties: { title: 'Shortcuts', children: [TEXT_CHILD] } },
+        { type: 'page:section', properties: { children: [TEXT_CHILD] } },
+        { type: 'page:footer', properties: { children: [TEXT_CHILD] } },
+        { type: 'page:sidebar', properties: { children: [TEXT_CHILD] } },
         {
           type: 'page:tabs',
           properties: { items: [{ label: 'Tasks', value: 'related:task', count: 3, children: [] }] },

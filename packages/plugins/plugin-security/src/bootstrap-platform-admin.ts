@@ -210,7 +210,6 @@ async function recordPlatformAdminStandingChange(
   const row = buildPlatformAdminStandingRow({
     snapshot,
     previousSerialized,
-    declaresOrganizationId: declaresField('organization_id'),
     declaresActor: declaresField('actor'),
   });
   // ⛔ Through this file's ONE write door, not a second `ql.insert` beside it.

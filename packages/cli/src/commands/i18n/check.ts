@@ -57,6 +57,7 @@ import {
   isReportedError,
 } from '../../utils/format.js';
 import { computeI18nCoverage, COVERAGE_SURFACE_PHRASE } from '../../utils/i18n-coverage.js';
+import { authoringRuleUnionStack } from '../../utils/stack-collections.js';
 
 export default class I18nCheck extends Command {
   // ⛔ The surface list is DERIVED (`COVERAGE_SURFACE_PHRASE`), never a
@@ -153,7 +154,11 @@ export default class I18nCheck extends Command {
       if (!flags.json) printInfo(`Config: ${chalk.white(absolutePath)}`);
 
       const normalized = normalizeStackInput(config as Record<string, unknown>);
-      const report = computeI18nCoverage(normalized, {
+      // [#22238] Over the package-union stack, as `os lint` reads it: a
+      // multi-package `preserve` artifact carries its collections and
+      // `translations` only in `packages[]`, so the top level alone expected
+      // zero keys and reported 100%.
+      const report = computeI18nCoverage(authoringRuleUnionStack(normalized as Record<string, unknown>), {
         defaultLocale: flags['default-locale'],
         locales: flags.locales ? flags.locales.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
         strict: flags.strict,

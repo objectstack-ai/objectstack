@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  preflightDeclaredCapabilities,
   preflightRequiredCapabilities,
   renderCapabilityMessage,
   missingProviderMessage,
   makeProviderResolver,
 } from '../src/utils/capability-preflight.js';
+import { artifactPackages } from '../src/utils/artifact-packages.js';
+import { composeStacks, defineStack } from '@objectstack/spec';
 import {
   classifyRequiredCapability,
   PLATFORM_CAPABILITY_PROVIDERS,
@@ -117,6 +120,75 @@ describe('renderCapabilityMessage (#3366)', () => {
     // `constructor` is not a retired token).
     expect(msgFor('reportz', () => true)).toContain('check for a typo');
     expect(renderCapabilityMessage({ token: 'constructor', status: 'unknown' })).toContain('check for a typo');
+  });
+});
+
+describe('preflightDeclaredCapabilities — every place a stack declares `requires` (#22189)', () => {
+  const svcManifest = { id: 'com.example.cap.svc', name: 'svc', version: '1.0.0', type: 'module' as const, namespace: 'cap' };
+  const appManifest = { id: 'com.example.cap.app', name: 'app', version: '1.0.0', type: 'app' as const, namespace: 'cap' };
+  const object = (name: string) => ({
+    name, label: name, sharingModel: 'private' as const,
+    fields: { name: { name: 'name', type: 'text' as const, label: 'Name', required: true } },
+  });
+  const nothingInstalled = () => false;
+  /** Called the way both doors call it: the top-level key, and `artifactPackages` over the stack. */
+  const preflight = (stack: Record<string, unknown>) =>
+    preflightDeclaredCapabilities({
+      requires: stack.requires,
+      packages: artifactPackages(stack),
+      projectDir: '/tmp/nowhere',
+      isInstalled: nothingInstalled,
+    });
+  /** Two `defineStack` packages under `composeStacks(…, { manifest: 'preserve' })`. */
+  const twoPackages = (svcRequires: string[], appRequires: string[]) =>
+    composeStacks([
+      defineStack({ manifest: svcManifest, objects: [object('cap_note')], requires: svcRequires } as never),
+      defineStack({ manifest: appManifest, objects: [object('cap_ticket')], requires: appRequires } as never),
+    ], { manifest: 'preserve' }) as unknown as Record<string, unknown>;
+
+  it('the fixture is the shape at issue: no top-level `requires`, one per package body', () => {
+    const stack = twoPackages(['ai'], ['hierarchy-security']);
+    expect(stack.requires).toBeUndefined();
+    expect(artifactPackages(stack).map((p) => [p.id, p.body.requires])).toEqual([
+      [svcManifest.id, ['ai']],
+      [appManifest.id, ['hierarchy-security']],
+    ]);
+  });
+
+  it('a two-package artifact: each finding names the package whose `requires` declared it', () => {
+    const r = preflight(twoPackages(['ai'], ['hierarchy-security']));
+    expect(r.errors.map((c) => [c.token, c.status, c.package])).toEqual([['ai', 'unavailable', svcManifest.id]]);
+    expect(r.warnings.map((c) => [c.token, c.status, c.package])).toEqual([['hierarchy-security', 'installable', appManifest.id]]);
+    expect(renderCapabilityMessage(r.errors[0])).toBe(
+      `package '${svcManifest.id}' — ${renderCapabilityMessage(classifyRequiredCapability('ai', nothingInstalled))}`,
+    );
+  });
+
+  it('the same token in two packages is reported once per package', () => {
+    const r = preflight(twoPackages(['ai'], ['ai']));
+    expect(r.errors.map((c) => c.package)).toEqual([svcManifest.id, appManifest.id]);
+  });
+
+  it('control: a top-level `requires` is read exactly as before, unattributed', () => {
+    const stack = defineStack({ manifest: appManifest, objects: [object('cap_ticket')], requires: ['ai', 'hierarchy-security'] } as never) as unknown as Record<string, unknown>;
+    const r = preflight(stack);
+    const before = preflightRequiredCapabilities({ requires: ['ai', 'hierarchy-security'], projectDir: '/tmp/nowhere', isInstalled: nothingInstalled });
+    expect(r).toEqual(before);
+    expect(r.errors.every((c) => c.package === undefined)).toBe(true);
+    expect(renderCapabilityMessage(r.errors[0])).toBe(renderCapabilityMessage(before.errors[0]));
+  });
+
+  it('a top-level `requires` wins over the bodies, as `resolveStackCollection` reads a collection', () => {
+    // The additive shape: the top level already carries the union, so reading
+    // the bodies as well would report every token twice.
+    const r = preflightDeclaredCapabilities({
+      requires: ['automation'],
+      packages: [{ id: svcManifest.id, body: { requires: ['ai'] } }],
+      projectDir: '/tmp/nowhere',
+      isInstalled: nothingInstalled,
+    });
+    expect(r.errors).toEqual([]);
+    expect(r.warnings.map((c) => [c.token, c.package])).toEqual([['automation', undefined]]);
   });
 });
 

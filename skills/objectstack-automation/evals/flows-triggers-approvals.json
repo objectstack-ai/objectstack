@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "Every night at 02:00, mark `subscription` records whose `renewal_date` is in the past as `lapsed`. `status` is a readonly field that only automation may change.",
-      "expected_output": "Emits a `defineFlow` with `type: 'schedule'`, the cadence on the START NODE's `config.schedule: { type: 'cron', expression: '0 2 * * *' }` (FlowSchema has no top-level `schedule`; no cron tagged template), `runAs: 'system'` because a scheduled run has no trigger user and a readonly field is stripped under `runAs: 'user'`. One `update_record` node with `filter` as an ObjectQL where-map (`renewal_date: { $lt: '{TODAY()}' }`) and `fields: { status: 'lapsed' }` (not `values`), `label` on every node, nodes wired with `edges` (never `next`), ending in an `end` node.",
+      "expected_output": "Emits a `defineFlow` with `type: 'schedule'`, the cadence on the START NODE's `config.schedule: { type: 'cron', expression: '0 2 * * *' }` (no top-level `schedule`; no cron tag), `runAs: 'system'` because a scheduled run has no trigger user and a readonly field is stripped under `runAs: 'user'`. One `update_record` node with `filter` as an ObjectQL where-map (`renewal_date: { $lt: '{TODAY()}' }`) and `fields: { status: 'lapsed' }` (not `values`), `label` on every node, `edges` (never `next`), an `end` node.",
       "files": [],
       "assertions": {
         "must_contain": ["defineFlow", "type: 'schedule'", "runAs: 'system'", "update_record", "edges"],
@@ -44,11 +44,11 @@
     {
       "id": 5,
       "prompt": "Add a step that calls our `pricing.recalc` function to compute the discount and saves it on the quote, then posts the quote to our tax service over HTTP; if the tax call fails, route to a handler node instead of failing the run.",
-      "expected_output": "Emits a `script` node with `config.function: 'pricing.recalc'` (registered via `defineStack({ functions })`), `inputs`, and `outputVariable: 'recalc'`; the function is a pure compute step, so a following `update_record` persists `{recalc.discount}` via `fields`. The `http` node sets `timeoutMs`. Failure routing is an edge `{ source, target, type: 'fault' }` — a `label: 'error'` alone routes nothing.",
+      "expected_output": "Emits a `script` node with `config.function: 'pricing.recalc'` (registered via `defineStack({ functions })`), `inputs`, and `outputVariable: 'recalc'`; the function is a pure compute step, so a following `update_record` persists it with `fields: { discount: { dialect: 'cel', source: 'recalc.discount' } }`. The `http` node sets `timeoutMs`. Failure routing is a `type: 'fault'` edge — a `label: 'error'` alone routes nothing.",
       "files": [],
       "assertions": {
-        "must_contain": ["function:", "outputVariable", "type: 'fault'", "timeoutMs", "update_record"],
-        "must_not_contain": ["label: 'error'", "query_record"]
+        "must_contain": ["function:", "outputVariable", "type: 'fault'", "timeoutMs", "update_record", "dialect: 'cel'"],
+        "must_not_contain": ["label: 'error'", "query_record", "{recalc"]
       }
     }
   ]

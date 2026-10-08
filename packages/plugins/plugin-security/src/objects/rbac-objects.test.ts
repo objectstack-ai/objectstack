@@ -101,6 +101,12 @@ describe('default permission sets', () => {
       'owner_only_writes',
       'sys_account_self',
       'sys_api_key_self',
+      // [ADR-0131 D7] The compliance ledger's organization scope on its
+      // attribution field `tenant_id`: the ledger has no tenant column, so
+      // Layer 0 is inert on it and this is the row scope for a ledger read any
+      // set grants. Behaviour is pinned end to end in
+      // `sys-audit-log-row-scope.test.ts`; this list only records presence.
+      'sys_audit_log_org',
       // [commit c25b2d52a] The one DELETE-class per-object policy, and the only entry here
       // that widens rather than narrows. `owner_only_deletes` above is a
       // parent-blind second implementation of "who may remove this row", and on

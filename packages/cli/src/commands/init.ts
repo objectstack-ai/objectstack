@@ -1219,7 +1219,14 @@ export default class Init extends Command {
 
     let installSucceeded = false;
     let installAttempted = false;
-    let chosenPm: 'npm' | 'pnpm' | 'yarn' | 'bun' = 'npm';
+    // Resolved before the install branch, not inside it: the Next-steps block
+    // below names this package manager whether or not an install ran. Resolved
+    // only under `--install`, a `--no-install` run kept a literal `'npm'` and
+    // printed `npm install` even for `--package-manager pnpm` or a pnpm-invoked
+    // run — the hardcoded answer `create-objectstack`'s Next steps are pinned
+    // against (`scaffold-next-steps-pm.test.ts`).
+    const chosenPm: 'npm' | 'pnpm' | 'yarn' | 'bun' =
+      (flags['package-manager'] as 'npm' | 'pnpm' | 'yarn' | 'bun' | undefined) ?? detectPackageManager();
 
     try {
       // 1. Create package.json if missing
@@ -1271,7 +1278,6 @@ export default class Init extends Command {
 
       // Install dependencies
       if (flags.install) {
-        chosenPm = (flags['package-manager'] as typeof chosenPm | undefined) ?? detectPackageManager();
         printStep(`Installing dependencies with ${chosenPm}...`);
         installAttempted = true;
         const { execSync } = await import('child_process');
