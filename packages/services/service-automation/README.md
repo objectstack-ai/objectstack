@@ -189,6 +189,7 @@ braces are for values.**
 | Edge `condition` | CEL — bare, no braces | `record.status == 'open'` |
 | Decision `conditions[].expression` | CEL — bare, no braces | `order_amount > 10000` |
 | Field values in `create_record` / `update_record` | Interpolation — braces required | `'Follow up on {record.name}'`, `'{TODAY() + 7}'` |
+| Text slots — `notify` `title` / `message`, `screen` `title` / `description`, `end` `message` | Template — `{{ }}` holes (ADR-0032 §3; a single-brace token is refused) | `'Deal won: {{ record.name }}'`, `'{{ record.amount \| currency }}'` |
 
 Value bindings: `{var}`, `{var.path}`, `{$User.Id}`, `{$User.Email}`, `{NOW()}`,
 `{TODAY()}`, `{TODAY() + 90}`.

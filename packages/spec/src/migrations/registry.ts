@@ -5717,6 +5717,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`flow-script-subflow-config-undeclared-keys-refused`.',
   },
   {
+    id: 'flow-text-slot-single-brace-refused',
+    order: 89,
+    text:
+      'It executes ADR-0032 Decision 3 in the flow TEXT slots — a `notify` node\'s `title` and `message`, '
+      + 'a `screen` node\'s `title` and `description`, a refusing `end` node\'s `message`: they render '
+      + 'through the formula template engine, so their placeholders are `{{ }}` holes, a variable path with '
+      + 'an optional formatter (the engine\'s hole grammar now admits a `$`-named variable, so '
+      + '`{{ $error.message }}` is a hole). A single-brace `{…}` token there is refused — by the node contract, '
+      + '`registerFlow` and `objectstack validate` alike — with the hole spelling of each path token, or, for '
+      + 'arithmetic, a function, a date macro or a run-user path, the `assignment` that computes it into a '
+      + 'variable. No D2 conversion exists: the 17.x interpolator and the engine render a `Date` differently '
+      + '(JSON-quoted against ISO text), and a whole-slot object differently in a screen or `end` text, so '
+      + 'the rewrite is the author\'s to check. Every other flow string keeps the single-brace dialect. Its '
+      + 'D3 record is the semantic entry `flow-text-slot-single-brace-refused`.',
+  },
+  {
     id: 'flow-value-slot-template-dialect-refused',
     order: 88,
     text:
@@ -14020,6 +14036,43 @@ const step18: MigrationStep = {
         + '`failed to register flow` warn for it — that warn line is the locator for a row that exists only in '
         + '`sys_metadata`. A `script` or `subflow` node whose keys its contract declares parses and registers '
         + 'byte-identically to before.',
+    },
+    // The flow text slots read ADR-0032 §3's double-brace template holes, rendered
+    // by the formula template engine; the single brace is deleted from them.
+    // Semantic-only — the two renderers answer differently for some value of every
+    // token spelling, so no D2 conversion rewrites any of them, and no spelling is
+    // kept.
+    {
+      id: 'flow-text-slot-single-brace-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'flows[].nodes[].config of a notify node (title, message), a screen node (title, description) and an end node '
+        + '(message) — a string, or the source of a template envelope, carrying a single-brace template token',
+      replacement:
+        'a double-brace template hole, rendered by the formula template engine over the flow\'s variables: a variable '
+        + 'path with an optional formatter, {{ record.name }}, {{ $error.message }}, {{ rows.0.subject }}, '
+        + '{{ record.amount | currency }}. A token no hole can spell is computed into a variable first, with an '
+        + 'assignment node — arithmetic and functions as a CEL value envelope, the date macros and the run-user paths '
+        + 'as the value-slot spelling that still reads them — and written as {{ variable }}',
+      reason:
+        'ADR-0032 Decision 3 fixes one template delimiter, double braces, and deletes the single brace: it collides '
+        + 'with CEL map literals, and an author who meets both dialects in one flow mixes them. The 17.x interpolator '
+        + 'and the template engine render the same text for a path holding a string, a number, a boolean, null, an '
+        + 'absent key or variable, an ISO date string, an object or an array, but not for every value — a Date '
+        + 'rendered JSON-quoted under the interpolator and as its ISO text under the engine, and a screen title, '
+        + 'screen description or end message that was one token holding an object, an array or a Date rendered '
+        + 'String(value) — so no conversion is lossless (ADR-0087 D2) and none is applied. Arithmetic, function '
+        + 'calls, the date macros and the run-user paths have no hole spelling: a hole is a path with a formatter, '
+        + 'never logic. A flow carrying a single-brace token in a text slot is refused at registration, by '
+        + 'objectstack validate and by the node contract; a stored flow carrying one is skipped at boot with a warn '
+        + 'naming it.',
+      acceptanceCriteria:
+        'Run objectstack validate: it reports each refused text slot as expression-invalid at the node and the '
+        + 'slot\'s key, with the double-brace spelling of every path token. Rewrite each slot as that spelling; for '
+        + 'a token no hole can spell, add the assignment the refusal names and write its variable as a hole. Re-run '
+        + 'the flow paths that send those notifications or show those screens and compare the text with the text '
+        + 'the 17.x renderer produced — in particular any slot that renders a date value or a whole object.',
     },
     // A value a flow reads, not an authorable key: there is no D2 conversion and
     // nothing for `objectstack migrate meta` to rewrite. The sibling of
