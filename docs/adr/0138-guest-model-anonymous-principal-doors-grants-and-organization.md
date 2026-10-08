@@ -2,10 +2,11 @@
 
 **Status**: Proposed (2026-10-08). The eight answers are ruled; this record transcribes them into
 contracts, each with its enforcement point. It becomes **Accepted** only when every item under
-[Acceptance criteria](#acceptance-criteria) holds: the maintainer's approval of this record, the
-G2 sweep recorded, and the one decision this record leaves open ([D2b](#d2b--open-the-anonymous-door--elevated-flow-combination))
-chosen. ⛔ Nothing in `packages/**`, `content/docs/**` or `skills/**` changes before acceptance; the
-execution cards are cut after it ([Execution plan](#execution-plan-after-acceptance)).
+[Acceptance criteria](#acceptance-criteria) holds: the maintainer's approval of this record and the
+G2 sweep recorded. The one letter the first ruling left open, [D2b](#d2b--the-anonymous-door--elevated-flow-combination-a-publish-refusal),
+is ruled R by the supplement, and D1 is revised to A′ by the same supplement. ⛔ Nothing in
+`packages/**`, `content/docs/**` or `skills/**` changes before acceptance; the execution cards are
+cut after it ([Execution plan](#execution-plan-after-acceptance)).
 **Decided by**: the maintainer's ruling on [#22146](https://github.com/objectstack-ai/objectstack/issues/22146)
 (comment [`6054113537`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6054113537),
 decision batch #290 item 1, 2026-10-08, 「22146 同意」): **A on all eight questions, and G2 on the
@@ -14,7 +15,11 @@ measurement gap**, as the `domain:spec` seat's decision request
 states them, with two clarifications (Q4 and Q2, carried into D4 and D2b). D2b's must-answer comes
 from ruling A on [#22147](https://github.com/objectstack-ai/objectstack/issues/22147)
 ([`6053767508`](https://github.com/objectstack-ai/objectstack/issues/22147#issuecomment-6053767508)).
-D9 records the maintainer's ruling of 2026-08-08 (Option A, landed as commit `f586f1a89`).
+The ruling supplement
+[`6056614963`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6056614963)
+(2026-10-08, maintainer 「D1 A′ D2b R」) revises D1 to A′, under which the platform declares no
+default owner, and rules D2b R, a publish refusal with a prescription. D9 records the maintainer's ruling of 2026-08-08 (Option A, landed as commit
+`f586f1a89`).
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove: every
 declared thing below names its enforcer), [ADR-0056](./0056-permission-model-landing-verification.md)
 D2 (anonymous default-deny), [ADR-0073](./0073-automation-execution-identity.md) D2/D3/D5 and M2
@@ -36,7 +41,7 @@ ADR-0106 D7, ADR-0121 D6, ADR-0096 D5 and E1, ADR-0135. The back-pointer lines a
 **Consumers**: `@objectstack/core` (`security/`), `@objectstack/plugin-security`,
 `@objectstack/runtime`, `@objectstack/rest`, `@objectstack/metadata-core` (the form doors' rule),
 `@objectstack/plugin-sharing` (D8), `@objectstack/service-automation` (D2b), and `@objectstack/spec`
-for the two contract changes the cards carry after acceptance (D1's declaration, D8's retirement).
+for the contract changes the cards carry after acceptance (D2b's publish refusal, D8's retirement).
 **Card**: [#22146](https://github.com/objectstack-ai/objectstack/issues/22146) (round 3 of 3: measurement,
 decision, this draft). ⛔ Classes, positions and functions only: door-level readings that would
 work as an exploit recipe stay private, as [#21158](https://github.com/objectstack-ai/objectstack/issues/21158)'s did.
@@ -54,9 +59,9 @@ enforced, one only in a code comment, and one never answered. This record puts t
 
 | | Question | Ruled | Contract in this record | Enforced by |
 |:--|:--|:--|:--|:--|
-| [D1](#d1--identity-and-ownership-the-guest-is-a-principal-never-an-owner) | identity and ownership | A | the guest never owns a record; a guest insert is owned by a declared default owner | the owner-anchor stamp in `SecurityPlugin` (card E3) |
+| [D1](#d1--identity-and-ownership-the-guest-is-a-principal-never-an-owner) | identity and ownership | A′ (supplement) | the guest never owns a record and a forged owner is refused; who owns a guest-written row is the business scenario's own metadata; the platform stamps nothing and declares no default | the guest branch of the owner-anchor stamp in `SecurityPlugin` (card E3) |
 | [D2](#d2--the-closed-list-of-doors) | the doors | A, plus a must-answer | five door classes; everything else answers 401, decided per domain | `shouldDenyAnonymous` at each domain's entry; the conformance matrix (card E2) |
-| [D2b](#d2b--open-the-anonymous-door--elevated-flow-combination) | anonymous door × elevated flow | **open** | two ruled options, analysed on the four axes | the maintainer's choice |
+| [D2b](#d2b--the-anonymous-door--elevated-flow-combination-a-publish-refusal) | anonymous door × elevated flow | R (supplement) | publish refuses an anonymous flow endpoint whose target runs as `system`, in both directions, with a prescription; no door triggers an elevated flow directly | the publish path, in both directions (card E2) |
 | [D3](#d3--the-grants-channel-adr-0090-d9-enforced) | the grants channel | A | the `guest` anchor's bindings resolve for the guest; an empty set denies all; no second channel | the anonymous branch of `resolveAuthzContext` (card E1) |
 | [D4](#d4--the-organization-a-guest-acts-in) | organization | A, with the form doors kept as they are | resolved only when the organization is unique; refused on a multi-organization deployment until D5 exists | the guest entry's organization step, sharing ADR-0131 D9's predicate (card E1) |
 | [D5](#d5--the-public-site-binding-shape-only-built-when-demand-arrives) | public-site binding | A | the shape only; nothing declared | — nothing is declared, so nothing needs an enforcer |
@@ -74,6 +79,10 @@ webhook signature vocabulary a separate card with its executor · Q8 every decla
 enforce-or-remove fate with ADR-0087 dispositions (`sys_record_share`'s `guest` recipient on its own
 card) · G2 the static door-class reading suffices to rule; the booted per-class anonymous sweep is an
 acceptance precondition of the ADR's third round, run in an environment that permits the probe."*
+
+The supplement [`6056614963`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6056614963) then ruled the two letters the draft asked for, verbatim
+「D1 A′ D2b R」: D1 keeps its invariant and loses the organization-level default owner, and D2b is a
+publish refusal with a prescription.
 
 ---
 
@@ -170,7 +179,7 @@ it becomes binding with its card, and not one declared thing here goes without a
 
 ### D1 — Identity and ownership: the guest is a principal, never an owner
 
-*Ruled: Q1 A.*
+*Ruled: Q1 A, revised to **A′** by the supplement [`6056614963`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6056614963).*
 
 1. **The guest is a principal.** An unauthenticated request served by a guest-entry door (D2,
    classes 4 and 5) executes as the envelope D9 records: `principalKind: 'guest'`,
@@ -178,33 +187,26 @@ it becomes binding with its card, and not one declared thing here goes without a
    never principal-less.
 2. **The guest never owns a record.** No ownership column takes a guest value, and the guest
    carries no `userId` for an owner gate to match.
-3. **A guest insert is owned by a declared default owner.** When the guest inserts into an object
-   that carries `owner_id`, the row is owned by the default owner declared for the organization the
-   request acts in (D4): one internal, human user of that organization, never the guest, never the
-   system principal, never an agent or service principal.
+3. **Ownership of a guest-written row is the business scenario's own metadata.** The door's
+   declaration may name an owner or an assignment target, and the object's hooks, record-change
+   flows and assignment rules run as they do for any insert. The platform stamps nothing on a guest
+   insert and declares no organization-level default owner. A guest-supplied owner is a forgery and
+   is refused.
 4. **Attribution is not ownership** (ADR-0073 D3). The audit records the guest as the actor that
-   wrote the row. The default owner is the row's owner and is not recorded as having acted.
-5. **Position and cardinality.** One declaration per organization. When D5's site binding is built,
-   a binding may carry its own default owner, which governs the requests that binding resolves. This
-   record fixes the position, the cardinality, the value class and the enforcer; the spelling of the
-   key is the Q1 card's contract change, made after acceptance.
-6. **Empty state.** With no default owner declared:
-   - a door that does not take guest inserts today (an `authRequired: false` `object_operation`
-     create, which D3's channel opens) refuses the insert, naming the missing declaration;
-   - the public form doors, which take guest inserts today, keep their current owner-unset intake,
-     and the form's authoring read states the absence on the channel that already carries the
-     form-intake advisory (`packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeUnavailableMessage`).
+   wrote the row. Whoever the scenario makes the row's owner is not recorded as having acted.
+5. **Empty state: the owner stays unset.** When nothing in the scenario sets it, a guest-written
+   row keeps no owner, exactly as the public form doors' intake does today; hooks and flows may set
+   it. The form's authoring read states the absence on the channel that already carries the intake
+   advisory (`packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeUnavailableMessage`).
+   There is no publish refusal: nothing that serves today starts refusing.
 
-   ⚠️ This empty state is this record's reading, and it is called out under
-   [What the ruling did not settle](#what-the-ruling-did-not-settle): it applies to Q1 the
-   principle the ruling states for Q4, that nothing which serves today starts refusing.
-
-**Enforced by**: the owner-anchor stamp in
-`packages/plugins/plugin-security/src/security-plugin.ts#SecurityPlugin`, the step that already
-stamps an absent `owner_id` with the acting user and refuses a forged one. For the form doors, its
-`publicFormGrant` branch strips a supplied owner today
-(`packages/spec/src/security/public-form.ts#PUBLIC_FORM_SERVER_MANAGED_FIELDS`) and leaves it unset;
-under D1 it stamps the declared owner instead. **Card**: E3.
+**Enforced by**: the guest branch of the owner-anchor stamp in
+`packages/plugins/plugin-security/src/security-plugin.ts#SecurityPlugin`, the step that stamps an
+absent `owner_id` with the acting user and refuses a forged one. For a guest it never writes the
+guest and never the system principal, refuses a forged owner, and leaves the owner unset unless the
+scenario sets it. For the form doors, its `publicFormGrant` branch strips a supplied owner
+(`packages/spec/src/security/public-form.ts#PUBLIC_FORM_SERVER_MANAGED_FIELDS`) and leaves it unset,
+as it does today. **Card**: E3.
 
 ### D2 — The closed list of doors
 
@@ -219,7 +221,7 @@ narrow authorization from a declaration; none derives it from a deployment postu
 | 2 | share links | the capability token | after validation, a read of that one record | `packages/plugins/plugin-sharing/src/share-link-routes.ts#registerShareLinkRoutes` |
 | 3 | the public book and doc metadata reads | `book.audience: 'public'` | reachability only; the ADR-0046 §6.7 gate authorizes the read | `packages/rest/src/meta-item-read-gate.ts#isPublicAudienceRead` |
 | 4 | `authRequired: false` endpoints of `type: 'object_operation'` | the endpoint declaration, with the armed rate limit ADR-0121 D6 requires | the guest envelope (D9), under the guest's grants (D3) | `packages/runtime/src/security/resolve-execution-context.ts#resolveExecutionContext`; the CRUD gate |
-| 5 | `authRequired: false` endpoints of `type: 'flow'` | the same | the guest envelope at the door; inside, the flow's own declared `runAs` (D2b) | the same, then `@objectstack/service-automation` |
+| 5 | `authRequired: false` endpoints of `type: 'flow'` | the same | the guest envelope at the door; inside, the flow's own declared `runAs`, which publish never lets be `system` behind this door (D2b) | the same, then `@objectstack/service-automation` |
 
 **Everything else answers 401** (`UNAUTHENTICATED`). The decision is taken once per **domain**, as the
 domain's first statement, never surface by surface:
@@ -247,13 +249,13 @@ conformance matrix (`packages/qa/dogfood/test/authz-conformance.matrix.ts#AUTHZ_
 rows already fail on a deleted deny call or an unclassified route. Card E2 records the five classes
 there. ⛔ No new gate script. **Card**: E2.
 
-### D2b — OPEN: the anonymous door × elevated flow combination
+### D2b — The anonymous door × elevated flow combination: a publish refusal
 
 *Must-answer added to Q2 by ruling A on #22147 ([`6053767508`](https://github.com/objectstack-ai/objectstack/issues/22147#issuecomment-6053767508)),
 pointer [`6053819337`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6053819337).
-⛔ This record does not decide it.* The full analysis is in
-[The open decision](#the-open-decision--d2b-on-the-four-axes); the summary is here so that D2 reads
-whole.
+Ruled **R** by the supplement [`6056614963`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6056614963).* The reasoning is in
+[D2b on the four axes](#d2b-on-the-four-axes); Option M is under
+[Alternatives considered](#alternatives-considered).
 
 **The question.** An anonymous request admitted at an `authRequired: false` endpoint of
 `type: 'flow'` whose target flow declares `runAs: 'system'` runs that flow's data steps as the
@@ -261,14 +263,33 @@ system principal, by the flow author's explicit declaration (ADR-0073 D2). Rulin
 that, changing nothing in code, and routed the hazard here: the `runAs` description itself
 (`packages/spec/src/automation/flow.zod.ts#runAs`) prescribes `system` for user-less triggers, so an
 author who follows it opens an anonymous system-level door whose only brake is ADR-0121 D6's rate
-limit. The ruling names two answers, verbatim: *"a publish refusal with a prescription, or allowed
-only once ADR-0073 M2's `automation` posture lands"*. The answer must also say which doors may
-trigger an elevated flow, and how loudly publish says so.
+limit. The ruling named two answers, verbatim: *"a publish refusal with a prescription, or allowed
+only once ADR-0073 M2's `automation` posture lands"*; the answer also says which doors may trigger
+an elevated flow, and how loudly publish says so.
 
-- **Option R — a publish refusal with a prescription.**
-- **Option M — allowed only once ADR-0073 M2's `automation` posture lands.**
+**The decision.** Publish refuses an `authRequired: false` endpoint of `type: 'flow'` whose target
+flow declares `runAs: 'system'`, in both directions, because either item can be the last one edited:
+the endpoint's publish reads its target's `runAs`, and a flow's publish that sets `runAs: 'system'`
+reads the anonymous endpoints that target it. The prescription names what serves each scenario
+instead: an authenticated endpoint for a partner that can hold a credential; the signed inbound-hook
+channel (ADR-0041) for a partner webhook; a public form for anonymous intake; and, once ADR-0073 M2
+lands, `runAs: 'automation'`.
 
-Until the maintainer chooses, ruling A on #22147 governs: today's combination stands, unchanged.
+- *Which doors may trigger an elevated flow directly:* none.
+- *How loudly publish says so:* a refusal; the publish fails.
+
+**The indirect path, recorded and not decided.** A guest-written row fires record-change flows: a
+form submission today, an endpoint create once D3's channel opens. Such a flow runs under its own
+declared `runAs`, as every flow fired by a write without a user does (ADR-0073's amendment of
+2026-07-28: under `user` its data steps are refused; under `system` they run elevated). The refusal
+does not reach that path, because the trigger is the write and not the door. Covering it would be a
+third shape, which neither ruled option stated.
+
+**Enforced by**: the publish path, in both directions. The cross-item read sits where both items
+are readable at publish, beside the per-endpoint `packages/spec/src/api/endpoint-publish-gate.ts#policyGate`,
+which reads one endpoint only. The refusal narrows the accept set, so card E2 registers one ADR-0087
+semantic entry with it. Until E2 lands, ruling A on #22147 governs and today's combination stands,
+unchanged. **Card**: E2.
 
 ### D3 — The grants channel: ADR-0090 D9, enforced
 
@@ -328,8 +349,7 @@ then treats them as any requested set. **Card**: E1.
    (`packages/objectql/src/tenancy/system-write-organization.ts#resolveSystemWriteOrganization`) — and
    the guest entry asks the same one, never a second spelling of it.
 3. **Applied where it is needed.** D4 is asked where the guest's organization matters: to resolve
-   D3's grants, to scope the guest's data operations, and to stamp D1's owner. A door that needs none
-   of these — a flow running under its own declared posture — is untouched by D4.
+   D3's grants and to scope the guest's data operations. A door that needs neither of these — a flow running under its own declared posture — is untouched by D4.
 4. **Clarification (1), verbatim in substance.** The public form doors' declared binding to the
    deployment's default organization (`packages/metadata-core/src/anonymous-form-intake.ts`) stays as
    it is. D4's rule — resolve only when the organization is unique; refuse on a multi-organization
@@ -357,7 +377,6 @@ declaratively has this shape, the shape every platform in the comparison binds a
 | organization | the organization a matched request acts in | answers D4 for that request |
 | guest grants | the guest permission sets for that site | through D3's channel and its anchor tier, never around it |
 | allowed doors | the door classes the site opens | a subset of D2's list; it narrows, never adds a class |
-| default owner | D1's declaration for that site | the same value class as D1 |
 
 Built implementation-first (ADR-0049, ADR-0078): the card that builds it declares the type with its
 enforcer in the same change. The measured demand at `7b926f7600` is none: the repository's example
@@ -434,46 +453,11 @@ floor. Each breaks a live consumer.
 
 ---
 
-## The open decision — D2b on the four axes
+## D2b on the four axes
 
-### What each option means, stated so that it can be enforced
-
-**Option R — a publish refusal with a prescription.** From the day its card lands, publish refuses
-an `authRequired: false` endpoint of `type: 'flow'` whose target flow declares `runAs: 'system'`.
-The refusal runs in both directions, because either item can be the last one edited: the endpoint's
-publish reads its target's `runAs`, and a flow's publish that sets `runAs: 'system'` reads the
-anonymous endpoints that target it. The prescription names what serves each scenario instead: an
-authenticated endpoint for a partner that can hold a credential; the signed inbound-hook channel
-(ADR-0041) for a partner webhook; a public form for anonymous intake; and, once ADR-0073 M2 lands,
-`runAs: 'automation'`.
-
-- *Which doors may trigger an elevated flow:* none, directly.
-- *How loudly publish says so:* a refusal; the publish fails.
-
-**Option M — allowed only once ADR-0073 M2's `automation` posture lands.** The supported way for
-an anonymous door to run a user-less flow is the `automation` posture: an elevated run with
-row-level security in force against the automation principal's own grants (ADR-0073 D2). When M2
-lands, an anonymous flow door targets `automation`, and `system` behind an anonymous door becomes a
-publish refusal whose prescription is `automation`. Until M2 lands, ruling A on #22147 governs and
-today's combination stands; publish states the elevation as an advisory that names the endpoint and
-the flow.
-
-- *Which doors may trigger an elevated flow:* until M2, the flow endpoint door (D2 class 5), loudly;
-  after M2, with `automation` only.
-- *How loudly publish says so:* an advisory until M2; a refusal after it.
-
-**A reading note.** The ruling's words for Option M are *"allowed only once ADR-0073 M2's
-`automation` posture lands"*. This record reads them as the end state of an anonymous flow door,
-with the interim governed by ruling A on #22147, which kept today's combination and changed nothing
-in code. The stricter reading, refused until M2 lands, is exactly Option R's interim; a maintainer
-who holds that reading chooses R.
-
-**What neither option reaches.** A guest-written row fires record-change flows: a form submission
-today, an endpoint create once D3's channel opens. Such a flow runs under its own declared `runAs`,
-as every flow fired by a write without a user does (ADR-0073's amendment of 2026-07-28: under `user`
-its data steps are refused; under `system` they run elevated). Neither option names that path,
-because the trigger is the write and not the door. It is recorded so that the choice is made
-knowing it. Covering it would be a third shape, which neither ruled option states.
+The reasoning recorded for the ruled letter, R ([D2b](#d2b--the-anonymous-door--elevated-flow-combination-a-publish-refusal)).
+The table compares it with Option M, which the supplement did not take
+([Alternatives considered](#alternatives-considered)).
 
 ### The four axes
 
@@ -484,9 +468,9 @@ knowing it. Covering it would be a third shape, which neither ruled option state
 | **Preventing AI authoring errors** | Strongest. The `runAs` description prescribes `system` for user-less triggers; an AI that follows it is stopped at publish with the prescription in hand. What is declared is what is enforced. | Weaker until M2: an advisory leaves publish green, and an automated authoring loop reads green as done. After M2 it is the same as R. |
 | **Startup focus** | One refusal in the existing publish path: no new gate script and no new key. It narrows the accept set, so its card carries an ADR-0087 semantic entry. | A staged transition. The startup axis admits a staged path only on named external-user evidence, and none was measured. Two changes instead of one. |
 
-**This record does not choose.** The maintainer's letter is written into D2b by the accepting
-change. Whichever letter is chosen, card E2 implements it, and D2's class 5 row gains its final
-sentence.
+**Ruled R** by the supplement [`6056614963`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6056614963): card E2 implements it, with the registered ADR-0087
+semantic entry, and D2's class 5 row records it. ⛔ M not taken: an advisory interim with no date,
+which an automated authoring loop reads as done.
 
 ---
 
@@ -502,13 +486,13 @@ that card lands; no row is declared without an enforcer.
 | the fail-closed default entry | D9 | `assembleExecutionContext` | enforced |
 | the five door classes | D2 | the enforcer named in each row of D2's table | enforced per door |
 | the list itself | D2 | the conformance matrix, `AUTHZ_CONFORMANCE` | card E2 records it |
-| an elevated flow behind an anonymous door | D2b | — | open; card E2 after the choice |
+| no `system` flow behind an anonymous flow door | D2b | the publish path, in both directions | card E2 |
 | the guest's grants, and deny-all when none | D3 | the anonymous branch of `resolveAuthzContext` | card E1 |
 | the anchor binding tier | ADR-0090 D9; D3 | `describeAnchorForbiddenBits`, through `assertAudienceAnchorBindingGate` | enforced |
 | no delegated binding of an anchor | ADR-0090 D12 | `ANCHOR_POSITIONS` | enforced |
 | the guest's organization | D4 | the guest entry's organization step, with `resolveSystemWriteOrganization`'s predicate | card E1 |
 | the form doors' organization | D4, clarification (1) | `anonymousFormIntakeUnavailability`; the engine's write derivation | enforced |
-| the guest owns nothing; the default owner | D1 | the owner-anchor stamp and the `publicFormGrant` branch in `SecurityPlugin` | card E3 |
+| the guest owns nothing; a forged owner refused; the owner unset unless the scenario sets it | D1 | the guest branch of the owner-anchor stamp, and the `publicFormGrant` branch, in `SecurityPlugin` | card E3; the form doors' strip is enforced today |
 | anonymous endpoints carry an armed rate limit | ADR-0121 D6; D7 | `policyGate` | enforced |
 | metadata disclosure to a zero-set caller | ADR-0106 D7; D6 | `getMetadataReadableFields` | enforced |
 | the guest's explain posture | D6 | `derivePosture` | enforced |
@@ -530,9 +514,6 @@ that card lands; no row is declared without an enforcer.
   and the administrator who confirmed it believed it granted, so D3 honours a declaration rather than
   widening one. The change is still visible: E1's changeset names it, and E1 counts the population
   on the reference apps before it lands.
-- **Owner-assigning hooks (D1).** An object hook that assigns an owner only when none is set will
-  find D1's default owner already stamped on a guest insert. E3 measures such hooks on the objects
-  the reference apps open to guests before it lands.
 - **A multi-organization deployment's anonymous endpoints answer a located refusal** where they need
   an organization, until D5 is built. Today those requests are refused at the CRUD gate with nothing
   granted, so no request that is served today stops being served.
@@ -547,14 +528,11 @@ that card lands; no row is declared without an enforcer.
 
 Stated so that approving this record approves these readings knowingly.
 
-1. **D2b is open**, by the ruling's own terms.
-2. **D1's empty state** (D1, point 6) is this record's reading: it applies the ruling's Q4 principle,
-   that nothing which serves today starts refusing, to the form doors' owner-unset intake.
-3. **The spellings of D1's declaration and D5's binding** belong to their cards. This record fixes
-   position, cardinality, value class and enforcer, and reserves no key.
-4. **The indirect path** (record-change flows fired by a guest-written row) lies outside both D2b
-   options, as stated there.
-5. **The guest's row scope** is stated as a contract (one pipeline, no special case, ADR-0090 D9's
+1. **The spelling of D5's binding** belongs to the card that builds it. This record fixes its shape
+   and reserves no key.
+2. **The indirect path** (record-change flows fired by a guest-written row) lies outside D2b's
+   refusal, as stated there: recorded, not decided.
+3. **The guest's row scope** is stated as a contract (one pipeline, no special case, ADR-0090 D9's
    division of labour); its measured outcome per sharing model is E1's pin.
 
 ## Alternatives considered
@@ -564,6 +542,13 @@ The letters the ruling did not take, from the decision request
 
 - **Q1 B — the guest as owner.** Rows that nobody inside the organization can manage, and an owner
   column holding a principal that never signs in.
+- **Q1 A as first drafted — an organization-level default owner** (superseded by A′,
+  [`6056614963`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6056614963); the maintainer: 「访客写进来的记录归本组织声明的一个内部人,这个没必要吧,应该是每个业务场景在元数据级别自己处理吧」).
+  Ownership policy is business logic that differs per scenario (territory, queue, round-robin,
+  product line), so an organization-level constant is wrong in most deployments and pre-empts the
+  scenario's own hook. On Salesforce and ServiceNow the assignment rule does the work and an
+  organization default is only the fallback. A silent stamp hides a missing assignment, and the
+  draft needed a new declaration, an empty-state rule and a site-binding element to carry it.
 - **Q2 B — every surface that declares `authRequired: false` open to the guest.** Each new surface
   becomes a door nobody reviewed.
 - **Q3 B — keep D9 declared and unenforced.** Administrators keep being told a binding grants when
@@ -575,12 +560,18 @@ The letters the ruling did not take, from the decision request
 - **Q7 B — fold the signature vocabulary in here.** Keys without an executor (ADR-0078).
 - **Q8 B — change every key in this record's change.** This record carries no code; the ruling
   places every code change after acceptance.
+- **D2b M — allowed only once ADR-0073 M2's `automation` posture lands** (not taken by the
+  supplement [`6056614963`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6056614963)). Until M2, today's combination would have stood with a publish
+  advisory; at M2, `system` behind an anonymous door would have become a refusal prescribing
+  `automation`. An advisory interim with no date is one an automated authoring loop reads as done,
+  and the transition is staged with no named external-user evidence. The stricter reading of the
+  ruled words, refused until M2 lands, is R's interim exactly.
 - **G1 — run the booted sweep before ruling.** One more round of waiting, against a static reading
   whose failure direction is safe: every door class reads as a denial or a narrow door.
 
 ## Acceptance criteria
 
-This record moves from Proposed to Accepted when all four hold:
+This record moves from Proposed to Accepted when all four hold; the third is met:
 
 1. **The maintainer approves this record** (`docs/adr/**` is a Tier H surface, Prime Directive #14).
 2. **G2 — the booted per-door-class anonymous sweep**, run in an environment that permits the probe.
@@ -588,7 +579,7 @@ This record moves from Proposed to Accepted when all four hold:
    anonymous answer (its status class, and what is served) matches D2's table. The readings stay
    private, as #21158's did; the card records a class-level result only. ⛔ This record names no
    driver and no probe.
-3. **D2b is chosen**, and the letter is written into D2b.
+3. **D2b is chosen — met.** The supplement [`6056614963`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6056614963) ruled R, and D2b records it.
 4. **The back-pointers land with the accepting change**, one status-line continuation each, in the
    form ADR-0042 and ADR-0046 use for a decision amended in part:
 
@@ -613,8 +604,8 @@ changes `packages/spec` before it.
 | Card | Decisions | What lands | Pins | ADR-0087 disposition | Order |
 |:--|:--|:--|:--|:--|:--|
 | **E1** — the grants channel | D3, D4 | the guest entry resolves D4's organization, then the `guest` anchor's bindings; the located refusal where D4 refuses | no binding: denied on class 4; a bound read set: that object only; the baseline, `everyone` and the name fold never reach the guest; a multi-organization deployment: the located refusal; the form doors unchanged; the guest's row scope for each sharing model; the bindings that start granting, counted on the reference apps | none: no authorable key, accept set or stored shape moves; the changeset names the bindings that start granting | first |
-| **E2** — the closed list and denial by domain, and D2b | D2, D2b, D9's pointer | the five classes recorded in the conformance matrix; any face of a listed domain that still decides per face moved to the domain-level deny; D2b as chosen; the module doc of `assemble-execution-context.ts` cites this record | a new route in a governed domain answers 401; each class's admission; D2b's behaviour, both directions under R | under R: `registered`, one new semantic entry, because a publish refusal narrows the accept set and no conversion can choose a posture for the author; under M: none until M2, then the same entry on M2's card | after acceptance and the D2b letter |
-| **E3** — the default owner | D1 | the declaration (its key and value class), the stamp, the empty state | a guest insert owned by the declared owner; the guest never an owner; the form doors' empty state; owner-assigning hooks measured | none: an additive key widens the accept set | after E1, which supplies D4 |
+| **E2** — the closed list and denial by domain, and D2b | D2, D2b, D9's pointer | the five classes recorded in the conformance matrix; any face of a listed domain that still decides per face moved to the domain-level deny; D2b's publish refusal in both directions, with its prescription; the module doc of `assemble-execution-context.ts` cites this record | a new route in a governed domain answers 401; each class's admission; D2b refused in both directions (an anonymous flow endpoint naming a `system` flow, and a flow set to `system` while an anonymous endpoint names it), each refusal carrying the prescription | `registered`, one new semantic entry: the publish refusal narrows the accept set, and no conversion can choose a posture for the author | after acceptance |
+| **E3** — the stamp's guest branch | D1 | the owner-anchor stamp's guest branch: never the guest, never the system principal, a forged owner refused, the owner unset unless the scenario sets it | a guest insert with nothing in the scenario setting an owner leaves it unset; an owner set by a hook, flow or assignment rule stands; a guest-supplied owner refused at an endpoint and stripped at the form doors; the owner column never holds the guest or the system principal | none: no new key, and nothing moves | after E1, which opens guest inserts at the endpoint doors |
 | **E4** — retire `sys_record_share`'s `guest` recipient | D8 | the select option and the contract's union member removed, translations regenerated, following the `spec-property-retirement` playbook where it applies | the value refused with its prescription; a census showing no stored row carries it | expected `not-required (no-migration-prescription)`; `registered` if the census finds a stored metadata surface carrying the value | independent |
 
 ## Follow-ups, named, not filed
@@ -622,8 +613,8 @@ changes `packages/spec` before it.
 - **F1 — the webhook signature vocabulary** (an HMAC, a timestamp, a replay window), filed with its
   executor (D7).
 - **F2 — the site binding** (D5), built when a named deployment needs it.
-- **F3 — ADR-0073 M2**, on which D2b's Option M depends; ADR-0073's own trigger, a first real
-  consumer, governs it.
+- **F3 — ADR-0073 M2**, which adds `runAs: 'automation'` to D2b's prescription when it lands;
+  ADR-0073's own trigger, a first real consumer, governs it.
 
 ## References
 
@@ -633,7 +624,8 @@ changes `packages/spec` before it.
   ([`6052740067`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6052740067)),
   the pointers ([`6052731596`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6052731596),
   [`6053819337`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6053819337)),
-  and the ruling ([`6054113537`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6054113537)).
+  the ruling ([`6054113537`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6054113537)),
+  and its supplement [`6056614963`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6056614963) (D1 A′, D2b R).
 - [#22147](https://github.com/objectstack-ai/objectstack/issues/22147): ruling C
   ([`6051299672`](https://github.com/objectstack-ai/objectstack/issues/22147#issuecomment-6051299672)),
   the guest at `authRequired: false` endpoints; ruling A
