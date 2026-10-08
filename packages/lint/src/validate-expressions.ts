@@ -481,13 +481,23 @@ function celSourceOf(raw: unknown): string | undefined {
   return undefined;
 }
 
+/** One predicate a validation rule carries — see {@link rulePredicates}. */
+interface RulePredicate {
+  label: string;
+  raw: unknown;
+  /** `condition` (a `script` / `cross_field` rule's) or `when` (a `conditional` rule's). */
+  slot: 'condition' | 'when';
+  /** 0 for the rule itself; 1 inside its `then` / `otherwise`, and so on down. */
+  depth: number;
+}
+
 /**
  * Every predicate a validation rule carries, including the ones nested inside a
  * `conditional` rule's `then` / `otherwise` — the trap hides there just as
  * happily as at the top level.
  */
-function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw: unknown }> {
-  const out: Array<{ label: string; raw: unknown }> = [];
+function rulePredicates(rule: AnyRec, path: string, depth = 0): RulePredicate[] {
+  const out: RulePredicate[] = [];
   const name = typeof rule.name === 'string' ? rule.name : '?';
   const here = path ? `${path} → '${name}'` : `'${name}'`;
   // `condition` is the declared predicate key on every validation-rule variant
@@ -499,12 +509,14 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
   // author who wrote both `condition` and a rejected alias had their canonical
   // predicate short-circuited away and the alias validated instead (#5017).
   const main = rule.condition;
-  if (main != null) out.push({ label: `validation rule ${here}`, raw: main });
-  if (rule.when != null) out.push({ label: `validation rule ${here} when-predicate`, raw: rule.when });
+  if (main != null) out.push({ label: `validation rule ${here}`, raw: main, slot: 'condition', depth });
+  if (rule.when != null) {
+    out.push({ label: `validation rule ${here} when-predicate`, raw: rule.when, slot: 'when', depth });
+  }
   for (const branch of ['then', 'otherwise'] as const) {
     const nested = rule[branch];
     if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
-      out.push(...rulePredicates(nested as AnyRec, `${here} ${branch}`));
+      out.push(...rulePredicates(nested as AnyRec, `${here} ${branch}`, depth + 1));
     }
   }
   return out;
@@ -1885,18 +1897,37 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // The declared predicate key is `condition` (see `rulePredicates`).
       // Validation predicates are `record`-scoped — no field flattening — so
       // bare refs are flagged (#1928).
-      // [#18682] The two sites where a relationship traversal is SERVED: these
-      // are the `script` / `cross_field` conditions ObjectQL's `checkPredicate`
-      // hydrates. `traversalHydration` is passed here and NOWHERE else.
+      // [#18682] The sites where a relationship traversal is SERVED: these are
+      // the `script` / `cross_field` conditions ObjectQL's `checkPredicate`
+      // hydrates. `traversalHydration` is passed here and on a nested
+      // `condition` below (#22042), and NOWHERE else.
       check(where, rule.condition, objectName, 'record', undefined, true);
       // `conditional` rules carry a nested `when` predicate (record-scoped).
       // ⚠️ `when` is evaluated by `checkConditional` WITHOUT hydration today, so
       // it is opted OUT: a traversal there faults, and the conflict checks'
       // prescription would not repair it.
       check(`${where} when`, (rule as AnyRec).when, objectName, 'record');
+      const predicates = rulePredicates(rule, '');
+      // [#22042] The same verdict one level down, and every level below it: a
+      // `conditional` rule's `then` / `otherwise` is a rule the evaluator runs
+      // (`checkConditional` hands the branch to `evaluateRule`), so its
+      // predicates meet `check()` exactly as the two calls above do — located
+      // at the label `rulePredicates` builds, the location the null-guard gate
+      // below already gives the same predicate. Depth 0 is skipped: the rule's
+      // own `condition` / `when` met `check()` above, under their own location.
+      // Hydration follows the evaluator per slot, as at the top level: a
+      // nested `condition` is a `script` / `cross_field` rule's, which
+      // ObjectQL's `collectPredicateRelationships` reaches inside a
+      // `conditional` and `checkPredicate` hydrates; a nested `when` is a
+      // nested `conditional`'s, which `checkConditional` evaluates WITHOUT
+      // hydration, so it is opted out like the top-level `when`.
+      for (const p of predicates) {
+        if (p.depth === 0) continue;
+        check(`object '${objectName}' · ${p.label}`, p.raw, objectName, 'record', undefined, p.slot === 'condition');
+      }
       // #4763 — null-guard gate over every predicate the rule carries, nested
       // `then`/`otherwise` branches included.
-      for (const p of rulePredicates(rule, '')) {
+      for (const p of predicates) {
         checkNullGuards(`object '${objectName}' · ${p.label}`, p.label, p.raw, objectName);
       }
     }
