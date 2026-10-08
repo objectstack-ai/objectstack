@@ -17,6 +17,15 @@ import { RLS } from '@objectstack/spec/security';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 
 /**
+ * The registry answer for the doubles below that fire every `kernel:ready`
+ * handler, as the kernel does: the plugin refuses a boot whose registry lacks
+ * the identity objects its authorization store reads, so a double that boots it
+ * holds those two names and nothing else (`authz-identity-objects-boot-refusal.test.ts`).
+ */
+const identityObjectsOnly = (name: string) =>
+  name === 'sys_user' || name === 'sys_member' ? { name, fields: {} } : undefined;
+
+/**
  * [commit a016f08b8] What the ENGINE does inside the middleware's `next()` — the part of
  * `ObjectQL.insert` the doubles in this file stand in for.
  *
@@ -170,7 +179,7 @@ describe('SecurityPlugin', () => {
         assertEngineUpdateDispatch(d, o);
         return true;
       }),
-      getSchema: () => undefined,
+      getSchema: identityObjectsOnly,
     };
     const metadata = { get: async () => null, list: async () => [] };
     const services: Record<string, any> = { manifest: manifestService, objectql: ql, metadata };
@@ -4436,7 +4445,7 @@ describe('audience-anchor bindings read the stack\'s declared capabilities (#185
         assertEngineUpdateDispatch(d, o);
         return true;
       },
-      getSchema: () => undefined,
+      getSchema: identityObjectsOnly,
     };
     const metadata = {
       get: async () => null,

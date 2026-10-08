@@ -72,6 +72,7 @@ import { join } from 'node:path';
 import { ObjectKernel } from '@objectstack/core';
 import { Runtime } from './runtime.js';
 import { createStandaloneStack } from './standalone-stack.js';
+import { createIdentityObjectsPlugin } from '@objectstack/plugin-auth';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 import { AUDIENCE_ANCHOR_POSITIONS, BUILTIN_IDENTITY_NAMES } from '@objectstack/spec';
 import { SharingServicePlugin } from '@objectstack/plugin-sharing';
@@ -223,6 +224,10 @@ beforeAll(async () => {
   // `org-scoping` installed. Without it the sharing seeder runs zero passes and
   // this file would measure the tenancy default instead of the seeder's read.
   kernel.registerService('tenancy', { posture: 'single' } as any);
+  // No auth plugin here, so plugin-auth's identity objects come from its
+  // preset: `SecurityPlugin` refuses a boot without the `sys_user` /
+  // `sys_member` its authorization store reads.
+  await kernel.use(createIdentityObjectsPlugin() as any);
   await kernel.use(new SecurityPlugin() as any);
   await kernel.use(new SharingServicePlugin() as any);
   await kernel.bootstrap();

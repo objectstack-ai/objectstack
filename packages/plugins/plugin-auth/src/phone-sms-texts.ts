@@ -4,14 +4,23 @@
  * Localised auth SMS texts (#2815).
  *
  * The phone OTP / invitation SMS bodies were hard-coded English (#2780).
- * They now resolve in two layers:
+ * They resolve one locale rung at a time — see
+ * {@link resolvePhoneSmsTemplateBody}:
  *
- *  1. **Tenant-customisable templates** — a `sys_notification_template` row
- *     for `(topic, channel:'sms', locale)`, the same object the messaging
- *     `sms` channel renders. Operators edit them in Setup; the built-in
- *     rows below are seeded once and never overwrite an existing row.
- *  2. **Built-in fallback** — the bundled texts here (en + zh), used when
- *     no template row resolves (fresh env, missing table, exotic locale).
+ *  1. **A tenant template row** — a `sys_notification_template` row for
+ *     `(topic, channel:'sms', locale)`, the same object the messaging `sms`
+ *     channel renders. Operators author them in Setup; a row at a rung
+ *     decides that rung.
+ *  2. **The built-in text at that rung** — the bundled texts here (en + zh),
+ *     when no row exists at that locale.
+ *
+ * The built-in texts used to be SEEDED into `sys_notification_template` as
+ * rows on every boot with phone sign-in on (insert-if-missing). That seed is
+ * retired (ADR-0131: a row exists only when an organization authored it; a
+ * notification template has no metadata type, so its seed retires and no type
+ * is added). The per-rung walk renders byte for byte what the seeded store
+ * rendered — the seeder's rows were the built-in texts at the built-in
+ * locales — and a row an operator already has keeps winning.
  *
  * The recipient locale reaching this module is resolved by the caller
  * (`AuthManager.renderPhoneSmsBody`), and commit 35e94c96b gave the OTP send a rung
@@ -55,8 +64,8 @@ export interface PhoneSmsTemplateRow {
 }
 
 /**
- * Built-in texts, seeded as template rows and used directly as the render
- * fallback. Holes use the same `{{ path }}` syntax as the messaging
+ * Built-in texts — the text a rung renders when no template row exists at its
+ * locale. Holes use the same `{{ path }}` syntax as the messaging
  * template renderer (service-messaging/template-renderer.ts).
  *
  * The OTP text is deliberately purpose-neutral (no "sign-in" vs "reset"
@@ -145,68 +154,66 @@ export function builtinPhoneSmsBody(topic: string, locale: string | undefined): 
   return '';
 }
 
-/** Minimal engine surface the loader/seeder needs. */
+/** Minimal engine surface the template read needs. */
 export interface PhoneSmsTemplateEngine {
   find(objectName: string, query?: unknown): Promise<Array<Record<string, unknown>>>;
-  insert(objectName: string, data: unknown, options?: unknown): Promise<unknown>;
 }
 
 const TEMPLATE_OBJECT = 'sys_notification_template';
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
-/**
- * Load the tenant's template body for `(topic, 'sms', locale chain)`.
- * Best-effort: any lookup error (missing table, no engine) yields `null`
- * so the caller falls back to the built-in text — a template outage must
- * never block an OTP send.
- */
-export async function loadPhoneSmsTemplateBody(
-  engine: PhoneSmsTemplateEngine | undefined,
-  topic: string,
-  locale: string | undefined,
-): Promise<string | null> {
-  if (!engine) return null;
-  for (const loc of phoneSmsLocaleChain(locale)) {
-    try {
-      const result = await engine.find(TEMPLATE_OBJECT, {
-        where: { topic, channel: 'sms', locale: loc, is_active: true },
-        limit: 1,
-        context: SYSTEM_CTX,
-      });
-      const row = result[0];
-      const body = row?.body;
-      if (typeof body === 'string' && body.trim()) return body;
-    } catch {
-      return null; // best-effort — fall back to the built-in text
-    }
-  }
-  return null;
+/** The first stored row matching `where`, or `undefined`. */
+async function firstTemplateRow(
+  engine: PhoneSmsTemplateEngine,
+  where: Record<string, unknown>,
+): Promise<Record<string, unknown> | undefined> {
+  const result = await engine.find(TEMPLATE_OBJECT, { where, limit: 1, context: SYSTEM_CTX });
+  return result[0];
 }
 
 /**
- * Seed the built-in rows into `sys_notification_template`, one per
- * `(topic, 'sms', locale)`, **only when absent** — a tenant-customised (or
- * deactivated) row is never overwritten. Per-row failures are isolated;
- * the table may not exist yet on a fresh env (messaging provisions it at
- * kernel:ready), so callers log-and-continue.
+ * The template body to send for `(topic, locale)` — never empty for a built-in
+ * topic, and never blocked by a template outage.
+ *
+ * Walks {@link phoneSmsLocaleChain} one rung at a time:
+ *
+ *  1. an ACTIVE row at that locale with a non-blank body → its body;
+ *  2. NO row at all at that locale → the built-in text at that locale, when
+ *     one exists;
+ *  3. otherwise (a deactivated or blank row there, or no built-in text for that
+ *     locale) → the next rung.
+ *
+ * If no rung answers, the built-in walk ({@link builtinPhoneSmsBody}) is the
+ * floor, as it is when the template read fails (missing table, no engine).
+ *
+ * This is exactly what the retired boot seed rendered. That seed inserted the
+ * built-in text at every built-in `(topic, locale)` that held NO row, active or
+ * not, and the read then took the first active, non-blank row along the chain,
+ * with the built-in walk as its floor. So "no row at this locale" read the
+ * built-in text there, a deactivated or blank row passed the rung on, and a row
+ * an operator wrote wins at its rung. `phone-sms-seed-retired.test.ts` holds
+ * the two equal against the seeded store, for every built-in text and locale.
+ *
+ * Best-effort: a failed template read yields the built-in text — a template
+ * outage must never block an OTP send.
  */
-export async function seedPhoneSmsTemplates(
-  engine: PhoneSmsTemplateEngine,
-  logger?: { warn(msg: string): void },
-): Promise<void> {
-  for (const tpl of BUILTIN_PHONE_SMS_TEMPLATES) {
-    try {
-      const existing = await engine.find(TEMPLATE_OBJECT, {
-        where: { topic: tpl.topic, channel: tpl.channel, locale: tpl.locale },
-        limit: 1,
-        context: SYSTEM_CTX,
-      });
-      if (existing.length > 0) continue;
-      await engine.insert(TEMPLATE_OBJECT, { ...tpl }, { context: SYSTEM_CTX });
-    } catch (err) {
-      logger?.warn(
-        `[AuthPlugin] phone SMS template seed failed for ${tpl.topic}/${tpl.locale}: ${(err as Error)?.message ?? err}`,
-      );
+export async function resolvePhoneSmsTemplateBody(
+  engine: PhoneSmsTemplateEngine | undefined,
+  topic: string,
+  locale: string | undefined,
+): Promise<string> {
+  if (!engine) return builtinPhoneSmsBody(topic, locale);
+  try {
+    for (const loc of phoneSmsLocaleChain(locale)) {
+      const where = { topic, channel: 'sms', locale: loc };
+      const active = await firstTemplateRow(engine, { ...where, is_active: true });
+      const body = active?.body;
+      if (typeof body === 'string' && body.trim()) return body;
+      const builtin = BUILTIN_PHONE_SMS_TEMPLATES.find((t) => t.topic === topic && t.locale === loc);
+      if (builtin && !(await firstTemplateRow(engine, where))) return builtin.body;
     }
+  } catch {
+    // best-effort — fall back to the built-in text
   }
+  return builtinPhoneSmsBody(topic, locale);
 }

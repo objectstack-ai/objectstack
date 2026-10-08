@@ -24,8 +24,10 @@
  * `runStackExpressionPasses` admits the field-rule slots on an object write,
  * at the build's own position in the field walk, so the door's finding IS the
  * build's finding — rule, location, message and hint. The per-option
- * `visibleWhen` (pass 3) and the object's own action predicates (pass 4) stay
- * fenced; that pin is in `runtime-gate.object-formula-writes.test.ts`.
+ * `visibleWhen` joined the door in pass 3
+ * (`runtime-gate.object-option-visibility-writes.test.ts`); the object's own
+ * action predicates (pass 4) stay fenced, and that pin is in
+ * `runtime-gate.object-formula-writes.test.ts`.
  *
  * The protocol-level half — the same verdict through the real `saveMetaItem`,
  * `publishMetaItem` and `publishPackageDrafts` — is the #22032 pass 2 block of
