@@ -42,10 +42,8 @@ import {
   DEFAULT_AUTH_BASE_PATH,
   type AuthManagerOptions,
 } from './auth-manager.js';
-import {
-  ensureDefaultOrganizationExists,
-  isDefaultOrganizationBootstrapTrigger,
-} from './ensure-default-organization.js';
+import { isDefaultOrganizationBootstrapTrigger } from './ensure-default-organization.js';
+import { ensureDefaultOrganizationExists } from './default-organization-invariant.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
 import { withSystemContext } from './objectql-adapter.js';

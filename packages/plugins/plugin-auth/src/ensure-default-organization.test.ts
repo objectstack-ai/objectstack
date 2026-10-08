@@ -8,9 +8,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
 import {
   ensureDefaultOrganization,
-  ensureDefaultOrganizationExists,
   isDefaultOrganizationBootstrapTrigger,
 } from './ensure-default-organization.js';
+import { ensureDefaultOrganizationExists } from './default-organization-invariant.js';
 import { createEnsureDefaultOrganizationOnce } from './default-org-bootstrap-once.js';
 
 // [#11973] The config anchor reads `OS_PLATFORM_OWNER_EMAIL` live (memoized on

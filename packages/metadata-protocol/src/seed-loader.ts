@@ -1163,15 +1163,26 @@ export class SeedLoaderService implements ISeedLoaderService {
       }
     };
 
+    // [ADR-0131 D3 / D9] Does a row of this object carry an organization at
+    // all? Read once per dataset, from the object definition the loader
+    // resolves every dataset through. Since the namespace exemption is gone,
+    // this is the ONLY thing that keeps the stamp off an object with no
+    // `organization_id` column — `tenancy: { enabled: false }` (ADR-0066), or a
+    // platform object whose injected column was dropped (ADR-0131 D7) — where
+    // the engine refuses the stamped row as an unknown field and the seed row
+    // is lost. A definition the loader cannot resolve keeps the stamp (the
+    // behaviour before this read existed): the column is then the engine's to
+    // judge, and nothing here refuses a row for an owner it cannot prove.
+    const objectDefinition = await this.resolveObjectDefinition(objectName);
+    const rowsCarryOrganization = objectDefinition == null || seedRowNeedsOrganization(objectDefinition);
     // [ADR-0131 D9] With no organization pinned and none derivable on an install
     // that registers the organization object, a row of an organization-owned
-    // object has no owner: it is REFUSED below, never written NULL. Read once
-    // per dataset, and only when it can matter.
+    // object has no owner: it is REFUSED below, never written NULL.
     const refuseUnownedRows =
       config.organizationId == null &&
       this.fallbackOrgId === undefined &&
       this.unownedOrganizationCount !== undefined &&
-      seedRowNeedsOrganization(await this.resolveObjectDefinition(objectName));
+      seedRowNeedsOrganization(objectDefinition);
     let unownedRefusalLogged = false;
 
     // Pin a single `now()` snapshot for the entire dataset so multi-pass
@@ -1246,14 +1257,16 @@ export class SeedLoaderService implements ISeedLoaderService {
        */
       const requiredDeferrals: Array<{ field: string; targetObject: string; attemptedValue: unknown }> = [];
 
-      // Per-tenant tagging: stamp every seeded row with the target org — the
-      // caller's explicit `config.organizationId`, or (when none was pinned) the
-      // install's sole organization. [ADR-0131 D3] `sys_` / `cloud_` / `ai_`
-      // seeds take it too: their exemption ("intentionally global") is
-      // withdrawn, since no platform-global seeds remain. A record that
-      // supplies its own `organization_id` always wins; objects without the
-      // column ignore the extra key at the engine.
-      const tenantOrg = config.organizationId ?? this.fallbackOrgId;
+      // Per-tenant tagging: stamp every seeded row of an object that carries an
+      // organization with the target org — the caller's explicit
+      // `config.organizationId`, or (when none was pinned) the install's sole
+      // organization. [ADR-0131 D3] `sys_` / `cloud_` / `ai_` seeds take it
+      // too: their exemption ("intentionally global") is withdrawn, since no
+      // platform-global seeds remain. A record that supplies its own
+      // `organization_id` always wins. An object with no organization column
+      // gets no stamp (`rowsCarryOrganization` above): the engine refuses an
+      // undeclared field, so a stamp there would drop the row.
+      const tenantOrg = rowsCarryOrganization ? (config.organizationId ?? this.fallbackOrgId) : undefined;
       if (refuseUnownedRows && tenantOrg === undefined && record['organization_id'] == null) {
         // [ADR-0131 D9] No owner to stamp — refuse the row, loudly, by name.
         errored++;

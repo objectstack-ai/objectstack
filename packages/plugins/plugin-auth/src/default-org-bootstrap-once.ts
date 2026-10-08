@@ -49,12 +49,12 @@ export interface EnsureDefaultOrganizationOnceOptions {
   ensure?: typeof ensureDefaultOrganization;
   /**
    * [ADR-0131 D3] Did THIS process create the Default Organization at boot
-   * (`ensureDefaultOrganizationExists`)? Under `single` the organization no
-   * longer waits for the admin, so the call that creates it is no longer this
-   * gate's — and a kernel with no ledger binds "only on the call that CREATES
-   * the default organization". An organization this process created is that
-   * fresh install, so the bind is admitted for it; one that predates the
-   * process is still never re-bound.
+   * (`ensureDefaultOrganizationExists`, `default-organization-invariant.ts`)?
+   * Under `single` the organization no longer waits for the admin, so the call
+   * that creates it is no longer this gate's — and a kernel with no ledger
+   * binds "only on the call that CREATES the default organization". An
+   * organization this process created is that fresh install, so the bind is
+   * admitted for it; one that predates the process is still never re-bound.
    */
   organizationCreatedByThisProcess?: () => boolean;
 }

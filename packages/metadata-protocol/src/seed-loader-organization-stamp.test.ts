@@ -123,6 +123,9 @@ describe('[ADR-0131 D3] the platform-namespace seed exemption is withdrawn', () 
     expect(orgOf(inserted, 'sys_business_unit')).toEqual(['org_default']);
     // The business object takes it too; the author's explicit organization wins.
     expect(orgOf(inserted, 'my_app_widget')).toEqual(['org_default', 'org_named_by_author']);
+    // CONTROL — an object with no organization column gets no stamp: the real
+    // engine refuses an undeclared `organization_id` and the row would be lost.
+    expect(orgOf(inserted, 'billing_license')).toEqual([null]);
   });
 
   it('a pinned `config.organizationId` stamps the platform seed as well', async () => {
@@ -130,6 +133,8 @@ describe('[ADR-0131 D3] the platform-namespace seed exemption is withdrawn', () 
     const result = await new SeedLoaderService(engine, createMetadata(true), silentLogger()).load(seeds('org_b'));
     expect(result.errors).toEqual([]);
     expect(orgOf(inserted, 'sys_business_unit')).toEqual(['org_b']);
+    // The pinned organization is no stamp on an object with no organization column either.
+    expect(orgOf(inserted, 'billing_license')).toEqual([null]);
   });
 });
 
