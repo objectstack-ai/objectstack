@@ -150,7 +150,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IObjectQLEngine, IPubSub, ISecurityService } from '@objectstack/spec/contracts';
-import { applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
+import { applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
@@ -20550,11 +20550,28 @@ export class ObjectStackProtocolImplementation implements
         // an already-canonical body comes back reference-identical, so
         // `migrateStoredMetadata` and `duplicatePackage` re-entering here pay
         // nothing.
+        //
+        // [#21982] The two gates below — the schema gate and the runtime
+        // authoring gate — JUDGE a flow in its canonical spelling on every path. When no canonicalizer resolved, or it threw,
+        // `flowGateVerdictBody` is the raw body with the spec's ADR-0087 D2
+        // conversions applied (`applyConversionsToFlow`) — for the VERDICT
+        // only: what is stored stays the raw request body, exactly as before.
+        // The flow parse judges an undeclared config key on the builtin node
+        // types, so a D2 spelling the load path still rewrites (`filters`,
+        // script `functionName`, subflow `flow`, …) would otherwise be refused
+        // here and accepted at every converting door (`os validate`,
+        // `defineStack`, `registerFlow`): a verdict that depended on whether
+        // this host runs an automation service. No `reservedNodeTypes` (no
+        // engine here): a node-type rename's conflict guard keeps its one home
+        // in the engine's canonicalizer, and this converted body is never
+        // persisted. A key no conversion rewrites is judged exactly as written.
+        let flowGateVerdictBody: unknown;
         if (singularType === 'flow' && request.item) {
             // No automation service reachable (control-plane / metadata-only
             // host): save exactly as today — a host must not start refusing
             // flow writes it accepted yesterday.
             const canonicalizeFlow = this.resolveFlowCanonicalizer();
+            let canonicalized = false;
             if (canonicalizeFlow) {
                 let result: StoredFlowCanonicalization | undefined;
                 try {
@@ -20616,8 +20633,10 @@ export class ObjectStackProtocolImplementation implements
                         throw err;
                     }
                     request.item = result.storable;
+                    canonicalized = true;
                 }
             }
+            if (!canonicalized) flowGateVerdictBody = applyConversionsToFlow(request.item);
         }
 
         // Spec-conformance check: if a Zod schema is registered for this
@@ -20642,7 +20661,10 @@ export class ObjectStackProtocolImplementation implements
         {
             const schema = resolveOverlaySchema(request.type, request.item);
             if (schema) {
-                const parsed = schema.safeParse(request.item);
+                // [#21982] A flow on the canonicalizer's fallback is judged in
+                // its D2-converted spelling (see `flowGateVerdictBody` above);
+                // every other body is judged as stored.
+                const parsed = schema.safeParse(flowGateVerdictBody ?? request.item);
                 if (!parsed.success) {
                     const issues = zodIssuesToMetadataIssues(parsed.error.issues);
                     // [#10524 → commit d806081dd] The findings clause is rendered PER
@@ -20755,7 +20777,12 @@ export class ObjectStackProtocolImplementation implements
             type: request.type,
             name: request.name,
             state: mode === 'draft' ? 'draft' : 'active',
-            body: gatedItem,
+            // [#21982] The same verdict body as the schema gate above: a flow
+            // on the canonicalizer's fallback is judged in its D2-converted
+            // spelling (the lint's config judge refuses an undeclared key, so
+            // the raw `filters` alias would be refused here and nowhere else).
+            // Stored, and handed to the credential walk below, as written.
+            body: flowGateVerdictBody ?? gatedItem,
             source: writeSource,
             // [#6285] The write's organization partition. It was always here;
             // it simply never travelled to the gate, which is the whole reason

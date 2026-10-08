@@ -219,8 +219,15 @@ describe('what stays accepted (lit controls)', () => {
   });
 
   it('CONTROL: key membership is not this arm\'s — an undeclared key and a tombstoned one', () => {
-    expect(flowNodeConfigRefusals('http', { ...VALID.http, bogusKey: 1 })).toEqual([]);
-    expect(flowNodeConfigRefusals('screen', { fields: [{ name: 'qty', visible: 'x' }] })).toEqual([]);
+    // [#21982] An undeclared key on these builtins draws the KEY arm's one
+    // refusal at its location; this arm adds nothing beside it.
+    for (const [type, config, key] of [
+      ['http', { ...VALID.http, bogusKey: 1 }, 'bogusKey'],
+      ['screen', { fields: [{ name: 'qty', visible: 'x' }] }, 'fields[0].visible'],
+    ] as const) {
+      expect(flowNodeConfigRefusals(type, config).map(({ code, path }) => ({ code, path })), type)
+        .toEqual([{ code: 'node-config-refused-by-contract', path: key }]);
+    }
     expect(flowNodeConfigRefusals('script', { ...VALID.script, actionType: 'email' })).toEqual([]);
     expect(flowNodeConfigRefusals('try_catch', { ...VALID.try_catch, retry: { retryDelayMs: 500 } })).toEqual([]);
     // CONTROL: the contracts refuse all four — the arm holds back, the contract does not.
