@@ -23,8 +23,8 @@
  * `runStackExpressionPasses` admits this pass on an object write, at the
  * build's own position in the walk, so the door's finding IS the build's
  * finding — rule, location, message and hint. The other object-borne passes
- * (the field-rule slots, option `visibleWhen`, the object's own action
- * predicates) stay fenced; that pin is in
+ * joined later (the field-rule slots in pass 2, option `visibleWhen` in pass
+ * 3) or stay fenced (the object's own action predicates); that pin is in
  * `runtime-gate.object-formula-writes.test.ts`.
  *
  * The protocol-level half — the same verdict through the real `saveMetaItem`
