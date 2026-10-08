@@ -292,19 +292,20 @@ describe('findModuleDocBlock — #13263: an import injected between a block and 
   });
 
   it('rejects it across a MULTI-LINE import — continuation lines are plumbing too', () => {
-    // `data/document.zod.ts` and `kernel/execution-context.zod.ts` reach their
-    // declaration only over a wrapped import's `Foo,` and `} from '…';` lines.
+    // `kernel/execution-context.zod.ts` reaches its declaration only over a
+    // wrapped import's `Foo,` and `} from '…';` lines (and so did the since-retired
+    // `data/document.zod.ts`).
     const source = [
       "import { z } from 'zod';",
       '',
       '/**',
-      ' * Document Version Schema',
+      ' * Execution Context Schema',
       ' */',
       'import {',
       '  MetadataProtectionFields,',
       '  ProtectionSchema,',
       "} from '../kernel/metadata-protection.zod';",
-      'export const DocumentVersionSchema = z.object({});',
+      'export const ExecutionContextSchema = z.object({});',
       '',
     ].join('\n');
     expect(findModuleDocBlock(source)).toBeNull();
