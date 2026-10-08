@@ -46,6 +46,7 @@
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
+    "@objectstack/service-settings": "workspace:*",
     "@types/node": "^26.6.3",
     "hono": "^4.13.9",
     "tsx": "^4.23.15",

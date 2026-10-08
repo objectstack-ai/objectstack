@@ -27,10 +27,10 @@
  * caller better-auth does not authorize, no matter who the write would be
  * credited to.
  *
- * Harness note: `bootStack` disables the default-org bootstrap and installs no
- * audit plugin, so this file mints the Default Organization itself (system
- * context — exactly what the bootstrap would do) and adds `AuditPlugin`, which
- * is what turns `trackHistory` into rows.
+ * Harness note: `bootStack` boots the production `single` shape, so the
+ * Default Organization exists from the boot (ADR-0131 D3); it installs no audit
+ * plugin, so this file adds `AuditPlugin`, which is what turns `trackHistory`
+ * into rows.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -118,11 +118,11 @@ describe('#4586: the better-auth actor reaches sys_member history and the grant'
     adminToken = await stack.signIn(); // the seeded dev admin
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 
-    const org = await ql.insert(
-      'sys_organization',
-      { name: 'Default Organization', slug: 'default' },
-      { context: SYSTEM_CTX },
-    );
+    // [ADR-0131 D3] The Default Organization is a boot invariant under
+    // `single`: the boot created it before the seeds loaded. Read it — minting
+    // a second `slug: 'default'` row is refused as a duplicate.
+    const [org] = await findRows(ql, 'sys_organization', { slug: 'default' }, 1);
+    expect(org?.id, 'the boot created the Default Organization').toBeTruthy();
     orgId = String(org.id);
 
     // A second org, so invite-accept has somewhere to add a membership that the
@@ -134,8 +134,8 @@ describe('#4586: the better-auth actor reaches sys_member history and the grant'
     );
     partnerOrgId = String(partner.id);
 
-    // The dev admin predates the org rows — give them the owner membership the
-    // single-org bootstrap would have, in both orgs.
+    // The owner bind made the dev admin the Default Organization's owner; this
+    // re-asserts it and adds the partner org's owner membership.
     const [adminUser] = await findRows(ql, 'sys_user', { email: 'admin@objectos.ai' }, 1);
     adminUserId = String(adminUser.id);
     const adminMembers = await findRows(ql, 'sys_member', { user_id: adminUserId }, 5);

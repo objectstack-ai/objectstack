@@ -64,11 +64,19 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * ONLY read refusals whose log frames may be withheld here.
  *
  * `beforeEach` boots a kernel with no datasource and attaches sqlite late, then
- * syncs its objects. Every approval decision below probes `sys_organization`
- * (`ObjectQL.probeInstallOrganizations`) and `sys_approval_delegation`, which
- * `ApprovalService.lookupActiveDelegation` reads best-effort on each decision.
- * Both are fail-soft, so the reads are EXPECTED — but the driver and the engine
- * each log the fault on the way out.
+ * syncs its objects. Every approval decision below reads
+ * `sys_approval_delegation`, which `ApprovalService.lookupActiveDelegation`
+ * reads best-effort on each decision. It is fail-soft, so the read is EXPECTED
+ * — but the driver and the engine each log the fault on the way out.
+ *
+ * ⚠️ [ADR-0131 D3] `sys_organization` USED TO BE on this list, as the second
+ * expected refusal (`ObjectQL.probeInstallOrganizations`). It is not any more:
+ * under `single` the Default Organization exists from the boot (the auth
+ * plugin's boot invariant), and a system insert into a tenant-scoped object in
+ * a composition that registers the organization object is refused when the
+ * install holds none (D9). So this fixture now provisions `sys_organization`
+ * and seeds the Default Organization, as the production boot does — and, by
+ * this channel's own contract, a table that started resolving leaves the list.
  *
  * ⚠️ [#17985] The five authz tables `resolveUserAuthzGrants` reads USED TO BE on
  * this list. They are not any more, because this fixture now provisions them
@@ -83,8 +91,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * before this fixture provisioned anything, a run emitted 25 `refused a read on
  * '<t>'` driver lines and 25 matching engine frames — sys_user 5 / sys_member 4
  * / sys_position 4 / sys_user_position 4 / sys_user_permission_set 4 /
- * sys_organization 2 / sys_approval_delegation 2. The 21 authz ones are gone;
- * the remaining two channels are the ones declared below.
+ * sys_organization 2 / sys_approval_delegation 2. The 21 authz ones are gone,
+ * and so are the two `sys_organization` ones (ADR-0131 D3, above); the one
+ * remaining channel is the one declared below.
  *
  * ## Why a capture instead of the blanket `silent` this replaces
  *
@@ -98,7 +107,6 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * happen. A capture nobody asserts is a mute.
  */
 const EXPECTED_ABSENT_PROBE_TABLES = [
-  'sys_organization',
   'sys_approval_delegation',
 ] as const;
 
@@ -311,20 +319,36 @@ describe('an approval decision cascades as the deciding user (#3783)', () => {
     for (const o of authzResolverObjects) {
       objectql.registry.registerObject(o.def as any, o.owner);
     }
-    // Real DDL for all four objects — including the three sys_approval_* tables
-    // the ApprovalService writes through.
-    await objectql.syncSchemas();
-    // [#21516] The two probes this fixture EXPECTS to be refused (above) are
-    // registered here, AFTER the DDL, so they stay unprovisioned. The engine
-    // refuses a name its registry does not hold before any driver, so the
-    // single-tenant org probe and the delegation lookup reach the driver — and
-    // its missing-table refusal — only through registered objects, as they do
-    // in production (the approvals plugin registers `sys_approval_delegation`).
-    objectql.registry.registerObject(SysApprovalDelegation as any, 'approvals-test', 'approvals-test');
+    // [ADR-0131 D3] The organization object, provisioned: the production
+    // `single` boot holds it and its Default Organization row (seeded below).
+    // Spelled locally with the columns the boot invariant writes, for the same
+    // no-dependency-edge reason as `authzResolverObjects`.
     objectql.registry.registerObject(
-      { name: 'sys_organization', label: 'Organization', fields: { name: { type: 'text', label: 'Name' } } } as any,
-      'approvals-test',
+      {
+        name: 'sys_organization',
+        label: 'Organization',
+        fields: { name: { type: 'text', label: 'Name' }, slug: { type: 'text', label: 'Slug' } },
+      } as any,
+      '@objectstack/plugin-auth',
     );
+    // Real DDL for every object registered so far — including the three
+    // sys_approval_* tables the ApprovalService writes through.
+    await objectql.syncSchemas();
+    // [ADR-0131 D3] The Default Organization the auth plugin's boot invariant
+    // guarantees before any seed or request: the one organization every system
+    // insert below derives (D9), as it does in production.
+    await data.insert(
+      'sys_organization',
+      { id: 'org_default', name: 'Default Organization', slug: 'default' },
+      { context: { isSystem: true } },
+    );
+    // [#21516] The probe this fixture EXPECTS to be refused (above) is
+    // registered here, AFTER the DDL, so it stays unprovisioned. The engine
+    // refuses a name its registry does not hold before any driver, so the
+    // delegation lookup reaches the driver — and its missing-table refusal —
+    // only through a registered object, as it does in production (the
+    // approvals plugin registers `sys_approval_delegation`).
+    objectql.registry.registerObject(SysApprovalDelegation as any, 'approvals-test', 'approvals-test');
     automation.registerFlow('on_approved', onApprovedFlow as any);
 
     svc = new ApprovalService({ engine: objectql });

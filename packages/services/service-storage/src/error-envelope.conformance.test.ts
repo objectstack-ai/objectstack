@@ -248,6 +248,22 @@ describe('storage error envelope (#3675)', () => {
       },
     },
     {
+      // #22283: the saved `max_upload_mb`, enforced at the upload doors — the
+      // standard member the platform derives for a 413 (no 413 member exists,
+      // and `PAYLOAD_TOO_LARGE` is registered under another package).
+      name: 'an upload declared over the saved max_upload_mb',
+      status: 413,
+      code: 'VALIDATION_ERROR',
+      run: async () => {
+        const routes = mount(await tmpAdapter(), new StorageMetadataStore(null), {
+          limitsSnapshot: () => ({ maxUploadMb: { value: 1, authored: true } }),
+        });
+        return drive(routes, 'POST', `${BASE}/upload/presigned`, {
+          body: { filename: 'big.bin', mimeType: 'application/octet-stream', size: 1024 * 1024 + 1 },
+        });
+      },
+    },
+    {
       name: 'anonymous upload when a session resolver is wired',
       status: 401,
       code: 'AUTH_REQUIRED',
