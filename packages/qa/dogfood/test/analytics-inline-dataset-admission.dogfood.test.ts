@@ -21,10 +21,11 @@
 //
 // ## Why this file boots TWICE
 //
-// The two drivers reach the analytics service through DIFFERENT strategies —
-// `NativeSQLStrategy` on `sqlite-wasm`, `ObjectQLStrategy` on `memory` (which
-// cannot run raw SQL) — and the defect was precisely that the two disagreed. A
-// gate written against one driver cannot see that class of divergence at all,
+// The two boots reach the analytics service through DIFFERENT strategies —
+// `NativeSQLStrategy`, and `ObjectQLStrategy` (the leg that withholds native
+// SQL; see `DRIVERS` for why that leg is no longer the `memory` driver) — and
+// the defect was precisely that the two disagreed. A gate written against one
+// strategy cannot see that class of divergence at all,
 // which is how it shipped. Every case below therefore runs from one table
 // against both boots, and the verdicts are compared to `/data`'s rather than to
 // a hard-coded expectation: the assertion is AGREEMENT, so it stays honest if
@@ -40,6 +41,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { AnalyticsServicePlugin } from '@objectstack/service-analytics';
 import {
   admissionFixtureStack,
   admissionFixtureSecurity,
@@ -71,7 +73,31 @@ const inlineGrouped = (object: string) => ({
 /** `403` / `200` / `<other status>` — the admission verdict, nothing finer. */
 type Verdict = string;
 
-const DRIVERS = ['sqlite-wasm', 'memory'] as const;
+/**
+ * [ADR-0131 C1] The two analytics strategies, each on the SQL in-memory driver
+ * (`sqlite-wasm`, `:memory:`): the `sqlite-wasm` leg lets the analytics plugin
+ * take its NativeSQL strategy, and the `objectql-strategy` leg withholds the
+ * native-SQL capability (`queryCapabilities`) so the ObjectQL strategy answers.
+ * That leg used to be the in-memory driver, whose only route to the ObjectQL
+ * strategy was having no SQL. Under `single` every session now carries the
+ * Default Organization, and `driver-memory` refuses a tenant-scoped read (503)
+ * until ADR-0131 D8 gives `single` no read predicate.
+ * Restart-when: #15212 closed — add the `memory` leg back then.
+ */
+const DRIVERS = ['sqlite-wasm', 'objectql-strategy'] as const;
+
+/** The analytics plugin a leg boots; the ObjectQL-strategy leg withholds native SQL. */
+function analyticsFor(
+  leg: (typeof DRIVERS)[number],
+  options: ConstructorParameters<typeof AnalyticsServicePlugin>[0] = {},
+): AnalyticsServicePlugin {
+  return new AnalyticsServicePlugin({
+    ...options,
+    ...(leg === 'objectql-strategy'
+      ? { queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }) }
+      : {}),
+  });
+}
 
 interface Boot {
   stack: VerifyStack;
@@ -84,7 +110,8 @@ const boots = new Map<string, Boot>();
 async function bootFor(driver: (typeof DRIVERS)[number]): Promise<Boot> {
   const stack = await bootStack(admissionFixtureStack as never, {
     security: admissionFixtureSecurity(),
-    databaseDriver: driver,
+    databaseDriver: 'sqlite-wasm',
+    analytics: analyticsFor(driver),
   });
   const adminToken = await stack.signIn();
   const memberToken = await stack.signUp(`admission-${driver}@verify.test`);

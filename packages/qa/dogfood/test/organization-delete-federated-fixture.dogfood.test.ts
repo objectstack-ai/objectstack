@@ -35,9 +35,14 @@
  *  - the field that probe named is the platform's injected anchor
  *    (`resolveInjectedColumnProvenance` answers `injected-unprovisioned`).
  *
- * Booted with `orgContext`, the harness's switch for the real single-org
- * default-organization bootstrap: it creates the organization and seats the
- * admin as its owner, which is what lets better-auth delete it.
+ * Booted with `orgContext`, which asserts the admin is seated in the Default
+ * Organization. The organization deleted is a SECOND one the admin owns, not
+ * the Default Organization: under `single` the Default Organization owns every
+ * row the deployment wrote, the showcase's seed included (ADR-0131 D3), so
+ * deleting it runs those rows' own delete behaviour — a different question
+ * from the federated anchor this file pins. The cascade scan probes every
+ * reference to `sys_organization` on ANY organization's delete, so the
+ * second organization reaches the same scan with nothing else attached.
  *
  * The working directory is a temporary one. The showcase's external datasource
  * and its fixture both name a cwd-relative SQLite file, so this file's remote
@@ -85,10 +90,14 @@ describe('[#21910] an organization delete with the showcase federated fixture pr
     token = await stack.signIn();
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 
-    const [org] = await findRows(ql, 'sys_organization', { slug: 'default' }, 1);
-    expect(org, 'PREMISE: the bootstrap created the default organization').toBeTruthy();
+    const [defaultOrg] = await findRows(ql, 'sys_organization', { slug: 'default' }, 1);
+    expect(defaultOrg, 'PREMISE: the boot created the Default Organization').toBeTruthy();
+    // The organization this file deletes: a second one, owned by the admin,
+    // that no row of the deployment belongs to (see the header).
+    const org = await ql.insert('sys_organization', { name: 'Org 21910', slug: 'org-21910' }, { context: SYSTEM_CTX });
     orgId = String(org.id);
     const [admin] = await findRows(ql, 'sys_user', { email: 'admin@objectos.ai' }, 1);
+    await ql.insert('sys_member', { user_id: String(admin?.id), organization_id: orgId, role: 'owner' }, { context: SYSTEM_CTX });
     const seats = await findRows(ql, 'sys_member', { user_id: String(admin?.id), organization_id: orgId }, 5);
     expect(seats.map((m) => m.role), 'PREMISE: the admin owns the organization').toEqual(['owner']);
   }, 240_000);

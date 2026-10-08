@@ -211,26 +211,29 @@ describe('#8844 system-context writes — the runtime autonumber fork', () => {
     expect(await readSequences(driver)).toEqual([{ tenant: SECOND_ORG_ID, lastValue: 1 }]);
   });
 
-  it('[first boot] before any organization exists nothing is refused, and #8686 still adopts the rows', async () => {
-    // Seeds and boot-time system writes land before the admin signs up, so there
-    // is no organization to derive — and no second partition to fork away from
-    // either. Refusing here would refuse first boot itself. This is the case
-    // that keeps #8844's refusal from swallowing #8686's handoff seam.
+  it('[ADR-0131 D9] with NO organization the system write is REFUSED — no row, no `__global__` counter', async () => {
+    // Before ADR-0131 this was "first boot": seeds and boot-time system writes
+    // landed before the admin signed up and created the organization, so a
+    // refusal here would have refused first boot itself. The Default
+    // Organization is now a boot invariant under `single` (D3) — it exists
+    // before anything writes — so an install that registers the organization
+    // object and holds none of it has no owner to derive, and D9 refuses.
     const { driver, engine } = await bootInstall();
 
-    await systemWrite(engine, 'boot-time');
-    expect(await countUntenanted(driver)).toBe(1);
-    expect(await readSequences(driver)).toEqual([{ tenant: GLOBAL_TENANT, lastValue: 1 }]);
+    const refusal = await systemWrite(engine, 'no owner').catch((e) => e);
+    expect(refusal.code).toBe('ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED');
+    expect(refusal.status).toBe(500);
+    expect(refusal.reason).toBe('no-organization');
+    // Refused before the driver: no row, and no `__global__` counter minted.
+    expect(await countUntenanted(driver)).toBe(0);
+    expect(await readSequences(driver)).toEqual([]);
 
-    // The sign-up arrives; from here on the runtime producer is stamped, which
-    // is what stops the split REOPENING after #8686's backfill has closed it.
+    // DISCRIMINATING CONTROL: the organization exists, and the identical write
+    // is derived and stamped — one counter, under the organization.
     await createOrganization(engine);
-    await systemWrite(engine, 'after sign-up');
-    expect(await countUntenanted(driver)).toBe(1); // still just the boot-time row
-    expect(await readSequences(driver)).toEqual([
-      { tenant: GLOBAL_TENANT, lastValue: 1 },
-      { tenant: ORG_ID, lastValue: 1 },
-    ]);
+    expect((await systemWrite(engine, 'owned')).document_no).toBe('WI-00001');
+    expect(await countUntenanted(driver)).toBe(0);
+    expect(await readSequences(driver)).toEqual([{ tenant: ORG_ID, lastValue: 1 }]);
   });
 
   it('[#8686 regression] the repaired install no longer re-splits on the next system write', async () => {

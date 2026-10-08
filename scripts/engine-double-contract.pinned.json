@@ -2742,6 +2742,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/auth-plugin.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/auth-settings-refusal-isolation.test.ts",
       "verb": "findOne",
       "pinned": 1

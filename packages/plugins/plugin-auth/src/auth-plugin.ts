@@ -43,6 +43,7 @@ import {
   type AuthManagerOptions,
 } from './auth-manager.js';
 import { isDefaultOrganizationBootstrapTrigger } from './ensure-default-organization.js';
+import { ensureDefaultOrganizationExists } from './default-organization-invariant.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
 import { withSystemContext } from './objectql-adapter.js';
@@ -188,20 +189,25 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    */
 
   /**
-   * The single-org default-organization bootstrap (a pre-repo decision whose
+   * The single-org default-organization OWNER BIND (a pre-repo decision whose
    * old label collides with this repo's ADR series — see the citation note
-   * under ADR-0093 D9; the membership guarantee it backs is D9). In single-org
-   * mode (`OS_MULTI_ORG_ENABLED` unset/false) nothing else ever creates an
-   * organization, so sessions carry no `activeOrganizationId` and better-auth
-   * `organization/invite-member` has no org to resolve — i.e. no way to add a
-   * user at all. When enabled (default), the plugin idempotently creates the
-   * `Default Organization` (slug `default`) and binds the platform admin as
-   * `owner`, on `kernel:ready` and after every write matched by
-   * `isDefaultOrganizationBootstrapTrigger` (a `sys_user` insert or
-   * email/email_verified update — the config-anchor trigger set — plus the
-   * legacy `sys_user_permission_set` insert that `single`-posture first-user
-   * promotion still writes). Inert in multi-org mode — the enterprise
-   * organizations package owns the bootstrap there.
+   * under ADR-0093 D9; the membership guarantee it backs is D9). When enabled
+   * (default), the plugin binds the platform admin as `owner` of the
+   * `Default Organization` (slug `default`) — or promotes the `member` row the
+   * membership reconciler gave them there — on `kernel:ready` and after every
+   * write matched by `isDefaultOrganizationBootstrapTrigger` (a `sys_user`
+   * insert or email/email_verified update — the config-anchor trigger set —
+   * plus the legacy `sys_user_permission_set` insert that `single`-posture
+   * first-user promotion still writes), recreating the organization if it went
+   * missing. Inert in multi-org mode — the enterprise organizations package
+   * owns the bootstrap there.
+   *
+   * ⚠️ BREAKING (ADR-0131 D3): `false` no longer means "no organization".
+   * Under the `single` posture the Default Organization is a boot invariant —
+   * created in `start()` whatever this option says, before the application
+   * seeds load, and a failure to create it fails the boot — because every row
+   * has an owner and `single` derives it from that organization. `false` now
+   * turns off only the owner bind.
    * @default true
    */
   autoDefaultOrganization?: boolean;
@@ -362,6 +368,8 @@ export class AuthPlugin implements Plugin {
   private authManager: AuthManager | null = null;
   /** ADR-0093 D4 — the tenancy service registered in init(); reused at kernel:ready. */
   private tenancy: TenancyService | null = null;
+  /** [ADR-0131 D3] Whether `start()` created the Default Organization (a fresh install). */
+  private defaultOrganizationCreatedAtBoot = false;
   private configuredSocialProviders: SocialProviderConfig | undefined;
   // ADR-0092 D6 — the EFFECTIVE better-auth secondaryStorage (host-supplied or
   // the kernel-cache adapter wired in init). The identity write guard's
@@ -723,6 +731,41 @@ export class AuthPlugin implements Plugin {
 
     if (!this.authManager) {
       throw new Error('Auth manager not initialized');
+    }
+
+    // [ADR-0131 D3] The Default Organization is a BOOT INVARIANT under the
+    // `single` posture: it owns every row, so it exists before the application
+    // seeds load (every `AppPlugin` declares this plugin in its
+    // `optionalDependencies`, so the kernel starts it first) and before the
+    // server accepts a request (`kernel:listening` follows every `start()`).
+    // A failure THROWS and fails the boot — never warn-only.
+    //
+    // Judged on the posture IN FORCE (`tenancy.posture`), the same judge
+    // `AppPlugin` uses to decide on its inline seed: a degraded walled request
+    // behaves as `single` and seeds inline, so it needs the owner too.
+    //
+    // ⛔ Not gated on `autoDefaultOrganization`. That option governs the
+    // platform admin's OWNER BIND (below, on `kernel:ready`); whether the
+    // organization exists is not an onboarding convenience any more — under
+    // `single` no row is org-less (ADR-0131 D11).
+    if (this.tenancy?.posture === 'single') {
+      let ql: IDataEngine | undefined;
+      try { ql = ctx.getService<IDataEngine>('objectql'); } catch { ql = undefined; }
+      // An engine that can neither read nor write (mock mode — the same guard
+      // `ensureDefaultOrganization` opens with) writes no row that needs an
+      // owner. A real composition always has one: `objectql` is this plugin's
+      // hard dependency.
+      if (ql && typeof ql.find === 'function' && typeof ql.insert === 'function') {
+        const invariant = await ensureDefaultOrganizationExists(ql, { logger: ctx.logger });
+        if (invariant.created) this.defaultOrganizationCreatedAtBoot = true;
+        if (invariant.ambiguous) {
+          ctx.logger.warn(
+            `[auth] the 'single' tenancy posture holds ${invariant.ambiguous.organizationCount} organizations and none `
+              + 'is the Default Organization (slug \'default\'), so no owner is derivable: system writes and seed rows '
+              + 'that need one are refused (ADR-0131 D9). The tenancy organization census names the remedies.',
+          );
+        }
+      }
     }
 
     // [#8009] Move any provider row still holding a CLEARTEXT OIDC client
@@ -1168,7 +1211,12 @@ export class AuthPlugin implements Plugin {
       // `@objectstack/organizations` calls too): recorded in the
       // `sys_migration` ledger and latched in-process, after which this hook
       // still recreates a missing default organization but binds nobody.
-      const ensureOnce = createEnsureDefaultOrganizationOnce({ logger: ctx.logger });
+      const ensureOnce = createEnsureDefaultOrganizationOnce({
+        logger: ctx.logger,
+        // [ADR-0131 D3] The organization `start()` created is this install's
+        // fresh one; a ledger-less kernel may bind its owner (see the option).
+        organizationCreatedByThisProcess: () => this.defaultOrganizationCreatedAtBoot,
+      });
       const runEnsure = async () => {
         try {
           const ql = ctx.getService<IDataEngine>('objectql');
