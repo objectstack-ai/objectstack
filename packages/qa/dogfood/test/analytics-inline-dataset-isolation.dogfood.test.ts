@@ -111,7 +111,31 @@ const inlineDataset = (name: string, object: string) => ({
   measures: [{ name: 'inline_total', label: 'Inline total', aggregate: 'count' }],
 });
 
-const DRIVERS = ['sqlite-wasm', 'memory'] as const;
+/**
+ * [ADR-0131 C1] The two analytics strategies, each on the SQL in-memory driver
+ * (`sqlite-wasm`, `:memory:`): the `sqlite-wasm` leg lets the analytics plugin
+ * take its NativeSQL strategy, and the `objectql-strategy` leg withholds the
+ * native-SQL capability (`queryCapabilities`) so the ObjectQL strategy answers.
+ * That leg used to be the in-memory driver, whose only route to the ObjectQL
+ * strategy was having no SQL. Under `single` every session now carries the
+ * Default Organization, and `driver-memory` refuses a tenant-scoped read (503)
+ * until ADR-0131 D8 gives `single` no read predicate.
+ * Restart-when: #15212 closed — add the `memory` leg back then.
+ */
+const DRIVERS = ['sqlite-wasm', 'objectql-strategy'] as const;
+
+/** The analytics plugin a leg boots; the ObjectQL-strategy leg withholds native SQL. */
+function analyticsFor(
+  leg: (typeof DRIVERS)[number],
+  options: ConstructorParameters<typeof AnalyticsServicePlugin>[0] = {},
+): AnalyticsServicePlugin {
+  return new AnalyticsServicePlugin({
+    ...options,
+    ...(leg === 'objectql-strategy'
+      ? { queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }) }
+      : {}),
+  });
+}
 
 interface Boot {
   stack: VerifyStack;
@@ -161,8 +185,8 @@ function countOf(body: unknown, measure: string): number {
 async function bootFor(driver: (typeof DRIVERS)[number]): Promise<Boot> {
   const stack = await bootStack(isolationStack as never, {
     security: admissionFixtureSecurity(),
-    databaseDriver: driver,
-    analytics: new AnalyticsServicePlugin({ cubes: [OPEN_SUMMARY, HIDDEN_SUMMARY] }),
+    databaseDriver: 'sqlite-wasm',
+    analytics: analyticsFor(driver, { cubes: [OPEN_SUMMARY, HIDDEN_SUMMARY] }),
   });
   const adminToken = await stack.signIn();
   const tokenA = await stack.signUp(`isolation-a-${driver}@verify.test`);

@@ -46,6 +46,7 @@
 import { describe, it, expect } from 'vitest';
 import { pluralToSingular } from '@objectstack/spec/shared';
 import { ObjectQL } from './engine';
+import { NAMESPACE_CONFLICT_CODE } from './registry';
 
 /**
  * The exact read `bootstrapDeclaredCapabilities` performs on the engine, kept
@@ -112,14 +113,27 @@ describe('registerApp — declared capabilities carry registry provenance (#5870
     expect(cap?._provenance).toBe(permission?._provenance);
   });
 
-  it('keeps two packages\' same-named capabilities attributed to their own owner', () => {
+  // This case used to pin two packages' same-named capabilities COEXISTING,
+  // each attributed to its own owner (ADR-0048 §3.4's coexistence). The
+  // maintainer's ruling Q4 = A on #15196 takes the security catalog out of
+  // §3.4: one capability name, one holder per deployment — the second package
+  // is refused at registration, and the first keeps its attribution. The
+  // refusal is pinned door by door in `registry-security-catalog-namespace.test.ts`.
+  it('refuses a second package\'s same-named capability; the first keeps its attribution', () => {
     const engine = new ObjectQL();
     engine.registerApp({ id: 'com.acme.crm', capabilities: [{ name: 'export_data', label: 'CRM Export' }] });
-    engine.registerApp({ id: 'com.acme.hr', capabilities: [{ name: 'export_data', label: 'HR Export' }] });
+    let refusal: (Error & { code?: string; status?: number; existingHolder?: unknown }) | undefined;
+    try {
+      engine.registerApp({ id: 'com.acme.hr', capabilities: [{ name: 'export_data', label: 'HR Export' }] });
+    } catch (e) {
+      refusal = e as typeof refusal;
+    }
+    expect(refusal?.code).toBe(NAMESPACE_CONFLICT_CODE);
+    expect(refusal?.status).toBe(422);
+    expect(refusal?.existingHolder).toEqual({ kind: 'package', packageId: 'com.acme.crm' });
 
     expect(engine.registry.getItem<any>('capability', 'export_data', 'com.acme.crm')?.label).toBe('CRM Export');
-    expect(engine.registry.getItem<any>('capability', 'export_data', 'com.acme.hr')?.label).toBe('HR Export');
-    expect(readDeclaredShape(engine, 'capability')).toHaveLength(2);
+    expect(readDeclaredShape(engine, 'capability').map((c) => c._packageId)).toEqual(['com.acme.crm']);
   });
 
   it('stamps capabilities declared by a NESTED plugin too (the second seam)', () => {

@@ -58,14 +58,18 @@ describe('#15784: a membership that ends takes the session\'s claim on that orga
     adminToken = await stack.signIn();
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 
-    const org = await ql.insert('sys_organization', { name: 'Default Organization', slug: 'default' }, { context: SYSTEM_CTX });
+    // [ADR-0131 D3] The Default Organization is a boot invariant under
+    // `single`: the boot created it before the seeds loaded. Read it — minting
+    // a second `slug: 'default'` row is refused as a duplicate.
+    const [org] = await findRows(ql, 'sys_organization', { slug: 'default' }, 1);
+    expect(org?.id, 'the boot created the Default Organization').toBeTruthy();
     orgId = String(org.id);
     const partner = await ql.insert('sys_organization', { name: 'Partner Organization', slug: 'partner' }, { context: SYSTEM_CTX });
     partnerOrgId = String(partner.id);
 
-    // The dev admin predates the org rows — give them the owner membership the
-    // single-org bootstrap would have, in both orgs, so remove-member is
-    // authorized in either.
+    // The owner bind made the dev admin the Default Organization's owner; this
+    // re-asserts it and adds the partner org's owner membership, so remove-member
+    // is authorized in either.
     const [adminUser] = await findRows(ql, 'sys_user', { email: 'admin@objectos.ai' }, 1);
     const adminUserId = String(adminUser.id);
     const adminMembers = await findRows(ql, 'sys_member', { user_id: adminUserId }, 5);

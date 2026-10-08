@@ -5737,7 +5737,9 @@ export class ObjectQL implements IObjectQLEngine {
    * [#9261] "The probe found no organizations" and "the probe could not run"
    * are different facts (ADR-0110 D3), and this returns the FIRST one only when
    * it measured it. The `catch {}` this replaces answered both with `[]`, which
-   * `resolveSystemWriteOrganization` reads as `no-organization-yet` — so one
+   * `resolveSystemWriteOrganization` then read as "no organization yet" (a
+   * branch that landed the row; since ADR-0131 D9 a registered-but-empty
+   * organization object is refused instead) — so one
    * transient failure silently skipped both halves of the #8844 ruling: the
    * single-organization stamp (rows land untenanted and fork exactly the
    * counter the ruling exists to protect) and the multi-organization REFUSAL
@@ -5820,8 +5822,9 @@ export class ObjectQL implements IObjectQLEngine {
    * Returns the organization id to thread as `DriverOptions.tenantId` (the same
    * knob a session write sets, so the driver stamps the column and the counter
    * scopes by it), or `undefined` when there is nothing to resolve. Throws
-   * {@link SystemWriteOrganizationRequiredError} on the multi-organization
-   * branch.
+   * {@link SystemWriteOrganizationRequiredError} wherever no owner is
+   * derivable (ADR-0131 D9): a wall, several organizations, or — under
+   * `single`, in a composition that registers the organization object — none.
    *
    * Called AFTER the beforeInsert hooks on purpose: a hook that stamps the
    * organization itself has carried it, and must not then be refused for a
@@ -5865,12 +5868,18 @@ export class ObjectQL implements IObjectQLEngine {
     if (rows.every((row) => carriesOrganization(row?.[tenantField]))) return undefined;
 
     const posture = this.resolveEnginePosture();
+    // [ADR-0131 D9] Zero organizations is refused under `single` only where
+    // the composition registers the organization object; the composition that
+    // registers none keeps today's branch (`no-organization-object`). The
+    // probe itself is unchanged and answers `[]` for both — this is the one
+    // fact that tells them apart, read from the same registry the probe reads.
     const decision = await resolveSystemWriteOrganization({
       posture,
       probeOrganizations: () => this.probeInstallOrganizations(),
+      organizationObjectRegistered: !!this._registry.getObject(ORGANIZATION_OBJECT),
     });
     if (decision.kind === 'derived') return decision.organizationId;
-    if (decision.kind === 'no-organization-yet') return undefined;
+    if (decision.kind === 'no-organization-object') return undefined;
     throw new SystemWriteOrganizationRequiredError(
       object,
       posture,
