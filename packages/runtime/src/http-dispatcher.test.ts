@@ -2115,7 +2115,11 @@ describe('HttpDispatcher', () => {
             const insert = vi.fn().mockImplementation(async (_obj: string, rec: any) => (
                 Array.isArray(rec) ? rec.map((r) => ({ id: `id_${r.name}` })) : { id: `id_${rec.name}` }
             ));
-            const find = vi.fn().mockResolvedValue([]); // no existing rows → all insert
+            // No existing rows → all insert. [ADR-0131 D3] The install holds its
+            // Default Organization from boot, and the un-pinned publish stamps
+            // every seed row with it (with none of it, D9 refuses the rows).
+            const find = vi.fn().mockImplementation(async (obj: string) =>
+                (obj === 'sys_organization' ? [{ id: 'org_default' }] : []));
             (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
                 if (name === 'protocol') return Promise.resolve({ publishPackageDrafts, getMetaItem });
                 if (name === 'objectql') return Promise.resolve({ insert, find, update: vi.fn(), registry: { getAllPackages: vi.fn().mockReturnValue([]) } });

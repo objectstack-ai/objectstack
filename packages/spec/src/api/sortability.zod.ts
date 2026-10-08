@@ -31,12 +31,15 @@
  * `assertSortFieldsExist` (`@objectstack/metadata-protocol`, #6994) and
  * `assertOrderByIsMaterializable` (`@objectstack/objectql`, #7095) — actually
  * do with an `orderBy` over the name. Three verdicts are REFUSALS, and one
- * measured degradation is not refused; the projection covers all four:
+ * measured degradation is not refused; the projection covers all four, and
+ * one more absence that is a fact about the CALLER, not the column (5.):
  *
  * 1. **Unknown name** — not a field of the object. Refused (`400
  *    INVALID_SORT`). Encoded as ABSENCE: the projection's domain is exactly
- *    the served field map plus the always-provisioned `id`, so a name with no
- *    entry has no platform sort behind it and gets no affordance.
+ *    the served field map plus the always-provisioned `id`, less any field
+ *    the caller's own field permission withholds (5. — which removes nothing
+ *    for every caller but a D4-exempt one), so a name with no entry has no
+ *    platform sort behind it and gets no affordance.
  * 2. **Dotted path** (`account.name`) — crosses into a related record no
  *    driver joins for. Refused. Encoded as absence too: entries are keyed by
  *    whole-column field names, and a dotted name can never appear as one.
@@ -57,6 +60,15 @@
  *    so the entry stays `sortable: true` — the enforcement fact — and carries
  *    `caveat: 'unprovisioned-anchor'` so a consumer can choose a conservative
  *    affordance without re-deriving federation from the document.
+ * 5. **Withheld by the caller's field permission** (ADR-0106 D1/D4, #22250) —
+ *    a field the caller's own field-level security marks unreadable. Refused
+ *    for that caller by the data route's field guard (`403`: filtering or
+ *    sorting on a hidden field would leak its values). Encoded as absence: no
+ *    entry, whatever the caller's class — including a caller exempt from the
+ *    object-schema mask (ADR-0106 D4: `manage_metadata`, `studio.access`,
+ *    `setup.access`), who IS served the field in `item.fields` because
+ *    authoring needs the whole definition. For every other caller the mask
+ *    has already removed the field from `item`, so this is case 1's absence.
  *
  * ## Considered and deliberately NOT members
  *
@@ -153,9 +165,13 @@ export type FieldSortability = z.input<typeof FieldSortabilitySchema>;
 export const ObjectSortabilitySchema = lazySchema(() => z.object({
   fields: z.record(z.string(), FieldSortabilitySchema).describe(
     'Verdict per sortable-addressable column, keyed by field name. The domain '
-    + 'is the served field map plus the always-provisioned `id`; a name absent '
-    + 'from this map (an unknown field, a dotted path, an unprovisioned audit '
-    + 'column) has no platform sort behind it and must get no sort affordance.',
+    + 'is the served field map plus the always-provisioned `id`, less any field '
+    + 'the caller\'s own field permission withholds: a caller exempt from the '
+    + 'object-schema mask (ADR-0106 D4) is served such fields in `item` and gets '
+    + 'no entry for them; for every other caller the served map already excludes '
+    + 'them. A name absent from this map (an unknown field, a dotted path, an '
+    + 'unprovisioned audit column, a field the caller may not read) has no '
+    + 'platform sort behind it and must get no sort affordance.',
   ),
 }));
 
@@ -191,7 +207,10 @@ function fieldEntriesOf(doc: unknown): Array<[string, SearchFieldMeta | undefine
  * every derivation in `data/injected-system-column-provenance.ts` carries), so
  * the REST serving layer can run it on the exact document it is about to serve
  * — post-masking, post-injection — and the projection's domain equals what the
- * caller can see. Judged by the spec's own predicates and nothing else:
+ * caller can see. For a caller exempt from the mask (ADR-0106 D4) it runs on
+ * that document narrowed to the fields the caller's own field permission reads
+ * (case 5. above), so the domain is what the caller may sort on. Judged by the
+ * spec's own predicates and nothing else:
  *
  * - virtuality by {@link isVirtualSearchField} (`SEARCH_VIRTUAL_TYPES`) — the
  *   same storage fact the runtime doors (#6994/#7095) and the authoring linter

@@ -62,7 +62,7 @@ import {
   attachmentManagerSet,
 } from './fixtures/attachments-fixture.js';
 import { CmtPrivate, CmtReadonly, commentManagerSet } from './fixtures/comments-fixture.js';
-import { armedWhen, assertArmed, principalArmed, resolveAuthzFor } from './armed.js';
+import { armedWhen, assertArmed, leaveOrganization, principalArmed, resolveAuthzFor } from './armed.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -102,10 +102,16 @@ interface Booted {
   token: string;
 }
 
-async function boot(orgContext: boolean, email: string): Promise<Booted> {
+/**
+ * Boot the stack and sign `email` up. [ADR-0131 D3] Every boot is the
+ * production `single` shape, so the sign-up is a member of the Default
+ * Organization; the OUTSIDE class is that user removed from it (an
+ * administrator's act), not an org-less boot, which no longer exists.
+ */
+async function boot(inside: boolean, email: string): Promise<Booted> {
   const rootDir = mkdtempSync(join(tmpdir(), 'parent-refusal-'));
   const stack = await bootStack(stackDefinition as never, {
-    orgContext,
+    orgContext: inside,
     security: security(),
     extraPlugins: [
       new StorageServicePlugin({ adapter: 'local', local: { rootDir }, bindToSettings: false }),
@@ -113,7 +119,7 @@ async function boot(orgContext: boolean, email: string): Promise<Booted> {
     ],
   });
   await stack.signIn();
-  const token = await stack.signUp(email);
+  let token = await stack.signUp(email);
   const ql = await stack.kernel.getServiceAsync<any>('objectql');
   const adminId = (await ql.findOne('sys_user', { where: { email: 'admin@objectos.ai' }, context: SYS }))?.id;
   const userId = (await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id;
@@ -122,6 +128,7 @@ async function boot(orgContext: boolean, email: string): Promise<Booted> {
     expect(set?.id, `fixture permission set ${name} seeded`).toBeTruthy();
     await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: set.id }, { context: { ...SYS } });
   }
+  if (!inside) token = await leaveOrganization(stack, email);
   return { stack, rootDir, ql, adminId, token };
 }
 
@@ -191,7 +198,7 @@ describe('parent-derived write refusal on an unreadable parent names nothing', (
           "a principal OUTSIDE the ownership floor's domain — the class the by-id write pre-image check does not " +
           'bind, so the attachment and comment gates answer it themselves',
         disarmedBy:
-          'an org-bound boot of this half: the principal then holds org_member, the pre-image check refuses ' +
+          'a principal still bound to the organization: it then holds org_member, the pre-image check refuses ' +
           'first, and the outside-the-domain pins pass without either gate being asked',
         observe: () => resolveAuthzFor(outside.stack, outside.token),
         armed: (ctx) => !ctx.positions.includes('org_member') && GRANTS.every((g) => ctx.permissions.includes(g)),
@@ -205,7 +212,7 @@ describe('parent-derived write refusal on an unreadable parent names nothing', (
         permissions: GRANTS,
         control: "the by-id write pre-image check's not-visible refusal — the reference answer pin 1 compares with",
         disarmedBy:
-          'an org-less boot of the reference half: no org_member, so the "reference" is the gate answering ' +
+          'a reference principal outside the organization: no org_member, so the "reference" is the gate answering ' +
           'itself and pin 1 compares a refusal with its own copy',
       }),
     ]);

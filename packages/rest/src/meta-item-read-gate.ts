@@ -67,6 +67,7 @@ import {
     applyObjectSchemaMask,
     organizationIdForMetaRead,
     relateObjectSchemaMaskPosture,
+    resolveObjectSchemaRuntimeView,
     type ObjectSchemaMaskPosture,
 } from '@objectstack/metadata-core';
 import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
@@ -2284,9 +2285,14 @@ export async function translateMetaDocument(
  * translated ({@link translateMetaDocument}).
  *
  * Beside an OBJECT schema it serves the per-column `sortability` projection
- * (#10235), computed from the FINAL document — post ADR-0106 mask — so its
- * domain is exactly the field set this caller is served, and never inside
- * `item` (`FieldSchema` is strict; the key must stay un-authorable).
+ * (#10235), computed from the caller's RUNTIME view of the final document —
+ * post ADR-0106 mask — and never inside `item` (`FieldSchema` is strict; the
+ * key must stay un-authorable). [#22250] `runtimeDocument` is that view
+ * (`resolveObjectSchemaRuntimeView`): the served document itself for every
+ * caller the mask projects, so the domain is exactly the field set they are
+ * served; for a D4-exempt caller, served the definition whole for authoring,
+ * the fields their own field permission reads — a sort the data route refuses
+ * them is never offered. Defaults to `document`.
  *
  * Moved here, unchanged, from `RestServer.translateMetaEnvelope` (which now
  * delegates), so the runtime dispatcher's item read answers the same body —
@@ -2297,10 +2303,11 @@ export async function translateMetaEnvelope(
     metaType: string,
     envelope: Readonly<Record<string, unknown>> | undefined,
     document: unknown,
+    runtimeDocument: unknown = document,
 ): Promise<Record<string, unknown>> {
     const sortability = metaType === 'object'
-        && document && typeof document === 'object' && !Array.isArray(document)
-        ? { sortability: resolveObjectSortability(document) }
+        && runtimeDocument && typeof runtimeDocument === 'object' && !Array.isArray(runtimeDocument)
+        ? { sortability: resolveObjectSortability(runtimeDocument) }
         : {};
     return {
         ...envelope,
@@ -2626,11 +2633,17 @@ export interface MetaItemAnswerSources extends MetaItemReadGateSources {
     requestLocale(i18n?: unknown): string | undefined;
     /**
      * The body step: {@link translateMetaEnvelope} over this transport's I/O,
-     * handed the store's envelope and the served document. A port rather than a
-     * call so each transport keeps ONE entry into it
+     * handed the store's envelope, the served document and [#22250] the
+     * caller's runtime view of it (`resolveObjectSchemaRuntimeView`), which the
+     * port hands on as `translateMetaEnvelope`'s `runtimeDocument`. A port
+     * rather than a call so each transport keeps ONE entry into it
      * (`RestServer.translateMetaEnvelope`).
      */
-    translateEnvelope(envelope: Readonly<Record<string, unknown>>, document: unknown): Promise<unknown>;
+    translateEnvelope(
+        envelope: Readonly<Record<string, unknown>>,
+        document: unknown,
+        runtimeDocument?: unknown,
+    ): Promise<unknown>;
 }
 
 /** The request facts the item chain reads — no transport shape. */
@@ -2700,7 +2713,10 @@ export type MetaItemAnswer =
  *  4. `object` — the ADR-0106 mask ({@link projectMetaObjectSchema}) under the
  *     posture resolved before the fetch.
  *  5. The body ({@link translateMetaEnvelope}, through the transport's entry):
- *     the translation, and `sortability` beside an object schema.
+ *     the translation, and `sortability` beside an object schema — derived
+ *     from the caller's runtime view ([#22250] `resolveObjectSchemaRuntimeView`:
+ *     a D4-exempt caller is served the definition whole, never a sort their
+ *     own field permission refuses).
  *
  * The envelope is never mutated. A gate input that cannot be read REJECTS:
  * the transport answers that fault, ⛔ never the document.
@@ -2733,8 +2749,10 @@ export function createMetaItemAnswer(
         if (!masked.ok) return { kind: 'mask-fault', object: name };
         visible = masked.document;
 
-        // 5. The body — translation, and `sortability` beside an object schema.
-        const served = await sources.translateEnvelope(envelope ?? {}, visible);
+        // 5. The body — translation, and `sortability` beside an object schema,
+        //    over [#22250] the caller's runtime view of what step 4 serves.
+        const runtime = await resolveObjectSchemaRuntimeView(visible, maskPosture);
+        const served = await sources.translateEnvelope(envelope ?? {}, visible, runtime.document);
         return masked.cacheControl
             ? { kind: 'serve', envelope: served, cacheControl: masked.cacheControl }
             : { kind: 'serve', envelope: served };

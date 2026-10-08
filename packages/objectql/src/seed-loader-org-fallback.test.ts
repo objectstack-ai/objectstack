@@ -3,9 +3,14 @@
 // The SeedLoader stamps business seed rows with the tenant's organization key so
 // they don't vanish under strict org-scoping. When the caller pins no org (an
 // in-process publish has no active user session — the AI build agent's publish
-// path), the loader adopts the tenant's SOLE organization as a fallback. A
-// `sys_`/platform seed never takes the fallback (those stay global). Zero or
-// many orgs → leave rows org-less (genuinely ambiguous → historical behavior).
+// path), the loader adopts the tenant's SOLE organization as a fallback.
+//
+// [ADR-0131 D3 / D9] A `sys_`/platform seed takes the fallback too — the
+// "intentionally global" exemption is withdrawn. Zero or many orgs no longer
+// leave rows org-less: this double's metadata answers every name, so the
+// composition REGISTERS the organization object, and a row with no derivable
+// owner is REFUSED. The composition with no organization object keeps the
+// org-less branch (`metadata-protocol/src/seed-loader-organization-stamp.test.ts`).
 
 import { describe, it, expect } from 'vitest';
 import { SeedLoaderService } from '@objectstack/metadata-protocol';
@@ -53,31 +58,38 @@ describe('SeedLoader org-key fallback (un-pinned publish)', () => {
     expect(inserted[0]?.record.organization_id).toBe('org_only');
   });
 
-  it('does NOT take the fallback for sys_/platform seeds (they stay global)', async () => {
+  it('[ADR-0131 D3] takes the fallback for sys_/platform seeds too — the exemption is withdrawn', async () => {
     const { svc, inserted } = harness([{ id: 'org_only' }]);
     await svc.load({
       seeds: [{ object: 'sys_widget_pref', records: [{ name: 'X' }] }] as never,
       config: cfg(),
     });
-    expect(inserted[0]?.record.organization_id).toBeUndefined();
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0].record.organization_id).toBe('org_only');
   });
 
-  it('leaves rows org-less when the tenant org is ambiguous (≠ exactly one)', async () => {
+  it('[ADR-0131 D9] REFUSES the row when the tenant org is ambiguous (≠ exactly one)', async () => {
     const { svc, inserted } = harness([{ id: 'a' }, { id: 'b' }]);
-    await svc.load({
+    const result = await svc.load({
       seeds: [{ object: 'project', records: [{ name: 'Apollo' }] }] as never,
       config: cfg(),
     });
-    expect(inserted[0]?.record.organization_id).toBeUndefined();
+    expect(inserted).toEqual([]);
+    expect(result.errors.map((e: { message: string }) => e.message)).toEqual([
+      expect.stringContaining('several organizations'),
+    ]);
   });
 
-  it('leaves rows org-less when there is no organization at all', async () => {
+  it('[ADR-0131 D9] REFUSES the row when there is no organization at all', async () => {
     const { svc, inserted } = harness([]);
-    await svc.load({
+    const result = await svc.load({
       seeds: [{ object: 'project', records: [{ name: 'Apollo' }] }] as never,
       config: cfg(),
     });
-    expect(inserted[0]?.record.organization_id).toBeUndefined();
+    expect(inserted).toEqual([]);
+    expect(result.errors.map((e: { message: string }) => e.message)).toEqual([
+      expect.stringContaining('no organization at all'),
+    ]);
   });
 
   it('an explicitly pinned org still wins over the fallback path', async () => {

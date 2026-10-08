@@ -154,12 +154,21 @@ const WIDGET = {
     },
 };
 
+/**
+ * Answers for the one object this fixture defines, and nothing else. A mock
+ * that answered EVERY name also claimed an organization object, and since
+ * ADR-0131 D9 a composition with that object and no organization refuses the
+ * seed rows of an organization-owned object — a question these cases are not
+ * about. Composition here: the widget, no organization object (today's branch).
+ */
 function createMetadata(): IMetadataService {
+    const only = async (_typeOrName: string, name?: string) =>
+        ((name ?? _typeOrName) === WIDGET.name ? WIDGET : undefined);
     return {
-        getObject: vi.fn(async () => WIDGET),
+        getObject: vi.fn(async (name: string) => only(name)),
         listObjects: vi.fn(async () => [WIDGET]),
         register: vi.fn(async () => {}),
-        get: vi.fn(async () => WIDGET),
+        get: vi.fn(async (type: string, name: string) => only(type, name)),
         list: vi.fn(async () => []),
         unregister: vi.fn(async () => {}),
         exists: vi.fn(async () => false),
