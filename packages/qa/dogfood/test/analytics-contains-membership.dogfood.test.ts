@@ -5,7 +5,7 @@
 // of a multi-valued field, through the REAL stack: HTTP -> REST execution
 // context -> SecurityPlugin row policy -> the AnalyticsServicePlugin's
 // `getReadScope` auto-bridge -> the NativeSQL strategy on SQLite, and the
-// ObjectQL strategy on the memory driver.
+// ObjectQL strategy (native SQL withheld; see `DRIVERS`).
 //
 // ## The defect
 //
@@ -29,6 +29,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { AnalyticsServicePlugin } from '@objectstack/service-analytics';
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
@@ -117,7 +118,31 @@ const OPEN = [
   { name: 'o4' },
 ];
 
-const DRIVERS = ['sqlite-wasm', 'memory'] as const;
+/**
+ * [ADR-0131 C1] The two analytics strategies, each on the SQL in-memory driver
+ * (`sqlite-wasm`, `:memory:`): the `sqlite-wasm` leg lets the analytics plugin
+ * take its NativeSQL strategy, and the `objectql-strategy` leg withholds the
+ * native-SQL capability (`queryCapabilities`) so the ObjectQL strategy answers.
+ * That leg used to be the in-memory driver, whose only route to the ObjectQL
+ * strategy was having no SQL. Under `single` every session now carries the
+ * Default Organization, and `driver-memory` refuses a tenant-scoped read (503)
+ * until ADR-0131 D8 gives `single` no read predicate.
+ * Restart-when: #15212 closed — add the `memory` leg back then.
+ */
+const DRIVERS = ['sqlite-wasm', 'objectql-strategy'] as const;
+
+/** The analytics plugin a leg boots; the ObjectQL-strategy leg withholds native SQL. */
+function analyticsFor(
+  leg: (typeof DRIVERS)[number],
+  options: ConstructorParameters<typeof AnalyticsServicePlugin>[0] = {},
+): AnalyticsServicePlugin {
+  return new AnalyticsServicePlugin({
+    ...options,
+    ...(leg === 'objectql-strategy'
+      ? { queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }) }
+      : {}),
+  });
+}
 
 /** The single count a one-measure answer carries, whichever envelope the door uses. */
 function countOf(body: unknown, measure: string): number {
@@ -137,7 +162,8 @@ describe.each(DRIVERS)('dogfood: analytics counts a $contains policy on a multi-
         defaultPermissionSets: [...securityDefaultPermissionSets, memberSet],
         fallbackPermissionSet: memberSet.name,
       }),
-      databaseDriver: driver,
+      databaseDriver: 'sqlite-wasm',
+      analytics: analyticsFor(driver),
     });
     adminToken = await stack.signIn();
     memberToken = await stack.signUp(`mbr-member-${driver}@verify.test`);

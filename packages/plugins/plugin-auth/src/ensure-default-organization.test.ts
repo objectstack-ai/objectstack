@@ -6,10 +6,13 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
+import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import {
   ensureDefaultOrganization,
   isDefaultOrganizationBootstrapTrigger,
 } from './ensure-default-organization.js';
+import { ensureDefaultOrganizationExists } from './default-organization-invariant.js';
+import { createEnsureDefaultOrganizationOnce } from './default-org-bootstrap-once.js';
 
 // [#11973] The config anchor reads `OS_PLATFORM_OWNER_EMAIL` live (memoized on
 // the raw value), so every case in this file pins the variable's state instead
@@ -495,5 +498,116 @@ describe('[#11663 L5] under a WALLED posture the legacy grant anchors nothing', 
     }
     requestPosture('single');
     expect(isDefaultOrganizationBootstrapTrigger({ object: 'sys_user_permission_set', operation: 'insert' })).toBe(true);
+  });
+});
+
+// ── [ADR-0131 D3] the Default Organization boot invariant, and the owner pin ──
+
+describe('[ADR-0131 D3] ensureDefaultOrganizationExists — the boot invariant needs no admin', () => {
+  it('creates the Default Organization on an empty install, with nobody to bind', async () => {
+    const ql = makeQl({ sys_user_permission_set: [] });
+    const res = await ensureDefaultOrganizationExists(ql);
+    expect(res.created).toBe(true);
+    expect(ql.tables.sys_organization).toEqual([
+      expect.objectContaining({ id: res.organizationId, slug: 'default', name: 'Default Organization' }),
+    ]);
+    expect(ql.tables.sys_member).toEqual([]);
+  });
+
+  it('answers the existing organization without writing — by slug first, else the sole one', async () => {
+    const bySlug = makeQl({ sys_organization: [{ id: 'org_x', slug: 'x' }, { id: 'org_d', slug: 'default' }] });
+    expect(await ensureDefaultOrganizationExists(bySlug)).toEqual({ organizationId: 'org_d', created: false });
+    const sole = makeQl({ sys_organization: [{ id: 'org_renamed', slug: 'acme' }] });
+    expect(await ensureDefaultOrganizationExists(sole)).toEqual({ organizationId: 'org_renamed', created: false });
+    expect(bySlug.insert).not.toHaveBeenCalled();
+    expect(sole.insert).not.toHaveBeenCalled();
+  });
+
+  it('reports several organizations with no default as ambiguous and creates nothing', async () => {
+    const ql = makeQl({ sys_organization: [{ id: 'org_a', slug: 'a' }, { id: 'org_b', slug: 'b' }] });
+    expect(await ensureDefaultOrganizationExists(ql)).toEqual({ created: false, ambiguous: { organizationCount: 2 } });
+    expect(ql.insert).not.toHaveBeenCalled();
+  });
+
+  it('a refused insert THROWS (the caller fails the boot) — it is not best-effort', async () => {
+    const ql = makeQl();
+    ql.insert.mockImplementation(async () => { throw new Error('UNIQUE constraint failed: sys_organization.slug'); });
+    await expect(ensureDefaultOrganizationExists(ql)).rejects.toThrow(
+      /BOOT REFUSED: the Default Organization could not be created[\s\S]*UNIQUE constraint failed/,
+    );
+  });
+
+  it('a failed READ propagates — an unreadable store is not an empty one', async () => {
+    const ql = makeQl();
+    ql.find.mockImplementation(async () => { throw new Error('connection reset'); });
+    await expect(ensureDefaultOrganizationExists(ql)).rejects.toThrow('connection reset');
+    expect(ql.insert).not.toHaveBeenCalled();
+  });
+});
+
+describe('[ADR-0131 D3 / ADR-0093 D7] the first admin is the owner even when the reconciler bound them first', () => {
+  /** A ledger-carrying engine (the `sys_migration` object is registered). */
+  function ledgerQl(seed: Partial<Record<string, Row[]>> = {}) {
+    const ql = makeQl({ sys_migration: [], ...seed }) as ReturnType<typeof makeQl> & Record<string, any>;
+    ql.getObject = (name: string) => (name === 'sys_migration' ? { name } : undefined);
+    ql.findOne = async (object: string, q: any) =>
+      (ql.tables[object] ?? []).find((r: Row) => r.id === q?.where?.id) ?? null;
+    ql.update = vi.fn(async (object: string, data: Row, options?: any) => {
+      // Pinned to ObjectQL.update's dispatch predicate (the promotion is by id).
+      assertEngineUpdateDispatch(data, options);
+      const row = (ql.tables[object] ?? []).find((r: Row) => r.id === data.id);
+      if (row) Object.assign(row, data);
+      return row ?? null;
+    });
+    return ql;
+  }
+
+  const reconciled = (organizationId: string): Row =>
+    ({ id: 'mem_reconciled', organization_id: organizationId, user_id: 'u1', role: 'member' });
+
+  it('promotes the reconciler-written `member` row in place and records the decision as `promoted`', async () => {
+    const ql = ledgerQl({ sys_organization: [{ id: 'org_d', slug: 'default' }], sys_member: [reconciled('org_d')] });
+    const res = await createEnsureDefaultOrganizationOnce()(ql);
+    expect(res).toMatchObject({ ownerPromoted: true, memberCreated: false, defaultOrgId: 'org_d' });
+    expect(ql.tables.sys_member).toEqual([{ ...reconciled('org_d'), role: 'owner' }]);
+    const decision = ql.tables.sys_migration.find((r: Row) => r.id === 'adr-0093-default-org-owner-bind');
+    expect(JSON.parse(String(decision?.details))).toMatchObject({ outcome: 'promoted', organizationId: 'org_d' });
+  });
+
+  it('never promotes once the owner bind is DECIDED (ADR-0093 D7: a removed owner stays removed)', async () => {
+    const ql = ledgerQl({
+      sys_organization: [{ id: 'org_d', slug: 'default' }],
+      sys_member: [reconciled('org_d')],
+      sys_migration: [{ id: 'adr-0093-default-org-owner-bind', details: '{"outcome":"bound"}' }],
+    });
+    const res = await createEnsureDefaultOrganizationOnce()(ql);
+    expect(res.ownerPromoted).toBeUndefined();
+    expect(ql.tables.sys_member[0].role).toBe('member');
+    expect(ql.update).not.toHaveBeenCalled();
+  });
+
+  it('never promotes over an existing owner, nor a role other than `member`', async () => {
+    const withOwner = ledgerQl({
+      sys_organization: [{ id: 'org_d', slug: 'default' }],
+      sys_member: [{ id: 'mem_o', organization_id: 'org_d', user_id: 'u9', role: 'owner' }, reconciled('org_d')],
+    });
+    await ensureDefaultOrganization(withOwner);
+    expect(withOwner.update).not.toHaveBeenCalled();
+    const asAdmin = ledgerQl({
+      sys_organization: [{ id: 'org_d', slug: 'default' }],
+      sys_member: [{ ...reconciled('org_d'), role: 'admin' }],
+    });
+    expect(await ensureDefaultOrganization(asAdmin)).toMatchObject({ reason: 'admin_already_in_org' });
+    expect(asAdmin.update).not.toHaveBeenCalled();
+  });
+
+  it('a refused promotion reports at `error` and leaves the bind undecided for the next trigger', async () => {
+    const ql = ledgerQl({ sys_organization: [{ id: 'org_d', slug: 'default' }], sys_member: [reconciled('org_d')] });
+    ql.update.mockImplementation(async () => { throw new Error('write refused'); });
+    const error = vi.fn();
+    const res = await createEnsureDefaultOrganizationOnce({ logger: { info: vi.fn(), warn: vi.fn(), error } as any })(ql);
+    expect(res).toMatchObject({ reason: 'owner_promotion_failed' });
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('NOT promoted to owner'), undefined, expect.any(Object));
+    expect(ql.tables.sys_migration).toEqual([]);
   });
 });

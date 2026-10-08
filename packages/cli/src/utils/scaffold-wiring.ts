@@ -6,7 +6,7 @@ import { isAggregatedViewContainer } from '@objectstack/spec';
 // The LEAF subpath: the registry-key derivation alone, not the metadata plugin.
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
 import { findConfigPath, loadConfig } from './config.js';
-import { authoringRuleUnionStack } from './stack-collections.js';
+import { authoringRuleUnionStack, stackDeclaredCapabilities } from './stack-collections.js';
 
 /**
  * Whether what `os generate` just wrote REACHES the stack the project's config
@@ -48,8 +48,9 @@ export type StackReach =
   /**
    * The config loaded. `reached` says whether its stack carries the item;
    * `missingRequires` lists the capability tokens the item needs to RUN that
-   * the stack's top-level `requires` does not declare, and `declaredRequires`
-   * is that list as declared (`null`: the stack declares no `requires`).
+   * the stack does not declare ({@link declaredCapabilities}: its top-level
+   * `requires`, else every package body's), and `declaredRequires` is that
+   * list as declared (`null`: the stack declares no `requires`).
    */
   | {
     kind: 'loaded';
@@ -104,19 +105,35 @@ export function stackCarries(config: unknown, stackKey: string, itemName: string
 }
 
 /**
- * The tokens in `requires` that the config's top-level `requires` does not
- * declare. Top-level on purpose: it is the list `defineStack`'s trigger
- * capability rule reads and the list `os serve` mounts capabilities from.
+ * The tokens in `requires` that the config's stack does not declare, read as
+ * `os serve` reads them to decide which providers it mounts
+ * ({@link declaredCapabilities}).
  */
 export function missingCapabilities(config: unknown, requires: readonly string[]): string[] {
   const tokens = declaredCapabilities(config) ?? [];
   return requires.filter((token) => !tokens.includes(token));
 }
 
-/** The config's top-level `requires` tokens, or `null` when it declares none. */
+/**
+ * The config's declared `requires` tokens, or `null` when it declares none —
+ * by `stackDeclaredCapabilities`'s rule, the one `os serve` mounts providers
+ * from: the top-level `requires` when the stack carries one, otherwise every
+ * package body's (#22288).
+ *
+ * - A one-package stack: its top-level `requires`. That is also the list
+ *   `defineStack`'s trigger capability rule reads for that stack.
+ * - A multi-package `preserve` stack: its top level carries no `requires`, so
+ *   this is the union of the package bodies, which is the set a server mounts.
+ *   `defineStack`'s rule judged each package against that package's OWN
+ *   `requires` when the config loaded: a package carrying a record-change flow
+ *   without `automation` and `triggers` refuses there, and this module answers
+ *   `load-failed` before it reads this list. Reading only the top level here
+ *   told the author that a token a package already declares was missing.
+ */
 export function declaredCapabilities(config: unknown): string[] | null {
-  const declared = (config as { requires?: unknown } | null)?.requires;
-  return Array.isArray(declared) ? declared.filter((t): t is string => typeof t === 'string') : null;
+  const declared = stackDeclaredCapabilities(config);
+  const topLevel = (config as { requires?: unknown } | null)?.requires;
+  return Array.isArray(topLevel) || declared.length > 0 ? declared : null;
 }
 
 /** Load the project's config and ask it about `target`. Never throws. */

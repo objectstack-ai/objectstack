@@ -9,10 +9,15 @@
 //
 // So every probe is measured twice, and the disarmed halves are not synthetic:
 //
-//   principalArmed    DISARMED on an org-LESS boot — a live reproduction of
-//                     #8023, where a fresh sign-up holds `['everyone']` and the
-//                     `org_member`-gated write floor never applies
-//                     ARMED on `bootStack(..., { orgContext: true })`
+//   principalArmed    DISARMED for a principal OUTSIDE the organization — a
+//                     live reproduction of #8023's shape, where the caller
+//                     holds no `org_member` and the `org_member`-gated write
+//                     floor never applies. [ADR-0131 D3] #8023 met it as an
+//                     org-less boot; every `single` boot now has the Default
+//                     Organization, so the disarmed principal is a member
+//                     removed from it (`leaveOrganization`)
+//                     ARMED for a member of the organization, on
+//                     `bootStack(..., { orgContext: true })`
 //   authSettingArmed  DISARMED on the default auth config — a live reproduction
 //                     of #8049, where `passwordHistoryCount` is 0/undefined and
 //                     the reuse control has nothing to reject against
@@ -39,6 +44,7 @@ import {
   assertArmed,
   armedWhen,
   authSettingArmed,
+  leaveOrganization,
   principalArmed,
   resolveAuthzFor,
   seededArmed,
@@ -48,8 +54,9 @@ import {
 /** The control #8023's fixture measures, named the way that card names it. */
 const WRITE_FLOOR = 'the wildcard row-level write floor (`owner_only_writes`)';
 const WRITE_FLOOR_DISARM =
-  'an org-less boot: no organization ⇒ no `sys_member` row ⇒ the principal never holds ' +
-  '`org_member` ⇒ the positions-gated floor never applies. Boot with `orgContext: true`.';
+  'a principal outside the organization: no `sys_member` row ⇒ the principal never holds ' +
+  '`org_member` ⇒ the positions-gated floor never applies. Keep the principal a member of ' +
+  'the organization (the membership reconciler binds every sign-up).';
 
 /** The control #8049's fixture measures. */
 const REUSE_CONTROL = "ADR-0069 D1's password-reuse rejection";
@@ -58,29 +65,36 @@ const REUSE_DISARM =
   'has nothing to reject against. Arm it through `applyConfigPatch`.';
 
 describe('[#8074] assertArmed: the guard against assertions that cannot fail', () => {
-  /** The org-LESS stack — #8023's and #8049's disarmed shapes, booted for real. */
-  let orgless: VerifyStack;
-  /** The org-BOUND stack — the same probe, armed. */
-  let orgbound: VerifyStack;
+  /**
+   * The stack whose plain member has LEFT the organization — #8023's disarmed
+   * shape — and the default auth config, #8049's. Both booted for real.
+   */
+  let outside: VerifyStack;
+  /** The stack whose plain member is IN the organization — the same probe, armed. */
+  let inside: VerifyStack;
 
-  let orglessMember: string;
-  let orgboundMember: string;
+  let outsideMember: string;
+  let insideMember: string;
 
   beforeAll(async () => {
-    orgless = await bootStack(showcaseStack, {});
-    orgbound = await bootStack(showcaseStack, { orgContext: true });
+    outside = await bootStack(showcaseStack, {});
+    inside = await bootStack(showcaseStack, { orgContext: true });
 
     // The first user is the seeded dev admin; a fresh sign-up is the plain
     // member #8023's fixture measures.
-    await orgless.signIn();
-    await orgbound.signIn();
-    orglessMember = await orgless.signUp('armed-orgless@verify.test');
-    orgboundMember = await orgbound.signUp('armed-orgbound@verify.test');
+    await outside.signIn();
+    await inside.signIn();
+    outsideMember = await outside.signUp('armed-outside@verify.test');
+    insideMember = await inside.signUp('armed-inside@verify.test');
+    // [ADR-0131 D3] The reconciler bound both sign-ups to the Default
+    // Organization; the outside member is then removed from it, which is how a
+    // real `single` deployment holds a principal outside the `org_member` domain.
+    outsideMember = await leaveOrganization(outside, 'armed-outside@verify.test');
   }, 300_000);
 
   afterAll(async () => {
-    await orgless?.stop?.();
-    await orgbound?.stop?.();
+    await outside?.stop?.();
+    await inside?.stop?.();
   });
 
   // ── the fixture's own integrity ───────────────────────────────────────────
@@ -88,14 +102,14 @@ describe('[#8074] assertArmed: the guard against assertions that cannot fail', (
   // Every reading below is worthless if the two stacks are not actually the two
   // shapes they are named for, so that is asserted before anything is measured.
 
-  it('[integrity] the two stacks really are the org-less and org-bound shapes', async () => {
-    const less = await resolveAuthzFor(orgless, orglessMember);
-    const bound = await resolveAuthzFor(orgbound, orgboundMember);
-    expect(less.userId, 'the org-less member resolved as a real principal').toBeTruthy();
-    expect(bound.userId, 'the org-bound member resolved as a real principal').toBeTruthy();
-    expect(less.positions, 'org-less: a fresh sign-up holds only the everyone anchor')
+  it('[integrity] the two members really are outside and inside the organization', async () => {
+    const less = await resolveAuthzFor(outside, outsideMember);
+    const bound = await resolveAuthzFor(inside, insideMember);
+    expect(less.userId, 'the outside member resolved as a real principal').toBeTruthy();
+    expect(bound.userId, 'the inside member resolved as a real principal').toBeTruthy();
+    expect(less.positions, 'outside: the member removed from the organization holds no org_member')
       .not.toContain('org_member');
-    expect(bound.positions, 'org-bound: the membership reconciler bound the sign-up')
+    expect(bound.positions, 'inside: the membership reconciler bound the sign-up')
       .toContain('org_member');
   });
 
@@ -112,38 +126,38 @@ describe('[#8074] assertArmed: the guard against assertions that cannot fail', (
         disarmedBy: WRITE_FLOOR_DISARM,
       });
 
-    it('reports DISARMED on an org-less boot, and names what it saw', async () => {
-      const verdict = await probeOn(orgless, orglessMember).read();
-      expect(verdict.armed, 'org-less: the floor is outside this principal’s domain').toBe(false);
+    it('reports DISARMED for a principal outside the organization, and names what it saw', async () => {
+      const verdict = await probeOn(outside, outsideMember).read();
+      expect(verdict.armed, 'outside: the floor is outside this principal’s domain').toBe(false);
       expect(verdict.observed).toContain('missing positions');
       expect(verdict.observed).toContain('org_member');
     });
 
     it('reports ARMED on `orgContext: true` — the same probe, the other direction', async () => {
-      const verdict = await probeOn(orgbound, orgboundMember).read();
-      expect(verdict.armed, 'org-bound: the principal is inside the floor’s domain').toBe(true);
+      const verdict = await probeOn(inside, insideMember).read();
+      expect(verdict.armed, 'inside: the principal is inside the floor’s domain').toBe(true);
       expect(verdict.observed).toContain('org_member');
     });
 
     it('assertArmed REJECTS the disarmed stack, naming the control and the default', async () => {
-      await expect(assertArmed([probeOn(orgless, orglessMember)])).rejects.toThrow(
+      await expect(assertArmed([probeOn(outside, outsideMember)])).rejects.toThrow(
         /this fixture is DISARMED/,
       );
-      const err = await assertArmed([probeOn(orgless, orglessMember)]).catch((e: Error) => e);
+      const err = await assertArmed([probeOn(outside, outsideMember)]).catch((e: Error) => e);
       expect(String(err)).toContain(WRITE_FLOOR);
       // The remedy, not just the symptom — the sentence the next author needs.
-      expect(String(err)).toContain('orgContext: true');
+      expect(String(err)).toContain('Keep the principal a member of the organization');
     });
 
     it('[positive control] assertArmed RESOLVES on the armed stack', async () => {
       // Without this, every rejection assertion above would be satisfied by an
       // `assertArmed` that simply always threw.
-      await expect(assertArmed([probeOn(orgbound, orgboundMember)])).resolves.toBeUndefined();
+      await expect(assertArmed([probeOn(inside, insideMember)])).resolves.toBeUndefined();
     });
 
     it('a principal that resolves to nothing is DISARMED, not skipped', async () => {
       const verdict = await principalArmed({
-        stack: orgbound,
+        stack: inside,
         token: 'not-a-token-8074',
         who: 'a bogus credential',
         positions: ['org_member'],
@@ -170,27 +184,27 @@ describe('[#8074] assertArmed: the guard against assertions that cannot fail', (
     it('reads DISARMED by default and ARMED after the patch the fixture uses', async () => {
       // Read the default FIRST, then arm, then restore — so this case is
       // atomic and cannot depend on the order vitest runs the file in.
-      const before = await probe(orgless).read();
+      const before = await probe(outside).read();
       expect(before.armed, 'the platform default leaves the reuse control off').toBe(false);
       expect(before.observed).toContain('passwordHistoryCount=');
 
-      const auth = await orgless.kernel.getServiceAsync<any>('auth');
+      const auth = await outside.kernel.getServiceAsync<any>('auth');
       try {
         auth.applyConfigPatch({ passwordHistoryCount: 3 });
-        const after = await probe(orgless).read();
+        const after = await probe(outside).read();
         expect(after.armed, 'the same seam the settings service writes arms it').toBe(true);
         expect(after.observed).toContain('passwordHistoryCount=3');
-        await expect(assertArmed([probe(orgless)])).resolves.toBeUndefined();
+        await expect(assertArmed([probe(outside)])).resolves.toBeUndefined();
       } finally {
         auth.applyConfigPatch({ passwordHistoryCount: undefined });
       }
 
-      const restored = await probe(orgless).read();
+      const restored = await probe(outside).read();
       expect(restored.armed, 'and the restore really disarmed it again').toBe(false);
     });
 
     it('assertArmed REJECTS the default config, naming the 0 default', async () => {
-      const err = await assertArmed([probe(orgless)]).catch((e: Error) => e);
+      const err = await assertArmed([probe(outside)]).catch((e: Error) => e);
       expect(String(err)).toContain(REUSE_CONTROL);
       expect(String(err)).toContain('defaults to 0');
     });
@@ -215,7 +229,7 @@ describe('[#8074] assertArmed: the guard against assertions that cannot fail', (
   describe('seededArmed', () => {
     it('[control] finds a set that really seeded — so its negative reading is a real negative', async () => {
       const verdict = await seededArmed({
-        stack: orgless,
+        stack: outside,
         object: 'sys_permission_set',
         where: { name: 'member_default' },
         control: 'the platform baseline permission set',
@@ -227,7 +241,7 @@ describe('[#8074] assertArmed: the guard against assertions that cannot fail', (
 
     it('reports DISARMED for a set that does not exist', async () => {
       const verdict = await seededArmed({
-        stack: orgless,
+        stack: outside,
         object: 'sys_permission_set',
         where: { name: 'no_such_set_8074' },
         control: 'an app-declared permission set',
@@ -239,7 +253,7 @@ describe('[#8074] assertArmed: the guard against assertions that cannot fail', (
 
     it('reports DISARMED when the row exists but fails its own predicate', async () => {
       const verdict = await seededArmed({
-        stack: orgless,
+        stack: outside,
         object: 'sys_permission_set',
         where: { name: 'member_default' },
         armed: () => false,
@@ -290,8 +304,8 @@ describe('[#8074] assertArmed: the guard against assertions that cannot fail', (
     it('principalArmed with nothing required throws at CONSTRUCTION', () => {
       expect(() =>
         principalArmed({
-          stack: orgless,
-          token: orglessMember,
+          stack: outside,
+          token: outsideMember,
           who: 'nobody in particular',
           control: WRITE_FLOOR,
           disarmedBy: WRITE_FLOOR_DISARM,
@@ -302,7 +316,7 @@ describe('[#8074] assertArmed: the guard against assertions that cannot fail', (
     it('seededArmed with an empty `where` throws at CONSTRUCTION', () => {
       expect(() =>
         seededArmed({
-          stack: orgless,
+          stack: outside,
           object: 'sys_permission_set',
           where: {},
           control: 'anything',
@@ -327,15 +341,15 @@ describe('[#8074] assertArmed: the guard against assertions that cannot fail', (
     it('names EVERY disarmed control, not just the first', async () => {
       const err = await assertArmed([
         principalArmed({
-          stack: orgless,
-          token: orglessMember,
+          stack: outside,
+          token: outsideMember,
           who: 'the plain member',
           positions: ['org_member'],
           control: WRITE_FLOOR,
           disarmedBy: WRITE_FLOOR_DISARM,
         }),
         authSettingArmed({
-          stack: orgless,
+          stack: outside,
           setting: 'passwordHistoryCount',
           armed: (v) => Number(v) >= 1,
           control: REUSE_CONTROL,
@@ -352,15 +366,15 @@ describe('[#8074] assertArmed: the guard against assertions that cannot fail', (
       await expect(
         assertArmed([
           principalArmed({
-            stack: orgbound,
-            token: orgboundMember,
+            stack: inside,
+            token: insideMember,
             who: 'the org-bound member',
             positions: ['org_member'],
             control: WRITE_FLOOR,
             disarmedBy: WRITE_FLOOR_DISARM,
           }),
           seededArmed({
-            stack: orgbound,
+            stack: inside,
             object: 'sys_permission_set',
             where: { name: 'member_default' },
             control: 'the platform baseline permission set',

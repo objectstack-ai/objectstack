@@ -1334,7 +1334,12 @@ export function generateTypesFromConfig(config: Record<string, unknown>): string
 
   // Extract objects from config (supports both top-level and nested)
   const objects: Record<string, unknown>[] = [];
-  const rawObjects = (config as any).objects ?? (config as any).data?.objects ?? {};
+  // [#22288] Read off the folded stack: a multi-package `preserve` config
+  // carries its objects in its package bodies and none at its top level, so
+  // this emitted nothing for such an app. A stack with no `packages[]` comes
+  // back by identity.
+  const stack = authoringRuleUnionStack(config) as any;
+  const rawObjects = stack.objects ?? stack.data?.objects ?? {};
 
   if (Array.isArray(rawObjects)) {
     objects.push(...rawObjects);
@@ -2245,7 +2250,9 @@ function generateClientFromConfig(config: Record<string, unknown>): string {
   ];
 
   const objects: Record<string, unknown>[] = [];
-  const rawObjects = (config as any).objects ?? (config as any).data?.objects ?? {};
+  // [#22288] The folded stack, as in `generateTypesFromConfig`.
+  const stack = authoringRuleUnionStack(config) as any;
+  const rawObjects = stack.objects ?? stack.data?.objects ?? {};
 
   if (Array.isArray(rawObjects)) {
     objects.push(...rawObjects);
@@ -3482,7 +3489,9 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
   ];
 
   const objects: Record<string, unknown>[] = [];
-  const rawObjects = (config as any).objects ?? (config as any).data?.objects ?? {};
+  // [#22288] The folded stack, as in `generateTypesFromConfig`.
+  const stack = authoringRuleUnionStack(config) as any;
+  const rawObjects = stack.objects ?? stack.data?.objects ?? {};
 
   if (Array.isArray(rawObjects)) {
     objects.push(...rawObjects);
@@ -3653,7 +3662,9 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
   ];
 
   const objects: Record<string, unknown>[] = [];
-  const rawObjects = (config as any).objects ?? (config as any).data?.objects ?? {};
+  // [#22288] The folded stack, as in `generateTypesFromConfig`.
+  const stack = authoringRuleUnionStack(config) as any;
+  const rawObjects = stack.objects ?? stack.data?.objects ?? {};
 
   if (Array.isArray(rawObjects)) {
     objects.push(...rawObjects);

@@ -63,6 +63,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { leaveOrganization } from './armed.js';
 
 const RULES = '/sharing/rules';
 const SYS = { isSystem: true } as const;
@@ -75,6 +76,7 @@ const PASSWORD = 'Member-Pass-123';
 const ORG_LESS_EMAIL = 'orgless-8158@verify.test';
 const ORG_BOUND_EMAIL = 'orgbound-8158@verify.test';
 const ORG_SCOPED_ORG_LESS_EMAIL = 'orgscoped-orgless-8158@verify.test';
+const OPERATOR_EMAIL = 'operator-8158@verify.test';
 
 interface RuleRow {
   id: string;
@@ -86,7 +88,12 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
   let stack: VerifyStack;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
-  /** The harness admin: platform authority, and (by harness design) org-less. */
+  /**
+   * A platform operator with no active organization: `admin_full_access` held
+   * globally, and no membership. [ADR-0131 D3] The harness admin can no longer
+   * play this part — every `single` boot makes them the Default Organization's
+   * owner, so their session carries it.
+   */
   let platform: string;
   /** The exposed persona: GLOBAL `manage_sharing`, no membership, no active org. */
   let orgLess: string;
@@ -117,7 +124,7 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
 
   beforeAll(async () => {
     stack = await bootStack(showcaseStack);
-    platform = await stack.signIn();
+    await stack.signIn(); // the first user: the bootstrap account
     ql = await stack.kernel.getServiceAsync('objectql');
 
     // Two tenants — the anti-vacuity premise.
@@ -162,18 +169,38 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
         user_id: userId, permission_set_id: psId, organization_id: ORG_A,
       }, { context: SYS });
     }
-    // …and a membership for ONE of them. That single row is the whole
-    // difference between the two personas: `session.create.before` resolves it
-    // and stamps `activeOrganizationId`.
+    // [ADR-0131 D3] The membership reconciler bound every sign-up above to the
+    // Default Organization. The control persona keeps exactly ONE membership,
+    // in tenant A, so its own is removed first…
+    const ownMembers = await ql.find('sys_member', { where: { user_id: orgBoundUserId }, context: SYS });
+    for (const m of Array.isArray(ownMembers) ? ownMembers : ownMembers?.records ?? []) {
+      await ql.delete('sys_member', { where: { id: m.id }, context: SYS });
+    }
+    // …and given a membership in tenant A. That single row is the whole
+    // difference between the personas: `session.create.before` resolves it and
+    // stamps `activeOrganizationId`.
     await ql.insert('sys_member', {
       id: 'mem_8158_bound', organization_id: ORG_A, user_id: orgBoundUserId, role: 'member',
     }, { context: SYS });
 
-    // Sign in AFTER the grants, so both sessions are minted by the same path
-    // with the membership state above already in place.
-    orgLess = await stack.signIn(ORG_LESS_EMAIL, PASSWORD);
+    // A platform operator outside the organization: `admin_full_access` held
+    // globally, the grant a platform administrator holds under `single`.
+    await stack.signUp(OPERATOR_EMAIL, PASSWORD);
+    const adminSet = await ql.findOne('sys_permission_set', { where: { name: 'admin_full_access' }, context: SYS });
+    expect(adminSet?.id, 'admin_full_access is seeded').toBeTruthy();
+    await ql.insert('sys_user_permission_set', {
+      user_id: await uid(OPERATOR_EMAIL), permission_set_id: adminSet.id, organization_id: null,
+    }, { context: SYS });
+
+    // Sign in AFTER the grants, so every session is minted by the same path
+    // with the membership state above already in place. The org-less personas
+    // and the operator are removed from the Default Organization first — a user
+    // removed from their organization, one of the ordinary shapes the header
+    // names — so their sessions carry no active organization.
+    orgLess = await leaveOrganization(stack, ORG_LESS_EMAIL, PASSWORD);
     orgBound = await stack.signIn(ORG_BOUND_EMAIL, PASSWORD);
-    orgScopedOrgLess = await stack.signIn(ORG_SCOPED_ORG_LESS_EMAIL, PASSWORD);
+    orgScopedOrgLess = await leaveOrganization(stack, ORG_SCOPED_ORG_LESS_EMAIL, PASSWORD);
+    platform = await leaveOrganization(stack, OPERATOR_EMAIL, PASSWORD);
   }, 180_000);
 
   afterAll(async () => {
@@ -200,8 +227,12 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
 
     const sessions = await ql.find('sys_session', { where: { user_id: orgLessUserId }, context: SYS });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rows: any[] = Array.isArray(sessions) ? sessions : sessions?.records ?? [];
-    expect(rows.length, 'the sign-in really did mint a session row').toBeGreaterThan(0);
+    const all: any[] = Array.isArray(sessions) ? sessions : sessions?.records ?? [];
+    // [ADR-0131 D3] The sign-up session was minted while the reconciler's
+    // membership held, and leaving the organization revoked it (#15784); the
+    // LIVE session is the one the persona signed in with afterwards.
+    const rows = all.filter((s) => !(s.revoked_at ?? s.revokedAt));
+    expect(rows.length, 'the sign-in really did mint a live session row').toBeGreaterThan(0);
     for (const s of rows) {
       expect(
         s.active_organization_id ?? s.activeOrganizationId ?? null,
@@ -309,8 +340,10 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     expect(Array.isArray(members) ? members : members?.records ?? []).toHaveLength(0);
     const sessions = await ql.find('sys_session', { where: { user_id: orgScopedOrgLessUserId }, context: SYS });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rows: any[] = Array.isArray(sessions) ? sessions : sessions?.records ?? [];
-    expect(rows.length, 'the sign-in really did mint a session row').toBeGreaterThan(0);
+    const all: any[] = Array.isArray(sessions) ? sessions : sessions?.records ?? [];
+    // The live session only — the sign-up one was revoked on leaving (see above).
+    const rows = all.filter((s) => !(s.revoked_at ?? s.revokedAt));
+    expect(rows.length, 'the sign-in really did mint a live session row').toBeGreaterThan(0);
     for (const s of rows) {
       expect(s.active_organization_id ?? s.activeOrganizationId ?? null).toBeFalsy();
     }
