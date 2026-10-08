@@ -133,7 +133,7 @@
           "the read-only showcase package in Studio (stock)"
         ],
         "knownGaps": [
-          "Expected FAIL on stock: the task record's Archive button (examples/app-showcase/src/ui/actions/index.ts#ArchiveTaskAction, disabled while has(record.done) && record.done != true) renders disabled in both its record_header and record_section placements with no title, tooltip or aria-describedby (objectstack-ai/objectui#11811). The action spec has no author-facing reason next to `disabled`, so a generic platform fallback scores PASS-with-note on clause 3 — record which one was shown.",
+          "Expected FAIL on stock: the task record's Archive button (examples/app-showcase/src/ui/actions/index.ts#ArchiveTaskAction, disabled while has(record.done) && record.done != true) renders disabled in both its record_header and record_section placements with no title, tooltip or aria-describedby (objectstack-ai/objectui#11811). The action spec has no author-facing reason next to `disabled`, so a generic platform fallback passes clause 3 and is recorded as generic in the evidence — note which one was shown.",
           "Known PASS reference: Studio's Publish button on the read-only showcase package carries a tooltip — check it first to calibrate the oracle before scoring the other rows."
         ]
       },
@@ -167,7 +167,7 @@
         {
           "clause": "the reason is specific when the author or the platform knows the condition, generic only as a fallback",
           "oracle": "dom",
-          "verify": "classify each reason: names the condition (e.g. 'Available once the task is done', 'This package is read-only') → PASS; generic ('Not available') → PASS-with-note; empty → FAIL",
+          "verify": "classify each reason: one that names the condition (e.g. 'Available once the task is done', 'This package is read-only') or a generic fallback ('Not available') passes, and the evidence records which of the two it was; an empty reason fails",
           "evidence": "verbatim reason strings, classified specific / generic / none"
         }
       ],
