@@ -123,10 +123,19 @@ function textSlotSource(value: unknown): string | undefined {
   return undefined;
 }
 
-/** The single-brace tokens of `text` — every `{…}` the 17.x interpolator substituted, minus the inside of a `{{ }}` hole. */
+/**
+ * The single-brace tokens of `text` — every `{…}` the 17.x interpolator
+ * substituted, minus any that touch another brace.
+ *
+ * Touching on BOTH sides is the inside of a `{{ }}` hole. Touching on ONE side
+ * (`Total {{ amount }`, `Total { amount }}`) is a hole with a brace missing,
+ * not an old token: doubling it would prescribe a three-brace "fix" the engine
+ * refuses too. So it is left to the compile step every door runs next
+ * (`validateExpression('template', …)`), which names the unbalanced hole.
+ */
 function singleBraceTokens(text: string): TemplateToken[] {
   return templateTokensOf(text).filter((token) =>
-    !(text[token.index - 1] === '{' && text[token.index + token.text.length] === '}'));
+    text[token.index - 1] !== '{' && text[token.index + token.text.length] !== '}');
 }
 
 /** `text` with each single-brace PATH token written as a hole — the spelling a refusal prescribes for it. */

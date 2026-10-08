@@ -909,6 +909,23 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
     ).toEqual([]);
   });
 
+  // …and a hole carrying a formatter is judged by its path: before #22110 a text
+  // slot had no formatter syntax, so a formatter must not become a place a
+  // misspelt field hides.
+  it('judges the path of a `{{ path | formatter }}` hole like a bare one', () => {
+    const findings = validateFlowTemplatePaths(
+      scheduleFlow([FETCH_ONE, { id: 'note', type: 'notify', config: { title: 'Case {{ caseRecord.subjcet | upper }}' } }]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
+    expect(findings[0].message).toContain('subjcet');
+    expect(
+      validateFlowTemplatePaths(
+        scheduleFlow([FETCH_ONE, { id: 'note', type: 'notify', config: { title: "Case {{ caseRecord.subject | truncate:'40' }}" } }]),
+      ),
+    ).toEqual([]);
+  });
+
   it('resolves the declared-variable + loop shape examples/app-todo ships', () => {
     const findings = validateFlowTemplatePaths(
       scheduleFlow(

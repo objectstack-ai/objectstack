@@ -26,6 +26,7 @@
 import { describe, expect, it } from 'vitest';
 import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
 import { TEXT_SLOT_TEMPLATE_REFUSAL } from '@objectstack/spec/automation';
+import { validateExpression } from '@objectstack/formula';
 import { runAuthoringRules, EXPRESSION_INVALID } from './authoring-rules.js';
 import { validateStackExpressions } from './validate-expressions.js';
 
@@ -83,6 +84,24 @@ describe('`objectstack validate` — a flow text slot reads `{{ }}` holes (#2211
       expect(findings, title).toHaveLength(1);
       expect(findings[0]!.severity, title).toBe('error');
       expect(findings[0]!.message, title).toContain('invalid template');
+    }
+  });
+
+  // A hole with one brace missing is an unbalanced hole, not an old single-brace
+  // token: the judge prescribes no rewrite (a doubled `{{{ amount }}` would be
+  // refused too) and the compile step names it — one finding, the template's.
+  it('reports a hole touching exactly one brace as the compile step\'s unbalanced hole — no three-brace rewrite', () => {
+    for (const title of ['Total {{ amount }', 'Total { amount }}']) {
+      const findings = validate('notify', { recipients: ['u1'], title });
+      expect(findings, title).toHaveLength(1);
+      expect(findings[0]!.rule, title).toBe(EXPRESSION_INVALID);
+      expect(findings[0]!.severity, title).toBe('error');
+      expect(findings[0]!.where, title).toContain("node 'w' (notify) notify title at config.title");
+      expect(findings[0]!.message, title).toContain('unbalanced');
+      expect(findings[0]!.message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL), title).toBe(false);
+      expect(findings[0]!.message, title).not.toMatch(/\{\{\{|\}\}\}/);
+      // The refusal the door prints is the template compile's, by its code.
+      expect(validateExpression('template', title).errors.map((e) => e.code), title).toEqual(['invalid-template']);
     }
   });
 

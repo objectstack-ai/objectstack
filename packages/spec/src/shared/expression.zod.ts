@@ -400,8 +400,8 @@ export type CronExpressionInput = z.input<typeof CronExpressionInputSchema>;
  *   so their refusals can name the slot.
  *
  * So write the spelling the slot's renderer reads — `{{var}}` on this schema's
- * slots, `{var}` on a notify node's — and do not read either spelling as
- * declared, preferred or rejected here.
+ * slots and on a notify node's `title` / `message` alike — and do not read
+ * either spelling as declared, preferred or rejected here.
  */
 export const TemplateExpressionInputSchema = templateExpressionInput(ExpressionSchema, typedExpressionRefusals('template'));
 export type TemplateExpressionInput = z.input<typeof TemplateExpressionInputSchema>;

@@ -83,6 +83,21 @@ describe('textSlotTemplateRefusal — the one judge of the single brace in a tex
     }
   });
 
+  // A hole with one brace missing is not an old single-brace token: doubling it
+  // would prescribe `{{{ amount }}` / `{{ amount }}}`, which the engine refuses
+  // too. The judge stays silent and the compile step every door runs next names
+  // the unbalanced hole (pinned at the `objectstack validate` door in
+  // `@objectstack/lint`'s `validate-expressions.text-slot.test.ts`).
+  it('prescribes no rewrite for a token touching exactly one brace — an unbalanced hole is the compile step\'s', () => {
+    for (const text of ['Total {{ amount }', 'Total { amount }}', '{{x}', '{x}}']) {
+      expect(textSlotTemplateRefusal(text), text).toBeUndefined();
+    }
+    // …while a genuine single-brace token beside one still gets its rewrite, and nothing three-braced.
+    const message = textSlotTemplateRefusal('Total {{ amount } by {owner}')!;
+    expect(message).toContain('`Total {{ amount } by {{ owner }}`');
+    expect(message).not.toMatch(/\{\{\{|\}\}\}/);
+  });
+
   it('tells an author to delete a token that is neither a path nor an expression', () => {
     expect(textSlotTemplateRefusal('JSON {"a": 1}')).toContain('neither a variable path nor an expression');
   });
