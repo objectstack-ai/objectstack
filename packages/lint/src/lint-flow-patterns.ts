@@ -1760,7 +1760,7 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
         }
         // [#22110] The text slots' own bare-`$` check: read OUTSIDE their
         // `{{ }}` holes, where a `$name.path` is the hole's correct content.
-        for (const slot of flowNodeTextSlotSources(node.type, node.config)) {
+        for (const slot of flowNodeTextSlotSources(String(node.type), node.config)) {
           const outsideHoles = slot.source.replace(/\{\{[^}]*\}\}/g, '');
           if (BARE_DOLLAR_REF.test(outsideHoles)) {
             findings.push({
