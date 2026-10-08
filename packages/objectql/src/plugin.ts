@@ -9,6 +9,8 @@ import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
 // [#21777] The ONE "is this schema the remote's?" predicate, shared with `ObjectQL.syncSchemas`.
 import { isFederatedObject } from './federated-object.js';
+// [#22070] The builtin audit stamps are wrapped like a bound hook but registered in code.
+import { wrapDeclarativeHook } from './hook-wrappers.js';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
 import { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
 import type { DanglingReferenceAuditOptions } from './integrity/dangling-reference-audit.js';
@@ -1086,12 +1088,12 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
-   * Register built-in audit hooks for auto-stamping created_by/updated_by
-   * and fetching previousData for update/delete operations. These are
-   * declared as canonical `Hook` metadata and bound through the same
-   * `bindHooksToEngine` path used by `defineStack({ hooks })`, so the
-   * engine's built-ins flow through the same rails as user code
-   * (dogfooding the protocol).
+   * Register the built-in audit stamps (`created_by` / `updated_by` /
+   * `created_at` / `updated_at` / `tenant_id`). They are written in the
+   * canonical `Hook` shape and wrapped by the same declarative wrapper the
+   * binder uses, but registered IN CODE, with no metadata binding: audit is
+   * platform behaviour, and `ExecutionContext.skipAutomations`, which skips
+   * every hook bound from metadata, must never bypass it (#22070).
    */
   private registerAuditHooks(ctx: PluginContext) {
     if (!this.ql) return;
@@ -1326,18 +1328,36 @@ export class ObjectQLPlugin implements Plugin {
       // true" stays a measurement instead of rotting into a claim.
     ];
 
-    if (typeof (this.ql as any).bindHooks === 'function') {
-      (this.ql as any).bindHooks(builtinHooks, { packageId: 'sys:audit' });
-    } else {
-      // Defensive fallback if binder isn't available (older builds).
-      for (const h of builtinHooks) {
-        for (const event of h.events) {
-          this.ql.registerHook(event, h.handler, {
-            object: h.object,
-            priority: h.priority,
-            packageId: 'sys:audit',
-          });
-        }
+    // [#22070] Registered IN CODE — `registerHook`, with NO `meta` — and never
+    // through the hook binder. `meta` is the metadata binding the engine's
+    // `skipAutomations` opt-out keys on (`triggerHooks`): every hook the binder
+    // binds is skippable by it, and `ExecutionContext.skipAutomations` says
+    // audit never is. Bound through the binder, these stamps were skipped with
+    // the app's hooks, so a data import with "run automations & triggers"
+    // unchecked stored rows with no `created_by` / `updated_by`, no declared
+    // `tenant_id`, and no timestamps on a driver that does not stamp its own.
+    // Every entry of `builtinHooks` takes this path, so a builtin added to the
+    // list later cannot reach the opt-out either.
+    //
+    // What the binder gave them is kept, deliberately, so the opt-out is the
+    // ONLY thing that changes for a builtin:
+    //  - the same wrapper (`wrapDeclarativeHook`) with the engine's metrics
+    //    recorder, read now exactly as `bindHooks` reads it at bind time — the
+    //    Server-Timing `hooks` span AppPlugin installs in its `init`, ahead of
+    //    this `start`, keeps counting them;
+    //  - the unregister-by-package first, which keeps a second ObjectQLPlugin
+    //    on a SHARED engine (the constructor accepts an existing `ql`) from
+    //    registering every stamp twice.
+    this.ql.unregisterHooksByPackage('sys:audit');
+    const metrics = this.ql.getHookMetricsRecorder();
+    for (const h of builtinHooks) {
+      const wrapped = wrapDeclarativeHook(h, h.handler, { logger: ctx.logger, metrics });
+      for (const event of h.events) {
+        this.ql.registerHook(event, wrapped, {
+          object: h.object,
+          priority: h.priority,
+          packageId: 'sys:audit',
+        });
       }
     }
 
@@ -1346,7 +1366,7 @@ export class ObjectQLPlugin implements Plugin {
     // (#5846 update-side, #5929 delete-side) and `previous` is bound by the
     // ENGINE on both write paths. A log line naming a producer that no longer
     // exists is the cheapest way to send the next reader looking for it.
-    ctx.logger.debug('Audit hooks registered via binder (created_by/updated_by/created_at/updated_at/tenant_id stamping)');
+    ctx.logger.debug('Audit hooks registered in code (created_by/updated_by/created_at/updated_at/tenant_id stamping)');
   }
 
   /**
