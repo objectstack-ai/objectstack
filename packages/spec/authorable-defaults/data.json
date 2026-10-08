@@ -23,8 +23,6 @@
     "data/Datasource:origin = \"code\"",
     "data/Datasource:schemaMode = \"managed\"",
     "data/DocumentSchemaValidation:enabled = false",
-    "data/DocumentVersion:isLatest = false",
-    "data/ESignatureConfig:enabled = false",
     "data/EngineDeleteOptions:multi = false",
     "data/EngineUpdateOptions:multi = false",
     "data/EngineUpdateOptions:returning = false",

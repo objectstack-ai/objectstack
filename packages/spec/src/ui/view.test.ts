@@ -3906,7 +3906,10 @@ describe('ListViewSchema — retired striped/bordered/virtualScroll (every reade
 // and functional. The object form declares exactly the five renderer-read keys
 // (measured objectui origin/main@878140b, ObjectGrid.tsx:1596–1642); the
 // legacy bare array stays accepted and lifts to `{ formats }` at parse.
-// `'pdf'` left the enum in the same change (#1301 NOT_PLANNED).
+// `'pdf'` left the enum in the same change (#1301 NOT_PLANNED). The removal
+// stands under the 2026-10-08 ruling on #8346 (B′), which re-planned PDF
+// documents as print PAGES; the prescription stopped saying "declined as NOT
+// PLANNED" and points at the print page instead (#22158).
 // ============================================================================
 describe('ListViewSchema.exportOptions — object form + array lift + pdf retirement', () => {
   it('accepts the object form with all five renderer-read keys, byte-preserved (no unrecognized_keys)', () => {
@@ -3934,7 +3937,12 @@ describe('ListViewSchema.exportOptions — object form + array lift + pdf retire
       ListViewSchema.parse({ type: 'grid', columns: ['name'], exportOptions: ['xlsx', 'pdf'] });
     } catch (e) { message = String((e as Error).message); }
     expect(message).toMatch(/'pdf' was removed from `view\.exportOptions` formats/);
-    expect(message).toMatch(/PDF export itself was declined as NOT PLANNED/);
+    // [#22158] The sentence that stopped being true is gone, and the
+    // prescription points at the two live answers instead: the view's own
+    // print control, and a page that declares `print` for a document.
+    expect(message).not.toMatch(/NOT PLANNED|declined/);
+    expect(message).toMatch(/set the view's `allowPrinting`/);
+    expect(message).toMatch(/a printable document \(an invoice, a delivery order, a letter\) is a page that declares\s+`print`/);
     expect(message).not.toMatch(/#\d{3,5}\b/);
     expect(message).toMatch(/'csv', 'xlsx' and 'json'/);
     expect(message).toMatch(/Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./);
@@ -3943,7 +3951,7 @@ describe('ListViewSchema.exportOptions — object form + array lift + pdf retire
   it("REJECTS 'pdf' in the object form's `formats` with the same prescription", () => {
     expect(() => ListViewSchema.parse({
       type: 'grid', columns: ['name'], exportOptions: { formats: ['csv', 'pdf'] },
-    })).toThrow(/'pdf' was removed from `view\.exportOptions` formats.*NOT PLANNED/s);
+    })).toThrow(/'pdf' was removed from `view\.exportOptions` formats.*a page that declares\s+`print`/s);
   });
 
   it('a wrong format that was NEVER legal keeps the plain enum message, not the retirement text', () => {

@@ -33,21 +33,34 @@ import { VIEW_HISTORY } from './view-history';
 // `'pdf'` retirement prescription (#8010). Declared with `//` on purpose — the
 // hook-body precedent's placement note applies here too: build-docs takes a
 // file's first JSDoc per exported symbol, and this constant needs no doc page.
+//
+// [#22158] Re-worded under the ruling of record on #8346 (6051470224, letter
+// B′, maintainer 「8346 B′」 2026-10-08): the 17.0 retirement STANDS — list
+// export does not regain `'pdf'` — but the sentence it carried, "PDF export
+// itself was declined as NOT PLANNED", stopped being true when the maintainer
+// re-planned PDF documents for v18 (2026-08-13). A printable document is now a
+// page with a `print` declaration, so the prescription points there instead,
+// and at the view's own `allowPrinting` for printing a list as shown.
 export const LIST_VIEW_EXPORT_PDF_RETIRED =
-  "'pdf' was removed from `view.exportOptions` formats in @objectstack/spec 17.0.0 "
-  + '(PDF export itself was declined as NOT PLANNED) — no renderer has ever produced a PDF '
-  + 'export: ObjectGrid dropped the declared format from the export menu with only a runtime '
-  + "console.warn, so authoring it was a parse-clean no-op. Delete the value; the surviving "
-  + "formats are 'csv', 'xlsx' and 'json'. "
+  "'pdf' was removed from `view.exportOptions` formats in @objectstack/spec 17.0.0 — no "
+  + 'renderer has ever produced a PDF export: ObjectGrid dropped the declared format from the '
+  + 'export menu with only a runtime console.warn, so authoring it was a parse-clean no-op. '
+  + "Delete the value; the surviving formats are 'csv', 'xlsx' and 'json'. A list export does "
+  + "not produce documents: to let users print a list as shown, set the view's `allowPrinting`; "
+  + 'a printable document (an invoice, a delivery order, a letter) is a page that declares '
+  + '`print` — its paper, margins and running header and footer — with its blocks in `regions`. '
   + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * Export formats the platform actually delivers (#8010): `csv`/`json` on both
  * export paths, `xlsx` on the server stream only.
  *
- * `'pdf'` was REMOVED in 17 (#8010): PDF export was declined platform-side
- * (#1301 NOT_PLANNED), so the enum member was a declared-but-unrenderable
- * format whose only failure signal was a browser console line. This is an
+ * `'pdf'` was REMOVED in 17 (#8010): PDF export was then declined
+ * platform-side (#1301 NOT_PLANNED), so the enum member was a
+ * declared-but-unrenderable format whose only failure signal was a browser
+ * console line. The removal stands under the 2026-10-08 ruling on #8346 (B′),
+ * which re-planned PDF documents as print PAGES rather than as a list-export
+ * format, and the prescription now points there (#22158). This is an
  * enum-VALUE narrowing, so there is no `retiredKey()` tombstone to hang the
  * prescription on — the enum's own error map carries it
  * ({@link LIST_VIEW_EXPORT_PDF_RETIRED}), keyed on `issue.input` so that only

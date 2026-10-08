@@ -228,8 +228,20 @@ export { hookForm } from './hook.form';
 // Seed Loader Protocol (Relationship Resolution & Dependency Ordering)
 export * from './seed-loader.zod';
 
-// Document Management Protocol
-export * from './document.zod';
+// document.zod (DocumentTemplateSchema / DocumentSchema / ESignatureConfigSchema /
+// DocumentVersionSchema + every type alias) was REMOVED (#22158) under ADR-0049
+// enforce-or-remove, by the ruling of record on #8346 (letter B′, 2026-10-08):
+// "The zero-reader `DocumentTemplateSchema`, `DocumentSchema` and
+// `ESignatureConfigSchema` retire in v18 under ADR-0049 with ADR-0087 entries,
+// so that 'template' means one thing." A printable document is a page that
+// declares `print` (`ui/page.zod.ts`, `PagePrintSchema`) — no second template
+// vocabulary. The module declared a docx template with placeholders, a
+// document with versioning and access control, and an e-signature workflow,
+// and nothing anywhere consumed any of it: no metadata-type binding, no stack
+// collection, no reader outside `packages/spec` in this repository, objectui
+// or hotcrm. `DocumentVersionSchema` had one carrier, `DocumentSchema.versioning`,
+// and left with it (the orphan-value-schema rule). See the D3 record
+// `document-schemas-retired`.
 
 // external-lookup.zod (ExternalDataSourceSchema / ExternalFieldMappingSchema /
 // ExternalLookupSchema + every type alias) was REMOVED per ADR-0049

@@ -38,12 +38,15 @@ import { absentTableReads } from '../../utils/absent-table-reads.js';
 import type { StoredMigrationReport } from '@objectstack/metadata-protocol';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import { checkProtocolCompat, type ProtocolHandshakeManifest } from '@objectstack/metadata-core';
 import {
   planAuthoredSourceWrite,
   restoreAuthoredSources,
   verifyAuthoredSourceWrite,
   writeAuthoredSources,
   type AuthoredSourceWritePlan,
+  type RangeOutcome,
+  type RangeRewrite,
   type WriteVerification,
 } from '../../utils/authored-source-codemod.js';
 
@@ -277,6 +280,147 @@ function writeStackSnapshot(out: string, stack: Record<string, unknown>): void {
   printInfo(`Wrote migrated stack snapshot → ${chalk.white(out)}`);
 }
 
+/**
+ * What the run owes the manifest's declared protocol range (#22219).
+ *
+ * `rewrite`: the load refuses the range under the major this run migrated the
+ * source to, so `--write` rewrites it (and a dry run names the edit).
+ * `behind-from`: the load refuses it, but the chain started ABOVE the major the
+ * range declares, so it never replayed the majors in between; the range is
+ * left as written, and the report says which `--from` would move it.
+ */
+export type ProtocolRangePlan =
+  | { kind: 'rewrite'; rewrite: RangeRewrite }
+  | { kind: 'behind-from'; path: string; range: string; declaredMajor: number };
+
+/** A manifest value narrowed to the strings the handshake reads; anything else reads as absent. */
+function handshakeSlice(manifest: Record<string, unknown>): ProtocolHandshakeManifest {
+  const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
+  const obj = (v: unknown) => (v && typeof v === 'object' ? (v as Record<string, unknown>) : undefined);
+  const engines = obj(manifest.engines);
+  const engine = obj(manifest.engine);
+  return {
+    ...(engines ? { engines: { protocol: str(engines.protocol), platform: str(engines.platform) } } : {}),
+    ...(engine ? { engine: { objectstack: str(engine.objectstack) } } : {}),
+  };
+}
+
+/**
+ * The declared protocol range a migrated source owes, judged by the load's
+ * own handshake (#22219).
+ *
+ * ## Why this exists
+ *
+ * The load refuses a manifest whose range excludes the runtime's major, and the
+ * refusal names `objectstack migrate meta --from N` as the command that resolves
+ * it (`ProtocolIncompatibleDiagnostic.migrateCommand`, ADR-0087 P2). No
+ * conversion touches the range, so `--write` used to write the chain's edits,
+ * leave `'^N'` as it was, and hand the author back the same refusal.
+ *
+ * ## Which major the range is moved to
+ *
+ * `--to`, capped at the protocol this runtime implements. `--to` defaults to
+ * {@link CHAIN_TERMINUS_MAJOR}, which runs AHEAD of {@link PROTOCOL_MAJOR} while
+ * this build carries the next major's conversions — measured on a protocol-17
+ * build, `--from 16` replays 16 → 18. Those conversions map shapes the
+ * installed schemas refuse onto ones they accept, so the migrated source is
+ * what THIS runtime loads, and `'^18'` would be refused by the same handshake
+ * (measured: "targets protocol ^18 … Run: objectstack migrate meta --from 18").
+ * A `--to` below this runtime's major stops there, and so does the range: the
+ * source was not migrated past it.
+ *
+ * ## Where, and in what spelling
+ *
+ * At the key the handshake READ (`resolveDeclaredRange`: `engines.protocol`,
+ * else `engines.platform`, else the legacy `engine.objectstack`), in place. No
+ * chain step moves a range between those keys, and the schema accepts all three,
+ * so moving one would be a conversion the chain has not declared; the key the
+ * handshake read is the key it reads again. The spelling is the scaffold's and
+ * `os lint`'s, `'^N'` — except under `engine.objectstack`, whose schema refuses
+ * anything short of a full version, so `'^N.0.0'` there.
+ *
+ * ## What it never does
+ *
+ * It never lowers a range: one declaring a major at or above the target is
+ * left for the handshake to refuse, since moving it down would silence a real
+ * mismatch. It never touches a range the load admits, an absent one, or one
+ * the handshake cannot parse (the load admits those too). And it moves a range
+ * only across majors the chain replayed: when `--from` starts above the major
+ * the range declares (and above the chain's floor), the range is left and the
+ * report names the `--from` that would move it.
+ */
+export function planProtocolRange(
+  stack: Record<string, unknown>,
+  fromMajor: number,
+  toMajor: number,
+): ProtocolRangePlan | undefined {
+  // The slice the load's handshake reads: the bundle's `manifest`, else the
+  // bundle itself (`AppPlugin`: `bundle.manifest || bundle`).
+  const nested = stack.manifest && typeof stack.manifest === 'object';
+  const manifest = (nested ? stack.manifest : stack) as Record<string, unknown>;
+  const slice = handshakeSlice(manifest);
+  const major = Math.min(toMajor, PROTOCOL_MAJOR);
+  const compat = checkProtocolCompat(slice, `${major}.0.0`);
+  if (compat.status !== 'incompatible') return undefined;
+  const declaredMajor = compat.diagnostic.targetMajor;
+  if (declaredMajor === null || declaredMajor >= major) return undefined;
+
+  const path = `${nested ? 'manifest.' : ''}${compat.source}`;
+  const authored = compat.source === 'engines.protocol'
+    ? slice.engines?.protocol
+    : compat.source === 'engines.platform' ? slice.engines?.platform : slice.engine?.objectstack;
+  const from = authored ?? compat.requiredRange;
+  if (fromMajor > Math.max(declaredMajor, MIGRATION_SUPPORT_FLOOR)) {
+    return { kind: 'behind-from', path, range: from, declaredMajor };
+  }
+  const to = compat.source === 'engine.objectstack' ? `^${major}.0.0` : `^${major}`;
+  return { kind: 'rewrite', rewrite: { path, from, to, major } };
+}
+
+/** A range string as the report quotes it. */
+function quotedRange(range: string): string {
+  return `'${range}'`;
+}
+
+/** A dry run's range line (#22219): the edit `--write` would make, and why it is owed. */
+function printRangeDryRun(rewrite: RangeRewrite): void {
+  printWarning(
+    `${rewrite.path} ${quotedRange(rewrite.from)} does not admit protocol ${rewrite.major}, so the load `
+    + `refuses this stack even after migrating; --write rewrites it to ${quotedRange(rewrite.to)}.`,
+  );
+  console.log('');
+}
+
+/** The range a run left because it started above the major the range declares (#22219). */
+function printRangeLeft(plan: Extract<ProtocolRangePlan, { kind: 'behind-from' }>, fromMajor: number): void {
+  // The lowest `--from` that replays every major the range missed — never under the chain's floor.
+  const start = Math.max(plan.declaredMajor, MIGRATION_SUPPORT_FLOOR);
+  printWarning(
+    `${plan.path} ${quotedRange(plan.range)} declares protocol ${plan.declaredMajor}, below --from ${fromMajor}: `
+    + `this run did not replay protocol ${start} → ${fromMajor}, so the range is left as written and `
+    + `the load still refuses it. Run with --from ${start}.`,
+  );
+  console.log('');
+}
+
+/** What `--write` did with the declared range (#22219): written at its site, or left with the reason. */
+function printRangeOutcome(range: RangeOutcome): void {
+  const { rewrite } = range;
+  const edit = `${rewrite.path}: ${quotedRange(rewrite.from)} → ${quotedRange(rewrite.to)}`;
+  if (range.status === 'written') {
+    console.log(chalk.bold(`  Rewrote the declared protocol range, so the load admits protocol ${rewrite.major}:`));
+    console.log(`    ${chalk.white(range.file)}${chalk.dim(`:${range.line}`)} ${edit}`);
+    console.log('');
+    return;
+  }
+  console.log(chalk.bold(chalk.yellow(
+    `  The declared protocol range was left for you to change by hand; until then the load refuses it under protocol ${rewrite.major}:`,
+  )));
+  console.log(`    ${chalk.yellow('•')} ${edit}`);
+  console.log(chalk.dim(`        not written [${range.refusal.kind}]: ${range.refusal.reason}`));
+  console.log('');
+}
+
 /** One schema refusal of the migrated stack, in the shape `formatZodIssue` renders. */
 export type MigrationRefusal = Parameters<typeof formatZodIssue>[0];
 
@@ -318,9 +462,21 @@ export function writeOutcomeJson(outcome: WriteOutcome) {
       reason: m.refusal.reason,
     })),
     unexplained: plan.unexplained,
+    // The declared protocol range (#22219), only when the run owed it an edit.
+    // Not one of `written` / `manual`: those list the chain's `applied`
+    // entries, and the range is not one.
+    ...(plan.range ? { range: rangeOutcomeJson(plan.range) } : {}),
     ...(outcome.verification ? { verification: outcome.verification } : {}),
     ...(outcome.error ? { error: outcome.error } : {}),
   };
+}
+
+/** The `--json` face of a {@link RangeOutcome}. */
+function rangeOutcomeJson(range: RangeOutcome) {
+  const { path, from, to } = range.rewrite;
+  return range.status === 'written'
+    ? { status: range.status, path, from, to, file: range.file, line: range.line }
+    : { status: range.status, path, from, to, kind: range.refusal.kind, reason: range.refusal.reason };
 }
 
 /**
@@ -330,7 +486,7 @@ export function writeOutcomeJson(outcome: WriteOutcome) {
  */
 function printWriteOutcome(outcome: WriteOutcome, appliedCount: number): void {
   const { plan } = outcome;
-  if (appliedCount === 0) {
+  if (appliedCount === 0 && !plan.range) {
     printInfo('--write: the chain made no mechanical change here, so no file was written.');
     console.log('');
     return;
@@ -349,16 +505,25 @@ function printWriteOutcome(outcome: WriteOutcome, appliedCount: number): void {
     console.log('');
     return;
   }
-  console.log(chalk.bold(
-    `  Wrote ${plan.written.length} of ${appliedCount} mechanical change(s) into ${files} file(s):`,
-  ));
-  for (const r of plan.rewrites) {
-    console.log(`    ${chalk.white(r.file)}`);
-    for (const w of plan.written.filter((x) => x.file === r.file)) {
-      console.log(`      ${chalk.dim(`:${w.line}`)} ${w.application.path} ${chalk.dim(`(${w.application.conversionId})`)}`);
+  if (appliedCount === 0) {
+    // #22219: a stack with nothing to convert still owes the range its refusal names.
+    printInfo('--write: the chain made no mechanical change here; the declared protocol range is the one edit it owes.');
+    console.log('');
+  } else {
+    // The files holding the chain's edits; a file holding only the range is the range group's.
+    const chainFiles = plan.rewrites.filter((r) => plan.written.some((w) => w.file === r.file));
+    console.log(chalk.bold(
+      `  Wrote ${plan.written.length} of ${appliedCount} mechanical change(s) into ${chainFiles.length} file(s):`,
+    ));
+    for (const r of chainFiles) {
+      console.log(`    ${chalk.white(r.file)}`);
+      for (const w of plan.written.filter((x) => x.file === r.file)) {
+        console.log(`      ${chalk.dim(`:${w.line}`)} ${w.application.path} ${chalk.dim(`(${w.application.conversionId})`)}`);
+      }
     }
+    console.log('');
   }
-  console.log('');
+  if (plan.range) printRangeOutcome(plan.range);
   if (plan.manual.length > 0) {
     console.log(chalk.bold(chalk.yellow(`  ${plan.manual.length} mechanical change(s) left for you to apply by hand:`)));
     for (const m of plan.manual) {
@@ -375,13 +540,27 @@ function printWriteOutcome(outcome: WriteOutcome, appliedCount: number): void {
     );
   }
   if (files > 0) {
+    // The re-check holds the range as it holds the chain's edits (#22219).
+    const range = plan.range?.status === 'written'
+      ? ` The declared protocol range now admits protocol ${plan.range.rewrite.major}.`
+      : '';
     printSuccess(
       `Re-ran the chain over the written sources: ${plan.manual.length === 0
         ? 'no mechanical change remains.'
-        : `only the ${plan.manual.length} change(s) left above remain.`}`,
+        : `only the ${plan.manual.length} change(s) left above remain.`}${range}`,
     );
     console.log('');
   }
+}
+
+/**
+ * Group ⑤: with `--write`, what it wrote; without it, the range edit it would
+ * make (#22219). A range the run left alone says so either way.
+ */
+function printWriteGroup(report: MigrationReport, appliedCount: number): void {
+  if (report.range?.kind === 'behind-from') printRangeLeft(report.range, report.result.fromMajor);
+  if (report.write) printWriteOutcome(report.write, appliedCount);
+  else if (report.range?.kind === 'rewrite') printRangeDryRun(report.range.rewrite);
 }
 
 /** Everything the human report prints after the `Config:` / `Chain:` preamble. */
@@ -406,6 +585,8 @@ export interface MigrationReport {
   out?: string;
   /** `--write`: what was written into the authored sources (absent without the flag). */
   write?: WriteOutcome;
+  /** What the run owes the declared protocol range, when anything (#22219). */
+  range?: ProtocolRangePlan;
   /** Printed beside a schema-valid verdict. */
   elapsed: string;
 }
@@ -578,7 +759,9 @@ function printAbsentNotices(result: MigrationChainResult, all: boolean): void {
  *    in full (see {@link printAbsentNotices});
  *  ⑤ with `--write`, what was written into the authored sources and what was
  *    left (see {@link printWriteOutcome}) — mechanical changes only, so it
- *    reads `applied` and never ③ or ④.
+ *    reads `applied` and never ③ or ④ — plus the declared protocol range the
+ *    load would otherwise still refuse; without `--write`, that range edit
+ *    named as the one `--write` would make (see {@link printWriteGroup}).
  *
  * ## Why this order
  *
@@ -624,7 +807,7 @@ export function printMigrationReport(report: MigrationReport): void {
     // `--json` writes it regardless (#22116).
     console.log('');
     if (report.out) writeStackSnapshot(report.out, result.stack);
-    if (report.write) printWriteOutcome(report.write, 0);
+    printWriteGroup(report, 0);
     printPendingDataMigrations(report.dataMigrations);
     // Returning is safe only because ① has already printed: the schema verdict
     // is the one line that can contradict a "nothing to do" answer, and
@@ -664,8 +847,9 @@ export function printMigrationReport(report: MigrationReport): void {
     writeStackSnapshot(report.out, result.stack);
   }
 
-  // ⑤ `--write`: the mechanical changes written into the sources, and the rest.
-  if (report.write) printWriteOutcome(report.write, result.applied.length);
+  // ⑤ `--write`: the mechanical changes written into the sources, and the rest;
+  // or, on a dry run, the declared-range edit `--write` would make (#22219).
+  printWriteGroup(report, result.applied.length);
 
   printPendingDataMigrations(report.dataMigrations);
 }
@@ -687,7 +871,9 @@ export function printMigrationReport(report: MigrationReport): void {
  * mechanical changes into the authored sources in place — only at sites it can
  * trace to one literal in one project file, every other byte left as it was —
  * and lists each change it could not trace, with the reason; it never writes a
- * semantic TODO. See `utils/authored-source-codemod.ts` for what it proves
+ * semantic TODO. It also rewrites the manifest's declared protocol range when
+ * the load would still refuse the migrated source under it (#22219, see
+ * {@link planProtocolRange}). See `utils/authored-source-codemod.ts` for what it proves
  * before writing and the closed set of reasons it refuses. `--step` prints a
  * per-hop checkpoint so a failure can be bisected to the exact major.
  *
@@ -762,8 +948,8 @@ export default class MigrateMeta extends Command {
     write: Flags.boolean({
       description:
         'Rewrite the authored source files in place for each mechanical change traced to one literal in one '
-        + 'project file; every other change is listed with the reason it was not written. Never writes the '
-        + 'manual (semantic) changes.',
+        + 'project file, and the manifest\'s declared protocol range when the load would still refuse it; every '
+        + 'other change is listed with the reason it was not written. Never writes the manual (semantic) changes.',
       default: false,
       exclusive: ['stored'],
     }),
@@ -881,6 +1067,10 @@ export default class MigrateMeta extends Command {
       const specChanges = composeSpecChanges(fromMajor, toMajor);
       const dataMigrations = pendingDataMigrations(result.stack, result.fromMajor, result.toMajor);
 
+      // The declared protocol range the load would still refuse after this
+      // run (#22219): `--write` rewrites it, a dry run names the edit.
+      const range = planProtocolRange(normalized, result.fromMajor, result.toMajor);
+
       // `--write` (#9591): the mechanical changes go into the authored sources
       // where they can be proved, and the write is held to a re-run of the chain.
       const write = flags.write
@@ -891,6 +1081,7 @@ export default class MigrateMeta extends Command {
             namedExports,
             normalized,
             result,
+            ...(range?.kind === 'rewrite' ? { range: range.rewrite } : {}),
             json: Boolean(flags.json),
           })
         : undefined;
@@ -964,6 +1155,7 @@ export default class MigrateMeta extends Command {
         all: flags.all,
         ...(flags.out ? { out: resolve(flags.out) } : {}),
         ...(write ? { write } : {}),
+        ...(range ? { range } : {}),
         elapsed: timer.display(),
       });
       // A write refused or undone is a failed run, reported above.
@@ -994,7 +1186,9 @@ export default class MigrateMeta extends Command {
   /**
    * `--write`: plan the source edits, write them, re-run the chain over the
    * written sources, and restore every file when the re-run disagrees with
-   * the plan (#9591). Writes nothing when the chain applied nothing.
+   * the plan (#9591). The declared protocol range rides the same plan, write
+   * and re-check (#22219). Writes nothing when neither the chain nor the range
+   * owes an edit.
    */
   private async writeSources(input: {
     configArg: string | undefined;
@@ -1003,10 +1197,13 @@ export default class MigrateMeta extends Command {
     namedExports: readonly string[];
     normalized: Record<string, unknown>;
     result: MigrationChainResult;
+    range?: RangeRewrite;
     json: boolean;
   }): Promise<WriteOutcome> {
     const { result } = input;
-    if (!input.json && result.applied.length > 0) printStep('Writing the mechanical changes into the authored sources…');
+    if (!input.json && (result.applied.length > 0 || input.range)) {
+      printStep('Writing the mechanical changes into the authored sources…');
+    }
     const plan = await planAuthoredSourceWrite({
       configPath: input.configPath,
       config: input.config,
@@ -1014,6 +1211,7 @@ export default class MigrateMeta extends Command {
       normalized: input.normalized,
       migrated: result.stack,
       applied: result.applied,
+      ...(input.range ? { range: input.range } : {}),
     });
     if (plan.rewrites.length === 0) return { plan, status: 'written' };
     try {
@@ -1031,12 +1229,15 @@ export default class MigrateMeta extends Command {
     console.warn = () => {};
     try {
       const reloaded = await loadConfig(input.configArg, { authoredSource: true });
-      const rerun = applyMetaMigrations(
-        normalizeStackInput(reloaded.config as Record<string, unknown>, { convert: false }),
-        result.fromMajor,
-        result.toMajor,
+      const rerunInput = normalizeStackInput(reloaded.config as Record<string, unknown>, { convert: false });
+      const rerun = applyMetaMigrations(rerunInput, result.fromMajor, result.toMajor);
+      // The range the written sources still owe, judged as it was before the write.
+      const rerunRange = planProtocolRange(rerunInput, result.fromMajor, result.toMajor);
+      verification = verifyAuthoredSourceWrite(
+        plan,
+        rerun.applied,
+        rerunRange?.kind === 'rewrite' ? rerunRange.rewrite : undefined,
       );
-      verification = verifyAuthoredSourceWrite(plan, rerun.applied);
     } catch (error: any) {
       restoreAuthoredSources(plan);
       return { plan, status: 'restored', error: `the re-run over the written sources failed: ${error.message || String(error)}` };
