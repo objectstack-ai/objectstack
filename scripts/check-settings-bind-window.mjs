@@ -495,8 +495,9 @@ function objectUnit(file, src, obj, fileFunctions) {
  *  - ANY of them registered from inside a handler → that handler's own origin,
  *    because it can only run once the registering handler has.
  *
- * A fired hook's name is a string literal, or a parameter the call site bound
- * to one (`emitCatalogEvent(ctx, 'app:registered', sys)` reaches
+ * A hook is fired by `.trigger` on the PLUGIN CONTEXT (or `trigger.call` with
+ * the context as `this`). Its name is a string literal, or a parameter the call
+ * site bound to one (`emitCatalogEvent(ctx, 'app:registered', sys)` reaches
  * `trigger.call(ctx, event, payload)`); anything else is recorded UNRESOLVED,
  * and `audit()` refuses on it rather than derive a population it cannot name.
  */
@@ -506,6 +507,42 @@ function preBindReads(unit, src, hookNames = new Set([READY_HOOK, ...Object.keys
 
   /** Local (block-scoped) function bindings seen anywhere along the walk. */
   const locals = new Map();
+
+  // The PLUGIN CONTEXT, by the names it travels under: the lifecycle methods'
+  // first parameter, every helper parameter a call site hands it to, and every
+  // `this.X = <context>` field. Only a `.trigger` on the context fires a kernel
+  // hook — a job or flow service's `.trigger(name)` is not one, and reading it
+  // as one would refuse a correct plugin with a remedy that does not apply.
+  const contextNames = new Set();
+  const contextFields = new Set();
+  for (const phase of ['init', 'start']) {
+    const p = unit.methods.get(phase)?.parameters?.[0];
+    if (p && ts.isIdentifier(p.name)) contextNames.add(p.name.text);
+  }
+  const unwrap = (node) => {
+    let n = node;
+    while (n && (ts.isParenthesizedExpression(n) || ts.isAsExpression(n) ||
+      ts.isNonNullExpression(n) || ts.isTypeAssertionExpression(n))) n = n.expression;
+    return n;
+  };
+  const isContext = (node) => {
+    const n = unwrap(node);
+    if (!n) return false;
+    if (ts.isIdentifier(n)) return contextNames.has(n.text);
+    return ts.isPropertyAccessExpression(n) && n.expression.kind === ts.SyntaxKind.ThisKeyword &&
+      contextFields.has(n.name.text);
+  };
+  for (const method of unit.methods.values()) {
+    const scanFields = (node) => {
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isPropertyAccessExpression(node.left) && node.left.expression.kind === ts.SyntaxKind.ThisKeyword &&
+        isContext(node.right)) {
+        contextFields.add(node.left.name.text);
+      }
+      ts.forEachChild(node, scanFields);
+    };
+    if (method.body) scanFields(method.body);
+  }
 
   const walk = (fnNode, origin, visited, onHook, bindings = new Map()) => {
     if (!fnNode) return;
@@ -535,11 +572,13 @@ function preBindReads(unit, src, hookNames = new Set([READY_HOOK, ...Object.keys
       return undefined;
     };
 
-    /** The callee's parameters bound to whatever string arguments resolve. */
+    /** The callee's parameters bound to whatever string arguments resolve —
+     *  and, unit-wide, the parameters it receives the context through. */
     const bindArgs = (target, args) => {
       const out = new Map();
       (target.parameters ?? []).forEach((p, i) => {
         if (!ts.isIdentifier(p.name)) return;
+        if (isContext(args[i])) contextNames.add(p.name.text);
         const value = resolveString(args[i]);
         if (value !== undefined) out.set(p.name.text, value);
       });
@@ -600,12 +639,14 @@ function preBindReads(unit, src, hookNames = new Set([READY_HOOK, ...Object.keys
               if (handler) onHook(nameArg.text, handler);
             }
           }
-          // `<anything>.trigger(name, …)` — the hook is FIRED here.
-          if (callee.name.text === EMIT_CALLEE) recordEmit(node.arguments[0], node);
-          // `trigger.call(thisArg, name, …)` — AppPlugin's spelling, which
+          // `<context>.trigger(name, …)` — the hook is FIRED here.
+          if (callee.name.text === EMIT_CALLEE && isContext(callee.expression)) {
+            recordEmit(node.arguments[0], node);
+          }
+          // `trigger.call(<context>, name, …)` — AppPlugin's spelling, which
           // reads the method off the context first so a kernel without one
-          // is a no-op rather than a throw.
-          if (callee.name.text === 'call' &&
+          // is a no-op rather than a throw. The context is the `this` argument.
+          if (callee.name.text === 'call' && isContext(node.arguments[0]) &&
             ((ts.isIdentifier(callee.expression) && callee.expression.text === EMIT_CALLEE) ||
               (ts.isPropertyAccessExpression(callee.expression) && callee.expression.name.text === EMIT_CALLEE))) {
             recordEmit(node.arguments[1], node);
@@ -1448,6 +1489,7 @@ function selfTest() {
   //     emitCatalogEvent; the continuation is the over-budget seed path.
   {
     const { units } = auditSource(PROVIDER + `
+      function fireFrom(pluginCtx: PluginContext) { pluginCtx.trigger('x:renamed'); }
       export class EmitterPlugin implements Plugin {
         name = 'plugin.emitter';
         private emitCatalogEvent(ctx: PluginContext, event: string, sys: any): void {
@@ -1457,9 +1499,13 @@ function selfTest() {
         private emitWhenSettled(ctx: PluginContext, event: string): void {
           settled.then(() => ctx.trigger(event));
         }
-        async init(ctx: PluginContext) { await ctx.trigger('x:init', {}); }
+        async init(ctx: PluginContext) { this.ctx = ctx; await ctx.trigger('x:init', {}); }
         async start(ctx: PluginContext) {
           await ctx.trigger('x:direct', this.service);
+          this.ctx.trigger('x:stored');
+          fireFrom(ctx);
+          jobs.trigger('nightly-cleanup');
+          this.jobs.trigger(jobName);
           const emitSettled = (overBudget: boolean) => {
             const trigger = (ctx as any).trigger;
             trigger.call(ctx, 'x:call', { overBudget });
@@ -1476,8 +1522,10 @@ function selfTest() {
     `);
     const derived = derivePreBindHooks(units);
     const names = [...derived.fired.keys()].sort();
-    assert(JSON.stringify(names) === JSON.stringify(['x:call', 'x:direct', 'x:init', 'x:param', 'x:then', 'x:then-param']),
-      `the derivation reads every shipped fire-site spelling and nothing deferred (got ${names.join(', ')})`);
+    assert(JSON.stringify(names) === JSON.stringify(
+      ['x:call', 'x:direct', 'x:init', 'x:param', 'x:renamed', 'x:stored', 'x:then', 'x:then-param']),
+    `the derivation reads every shipped fire-site spelling on the context, and nothing deferred or ` +
+      `off-context (got ${names.join(', ')})`);
     assert(derived.fired.get('x:init')[0].origin === 'init-body', 'an init() fire site is recorded as init-body');
     assert(derived.unresolved.length === 1 && derived.unresolved[0].text === 'eventName',
       'a hook name the walk cannot resolve is recorded, not dropped');
