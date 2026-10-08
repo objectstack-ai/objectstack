@@ -594,6 +594,8 @@
   **If a widget stopped answering for some users,** it reads a field those users
   may not read. Grant that field's read permission to the users who need it, or
   build the widget on fields they can read.
+  
+  *Erratum, 2026-10-08 — this entry said "A deployment with no security service applies no field-level check, as on the data API." The sentence was false when published: in the published 17.6.0 packages, `ObjectKernel` and `LiteKernel` throw on a `security` service nothing ever registered, and the analytics bridges answer that throw by refusing the query, fail-closed. One passage above is corrected in place; everything else this entry published is unchanged. (Corrected after publication, #22279.)*
 - 5dbeb7d: fix(service-analytics): on the engine-aggregate path, a `$not`, `$notContains` or null test over a multi-valued lookup now gets the engine's rows instead of `400 INVALID_FILTER` (#20918)
   
   Clause-②: yes
@@ -663,6 +665,8 @@
   **If a widget stopped answering for some users,** it reads a related object
   those users may not read. Grant read access on that object to the users who
   need it, or build the widget on objects they can read.
+  
+  *Erratum, 2026-10-08 — this entry said "A deployment with no security service applies no object-level check, as on the data API." The sentence was false when published: in the published 17.6.0 packages, `ObjectKernel` and `LiteKernel` throw on a `security` service nothing ever registered, and the analytics bridges answer that throw by refusing the query, fail-closed. One passage above is corrected in place; everything else this entry published is unchanged. (Corrected after publication, #22279.)*
 - 83480c6: fix(service-analytics)!: a field the caller is served masked is refused as a group key, an aggregate input, a filter or a sort key on every analytics face, whichever strategy serves the cube (#20935)
   
   Clause-②: yes (narrowing)
@@ -824,6 +828,8 @@
   **What changes.** The service compiles a dataset into a cube whose members read as declared, so a dimension or measure whose `field` was a raw expression resolved to a declared cube member and was left to the field-level read gate, which stands down where no field reader is wired (a host that constructs `AnalyticsService` without one) and on an object its reader answers `undefined` for; in those tiers the expression reached the native statement as written. (A deployment with no security service is not such a tier: the in-repo kernels throw on a `security` service nothing ever registered, so its analytics queries are refused, fail-closed.) The dataset's own `field` text is now judged at the dataset door, before compile and before any strategy runs, through the field-read gate's existing judge (`PERMISSION_DENIED` / 403, naming the member and never the expression text), for every caller, admin included, and with or without a security service. There is no new error code and no new admission module.
   
   **What stays answerable.** Every dataset whose fields are columns or relationship paths is unchanged, inline or saved. A saved dataset whose `field` is an expression is refused the same way as an inline one; refusing such a `field` when it is authored belongs to the dataset schema's own retirement of expression fields, not to this door. The dataset's own filter, the selection's runtime filter and cube-query members are lowered into the compiled query and already judged on the query path, so they are unchanged.
+  
+  *Erratum, 2026-10-08 — this entry said the field-level read gate "stands down with no security service". The sentence was false when published: in the published 17.6.0 packages, `ObjectKernel` and `LiteKernel` throw on a `security` service nothing ever registered, and the analytics bridges answer that throw by refusing the query, fail-closed. One passage above is corrected in place; everything else this entry published is unchanged. (Corrected after publication, #22279.)*
 - 4727fcb: fix(service-analytics)!: a grouped dimension or a `count_distinct` measure over a JSON-stored column reached through a relationship path the cube declares no join for is refused with `INVALID_FIELD` / 400 at the analytics door, as the same member over a declared join already was
   
   Clause-②: no (narrowing)
@@ -1223,6 +1229,8 @@
   declare the derived value on an ADR-0021 dataset: a conditional count or sum
   is a dataset measure with its own `filter`, and a ratio of measures is
   `derived: { op: 'ratio', of: [...] }`.
+  
+  *Erratum, 2026-10-08 — this entry said "A deployment with no security service, and an object the security service gives no field answer for, apply no field-level check, as before." The sentence was false when published: in the published 17.6.0 packages, `ObjectKernel` and `LiteKernel` throw on a `security` service nothing ever registered, and the analytics bridges answer that throw by refusing the query, fail-closed. One passage above is corrected in place; its half about an object the security service gives no field answer for stands, and everything else this entry published is unchanged. (Corrected after publication, #22279.)*
 - 097ef80: fix: the analytics native-SQL path aggregates with the engine's own aggregate policies, so one query answers one number whichever strategy serves it: `sum` / `avg` accumulate in double, a PostgreSQL boolean aggregand is cast, and an all-NULL `sum` answers `0`. The operand policies move from `@objectstack/driver-sql` to `@objectstack/core` (#21042)
   
   Clause-②: yes (widening)
@@ -1937,6 +1945,8 @@
   - **`@objectstack/verify`** gains `bootStack(app, { databaseDriver: 'sqlite-wasm' | 'memory' })`, because a two-driver equivalence property cannot be measured on one driver — which is how the strategies were allowed to disagree.
   
   The refusal is `PERMISSION_DENIED` / 403, the same code and status the engine path already answers, and it names only the object the caller themselves named.
+  
+  *Erratum, 2026-10-08 — this entry said that a deployment with no `security` service registered "keeps its previous analytics behaviour by design", that "an ABSENT `security` service admits", and that this "keeps a deployment shipping no `plugin-security` working as before". The sentences were false when published: in the published 17.5.0 packages, `ObjectKernel` and `LiteKernel` throw on a `security` service nothing ever registered, so the bridge took its cannot-be-USED branch and refused the query, fail-closed. ABSENT is reached only by a context that answers the lookup with nothing, and no in-repo kernel does. Two passages above are corrected in place and the BREAKING banner now names that deployment among the requests that become refused; everything else this entry published is unchanged. (Corrected after publication, #22279.)*
 - 5d12b16: fix(service-analytics): the ROW-SCOPE bridge to the `security` service tells the same three resolutions apart as the object-level one — a broken security service refuses the query instead of running it with no row policy (#16918)
   
   `AnalyticsServicePlugin` bridges to the `security` service twice: once for the OBJECT-level read grant (`admitObjectRead` → `canReadObject`, #16645) and once for the ROW-level read scope (`getReadScope` → `getReadFilter`, ADR-0021 D-C). The object-level bridge tells three resolutions apart — ABSENT (the context answers the lookup with nothing; no in-repo kernel does) admits, THROWING (on the in-repo kernels that includes a `security` service nothing ever registered) and METHOD-LESS deny at `error`. The row-scope bridge collapsed all three into one:
@@ -1963,6 +1973,8 @@
   **No published-surface delta.** No new error code (the refusal rides the seam's existing fail-closed error), no exported symbol, no key on `AnalyticsServicePluginOptions` or any payload, and no documented envelope changes shape. Graded `minor` rather than `patch` because it is a behaviour narrowing on a published package's read path, matching how its object-level sibling was graded in the same lockstep window.
   
   ⚠️ Deliberately **not** answered here: which tenant wall the platform's is (plugin-security's posture-gated Layer 0, or driver-sql's posture-independent auto-scope) — the escalated maintainer decision of triage condition 5. Refusing to serve is neutral between them: it answers *"should we serve at all"*, never *"what shape is the wall"*.
+  
+  *Erratum, 2026-10-08 — this entry described an ABSENT `security` resolution as "a legitimate configuration (a single-tenant kernel that ships no `plugin-security`, …)" that stays **unchanged** and is "Deliberately not tightened", and said "no deployment with none, changes behaviour by so much as a byte". The sentences were false when published: in the published 17.5.0 packages, `ObjectKernel` and `LiteKernel` throw on a `security` service nothing ever registered, so such a kernel took the THROWING row and was refused. Three passages above are corrected in place; everything else this entry published is unchanged. (Corrected after publication, #22279.)*
 - 634f23d: fix(analytics)!: `AnalyticsServiceConfig.sqlDialect` declares its three-name accept set, and a host that answers outside it is told once (#16206)
   
   <!-- adr-0087: not-required (runtime-interface-only packages/services/service-analytics/src/analytics-service.ts#AnalyticsServiceConfig) The narrowed member is one hook on a service CONSTRUCTOR CONFIG — a published runtime TypeScript interface with no metadata surface. It has no Zod schema, no `packages/spec` declaration and no stored representation, so `objectstack migrate meta`, `spec-changes.json` and the generated upgrade guide have nothing to rewrite; the affected party is a TypeScript host and the channel that reaches every one of them is the compiler at their own composition site. No metadata key is added, removed, renamed or re-shaped, and `packages/spec` is untouched by this diff. -->
@@ -2777,6 +2789,8 @@
   - its message is withheld from the response body by declaration (the operator still gets the full text, at `error`, from the producing site) rather than echoed.
   
   Every refusal message is byte-unchanged, and #5033's leniency is untouched: a genuine absent source table still degrades to the empty result with its `warn`. A deployment with NO security service does not run unscoped either: the in-repo kernels throw on its `security` lookup, so its queries are refused, fail-closed, as they already were. A guard derived from the source (`refusal-wording-collision.test.ts`) now walks every `throw` in the package and fails if an un-enveloped refusal can be read as a missing source table.
+  
+  *Erratum, 2026-10-08 — this entry said "a deployment with NO security service still runs unscoped exactly as before." The sentence was false when published: in the published 17.5.0 packages, `ObjectKernel` and `LiteKernel` throw on a `security` service nothing ever registered, and the analytics bridges answer that throw by refusing the query, fail-closed. One passage above is corrected in place; everything else this entry published is unchanged. (Corrected after publication, #22279.)*
 - f3b28eb: Draft-preview analytics: `avg` answers the mean of the NON-NULL operands, and `null` when there are none — matching every live face
   
   A dataset measure `{ aggregate: 'avg', field: 'amount' }` compiles to the cube

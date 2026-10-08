@@ -577,6 +577,8 @@
   - **`@objectstack/verify`** gains `bootStack(app, { databaseDriver: 'sqlite-wasm' | 'memory' })`, because a two-driver equivalence property cannot be measured on one driver — which is how the strategies were allowed to disagree.
   
   The refusal is `PERMISSION_DENIED` / 403, the same code and status the engine path already answers, and it names only the object the caller themselves named.
+  
+  *Erratum, 2026-10-08 — this entry said that a deployment with no `security` service registered "keeps its previous analytics behaviour by design", that "an ABSENT `security` service admits", and that this "keeps a deployment shipping no `plugin-security` working as before". The sentences were false when published: in the published 17.5.0 packages, `ObjectKernel` and `LiteKernel` throw on a `security` service nothing ever registered, so the bridge took its cannot-be-USED branch and refused the query, fail-closed. ABSENT is reached only by a context that answers the lookup with nothing, and no in-repo kernel does. Two passages above are corrected in place and the BREAKING banner now names that deployment among the requests that become refused; everything else this entry published is unchanged. (Corrected after publication, #22279.)*
 - 611795e: verify: let `bootStack` be told which package `multiTenant: true` resolves, so the
   `declared-unresolvable` control can name a subject the workspace can never supply
   
