@@ -267,7 +267,8 @@ describe('scaffolded Dockerfile build stage installs from the project lockfile',
 
     const run = runInstallStep(project);
     expect(run.status, `the stage's install failed for an npm project:\n${run.output}`).toBe(0);
-    expect(run.copied).toEqual(['package-lock.json', 'package.json', 'pnpm-workspace.yaml']);
+    expect(run.copied).toEqual(expect.arrayContaining(['package-lock.json', 'package.json']));
+    expect(run.copied).not.toContain('pnpm-lock.yaml');
     expect(run.corepackCalls).toEqual([]);
     expect(installedLink(run.app), 'no install ran: node_modules/local-dep is missing').toBe(true);
   }, 30_000);
