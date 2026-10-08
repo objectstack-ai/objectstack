@@ -32,22 +32,9 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CAPABILITY_PROVIDERS, providesCapability } from '@objectstack/core';
 import Serve from '../src/commands/serve.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
-
-/**
- * [#22301] The table and the rule live in `@objectstack/core`, read by `os serve`
- * AND by `@objectstack/verify`'s `bootStack`; `Serve`'s statics are handles over
- * them. Pinned by identity, so a second copy kept on `Serve` cannot pass.
- */
-describe('one declaration, several readers', () => {
-  it('Serve.CAPABILITY_PROVIDERS and Serve.providesCapability ARE the @objectstack/core declarations', () => {
-    expect(Serve.CAPABILITY_PROVIDERS).toBe(CAPABILITY_PROVIDERS);
-    expect(Serve.providesCapability).toBe(providesCapability);
-  });
-});
 
 /** Minimal stand-in for a loaded plugin: what the resolver actually reads. */
 function plugin(name: string, ctorName: string): { name: string } {
@@ -56,23 +43,23 @@ function plugin(name: string, ctorName: string): { name: string } {
 }
 
 describe('#7652: providesCapability compares identities, not substrings', () => {
-  const MCP = CAPABILITY_PROVIDERS.mcp;
+  const MCP = Serve.CAPABILITY_PROVIDERS.mcp;
 
   it('the outbound MCP CLIENT connector does not satisfy the `mcp` capability', () => {
     // The exact plugin the showcase loads (`packages/connectors/connector-mcp`).
     const consumer = plugin('com.objectstack.connector.mcp', 'ConnectorMcpPlugin');
     expect(
-      providesCapability([consumer], MCP.identities),
+      Serve.providesCapability([consumer], MCP.identities),
       'a consumer named after the capability must never suppress its provider',
     ).toBe(false);
   });
 
   it('the real MCP server plugin still satisfies it — by name and by class', () => {
-    expect(providesCapability([plugin('com.objectstack.mcp', 'MCPServerPlugin')], MCP.identities)).toBe(true);
+    expect(Serve.providesCapability([plugin('com.objectstack.mcp', 'MCPServerPlugin')], MCP.identities)).toBe(true);
     // A host that constructs the class under another id (or a subclass) is still
     // recognised through whichever identity survives.
-    expect(providesCapability([plugin('com.acme.custom-mcp', 'MCPServerPlugin')], MCP.identities)).toBe(true);
-    expect(providesCapability([plugin('com.objectstack.mcp', 'WrappedMcp')], MCP.identities)).toBe(true);
+    expect(Serve.providesCapability([plugin('com.acme.custom-mcp', 'MCPServerPlugin')], MCP.identities)).toBe(true);
+    expect(Serve.providesCapability([plugin('com.objectstack.mcp', 'WrappedMcp')], MCP.identities)).toBe(true);
   });
 
   it('rejects the near-misses substring matching used to accept', () => {
@@ -84,18 +71,18 @@ describe('#7652: providesCapability compares identities, not substrings', () => 
       // provider class name used to match it.
       plugin('com.acme.thing', 'FakeMCPServerPlugin'),
     ]) {
-      expect(providesCapability([near], MCP.identities), `${near.name} must not satisfy \`mcp\``).toBe(false);
+      expect(Serve.providesCapability([near], MCP.identities), `${near.name} must not satisfy \`mcp\``).toBe(false);
     }
   });
 
   it('an empty identity list never matches, and empty strings are ignored', () => {
-    expect(providesCapability([plugin('com.objectstack.mcp', 'MCPServerPlugin')], [])).toBe(false);
-    expect(providesCapability([plugin('', 'Anon')], [''])).toBe(false);
+    expect(Serve.providesCapability([plugin('com.objectstack.mcp', 'MCPServerPlugin')], [])).toBe(false);
+    expect(Serve.providesCapability([plugin('', 'Anon')], [''])).toBe(false);
   });
 
   it('survives plugins with no name / a null-prototype object', () => {
-    expect(providesCapability([{}, null, undefined, Object.create(null)], MCP.identities)).toBe(false);
-    expect(providesCapability([{ name: 'com.objectstack.mcp' }], MCP.identities)).toBe(true);
+    expect(Serve.providesCapability([{}, null, undefined, Object.create(null)], MCP.identities)).toBe(false);
+    expect(Serve.providesCapability([{ name: 'com.objectstack.mcp' }], MCP.identities)).toBe(true);
   });
 });
 
@@ -133,20 +120,20 @@ const EXPECTED_PROVIDER_NAME: Record<string, string> = {
 
 describe('#7652: every registered provider is still recognised (the other direction)', () => {
   it('covers every CAPABILITY_PROVIDERS token — the table cannot silently fall behind', () => {
-    expect(Object.keys(EXPECTED_PROVIDER_NAME).sort()).toEqual(Object.keys(CAPABILITY_PROVIDERS).sort());
+    expect(Object.keys(EXPECTED_PROVIDER_NAME).sort()).toEqual(Object.keys(Serve.CAPABILITY_PROVIDERS).sort());
   });
 
-  it.each(Object.entries(CAPABILITY_PROVIDERS))(
+  it.each(Object.entries(Serve.CAPABILITY_PROVIDERS))(
     '`%s` is satisfied by its own provider, by name and by class',
     (cap, spec) => {
       const realName = EXPECTED_PROVIDER_NAME[cap]!;
-      expect(providesCapability([plugin(realName, 'Unrelated')], spec.identities)).toBe(true);
-      expect(providesCapability([plugin('com.example.unrelated', spec.export)], spec.identities)).toBe(true);
+      expect(Serve.providesCapability([plugin(realName, 'Unrelated')], spec.identities)).toBe(true);
+      expect(Serve.providesCapability([plugin('com.example.unrelated', spec.export)], spec.identities)).toBe(true);
     },
   );
 
   it('every entry declares its exported class name as an identity', () => {
-    for (const [cap, spec] of Object.entries(CAPABILITY_PROVIDERS)) {
+    for (const [cap, spec] of Object.entries(Serve.CAPABILITY_PROVIDERS)) {
       expect(spec.identities, `'${cap}' must accept an explicitly-constructed ${spec.export}`).toContain(spec.export);
       for (const ex of spec.extras ?? []) {
         expect(ex.identities, `'${cap}' extra ${ex.export}`).toContain(ex.export);
@@ -155,7 +142,7 @@ describe('#7652: every registered provider is still recognised (the other direct
   });
 
   it('no identity is a bare fragment — ids are fully qualified, class names are not ids', () => {
-    for (const [cap, spec] of Object.entries(CAPABILITY_PROVIDERS)) {
+    for (const [cap, spec] of Object.entries(Serve.CAPABILITY_PROVIDERS)) {
       const all = [spec, ...(spec.extras ?? [])];
       for (const entry of all) {
         for (const id of entry.identities) {
@@ -181,9 +168,9 @@ describe('#7652: every registered provider is still recognised (the other direct
       plugin('com.objectstack.connector.rest', 'ConnectorRestPlugin'),
       plugin('com.objectstack.connector.slack', 'ConnectorSlackPlugin'),
     ];
-    for (const [cap, spec] of Object.entries(CAPABILITY_PROVIDERS)) {
+    for (const [cap, spec] of Object.entries(Serve.CAPABILITY_PROVIDERS)) {
       expect(
-        providesCapability(consumers, spec.identities),
+        Serve.providesCapability(consumers, spec.identities),
         `a connector must not stand in for the '${cap}' provider`,
       ).toBe(false);
     }
@@ -200,7 +187,7 @@ describe('#7652: every registered provider is still recognised (the other direct
  * asserted too whenever the plugin can be constructed without arguments.
  */
 describe('#7652: declared identities match what the provider packages register', () => {
-  const entries = Object.entries(CAPABILITY_PROVIDERS).flatMap(([cap, spec]) => [
+  const entries = Object.entries(Serve.CAPABILITY_PROVIDERS).flatMap(([cap, spec]) => [
     { cap, pkg: spec.pkg, export: spec.export, identities: spec.identities },
     ...(spec.extras ?? []).map((ex) => ({ cap: `${cap}:${ex.export}`, pkg: ex.pkg, export: ex.export, identities: ex.identities })),
   ]);
@@ -220,9 +207,9 @@ describe('#7652: declared identities match what the provider packages register',
     expect(src).toContain("name = 'com.objectstack.connector.mcp'");
     expect(src).toContain('export class ConnectorMcpPlugin');
     // And that name must NOT satisfy the capability it consumes.
-    expect(providesCapability(
+    expect(Serve.providesCapability(
       [plugin('com.objectstack.connector.mcp', 'ConnectorMcpPlugin')],
-      CAPABILITY_PROVIDERS.mcp.identities,
+      Serve.CAPABILITY_PROVIDERS.mcp.identities,
     )).toBe(false);
   });
 
@@ -251,7 +238,7 @@ describe('#7652: declared identities match what the provider packages register',
  * SHIPPED build, and every registry that declares one is enumerated here.
  *
  * What was measured, and why the drift block above could not see it:
- * `providesCapability` recognises a provider by comparing
+ * `Serve.providesCapability` recognises a provider by comparing
  * `plugin.constructor.name` against the declared identities, so a class-name
  * identity is a genuine SECOND way to recognise a provider only while it equals
  * the class's runtime `.name`. Nothing compared those two. The block above
@@ -313,7 +300,7 @@ type IdentitySource = {
 
 /** Every declared class-name identity in `serve.ts`, from both registry shapes. */
 const IDENTITY_SOURCES: IdentitySource[] = [
-  ...Object.entries(CAPABILITY_PROVIDERS).flatMap(([cap, spec]) => [
+  ...Object.entries(Serve.CAPABILITY_PROVIDERS).flatMap(([cap, spec]) => [
     { label: `CAPABILITY_PROVIDERS.${cap}`, pkg: spec.pkg, export: spec.export, identities: spec.identities },
     ...(spec.extras ?? []).map((ex) => ({
       label: `CAPABILITY_PROVIDERS.${cap} → ${ex.export}`,
@@ -364,7 +351,7 @@ describe('#8645: every declared class-name identity equals the runtime class nam
       // satisfy this, which is the redundancy the registry claims to have.
       const bare = Object.create((Ctor as { prototype: object }).prototype) as unknown;
       expect(
-        providesCapability([bare], identities),
+        Serve.providesCapability([bare], identities),
         `${label}: the class-name limb must recognise ${exportName} by itself`,
       ).toBe(true);
     },

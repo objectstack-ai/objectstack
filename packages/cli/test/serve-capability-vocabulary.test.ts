@@ -4,7 +4,6 @@ import {
   PLATFORM_CAPABILITY_PROVIDERS,
   PLATFORM_PLUGIN_WIRED_RUNTIMES,
 } from '@objectstack/spec/kernel';
-import { CAPABILITY_PROVIDERS } from '@objectstack/core';
 import Serve from '../src/commands/serve.js';
 
 // framework#3265 — drift guard: the serve path's provider registries must stay
@@ -13,7 +12,7 @@ import Serve from '../src/commands/serve.js';
 
 describe('serve capability registries vs spec vocabulary (#3265)', () => {
   it('every CAPABILITY_PROVIDERS token is in PLATFORM_CAPABILITY_TOKENS', () => {
-    for (const token of Object.keys(CAPABILITY_PROVIDERS)) {
+    for (const token of Object.keys(Serve.CAPABILITY_PROVIDERS)) {
       expect(PLATFORM_CAPABILITY_TOKENS, `provider token '${token}' missing from spec vocabulary`).toContain(token);
     }
   });
@@ -26,13 +25,13 @@ describe('serve capability registries vs spec vocabulary (#3265)', () => {
 
   it('registries use only canonical spellings — never the removed camelCase aliases (#3308)', () => {
     const legacy = ['aiStudio', 'aiSeat'];
-    for (const token of [...Object.keys(CAPABILITY_PROVIDERS), ...Object.keys(Serve.CAPABILITY_TO_TIER)]) {
+    for (const token of [...Object.keys(Serve.CAPABILITY_PROVIDERS), ...Object.keys(Serve.CAPABILITY_TO_TIER)]) {
       expect(legacy).not.toContain(token);
     }
   });
 
   it('tier-gated and provider-backed tokens do not overlap (each token has ONE resolution path)', () => {
-    const providerTokens = new Set(Object.keys(CAPABILITY_PROVIDERS));
+    const providerTokens = new Set(Object.keys(Serve.CAPABILITY_PROVIDERS));
     for (const tierToken of Object.keys(Serve.CAPABILITY_TO_TIER)) {
       expect(providerTokens.has(tierToken)).toBe(false);
     }
@@ -85,7 +84,7 @@ describe('serve capability registries vs spec vocabulary (#3265)', () => {
    * a warning for a case this makes unreachable.
    */
   it('every always-on slate token has a serve mount — a provider entry or a tier (#19387)', () => {
-    const providerTokens = new Set(Object.keys(CAPABILITY_PROVIDERS));
+    const providerTokens = new Set(Object.keys(Serve.CAPABILITY_PROVIDERS));
     const tierTokens = new Set(Object.keys(Serve.CAPABILITY_TO_TIER));
     // Non-vacuity: an empty slate would pass the filter below over nothing.
     expect(Serve.ALWAYS_ON_CAPABILITIES.length).toBeGreaterThan(0);
@@ -95,7 +94,7 @@ describe('serve capability registries vs spec vocabulary (#3265)', () => {
     expect(
       unmounted,
       'always-on tokens that `serve` force-appends to every app and then mounts NOTHING for — ' +
-        'key each one in CAPABILITY_PROVIDERS at the provider PLATFORM_CAPABILITY_PROVIDERS declares',
+        'key each one in Serve.CAPABILITY_PROVIDERS at the provider PLATFORM_CAPABILITY_PROVIDERS declares',
     ).toEqual([]);
   });
 });
@@ -116,7 +115,7 @@ describe('PLATFORM_CAPABILITY_PROVIDERS vs vocabulary + serve resolver (#3366)',
   });
 
   it('open-edition service tokens name the SAME package as serve CAPABILITY_PROVIDERS', () => {
-    for (const [token, spec] of Object.entries(CAPABILITY_PROVIDERS)) {
+    for (const [token, spec] of Object.entries(Serve.CAPABILITY_PROVIDERS)) {
       const provider = PLATFORM_CAPABILITY_PROVIDERS[token];
       expect(provider, `serve provider '${token}' has no registry entry`).toBeTruthy();
       expect(provider.package, `package mismatch for '${token}'`).toBe(spec.pkg);
@@ -204,7 +203,7 @@ describe('PLATFORM_PLUGIN_WIRED_RUNTIMES vs providers + serve resolver (#11263)'
   });
 
   it('no roster package appears in serve CAPABILITY_PROVIDERS — plugins[]-wired is not requires-resolved by serve', () => {
-    const servePackages = Object.values(CAPABILITY_PROVIDERS).map((s) => s.pkg);
+    const servePackages = Object.values(Serve.CAPABILITY_PROVIDERS).map((s) => s.pkg);
     for (const pkg of Object.keys(PLATFORM_PLUGIN_WIRED_RUNTIMES)) {
       expect(servePackages, `'${pkg}' is loaded by serve's open-edition resolver — it belongs in the token-keyed map`).not.toContain(pkg);
     }
