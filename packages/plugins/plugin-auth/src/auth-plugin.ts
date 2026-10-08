@@ -1232,15 +1232,29 @@ export class AuthPlugin implements Plugin {
       // ('ran-unrecorded') does not unlatch it: a second trigger in this
       // process must not run the pass again (ADR-0093 D7).
       let backfillDecided = false;
+      // [#22257] Armed by this pass's own `kernel:ready` hook below; every
+      // trigger before it is a no-op. The pass's policy is a SETTING, and the
+      // settings data engine binds in `SettingsServicePlugin`'s `kernel:ready`
+      // hook. The `optionalDependencies` edge orders that hook ahead of this
+      // plugin's hooks, and orders nothing else: an event fired during Phase 2
+      // reaches this pass before the bind. `app:seeded` is one —
+      // `AppPlugin.start()` emits it when its inline seed lands, after this
+      // plugin started — and on a seeded boot it bound the `auth` namespace
+      // from the manifest defaults (the `Pre-bind READ` warning), so the
+      // one-time pass could decide under a policy the deployment never chose.
+      // A pre-ready trigger loses nothing: the `kernel:ready` pass is still
+      // ahead, and it scans every row such a trigger was about.
+      let backfillArmed = false;
       const runBackfill = (source: string): Promise<void> => {
+        if (!backfillArmed) return backfillChain;
         backfillChain = backfillChain.then(async () => {
           if (backfillDecided) return;
           try {
             // #5152 — the policy this pass runs under is a SETTING, so bind the
-            // namespace before reading it. This hook is registered in `init()`
-            // and therefore fires ahead of the one in `start()` that normally
-            // binds; without this the first pass of a fresh boot would run the
-            // pre-settings policy. Idempotent and shared with that hook.
+            // namespace before reading it. The composition `kernel:ready` hook
+            // registered earlier in `start()` has normally bound it by the time
+            // the pass is armed; awaiting it here keeps the policy independent
+            // of hook order. Idempotent and shared with that hook.
             await this.ensureAuthSettingsBound(ctx);
             const ql = ctx.getService<IDataEngine>('objectql');
             const tenancy = this.tenancy;
@@ -1288,13 +1302,17 @@ export class AuthPlugin implements Plugin {
         return backfillChain;
       };
       runBackfillOnDefaultOrg = runBackfill;
-      ctx.hook('kernel:ready', () => runBackfill('kernel:ready'));
+      ctx.hook('kernel:ready', () => {
+        backfillArmed = true;
+        return runBackfill('kernel:ready');
+      });
       // #2996: app seeds insert `sys_user` via raw engine.insert, bypassing
       // better-auth's `user.create.after` reconciler. A seed that overruns
       // OS_INLINE_SEED_BUDGET_MS finishes in the background AFTER kernel:ready,
       // so its users would miss a kernel:ready pass that had no target yet.
       // The trigger stays; the ledger makes it a no-op once the one-time pass
-      // has been recorded.
+      // has been recorded. An in-budget seed settles during Phase 2, before the
+      // pass is armed, and the `kernel:ready` pass covers its rows.
       ctx.hook('app:seeded', () => runBackfill('app:seeded'));
     }
 

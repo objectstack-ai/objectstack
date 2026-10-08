@@ -1716,6 +1716,9 @@ importers:
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../plugin-security
+      '@objectstack/service-settings':
+        specifier: workspace:*
+        version: link:../../services/service-settings
       '@types/node':
         specifier: ^26.6.3
         version: 26.6.3

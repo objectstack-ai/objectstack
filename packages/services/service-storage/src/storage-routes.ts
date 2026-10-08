@@ -35,6 +35,14 @@ import {
 // guard's own `findFileHolder`.
 import type { FileHolder } from './attachment-lifecycle.js';
 import { contentDispositionValue } from './content-disposition.js';
+// [#22283] The `storage` settings namespace's Limits group — read and resolved
+// in ONE module, called per request by the doors below.
+import {
+  resolveStorageLimits,
+  BYTES_PER_UPLOAD_MB,
+  type ResolvedStorageLimits,
+  type StorageLimitsSnapshot,
+} from './storage-limits.js';
 
 /** Authorization verdict for an attachments-scope download (#2970 item 2). */
 export type FileReadVerdict = 'allow' | 'deny' | 'unauthenticated';
@@ -61,6 +69,45 @@ const ORGANIZATION_CHANGED_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
 const ORGANIZATION_CHANGED_MESSAGE =
   'This upload was started in a different organization than your active one. ' +
   'Switch your active organization back to the one the upload was started in, then finish the upload.';
+
+/**
+ * [#22283] The answer every upload door gives a file over the resolved
+ * `max_upload_mb` — before the backend stores a byte and before any row is
+ * written.
+ *
+ * `413` because that is the condition (RFC 9110, content too large).
+ * `VALIDATION_ERROR` because it is the standard-catalog member the platform
+ * itself derives for a `413` (`standardErrorCodeForHttpStatus`, ADR-0112): the
+ * catalog names no `413` member, and the ledger's `PAYLOAD_TOO_LARGE` row is
+ * registered under `@objectstack/rest` alone, so stamping it here would be an
+ * unregistered emitter (`check:error-code-provenance`). The status carries the
+ * specific condition; the message names the limit and where it is set.
+ */
+const UPLOAD_TOO_LARGE_STATUS = 413;
+const UPLOAD_TOO_LARGE_CODE: StandardErrorCode = 'VALIDATION_ERROR';
+
+/** The refusal's message: what was measured, the limit, and the one setting that moves it. */
+function uploadTooLargeMessage(measured: string, maxUploadBytes: number): string {
+  const mb = Math.round((maxUploadBytes / BYTES_PER_UPLOAD_MB) * 100) / 100;
+  return (
+    `${measured}, over the maximum upload size of ${mb} MB (${maxUploadBytes} bytes). ` +
+    'The limit is the "Max upload size (MB)" storage setting (max_upload_mb in the storage settings), ' +
+    'which an administrator can change.'
+  );
+}
+
+/**
+ * The request's declared `content-length`, or `undefined` when it carries none
+ * that parses. A pre-check only, so an oversized body is refused before it is
+ * read into memory: the bytes actually read are judged again after.
+ */
+function declaredContentLength(req: IHttpRequest): number | undefined {
+  const raw = (req.headers ?? {})['content-length'];
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  if (first === undefined || first === null || String(first).trim() === '') return undefined;
+  const n = Number(first);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
 
 /**
  * What the upload routes need to know about the caller (#2755, widened #12745).
@@ -94,10 +141,31 @@ export interface StorageUploadSession {
  */
 export interface StorageRoutesOptions {
   basePath?: string;
-  /** Default presigned URL TTL in seconds */
+  /**
+   * Default presigned URL TTL in seconds (3600 when unset). A SAVED
+   * `storage.presigned_ttl` wins over it; the namespace's own default does not
+   * (see {@link StorageRoutesOptions.limitsSnapshot}).
+   */
   presignedTtl?: number;
-  /** Default chunked upload session TTL in seconds */
+  /**
+   * Default chunked upload session TTL in seconds (86400 when unset). A SAVED
+   * `storage.session_ttl` wins over it; the namespace's own default does not.
+   */
   sessionTtl?: number;
+  /**
+   * [#22283] The `storage` settings namespace's Limits group as last read —
+   * `presigned_ttl`, `session_ttl` and `max_upload_mb` — asked once per
+   * request, so a save reaches the next upload without a remount. Resolved
+   * against `presignedTtl` / `sessionTtl` above by `resolveStorageLimits`
+   * (`storage-limits.ts`): a saved value wins over these options, these options
+   * win over the namespace default.
+   *
+   * Absent, or answering `undefined` (no settings namespace bound): the TTLs
+   * are the options above and NO upload size limit applies — the behaviour
+   * before the Limits group was honoured. `composeStorageRoutes` binds it from
+   * the `storage` service the plugin registers, for both mounts.
+   */
+  limitsSnapshot?: () => StorageLimitsSnapshot | undefined;
   /**
    * Session resolver for the UPLOAD entry points (#2755). When wired, the
    * presigned/complete/chunked upload routes reject anonymous requests with
@@ -198,9 +266,31 @@ export function registerStorageRoutes(
   opts: StorageRoutesOptions = {},
 ): void {
   const basePath = opts.basePath ?? '/api/v1/storage';
-  const presignedTtl = opts.presignedTtl ?? 3600;
-  const sessionTtl = opts.sessionTtl ?? 86400;
   const downloadTtl = opts.downloadTtl ?? 300;
+
+  // [#22283] The limits THIS request is served under — the saved Limits group
+  // resolved against this mount's own options, asked per request (never
+  // hoisted to registration) so a settings save reaches the next request.
+  const currentLimits = (): ResolvedStorageLimits =>
+    resolveStorageLimits(opts.limitsSnapshot?.(), {
+      presignedTtl: opts.presignedTtl,
+      sessionTtl: opts.sessionTtl,
+    });
+
+  // [#22283] The size gate every upload door asks before it stores a byte or
+  // writes a row. `false` ⇒ the 413 was already sent and the handler must stop.
+  // `bytes` that is not a finite number cannot be judged and passes — the
+  // byte-carrying doors judge what they actually receive.
+  const requireWithinUploadLimit = (
+    bytes: number,
+    maxUploadBytes: number | undefined,
+    measured: (bytes: number) => string,
+    res: IHttpResponse,
+  ): boolean => {
+    if (maxUploadBytes === undefined || !Number.isFinite(bytes) || bytes <= maxUploadBytes) return true;
+    sendError(res, UPLOAD_TOO_LARGE_STATUS, UPLOAD_TOO_LARGE_CODE, uploadTooLargeMessage(measured(bytes), maxUploadBytes));
+    return false;
+  };
 
   // ── Download authorization gate (#2970 item 2, ADR-0104 D3 wave 2) ───
   // Two kinds of file are gated, both deriving access from a PARENT record:
@@ -227,7 +317,7 @@ export function registerStorageRoutes(
     const fieldOwned = !!file.ref_object && file.ref_id != null && file.ref_id !== '';
     const gated = file.scope === 'attachments' || fieldOwned;
     if (!gated || file.acl === 'public_read' || !opts.authorizeFileRead) {
-      return presignedTtl;
+      return currentLimits().presignedTtl;
     }
     let verdict: FileReadVerdict;
     try {
@@ -532,6 +622,12 @@ export function registerStorageRoutes(
         sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and size are required');
         return;
       }
+      // [#22283] The declared size against the saved limit — before the
+      // pending row and before any URL is minted. On the local adapter the
+      // bytes are judged again at `_local/raw`; an S3 URL takes them straight
+      // to the bucket, so this is the platform's one look at that upload.
+      const { presignedTtl, maxUploadBytes } = currentLimits();
+      if (!requireWithinUploadLimit(Number(size), maxUploadBytes, (n) => `The declared file size is ${n} bytes`, res)) return;
 
       const fileId = randomUUID();
       const key = buildKey(scope ?? 'user', fileId, filename);
@@ -656,6 +752,11 @@ export function registerStorageRoutes(
         sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and totalSize are required');
         return;
       }
+      // [#22283] The declared total against the saved limit — before the file
+      // row, the backend multipart and the session row. The chunk door judges
+      // the bytes as they arrive.
+      const { sessionTtl, maxUploadBytes } = currentLimits();
+      if (!requireWithinUploadLimit(Number(totalSize), maxUploadBytes, (n) => `The declared total size is ${n} bytes`, res)) return;
 
       const chunkSize = Math.max(reqChunkSize ?? 5242880, 5242880);
       const totalChunks = Math.ceil(totalSize / chunkSize);
@@ -786,6 +887,20 @@ export function registerStorageRoutes(
         return;
       }
 
+      // [#22283] The bytes received so far plus this chunk, against the saved
+      // limit — the declared length first, so an oversized chunk is refused
+      // before it is read, then the bytes actually read, before the backend
+      // stores them and before the progress write. "So far" is what the
+      // upload will hold: a RETRIED chunk index replaces its earlier bytes in
+      // both backends, so those bytes are not counted twice (see
+      // `bytesHeldByOtherChunks`).
+      const { maxUploadBytes } = currentLimits();
+      const currentParts: StoredChunkPart[] = JSON.parse(session.parts ?? '[]');
+      const receivedSoFar = bytesHeldByOtherChunks(currentParts, chunkIndex, session.uploaded_size ?? 0);
+      const reaches = (n: number) => `This chunk would bring the upload to ${n} bytes`;
+      const declaredChunk = declaredContentLength(req);
+      if (declaredChunk !== undefined && !requireWithinUploadLimit(receivedSoFar + declaredChunk, maxUploadBytes, reaches, res)) return;
+
       // Get raw body (binary data)
       let data: Buffer;
       if (req.rawBody) {
@@ -798,6 +913,7 @@ export function registerStorageRoutes(
         sendError(res, 400, 'INVALID_REQUEST', 'Binary body required');
         return;
       }
+      if (!requireWithinUploadLimit(receivedSoFar + data.byteLength, maxUploadBytes, reaches, res)) return;
 
       // Upload the chunk (S3 uses 1-based part numbers)
       let eTag = '';
@@ -805,9 +921,9 @@ export function registerStorageRoutes(
         eTag = await storage.uploadChunk(uploadId, chunkIndex + 1, data);
       }
 
-      // Update session progress
-      const currentParts: Array<{ chunkIndex: number; eTag: string }> = JSON.parse(session.parts ?? '[]');
-      currentParts.push({ chunkIndex, eTag });
+      // Update session progress — each part records its size (#22283), so
+      // the limit above can tell a retried chunk from a new one.
+      currentParts.push({ chunkIndex, eTag, size: data.byteLength });
       const uploadedChunks = (session.uploaded_chunks ?? 0) + 1;
       const uploadedSize = (session.uploaded_size ?? 0) + data.byteLength;
       await store.updateSession(
@@ -1065,6 +1181,14 @@ export function registerStorageRoutes(
       }
 
       const payload = localAdapter.verifyToken(token, 'put');
+      // [#22283] The local adapter's byte door for a presigned upload: the
+      // declared length first, so an oversized body is refused before it is
+      // read, then the bytes actually read — before `upload` stores them.
+      // Judged against the limit in force NOW, whatever the URL was minted under.
+      const { maxUploadBytes } = currentLimits();
+      const bodyIs = (n: number) => `The upload body is ${n} bytes`;
+      const declaredBody = declaredContentLength(req);
+      if (declaredBody !== undefined && !requireWithinUploadLimit(declaredBody, maxUploadBytes, bodyIs, res)) return;
       let data: Buffer;
       if (req.rawBody) {
         data = await req.rawBody();
@@ -1074,6 +1198,7 @@ export function registerStorageRoutes(
         sendError(res, 400, 'INVALID_REQUEST', 'Binary body required');
         return;
       }
+      if (!requireWithinUploadLimit(data.byteLength, maxUploadBytes, bodyIs, res)) return;
 
       await storage.upload(payload.k, data, { contentType: payload.ct });
       // `{ ok: true, key }` until #3689. `ok` was a second, private word for
@@ -1132,6 +1257,39 @@ export function registerStorageRoutes(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** One entry of `sys_upload_session.parts`. `size` is recorded since #22283; rows written before it lack it. */
+interface StoredChunkPart {
+  chunkIndex: number;
+  eTag: string;
+  size?: number;
+}
+
+/**
+ * [#22283] The bytes the upload holds in chunks OTHER than `chunkIndex` —
+ * what the chunk door adds this chunk to before judging the limit.
+ *
+ * A chunk index sent again REPLACES its earlier bytes (the local adapter
+ * rewrites `.parts/UPLOAD/INDEX`, S3 overwrites the part number), so a
+ * client retrying a chunk whose answer it lost must not be judged as if the
+ * upload held both copies. The latest size per index counts, and the index
+ * being written now counts as this chunk alone.
+ *
+ * A session whose parts predate the recorded `size` (started before this
+ * change, still inside its TTL) has no per-chunk sizes to sum, so it is judged
+ * by its running `uploaded_size` — the upper bound the bytes cannot exceed.
+ * That side refuses a retry near the limit rather than admitting an upload
+ * over it, and it ends with that session.
+ */
+function bytesHeldByOtherChunks(parts: ReadonlyArray<StoredChunkPart>, chunkIndex: number, uploadedSize: number): number {
+  if (parts.some((p) => typeof p.size !== 'number')) return uploadedSize;
+  const latest = new Map<number, number>();
+  for (const p of parts) latest.set(p.chunkIndex, p.size as number);
+  latest.delete(chunkIndex);
+  let held = 0;
+  for (const size of latest.values()) held += size;
+  return held;
+}
 
 function buildKey(scope: string, fileId: string, filename: string): string {
   const ext = filename.includes('.') ? '.' + filename.split('.').pop() : '';

@@ -20,6 +20,11 @@ export type {
   FileReadVerdict,
   StorageUploadSession,
 } from './storage-routes.js';
+// [#22283] The shape `StorageRoutesOptions.limitsSnapshot` and
+// `SwappableStorageService` carry: the `storage` settings namespace's Limits
+// group as last read. Types only — the reading and the resolution stay inside
+// the package, so the precedence has one definition.
+export type { StorageLimitsSnapshot, StorageLimitReading } from './storage-limits.js';
 // [#15169] The host door: the storage routes composed from a kernel and
 // mounted on an HTTP surface the host owns — for kernels with no `http-server`
 // service (cloud's per-environment tenant kernels). Published as ONE entry
