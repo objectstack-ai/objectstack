@@ -62,11 +62,11 @@ const DRAFT_ONLY_PKG = 'com.example.repairs_draft_only';
 /**
  * The code-shipped control. `examples/app-showcase` ships this package id, and
  * its two capabilities (`src/security/capabilities.ts`) are authored with
- * `packageId: 'com.example.showcase'` — the key `MetadataManager.revertPackage`
- * collects by, which is why a live boot of the showcase answers its revert with
- * the registry's own `409 "has never been published"`. The two items are
- * restated here as a literal, not imported: importing the example would make
- * this test read outside its package.
+ * `packageId: 'com.example.showcase'`. [#22113] A live boot of the showcase now
+ * answers its revert with `422 WRITABLE_PACKAGE_REQUIRED` (ADR-0070 D2: a
+ * booted package is read-only); the cases below boot it the same way. The two
+ * items are restated here as a literal, not imported: importing the example
+ * would make this test read outside its package.
  */
 const SHOWCASE_PKG = 'com.example.showcase';
 const SHOWCASE_CAPABILITIES = [
@@ -275,7 +275,7 @@ describe('#22090 POST /packages/:id/revert on a Studio-authored package', () => 
   });
 });
 
-describe('#22090 controls — a package with no stored row is the metadata service’s, exactly as before', () => {
+describe('#22090 controls — a package with no stored row is not the protocol’s', () => {
   it('(c) an unknown package id: 404 RESOURCE_NOT_FOUND, the metadata service’s own answer', async () => {
     const { revert } = await boot();
 
@@ -286,19 +286,26 @@ describe('#22090 controls — a package with no stored row is the metadata servi
     expect(answer.body?.error?.message).toBe("No metadata items found for package 'com.example.no_such_package'");
   });
 
-  it('(d) the code-shipped com.example.showcase, never published: 409, the registry’s own sentence', async () => {
-    const { metadata, revert } = await boot();
+  // [#22113] FLIPPED. Both cases boot the showcase as the dev boot does (its
+  // manifest in the engine), which makes it a read-only code package (ADR-0070
+  // D2). With no stored row, the door now refuses it after the protocol's
+  // answer, with `422 WRITABLE_PACKAGE_REQUIRED`, instead of handing it to the
+  // metadata service (which answered 409 "has never been published", and 200
+  // once a publish had snapshotted the capabilities). A writable package's
+  // metadata-service revert is held in `package-revert-code-shipped-members.integration.test.ts`.
+  it('(d) the code-shipped com.example.showcase, never published: 422 WRITABLE_PACKAGE_REQUIRED (was: 409)', async () => {
+    const { engine, metadata, revert } = await boot();
     for (const cap of SHOWCASE_CAPABILITIES) await metadata.register('capability', cap.name, { ...cap });
+    engine.registerApp({ id: SHOWCASE_PKG, name: SHOWCASE_PKG, version: '1.0.0' });
 
     const answer = await revert(SHOWCASE_PKG);
 
-    expect(answer.status).toBe(409);
-    expect(answer.body?.error?.code).toBe('RESOURCE_CONFLICT');
-    expect(answer.body?.error?.message).toBe(`Package '${SHOWCASE_PKG}' has never been published`);
+    expect(answer.status).toBe(422);
+    expect(answer.body?.error?.code).toBe('WRITABLE_PACKAGE_REQUIRED');
   });
 
-  it('(d) the code-shipped com.example.showcase, published then edited: 200, restored from its published snapshot', async () => {
-    const { metadata, revert } = await boot();
+  it('(d) the code-shipped com.example.showcase, published then edited: 422 WRITABLE_PACKAGE_REQUIRED, and nothing is restored (was: 200)', async () => {
+    const { engine, metadata, revert } = await boot();
     for (const cap of SHOWCASE_CAPABILITIES) await metadata.register('capability', cap.name, { ...cap });
     const published = await metadata.publishPackage(SHOWCASE_PKG, { validate: false });
     expect(published.success).toBe(true);
@@ -306,13 +313,14 @@ describe('#22090 controls — a package with no stored row is the metadata servi
     await metadata.register('capability', 'showcase.export_data', {
       ...item, metadata: { ...item.publishedDefinition, label: 'Edited after publish' }, state: 'draft',
     });
+    engine.registerApp({ id: SHOWCASE_PKG, name: SHOWCASE_PKG, version: '1.0.0' });
 
     const answer = await revert(SHOWCASE_PKG);
 
-    expect(answer.status).toBe(200);
-    const reverted = await metadata.get('capability', 'showcase.export_data') as any;
-    expect(reverted.state).toBe('active');
-    expect(reverted.metadata).toEqual(reverted.publishedDefinition);
-    expect(reverted.metadata.label).toBe('Export Showcase Data');
+    expect(answer.status).toBe(422);
+    expect(answer.body?.error?.code).toBe('WRITABLE_PACKAGE_REQUIRED');
+    const after = await metadata.get('capability', 'showcase.export_data') as any;
+    expect(after.state).toBe('draft');
+    expect(after.metadata.label).toBe('Edited after publish');
   });
 });
