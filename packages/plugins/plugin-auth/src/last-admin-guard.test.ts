@@ -140,6 +140,8 @@ const sysUserPermissionSet = {
     id: { name: 'id', type: 'text' as const, primaryKey: true },
     user_id: { name: 'user_id', type: 'text' as const },
     permission_set_id: { name: 'permission_set_id', type: 'text' as const },
+    // [ADR-0131 D4] The grant's set BY NAME — the column the guard reads.
+    permission_set: { name: 'permission_set', type: 'text' as const },
     organization_id: { name: 'organization_id', type: 'text' as const },
     valid_from: { name: 'valid_from', type: 'datetime' as const },
     valid_until: { name: 'valid_until', type: 'datetime' as const },
@@ -149,6 +151,17 @@ const sysUserPermissionSet = {
 const SYSTEM = { context: { isSystem: true } } as const;
 const ORG = 'org_1';
 const PS_ADMIN = 'ps_admin_full_access';
+
+/**
+ * [ADR-0131 D4] The name each fixture set id stands for. Every platform grant
+ * writer stores it beside the id, so a seeded grant carries it too; `ps_gone`
+ * is a set that was deleted after its grants were named.
+ */
+const SET_NAME_OF: Record<string, string> = {
+  [PS_ADMIN]: ADMIN_FULL_ACCESS,
+  ps_member: 'member_default',
+  ps_gone: 'retired_set',
+};
 
 /** Every ban a real deprovision performs is a system-context write. */
 async function ban(engine: ObjectQL, id: string): Promise<unknown> {
@@ -280,11 +293,9 @@ async function seedUser(
     );
   }
   if (extra.platformAdmin || extra.grant) {
-    await engine.insert(
-      'sys_user_permission_set',
-      { id: `ups_${id}`, user_id: id, permission_set_id: PS_ADMIN, ...(extra.grant ?? {}) },
-      SYSTEM,
-    );
+    const grant: Record<string, unknown> = { id: `ups_${id}`, user_id: id, permission_set_id: PS_ADMIN, ...(extra.grant ?? {}) };
+    if (!('permission_set' in grant)) grant.permission_set = SET_NAME_OF[String(grant.permission_set_id)];
+    await engine.insert('sys_user_permission_set', grant, SYSTEM);
   }
 }
 
@@ -1916,9 +1927,9 @@ describe('[#6084] a zero-administrator reading is no longer automatically the bo
     await expect(ban(engine, 'usr_platform')).rejects.toThrow(/recognises NO administrator/);
     await expect(ban(engine, 'usr_platform')).rejects.toThrow(/not the bootstrap window/i);
     // Holder and target are both quoted, so an operator can go find the row.
+    // [ADR-0131 D4] The target is the set the grant NAMES — its reference.
     await expect(ban(engine, 'usr_platform')).rejects.toThrow(/'usr_platform'/);
-    await expect(ban(engine, 'usr_platform')).rejects.toThrow(new RegExp(PS_ADMIN));
-    await expect(ban(engine, 'usr_platform')).rejects.toThrow(new RegExp(ADMIN_FULL_ACCESS));
+    await expect(ban(engine, 'usr_platform')).rejects.toThrow(`'usr_platform' → '${ADMIN_FULL_ACCESS}'`);
     await expect(ban(engine, 'usr_platform')).rejects.toThrow(/ADR-0135 D5\.2/);
   });
 

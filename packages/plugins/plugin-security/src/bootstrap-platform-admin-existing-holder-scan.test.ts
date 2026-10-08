@@ -239,6 +239,7 @@ async function seedTenant(
       id: 'ups_zzz_founder',
       user_id: 'usr_founder',
       permission_set_id: ADMIN_PS_ID,
+      permission_set: 'admin_full_access',
       organization_id: unscopedOrganizationId,
     },
     { context: SYSTEM_CTX },
@@ -259,6 +260,7 @@ async function seedTenant(
         id: `ups_org_${n}`,
         user_id: `usr_orgadmin_${n}`,
         permission_set_id: ADMIN_PS_ID,
+        permission_set: 'admin_full_access',
         organization_id: `org_${n}`,
       },
       { context: SYSTEM_CTX },
@@ -419,7 +421,7 @@ describe('#16861 — an existing platform admin is found, not sampled for', () =
     );
     await ql.insert(
       'sys_user_permission_set',
-      { id: 'ups_system', user_id: 'usr_system', permission_set_id: ADMIN_PS_ID, organization_id: null },
+      { id: 'ups_system', user_id: 'usr_system', permission_set_id: ADMIN_PS_ID, permission_set: 'admin_full_access', organization_id: null },
       { context: SYSTEM_CTX },
     );
     await seedUser(ql, 'usr_real', 'real@tenant.example', '2026-03-01T00:00:00.000Z', true);

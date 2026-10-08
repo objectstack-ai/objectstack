@@ -119,6 +119,7 @@ import {
 import type { TenancyService } from './tenancy-service.js';
 import { OtpSendGuard, assertOtpCooldownSeconds } from './otp-send-guard.js';
 import type { CounterStore } from './rate-limit-storage.js';
+import { GRANT_SET_NAME_FIELD } from './grant-set-name.js';
 import {
   isLastLocalCredentialHolder,
   LAST_LOCAL_CREDENTIAL_CODE,
@@ -5270,8 +5271,14 @@ export class AuthManager {
         );
         return;
       }
+      // [ADR-0131 D4] Already held? Asked BY NAME — the grant's
+      // `permission_set`, the reference a grant keeps once its id column is
+      // dropped. A self-registrant is a user created moments ago, so every
+      // grant it holds was written with its name; any of them naming this set,
+      // in any organization, settles the question and no second grant is
+      // written.
       const existing: any[] = await sys.find('sys_user_permission_set', {
-        where: { user_id: userId, permission_set_id: row.id },
+        where: { user_id: userId, [GRANT_SET_NAME_FIELD]: row.name },
         limit: 1,
       });
       if (existing.length > 0) return;

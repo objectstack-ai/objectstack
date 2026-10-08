@@ -142,7 +142,7 @@ function expectHydratedCurrencyRefusal(stack: unknown, location: string): void {
   expect(finding).toContain(COLUMN_FIRST_SENTENCE);
 }
 
-describe('#20901 — the form-view carrier references the column contract', () => {
+describe('the form-view carrier references the column contract', () => {
   it('its column element IS InlineGridColumnSchema — one contract, not a copy', () => {
     const subforms = (FormViewSchema.shape as unknown as Record<string, { unwrap(): { element: { shape: Record<string, { unwrap(): { element: unknown } }> } } }>).subforms;
     const columnElement = subforms.unwrap().element.shape.columns.unwrap().element;
@@ -196,7 +196,7 @@ describe('#20901 — the form-view carrier references the column contract', () =
   });
 });
 
-describe('#20901 — defineStack judges an identity-only column by the type it renders as', () => {
+describe('defineStack judges an identity-only column by the type it renders as', () => {
   it('refuses the card\'s identity-only column over a currency child field on the form view\'s `form`', () => {
     expectHydratedCurrencyRefusal(
       stackWithSubformColumns([{ name: 'quantity' }, IDENTITY_ONLY_WITH_SCALE]),
@@ -303,7 +303,7 @@ const stackWithProbeField = (fieldType: string, column: Record<string, unknown>)
   return { manifest, objects: [PARENT, { ...child, fields: { ...child.fields, probe: { type: fieldType } } }] };
 };
 
-describe('#20901 — every type-conditional column rule has its row in the hydrated-type table', () => {
+describe('every type-conditional column rule has its row in the hydrated-type table', () => {
   it('the probe reaches every column key, and finds the rule the tree holds today', () => {
     const { rules, unprobed } = typeConditionalRules();
     expect(unprobed, 'column keys no probe value satisfies — add a value to PROBE_VALUES').toEqual([]);
@@ -337,7 +337,7 @@ describe('#20901 — every type-conditional column rule has its row in the hydra
 // The `field` → `name` respelling reaches the form-view carrier (ADR-0087 D2).
 // ---------------------------------------------------------------------------
 
-describe('#20901 — the `field` → `name` respelling is a chain step on the form-view carrier', () => {
+describe('the `field` → `name` respelling is a chain step on the form-view carrier', () => {
   const ID = 'form-view-subform-columns-canonicalized';
   const conversion = () => ALL_CONVERSIONS.find((c) => c.id === ID);
   const form = (columns: unknown[]) => ({ ...FORM_BASE, subforms: [{ childObject: 'crm_invoice_line', columns }] });
@@ -477,7 +477,7 @@ const stackWithMasterDetailColumns = (columns: unknown[], position: PagePosition
   return { manifest, objects: [PARENT, childObject()], pages: [page] };
 };
 
-describe('#20928 — the master-detail block\'s detail entry is strict, and its columns are the column contract', () => {
+describe('the master-detail block\'s detail entry is strict, and its columns are the column contract', () => {
   it('its column element IS InlineGridColumnSchema — one contract, not a copy', () => {
     type Unwrapped = { unwrap(): { element: { shape: Record<string, { unwrap(): { element: unknown } }> } } };
     const details = (MASTER_DETAIL_PROPS.shape as unknown as Record<string, Unwrapped>).details;
@@ -552,7 +552,7 @@ describe('#20928 — the master-detail block\'s detail entry is strict, and its 
   });
 });
 
-describe('#20928 — defineStack judges an identity-only detail column by the type it renders as', () => {
+describe('defineStack judges an identity-only detail column by the type it renders as', () => {
   it('refuses the card\'s identity-only column over a currency child field, on a page region', () => {
     expectHydratedCurrencyRefusal(
       stackWithMasterDetailColumns([{ name: 'quantity' }, IDENTITY_ONLY_WITH_SCALE]),
@@ -645,7 +645,7 @@ const parseLineItems = (props: unknown): Result => LINE_ITEMS_PROPS.safeParse(pr
 const parseLineItemColumns = (columns: unknown[]): Result =>
   parseLineItems({ childObject: 'crm_invoice_line', relationshipField: 'invoice', columns });
 
-describe('#21142 — the line-items block is strict, and its columns are the column contract', () => {
+describe('the line-items block is strict, and its columns are the column contract', () => {
   it('its column element IS InlineGridColumnSchema — one contract, not a copy', () => {
     const shape = (LINE_ITEMS_PROPS as unknown as { shape: Record<string, { element: unknown }> }).shape;
     expect(shape.columns.element).toBe(InlineGridColumnSchema);
