@@ -767,12 +767,16 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
 export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
   success: z.boolean(),
   version: z.string().describe(
-    'Content hash of the just-committed body, and the token the ADR-0008 '
+    'Version token of the row this write left, and the token the ADR-0008 '
     + 'optimistic-concurrency chain runs on: send it back as the `If-Match` '
     + 'request header on the next write to that item and a concurrent edit is '
-    + 'reported as 409 `metadata_conflict` instead of silently overwritten. '
-    + 'Opaque to callers — echo it verbatim, never parse it. Currently emitted '
-    + 'as `sha256:<64 hex chars>`, but the format is not part of this contract.',
+    + 'refused 409 `METADATA_CONFLICT` instead of silently overwritten. The item '
+    + 'read serves the same token for the same row (`GetMetaItemResponseSchema.version`). '
+    + 'A keyed digest of the stored content hash, never the hash itself (under '
+    + 'the registered crypto provider\'s key, or a process-scoped key while none '
+    + 'is registered). Opaque to callers — echo it verbatim, never parse it. '
+    + 'Currently emitted as `hmac-sha256:` plus 64 hex characters, but the '
+    + 'format is not part of this contract.',
   ),
   seq: z.number().int().describe(
     'Monotonic sequence number of the metadata event this write appended to '
@@ -978,12 +982,15 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
     + 'best-effort side effects below, each of which reports its own `success`.',
   ),
   version: z.string().describe(
-    'Content hash of the just-promoted body, and the token the ADR-0008 '
+    'Version token of the row this promotion left, and the token the ADR-0008 '
     + 'optimistic-concurrency chain runs on: send it back as the `If-Match` '
     + 'request header on the next write to that item and a concurrent edit is '
-    + 'reported as 409 `metadata_conflict` instead of silently overwritten. '
-    + 'Opaque to callers — echo it verbatim, never parse it. Currently emitted '
-    + 'as `sha256:<64 hex chars>`, but the format is not part of this contract.',
+    + 'refused 409 `METADATA_CONFLICT` instead of silently overwritten. A keyed '
+    + 'digest of the stored content hash, never the hash itself — the same form '
+    + '`SaveMetaItemResponseSchema.version` and the item read\'s `version` '
+    + 'serve. Opaque to callers — echo it verbatim, never parse it. Currently '
+    + 'emitted as `hmac-sha256:` plus 64 hex characters, but the format is not '
+    + 'part of this contract.',
   ),
   seq: z.number().int().describe(
     'Monotonic sequence number of the `op=\'publish\'` metadata event this '
@@ -1149,11 +1156,12 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     type: z.string().describe('Metadata type of the promoted draft (canonical singular).'),
     name: z.string().describe('Item name of the promoted draft.'),
     version: z.string().describe(
-      'Content hash of the just-promoted body — the same ADR-0008 '
+      'Version token of the promoted row — the same keyed ADR-0008 '
       + 'optimistic-concurrency token the single-item doors return: echo it '
-      + 'back as `If-Match` on the next write to this item. Opaque to '
-      + 'callers; currently `sha256:<64 hex chars>`, but the format is not '
-      + 'part of this contract.',
+      + 'back as `If-Match` on the next write to this item. A keyed digest of '
+      + 'the stored content hash, never the hash itself. Opaque to callers; '
+      + 'currently `hmac-sha256:` plus 64 hex characters, but the format is '
+      + 'not part of this contract.',
     ),
     advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
       'Non-gating findings the runtime authoring gate raised against '
