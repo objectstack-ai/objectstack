@@ -320,8 +320,14 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
     await httpServer._getHandler(method, path)!(createMockReq({ ...req, headers: { 'x-test-as': as } }), res);
     return res;
   };
-  /** A pending upload Alice started in `org_a`: its file row and, for the chunked door, its session. */
+  /**
+   * A pending upload Alice started in `org_a`: its file row and, for the
+   * chunked door, its session — opened on the real adapter, so a completion
+   * that gets past the doors' questions really assembles. Sets {@link uploadId}.
+   */
+  let uploadId: string;
   const seed = async (store: StorageMetadataStore, sessionOrganization: string | undefined = 'org_a') => {
+    uploadId = await adapter.initiateChunkedUpload('user/f1.bin', { contentType: 'application/octet-stream' });
     await store.createFile({
       id: 'f1',
       key: 'user/f1.bin',
@@ -331,7 +337,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
       organization_id: 'org_a',
     });
     await store.createSession({
-      id: 'u1',
+      id: uploadId,
       file_id: 'f1',
       key: 'user/f1.bin',
       filename: 'f1.bin',
@@ -430,12 +436,12 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
     it('answers 409 RESOURCE_CONFLICT naming the change, moves neither row, and logs the cause', async () => {
       const engine = createFakeEngine();
       await seed(mount(engine));
-      const res = await drive('POST', CHUNKED_COMPLETE, 'alice@b', { params: { uploadId: 'u1' }, body: { parts: [] } });
+      const res = await drive('POST', CHUNKED_COMPLETE, 'alice@b', { params: { uploadId }, body: { parts: [] } });
       expectOrganizationChanged(res, 'chunked completion from org_b');
       expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'in_progress' });
       expect(engine._rows('sys_file')[0]).toMatchObject({ status: 'pending' });
       expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toContain("'u1'");
+      expect(warnings[0]).toContain(`'${uploadId}'`);
       expect(warnings[0]).toContain("'org_a'");
       expect(warnings[0]).toContain("'org_b'");
     });
@@ -443,7 +449,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
     it('a session row with no organization still answers 409 when its FILE row is out of reach — that write would miss', async () => {
       const engine = createFakeEngine();
       await seed(mount(engine), undefined);
-      const res = await drive('POST', CHUNKED_COMPLETE, 'alice@b', { params: { uploadId: 'u1' }, body: { parts: [] } });
+      const res = await drive('POST', CHUNKED_COMPLETE, 'alice@b', { params: { uploadId }, body: { parts: [] } });
       expectOrganizationChanged(res, 'org-less session, file in org_a');
       expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'in_progress' });
       expect(engine._rows('sys_file')[0]).toMatchObject({ status: 'pending' });
@@ -453,14 +459,14 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
       const engine = createFakeEngine();
       const store = mount(engine);
       await seed(store);
-      await store.updateSession('u1', { expires_at: new Date(Date.now() - 60_000).toISOString() });
+      await store.updateSession(uploadId, { expires_at: new Date(Date.now() - 60_000).toISOString() });
       expectOrganizationChanged(
-        await drive('POST', CHUNKED_COMPLETE, 'alice@b', { params: { uploadId: 'u1' }, body: { parts: [] } }),
+        await drive('POST', CHUNKED_COMPLETE, 'alice@b', { params: { uploadId }, body: { parts: [] } }),
         'expired, from org_b',
       );
       expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'in_progress' });
       // Control: from its own organization the uploader reaches the expiry branch, which does write.
-      const home = await drive('POST', CHUNKED_COMPLETE, 'alice@a', { params: { uploadId: 'u1' }, body: { parts: [] } });
+      const home = await drive('POST', CHUNKED_COMPLETE, 'alice@a', { params: { uploadId }, body: { parts: [] } });
       expect(home._status).toBe(410);
       expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'expired' });
     });
@@ -468,7 +474,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
     it('CONTROL — same organization: completes as before, and logs nothing', async () => {
       const engine = createFakeEngine();
       await seed(mount(engine));
-      const res = await drive('POST', CHUNKED_COMPLETE, 'alice@a', { params: { uploadId: 'u1' }, body: { parts: [] } });
+      const res = await drive('POST', CHUNKED_COMPLETE, 'alice@a', { params: { uploadId }, body: { parts: [] } });
       expect(res._status).toBe(200);
       expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'completed' });
       expect(engine._rows('sys_file')[0]).toMatchObject({ status: 'committed' });
@@ -479,7 +485,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
       const engine = createFakeEngine();
       await seed(mount(engine));
       engine._setFailing('update', true);
-      const res = await drive('POST', CHUNKED_COMPLETE, 'alice@a', { params: { uploadId: 'u1' }, body: { parts: [] } });
+      const res = await drive('POST', CHUNKED_COMPLETE, 'alice@a', { params: { uploadId }, body: { parts: [] } });
       expect(res._status).toBe(500);
       expect(res._json.error.code).toBe('INTERNAL');
       expect(res._json.error.message).toContain('Restore the data engine');
@@ -489,7 +495,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
     it('the ownership rule runs FIRST: a non-uploader acting in another organization learns nothing of it', async () => {
       const engine = createFakeEngine();
       await seed(mount(engine));
-      const res = await drive('POST', CHUNKED_COMPLETE, 'carol@b', { params: { uploadId: 'u1' }, body: { parts: [] } });
+      const res = await drive('POST', CHUNKED_COMPLETE, 'carol@b', { params: { uploadId }, body: { parts: [] } });
       expect(res._status).toBe(403);
       expect(res._json.error.code).toBe('PERMISSION_DENIED');
       expect(JSON.stringify(res._json)).not.toContain('organization');
@@ -501,7 +507,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
     it('the progress door still answers the uploader after the switch — it is a read', async () => {
       const engine = createFakeEngine();
       await seed(mount(engine));
-      const res = await drive('GET', PROGRESS, 'alice@b', { params: { uploadId: 'u1' } });
+      const res = await drive('GET', PROGRESS, 'alice@b', { params: { uploadId } });
       expect(res._status).toBe(200);
       expect(res._json.data.fileId).toBe('f1');
       expect(warnings).toEqual([]);
@@ -512,9 +518,9 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
       await seed(store);
       expect((await drive('POST', COMMIT, 'alice@b', { body: { fileId: 'f1' } }))._status).toBe(200);
       expect((await store.getFile('f1'))?.status).toBe('committed');
-      const chunked = await drive('POST', CHUNKED_COMPLETE, 'alice@b', { params: { uploadId: 'u1' }, body: { parts: [] } });
+      const chunked = await drive('POST', CHUNKED_COMPLETE, 'alice@b', { params: { uploadId }, body: { parts: [] } });
       expect(chunked._status).toBe(200);
-      expect((await store.getSession('u1'))?.status).toBe('completed');
+      expect((await store.getSession(uploadId))?.status).toBe('completed');
       expect(warnings).toEqual([]);
     });
   });
