@@ -1560,7 +1560,8 @@ export function recordDiffersFromBody(row: any, body: any): boolean {
  *     backfilled into the metadata store ONCE (enforcement unchanged: the
  *     evaluator's db fallback already resolved exactly this body);
  *  3. an env-authored record that drifted from an EXISTING effective body is
- *     re-projected from metadata, loudly — for such names the evaluator
+ *     re-projected from metadata, loudly — THAT record, by its id, so every
+ *     row of a duplicated name converges (#22169) — for such names the evaluator
  *     already resolved the metadata body, so the record drift was
  *     display-only and never enforced (promoting it would silently change
  *     effective permissions at upgrade).
@@ -1617,20 +1618,37 @@ export async function reconcilePermissionSetProjection(
   }
 
   // 2 + 3. env-authored records: backfill or heal.
+  //
+  // [#22169] The layered read is LAZY and asked ONCE PER NAME. The trust rule
+  // below consults it only when no SchemaRegistry answers, yet it used to be
+  // awaited for every candidate ROW before that rule ran — four serial
+  // statements per row on the protocol's read, measured on a real
+  // `ObjectStackProtocolImplementation`, every one of them discarded on a
+  // kernel whose registry is readable (every hosted one). Keyed by name because
+  // a name's answer does not depend on which of its rows asked; dropped again
+  // after this pass backfills that name, because the backfill is a write that
+  // changes the answer.
+  const layeredByName = new Map<string, any>();
+  const layeredFor = async (name: string): Promise<any> => {
+    if (layeredByName.has(name)) return layeredByName.get(name);
+    let layered: any = null;
+    try {
+      layered = await protocol.getMetaItemLayered({ type: 'permission', name });
+    } catch { layered = null; }
+    layeredByName.set(name, layered);
+    return layered;
+  };
   const records = await tryFind(ql, 'sys_permission_set', {}, 1000);
   for (const row of records) {
     if (!row?.name || row.managed_by === 'package') continue;
     if (overlayNames.has(String(row.name))) continue; // governed + projected above
-    let layered: any = null;
-    try {
-      layered = await protocol.getMetaItemLayered({ type: 'permission', name: row.name });
-    } catch { layered = null; }
     // Same trust rule as the projector: with a readable SchemaRegistry the
     // declared body is the whole truth for overlay-less names — the layered
     // `code`/`effective` layers can echo tombstoned rows or runtime shadows
     // and would suppress a legitimate backfill.
     let effective: any = readDeclaredBody(ql, row.name);
     if (!effective?.name && !hasSchemaRegistry(ql)) {
+      const layered = await layeredFor(String(row.name));
       effective = (isProjectionEcho(layered?.effective) ? null : layered?.effective)
         ?? (isProjectionEcho(layered?.code) ? null : layered?.code)
         ?? null;
@@ -1643,6 +1661,9 @@ export async function reconcilePermissionSetProjection(
           type: 'permission', name: row.name, item: permissionSetBodyFromRow(row), actor: 'system',
         });
         out.backfilledIntoMetadata += 1;
+        // The name has metadata presence now, so a later row of it must see
+        // the definition this write created rather than the pre-write answer.
+        layeredByName.delete(String(row.name));
       } catch (e) {
         out.backfillFailed += 1;
         failedNames.push(String(row.name));
@@ -1681,13 +1702,38 @@ export async function reconcilePermissionSetProjection(
       // body IS the declared one — the registry already enforces it; only
       // the record needs healing. No registry sync (it would clobber the
       // pristine declared entry with a projection copy).
-      logger?.warn?.(
-        '[security] sys_permission_set record drifted from its metadata definition — re-projected (metadata wins; ADR-0094 D4)',
-        { name: row.name },
-      );
-      const res = await upsertEnvPermissionSet(ql, stripDecorations(effective), logger);
-      if (res.updated + res.seeded > 0) {
+      //
+      // [#22169] ⛔ The row THIS LOOP READ is healed, by its `id`, and nothing
+      // else. Handing the body to `upsertEnvPermissionSet` instead re-resolved
+      // the record BY NAME (first row, lowest id), so with more than one row
+      // per name only that one was ever written: every later row was reported
+      // "re-projected" and left drifted, on every boot, forever — measured on a
+      // real engine as 16 of 24 rows still drifted and warned about on boot 2,
+      // 3, … . The by-name read also had an INSERT branch that a refused read
+      // reached (`tryFind` answers `[]` for a throw), minting a duplicate of a
+      // row this loop was holding. A by-id update has no existence question to
+      // get wrong. Facets only (`permissionSetRowFields`), exactly the columns
+      // the upsert's update leg wrote: identity, `active` and provenance are
+      // never touched by a heal.
+      const healed = await tryUpdate(ql, 'sys_permission_set', {
+        id: row.id,
+        ...permissionSetRowFields(effective),
+      });
+      // Said AFTER the write, so the line reports what happened — the old
+      // order announced a re-projection the by-name write then never made.
+      if (healed) {
         out.driftHealed += 1;
+        logger?.warn?.(
+          '[security] sys_permission_set record drifted from its metadata definition — re-projected (metadata wins; ADR-0094 D4)',
+          { name: row.name, id: row.id },
+        );
+      } else {
+        logger?.warn?.(
+          '[security] sys_permission_set record drifted from its metadata definition — the re-projection write was ' +
+            'REFUSED, so the record keeps its drifted facets until a boot whose write lands. Enforcement is ' +
+            'unaffected: the evaluator resolves the metadata definition, never this record (ADR-0094 D4).',
+          { name: row.name, id: row.id },
+        );
       }
     }
   }
