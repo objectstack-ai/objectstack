@@ -398,7 +398,7 @@ describe('#6251 — reachable on a REAL parsed app stack', () => {
     version: '1.0.0',
     type: 'app',
     name: 'Form Layout Probe',
-    engines: { protocol: '^17' },
+    engines: { protocol: '^18' },
   };
 
   const data = { provider: 'object' as const, object: 'fl_contact' };

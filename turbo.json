@@ -672,7 +672,8 @@
         "$TURBO_ROOT$/examples/**/*.yaml",
         "$TURBO_ROOT$/examples/**/*.yml",
         "$TURBO_ROOT$/content/**",
-        "$TURBO_ROOT$/examples/*/src/**/*.ts"
+        "$TURBO_ROOT$/examples/*/src/**/*.ts",
+        "$TURBO_ROOT$/.changeset/**"
       ]
     },
     "@objectstack/core#test:repo": {

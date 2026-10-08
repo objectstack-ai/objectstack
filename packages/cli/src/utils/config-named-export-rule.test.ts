@@ -65,7 +65,7 @@ const MANIFEST = `{
     version: '0.1.0',
     type: 'app',
     name: 'Probe',
-    engines: { protocol: '^17' },
+    engines: { protocol: '^18' },
   }`;
 
 const roots: string[] = [];

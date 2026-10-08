@@ -236,6 +236,12 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // tests that live inside the todo app's `src/` tree. The pin's site table
       // quotes the showcase dataset's path, which holds this glob on the roster.
       'examples/*/src/**/*.ts',
+      // src/kernel/protocol-version-pre-mode.test.ts judges the lockstep's one
+      // exception (ruling record 6049734955, Q1 → B): Changesets pre mode with a
+      // pending `major` for this package. It reads `pre.json` and LISTS the
+      // directory to find the pending changesets, so the glob covers the
+      // directory, not only its files.
+      '.changeset/**',
     ],
     heldBy: {
       // The two repo-wide `*.object.ts` walkers. Each seeds a recognised
