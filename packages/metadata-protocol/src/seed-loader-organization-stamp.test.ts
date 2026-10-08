@@ -21,11 +21,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SeedLoaderService } from './seed-loader.js';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
-import {
-  assertEngineDeleteDispatch,
-  assertEngineFindOnePredicate,
-  assertEngineUpdateDispatch,
-} from '@objectstack/metadata-core';
 
 type Row = Record<string, unknown> & { id?: string };
 
@@ -56,12 +51,6 @@ function createEngine(store: Record<string, Row[]>) {
       }
       return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
     }),
-    // Pinned to ObjectQL's own contracts (`check:engine-double-contract`): a
-    // fake looser than the engine would let a call the engine refuses pass here.
-    findOne: vi.fn(async (object: string, query?: any) => {
-      assertEngineFindOnePredicate(object, query);
-      return null;
-    }),
     insert: vi.fn(async (object: string, data: Row | Row[]) => {
       const write = (d: Row) => {
         const row = { ...d, id: d.id ?? `gen-${++idCounter}` };
@@ -70,14 +59,6 @@ function createEngine(store: Record<string, Row[]>) {
         return row;
       };
       return Array.isArray(data) ? data.map(write) : write(data);
-    }),
-    update: vi.fn(async (_object: string, data: Row, options?: any) => {
-      assertEngineUpdateDispatch(data, options);
-      return data;
-    }),
-    delete: vi.fn(async (_object: string, options?: any) => {
-      assertEngineDeleteDispatch(options);
-      return { deleted: 0 };
     }),
     count: vi.fn(async (object: string) => (store[object] ?? []).length),
     aggregate: vi.fn(async () => []),
