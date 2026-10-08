@@ -1863,6 +1863,11 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         // yields the `executionContext` / `dataDriver` /
                         // `environmentId` the delegated call needs to run as the
                         // caller instead of as the system principal (#4936).
+                        // For a caller with no session this is the ONE place the
+                        // guest principal is built (#22147, ruling C): the
+                        // runtime face takes the explicit guest entry, so an
+                        // anonymous request an `authRequired: false` endpoint
+                        // admits executes as the guest, never principal-less.
                         const protocolContext: HttpProtocolContext = { request: req };
                         await dispatcher.resolveRequestScope(protocolContext, path.replace(/\/$/, ''));
 
