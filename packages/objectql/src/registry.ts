@@ -856,10 +856,10 @@ const TENANT_SCOPE_INDEX: { fields: string[] } = { fields: ['organization_id'] }
 
 function provisionTenantScopeIndex(
   schema: ServiceObject,
-  opts: { multiTenant: boolean },
+  opts: { multiTenant: boolean; platformGlobalObjects?: ReadonlySet<string> },
 ): ServiceObject {
   if (!opts.multiTenant) return schema;
-  if (!carriesTenantScopeColumn(schema)) return schema;
+  if (!carriesTenantScopeColumn(schema, opts.platformGlobalObjects)) return schema;
   if (declaresTenantIndex(schema)) return schema;
 
   return {
@@ -953,7 +953,10 @@ function provisionTenantScopeIndex(
  * sites above, and ⛔ not a contract for any other package to answer the
  * wall from — the wall answers for itself (ADR-0131 D8).
  */
-function carriesTenantScopeColumn(schema: ServiceObject): boolean {
+function carriesTenantScopeColumn(
+  schema: ServiceObject,
+  platformGlobalObjects?: ReadonlySet<string>,
+): boolean {
   // Clause 1 — the wall's own two clauses, spelled here because
   // plugin-security spells them there (option C, the single exported
   // predicate, is bounded to no new `@objectstack/spec` export and no
@@ -964,8 +967,16 @@ function carriesTenantScopeColumn(schema: ServiceObject): boolean {
     return false;
   }
   // Clause 2 — there is a column for the wall's predicate to filter on.
+  // [ADR-0131 D7] The injection plan is asked with the deployment's
+  // platform-global declaration, the same input `applySystemFields` planned the
+  // column from: a declared object carries no injected tenant column, so there
+  // is nothing for an index to serve.
+  const plan =
+    platformGlobalObjects && platformGlobalObjects.size > 0
+      ? resolveInjectedSystemColumns(schema, { platformGlobalObjects })
+      : resolveInjectedSystemColumns(schema);
   return (
-    resolveInjectedSystemColumns(schema).tenant ||
+    plan.tenant ||
     (schema as { fields?: Record<string, unknown> }).fields?.organization_id != null
   );
 }
@@ -2978,7 +2989,7 @@ export class SchemaRegistry {
    * platform's tenant index entry and the platform's own `organization_id`
    * come off and `systemFields.tenant: false` is recorded
    * ({@link applyDeploymentTenancy}); an `extend` layer loses the platform's
-   * own `organization_id`. A column the AUTHOR declared is the author's — it
+   * own `organization_id` and tenant index. A column the AUTHOR declared is the author's — it
    * stays, the object stays walled on it, and its name is returned in
    * `keptAuthoredColumn` for the caller to report.
    *
@@ -3006,10 +3017,15 @@ export class SchemaRegistry {
           keptAuthoredColumn.add(name);
           continue;
         }
+        // The tenant index comes off FIRST, while the body is still in the
+        // state it was stamped in (the strip re-stamps to prove the entry is
+        // the platform's own); an `extend` layer carried both too, because
+        // `applySystemFields` runs on every contributor.
+        const unindexed = this.stripProvisionedTenantIndexFrom(before);
         const after =
           contributor.ownership === 'extend'
-            ? withoutField(before, 'organization_id')
-            : this.applyDeploymentTenancy(this.stripProvisionedTenantIndexFrom(before));
+            ? withoutField(unindexed, 'organization_id')
+            : this.applyDeploymentTenancy(unindexed);
         if (after !== before) {
           contributor.definition = after;
           replanned.add(name);
