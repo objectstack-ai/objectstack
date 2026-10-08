@@ -1336,15 +1336,19 @@ export async function selfTest() {
   // this set separately. That card's OTHER new declaration,
   // `scripts/cross-package-test-inputs.mjs`, moves nothing here: the rollback
   // keeps `scripts/**`, which covers it. Measured, not inferred from the diff.
+  // Plus, since #22130, the one NEW root that card opened: @objectstack/spec's
+  // pre-mode lockstep check reads `.changeset/` (Changesets pre mode with a
+  // pending `major`), declared as `.changeset/**`, which no root the rollback
+  // keeps covers.
   // Ten plus one plus two plus one plus one plus one plus three plus two plus
-  // one: the rollback now uncovers twenty-two. This pin is judged over the LIVE
+  // one plus one: the rollback now uncovers twenty-three. This pin is judged over the LIVE
   // declaration table on purpose: a declaration added under a root the rollback
   // keeps leaves the count alone, one under a new root moves it and is recorded
   // here by name.
   const preFix = judge(fixtureWorkflow({ core: real.filters?.core, crosspkg: ['scripts/**'] }), CROSS_PACKAGE_TEST_INPUTS);
   assert(
-    new Set(uncoveredGlobs(preFix)).size === 22,
-    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two plus #18650's one -- got ${new Set(uncoveredGlobs(preFix)).size}`,
+    new Set(uncoveredGlobs(preFix)).size === 23,
+    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two plus #18650's one plus #22130's one -- got ${new Set(uncoveredGlobs(preFix)).size}`,
   );
   assert(
     uncoveredGlobs(preFix).includes('skills/**'),
@@ -1924,7 +1928,7 @@ export async function selfTest() {
       `same-root-different-file case observed failing and then covered by naming the file, a glob covered by ` +
       `\`core\`, one covered only by \`crosspkg\` and one covered by neither judged separately in one table, the ` +
       `stale-entry direction, seven refusals over subjects that could not be read, the checked-in ci.yml, the ` +
-      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two plus #18650's one, ` +
+      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two plus #18650's one plus #22130's one, ` +
       `the CI wiring read out of lint.yml, and the \`console\` selection: the spec's entry layout selecting Console Pin ` +
       `Gate and moving its dist key while a spec source file does neither, each way the filter and the key can drift ` +
       `observed red, and the report path red over the checked-in ci.yml with one hashed path dropped from the filter; ` +
