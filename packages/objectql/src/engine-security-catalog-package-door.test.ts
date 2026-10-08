@@ -132,7 +132,9 @@ function makeMemoryDriver() {
         async connect() {}, async disconnect() {}, async checkHealth() { return true; },
         async execute() { return null; },
         async find(object: string, ast: any) {
-            return Array.from(storeFor(object).values()).filter((r) => matchesWhere(r, ast?.where));
+            const rows = Array.from(storeFor(object).values()).filter((r) => matchesWhere(r, ast?.where));
+            // The caller's bound, after the filter, by presence (`check:objectql-double-limit`).
+            return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
         },
         async findOne(object: string, ast: any) {
             for (const r of storeFor(object).values()) if (matchesWhere(r, ast?.where)) return r;
