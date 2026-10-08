@@ -179,9 +179,8 @@ describe.each(NODE_TYPES)('%s `fields.*` — a CEL value envelope is EVALUATED (
 describe.each(NODE_TYPES)('%s `fields.*` — every literal writes exactly what it wrote before', (nodeType) => {
   it('literals, arrays, nested envelope-shaped JSON and the two kept `{…}` spellings: byte-identical to the whole-map `interpolate()`', async () => {
     const fields = {
-      subject: 'Quote',                                   // a literal string
+      subject: '{TODAY() + 7}',                           // a date macro — kept until CEL can write it
       total: 42,
-      due: '{TODAY() + 7}',                               // a date macro — kept until CEL can write it
       payload: {
         note: 'for the record',
         inner: { dialect: 'cel', source: 'price * 2' },   // NESTED envelope shape — data, not evaluated
@@ -213,7 +212,7 @@ describe.each(NODE_TYPES)('%s `fields.*` — the retired `{…}` template dialec
   const TEMPLATED: ReadonlyArray<[string, Record<string, unknown>, string, string]> = [
     ['a sole token', { total: '{price}' }, 'config.fields.total', "source: 'price'"],
     ['text with holes', { subject: 'Quote for {name} at {price}' }, 'config.fields.subject', `"'Quote for ' + name + ' at ' + price"`],
-    ['a string inside a literal', { payload: { note: 'for {name}' } }, 'config.fields.payload.note', "source: 'name'"],
+    ['a string inside a literal', { payload: { note: 'for {name}' } }, 'config.fields.payload.note', `"'for ' + name"`],
     ['a template expression', { total: '{round(price * 100) / 100}' }, 'config.fields.total', "source: 'round(price * 100) / 100.0'"],
   ];
 
