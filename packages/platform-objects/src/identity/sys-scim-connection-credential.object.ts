@@ -149,7 +149,7 @@ export const SysScimConnectionCredential = ObjectSchema.create({
   indexes: [
     // The digest is the verification lookup key — deterministic keyed HMAC, so
     // an indexed equality probe answers "which credential is this bearer".
-    { fields: ['token_digest'], unique: true },
+    { fields: ['token_digest'], unique: 'global' },
     { fields: ['connection_id'] },
     { fields: ['organization_id'] },
     { fields: ['user_id'] },

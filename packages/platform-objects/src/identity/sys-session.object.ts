@@ -302,7 +302,7 @@ export const SysSession = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['token'], unique: true },
+    { fields: ['token'], unique: 'global' },
     { fields: ['user_id'], unique: false },
     { fields: ['expires_at'], unique: false },
   ],

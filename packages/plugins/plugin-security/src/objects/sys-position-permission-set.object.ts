@@ -90,7 +90,7 @@ export const SysPositionPermissionSet = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['position_id', 'permission_set_id'], unique: true },
+    { fields: ['position_id', 'permission_set_id'], unique: 'global' },
     { fields: ['position_id'] },
     { fields: ['permission_set_id'] },
   ],

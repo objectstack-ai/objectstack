@@ -786,7 +786,18 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             const result = await protocol.getMetaItem({ type: 'app', name: 'test_app' });
 
             expect(result.item).toMatchObject(sampleApp);
-            expect(mockEngine.findOne).toHaveBeenCalledTimes(2);
+            // Two overlay reads, the canonical spelling and then the other —
+            // and [#22114] then ONE head read at the SAVE's address (canonical
+            // spelling, env-wide, package-unbound), which serves the read's
+            // `version`. The row served here sits under the other spelling,
+            // which no save writes, so that head is empty and `version` is null.
+            const reads = mockEngine.findOne.mock.calls.map(([table, opts]: any[]) => ({ table, where: opts?.where }));
+            expect(reads.map((r: any) => r.where?.type)).toEqual(['app', 'apps', 'app']);
+            expect(reads.every((r: any) => r.table === 'sys_metadata')).toBe(true);
+            expect(reads[2].where).toMatchObject({
+                type: 'app', name: 'test_app', state: 'active', organization_id: null, package_id: null,
+            });
+            expect((result as any).version).toBeNull();
         });
 
         it('should return undefined item when not in registry or DB', async () => {

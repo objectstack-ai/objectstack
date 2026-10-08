@@ -116,7 +116,7 @@ export const SysBusinessUnitMember = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['business_unit_id', 'user_id'], unique: true },
+    { fields: ['business_unit_id', 'user_id'], unique: 'global' },
     { fields: ['user_id'] },
     { fields: ['is_primary'] },
   ],

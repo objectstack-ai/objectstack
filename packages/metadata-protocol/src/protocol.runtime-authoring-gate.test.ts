@@ -2026,6 +2026,120 @@ describe('runtime authoring gate on OBJECT writes — the field-rule-slot verdic
 });
 
 /**
+ * [#22118] The object save door judges a stored sibling's finding against the
+ * STORED universe — the registry's objects WITH the written object's stored
+ * self — so a label-only save of a master is not refused for a detail the
+ * author never touched.
+ *
+ * The fix is in `@objectstack/lint` (`buildRuntimeWriteSnapshots` /
+ * `runRuntimeAuthoringRules`); no code here moves. Pinned through the REAL
+ * `saveMetaItem` with the registry holding the stored universe:
+ *
+ *  (a) the two measured cases — a detail's unknown `lookupColumns` entry, and
+ *      a detail's `readonlyWhen` read through `parent` — save, and the row
+ *      lands;
+ *  (b) a write that newly breaks a sibling, and a write whose object carries
+ *      its own finding (which its stored self carries too), are still refused
+ *      with the 422 `INVALID_METADATA` envelope, and nothing lands.
+ *
+ * Every spelling of a finding's location and the create path are pinned in
+ * `@objectstack/lint`'s `runtime-gate.stored-self-baseline.test.ts`.
+ *
+ * ⚠️ As in the blocks above: this package reaches `@objectstack/lint` through
+ * its built `dist/`, so an edit to the gate is invisible here until
+ * `pnpm --filter @objectstack/lint build` has run.
+ */
+describe('runtime authoring gate on OBJECT writes — the stored-self baseline (#22118)', () => {
+    const master = (fields: Record<string, unknown> = {}, label = 'Master') => ({
+        name: 'fx_master',
+        label,
+        sharingModel: 'private',
+        fields: {
+            name: { type: 'text', label: 'Name' },
+            code: { type: 'text', label: 'Code' },
+            acct: { type: 'lookup', label: 'Account', reference: 'fx_account' },
+            ...fields,
+        },
+    });
+    const account = {
+        name: 'fx_account',
+        label: 'Account',
+        sharingModel: 'private',
+        fields: { name: { type: 'text', label: 'Name' } },
+    };
+    const pickerDetail = (columns: string[]) => ({
+        name: 'fx_detail2',
+        label: 'Picker Detail',
+        sharingModel: 'private',
+        fields: { m: { type: 'lookup', label: 'Master', reference: 'fx_master', lookupColumns: columns } },
+    });
+    const parentDetail = {
+        name: 'fx_detail',
+        label: 'Parent Detail',
+        sharingModel: 'private',
+        fields: {
+            hdr: { type: 'master_detail', label: 'Header', reference: 'fx_master' },
+            qty: { type: 'number', label: 'Quantity', readonlyWhen: "parent.acct.name == 'x'" },
+        },
+    };
+
+    /** A protocol whose live registry holds `objects` — the stored universe. */
+    const hostWith = (objects: unknown[]) => {
+        const { engine, rows } = makeStubEngine();
+        engine.registry.listItems = (type: string) => (type === 'object' ? objects : []);
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+        return { protocol, rows };
+    };
+    const masterRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'object' && r.name === 'fx_master');
+    const saveMaster = (protocol: any, item: unknown) =>
+        protocol.saveMetaItem({ type: 'object', name: 'fx_master', item });
+
+    for (const [label, detail] of [
+        ['an unknown `lookupColumns` entry on a detail', pickerDetail(['nope_col'])],
+        ['a `readonlyWhen` read through `parent`', parentDetail],
+    ] as const) {
+        it(`(a) a label-only master save SAVES beside a stored detail with ${label}`, async () => {
+            const { protocol, rows } = hostWith([master(), account, detail]);
+
+            const result = await saveMaster(protocol, master({}, 'Master (renamed)'));
+
+            expect(result.success).toBe(true);
+            expect(masterRows(rows).map((r) => r.state)).toEqual(['active']);
+        });
+    }
+
+    it('(b) a write that newly breaks a sibling is still REFUSED with the 422 envelope', async () => {
+        // The stored master has `code`; the write drops it, so the detail's
+        // picker column now names nothing.
+        const { protocol, rows } = hostWith([master(), account, pickerDetail(['code'])]);
+        const dropped = master({}, 'Master (renamed)');
+        delete (dropped.fields as Record<string, unknown>).code;
+
+        const err = await saveMaster(protocol, dropped).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = err.issues.find((i: any) => i.rule === 'object-field-ref-unknown');
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(issue.path).toBe('objects.fx_detail2.fields.m.lookupColumns[0]');
+        expect(masterRows(rows)).toEqual([]);
+    });
+
+    it('(b) a finding on the written object itself is still REFUSED, though its stored self carries it', async () => {
+        const broken = master({ acct: { type: 'lookup', label: 'Account', reference: 'fx_account', lookupColumns: ['nope'] } });
+        const { protocol, rows } = hostWith([broken, account]);
+
+        const err = await saveMaster(protocol, { ...broken, label: 'Master (renamed)' }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = err.issues.find((i: any) => i.rule === 'object-field-ref-unknown');
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(issue.path).toBe('objects.fx_master.fields.acct.lookupColumns[0]');
+        expect(masterRows(rows)).toEqual([]);
+    });
+});
+
+/**
  * [#22042] The object save door gives the build's verdict on a `conditional`
  * validation rule's NESTED predicates.
  *

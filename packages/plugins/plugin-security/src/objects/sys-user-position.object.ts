@@ -187,7 +187,7 @@ export const SysUserPosition = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['user_id', 'position', 'organization_id'], unique: true },
+    { fields: ['user_id', 'position', 'organization_id'], unique: 'global' },
     { fields: ['user_id'] },
     { fields: ['position'] },
     { fields: ['business_unit_id'] },

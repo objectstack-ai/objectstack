@@ -2,7 +2,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // check-docs-image-tag (#9018) -- every CONCRETE version a doc surface pins for
-// the runtime image or the CLI must equal `packages/cli/package.json`'s version.
+// the runtime image or the CLI must equal `packages/cli/package.json`'s version --
+// or, in Changesets pre mode, the newest GA release (#22131; see "In pre mode"
+// below). `expectedVersion()` is the one place that decides which.
 //
 //   node scripts/check-docs-image-tag.mjs
 //   node scripts/check-docs-image-tag.mjs --self-test   # verify the checker itself
@@ -160,14 +162,56 @@
 // behaviour -- it is the mechanism, not a side effect, and #9018 forbids softening
 // it -- but it is a standing obligation on the release process, not a free check.
 // `pnpm check:docs-image-tag` names every `file:line` and the expected value, so
-// the remedy is mechanical.
+// the remedy is mechanical. In pre mode (next section) a prerelease bump does NOT
+// move the expectation; only the GA that ends the line does.
+//
+// ## In pre mode the docs follow the newest GA, not the prerelease (#22131)
+//
+// The maintainer's ruling on #22085 (Q3 -> B, comment 6049734955): during a
+// prerelease line the documented image and install versions follow the newest
+// GA, read from the CHANGELOG the way the GA is already judged; outside pre mode
+// nothing changes. Not taken: the docs reading `18.0.0-next.N` while npm `latest`
+// and the published image stay on the GA, so a production reader copying the
+// self-hosting or upgrade page is led into the breaking prerelease line.
+// `changeset version` moves `packages/cli` onto the prerelease in pre mode, so
+// `packages/cli/package.json` stops being the right answer exactly there.
+//
+// `expectedVersion()` is the ONE function that answers "which version", and both
+// consumers call it: this gate's `main()` and `sync-docs-image-tags.mjs`'s, so
+// the rewriter and the gate cannot disagree on the expectation -- the bargain
+// SURFACES and PATTERNS already make, one value further.
+//
+//   - No `.changeset/pre.json`: `packages/cli/package.json`'s version (VERSION_SOURCE).
+//   - `.changeset/pre.json` in either state Changesets writes -- `"mode": "pre"`
+//     (`changeset pre enter`) or `"mode": "exit"` (`changeset pre exit`): the
+//     newest GA in `packages/spec/CHANGELOG.md`. `exit` is still the prerelease
+//     line: `pre exit` rewrites only the mode, the tree stays on `X.Y.Z-next.N`
+//     until the next `changeset version` computes the GA and deletes pre.json
+//     (measured in @changesets/apply-release-plan 8.1.1: it removes the file when
+//     the mode is `exit`). That commit reaches `main` before the Version Packages
+//     PR does -- check-changeset-no-major.mjs's header describes the same window
+//     at the v17 exit -- so keying on `"pre"` alone would expect the prerelease
+//     there and redden this gate on every PR in between, the exiting one included.
+//   - Anything else (present but unparsable, or a mode that is neither) is a
+//     THROW, never a fallback to the other source: either fallback is a silent
+//     guess about which line the tree is on.
+//
+// Nothing here is a second reader. pre.json's content is read by
+// check-changeset-no-major.mjs's `readPre`; the GA by check-release-section-
+// coverage.mjs's `gaVersions` / `newestGaOfMajor` over its `SPEC_CHANGELOG`, the
+// reader the release gates and `sync-release-index-currency.mjs` already use. It
+// is the newest GA OVERALL, not the newest GA of the CLI's major: on the
+// `18.0.0-next.N` line there is no GA of 18 yet and the answer is 17.x.
+// `@objectstack/spec` and `@objectstack/cli` are one `fixed` group in
+// `.changeset/config.json`, so the spec CHANGELOG's newest GA is the CLI's.
 //
 // ## Why this file is dependency-free
 //
 // Same reason `check-adr-links.mjs` and `check-docs-redirects.mjs` are: an author
 // must be able to run it in any container with `node scripts/check-docs-image-tag.mjs`,
-// with no workspace install and no network. Reading three text files and one
-// `package.json` is the whole check.
+// with no workspace install and no network. Reading a handful of text files and
+// one `package.json` is the whole check; the two sibling scripts it imports the
+// pre-mode readers from are dependency-free on the same terms.
 //
 // ## Why a --self-test carries the weight here (#9018 dispatch)
 //
@@ -185,10 +229,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readPre } from './check-changeset-no-major.mjs';
+import { SPEC_CHANGELOG, gaVersions, newestGaOfMajor } from './check-release-section-coverage.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 /**
- * The package whose `version` every concrete pin below must equal.
+ * The package whose `version` every concrete pin below must equal OUTSIDE pre
+ * mode. In pre mode `expectedVersion()` reads the newest GA instead (#22131).
  *
  * Exported for the same reason SURFACES and PATTERNS are (#9064): the version-time
  * rewriter `sync-docs-image-tags.mjs` must resolve the SAME source of truth this gate
@@ -454,10 +501,15 @@ export function extractOccurrences(text) {
 /**
  * Compare every concrete pin on every enumerated surface against `expected`.
  *
- * @param {{ surfaces: { file: string, why: string }[], expected: string, root: string }} options
+ * `source` names where `expected` was read, for the STALE detail -- an
+ * `expectedVersion()` result's `source`. It defaults to VERSION_SOURCE, the
+ * outside-pre-mode answer, so a caller holding a bare version (the fixtures
+ * below) reads exactly as before.
+ *
+ * @param {{ surfaces: { file: string, why: string }[], expected: string, root: string, source?: string }} options
  * @returns {{ findings: Finding[], stats: Record<string, number> }}
  */
-export function checkSurfaces({ surfaces, expected, root }) {
+export function checkSurfaces({ surfaces, expected, root, source = VERSION_SOURCE }) {
   /** @type {Finding[]} */
   const findings = [];
   const stats = { surfaces: surfaces.length, read: 0, compared: 0, skipped: 0 };
@@ -510,7 +562,7 @@ export function checkSurfaces({ surfaces, expected, root }) {
         line: occurrence.line,
         detail:
           `found '${occurrence.raw}' (${occurrence.pattern}) -- expected version '${expected}', got '${occurrence.tag}'. `
-          + `Every concrete version pinned in the docs must equal ${VERSION_SOURCE}'s version: a reader copies `
+          + `Every concrete version pinned in the docs must equal the version read from ${source}: a reader copies `
           + 'this line verbatim into a Dockerfile or an orchestrator manifest, and a stale pin is valid syntax '
           + 'that quietly deploys the wrong major.',
       });
@@ -905,6 +957,107 @@ export function loadExpectedVersion(file) {
   return version;
 }
 
+/**
+ * Changesets' pre-release state file, spelled here for the presence test and the
+ * messages only. Its CONTENT is read by `readPre` (check-changeset-no-major.mjs),
+ * so this repository keeps one reader of it.
+ */
+const PRE_STATE = '.changeset/pre.json';
+
+/**
+ * The two modes Changesets writes into PRE_STATE, both of which are the
+ * prerelease line (see the header's "In pre mode" section for why `exit` is).
+ */
+const PRE_MODES = Object.freeze(['pre', 'exit']);
+
+/**
+ * @typedef {{ mode: string, tag: string, cli: string }} PreMode
+ * @typedef {{ version: string, source: string, preMode: PreMode | null }} Expectation
+ */
+
+/**
+ * The version every concrete pin must equal, and where it was read (#22131).
+ *
+ * The ONE function both consumers call -- this gate's `main()` and
+ * `sync-docs-image-tags.mjs`'s -- so the version the rewriter writes and the
+ * version the gate judges are the same value by construction:
+ *
+ *   - no PRE_STATE: VERSION_SOURCE's version, as before this function existed;
+ *   - PRE_STATE in mode `pre` or `exit`: the newest GA in SPEC_CHANGELOG, overall
+ *     (not of the CLI's major), through the release gates' own reader.
+ *
+ * `source` is a phrase naming where `version` came from, for messages; `preMode`
+ * is null outside pre mode, and otherwise carries the mode, the tag and the CLI's
+ * own (prerelease) version, so a message can say what was NOT used and why.
+ *
+ * Every state it cannot read throws rather than falling back to the other
+ * source -- a fallback in either direction is a silent guess about which line
+ * the tree is on, and the gate would report OK over it.
+ *
+ * @param {string} root the repository root to read
+ * @returns {Expectation}
+ */
+export function expectedVersion(root) {
+  const cliVersion = () => loadExpectedVersion(join(root, VERSION_SOURCE));
+  if (!existsSync(join(root, PRE_STATE))) {
+    return { version: cliVersion(), source: VERSION_SOURCE, preMode: null };
+  }
+
+  const pre = readPre(root);
+  if (pre === null || typeof pre !== 'object' || !PRE_MODES.includes(pre.mode)) {
+    throw new Error(
+      `${PRE_STATE} is present but is not a pre-release state this gate can read (got `
+      + `${pre === null ? 'unparsable JSON' : `mode ${JSON.stringify(pre?.mode)}`}; Changesets writes mode `
+      + `${PRE_MODES.map((mode) => JSON.stringify(mode)).join(' or ')}). Its presence means the tree may be on a `
+      + 'prerelease line, where the docs follow the newest GA, and its content cannot say -- refusing to guess '
+      + `between that and ${VERSION_SOURCE}.`,
+    );
+  }
+
+  const changelog = join(root, SPEC_CHANGELOG);
+  if (!existsSync(changelog)) {
+    throw new Error(
+      `${PRE_STATE} puts the tree in pre mode, where the docs follow the newest GA, but ${SPEC_CHANGELOG} `
+      + 'is not there to read it from -- refusing to report OK over an unusable expectation.',
+    );
+  }
+  const versions = gaVersions(readFileSync(changelog, 'utf8'));
+  if (versions.length === 0) {
+    throw new Error(
+      `${PRE_STATE} puts the tree in pre mode, where the docs follow the newest GA, but ${SPEC_CHANGELOG} `
+      + 'carries no GA heading (`## X.Y.Z`) to read it from -- refusing to report OK over an unusable '
+      + 'expectation.',
+    );
+  }
+  // `gaVersions` is ascending, so its last entry carries the highest major; the
+  // newest GA of THAT major is the newest GA overall.
+  const version = newestGaOfMajor(versions, versions[versions.length - 1][0]);
+  return {
+    version,
+    source: `the newest GA in ${SPEC_CHANGELOG} (pre mode)`,
+    preMode: { mode: pre.mode, tag: typeof pre.tag === 'string' ? pre.tag : 'unknown', cli: cliVersion() },
+  };
+}
+
+/**
+ * The sentence a pre-mode run prints, so a red (or a quiet rewrite) says WHY the
+ * expectation is not `packages/cli`'s version. Null outside pre mode.
+ *
+ * @param {Expectation} expectation
+ * @returns {string | null}
+ */
+export function preModeNote(expectation) {
+  if (expectation.preMode === null) return null;
+  const { mode, tag, cli } = expectation.preMode;
+  return (
+    `Pre mode: ${PRE_STATE} is in mode ${JSON.stringify(mode)} (tag ${JSON.stringify(tag)}), so the documented `
+    + `versions follow the newest GA, ${expectation.version}, and not ${VERSION_SOURCE}'s ${cli}. On a prerelease `
+    + 'line npm `latest` and the published image stay on the GA, and a production reader copying these pages must '
+    + 'not be led into the prerelease. `pnpm run version` keeps the surfaces there; do not move them to the '
+    + 'prerelease by hand.'
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Reporting.
 // ---------------------------------------------------------------------------
@@ -915,10 +1068,13 @@ export function loadExpectedVersion(file) {
  * Named unconditionally, zeroes included: the live corpus is green, so the only
  * thing distinguishing "8 pins were compared" from "the loop never ran" is this.
  */
-export function summarise(stats, expected, proseStats, driverStats) {
+export function summarise(stats, expectation, proseStats, driverStats) {
+  // `expectation` is an `expectedVersion()` result (or the same shape): its source
+  // is named beside the version, so a pre-mode green says it judged against the
+  // newest GA rather than reading as a `packages/cli` comparison.
   const pins = (
     `${stats.read}/${stats.surfaces} enumerated surface(s) read, `
-    + `${stats.compared} concrete pin(s) compared against ${VERSION_SOURCE} ${expected}, `
+    + `${stats.compared} concrete pin(s) compared against ${expectation.source} ${expectation.version}, `
     + `${stats.skipped} rolling/floating tag(s) skipped as non-concrete`
   );
   if (!proseStats) return pins;
@@ -944,9 +1100,9 @@ export function summarise(stats, expected, proseStats, driverStats) {
   );
 }
 
-function report(findings, stats, expected, proseStats, driverStats) {
+function report(findings, stats, expectation, proseStats, driverStats) {
   if (findings.length === 0) {
-    console.log(`check-docs-image-tag: OK (${summarise(stats, expected, proseStats, driverStats)}).`);
+    console.log(`check-docs-image-tag: OK (${summarise(stats, expectation, proseStats, driverStats)}).`);
     return 0;
   }
   const byKind = findings.reduce((acc, finding) => {
@@ -960,10 +1116,15 @@ function report(findings, stats, expected, proseStats, driverStats) {
     console.error(`  • [${finding.kind}] ${at}`);
     console.error(`      ${finding.detail}\n`);
   }
+  // Outside pre mode the bump sentence is the whole story. In pre mode it is false
+  // -- a prerelease bump does not move the expectation -- and what the reader needs
+  // instead is why the expectation is not `packages/cli`'s own version.
   console.error(
-    `Expected version: ${expected} (from ${VERSION_SOURCE}). `
-    + 'A version bump turns the PIN half of this gate red until the doc surfaces move in the same change -- '
-    + 'that is the mechanism, not a bug. Update the lines named above.\n',
+    `Expected version: ${expectation.version} (from ${expectation.source}). `
+    + (preModeNote(expectation)
+      ?? 'A version bump turns the PIN half of this gate red until the doc surfaces move in the same change -- '
+        + 'that is the mechanism, not a bug.')
+    + ' Update the lines named above.\n',
   );
   if (findings.some((finding) => finding.kind === 'PROSE-VERSION')) {
     console.error(
@@ -982,7 +1143,7 @@ function report(findings, stats, expected, proseStats, driverStats) {
       + 'it.\n',
     );
   }
-  console.error(`Scope of this run: ${summarise(stats, expected, proseStats, driverStats)}.`);
+  console.error(`Scope of this run: ${summarise(stats, expectation, proseStats, driverStats)}.`);
   return 1;
 }
 
@@ -1018,6 +1179,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The classifier, asserted directly': 9,
   'The extractor\'s anchoring and position reporting': 6,
   'The expectation refuses to be unusable': 4,
+  'Pre mode: the expectation is the newest GA (#22131)': 18,
   'The LIVE false-positive control (#9018\'s named risk, in situ)': 3,
   'The PROSE limb (#10229)': 22,
   'The LIVE prose control (#10229, in situ)': 2,
@@ -1028,7 +1190,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 12;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1066,6 +1228,9 @@ async function selfTest() {
 
   try {
     const expected = '17.0.0';
+    // What `main()` hands `summarise()`: an `expectedVersion()` result. The fixtures
+    // above the pre-mode battery judge against a bare version outside pre mode.
+    const expectation = { version: expected, source: VERSION_SOURCE, preMode: null };
 
     // ── Clean fixture: every shape that MUST stay silent ────────────────────
     //
@@ -1310,6 +1475,181 @@ async function selfTest() {
     rejects('not-json.json', 'not json at all', 'an unparseable package.json is rejected');
     write('good.json', '{"version":"17.1.2"}');
     assert(loadExpectedVersion(join(dir, 'good.json')) === '17.1.2', 'a well-formed version loads');
+
+    // ── Pre mode: the expectation is the newest GA (#22131) ─────────────────
+    //
+    // Every case is a tree `expectedVersion()` reads exactly as `main()` does, and
+    // every case carries its positive control: the SAME tree read the old way (or
+    // without pre.json) answers differently, so a green here cannot be an
+    // implementation that ignores pre mode.
+    battery('Pre mode: the expectation is the newest GA (#22131)');
+    // The spec CHANGELOG as the first `next` cut leaves it: a prerelease heading on
+    // top, which is never a GA, and the GA history below it.
+    const preChangelog = [
+      '# @objectstack/spec',
+      '',
+      '## 18.0.0-next.0',
+      '',
+      '### Major Changes',
+      '',
+      '- The v18 line opens.',
+      '',
+      '## 17.7.0',
+      '',
+      '### Minor Changes',
+      '',
+      '## 17.6.0',
+      '',
+      '## 16.4.2',
+      '',
+    ].join('\n');
+    const preTree = (name, { cli = '18.0.0-next.0', pre = '{"mode":"pre","tag":"next"}', changelog = preChangelog } = {}) => {
+      write(`${name}/${VERSION_SOURCE}`, `${JSON.stringify({ name: '@objectstack/cli', version: cli })}\n`);
+      if (changelog !== null) write(`${name}/${SPEC_CHANGELOG}`, changelog);
+      if (pre !== null) write(`${name}/${PRE_STATE}`, pre);
+      return join(dir, name);
+    };
+    const refuses = (root) => {
+      try {
+        expectedVersion(root);
+        return null;
+      } catch (error) {
+        return error.message;
+      }
+    };
+
+    // 1 -- pre mode, CLI on the prerelease, newest GA 17.7.0 => 17.7.0.
+    const nextRoot = preTree('pre-next');
+    const inPre = expectedVersion(nextRoot);
+    assert(
+      inPre.version === '17.7.0',
+      `a pre-mode tree whose CLI is 18.0.0-next.0 and whose newest GA is 17.7.0 expects 17.7.0 -- got ${JSON.stringify(inPre)}`,
+    );
+    // Its positive control: the CLI in that very tree reads the prerelease, so the
+    // old reading (VERSION_SOURCE, unconditionally) answers 18.0.0-next.0 here.
+    assert(
+      loadExpectedVersion(join(nextRoot, VERSION_SOURCE)) === '18.0.0-next.0',
+      'control: the same tree\'s packages/cli reads 18.0.0-next.0, so the case above discriminates the pre-mode '
+        + 'branch from the reading it replaces',
+    );
+    // ...and the newest GA OVERALL is the answer, not the newest GA of the CLI's
+    // major, which has none on a fresh line.
+    assert(
+      newestGaOfMajor(gaVersions(preChangelog), 18) === null,
+      'control: there is no GA of 18 in that CHANGELOG, so a "newest GA of the CLI\'s major" reading would have '
+        + 'no answer at all -- the overall newest GA is the one that can be right',
+    );
+    assert(
+      inPre.source.includes(SPEC_CHANGELOG) && inPre.source.includes('pre mode')
+        && inPre.preMode?.mode === 'pre' && inPre.preMode?.tag === 'next' && inPre.preMode?.cli === '18.0.0-next.0',
+      `the expectation names its source and what it did NOT use (mode, tag, the CLI's prerelease) -- got ${JSON.stringify(inPre)}`,
+    );
+
+    // 2 -- the same tree without pre.json => the CLI's version, as before.
+    const noPre = expectedVersion(preTree('pre-absent', { pre: null }));
+    assert(
+      noPre.version === '18.0.0-next.0' && noPre.source === VERSION_SOURCE && noPre.preMode === null,
+      `the same tree without pre.json expects the CLI's version, read from ${VERSION_SOURCE} -- got ${JSON.stringify(noPre)}`,
+    );
+    // Its positive control is case 1: one file apart, two different answers.
+    assert(
+      noPre.version !== inPre.version,
+      'control: removing pre.json is the ONLY difference between the two trees, and it changes the answer',
+    );
+
+    // 3 -- a pre-mode tree whose docs already read the newest GA judges GREEN...
+    const gaDocs = [
+      'FROM ghcr.io/objectstack-ai/objectstack:17.7.0',
+      'docker build --build-arg OS_CLI_VERSION=17.7.0 docker/',
+      'npm install -g @objectstack/cli@17.7.0',
+      '',
+    ].join('\n');
+    write('pre-next/docs.md', gaDocs);
+    const preGreen = checkSurfaces({
+      surfaces: [{ file: 'docs.md', why: 'fixture' }],
+      expected: inPre.version,
+      source: inPre.source,
+      root: nextRoot,
+    });
+    assert(
+      preGreen.findings.length === 0 && preGreen.stats.compared === 3,
+      `a pre-mode tree whose docs read the newest GA judges green, having compared all 3 pins -- got ${JSON.stringify(preGreen)}`,
+    );
+    // ...and its positive control: the same docs judged the old way go red.
+    const oldWay = checkSurfaces({
+      surfaces: [{ file: 'docs.md', why: 'fixture' }],
+      expected: noPre.version,
+      root: nextRoot,
+    });
+    assert(
+      oldWay.findings.filter((finding) => finding.kind === 'STALE').length === 3,
+      'control: the same GA docs judged against packages/cli\'s 18.0.0-next.0 are 3 STALE -- the red this change '
+        + `removes from every PR on the prerelease line. Got ${JSON.stringify(oldWay.findings.map((f) => f.kind))}`,
+    );
+
+    // 4 -- docs moved onto the prerelease, in pre mode, are STALE, and say why.
+    write('pre-next/docs-on-next.md', 'FROM ghcr.io/objectstack-ai/objectstack:18.0.0-next.0\n');
+    const onNext = checkSurfaces({
+      surfaces: [{ file: 'docs-on-next.md', why: 'fixture' }],
+      expected: inPre.version,
+      source: inPre.source,
+      root: nextRoot,
+    });
+    assert(
+      onNext.findings.length === 1 && onNext.findings[0].kind === 'STALE'
+        && onNext.findings[0].detail.includes("expected version '17.7.0'")
+        && onNext.findings[0].detail.includes(inPre.source),
+      'a pin moved onto the prerelease in pre mode is STALE, and the finding names the pre-mode source it was '
+        + `judged against -- got ${JSON.stringify(onNext.findings)}`,
+    );
+    const note = preModeNote(inPre);
+    assert(
+      note !== null && note.includes('17.7.0') && note.includes('18.0.0-next.0') && note.includes('"next"'),
+      `a pre-mode red explains itself: the GA used, the CLI prerelease NOT used, the tag -- got ${JSON.stringify(note)}`,
+    );
+    assert(preModeNote(noPre) === null, 'outside pre mode there is no pre-mode note: the red reads exactly as before');
+    assert(
+      summarise(preGreen.stats, inPre).includes(`compared against ${inPre.source} 17.7.0`),
+      `a pre-mode green names its source in the scope line -- got "${summarise(preGreen.stats, inPre)}"`,
+    );
+
+    // 5 -- `changeset pre exit` leaves mode "exit" with the tree still on the
+    // prerelease; that is the prerelease line too.
+    const inExit = expectedVersion(preTree('pre-exit', { pre: '{"mode":"exit","tag":"next"}' }));
+    assert(
+      inExit.version === '17.7.0' && inExit.preMode?.mode === 'exit',
+      'mode "exit" (after `changeset pre exit`, before the version pass that deletes pre.json) still expects the '
+        + `newest GA -- keying on "pre" alone reds every PR in that window. Got ${JSON.stringify(inExit)}`,
+    );
+    // 6 -- an rc line (cut-rc.yml runs only in pre mode, tag rc) is a prerelease line too.
+    const inRc = expectedVersion(preTree('pre-rc', { cli: '17.8.0-rc.0', pre: '{"mode":"pre","tag":"rc"}' }));
+    assert(
+      inRc.version === '17.7.0' && inRc.preMode?.tag === 'rc',
+      `an rc pre-mode tree (CLI 17.8.0-rc.0) expects the newest GA too -- got ${JSON.stringify(inRc)}`,
+    );
+
+    // 7 -- every state the function cannot read is a REFUSAL, never a fallback.
+    // Positive control for all four: case 1's well-formed tree did not throw.
+    const garbled = refuses(preTree('pre-garbled', { pre: '{ not json' }));
+    assert(
+      garbled !== null && garbled.includes(PRE_STATE) && garbled.includes('unparsable'),
+      `a present but unparsable pre.json is refused, not read as "no pre mode" -- got ${JSON.stringify(garbled)}`,
+    );
+    const oddMode = refuses(preTree('pre-oddmode', { pre: '{"mode":"later","tag":"next"}' }));
+    assert(
+      oddMode !== null && oddMode.includes('"later"'),
+      `a pre.json in a mode Changesets never writes is refused -- got ${JSON.stringify(oddMode)}`,
+    );
+    const noChangelog = refuses(preTree('pre-nochangelog', { changelog: null }));
+    assert(
+      noChangelog !== null && noChangelog.includes(SPEC_CHANGELOG),
+      `pre mode with no spec CHANGELOG is refused -- got ${JSON.stringify(noChangelog)}`,
+    );
+    const noGa = refuses(preTree('pre-noga', { changelog: '# @objectstack/spec\n\n## 18.0.0-next.0\n' }));
+    assert(
+      noGa !== null && noGa.includes('no GA heading'),
+      `pre mode over a CHANGELOG with only prerelease headings is refused -- got ${JSON.stringify(noGa)}`,
+    );
 
     // ── The LIVE false-positive control (#9018's named risk, in situ) ───────
     //
@@ -1772,9 +2112,10 @@ async function selfTest() {
 
     // ── The green states its own scope ──────────────────────────────────────
     battery('The green states its own scope');
-    const line = summarise(clean.stats, expected, proseClean.stats, driverClean.stats);
+    const line = summarise(clean.stats, expectation, proseClean.stats, driverClean.stats);
     assert(
-      line.includes('3 concrete pin(s) compared') && line.includes('4 rolling/floating tag(s) skipped'),
+      line.includes('3 concrete pin(s) compared against packages/cli/package.json 17.0.0')
+        && line.includes('4 rolling/floating tag(s) skipped'),
       `the summary names every count, so a green can be read for its scope -- got "${line}"`,
     );
     assert(
@@ -1788,16 +2129,16 @@ async function selfTest() {
     // A 3-argument call is still legal (the pin+prose scope line), and must not
     // invent driver counts it was not given.
     assert(
-      !summarise(clean.stats, expected, proseClean.stats).includes('driver(s) installed'),
+      !summarise(clean.stats, expectation, proseClean.stats).includes('driver(s) installed'),
       'summarise() omits the driver clause when it is given no driver stats, rather than printing zeroes '
         + 'that read as a comparison that happened',
     );
     // The scope line is printed under a FAILING run as well, so it must not word
     // itself as a verdict -- observed contradicting its own findings before this.
     assert(
-      !summarise(clean.stats, expected, proseDirty.stats).includes('version-free'),
+      !summarise(clean.stats, expectation, proseDirty.stats).includes('version-free'),
       'the scope line states what was SCANNED, not what was concluded -- the same line prints above a list '
-        + `of PROSE-VERSION findings. Got "${summarise(clean.stats, expected, proseDirty.stats)}"`,
+        + `of PROSE-VERSION findings. Got "${summarise(clean.stats, expectation, proseDirty.stats)}"`,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -1861,7 +2202,9 @@ async function selfTest() {
     + 'lost driver anchor on either side, empty driver list on either side -- observed FAILING, and the '
     + 'X.Y.Z metavariable, the historical "removed in 17.0.0" sentences, the upgrade-checklist rows, the '
     + "reader's own app version, the interpolated CLI pin, the `npm cache clean` tail, the backticked "
-    + 'URL schemes and the "not in the image" prose observed EXCLUDED.',
+    + 'URL schemes and the "not in the image" prose observed EXCLUDED; in pre mode (modes pre and exit) the '
+    + 'expectation observed to be the newest GA against a CLI on the prerelease, the same tree without pre.json '
+    + 'observed to expect the CLI, and every unreadable pre-mode state observed REFUSED.',
   );
 
   return SELF_TEST_VERDICT;
@@ -1871,12 +2214,18 @@ async function selfTest() {
 
 function main() {
   const root = scriptRepoRoot();
-  const expected = loadExpectedVersion(join(root, VERSION_SOURCE));
-  const { findings, stats } = checkSurfaces({ surfaces: SURFACES, expected, root });
+  // The ONE expectation, shared with sync-docs-image-tags.mjs (#22131).
+  const expectation = expectedVersion(root);
+  const { findings, stats } = checkSurfaces({
+    surfaces: SURFACES,
+    expected: expectation.version,
+    source: expectation.source,
+    root,
+  });
   const prose = checkProseClaims({ claims: PROSE_CLAIMS, root });
   const drivers = checkDriverPromise({ root });
   process.exit(
-    report([...findings, ...prose.findings, ...drivers.findings], stats, expected, prose.stats, drivers.stats),
+    report([...findings, ...prose.findings, ...drivers.findings], stats, expectation, prose.stats, drivers.stats),
   );
 }
 

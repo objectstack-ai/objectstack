@@ -105,7 +105,7 @@ export const SysScimGroupMember = ObjectSchema.create({
   indexes: [
     // UNIQUE mirrors @better-auth/scim's own declaration — what makes its
     // concurrent-add recovery work (same shape as sys_team_member).
-    { fields: ['membership_key'], unique: true },
+    { fields: ['membership_key'], unique: 'global' },
     { fields: ['group_id'] },
     { fields: ['scim_user_id'] },
   ],

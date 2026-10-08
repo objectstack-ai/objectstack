@@ -179,7 +179,7 @@ export const NotificationDelivery = ObjectSchema.create({
 
     indexes: [
         // Dedup: one delivery per (event, recipient, channel).
-        { fields: ['notification_id', 'recipient_id', 'channel'], unique: true },
+        { fields: ['notification_id', 'recipient_id', 'channel'], unique: 'global' },
         // The hot claim query.
         { fields: ['status', 'partition_key', 'next_attempt_at'] },
         // Stale-in_flight reaper.

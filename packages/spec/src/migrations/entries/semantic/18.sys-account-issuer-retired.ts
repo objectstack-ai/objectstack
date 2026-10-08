@@ -30,7 +30,7 @@ export const entry: SemanticMigration = {
     + 'sign-in failed `INVALID_EMAIL_OR_PASSWORD` behind a "User not found" warn pointing at the '
     + '`sys_user` row rather than at the account — four checklist items rediscovered that '
     + 'independently. Its discriminating power here was near zero: `sys_sso_provider` declares '
-    + '`{ fields: [\'provider_id\'], unique: true }`, so `provider_id → issuer` is a function '
+    + '`{ fields: [\'provider_id\'], unique: \'global\' }`, so `provider_id → issuer` is a function '
     + 'within an environment.',
   acceptanceCriteria:
     'BEFORE the column is dropped, `os migrate account-issuer` reads zero on the deployment: no '

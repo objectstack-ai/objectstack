@@ -566,7 +566,7 @@ export const SysOauthApplication = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['client_id'], unique: true },
+    { fields: ['client_id'], unique: 'global' },
     { fields: ['user_id'] },
     { fields: ['reference_id'] },
   ],

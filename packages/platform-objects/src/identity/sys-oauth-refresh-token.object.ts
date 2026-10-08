@@ -164,7 +164,7 @@ export const SysOauthRefreshToken = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['token'], unique: true },
+    { fields: ['token'], unique: 'global' },
     { fields: ['client_id'] },
     { fields: ['session_id'] },
     { fields: ['user_id'] },

@@ -69,7 +69,7 @@ describe('SysPresence object definition', () => {
     // shape is now exactly what the author wrote.
     expect(SysPresence.indexes).toEqual([
       { fields: ['user_id'], unique: false },
-      { fields: ['session_id'], unique: true },
+      { fields: ['session_id'], unique: 'global' },
       { fields: ['status'], unique: false },
     ]);
   });

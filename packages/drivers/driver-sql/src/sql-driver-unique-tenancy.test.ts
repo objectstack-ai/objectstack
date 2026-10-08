@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SqlDriver, classifyIndexKeyPart, parseIndexDdl } from '../src/index.js';
+import { applyConversionsToStoredItem } from '@objectstack/spec';
+import { SqlDriver, classifyIndexKeyPart, expectedIndexes, parseIndexDdl } from '../src/index.js';
 
 /**
  * Unique-scope materialization: tenancy composites (#3696) + the explicit
@@ -29,10 +30,14 @@ import { SqlDriver, classifyIndexKeyPart, parseIndexDdl } from '../src/index.js'
  *     → single-column `(field)`.
  *   field `unique: 'global'`
  *     → single-column `(field)`, platform-wide, always.
- *   declared index `unique: true` / `'global'`
+ *   declared index `unique: 'global'`
  *     → VERBATIM listed columns, never rewritten — the #3696 verbatim contract,
- *       now the `'global'` arm of the vocabulary (bare `true` retires at
- *       protocol 18; the synonym pin below retires with it).
+ *       now the `'global'` arm of the vocabulary. Bare `true`, its positional
+ *       spelling, is refused by the spec since protocol 18 (#5082), and stored
+ *       metadata converts it to `'global'` (ADR-0120 D2) — the D2 corpus pin
+ *       below proves that respelling builds the same indexes byte for byte.
+ *       The old "`'global'` is a synonym of `true`" pin retired with the bare
+ *       spelling.
  *   declared index `unique: 'organization'`
  *     → NULL-safe organization key part PREPENDED to the listed columns; with
  *       no tenant column it degrades to the listed columns (S11); a listed
@@ -278,10 +283,12 @@ describe('SqlDriver unique × tenancy (#3696)', () => {
 
   // ── Declared indexes are NOT rewritten ────────────────────────────────────
 
-  it('leaves declared object-level indexes exactly as authored', async () => {
+  it("leaves a declared 'global' index exactly as authored", async () => {
     // A declared index names its own columns. Many are platform-wide on
     // purpose (a DNS hostname, a reserved slug, a Stripe customer id), so
-    // injecting a tenant column here would silently break them.
+    // injecting a tenant column here would silently break them. Retained FOR
+    // `'global'` (ADR-0120 D6.6) — the spelling the verbatim contract has
+    // been stated in since bare `true` was refused at protocol 18.
     await driver.initObjects([
       {
         name: 'slug_reservation',
@@ -289,7 +296,7 @@ describe('SqlDriver unique × tenancy (#3696)', () => {
           organization_id: { type: 'string' },
           slug: { type: 'string' },
         },
-        indexes: [{ fields: ['slug'], unique: true }],
+        indexes: [{ fields: ['slug'], unique: 'global' }],
       } as any,
     ]);
 
@@ -303,17 +310,104 @@ describe('SqlDriver unique × tenancy (#3696)', () => {
     ).rejects.toThrow(/UNIQUE constraint failed|duplicate key value/);
   });
 
-  it("accepts unique: 'global' on a declared index as a synonym of true", async () => {
-    await driver.initObjects([
+  // ── ADR-0120 D2: the bare-`true` → `'global'` conversion is zero-drift ────
+  //
+  // The regression corpus ADR-0120 D2 names: the S4/S5 shapes, i.e. the nine
+  // engine-owned idempotency/dedup keys of the #4986 inventory, each as it was
+  // declared when the ADR was written — bare `unique: true` on a declared
+  // index. (Four have since moved to `'organization'` on purpose and the rest
+  // to `'global'`; the corpus is frozen at the ADR-time spelling because that
+  // is the population stored rows carry.) Each is replayed through the stored
+  // seam's own conversion pass, and two facts are pinned:
+  //
+  //   1. the expected-index output is BYTE-IDENTICAL before and after — the
+  //      conversion changes the spelling and nothing the driver materializes;
+  //   2. on a database built from the bare spelling, the drift plan for the
+  //      converted metadata is EMPTY — no index op, safe or destructive.
+  //
+  // The second has a control: the same database against one index moved to
+  // `'organization'` is NOT empty, so the empty plan is a reading, not a
+  // detector that cannot see index drift.
+  describe('ADR-0120 D2 — the nine-key corpus converts with zero drift', () => {
+    const NINE_KEY_CORPUS: Array<{ name: string; fields: Record<string, any>; indexes: any[] }> = [
+      { name: 'sys_job', fields: { name: { type: 'string' } }, indexes: [{ fields: ['name'], unique: true }] },
+      { name: 'sys_notification', fields: { dedup_key: { type: 'string' } }, indexes: [{ fields: ['dedup_key'], unique: true }] },
       {
-        name: 'domain',
-        fields: { organization_id: { type: 'string' }, host: { type: 'string' } },
-        indexes: [{ fields: ['host'], unique: 'global' }],
-      } as any,
-    ]);
+        name: 'http_delivery',
+        fields: { source: { type: 'string' }, dedup_key: { type: 'string' } },
+        indexes: [{ fields: ['source', 'dedup_key'], unique: true }],
+      },
+      { name: 'sys_presence', fields: { session_id: { type: 'string' } }, indexes: [{ fields: ['session_id'], unique: true }] },
+      {
+        name: 'sys_email_template',
+        fields: { name: { type: 'string' }, locale: { type: 'string' } },
+        indexes: [{ fields: ['name', 'locale'], unique: true }],
+      },
+      {
+        name: 'notification_delivery',
+        fields: { notification_id: { type: 'string' }, recipient_id: { type: 'string' }, channel: { type: 'string' } },
+        indexes: [{ fields: ['notification_id', 'recipient_id', 'channel'], unique: true }],
+      },
+      {
+        name: 'notification_receipt',
+        fields: { notification_id: { type: 'string' }, user_id: { type: 'string' }, channel: { type: 'string' } },
+        indexes: [{ fields: ['notification_id', 'user_id', 'channel'], unique: true }],
+      },
+      {
+        name: 'notification_subscription',
+        fields: { topic: { type: 'string' }, principal: { type: 'string' } },
+        indexes: [{ fields: ['topic', 'principal'], unique: true }],
+      },
+      {
+        name: 'notification_preference',
+        fields: { user_id: { type: 'string' }, topic: { type: 'string' }, channel: { type: 'string' } },
+        indexes: [{ fields: ['user_id', 'topic', 'channel'], unique: true }],
+      },
+    ].map((o) => ({ ...o, fields: { organization_id: { type: 'string' }, ...o.fields } }));
 
-    const uniques = await uniqueIndexColumns('domain');
-    expect(Object.values(uniques)).toContainEqual(['host']);
+    const converted = () => NINE_KEY_CORPUS.map((o) => applyConversionsToStoredItem('object', o));
+
+    /** What the driver asks the database for, per table — serialized, so "identical" means bytes. */
+    const expectedBytes = (objects: Array<{ name: string; fields: Record<string, any>; indexes: any[] }>) =>
+      JSON.stringify(
+        objects.map((o) =>
+          expectedIndexes({
+            table: o.name,
+            fields: o.fields,
+            tenantField: 'organization_id',
+            declaredIndexes: o.indexes,
+            physicalColumns: new Set(['id', ...Object.keys(o.fields)]),
+          }),
+        ),
+      );
+
+    it('the conversion respells every corpus index to global, and only that', () => {
+      const after = converted();
+      expect(after.map((o) => o.indexes.map((i: any) => i.unique))).toEqual(NINE_KEY_CORPUS.map(() => ['global']));
+      // Nothing but the scope word moved: same names, fields and columns.
+      expect(after.map((o) => ({ ...o, indexes: o.indexes.map(({ unique: _u, ...rest }: any) => rest) }))).toEqual(
+        NINE_KEY_CORPUS.map((o) => ({ ...o, indexes: o.indexes.map(({ unique: _u, ...rest }: any) => rest) })),
+      );
+    });
+
+    it('expected-index output is byte-identical before and after the conversion', () => {
+      const before = expectedBytes(NINE_KEY_CORPUS);
+      expect(before).toContain('"unique":true'); // non-vacuous: the corpus does declare uniques
+      expect(expectedBytes(converted())).toBe(before);
+    });
+
+    it('a database built from the bare spelling shows an EMPTY drift plan for the converted metadata', async () => {
+      await driver.initObjects(NINE_KEY_CORPUS as any);
+      expect(await driver.detectManagedDrift(converted() as any)).toEqual([]);
+
+      // Control: one index stated per organization IS index drift here, so the
+      // empty plan above is the detector reading, not the detector blind.
+      const moved = converted().map((o) =>
+        o.name === 'sys_presence' ? { ...o, indexes: [{ fields: ['session_id'], unique: 'organization' }] } : o,
+      );
+      const drift = await driver.detectManagedDrift(moved as any);
+      expect(drift.filter((d) => d.table === 'sys_presence').length).toBeGreaterThan(0);
+    });
   });
 
   // ── Legacy migration: drop the global index, create the composite ─────────
