@@ -460,6 +460,8 @@
     "MetadataCacheRequestSchema": "api/MetadataCacheRequest",
     "MetadataCacheResponse": "api/MetadataCacheResponse",
     "MetadataCacheResponseSchema": "api/MetadataCacheResponse",
+    "MetadataConflictError": "api/MetadataConflictError",
+    "MetadataConflictErrorSchema": "api/MetadataConflictError",
     "MetadataDeleteResponse": "api/MetadataDeleteResponse",
     "MetadataDeleteResponseSchema": "api/MetadataDeleteResponse",
     "MetadataDependenciesResponse": "api/MetadataDependenciesResponse",

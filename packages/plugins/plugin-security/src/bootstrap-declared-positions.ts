@@ -26,6 +26,7 @@
  */
 
 import { buildExistingByName } from './seed-name-lookup.js';
+import { isBuiltinPositionName } from './builtin-positions.js';
 import {
   createSeedWriteRefusals,
   seedCtx,
@@ -83,10 +84,7 @@ interface SeedOptions {
 }
 
 /**
- * Read declared metadata items of a type. The engine's SchemaRegistry
- * (populated by `manifest.register` from the stack's `positions`/`sharingRules`
- * arrays) is the reliable source in every boot path; the metadata-service
- * facade only surfaces these once the compiled-artifact loader runs (serve.ts).
+ * Read declared metadata items of a type from the engine's SchemaRegistry.
  *
  * [#8378] No `{ name, content }` unwrap: the registered item IS the authoring
  * document. `PositionSchema` declares no `content` key and rejects one as
@@ -101,6 +99,50 @@ function readDeclared(engine: any, type: string): any[] {
     }
   } catch { /* fall through */ }
   return [];
+}
+
+/** A declared position this seeder owns: any name but the six built-ins. */
+function isSeededHere(item: any): boolean {
+  return !isBuiltinPositionName(item?.name);
+}
+
+/**
+ * The positions this seeder projects into rows: the engine registry's, else
+ * the metadata service's — the same two-step as before — with the six built-in
+ * positions taken out of both the decision and the result.
+ *
+ * ## Why the six are taken out (ADR-0131 C2 stage S2)
+ *
+ * The six are declared position metadata of this plugin now
+ * (`builtin-positions.ts`), registered with the engine registry on every boot.
+ * Left in, they would change this read twice over:
+ *
+ *  - **the decision.** The registry is read first and the metadata service only
+ *    when the registry holds no position, so six registered names would make
+ *    the registry answer every boot — and the stack-declared positions, which
+ *    only the metadata service holds, would never be read again.
+ *  - **the result.** Their rows are `bootstrapBuiltinRoles`'s, seeded from the
+ *    same list with the `platform` provenance this seeder never writes. Taking
+ *    them here would put a copy without that provenance ahead of the built-in
+ *    pass on a fresh organization (refused outright for a reserved identity
+ *    name), which the built-in pass then restamps: a second writer for six rows
+ *    that have one.
+ *
+ * So the registry "holds a position" only when it holds one besides the six,
+ * and the six never reach the loop. With the six out, both the decision and the
+ * result are exactly what they were before the six were declared — that is the
+ * whole of this change; the two-step itself is not touched.
+ */
+async function readDeclaredPositions(engine: any, metadataService: any): Promise<any[]> {
+  const registered = readDeclared(engine, 'position');
+  let positions: unknown = registered;
+  if (!registered.some(isSeededHere)) {
+    try {
+      const listed = metadataService?.list?.('position');
+      positions = typeof (listed as any)?.then === 'function' ? await listed : (listed ?? []);
+    } catch { positions = []; }
+  }
+  return Array.isArray(positions) ? positions.filter(isSeededHere) : [];
 }
 
 /**
@@ -126,14 +168,8 @@ export async function bootstrapDeclaredPositions(
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') {
     return { seeded: 0, updated: 0, unchanged: 0, unreadable: 0 };
   }
-  let positions: any[] = readDeclared(ql, 'position');
-  if (positions.length === 0) {
-    try {
-      const listed = metadataService?.list?.('position');
-      positions = typeof (listed as any)?.then === 'function' ? await listed : (listed ?? []);
-    } catch { positions = []; }
-  }
-  if (!Array.isArray(positions) || positions.length === 0) return { seeded: 0, updated: 0, unchanged: 0, unreadable: 0 };
+  const positions = await readDeclaredPositions(ql, metadataService);
+  if (positions.length === 0) return { seeded: 0, updated: 0, unchanged: 0, unreadable: 0 };
 
   // [#10946] ONE existence read for the whole declaration, before the loop.
   // See `seed-name-lookup.ts` for why a read that cannot ANSWER must never be

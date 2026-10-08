@@ -31,8 +31,8 @@
  *
  * The rules are `(stack) => findings`. A runtime write is one ITEM. The gate
  * therefore builds a per-write snapshot — the written item, plus the live
- * registry's objects as resolution context — and runs the rules TWICE: once on
- * the context alone, once with the item grafted in. Only findings the item
+ * registry's objects as resolution context — and runs the rules on the
+ * context alone and again with the item grafted in. Only findings the item
  * ADDED are attributable to this write.
  *
  * That is not defensive padding, it is the D4 requirement made structural:
@@ -45,8 +45,26 @@
  *   subtraction, saving flow A would 422 because object B — untouched, already
  *   stored, possibly shipped in a package — has a bad predicate.
  *
- * The cost is two passes over a small in-memory snapshot, on a PUBLISH (not on
- * a draft autosave). That is the correct place to spend it.
+ * ## What "added" means, exactly (#22118)
+ *
+ * The gate blocks new writes, never another stored row. Precisely:
+ *
+ * - a finding located on ANOTHER entry is this write's only when neither the
+ *   universe without the item nor the stored universe already holds it. On an
+ *   update into a context collection the stored universe includes the written
+ *   item's stored self, so a stored detail's condition that only shows when
+ *   its master is present is not charged to a label-only save of the master;
+ * - a finding located on the written item itself is this write's whenever the
+ *   universe without the item does not hold it — whatever the stored row held.
+ *   Re-saving a row is writing it;
+ * - a finding whose path names no entry the gate can locate
+ *   ({@link isLocatedOnAnotherEntry}) is judged as one on the written item.
+ *   That direction can leave a sibling's finding charged to a write; it can
+ *   never wave the written item's own finding through.
+ *
+ * The cost is two passes over a small in-memory snapshot — three on an update
+ * into a context collection — on a PUBLISH (not on a draft autosave). That is
+ * the correct place to spend it.
  */
 
 import {
@@ -572,8 +590,8 @@ export function stackKeyForType(type: string): string | null {
 const fingerprint = (f: AuthoringFinding) => `${f.rule}\u0000${f.where}\u0000${f.path}\u0000${f.message}`;
 
 /**
- * The baseline/candidate stack pair the gate judges one write against, or
- * `null` when no snapshot can be built (unmapped type, non-object body).
+ * The snapshots the gate judges one write against, or `null` when no snapshot
+ * can be built (unmapped type, non-object body).
  *
  * Exported (#8309) so the tests that measure per-write vs whole-stack
  * agreement exercise the REAL construction instead of a hand-kept mirror —
@@ -584,27 +602,33 @@ const fingerprint = (f: AuthoringFinding) => `${f.rule}\u0000${f.where}\u0000${f
  * Shape:
  * - The baseline carries every context collection ({@link CONTEXT_STACK_KEYS})
  *   WITHOUT the written item. Anything found there is somebody else's
- *   pre-existing condition and is not this write's to answer for (#4463 D4 —
- *   the gate blocks new writes, never stored rows). Carrying the sibling
- *   collections in BOTH passes is what makes their findings cancel in the
- *   diff — and what gives the cross-collection rules the sibling collection
- *   they compare against, so the per-write verdict agrees with the
- *   whole-stack one instead of inventing findings (the 38-vs-4 measurement,
- *   PR #7886).
+ *   pre-existing condition and is not this write's to answer for (#4463 D4).
+ *   Carrying the sibling collections in BOTH passes is what makes their
+ *   findings cancel in the diff — and what gives the cross-collection rules
+ *   the sibling collection they compare against, so the per-write verdict
+ *   agrees with the whole-stack one instead of inventing findings (the
+ *   38-vs-4 measurement, PR #7886).
  * - The candidate is the same context with this write's item added. When the
- *   written type IS one of the context collections (an `object`, `permission`
- *   or `book` write), the item REPLACES its stored self rather than appearing
- *   beside it — otherwise an update reads as a duplicate name, and for
- *   `objects` every lookup in the tenant's model would read as dangling. For
- *   any other type the item is the sole member of its own collection, so
+ *   written type IS one of the context collections (an `object`, `permission`,
+ *   `book` or `dataset` write), the item REPLACES its stored self rather than
+ *   appearing beside it — otherwise an update reads as a duplicate name, and
+ *   for `objects` every lookup in the tenant's model would read as dangling.
+ *   For any other type the item is the sole member of its own collection, so
  *   index-0 paths in the findings are unambiguously this write.
+ * - [#22118] The gate also judges a third snapshot on an update into a
+ *   context collection, the STORED universe — see
+ *   {@link buildRuntimeWriteSnapshotSet}, which this function reads its two
+ *   snapshots off. It is not returned here: this signature is on both package
+ *   entries, and the third snapshot is the gate's own business.
  *
  * Cost (the #4463 D2 question, measured rather than assumed): built per
  * write, never cached. The construction is one filter + one spread over the
  * written type's collection; the sibling collections are passed by reference.
  * Over the shipped corpus (30 objects, 10 permission sets, 1 book) that is
  * microseconds on a PUBLISH (never a draft autosave, D1) — a cache would buy
- * nothing and would need cross-org invalidation the gate has no seam for.
+ * nothing and would need cross-org invalidation the gate has no seam for. An
+ * update into a context collection pays one more spread, for the stored
+ * universe.
  */
 export function buildRuntimeWriteSnapshots(args: {
   /** Singular metadata type of the item being written. */
@@ -620,6 +644,39 @@ export function buildRuntimeWriteSnapshots(args: {
    */
   packageScope?: RuntimePackageScope;
 }): { baseline: AnyRec; candidate: AnyRec } | null {
+  const set = buildRuntimeWriteSnapshotSet(args);
+  return set ? { baseline: set.baseline, candidate: set.candidate } : null;
+}
+
+/**
+ * {@link buildRuntimeWriteSnapshots}' baseline and candidate, plus — on an
+ * UPDATE into a context collection — `stored` (#22118).
+ *
+ * Exported for the pins in `runtime-gate.stored-self-baseline.test.ts` and for
+ * that only — it is on neither package entry.
+ *
+ * `stored` is the STORED universe: the baseline with the written item's stored
+ * self put back, at the slot the item takes in the candidate. Present only on
+ * an update into a context collection — a create has no stored self, and a
+ * non-context type's item is never carried as context — so in every other case
+ * the gate runs exactly the two passes it always ran.
+ *
+ * It exists because the baseline alone answers the wrong question for a
+ * SIBLING's finding that needs the written item present: a detail's
+ * `lookupColumns` entry is judged against its master only when the master is
+ * in the snapshot, so with the master dropped the baseline cannot hold the
+ * finding, and a label-only master save was charged with a stored detail's
+ * condition. The stored universe holds it.
+ *
+ * Its slot is the point: every sibling sits at the same index in all three
+ * snapshots, and the stored self sits where the candidate puts the item, so a
+ * positional path names the same entry in `stored` as in `candidate`.
+ * {@link runRuntimeAuthoringRules} reads only the `stored` findings located on
+ * ANOTHER entry; the stored self's own findings never cancel anything.
+ */
+export function buildRuntimeWriteSnapshotSet(
+  args: Parameters<typeof buildRuntimeWriteSnapshots>[0],
+): { baseline: AnyRec; candidate: AnyRec; stored?: AnyRec } | null {
   const stackKey = stackKeyForType(args.type);
   if (!stackKey) return null;
   if (!args.item || typeof args.item !== 'object') return null;
@@ -628,6 +685,10 @@ export function buildRuntimeWriteSnapshots(args: {
   const itemName = typeof item.name === 'string' ? item.name : undefined;
 
   const baseline: AnyRec = {};
+  // [#22118] The written item's stored self(ves), in stored order — what the
+  // filter below drops from the baseline. Two only when two stored entries
+  // (illegitimately) share the name; both go back into `stored`.
+  let storedSelf: readonly AnyRec[] = [];
   for (const key of CONTEXT_STACK_KEYS) {
     // [#9612] `objects` — and only `objects` — is reduced to the written
     // item's package closure. The other collections are already bounded
@@ -646,15 +707,76 @@ export function buildRuntimeWriteSnapshots(args: {
     const collection = key === 'objects'
       ? (narrowObjectsToPackageClosure(raw, args.packageScope) as readonly AnyRec[])
       : raw;
-    baseline[key] = key === stackKey
-      ? collection.filter((o) => !itemName || o?.name !== itemName)
-      : collection;
+    if (key === stackKey) {
+      baseline[key] = collection.filter((o) => !itemName || o?.name !== itemName);
+      if (itemName) storedSelf = collection.filter((o) => o?.name === itemName);
+    } else {
+      baseline[key] = collection;
+    }
   }
-  const candidate: AnyRec = {
-    ...baseline,
-    [stackKey]: [...((baseline[stackKey] as readonly AnyRec[] | undefined) ?? []), item],
-  };
-  return { baseline, candidate };
+  const siblings = (baseline[stackKey] as readonly AnyRec[] | undefined) ?? [];
+  const candidate: AnyRec = { ...baseline, [stackKey]: [...siblings, item] };
+  if (storedSelf.length === 0) return { baseline, candidate };
+  const stored: AnyRec = { ...baseline, [stackKey]: [...siblings, ...storedSelf] };
+  return { baseline, candidate, stored };
+}
+
+/**
+ * Whether a finding's RAW path (positional, as the rules emit it) positively
+ * names a collection entry other than the written item (#22118).
+ *
+ * It answers the ruling's "located on" question for the third pass, and it
+ * answers it once for every rule — it keys on the path's spelling, ⛔ never on
+ * which rule emitted it: a per-rule exemption would be a second policy beside
+ * the one differential every door rule reads. It reads the three spellings the
+ * door's rules locate an entry with:
+ *
+ *  - **positional** — `objects[3].fields.m.lookupColumns[0]`: the entry at
+ *    that index of a collection the snapshot carries. The written item is the
+ *    one at `writtenSlot` of its own collection ({@link buildRuntimeWriteSnapshots}
+ *    puts the stored self and the item there, and every sibling at the same
+ *    index in every snapshot);
+ *  - **name-keyed** — `objects.acme_invoice.validations.x.regex`: the entry
+ *    of that name in a collection the snapshot carries;
+ *  - **an object named in prose** — `object 'fx_detail' · field 'qty'
+ *    readonlyWhen`, the `path` a rule carrying its `where` as its path emits
+ *    (`validateStackExpressions`, `lintAutonumberFormats`). Only that spelling
+ *    is read — single-quoted, `object` — because it is the one in use.
+ *
+ * Anything else — a path into a collection the snapshot does not carry, a
+ * rule's source file on an `authoring-rule-threw` finding, prose naming
+ * something other than an object — is NOT positively located, and answers
+ * `false`. That is the deliberate direction: a finding the gate cannot locate
+ * keeps today's verdict (judged against the baseline alone), so a location the
+ * gate fails to read can leave a sibling's finding charged to a write, and can
+ * never wave a written item's own finding through.
+ */
+export function isLocatedOnAnotherEntry(
+  path: string,
+  args: {
+    /** The snapshot the finding came from (its collections decide what a path can name). */
+    snapshot: AnyRec;
+    /** The written item's stack key. */
+    stackKey: string;
+    /** The written item's name. */
+    itemName: string;
+    /** The written item's index in its own collection. */
+    writtenSlot: number;
+  },
+): boolean {
+  const positional = /^([A-Za-z_][A-Za-z0-9_]*)\[(\d+)\]/.exec(path);
+  if (positional && Array.isArray(args.snapshot[positional[1]!])) {
+    return !(positional[1] === args.stackKey && Number(positional[2]) === args.writtenSlot);
+  }
+  const named = /^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)(?=[.[]|$)/.exec(path);
+  if (named && Array.isArray(args.snapshot[named[1]!])) {
+    return !(named[1] === args.stackKey && named[2] === args.itemName);
+  }
+  const prose = /^object '([A-Za-z_][A-Za-z0-9_]*)'(?=\s|$)/.exec(path);
+  if (prose) {
+    return !(args.stackKey === stackKeyForType('object') && prose[1] === args.itemName);
+  }
+  return false;
 }
 
 /**
@@ -958,11 +1080,12 @@ export function runRuntimeAuthoringRules(args: {
 
   // The baseline/candidate construction — replace-not-erase for a write into
   // a context collection, the written item as sole member of its own
-  // collection otherwise, every context collection present in BOTH passes so
-  // sibling-derived findings cancel in the diff. See the builder's own
+  // collection otherwise, every context collection present in EVERY pass so
+  // sibling-derived findings cancel in the diff, and (#22118) the stored
+  // universe on an update into a context collection. See the builder's own
   // docblock; it is exported precisely so tests exercise this construction
   // and not a mirror of it.
-  const snapshots = buildRuntimeWriteSnapshots({
+  const snapshots = buildRuntimeWriteSnapshotSet({
     type: args.type,
     item: args.item,
     ...(args.context !== undefined ? { context: args.context } : {}),
@@ -981,7 +1104,10 @@ export function runRuntimeAuthoringRules(args: {
     // [#20611] Spelled against the CANDIDATE, the one snapshot that holds the
     // written item. The baseline pass shares the set and cannot match it: the
     // item is not in the baseline, and every other entry sits at an index the
-    // item does not.
+    // item does not. [#22118] The `stored` pass shares it too, and there it
+    // CAN match — the stored self sits at the item's index — but only
+    // findings located on the written item are affected, and the differential
+    // never reads those from that pass.
     ...(args.restoredCredentialPaths !== undefined && args.restoredCredentialPaths.length > 0
       ? {
           restoredCredentialPaths: restoredCredentialStackPaths(
@@ -993,6 +1119,25 @@ export function runRuntimeAuthoringRules(args: {
       : {}),
   };
   const before = new Set(runRules(rules, snapshots.baseline, ctx).map(fingerprint));
+  // [#22118] The stored universe answers for a sibling's finding that needs
+  // the written item present: one located on ANOTHER entry that the stored
+  // universe already holds is not new, so it is not this write's. Findings
+  // located on the written item are never read from this pass — the stored
+  // self's own condition cancels nothing — so they are judged as before,
+  // against the baseline alone. Positional paths compare across the passes
+  // because `stored` puts the stored self at the item's slot.
+  if (snapshots.stored) {
+    const stackKey = stackKeyForType(args.type)!;
+    const located = {
+      snapshot: snapshots.stored,
+      stackKey,
+      itemName: (args.item as AnyRec).name as string,
+      writtenSlot: (snapshots.candidate[stackKey] as readonly unknown[]).length - 1,
+    };
+    for (const f of runRules(rules, snapshots.stored, ctx)) {
+      if (isLocatedOnAnotherEntry(f.path, located)) before.add(fingerprint(f));
+    }
+  }
   const added = runRules(rules, snapshots.candidate, ctx)
     .filter((f) => !before.has(fingerprint(f)))
     // [commit def0d3e63] The wire shape: collection-resident findings key their
