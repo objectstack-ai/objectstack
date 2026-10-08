@@ -755,12 +755,12 @@ export class AnalyticsServicePlugin implements Plugin {
       };
       // [#22154] Absence is judged where it is used, not where init starts
       // (AGENTS.md "Startup registry reads"). At this plugin's init the
-      // security plugin has usually not registered yet — on the default
-      // composition it registers a moment later, and this bridge resolves per
-      // call, so plugin order is not significant. A WARN at init asserted a
-      // verdict that same boot contradicts; init reports the absence at `info`
-      // (below), and the WARN waits for a query that needs the gate and finds
-      // no service.
+      // "security" service is not registered yet on any composition that
+      // ships plugin-security: that plugin registers it in its own start(),
+      // after every init(). This bridge resolves per call, so plugin order is
+      // not significant. A WARN at init asserted a verdict the same boot
+      // contradicts; init reports the absence at `info` (below), and the WARN
+      // waits for a query that needs the gate and finds no service.
       //
       // Once per bridge, i.e. per plugin init: the state is the deployment's,
       // every later query is admitted the same way, and repeating it per query
@@ -1478,10 +1478,10 @@ export class AnalyticsServicePlugin implements Plugin {
       );
     } else if (autoBridgedReadAdmission) {
       // [#22154] A heads-up, not a verdict — the same situation the read-scope
-      // sibling above logs at `info`. The bridge resolves per query, and on a
-      // default composition the security plugin registers after this init; a
-      // query that needs the gate and finds no service WARNs then, once (see
-      // the bridge).
+      // sibling above logs at `info`. The bridge resolves per query, and
+      // plugin-security registers the service in its start(), after this
+      // init; a query that needs the gate and finds no service WARNs then,
+      // once (see the bridge).
       ctx.logger.info(
         '[Analytics] admitObjectRead bridged to the "security" service; that service is not ' +
         'registered yet at init and will be resolved per query (plugin order is not significant).',

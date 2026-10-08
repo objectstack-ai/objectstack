@@ -5,10 +5,10 @@
  * service answers the object-level read grant, and at what level.
  *
  * The bridge resolves the `security` service PER QUERY, so plugin order is not
- * significant — and on a default composition the security plugin registers a
- * moment AFTER this plugin's `init()`. A WARN at init therefore asserted a
- * verdict the same boot contradicts (AGENTS.md "Startup registry reads — never
- * record a verdict the boot can still contradict"), on every default boot.
+ * significant — and plugin-security registers that service in its `start()`,
+ * after every plugin's `init()`. A WARN at init therefore asserted a verdict
+ * the same boot contradicts (AGENTS.md "Startup registry reads — never record
+ * a verdict the boot can still contradict"), on every default boot.
  *
  * So:
  *   - init reports the absence at `info`, as the read-scope sibling already
@@ -79,9 +79,11 @@ const runProbe = (service: AnalyticsService) =>
 
 /**
  * Boots a real `LiteKernel` with a `data` provider, this plugin, and — when
- * given — a security provider registered AFTER it, which is the order a
- * default composition produces. The first plugin taps the kernel's logger so
- * every line the analytics plugin writes, at init and at query time, is seen.
+ * given — a security provider that registers AFTER this plugin's `init()`,
+ * which is what every composition shipping plugin-security produces (it
+ * registers `security` in its `start()`). The first plugin taps the kernel's
+ * logger so every line the analytics plugin writes, at init and at query
+ * time, is seen.
  */
 async function bootKernel(security?: Record<string, unknown>) {
   const lines: Lines = { info: [], warn: [], error: [] };
@@ -105,9 +107,11 @@ async function bootKernel(security?: Record<string, unknown>) {
   kernel.use(data);
   kernel.use(new AnalyticsServicePlugin({ queryCapabilities: nativeSql }));
   if (security) {
+    // Registered from start(), the phase plugin-security registers it in.
     kernel.use({
       name: 'test.security',
-      init: async (ctx: PluginContext) => { ctx.registerService('security', security); },
+      init: async () => {},
+      start: async (ctx: PluginContext) => { ctx.registerService('security', security); },
     } satisfies Plugin);
   }
   await kernel.bootstrap();
