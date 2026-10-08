@@ -123,10 +123,10 @@ export interface GrantNameBackfillEngine {
 
 /** The kernel logger, as this module uses it. */
 export interface GrantNameBackfillLogger {
-  info?: (message: string, meta?: Record<string, unknown>) => void;
-  warn: (message: string, meta?: Record<string, unknown>) => void;
+  info?: (message: string, meta?: Record<string, any>) => void;
+  warn: (message: string, meta?: Record<string, any>) => void;
   /** The kernel logger's shape: message, cause, meta. */
-  error?: (message: string, cause?: unknown, meta?: Record<string, unknown>) => void;
+  error?: (message: string, cause?: Error, meta?: Record<string, any>) => void;
 }
 
 /** Why a pass stopped before it reached a verdict. */
