@@ -580,8 +580,10 @@
   **What is not affected.** A query that reads only fields the caller may read
   answers as before. A system context, and a caller with no permission sets, are
   unaffected, as on the data API. A host read scope (row-level policy) may still
-  name fields the caller cannot read. A deployment with no security service applies
-  no field-level check, as on the data API. A member of an authored cube whose `sql`
+  name fields the caller cannot read. A deployment with no security service is
+  unaffected too: the in-repo kernels throw on a `security` service nothing ever
+  registered, so its analytics queries were already refused, fail-closed, at the
+  object-level read gate, and still are. A member of an authored cube whose `sql`
   is an expression is not attributed to a field.
   
   **New hook.** `AnalyticsServiceConfig.getReadableFields(object, context)` supplies
@@ -643,8 +645,9 @@
   **What is not affected.** A query through a related object the caller may read
   answers as before, within the caller's row scope. A system context, and a
   caller with no permission sets, are unaffected, as on the data API. A
-  deployment with no security service applies no object-level check, as on the
-  data API.
+  deployment with no security service is unaffected too: the in-repo kernels
+  throw on a `security` service nothing ever registered, so the object-level
+  gate already refused its analytics queries, fail-closed, and still does.
   
   **Refusals that change form.** On the ObjectQL strategy a related object the
   caller may not read was already refused on `POST /api/v1/analytics/query` and
@@ -818,7 +821,7 @@
   
   **BREAKING**: this narrows what the analytics dataset door accepts. A dataset whose dimension or measure `field` is not a column reference is now refused with `403 PERMISSION_DENIED` instead of being evaluated — an inline dataset and a saved dataset queried by name alike, since both reach the same door. No shipped dataset carries a non-column `field`. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
   
-  **What changes.** The service compiles a dataset into a cube whose members read as declared, so a dimension or measure whose `field` was a raw expression resolved to a declared cube member and was left to the field-level read gate, which stands down with no security service and on an object its reader answers `undefined` for; in those tiers the expression reached the native statement as written. The dataset's own `field` text is now judged at the dataset door, before compile and before any strategy runs, through the field-read gate's existing judge (`PERMISSION_DENIED` / 403, naming the member and never the expression text), for every caller, admin included, and with or without a security service. There is no new error code and no new admission module.
+  **What changes.** The service compiles a dataset into a cube whose members read as declared, so a dimension or measure whose `field` was a raw expression resolved to a declared cube member and was left to the field-level read gate, which stands down where no field reader is wired (a host that constructs `AnalyticsService` without one) and on an object its reader answers `undefined` for; in those tiers the expression reached the native statement as written. (A deployment with no security service is not such a tier: the in-repo kernels throw on a `security` service nothing ever registered, so its analytics queries are refused, fail-closed.) The dataset's own `field` text is now judged at the dataset door, before compile and before any strategy runs, through the field-read gate's existing judge (`PERMISSION_DENIED` / 403, naming the member and never the expression text), for every caller, admin included, and with or without a security service. There is no new error code and no new admission module.
   
   **What stays answerable.** Every dataset whose fields are columns or relationship paths is unchanged, inline or saved. A saved dataset whose `field` is an expression is refused the same way as an inline one; refusing such a `field` when it is authored belongs to the dataset schema's own retirement of expression fields, not to this door. The dataset's own filter, the selection's runtime filter and cube-query members are lowered into the compiled query and already judged on the query path, so they are unchanged.
 - 4727fcb: fix(service-analytics)!: a grouped dimension or a `count_distinct` measure over a JSON-stored column reached through a relationship path the cube declares no join for is refused with `INVALID_FIELD` / 400 at the analytics door, as the same member over a declared join already was
@@ -1208,10 +1211,12 @@
   
   **What is not affected.** A member that is a column reference is judged by the
   field it resolves to, as before. A `count` over `'*'` names no field and is
-  served. A deployment with no security service, and an object the security
-  service gives no field answer for, apply no field-level check, as before. The
-  spec's parse already refuses an expression member, so a cube that parses is
-  unaffected.
+  served. A host that wires no field reader, and an object the security service
+  gives no field answer for, apply no field-level check, as before. A deployment
+  with no security service is refused outright: the in-repo kernels throw on a
+  `security` service nothing ever registered, so its analytics queries are
+  refused, fail-closed. The spec's parse already refuses an expression member, so
+  a cube that parses is unaffected.
   
   **If a widget stopped answering,** its cube carries an expression member from
   before the parse refused one. Re-author the member as a column reference, or
@@ -1916,24 +1921,25 @@
   lockstep convention: during the window the bump level is not the carrier, this
   banner and the disposition above are). Nothing that was already admitted
   becomes refused **except** the requests `GET /data/<object>` refuses today for
-  the same principal, which is the defect. Nothing that was refused becomes
-  admitted.
+  the same principal, which is the defect, and every analytics read on a
+  deployment that registers no `security` service (below). Nothing that was
+  refused becomes admitted.
   
   `POST /analytics/dataset/query` now asks the OBJECT-level read grant before it serves an inline dataset, so the analytics door and `GET /data/<object>` reach one admission verdict on every driver.
   
   The route accepts an inline dataset definition (`body.dataset`) from any authenticated caller. On a SQL driver the compiled statement ran through the driver's raw `execute()`, which is documented as a tenant-isolation bypass and which no middleware sits in front of — so the request reached the database having passed exactly ONE of the three read layers (the row scope, threaded since ADR-0021 D-C). A caller with **no grant of any kind** on an object received its row count, and with `dimensions` its grouped counts by any column, where the `/data` door answered `403 PERMISSION_DENIED` for the same principal on the same deployment. On the memory driver the identical request fell through to the ObjectQL engine, which applies all three layers in one place, and was refused. The exposure is not opt-in and an application cannot decline it: a deployment shipping 0 datasets and 0 dashboards has the identical surface, because the reachable slot is the inline definition rather than a declared one.
   
-  **This change NARROWS what the analytics doors accept.** Requests that were already refused by `/data` are now refused by analytics too; nothing that was refused becomes admitted. "Fails closed" is a statement about a WIRED provider: a deployment with no `security` service registered keeps its previous analytics behaviour by design, because on that deployment `/data` carries no object-level gate either and the equivalence is what is being defended.
+  **This change NARROWS what the analytics doors accept.** Requests that were already refused by `/data` are now refused by analytics too; nothing that was refused becomes admitted. A deployment with no `security` service registered is refused too, fail-closed: `ObjectKernel` and `LiteKernel` throw on a `security` service nothing ever registered, so the bridge below gets no verdict and denies, naming the object. `/data` carries no object-level gate on that deployment, so there analytics refuses reads that `/data` serves. A composition that wants analytics to answer registers a security service, or its host supplies its own `admitObjectRead`.
   
   - **`ISecurityService.canReadObject(object, context)`** (`@objectstack/spec`, optional) — the object-level half of a read, the sibling of `getReadFilter`'s row-level half. It exists because the two are not interchangeable: `getReadFilter` answers "which rows" and answers `undefined` — "no row restriction" — for a caller who may not read the object at all, so a door holding only the filter reads a caller with NO grant as a caller with NO restriction. Fails CLOSED. Absence is a defined state and its fallback is **not** "admit": a consumer composes the same verdict from `explain`, which is not optional.
   - **`@objectstack/plugin-security` implements it** as the middleware's own read gate, arm for arm and in its order — the `isSystem` bypass, the "no permission sets resolved" skip, the #3545 fail-closed refusal on an unresolvable object posture, the ADR-0066 D3 `requiredPermissions` capability AND-gate, the `allowRead` CRUD grant, and the ADR-0090 D10 delegator intersection — from the same primitives the middleware calls, and it is exposed on the registered `security` service.
-  - **`@objectstack/service-analytics` asks it once at the door**, for the base object and every joined object, **ahead of strategy selection**. Placement is the fix: two strategies each enforcing their own copy of three layers is the CAUSE of the divergence, not its remedy, so both strategies — and any strategy added later — inherit one verdict by construction. `AnalyticsServicePlugin` auto-bridges the new `admitObjectRead` hook to the `security` service (`canReadObject`, falling back to `explain`), the same way it already bridges `getReadScope`, and warns loudly at init when no security service is registered. The bridge tells three resolutions apart: an ABSENT `security` service admits (that deployment has no object-level gate on `/data` either, so the two doors still agree, and this is what keeps a deployment shipping no `plugin-security` working as before); a service that cannot be USED — resolving it throws, or it exposes neither `canReadObject` nor `explain` — DENIES and reports at `error`, because `/data`'s middleware does not fall open in those states.
+  - **`@objectstack/service-analytics` asks it once at the door**, for the base object and every joined object, **ahead of strategy selection**. Placement is the fix: two strategies each enforcing their own copy of three layers is the CAUSE of the divergence, not its remedy, so both strategies — and any strategy added later — inherit one verdict by construction. `AnalyticsServicePlugin` auto-bridges the new `admitObjectRead` hook to the `security` service (`canReadObject`, falling back to `explain`), the same way it already bridges `getReadScope`, and warns loudly at init when no security service is registered. The bridge tells three resolutions apart: a context that answers the `security` lookup with nothing (ABSENT) admits, and no in-repo kernel answers that way; a service that cannot be USED — resolving it throws, or it exposes neither `canReadObject` nor `explain` — DENIES and reports at `error`. Resolving it throws on `ObjectKernel` and `LiteKernel` when no `security` service was ever registered, so a deployment that ships no `plugin-security` (or any other security service) is refused here, although `/data` carries no object-level gate on it; for a wired service that cannot be used, `/data`'s middleware does not fall open either.
   - **`@objectstack/verify`** gains `bootStack(app, { databaseDriver: 'sqlite-wasm' | 'memory' })`, because a two-driver equivalence property cannot be measured on one driver — which is how the strategies were allowed to disagree.
   
   The refusal is `PERMISSION_DENIED` / 403, the same code and status the engine path already answers, and it names only the object the caller themselves named.
 - 5d12b16: fix(service-analytics): the ROW-SCOPE bridge to the `security` service tells the same three resolutions apart as the object-level one — a broken security service refuses the query instead of running it with no row policy (#16918)
   
-  `AnalyticsServicePlugin` bridges to the `security` service twice: once for the OBJECT-level read grant (`admitObjectRead` → `canReadObject`, #16645) and once for the ROW-level read scope (`getReadScope` → `getReadFilter`, ADR-0021 D-C). The object-level bridge tells three resolutions apart — ABSENT admits, THROWING and METHOD-LESS deny at `error`. The row-scope bridge collapsed all three into one:
+  `AnalyticsServicePlugin` bridges to the `security` service twice: once for the OBJECT-level read grant (`admitObjectRead` → `canReadObject`, #16645) and once for the ROW-level read scope (`getReadScope` → `getReadFilter`, ADR-0021 D-C). The object-level bridge tells three resolutions apart — ABSENT (the context answers the lookup with nothing; no in-repo kernel does) admits, THROWING (on the in-repo kernels that includes a `security` service nothing ever registered) and METHOD-LESS deny at `error`. The row-scope bridge collapsed all three into one:
   
   ```ts
   const trySecurity = () => {
@@ -1949,10 +1955,10 @@
   
   **What changes.** The bridge now resolves the same explicit three-way, at the same reporting level:
   
-  - **ABSENT** — no `security` service resolved: **unchanged**. No row-scope provider on this deployment, which is a legitimate configuration (a single-tenant kernel that ships no `plugin-security`, where `/data` carries no row-level policy either) and is already reported loudly at init. ⛔ Deliberately not tightened: refusing here would break every such deployment.
+  - **ABSENT** — the context answers the `security` lookup with nothing: **unchanged**, no row-scope provider. No in-repo kernel reaches this row: `ObjectKernel` and `LiteKernel` throw on a `security` service nothing ever registered, so a kernel that ships no `plugin-security` takes the THROWING row below and is refused; the object-level gate of the same release refuses its query first.
   - **THROWING** resolver, or a registered service with **no `getReadFilter`** — the query is **REFUSED**, and the reason is reported at `error` naming the object and which of the two states it was. The refusal is a throw, which `AnalyticsService.resolveReadScopes` — fail-closed since ADR-0021 D-C — already turns into "deny the whole query rather than emit SQL with that object unscoped". A log over an `undefined` would not have been a refusal.
   
-  **This change only NARROWS what analytics serves, and only in a state where the security service is broken.** No deployment with a working `security` service, and no deployment with none, changes behaviour by so much as a byte. Nothing that was refused becomes admitted.
+  **This change only NARROWS what analytics serves, and only in a state where the security service is broken.** No deployment with a working `security` service changes behaviour by so much as a byte. A deployment with none counts as broken here on the in-repo kernels, whose lookup throws on a never-registered name, so it is refused too — though the object-level gate of the same release refuses its queries first. Nothing that was refused becomes admitted.
   
   **No published-surface delta.** No new error code (the refusal rides the seam's existing fail-closed error), no exported symbol, no key on `AnalyticsServicePluginOptions` or any payload, and no documented envelope changes shape. Graded `minor` rather than `patch` because it is a behaviour narrowing on a published package's read path, matching how its object-level sibling was graded in the same lockstep window.
   
@@ -2770,7 +2776,7 @@
   - the refusal reaches the caller as a declared `500` instead of relying on its phrasing to escape the degradation path;
   - its message is withheld from the response body by declaration (the operator still gets the full text, at `error`, from the producing site) rather than echoed.
   
-  Every refusal message is byte-unchanged, and #5033's leniency is untouched: a genuine absent source table still degrades to the empty result with its `warn`, and a deployment with NO security service still runs unscoped exactly as before. A guard derived from the source (`refusal-wording-collision.test.ts`) now walks every `throw` in the package and fails if an un-enveloped refusal can be read as a missing source table.
+  Every refusal message is byte-unchanged, and #5033's leniency is untouched: a genuine absent source table still degrades to the empty result with its `warn`. A deployment with NO security service does not run unscoped either: the in-repo kernels throw on its `security` lookup, so its queries are refused, fail-closed, as they already were. A guard derived from the source (`refusal-wording-collision.test.ts`) now walks every `throw` in the package and fails if an un-enveloped refusal can be read as a missing source table.
 - f3b28eb: Draft-preview analytics: `avg` answers the mean of the NON-NULL operands, and `null` when there are none — matching every live face
   
   A dataset measure `{ aggregate: 'avg', field: 'amount' }` compiles to the cube
