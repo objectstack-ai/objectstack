@@ -1,5 +1,48 @@
 # @objectstack/example-showcase
 
+## 0.3.22
+
+### Patch Changes
+
+- Updated dependencies [fec87e7]
+- Updated dependencies [1920cf3]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [8a399b2]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [78f841b]
+- Updated dependencies [1fb274e]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [8601526]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [a543e24]
+- Updated dependencies [51290bc]
+- Updated dependencies [d0bb78e]
+- Updated dependencies [8f2e808]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [299a2c6]
+  - @objectstack/spec@17.8.0
+  - @objectstack/runtime@17.8.0
+  - @objectstack/service-datasource@17.8.0
+  - @objectstack/cloud-connection@17.8.0
+  - @objectstack/connector-mcp@17.8.0
+  - @objectstack/connector-openapi@17.8.0
+  - @objectstack/connector-rest@17.8.0
+  - @objectstack/connector-slack@17.8.0
+  - @objectstack/driver-sql@17.8.0
+  - @objectstack/service-i18n@17.8.0
+
 ## 0.3.21
 
 ### Patch Changes

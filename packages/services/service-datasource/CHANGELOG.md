@@ -1,5 +1,56 @@
 # @objectstack/service-external-datasource
 
+## 17.8.0
+
+### Patch Changes
+
+- 8a399b2: The datasource admin door and the metadata door agree on a runtime datasource: a datasource saved through `/api/v1/meta/datasource/:name` is listed and editable through `/api/v1/datasources` in the same boot and after a restart, and one created through the admin door can be edited and removed through the metadata door (#21923)
+  
+  Clause-②: no
+  
+  `DatasourceSchema.origin` publishes `runtime` as "created via the Studio wizard, persisted in the runtime metadata store, environment-scoped, editable", and says `origin` is never accepted from client input. Three things broke that for a datasource the metadata door wrote, or one the admin door wrote:
+  
+  - **The admin door read `origin` from the record.** It served `origin ?? 'code'`, so after a restart a datasource saved through the metadata door (whose body carries no `origin`, or asserts `origin: 'code'`) was served as code-defined, and `PATCH /api/v1/datasources/:name` answered `400 DATASOURCE_ADMIN_ERROR` ("… is code-defined and cannot be edited at runtime."). It now serves `code` only for a name the host registers from code (the host's code-datasource set, the one the boot restore and the metadata door's refusal read), and `runtime` for every other name, whatever the record says. Boot pool rehydration follows the served origin, so such a datasource also gets its live pool after a restart.
+  - **A metadata-door write never reached the admin door until a restart.** The metadata door persisted the row but never registered it where the admin door lists, so in the same boot `GET /api/v1/datasources` omitted it and `PATCH` answered "not found". The datasource-admin plugin now registers the protocol's awaited `datasource` mutation projector: after a metadata-door save, publish, revert, rollback or delete, the admin door's registry follows the stored row and the live pool converges on it (opened on a create, rebuilt on a connectivity change, evicted on a delete) before the metadata door answers. A write under a name the host defines in code changes nothing here, so the metadata door's `DELETE` of a leftover row under such a name still leaves the code definition served.
+  - **An admin-created row could not be edited or removed through the metadata door.** The admin door stored its `sys_metadata` row with no `checksum`, the column the metadata door's optimistic lock compares, so `PUT` and `DELETE /api/v1/meta/datasource/:name` answered `409 METADATA_CONFLICT` for every admin-created datasource. The admin door now stamps the checksum the metadata door's repository stamps (`hashSpec` from `@objectstack/metadata-core`, which becomes a runtime dependency of this package). A row stored before this release has no checksum until the admin door next writes it: editing that datasource through the admin door once makes it editable through the metadata door.
+  
+  Cluster convergence (a peer replica's signal after an admin-door write) decides "code" from the same set, so a stored row under a code-defined name never opens a pool there, and every other stored row is pooled as runtime.
+  
+  **Unchanged.** A code-defined datasource stays read-only through both doors: the admin door's `PATCH` and `DELETE` still answer `400 DATASOURCE_ADMIN_ERROR`, and the metadata door's still answer `403 NOT_OVERRIDABLE`. A host that composes no code-datasource producer (neither `AppPlugin` nor `DefaultDatasourcePlugin`) registers no set, and the admin door then serves every datasource as runtime, as its boot restore already treats every stored row.
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [1920cf3]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [8f2e808]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [299a2c6]
+  - @objectstack/spec@17.8.0
+  - @objectstack/core@17.8.0
+  - @objectstack/metadata-core@17.8.0
+  - @objectstack/types@17.8.0
+  - @objectstack/driver-memory@17.8.0
+  - @objectstack/driver-mongodb@17.8.0
+  - @objectstack/driver-sql@17.8.0
+  - @objectstack/driver-sqlite-wasm@17.8.0
+  - @objectstack/driver-turso@17.8.0
+
 ## 17.7.0
 
 ### Minor Changes

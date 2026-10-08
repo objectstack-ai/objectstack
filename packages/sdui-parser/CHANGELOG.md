@@ -1,5 +1,9 @@
 # @objectstack/sdui-parser
 
+## 17.8.0
+
+No changes in this release.
+
 ## 17.7.0
 
 ### Minor Changes

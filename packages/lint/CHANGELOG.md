@@ -1,5 +1,277 @@
 # @objectstack/lint
 
+## 17.8.0
+
+### Minor Changes
+
+- f85a83b: fix(lint)!: the object save door refuses a formula field whose expression `os build` refuses (#22019)
+  
+  Clause-②: no (narrowing)
+  
+  `formulas.mdx` says the same `validateExpression` validator backs `os build` and metadata registration. At the object save door it did not. A formula field calling an unregistered function, such as `sqrt(record.amount)`, was refused by `os build` as an unknown function, but `PUT /api/v1/meta/object/:name` answered 200, stored it, and the field read `null` on every row.
+  
+  The runtime publish gate now runs the build's own formula check on an object write. The registry entry for the build's expression rule (`validateStackExpressions`) declared the flow, action and hook writes and never the object write, so the gate never dispatched it there. It now declares `object` as well, for one of its passes: a formula field's `expression`. The door's verdict is the build's finding: the same rule id (`expression-invalid`), location (`object 'NAME' · field 'FIELD' expression`), message and hint.
+  
+  **BREAKING — what moves for consumers.**
+  
+  - An object write in publish mode answered 200 for a formula field whose expression the shared validator refuses. It now answers `422 INVALID_METADATA`, with an `expression-invalid` issue located at that field's `expression`. This covers `PUT /api/v1/meta/object/:name` (and `saveMetaItem` in publish mode), the promotion of a draft (`POST /api/v1/meta/object/:name/publish`, `publishMetaItem`), and a package draft publish (`publishPackageDrafts`).
+  - The verdict is the one `os build`, `os validate` and `os lint` already gave: an unknown function, a field the object does not declare, a bare field reference (`amount` instead of `record.amount`), and the other errors in the build's formula check. Its warnings now ride the save response as advisories, as they already did for a flow write.
+  
+  **Remedy.** Fix the expression: the message names the unknown function or field and the position, as `os build` already requires. Use one of the functions `introspectScope` lists, qualify field reads as `record.FIELD`, or compute the value in a stored field and reference it. Saving it as a draft (`mode: 'draft'`) is still allowed, because drafts are never gated; publishing that draft is judged.
+  
+  **Unchanged.**
+  
+  - Stored rows are not migrated, and they are not refused on read. An object stored before this change keeps reading, with the formula still `null`, until it is next saved. At that save the gate judges it, because the differential compares the write against the stored universe without its own stored row.
+  - The other expressions an object carries are still not judged at this door: validation-rule predicates, the field-rule slots (`requiredWhen`, `readonlyWhen`, `conditionalRequired`, `visibleWhen`), option `visibleWhen`, and the object's own action predicates. `os build` judges them, and the door does not, as before. Each needs its own crossing, measured over the stored corpus first.
+  - `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still turns a refusal into a logged write.
+  - Measured before crossing: every formula field this repository ships has 0 refusals and 0 advisories at the door. That is 29 fields on 28 objects: examples 7 on 6, and the platform `display_title` formulas 22 on 22.
+  - No public export or signature moves. `validateStackExpressions(stack)` keeps its signature. The registry entry reaches the passes through an internal function that is not on the package's entry. The built entry declarations differ only in one doc comment, on `AuthoringRuleContext.runtimeWriteType`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal at the object save door of a formula expression the published validator already refuses at `os build`: no authorable key, spelling, export or stored shape moves, and no stored row is read, rewritten or converted. A stored object whose formula the validator refuses keeps reading until it is next saved, and the repair is the author's edit of the expression, which no ledger entry can derive. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers this door (not already-registered); and the change is a door verdict, not a declaration (not runtime-interface-only or type-surface-only). -->
+- f2a45db: fix(lint)!: the object save door refuses a field-rule slot whose predicate `os build` refuses (#22032)
+  
+  Clause-②: no (narrowing)
+  
+  `formulas.mdx` says the same `validateExpression` validator backs `os build` and metadata registration. For a field's rule slots it did not, at the object save door. A field whose `requiredWhen` read a bare field, such as `amount > 1`, or whose `visibleWhen` called an unregistered function, such as `sqrt(record.amount) > 1`, was refused by `os build` at error, but `PUT /api/v1/meta/object/:name` answered 200 and stored it.
+  
+  The runtime publish gate now runs the build's field-rule-slot check on an object write. The build's expression rule (`validateStackExpressions`) was already on the object door for formula fields and validation-rule predicates. On an object write it now also judges each field's `requiredWhen`, `readonlyWhen` and `visibleWhen` the way the build does, with the build's three gates on them: the `parent` gate, the null-guard check over `requiredWhen`, and the refusal of a `requiredWhen` or `readonlyWhen` that reads through a reference field. The door's verdict is the build's finding: the same rule id (`expression-invalid`), location (`object 'NAME' · field 'FIELD' SLOT`), message and hint.
+  
+  **BREAKING — what moves for consumers.**
+  
+  - An object write in publish mode answered 200 for a field whose `requiredWhen`, `readonlyWhen` or `visibleWhen` the shared validator refuses. It now answers `422 INVALID_METADATA`, with an `expression-invalid` issue located at that slot. This covers `PUT /api/v1/meta/object/:name` (and `saveMetaItem` in publish mode), the promotion of a draft (`POST /api/v1/meta/object/:name/publish`, `publishMetaItem`), and a package draft publish (`publishPackageDrafts`).
+  - The verdict is the one `os build`, `os validate` and `os lint` already gave: an unknown function, a field the object does not declare, a bare field reference (`amount` instead of `record.amount`), a syntax error, a root a field-level rule never binds (such as `current_user`), a `parent` read on an object that does not declare exactly one `master_detail` relationship, an ordering or arithmetic operator in `requiredWhen` applied to a nullable field with no `!= null` guard, and a `requiredWhen` or `readonlyWhen` that reads through a reference field (`record.account.tier`, or `parent.REF.FIELD`). Its warnings now ride the save response as advisories.
+  - A detail object's `requiredWhen` or `readonlyWhen` that reads through one of its master's reference fields (`parent.REF.FIELD`) is judged whenever the master is in the write's context, and that includes a save of the master itself. So a master save can answer 422 with an issue located at a stored detail's field. Fix the detail's predicate, then save the master again.
+  
+  **Remedy.** Fix the predicate: the message names the unknown function or field, the unbound root, the unguarded operand or the reference read, and the position, as `os build` already requires. Qualify field reads as `record.FIELD`, use one of the functions `introspectScope` lists, guard a nullable operand in `requiredWhen` with `record.FIELD != null && …`, and move a check that must read through `record.REF` into a `validations[]` `script` rule, whose `condition` is read one hop through a reference; a read through `parent.REF` has no such surface, so read a column the master declares instead (denormalise the value onto it). Saving it as a draft (`mode: 'draft'`) is still allowed, because drafts are never gated; publishing that draft is judged.
+  
+  **Unchanged.**
+  
+  - Stored rows are not migrated, and they are not refused on read. An object stored before this change keeps loading until it is next saved. At that save the gate judges it, because the differential compares the write against the stored universe without its own stored row.
+  - `conditionalRequired` is still refused at the save door's schema step, before this gate, as a key retired in protocol 17; `os build` judges it as a field-rule slot as before.
+  - Option `visibleWhen` and the object's own action predicates are still not judged at this door. `os build` judges them, and the door does not, as before.
+  - `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still turns a refusal into a logged write.
+  - Measured before crossing: every field-rule slot this repository ships has 0 refusals and 0 advisories, at the build and at the door. That is 9 slots on 8 fields of 3 objects (examples: 8 on `showcase_invoice` and `showcase_invoice_line`, three of them `parent`-scoped; the platform: 1 on `sys_permission_set`), over the 118 objects this repository ships.
+  - No public export or signature moves. `validateStackExpressions(stack)` keeps its signature, and no registry entry changes: the expression rule already declared `object`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal at the object save door of a field-rule predicate the published validator already refuses at `os build`: no authorable key, spelling, export or stored shape moves, and no stored row is read, rewritten or converted. A stored object whose field-rule predicate the validator refuses keeps loading until it is next saved, and the repair is the author's edit of the predicate, which no ledger entry can derive. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers this door (not already-registered); and the change is a door verdict, not a declaration (not runtime-interface-only or type-surface-only). -->
+- aa9447c: fix(lint)!: the object save door refuses a field option's `visibleWhen` that `os build` refuses (#22032)
+  
+  Clause-②: no (narrowing)
+  
+  `formulas.mdx` says the same `validateExpression` validator backs `os build` and metadata registration. For a field option's `visibleWhen` it did not, at the object save door. An option whose `visibleWhen` read a bare field, such as `amount > 1`, or called an unregistered function, such as `sqrt(record.amount) > 1`, was refused by `os build` at error, but `PUT /api/v1/meta/object/:name` answered 200 and stored it. The server's option check cannot evaluate such a predicate and lets the value through, so the gate it declares is never enforced.
+  
+  The runtime publish gate now runs the build's option check on an object write. The build's expression rule (`validateStackExpressions`) was already on the object door for formula fields, validation-rule predicates and the field-rule slots. On an object write it now also judges each `fields[].options[].visibleWhen` the way the build does: as a predicate over `record` and `previous`, and with the build's refusal of a read through a reference field. The door's verdict is the build's finding: the same rule id (`expression-invalid`), location (`object 'NAME' · field 'FIELD' option 'VALUE' visibleWhen`), message and hint. This supersedes the earlier #22032 entries' line that option `visibleWhen` is not judged at this door.
+  
+  **BREAKING — what moves for consumers.**
+  
+  - An object write in publish mode answered 200 for an option whose `visibleWhen` the shared validator refuses. It now answers `422 INVALID_METADATA`, with an `expression-invalid` issue located at that option. This covers `PUT /api/v1/meta/object/:name` (and `saveMetaItem` in publish mode), the promotion of a draft (`POST /api/v1/meta/object/:name/publish`, `publishMetaItem`), and a package draft publish (`publishPackageDrafts`).
+  - The verdict is the one `os build`, `os validate` and `os lint` already gave: an unknown function, a field the object does not declare, a bare field reference (`amount` instead of `record.amount`), a syntax error, and a read through a reference field (`record.account.tier`, `previous.account.tier`). Its warnings now ride the save response as advisories.
+  
+  **Remedy.** Fix the predicate: the message names the unknown function or field, the bare reference or the reference read, and the position, as `os build` already requires. Qualify field reads as `record.FIELD`, use one of the functions `introspectScope` lists, and compare a reference field as a value (`record.account != null`) rather than read through it. Saving the object as a draft (`mode: 'draft'`) is still allowed, because drafts are never gated; publishing that draft is judged.
+  
+  **Unchanged.**
+  
+  - `current_user` is still accepted in an option's `visibleWhen`, as the build accepts it: the option evaluator binds the acting user (ADR-0068 D1). A role gate such as `'org_admin' in current_user.positions`, or a grant check such as `current_user.can('OBJECT', 'edit')`, still saves. On a field's own `requiredWhen`, `readonlyWhen` or `visibleWhen` it is still refused, as before.
+  - Stored rows are not migrated, and they are not refused on read. An object stored before this change keeps loading until it is next saved, and that save is judged.
+  - The object's own action predicates (`actions[].visible`, `actions[].disabled`) are still not judged at this door. `os build` judges them, and the door does not, as before.
+  - `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still turns a refusal into a logged write.
+  - Measured before crossing: this repository ships 5 option predicates, all on `showcase_cascade` (four `record.country` cascades and one `current_user.positions` role gate), among the 118 objects it ships. They have 0 refusals and 0 advisories, at the build and at the door.
+  - No public export or signature moves. `validateStackExpressions(stack)` keeps its signature, and no registry entry changes: the expression rule already declared `object`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal at the object save door of a field option's visibleWhen predicate the published validator already refuses at `os build`: no authorable key, spelling, export or stored shape moves, and no stored row is read, rewritten or converted. A stored object whose option predicate the validator refuses keeps loading until it is next saved, and the repair is the author's edit of the predicate, which no ledger entry can derive. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers this door (not already-registered); and the change is a door verdict, not a declaration (not runtime-interface-only or type-surface-only). -->
+- 3d91885: fix(lint)!: the object save door refuses a validation rule whose predicate `os build` refuses (#22032)
+  
+  Clause-②: no (narrowing)
+  
+  `formulas.mdx` says the same `validateExpression` validator backs `os build` and metadata registration. For a validation rule's predicates it did not, at the object save door. A rule whose `condition` called an unregistered function, such as `sqrt(record.amount) > 1`, or read a bare field, such as `amount > 1`, was refused by `os build` at error, but `PUT /api/v1/meta/object/:name` answered 200 and stored it. The rule then faulted on every write it judged.
+  
+  The runtime publish gate now runs the build's validation-rule check on an object write. The build's expression rule (`validateStackExpressions`) was already on the object door for formula fields alone. On an object write it now also runs its validation-rule pass: each `validations[]` rule's `condition` and a `conditional` rule's `when`, plus the null-guard check over every predicate the rule carries, its nested `then` and `otherwise` rules included. The door's verdict is the build's finding: the same rule id (`expression-invalid`), location (`object 'NAME' · validation 'RULE'`, or `… validation rule 'RULE' then → 'CHILD'` for a nested predicate), message and hint.
+  
+  **BREAKING — what moves for consumers.**
+  
+  - An object write in publish mode answered 200 for a validation rule whose predicate the shared validator refuses. It now answers `422 INVALID_METADATA`, with an `expression-invalid` issue located at that rule. This covers `PUT /api/v1/meta/object/:name` (and `saveMetaItem` in publish mode), the promotion of a draft (`POST /api/v1/meta/object/:name/publish`, `publishMetaItem`), and a package draft publish (`publishPackageDrafts`).
+  - The verdict is the one `os build`, `os validate` and `os lint` already gave: an unknown function, a field the object does not declare, a bare field reference (`amount` instead of `record.amount`), a syntax error, an ordering or arithmetic operator applied to a nullable field with no `!= null` guard (`has()` is no guard here), and the other errors in the build's validation-rule check. Its warnings now ride the save response as advisories.
+  
+  **Remedy.** Fix the predicate: the message names the unknown function or field, or the unguarded operand, and the position, as `os build` already requires. Qualify field reads as `record.FIELD`, use one of the functions `introspectScope` lists, and guard a nullable operand with `record.FIELD != null && …`. Saving it as a draft (`mode: 'draft'`) is still allowed, because drafts are never gated; publishing that draft is judged.
+  
+  **Unchanged.**
+  
+  - Stored rows are not migrated, and they are not refused on read. An object stored before this change keeps loading until it is next saved. At that save the gate judges it, because the differential compares the write against the stored universe without its own stored row.
+  - The other expressions an object carries are still not judged at this door: the field-rule slots (`requiredWhen`, `readonlyWhen`, `conditionalRequired`, `visibleWhen`), option `visibleWhen`, and the object's own action predicates. `os build` judges them, and the door does not, as before.
+  - `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still turns a refusal into a logged write.
+  - Measured before crossing: every validation rule this repository ships has 0 refusals and 0 advisories, at the build and at the door. That is 21 rules carrying 13 predicates on 10 objects: examples 11 predicates on 7 objects, and the platform objects 2 on 3 (one rule on `sys_user` carries no predicate).
+  - No public export or signature moves. `validateStackExpressions(stack)` keeps its signature, and no registry entry changes: the expression rule already declared `object`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal at the object save door of a validation-rule predicate the published validator already refuses at `os build`: no authorable key, spelling, export or stored shape moves, and no stored row is read, rewritten or converted. A stored object whose rule predicate the validator refuses keeps loading until it is next saved, and the repair is the author's edit of the predicate, which no ledger entry can derive. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers this door (not already-registered); and the change is a door verdict, not a declaration (not runtime-interface-only or type-surface-only). -->
+- 8fc50b7: fix(lint)!: a `conditional` validation rule's nested `then` / `otherwise` predicate meets the same expression verdict as the rule's own (#22042)
+  
+  Clause-②: no (narrowing)
+  
+  A `conditional` validation rule applies its `then` rule when its `when` holds and its `otherwise` rule when it does not, and the rule validator evaluates either branch as a rule of its own. `os build` judged a rule's own `condition` and `when` with the shared `validateExpression` validator, but reached the predicates inside `then` / `otherwise` with the null-guard check alone. So a nested `condition` that called an unregistered function, such as `sqrt(record.amount) > 1`, or read a bare field, such as `amont > 1`, passed `os build`. The object save door gives the build's verdict, so `PUT /api/v1/meta/object/:name` stored it, and the rule then refused every write it judged, because a validation rule that cannot be evaluated fails closed. The same predicate one level up was refused at both doors.
+  
+  The build's expression rule (`validateStackExpressions`) now runs the same check on every predicate nested in a `conditional` rule, at every depth: each nested `condition`, and the `when` of a `conditional` nested inside a branch. A nested `condition` also gets the relationship-traversal checks, because ObjectQL hydrates a one-hop read there, as it does at the top level. A nested `when` does not, because the evaluator never hydrates a `when`, as at the top level. A nested finding is located at the nested rule, the location the null-guard check already gave it: `object 'OBJECT' · validation rule 'OUTER' then → 'INNER'`, with `when-predicate` appended for a nested `when`. A rule's own `condition` and `when` keep their findings and their location (`object 'OBJECT' · validation 'NAME'`) and are judged once.
+  
+  **BREAKING — what moves for consumers.**
+  
+  - `os build`, `os validate` and `os lint` now refuse, at `error`, a stack whose `conditional` validation rule carries a nested predicate the shared validator refuses. The validator's warnings on a nested predicate are now reported too, and at the save door they ride the response as advisories.
+  - An object write in publish mode that carries such a rule answered 200. It now answers `422 INVALID_METADATA`, with an `expression-invalid` issue located at the nested rule. This covers `PUT /api/v1/meta/object/:name` (and `saveMetaItem` in publish mode) and the promotion of a draft (`POST /api/v1/meta/object/:name/publish`, `publishMetaItem`).
+  - The verdict is the one a rule's own `condition` already got: an unknown function, a field the object does not declare, a bare field reference (`amount` instead of `record.amount`), a syntax error, and, for a nested `condition`, a reference field read both through the relationship and as a value, or a read deeper than one hop.
+  
+  **Remedy.** Fix the nested predicate the way the same predicate is fixed at the top level: the message names the unknown function or field and the position. Qualify field reads as `record.FIELD`, and use one of the functions `introspectScope` lists. Saving the object as a draft (`mode: 'draft'`) is still allowed, because drafts are never gated; publishing that draft is judged.
+  
+  **Unchanged.**
+  
+  - Stored rows are not migrated, and they are not refused on read. An object stored before this change keeps loading until it is next saved, and that save is judged.
+  - A rule's own `condition` and `when` are judged exactly as before, at the same location; the null-guard check over every predicate is unchanged.
+  - `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still turns a refusal into a logged write.
+  - Measured before crossing: this repository ships one `conditional` validation rule with nested predicates (`showcase_account.churn_reason_consistency`, two nested `condition`s), among 21 validation rules on the 118 objects it ships. Both have 0 refusals and 0 advisories, at the build and at the door.
+  - No public export or signature moves. `validateStackExpressions(stack)` keeps its signature, and no registry entry changes.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal, at os build and at the object save door, of a nested conditional validation predicate the published validator already refuses one level up: no authorable key, spelling, export or stored shape moves, and no stored row is read, rewritten or converted. A stored object whose nested predicate the validator refuses keeps loading until it is next saved, and the repair is the author's edit of the predicate, which no ledger entry can derive. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers this verdict (not already-registered); and the change is a validator verdict, not a declaration (not runtime-interface-only or type-surface-only). -->
+- ef1fcb2: A declared index states its uniqueness scope: bare `unique: true` on `indexes[]` is refused (protocol 18, ADR-0120 D1/D7), stored metadata converts it to `unique: 'global'` with zero drift, and `VISIBILITY_STRICT_OPTIONS` leaves `@objectstack/spec`'s public surface.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered declared-index-bare-unique-true-retired, visibility-strict-options-unexported -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface and one export removal, shipped as `minor` under the launch-window convention for accept-set narrowings (Changesets pre mode is not in on `main`).
+  
+  **Why.** On a declared index, bare `unique: true` was the one `unique` spelling whose scope was positional. It built the index over exactly `fields`, one holder across the whole installation, while reading like "unique per organization" to an author who knew the field-level meaning. 17.x warned (lint `unique/unscoped-declared-index`). Protocol 18 refuses it, so the scope is always stated.
+  
+  **What is refused.** A declared index (`objects[].indexes[]`, `objectExtensions[].indexes[]`) whose `unique` is bare `true`. The refusal names both replacements, and says which one keeps the index bare `true` built. It is raised by:
+  
+  - the schema (`IndexSchema.unique`, now `false | 'global' | 'organization'`), at every door that parses: `ObjectSchema.create()` and `ObjectSchema.parse()`, `defineStack`, `os validate`, `os build`, and the runtime save door (`422 INVALID_METADATA`). `tsc` refuses it too, because the input type no longer admits `true`;
+  - lint `unique/unscoped-declared-index`, now an `error` and a gating rule on all three commands. It is what refuses the spelling under `os lint`, which never parses.
+  
+  **What converts.** The protocol-18 ADR-0087 conversion `declared-index-unique-scope` rewrites a declared index's bare `true` to `'global'` on every data-at-rest seam: stored `sys_metadata` rows (`applyConversionsToStoredItem`), built artifacts inside their declared-floor window, and `os migrate meta --from 17`. `'global'` is exactly the index bare `true` built, so the physical index is byte-identical and the drift plan is empty. It is retired from the authoring funnel, so a live author is refused and taught instead of converted silently.
+  
+  **What stays accepted.** Field-level `unique: true` still means one holder per organization and stays valid indefinitely. On a declared index, `unique: false` or omitted, `'global'` and `'organization'` parse exactly as before.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `indexes: [{ fields: [...], unique: true }]` | `indexes: [{ fields: [...], unique: 'global' }]`: the same index, nothing on disk changes |
+  | …the same, when you meant one holder per organization | `unique: 'organization'`: the driver prepends the NULL-safe organization key part at registration, and `os migrate plan` shows the index change |
+  | `import { VISIBILITY_STRICT_OPTIONS } from '@objectstack/spec/shared'` (or the root entry) | delete the import: it was an internal option bag for the spec's own visibility-carrying schemas, and those schemas are unchanged |
+  
+  **The one-line fix: on every declared index, write `unique: 'global'` where you wrote `unique: true`.** Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.
+  
+  **Who is affected, measured.** At `e67ba80049`, an AST census found 48 declared indexes with bare `unique: true` in 39 source files of this repository, all platform and plugin objects. Every one is respelled `'global'` in this change, and the nine-key S5 corpus is pinned to build byte-identical indexes before and after (`driver-sql`'s `sql-driver-unique-tenancy.test.ts`). `examples/**` and `apps/**` carry none. Deployed metadata and other repositories were not measured.
+  
+  ### The kit
+  
+  - **The refusal.** `IndexSchema.unique` in `data/object.zod.ts`, with its own prescription. The lint rule moved from `warning` to `error` and from advisory to gating.
+  - **The conversion.** `declared-index-unique-scope` (`toMajor: 18`, retired from the load path, `retiredAfter: '17.7.0'`), with its S4/S5 fixture.
+  - **The ledger.** The D3 semantic entries `declared-index-bare-unique-true-retired` (the scope each respelled index really meant is the author's call) and `visibility-strict-options-unexported`, plus a step-18 rationale fragment.
+  - **The export.** `VISIBILITY_STRICT_OPTIONS` moved to the unbarrelled `shared/visibility-strict-options.ts`, beside its type `StrictObjectOptions`. `check:api-surface` counts the removal.
+  - **The pins.** The "`'global'` is a synonym of `true`" driver pin retired with the bare spelling. The verbatim pin is stated in `'global'`.
+- ace0a53: feat(lint)!: `relationship/master-detail-required` refuses the three unsafe master-reference shapes at `error` on a `controlled_by_parent` object (#9139)
+  
+  Clause-②: no (narrowing)
+  
+  A `controlled_by_parent` detail derives all of its record access from the master its `master_detail` reference names (ADR-0055). Three declarable shapes of that reference leave the security gate as the only thing refusing a detail record saved without its master, because record validation never checks a field that is not `required` and skips `readonly` and `system` fields before its required check:
+  
+  1. `required` absent, or `required: false`;
+  2. `required: true` with `readonly: true`;
+  3. `required: true` with `system: true`.
+  
+  A record that lands without its master anyway is readable by nobody, and every later write to it by id is refused. Until now `relationship/master-detail-required` was a `warning` with the predicate "`required` is not `true`", on every object, so shapes 2 and 3 drew no finding at any severity. The maintainer ruling of 2026-08-16 (Direction 1) scheduled the promotion for the v18 boundary, scoped to `controlled_by_parent`.
+  
+  **BREAKING — what moves for consumers.**
+  
+  - `os lint` reports each of the three shapes at `error` when the object declares `sharingModel: 'controlled_by_parent'`, located at the defect (`…fields.FIELD.required`, `.readonly` or `.system`). It covers every `master_detail` field of such an object, the same scope the builder's `required: true` force already applies. `os lint` therefore exits non-zero on such a stack, and the metadata-generation rubric (`scoreMetadata`) weighs the finding as an error and marks the stack `valid: false`.
+  - `@objectstack/spec` gains the step-18 semantic migration entry `cbp-master-detail-required-lint-error`, so `os migrate meta` across protocol 18 prints the prescription below.
+  
+  **Remedy — the v18 upgrade-checklist line.** On every object with `sharingModel: 'controlled_by_parent'`, give each `master_detail` reference `required: true` and remove any `readonly: true` or `system: true` from it. `os lint` now refuses the missing-`required`, `required` + `readonly` and `required` + `system` shapes there at `error` (`relationship/master-detail-required`). An object authored through `ObjectSchema.create` already gets `required: true` when the key is omitted, so the edit there is dropping the flag.
+  
+  **Unchanged.**
+  
+  - On every object that is not `controlled_by_parent` the rule is exactly as before: a `warning` for a `master_detail` without `required: true`, the same message and fix, and no finding for the two flagged shapes.
+  - The rule is not in the authoring-rule registry. `os build`, `os validate` and the metadata save door do not run it, so a stack carrying one of the shapes still builds and publishes. Only `os lint`'s exit code and the generation rubric move.
+  - Runtime is untouched. The security gate keeps refusing an insert that omits the master FK on these shapes and keeps resolving the master for metadata already at rest, and stored metadata is neither rewritten nor refused on load.
+  - No export or signature moves in either package.
+  - Measured before crossing, at `b04a5295f`: 129 authored objects across the example apps, the platform, plugin and service objects and the CLI's golden eval corpus. 7 of them are `controlled_by_parent`, and 0 draw the new `error`.
+  
+  <!-- adr-0087: registered cbp-master-detail-required-lint-error -->
+
+### Patch Changes
+
+- 78f841b: A `script` or `subflow` flow node whose `config` carries a key its executor contract does not declare is refused at parse, with a location, in the contract's own words: a `script` `bogusKey`, a `subflow` `timeoutMs` written inside `config`, and the like no longer pass the build doors and registration and then fail every run.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered flow-script-subflow-config-undeclared-keys-refused -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **Why.** The `script` and `subflow` executors parse the node's `config` against a strict contract (`ScriptConfigSchema`, `SubflowConfigSchema`) before they act, and refuse the node on an undeclared key. No door before the run judged one: `registerFlow`'s undeclared-key check reads the node type descriptor's `configSchema`, and these two descriptors publish none, while the build doors' executor-contract arm judged required keys and present values but not key membership. So a `script` node carrying `bogusKey` passed `FlowSchema.parse`, `objectstack validate` and `objectstack compile` (compile copied it into `dist/objectstack.json`), registered, and failed every run that reached the node: ``script 'n': config does not satisfy the script contract — config: Unrecognized key(s) on this script node config: `bogusKey` ``.
+  
+  **What is refused.** A `script` node, at any depth, whose config carries a key other than `function`, `inputs` and `outputVariable`, or a `subflow` node whose config carries a key other than `flowName`, `input` and `outputVariable`. The refusal is the existing closed-set code `node-config-refused-by-contract`, `params: { nodeType, key }`, one per undeclared key, anchored at the key (`nodes.N.config.bogusKey`), from the one judge `flowNodeConfigRefusals` that `FlowSchema.parse`, `AutomationEngine.registerFlow` (which parses first) and `objectstack validate` share. The issue's `code` is `custom`. That covers `FlowSchema`, `defineFlow()`, `defineStack` (`STACK_SCHEMA_INVALID`, 422, at `flows.N.nodes.M.config.<key>`), `os validate`, `os compile`, an artifact's parse, `registerFlow` and the metadata save door.
+  
+  **What stays as it was.**
+  
+  - Every other builtin node type: its undeclared keys are judged at registration against its descriptor's `configSchema`, with that check's own prescriptions, and the build doors do not judge them.
+  - `decision`: it publishes no descriptor `configSchema` either, but its executor parses no contract, so an undeclared key fails no run and stays unjudged.
+  - A retired `script` key (`actionType`, `template`, `recipients`, `variables`, `script`) keeps its tombstone path.
+  - A spelling an ADR-0087 D2 conversion still rewrites at load (`functionName` and `input` on a `script`, `flow` on a `subflow`) is converted before the judge at every door that converts first (`defineStack`, `os validate`, `os compile`, `registerFlow`). Met by a direct `FlowSchema.parse` or `defineFlow()`, it is refused like any other undeclared key, as its missing canonical key already was.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | a typo of a declared key (`funtion`, `outputVariabel`) | the declared key: `function`, `inputs`, `outputVariable` on a `script`; `flowName`, `input`, `outputVariable` on a `subflow` |
+  | a value the function or child flow should receive, as its own config key (`config: { function: 'f', taskId: '{record.id}' }`) | inside the input map: `config: { function: 'f', inputs: { taskId: '{record.id}' } }` (`input` on a `subflow`) |
+  | a `subflow` `config.timeoutMs` | on the node: `{ id, type: 'subflow', timeoutMs: 30000, config: { … } }` |
+  | a key nothing reads | delete it |
+  
+  **The one-line fix: rename, move or delete the key the refusal names.** The runtime never ran such a node, so the fix changes nothing a working flow does.
+  
+  **Who is affected, measured.** At `15ec50e528`, every `script` and `subflow` node authored in this repository's examples, platform objects, apps, scaffolding templates, skills and docs (8 nodes: 6 `script`, 2 `subflow`) carries only declared keys, and so does every one in hotcrm at `c9678036d9` (5 `subflow`, no `script`). The Studio flow designer at the pinned objectui `a58626c88d` writes only declared keys for both types (its `timeoutMs` field writes the node, not `config`), and seeds a new node with an empty `config`. Deployed metadata, and other repositories, were not measured. Where such a node already sits in a stored flow, the whole flow is refused at registration: at boot it is skipped with a warn naming it, its trigger not armed, while the flows beside it register.
+  
+  **`@objectstack/lint`.** `validateStackExpressions` keeps the pre-conversion tolerance it declares: on a raw source, a `script` node's `functionName` alias stays the callable check's to read, not an undeclared-key error, while every other undeclared `script` key is refused there as at the build doors.
+  
+  ### The kit
+  
+  - **The refusal.** The key half of the executor-contract arm of `flowNodeConfigRefusals` in `automation/flow-node-config-refusals.ts`, judged for the builtins in the spec's schemaless class (`SCHEMALESS_NODE_CONFIG_SCHEMAS`) that have an executor contract; no new code joins `FLOW_SLOT_REFUSAL_CODES`, and `getBuiltinNodeConfigContracts()` keeps its 13 entries.
+  - **The ledger.** The D3 semantic entry `flow-script-subflow-config-undeclared-keys-refused` (protocol 18). No key is removed, so there is no tombstone, and there is no D2 conversion: the platform cannot know what an undeclared key was meant to be.
+- 6c17a50: The runtime publish gate no longer charges a write with a stored sibling's finding that only shows when the written item is present. Re-saving a master object with only its label changed answered `422 INVALID_METADATA` for a stored detail the author never touched: a detail's `lookupColumns` entry naming no field of the master, or a detail's `readonlyWhen` read through `parent`.
+  
+  Clause-②: no
+  
+  - On an update into a context collection (`object`, `permission`, `book`, `dataset`) the gate also judges the stored universe: the live collections with the written item's stored self in place. A finding located on another entry that the stored universe already holds is not this write's.
+  - A finding located on the written item itself is judged as before, even when the stored row carries the same finding. Re-saving a row is writing it.
+  - A write that newly breaks a sibling is still refused, for example removing the master field a detail's `lookupColumns` names.
+  - A create is judged as before.
+  - On a permission write the same change drops a stored detail's `security-master-detail-ungranted` advisory from a label-only re-save of the tenant's only permission set.
+  - A finding whose path names no entry the gate can locate keeps the previous verdict.
+  - ⛔ Nothing you author changes, and no export or signature changes.
+- Updated dependencies [fec87e7]
+- Updated dependencies [1920cf3]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [8f2e808]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [299a2c6]
+  - @objectstack/spec@17.8.0
+  - @objectstack/formula@17.8.0
+  - @objectstack/sdui-parser@17.8.0
+
 ## 17.7.0
 
 ### Minor Changes

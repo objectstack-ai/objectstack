@@ -1,5 +1,167 @@
 # @objectstack/service-automation
 
+## 17.8.0
+
+### Minor Changes
+
+- 1920cf3: feat(platform-objects,service-automation,service-realtime)!: seven deployment-level platform tables lose their injected organization column, and reading them needs `manage_platform_settings` (ADR-0131 D7)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered sys-flow-dispatch-organization-column-retired, sys-job-organization-column-retired, sys-job-queue-organization-column-retired, sys-job-run-organization-column-retired, sys-migration-journal-organization-column-retired, sys-migration-organization-column-retired, sys-presence-organization-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes (Changesets pre mode is not on yet).
+  
+  `sys_job`, `sys_job_run`, `sys_job_queue`, `sys_flow_dispatch`, `sys_migration`, `sys_migration_journal` and `sys_presence` hold deployment-level state. No writer attributes a row of any of them to an organization: every write is a system-context write whose row names none, and nothing writes `sys_presence` through ObjectQL at all. So the injected `organization_id` column only ever held NULL. ADR-0131 D7 takes it off: each object now declares `systemFields: { tenant: false }`.
+  
+  With no column there is no tenant wall, so these tables are governed by object permission. Each also declares `requiredPermissions: ['manage_platform_settings']`. Without that gate, a walled deployment's `organization_admin`, whose grant carries the superuser bits on every object, would read every other organization's job errors, queued payloads, dispatch keys and migration traces.
+  
+  **What moves for consumers.**
+  
+  - **The column.** `organization_id` is no longer a field of these seven objects. A filter, list-view column, report grouping, formula or seed key naming it on one of them is now an unknown field. Delete the reference: no organization owns a row of these tables.
+  - **Who reads, on a walled posture** (`group` or `isolated`). Before: the wall compared the NULL column to the caller's organization, so every reader got zero rows, platform administrators included (unless the deployment declared the table platform-global, which stood the wall down). Now: a principal holding `manage_platform_settings` (platform administrators hold it) lists every row; anyone else is refused `403 PERMISSION_DENIED`.
+  - **Who reads, on the `single` posture.** Before: any principal with a read grant on the object read every row, an organization administrator included. Now: only a principal holding `manage_platform_settings` reads; an organization administrator who is not a platform administrator is refused `403 PERMISSION_DENIED`. Grant the capability to an operator who needs these tables.
+  
+  **Unchanged.** Every platform writer and reader of these tables uses a system context, which no capability gate applies to, so job scheduling, the queue, flow dispatch, migration flags and the migration journal behave as before. The physical unique indexes are unchanged: none of these objects declares an organization-scoped one.
+  
+  **Existing databases.** Schema sync only adds, so the physical `organization_id` column stays on each existing table (with its index, where the deployment indexed it), and the boot drift report names it orphaned. By the writer census it holds only NULL, so dropping it loses nothing: `os migrate apply --allow-destructive` drops it, the remedy the drift report names.
+
+### Patch Changes
+
+- d4680d2: feat(spec)!: `NotifyConfigSchema.title` and `NotifyConfigSchema.message` are template slots: each takes a bare string or a `{ dialect: 'template', source }` envelope (the `tmpl` helper), as the expression dialect table already listed notification subjects and bodies among the `template` slots, and a blank bare string is now refused there
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key is renamed, retired or re-shaped for an author: `title` and `message` still take every non-blank bare string they took before, and now also the `template` envelope. The one newly refused input is a blank bare string (`''` or whitespace-only) at either key, and it was measured, not assumed. Census: the 31 files in this repo that author a `notify` node at the merge base (examples, docs, skills, the ADR, tests and fixtures) carry zero blank `title` / `message` values. The objectui pin (`a58626c8`) has 9 files that name a `notify` type and zero blank `title` / `message` literals. Not covered by either count: objectui's flow inspector deletes a cleared key only when the committed value is `''` (`setAtPath`), so a whitespace-only entry typed into the Studio form IS stored, and a stored flow carrying one is refused at its next run; hosted tenants' stored flows were not measured. No conversion can repair such a value, because an empty title or body has no intended text to recover: the remedy is authoring intent (write the text, or delete the key), so the ledger has nothing to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at two authorable keys (`automation/NotifyConfig:title`, `automation/NotifyConfig:message`), shipped as `minor` under the repo's launch-window convention for breaking changes. It is the grade `TemplateExpressionInputSchema`'s blank-string rule shipped with when it reached the first twelve typed keys.
+  
+  - **What widens.** Both keys are typed with `TemplateExpressionInputSchema`, the input every other `template` slot uses. Before, both were `z.string()`, so a notify node written with `` tmpl`…` `` passed `defineFlow` and registration and then failed every run at the execute-time contract parse (`expected string, received object`). It now parses and runs.
+  - **What narrows.** A blank bare string (`''` or whitespace-only) at either key is newly refused, by the shared template input's non-blank rule (`invalid_union`, with the `TYPED_EXPRESSION_SOURCE_REQUIRED.template` sentence). Before, every blank value parsed:
+    - `title: ''` then failed every run at the executor's guard ("notify: title is required"), so it fails either way, now earlier;
+    - a whitespace-only `title` passed that guard and was delivered as the notification title, and it is now refused;
+    - `message: ''` or a whitespace-only `message` was delivered as an empty or blank body, and it is now refused.
+  
+    The fix is to write the text, or to delete the key (`message` is optional).
+  - **Parse output.** `NotifyConfigSchema.parse(...).title` and `.message` go from `string` to `{ dialect: 'template', source }`, for both spellings, because the parse normalizes a bare string to that envelope. The exported `NotifyConfigParsed` type changes with them. Code that reads parse output reads `.source`. The `notify` executor, the one reader in this repo, now does, so both spellings of one text deliver the same `payload.title` and `payload.body`, and a bare string renders exactly what it rendered before.
+  - **Still refused, with a new sentence.** A value that is neither a string nor a template envelope (a number, an array, a `cel` envelope) was refused before (`invalid_type`). It is refused now as `invalid_union`, with the `TYPED_EXPRESSION_DIALECT_ONLY.template` sentence.
+  - **New, notify-only.** A template envelope on either key must carry a non-blank `source`. The executor renders `source` and has nothing to render from `ast` alone, so such an envelope is refused at the key instead of failing every run (`title`) or sending an empty body (`message`). An envelope never parsed at these keys before, so this refuses nothing that used to parse.
+  - **Placeholder spelling.** These two slots read the flow's single-brace `{token}` (`{record.name}`). A `{{var}}` is not a placeholder here: the inner `{var}` resolves and the outer braces stay in the text, for a bare string and an envelope alike. The `.describe()` on both keys now says so, and no longer says the text is "sent verbatim".
+  - `@objectstack/service-automation`: the `notify` executor reads `source` from the two template slots, and the descriptor's `title` / `message` descriptions state the `{token}` interpolation in place of "sent verbatim".
+- 51290bc: Form help and refusals an author reads no longer carry service-interface names, ruling dates or another product's ids
+  
+  Clause-②: no
+  
+  Wording only: no schema, key, type, export or error-code change.
+  
+  - The notify node's Template help (the `NotifyConfigSchema.template` describe and the Studio
+    inspector's copy in `@objectstack/service-automation`) names the deployment's default locale in
+    product words instead of `II18nService.getDefaultLocale()`, and drops its ruling date.
+  - `MANIFEST_ID_EXAMPLES` is now `com.acme.crm` and `org.example.help-desk` (was `com.steedos.crm`
+    and `org.apache.superset`). The package-id refusal opens with the headline
+    "Invalid package id 'VALUE'." and names the key in the sentence after it, so the headline alone
+    carries no JSON path; the rule, the examples and the suggestion follow unchanged in substance. A
+    caller that matched the old "on KEY. Expected reverse-domain notation" wording matches the
+    headline, or compares against `manifestIdRefusal()` by reference, instead.
+  - Ruling dates leave the describes Studio renders as form help: field `required` and `multiple`,
+    form-view field and section `visibleWhen`, section `collapsible` / `collapsed`, the redirect
+    arm's `submitBehavior.url`, and page `kind` / `source` (the ADR citations stay). They also
+    leave the refusals for padded grouping field names, `submitBehavior.url`, `features.*` in a
+    form-view predicate, and the four filter comparand refusals (null ordering comparand,
+    `{ $field }` in a list position, null list member, blank `$between` bound). Each sentence still
+    states the rule, why it exists and the repair.
+  - The email-template form's Identity section help says how senders address a template instead of
+    naming `IEmailService.sendTemplate`, in all four shipped locales.
+  - The action `description` help no longer ends in a dangling dash left behind by an earlier
+    strip: "(one dialog, not two —)" now reads "(one dialog, not two)".
+- ef1fcb2: A declared index states its uniqueness scope: bare `unique: true` on `indexes[]` is refused (protocol 18, ADR-0120 D1/D7), stored metadata converts it to `unique: 'global'` with zero drift, and `VISIBILITY_STRICT_OPTIONS` leaves `@objectstack/spec`'s public surface.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered declared-index-bare-unique-true-retired, visibility-strict-options-unexported -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface and one export removal, shipped as `minor` under the launch-window convention for accept-set narrowings (Changesets pre mode is not in on `main`).
+  
+  **Why.** On a declared index, bare `unique: true` was the one `unique` spelling whose scope was positional. It built the index over exactly `fields`, one holder across the whole installation, while reading like "unique per organization" to an author who knew the field-level meaning. 17.x warned (lint `unique/unscoped-declared-index`). Protocol 18 refuses it, so the scope is always stated.
+  
+  **What is refused.** A declared index (`objects[].indexes[]`, `objectExtensions[].indexes[]`) whose `unique` is bare `true`. The refusal names both replacements, and says which one keeps the index bare `true` built. It is raised by:
+  
+  - the schema (`IndexSchema.unique`, now `false | 'global' | 'organization'`), at every door that parses: `ObjectSchema.create()` and `ObjectSchema.parse()`, `defineStack`, `os validate`, `os build`, and the runtime save door (`422 INVALID_METADATA`). `tsc` refuses it too, because the input type no longer admits `true`;
+  - lint `unique/unscoped-declared-index`, now an `error` and a gating rule on all three commands. It is what refuses the spelling under `os lint`, which never parses.
+  
+  **What converts.** The protocol-18 ADR-0087 conversion `declared-index-unique-scope` rewrites a declared index's bare `true` to `'global'` on every data-at-rest seam: stored `sys_metadata` rows (`applyConversionsToStoredItem`), built artifacts inside their declared-floor window, and `os migrate meta --from 17`. `'global'` is exactly the index bare `true` built, so the physical index is byte-identical and the drift plan is empty. It is retired from the authoring funnel, so a live author is refused and taught instead of converted silently.
+  
+  **What stays accepted.** Field-level `unique: true` still means one holder per organization and stays valid indefinitely. On a declared index, `unique: false` or omitted, `'global'` and `'organization'` parse exactly as before.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `indexes: [{ fields: [...], unique: true }]` | `indexes: [{ fields: [...], unique: 'global' }]`: the same index, nothing on disk changes |
+  | …the same, when you meant one holder per organization | `unique: 'organization'`: the driver prepends the NULL-safe organization key part at registration, and `os migrate plan` shows the index change |
+  | `import { VISIBILITY_STRICT_OPTIONS } from '@objectstack/spec/shared'` (or the root entry) | delete the import: it was an internal option bag for the spec's own visibility-carrying schemas, and those schemas are unchanged |
+  
+  **The one-line fix: on every declared index, write `unique: 'global'` where you wrote `unique: true`.** Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.
+  
+  **Who is affected, measured.** At `e67ba80049`, an AST census found 48 declared indexes with bare `unique: true` in 39 source files of this repository, all platform and plugin objects. Every one is respelled `'global'` in this change, and the nine-key S5 corpus is pinned to build byte-identical indexes before and after (`driver-sql`'s `sql-driver-unique-tenancy.test.ts`). `examples/**` and `apps/**` carry none. Deployed metadata and other repositories were not measured.
+  
+  ### The kit
+  
+  - **The refusal.** `IndexSchema.unique` in `data/object.zod.ts`, with its own prescription. The lint rule moved from `warning` to `error` and from advisory to gating.
+  - **The conversion.** `declared-index-unique-scope` (`toMajor: 18`, retired from the load path, `retiredAfter: '17.7.0'`), with its S4/S5 fixture.
+  - **The ledger.** The D3 semantic entries `declared-index-bare-unique-true-retired` (the scope each respelled index really meant is the author's call) and `visibility-strict-options-unexported`, plus a step-18 rationale fragment.
+  - **The export.** `VISIBILITY_STRICT_OPTIONS` moved to the unbarrelled `shared/visibility-strict-options.ts`, beside its type `StrictObjectOptions`. `check:api-surface` counts the removal.
+  - **The pins.** The "`'global'` is a synonym of `true`" driver pin retired with the bare spelling. The verbatim pin is stated in `'global'`.
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [1920cf3]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [77a94d8]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [879bd38]
+- Updated dependencies [b88c356]
+- Updated dependencies [1abfc58]
+- Updated dependencies [db87a02]
+- Updated dependencies [04e776b]
+- Updated dependencies [1c563af]
+- Updated dependencies [a7df552]
+- Updated dependencies [6befe19]
+- Updated dependencies [8caa131]
+- Updated dependencies [78f841b]
+- Updated dependencies [1fb274e]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [f85a83b]
+- Updated dependencies [2015c54]
+- Updated dependencies [f2a45db]
+- Updated dependencies [aa9447c]
+- Updated dependencies [3d91885]
+- Updated dependencies [8fc50b7]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [ae97841]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [a543e24]
+- Updated dependencies [51290bc]
+- Updated dependencies [8f2e808]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [299a2c6]
+  - @objectstack/spec@17.8.0
+  - @objectstack/core@17.8.0
+  - @objectstack/platform-objects@17.8.0
+  - @objectstack/metadata-protocol@17.8.0
+  - @objectstack/metadata-core@17.8.0
+  - @objectstack/types@17.8.0
+  - @objectstack/formula@17.8.0
+
 ## 17.7.0
 
 ### Minor Changes

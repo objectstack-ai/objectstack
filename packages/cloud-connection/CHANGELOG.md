@@ -1,5 +1,64 @@
 # @objectstack/cloud-connection
 
+## 17.8.0
+
+### Patch Changes
+
+- 8601526: `RuntimeConfigPluginConfig.controlPlaneUrl`'s published docblock no longer says that an empty string declares "this runtime IS the cloud". It now says what the constructor does: `''` keeps marketplace and install requests on this origin, and that is all it says.
+  
+  Clause-②: no
+  
+  - The runtime that passes `''` may serve the catalog itself or proxy a control plane it does not name. The CLI's cloud-connected `os serve` passes `''` while its marketplace proxy forwards to the control plane `resolveCloudUrl()` answers. So `''` reads neither as "this runtime is the cloud" nor as "there is no upstream". This matches the `AppShellRuntimeConfig.cloudUrl` doc in `@object-ui/app-shell`.
+  - A runtime with no control plane says so with a decline spelling (`'off'` / `'none'` / `'local'` / `'disabled'`), in `controlPlaneUrl` or in `OS_CLOUD_URL`. The docblock now says this too.
+  - ⛔ No code, type, export or default change. The served `cloudUrl` and the telemetry posture do not change.
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [1920cf3]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [b88c356]
+- Updated dependencies [1abfc58]
+- Updated dependencies [db87a02]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [6befe19]
+- Updated dependencies [8caa131]
+- Updated dependencies [78f841b]
+- Updated dependencies [1fb274e]
+- Updated dependencies [1fb274e]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [f85a83b]
+- Updated dependencies [2015c54]
+- Updated dependencies [f2a45db]
+- Updated dependencies [aa9447c]
+- Updated dependencies [3d91885]
+- Updated dependencies [8fc50b7]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [ae97841]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [a543e24]
+- Updated dependencies [a543e24]
+- Updated dependencies [51290bc]
+- Updated dependencies [d0bb78e]
+- Updated dependencies [8f2e808]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [299a2c6]
+  - @objectstack/spec@17.8.0
+  - @objectstack/runtime@17.8.0
+  - @objectstack/core@17.8.0
+  - @objectstack/metadata-protocol@17.8.0
+  - @objectstack/metadata-core@17.8.0
+  - @objectstack/types@17.8.0
+
 ## 17.7.0
 
 ### Minor Changes

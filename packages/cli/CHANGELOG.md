@@ -1,5 +1,197 @@
 # @objectstack/cli
 
+## 17.8.0
+
+### Minor Changes
+
+- cdeabec: `os migrate meta` stops listing semantic notices whose surface the stack provably does not declare. It counts them instead, and `--all` lists them in full.
+  
+  Clause-②: yes
+  
+  - **`SemanticMigration.relevantWhen`** (`@objectstack/spec/migrations`) is a new optional field. It holds a structured question over the loaded stack, `{ kind: 'stack-declares', keys: [...] }`: does the stack declare anything under one of these top-level keys? A key's value in a `packages[].manifest` body counts the same as a top-level value. The question is closed and named. It is never free text, and it never matches against the prose of `surface`. The new types `SemanticRelevance`, `StackDeclaresRelevance` and `SemanticRelevanceKey` are exported beside `SemanticMigration`.
+  - **`applyMetaMigrations`** asks each entry's question of the stack it is given and of every hop checkpoint.
+    - **`todos` is unchanged.** `MigrationChainResult.todos` and `MigrationHopResult.todos` still hold every semantic entry of every hop crossed, whatever the stack holds, as before.
+    - **`absentTodos` is a new required member** of `MigrationChainResult` and `MigrationHopResult`. It names the subset of `todos` whose question answered `absent` in all of them: the same objects, in chain order. Code that only reads a chain result needs no change. Code that builds one of these two interfaces itself must now supply `absentTodos` (an empty array when nothing is proven absent).
+    - **Only a positive proof names an entry.** These cases answer `unknown` and leave it off `absentTodos`:
+      - a value the question cannot read (a function, a promise, a scalar, a getter that throws);
+      - a stack that is not a plain object;
+      - any `plugins`, `devPlugins` or `tiers` entry, since a plugin, or the platform plugins a tier preset loads, can register metadata the stack does not show.
+  
+      An entry that judges a conversion which applied an edit in the same run is never named either.
+  - **The first batch is 25 entries** (5 from protocol 17, 20 from protocol 18). Each one's surface lives only under named top-level stack keys: `analyticsCubes`, `apis`, `jobs`, `mappings`, `hooks`, `agents`, `tools`, `dashboards` (with `reports` and `pages` for the chart-config entry), `datasets`, `permissions` and `sharingRules`. None of them names a code door. Each entry was also checked to confirm that its acceptance criteria send the author to no stored row and no runtime door. Every other entry is never named absent, so it is listed exactly as before.
+  - **`os migrate meta`** lists `todos` minus `absentTodos`. After the listed notices it prints one line that counts the entries proven absent and names `--all`. A second line says that the proof covers the stack this run loaded, and not metadata a deployment stores.
+    - `--all` prints each of those entries in full, with the keys it was proven absent under.
+    - `--json` keeps `todos` whole and adds `absentTodos`, plus `hops[].absentTodos` with `--step`.
+    - `--step` reports each hop's listed count, and adds a `not listed` count to the hop line when that count is not zero.
+    - A run whose only notices are proven absent still writes `--out`.
+- dd39171: The path an author writes as a public form's `sharing.publicLink` now answers: `GET /forms/SLUG` redirects to the Console's public form page, `/_console/f/SLUG`, when the anonymous form door serves that slug
+  
+  Clause-②: yes (widening)
+  
+  - **What was wrong.** An app declares a public form as `sharing: { enabled: true, allowAnonymous: true, publicLink: '/forms/contact-us' }`, the spelling the platform's own examples use. The Console serves that form to an anonymous visitor at `/_console/f/contact-us`, but the path as written answered `404 ENDPOINT_NOT_FOUND`, so the link an author put on a website reached nothing.
+  - **What it does now.** Wherever the Console is mounted (`os serve` / `os dev` with the Console, or any host that mounts `createConsoleStaticPlugin` from `@objectstack/cli/console`), `GET /forms/SLUG` answers `302` with `Location: /_console/f/SLUG`, followed by the request's query string. It does so only when the anonymous form door, `GET /api/v1/forms/SLUG`, serves the form to the same request: the form's `sharing` has `enabled` and `allowAnonymous` set and names the slug, no other metadata layer withdraws it, and the deployment's tenancy posture lets it take an anonymous submission. The redirect asks that door in-process with the visitor's own request, so it decides nothing the door does not, and it reveals nothing the door does not.
+  - **Unchanged.** Every other request under `/forms/` answers exactly as before: a disabled form, a form not open to anonymous visitors, an unknown slug, a form the posture withholds, any method other than `GET` / `HEAD`, a trailing slash or a deeper path all get the same `404 ENDPOINT_NOT_FOUND`. Nothing is mounted at the root for a bare slug. The signed-in Console route `/_console/forms/NAME` is untouched. A deployment without the Console (`--no-ui`, `--no-console`, `OS_DISABLE_CONSOLE=1`, or no built Console) mounts no redirect.
+  - **Status and target.** The redirect is a `302`, never a permanent one, because whether a form is served can change with its sharing. The `Location` path is built from the Console path and the slug, encoded as one path segment, so no request can point it anywhere else. The request's query string is carried verbatim after that path, because the public form page seeds its fields from `?prefill_FIELD=` parameters: `/forms/contact-us?prefill_source=website` lands on `/_console/f/contact-us?prefill_source=website`. A query string can change only the query of the page the visitor lands on, never its origin or path.
+  - **Nothing to migrate.** No key, export or signature changes. `sharing.publicLink` keeps its meaning and its accepted spellings (`/forms/x`, `forms/x` and `x` name one slug).
+- a959493: `os migrate meta --write` writes the chain's mechanical changes into the authored source files, in place, at every site it can prove
+  
+  Clause-②: yes (widening)
+  
+  - A new flag on the authored-source mode: `os migrate meta --from N --write`. Without it nothing changes: the dry run, its report and its `--json` payload are what they were, and `--out` still writes its snapshot.
+  - What it writes: each mechanical change the chain applied (`applied`), at a site it traces to one object or array literal in one project file — through `define*` calls and the `.create(…)` factories `@objectstack/spec` exports, module-level `const` bindings, relative imports and re-exports, and `Object.values()` over a namespace import — when the loaded value matches that literal and nothing else references the bindings on the way. Only that site's bytes change: a renamed key keeps its value and its comments, a removed key takes its own line(s), and every other byte (comments, formatting, key order) stays as it was.
+  - What it refuses, each change listed with the reason (`--json`: `write.manual[].kind`): `computed`, `helper`, `spread`, `shared`, `outside-project`, `mismatch`, `injected`, `unspellable`, `layout` and `unattributed`; and `entangled`, because a conversion's edits are written whole or not at all.
+  - What it never writes: the semantic changes (`todos`), which stay listed exactly as before, and a site a conversion declines, for which no mechanical change exists.
+  - After writing it re-runs the chain over the written sources. Unless the re-run applies exactly the changes it left, it restores every file it wrote and exits 1.
+  - `--json` gains a `write` key, only with `--write`: `status`, `files`, `written`, `manual`, `unexplained` and `verification`.
+  - `--write` is exclusive with `--stored`; `--stored --apply` is unchanged.
+
+### Patch Changes
+
+- bafb58b: `os serve` (and `objectstack start`, which runs it) now says at boot when an app's branding logo or favicon will not be served. Before, the runtime assets route was skipped without a word when its directory was absent, so an artifact booted outside its project directory drew a broken logo and favicon and nothing in the boot output said why.
+  
+  Clause-②: no
+  
+  - Once the boot settles, every loaded app whose `branding.logo` or `branding.favicon` is a root path under `/runtime/assets/` that the route will not serve gets one warning line per file. The line names the apps and keys that use the file, the directory searched, and whether that directory came from `OS_RUNTIME_ASSETS_DIR` or the `assets/` default under the working directory. When the directory does not exist, the line says so and says nothing under `/runtime/assets/` is mounted for this run.
+  - The apps read are the ones the console is served, through the same metadata protocol read that `GET /api/v1/meta/app` answers from. Config boots and artifact boots are both covered.
+  - Whether a file is servable is decided by the route's own filename resolution, so the warning and the route cannot disagree. Absolute URLs, protocol-relative URLs, data URIs, relative paths and other root paths are not checked.
+  - The line goes through the kernel logger at `warn`. It shows in the banner's *Boot diagnostics* block, streams live at `--log-level debug` or `info`, and is hidden at `error` or `silent` like every other boot warning.
+  - ⛔ What `/runtime/assets/*` serves does not change. No route is added or removed, and the artifact still carries no asset files: ship the `assets/` directory beside it, or point `OS_RUNTIME_ASSETS_DIR` at the files.
+- 4935c66: The startup banner prints one line per warning class, each warning appears once, and a localhost boot no longer warns that OAuth is unencrypted.
+  
+  Clause-②: no
+  
+  - **One line per class.** Flows that declare a trigger but are not bound are grouped by trigger type and reason, with the flows listed: `⚠ 8 flows declare a 'schedule' trigger but are NOT bound — disabled by deployment policy — … (OS_AUTOMATION_SCHEDULED_WORK_ENABLED is unset or not truthy), so no time trigger arms …: flow_a, flow_b, …`. Before, the full reason (up to ~650 characters) printed once per flow. The banner now shows the reason's first sentence; `--log-level debug` still streams each flow's full reason. A real binding failure, or a missing trigger, keeps its own line, worded as before.
+  - **Printed once.** *Boot diagnostics* no longer repeats the automation plugin's per-flow `… is NOT bound` and shadowed-flow warnings, which the banner's `Flows:` list already shows. Its header counts them instead: `⚠ Boot diagnostics — 5 warnings logged during startup (8 more already listed above):`. Every other boot warning replays exactly as before. A boot that fails before the banner still replays all of them.
+  - **OAuth on loopback.** `OAuth is served UNENCRYPTED: …` is logged at `info` when the issuer's host is loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`), so it is not shown at the default `warn` level. It stays `warn` on a private or link-local issuer. The sentence and the transport rule are unchanged.
+  - ⛔ Nothing you author changes. Which flows bind, the scheduled-work switch, the transport rule, the service-automation warning an embedded host reads, and every public key, export and parameter are unchanged.
+- 54ace18: fix(cli): `os migrate meta --out FILE` writes its snapshot on a range that crosses no step (#22116)
+  
+  Clause-②: no
+  
+  `os migrate meta --from 18 --to 18 --out FILE` exited 0, printed no snapshot line and wrote no `FILE`. The same command with `--json` wrote `FILE`. The human report returned early on a run with nothing to migrate, and that return came before the `--out` write. An operator or a CI step that keeps `FILE` as the record of the run then found no file, or read an earlier run's file as this one's.
+  
+  - The human mode now writes `FILE` and prints the line that names it on every run. On a run with nothing to migrate, the line comes after the range answer, before `--write`'s outcome and the data migrations, the same order as on every other run.
+  - The bytes are the ones `--json` writes for the same run: the stack the chain returned, which for a range with no step is the stack as loaded.
+  - The fix sits in the branch both "nothing to migrate" answers share. A range with steps that applies and lists nothing takes the same branch, but no range reaches it on this build, because every major carries semantic notices and the chain lists them all.
+  - Unchanged: the `--json` mode, `--write`, `--stored` and the chain. A range with steps writes `FILE` exactly as before.
+- Updated dependencies [fec87e7]
+- Updated dependencies [959c209]
+- Updated dependencies [c28f317]
+- Updated dependencies [7d7943d]
+- Updated dependencies [aa71c4d]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [1920cf3]
+- Updated dependencies [1920cf3]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [77a94d8]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [879bd38]
+- Updated dependencies [a7a48b7]
+- Updated dependencies [b88c356]
+- Updated dependencies [1abfc58]
+- Updated dependencies [8a399b2]
+- Updated dependencies [db87a02]
+- Updated dependencies [04e776b]
+- Updated dependencies [1c563af]
+- Updated dependencies [1c563af]
+- Updated dependencies [a7df552]
+- Updated dependencies [6befe19]
+- Updated dependencies [8caa131]
+- Updated dependencies [78f841b]
+- Updated dependencies [f0022c4]
+- Updated dependencies [1fb274e]
+- Updated dependencies [1fb274e]
+- Updated dependencies [1fb274e]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [f85a83b]
+- Updated dependencies [f85a83b]
+- Updated dependencies [2015c54]
+- Updated dependencies [0db5ad5]
+- Updated dependencies [8601526]
+- Updated dependencies [f2a45db]
+- Updated dependencies [aa9447c]
+- Updated dependencies [3d91885]
+- Updated dependencies [8fc50b7]
+- Updated dependencies [93125ae]
+- Updated dependencies [29678f2]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [ae97841]
+- Updated dependencies [56bf27a]
+- Updated dependencies [e67ba80]
+- Updated dependencies [c8d06a9]
+- Updated dependencies [cdeabec]
+- Updated dependencies [4935c66]
+- Updated dependencies [c6fe02d]
+- Updated dependencies [c6fe02d]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [a543e24]
+- Updated dependencies [a543e24]
+- Updated dependencies [51290bc]
+- Updated dependencies [d0bb78e]
+- Updated dependencies [8f2e808]
+- Updated dependencies [6c17a50]
+- Updated dependencies [98998ca]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [299a2c6]
+- Updated dependencies [299a2c6]
+  - @objectstack/spec@17.8.0
+  - @objectstack/runtime@17.8.0
+  - @objectstack/plugin-security@17.8.0
+  - @objectstack/core@17.8.0
+  - @objectstack/plugin-auth@17.8.0
+  - @objectstack/verify@17.8.0
+  - @objectstack/plugin-email@17.8.0
+  - @objectstack/platform-objects@17.8.0
+  - @objectstack/service-automation@17.8.0
+  - @objectstack/service-realtime@17.8.0
+  - @objectstack/objectql@17.8.0
+  - @objectstack/service-storage@17.8.0
+  - @objectstack/service-messaging@17.8.0
+  - @objectstack/service-settings@17.8.0
+  - @objectstack/metadata-protocol@17.8.0
+  - @objectstack/service-datasource@17.8.0
+  - @objectstack/plugin-sharing@17.8.0
+  - @objectstack/lint@17.8.0
+  - @objectstack/plugin-approvals@17.8.0
+  - @objectstack/rest@17.8.0
+  - @objectstack/service-analytics@17.8.0
+  - @objectstack/cloud-connection@17.8.0
+  - @objectstack/metadata-core@17.8.0
+  - @objectstack/types@17.8.0
+  - @objectstack/plugin-hono-server@17.8.0
+  - @objectstack/metadata@17.8.0
+  - @objectstack/console@17.8.0
+  - @objectstack/account@17.8.0
+  - @objectstack/setup@17.8.0
+  - @objectstack/client@17.8.0
+  - create-objectstack@17.8.0
+  - @objectstack/driver-memory@17.8.0
+  - @objectstack/driver-mongodb@17.8.0
+  - @objectstack/driver-sql@17.8.0
+  - @objectstack/driver-sqlite-wasm@17.8.0
+  - @objectstack/driver-turso@17.8.0
+  - @objectstack/formula@17.8.0
+  - @objectstack/mcp@17.8.0
+  - @objectstack/observability@17.8.0
+  - @objectstack/plugin-audit@17.8.0
+  - @objectstack/plugin-webhooks@17.8.0
+  - @objectstack/service-cache@17.8.0
+  - @objectstack/service-job@17.8.0
+  - @objectstack/service-package@17.8.0
+  - @objectstack/service-queue@17.8.0
+  - @objectstack/service-sms@17.8.0
+  - @objectstack/trigger-api@17.8.0
+  - @objectstack/trigger-record-change@17.8.0
+  - @objectstack/trigger-schedule@17.8.0
+  - @objectstack/plugin-pinyin-search@17.8.0
+
 ## 17.7.0
 
 ### Minor Changes

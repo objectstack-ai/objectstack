@@ -1,5 +1,85 @@
 # @objectstack/dogfood
 
+## 0.0.48
+
+### Patch Changes
+
+- Updated dependencies [fec87e7]
+- Updated dependencies [959c209]
+- Updated dependencies [7d7943d]
+- Updated dependencies [aa71c4d]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [1920cf3]
+- Updated dependencies [1920cf3]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [77a94d8]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [879bd38]
+- Updated dependencies [a7a48b7]
+- Updated dependencies [b88c356]
+- Updated dependencies [8a399b2]
+- Updated dependencies [04e776b]
+- Updated dependencies [1c563af]
+- Updated dependencies [1c563af]
+- Updated dependencies [a7df552]
+- Updated dependencies [78f841b]
+- Updated dependencies [f0022c4]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [f85a83b]
+- Updated dependencies [0db5ad5]
+- Updated dependencies [93125ae]
+- Updated dependencies [29678f2]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [56bf27a]
+- Updated dependencies [e67ba80]
+- Updated dependencies [c8d06a9]
+- Updated dependencies [cdeabec]
+- Updated dependencies [4935c66]
+- Updated dependencies [c6fe02d]
+- Updated dependencies [c6fe02d]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [d0bb78e]
+- Updated dependencies [8f2e808]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [299a2c6]
+  - @objectstack/spec@17.8.0
+  - @objectstack/plugin-security@17.8.0
+  - @objectstack/plugin-auth@17.8.0
+  - @objectstack/verify@17.8.0
+  - @objectstack/plugin-email@17.8.0
+  - @objectstack/platform-objects@17.8.0
+  - @objectstack/objectql@17.8.0
+  - @objectstack/service-storage@17.8.0
+  - @objectstack/service-messaging@17.8.0
+  - @objectstack/service-datasource@17.8.0
+  - @objectstack/plugin-sharing@17.8.0
+  - @objectstack/plugin-approvals@17.8.0
+  - @objectstack/service-analytics@17.8.0
+  - @objectstack/metadata-core@17.8.0
+  - @objectstack/types@17.8.0
+  - @objectstack/metadata@17.8.0
+  - @objectstack/example-crm@4.0.100
+  - @objectstack/example-multi-package@0.0.7
+  - @objectstack/example-showcase@0.3.22
+  - @objectstack/connector-mcp@17.8.0
+  - @objectstack/connector-openapi@17.8.0
+  - @objectstack/connector-rest@17.8.0
+  - @objectstack/formula@17.8.0
+  - @objectstack/mcp@17.8.0
+  - @objectstack/plugin-audit@17.8.0
+  - @objectstack/plugin-webhooks@17.8.0
+  - @objectstack/trigger-record-change@17.8.0
+  - @objectstack/trigger-schedule@17.8.0
+  - @objectstack/plugin-pinyin-search@17.8.0
+
 ## 0.0.47
 
 ### Patch Changes

@@ -1,5 +1,53 @@
 # @objectstack/plugin-approvals
 
+## 17.8.0
+
+### Patch Changes
+
+- f0022c4: Setup → Approvals → Requests opens on every approval request, not on the requests pending on the administrator. Before this, the entry named no view, and `sys_approval_request` declared the caller-scoped "My Pending" view (`pending_approvers contains {current_user_id}`) first, so the console opened it.
+  
+  Clause-②: no
+  
+  - `sys_approval_request` now declares its unscoped "All" view (`all_requests`) first. "My Pending", "I Submitted" and "Completed" follow it in their previous order, still as tabs. A route that names no view, such as a record page's object breadcrumb or the object switcher, now opens "All". No view is added, removed or changed.
+  - The Setup entry `nav_approval_requests` now names `all_requests` with `viewName`, so it does not depend on the declared order. The Account app's Approvals entry opens the Approvals Inbox component and reads neither.
+  - The declared order decides which view opens, not which rows a caller may read.
+  - The generated translation bundles follow the new view order. No translated text changed.
+  - ⛔ No schema, parse, export or accept-set change.
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [1920cf3]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [77a94d8]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [879bd38]
+- Updated dependencies [04e776b]
+- Updated dependencies [1c563af]
+- Updated dependencies [a7df552]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [8f2e808]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [299a2c6]
+  - @objectstack/spec@17.8.0
+  - @objectstack/core@17.8.0
+  - @objectstack/platform-objects@17.8.0
+  - @objectstack/metadata-core@17.8.0
+  - @objectstack/types@17.8.0
+  - @objectstack/formula@17.8.0
+
 ## 17.7.0
 
 ### Minor Changes

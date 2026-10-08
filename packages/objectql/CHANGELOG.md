@@ -1,5 +1,86 @@
 # @objectstack/objectql
 
+## 17.8.0
+
+### Patch Changes
+
+- 1920cf3: fix(objectql): the lifecycle reaper and archiver no longer partition an object with no tenant column by organization
+  
+  A tenant-scope `lifecycle.retention_overrides` entry gives one organization its own retention window, and the reaper and the archiver apply it by partitioning the object's rows on `organization_id`: one pass for that organization's rows, then a global pass for everyone else's. On an object that has no `organization_id` column — one declaring `systemFields: { tenant: false }`, such as the deployment-level platform tables (`sys_job`, `sys_job_run`, `sys_job_queue`, `sys_flow_dispatch`, `sys_migration`, `sys_migration_journal`, `sys_presence`), or any other object the registry injects no tenant column into and whose author declares none — both passes named a column the table does not have. The SQL driver refused them (`INVALID_FILTER`), the sweep reported the object in its errors, and the table's retention stopped.
+  
+  Such an object now has no tenant partition, the answer a federated object already got: the sweep runs its one global pass at the global window. No row of it belongs to an organization, so a tenant override naming it has nothing to select, and it is not applied. An object that has the column keeps its per-tenant windows unchanged.
+- f85a83b: fix(objectql): a formula field that does not evaluate is logged once per object and field, instead of reading `null` in silence (#22019)
+  
+  A formula the engine cannot evaluate reads `null`, on `find`, on `findOne` and on the write response. Before this change nothing said why. A formula calling an unregistered function (`sqrt(record.amount)`) read `null` on every row with no log line anywhere. ADR-0032 says a call site must not silently swallow an expression fault.
+  
+  The engine now reports the fault through its logger at `warn`, once per (object, field) per engine instance, however many rows and reads hit it. The line names the object, the field and the evaluator's error (kind and first line; the full message is in the log metadata). It also says where the repair is: `os validate` or a re-save of the object refuses an expression-level fault with a located message, and a fault that depends on a record's values needs a guard on the operands it reads.
+  
+  Unchanged: the field still reads `null`, because what a read returns is protocol. `evaluateFormulaField`, the hook-side helper with no engine, still returns `null` without a log line. The built entry declarations gain three `private` member names on `ObjectQL`.
+- c8d06a9: `skipAutomations` no longer skips ObjectQL's own audit stamps: a data import with "run automations & triggers" unchecked stamps `created_by` / `updated_by` from the session user again
+  
+  Clause-②: no
+  
+  `ExecutionContext.skipAutomations` suppresses the lifecycle hooks bound from metadata and, by its own
+  description, never bypasses audit. ObjectQL's builtin audit stamps (`sys_stamp_audit_insert` on
+  `beforeInsert`, `sys_stamp_audit_update` on `beforeUpdate`) were registered through the hook binder,
+  so they carried the metadata binding the opt-out keys on and were skipped together with the app's
+  hooks. Rows that a data import wrote with automations off landed with no `created_by` / `updated_by`
+  and no value in a declared plain `tenant_id` field. On a driver that does not stamp its own
+  timestamps, they also landed with no `created_at` / `updated_at`. The organization column was not
+  affected: the driver stamps it from the engine's driver options either way.
+  
+  The builtins are now registered in code (`registerHook`, no metadata binding), which is how the
+  contract describes audit. They run under `skipAutomations` exactly as they run without it, and they
+  keep the same wrapper, priority and `sys:audit` package id. Every hook bound from metadata is still
+  skipped under the flag. ⛔ Nothing you author changes: no key, option, export or type is added or
+  removed.
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [1920cf3]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [b88c356]
+- Updated dependencies [1abfc58]
+- Updated dependencies [db87a02]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [6befe19]
+- Updated dependencies [8caa131]
+- Updated dependencies [78f841b]
+- Updated dependencies [1fb274e]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [f85a83b]
+- Updated dependencies [2015c54]
+- Updated dependencies [f2a45db]
+- Updated dependencies [aa9447c]
+- Updated dependencies [3d91885]
+- Updated dependencies [8fc50b7]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [ae97841]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [a543e24]
+- Updated dependencies [51290bc]
+- Updated dependencies [d0bb78e]
+- Updated dependencies [8f2e808]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [299a2c6]
+  - @objectstack/spec@17.8.0
+  - @objectstack/core@17.8.0
+  - @objectstack/metadata-protocol@17.8.0
+  - @objectstack/metadata-core@17.8.0
+  - @objectstack/types@17.8.0
+  - @objectstack/metadata@17.8.0
+  - @objectstack/formula@17.8.0
+
 ## 17.7.0
 
 ### Minor Changes

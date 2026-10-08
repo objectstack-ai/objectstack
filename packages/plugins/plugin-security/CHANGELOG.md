@@ -1,5 +1,173 @@
 # @objectstack/plugin-security
 
+## 17.8.0
+
+### Minor Changes
+
+- 959c209: feat(plugin-security)!: the six built-in positions are declared position metadata of the plugin (ADR-0131 D2)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no authorable key, export or stored shape changes; the refusal is of six reserved position names at one REST door, and no stored definition is rewritten -->
+  
+  **BREAKING** on one write door, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  - **What is declared.** The identity positions `platform_admin`, `org_owner`, `org_admin` and `org_member` (ADR-0068 D2) and the audience anchors `everyone` and `guest` (ADR-0090 D5/D9) are registered with the engine registry as `position` metadata owned by `com.objectstack.plugin-security`, the way the plugin's own permission sets are. Their names, labels and descriptions come from one list built from `@objectstack/spec`'s `BUILTIN_IDENTITY_NAMES` and `BUILTIN_IDENTITY_METADATA` and the anchor text, and the built-in seeder reads that same list.
+  - **Rows and grants do not move.** `sys_position` is seeded exactly as before: the same names, the same organizations (one copy per organization under a walled posture, one organization-less pass under `single`), `managed_by: 'platform'`, `active: true`, `is_default: false`, and the same labels and descriptions. No principal's grants change.
+  - **What a client can now read.** `GET /api/v1/meta/position` lists the six beside the stack's own positions, and `GET /api/v1/meta/position/:name` answers `200` with each one's definition, where it answered `404 RESOURCE_NOT_FOUND`. The security catalog read (`createSecurityCatalogReader` in `@objectstack/core`) lists them from the engine registry.
+  - **What a client can no longer write.** `PUT /api/v1/meta/position/:name` naming one of the six is refused `403 NOT_OVERRIDABLE`: the name is provided by a code package, and `position` has no overlay. It was saved as an environment-wide definition before. Give an authored position a different name. `DELETE /api/v1/meta/position/:name` on one of the six still answers `200` and removes nothing.
+  - **The declared-positions seeder** keeps reading the engine registry first and the metadata service only when the registry holds no position. The six are left out of that decision and out of what it seeds, so stack-declared positions keep seeding and the six keep the built-in seeder as their one writer.
+- aa71c4d: `sys_user_permission_set` gains `permission_set`, the name of the permission set a grant holds, written beside `permission_set_id` (ADR-0131 D4)
+  
+  Clause-②: yes (widening)
+  
+  - **The column.** `permission_set` is a read-only text column, at most 100 characters, holding the `name` of the `sys_permission_set` row that `permission_set_id` points at. It is readable everywhere the grant row is readable. A grant written before this release has `NULL` here until the backfill stage rewrites it. No reader uses the column yet: the grant is still resolved from `permission_set_id`, which stays until it is dropped in a later major (ADR-0131 D10).
+  - **The platform writes it, on every write that carries `permission_set_id`, for every caller.** Two `@objectstack/plugin-security` engine hooks (`beforeInsert` and `beforeUpdate` on `sys_user_permission_set`) look up the set by id and store its name. A write that sends only the id, which is how the data door and the Setup forms write, gets the name filled in.
+  - **A name that names a different set is refused** with `400 VALIDATION_FAILED`, `invalid_value` at `permission_set`. This covers a name that disagrees with the id written beside it, or with the id already stored when only the name is written. For a non-system caller it also covers a name beside an id that names no set this caller's organization can see. A name that agrees is accepted. A cleared name (`null`) is not stored as a clear: the derived name is written back. Before this change the column did not exist, so a write naming it was refused with `400 INVALID_FIELD`. No write that was accepted before is refused now.
+  - **Every platform grant writer writes both columns:** the organization-admin reconcile and the platform-admin promotion in `@objectstack/plugin-security`, the self-registration grant in `@objectstack/plugin-auth`, and the RLS probe persona in `@objectstack/verify`.
+  - **Nothing to migrate.** No principal's grants change. To fill the column on grants written by your own code, write the set's name as `permission_set`, or leave it out and the platform fills it in. Do not write any other value there.
+- c6fe02d: `SecurityPlugin` declares the identity objects its authorization store reads, `sys_user` and `sys_member`, and refuses to boot a kernel that does not register them. The refusal names the missing objects and the plugin that registers them, where the kernel used to boot and then fail every authenticated request's permission read as an outage.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A boot refusal of a plugin composition, not a metadata change: no spec key, export, option or stored shape is removed, renamed or re-shaped, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. The remedy is a kernel composition edit (mount plugin-auth's identity objects), which no ledger entry can derive from metadata. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this boot path and this diff adds none (not already-registered); and what narrows is which kernels boot, not a runtime interface or a type surface (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: a kernel that booted before is refused at boot, shipped as `minor` under the launch-window convention.
+  
+  **Why.** Permission resolution, `resolveUserAuthzGrants` in `@objectstack/core`, reads `sys_user` and `sys_member`, which `@objectstack/plugin-auth` registers. The engine refuses a read of an object its registry does not hold, so a kernel with `SecurityPlugin` and without those objects booted cleanly, and then every authenticated request's permission read failed with `AuthzStoreUnavailableError` (`SERVICE_UNAVAILABLE`, 503), which reads as an outage and names no missing dependency.
+  
+  **What is refused.** A kernel where `SecurityPlugin.start()` ran and the engine registry does not hold `sys_user` or `sys_member` at `kernel:ready`: `bootstrap()` rejects with an error named `AuthzIdentityObjectsMissingError`, whose `missingObjects` lists the absent names and whose message names `@objectstack/plugin-auth`, `AuthPlugin` and `createIdentityObjectsPlugin()`. Measured in this repository: three test harnesses that boot `SecurityPlugin` without `AuthPlugin` (one in `@objectstack/runtime`, two in `@objectstack/service-automation`), each now mounting `createIdentityObjectsPlugin()`. By reading the code, not by a run: `objectstack dev` through `DevPlugin` with `services: { auth: false }` and security left on is refused too.
+  
+  **What still boots, unchanged.** A kernel that mounts `AuthPlugin` (`os serve` pairs the two; `@objectstack/verify`'s `bootStack` mounts both); a kernel that registers the two objects any other way; and a boot that composes `SecurityPlugin` for its declarations only (`os migrate`, which suppresses `start()`).
+  
+  **The remedy.** on a kernel that mounts `SecurityPlugin` without `AuthPlugin`, such as a test kit, add `await kernel.use(createIdentityObjectsPlugin())` from `@objectstack/plugin-auth`. It registers plugin-auth's own identity list, so a hand-written plugin that registers `SysUser` and `SysMember` is no longer needed, though it still satisfies the check. A `DevPlugin` stack with `services: { auth: false }` either turns security off as well or passes `createIdentityObjectsPlugin()` in `extraPlugins`. Nothing in an app's metadata changes.
+
+### Patch Changes
+
+- fec87e7: feat(spec)!: a package manifest's `permissions` no longer takes a flat list of permission strings — the structured `{ services, hooks, network, fs }` block is the only form (#13458)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered manifest-permissions-string-list-removed, manifest-permissions-string-list-retired -->
+  
+  **BREAKING** — an accept-set narrowing on a published authoring surface, shipped as `minor` under the launch-window convention for accept-set narrowings (Changesets pre mode is not yet in on `main`).
+  
+  `ManifestPermissionsSchema` was a union of a flat `string[]` and the structured ADR-0025 §3.2 block. Nothing ever acted on the list: the loader registers the consented `grantedPermissions` set from the environment artifact with the permission enforcer, never the manifest's request, and the only code that met a list on a manifest was two reports saying it had been skipped. The marketplace install disclosure reads only the four lists, so a list was shown to an installer as "Requests no special permissions." (ADR-0049 enforce-or-remove). `ManifestPermissionsSchema` is now the structured block itself.
+  
+  ### FROM → TO
+  
+  | before | what to write instead |
+  | --- | --- |
+  | `permissions: ['system.user.read', 'system.data.write']` | `permissions: { services: [...], hooks: [...], network: [...], fs: [...] }`, naming the platform services the plugin resolves, the lifecycle hooks it registers, the network hosts it reaches and the filesystem paths it touches. |
+  | `permissions: []` | delete `permissions`: absence is the spelling for "requests nothing". |
+  | a list on an app manifest that ships no code | delete `permissions`. An app's record access is its permission SETS, in the stack's own top-level `permissions` collection. |
+  
+  **The one-line fix: replace every manifest `permissions` list with the structured block, or delete it.** A permission string has no mechanical mapping onto the four lists, so the translation is done by hand. `os migrate meta --from 17` lists the mechanical edits for existing sources; apply them by hand.
+  
+  **What an author now sees.** Writing a list fails `tsc` (the key's type is the block), and `os validate`, `os build`, `os plugin build` and `defineStack` refuse it at `manifest.permissions` with the block's own answer: `Expected the plugin permission block { services?, hooks?, network?, fs? }, received a flat list.`, followed by the prescription. Every structured block that parsed before still parses, unchanged.
+  
+  ### The retirement kit
+  
+  - **Schema.** `ManifestPermissionsSchema` is `PluginPermissionsSchema`, by identity, and both export names stay. The block answers a list with its prescription on its own error map, the bare-array pattern `ListViewExportOptionsSchema` uses. The block also carries `EnvironmentArtifactSchema.grantedPermissions` values, so the answer is worded true there too, where a list was never legal.
+  - **D2 conversion `manifest-permissions-string-list-removed`** (step 18, retired from the load path): a lossless delete of an all-string list from the stack's `manifest` and every `packages[].manifest`. The notice carries the dropped strings. A built artifact replays it at the artifact door, so an artifact built while the list was legal still boots. It never touches the structured block, an array of objects, or the top-level ADR-0090 permission-set collection.
+  - **D3 entry `manifest-permissions-string-list-retired`** carries the judgement the delete cannot make: what each dropped string meant in services, hooks, hosts and paths.
+  - **Liveness.** `manifest.permissions` stays `live` on corrected evidence. Its consumer is the marketplace install disclosure, and it refuses nothing at load. The four keys are now drilled.
+  - **The two skip reports reworded.** `AppPlugin`'s security registrar and `@objectstack/plugin-security`'s audience-binding reconciler both report a manifest-stage `permissions` they cannot read as permission sets. They now name the flat list as the retired legacy form. They behave as before.
+  
+  **Measured producers: none outside tests.** On origin/main e67ba80049, no manifest in `examples/`, `apps/`, `packages/`, `skills/` or `content/docs/` writes a list. The exceptions are five `@objectstack/spec` `manifest.test.ts` fixtures, re-triaged here, and the skip-report tests of `@objectstack/runtime` and `@objectstack/plugin-security`, which hand a list to an unparsed bundle on purpose and still pass. The same instrument finds those five fixtures, which is its control. At the objectui pin `a58626c88dc8`, nothing reads `manifest.permissions` (control: 91 `manifest.(id|name|version)` reads), and the install disclosure reads the structured block alone. Deployed and cloud-held manifests NOT MEASURED.
+- 7d7943d: Grants written before `sys_user_permission_set.permission_set` existed now get their permission set's name, once, at boot (ADR-0131 D4)
+  
+  Clause-②: no
+  
+  - **What happens on the first boot after upgrading.** At `kernel:bootstrapped`, `@objectstack/plugin-security` fills `permission_set` on every grant that has no name yet. The name is the `name` of the `sys_permission_set` row that the grant's `permission_set_id` points at. The set row is read inside the grant's own organization: a grant of an organization may name that organization's set or an organization-less one, and an organization-less grant may name only an organization-less set. Each name is checked in the security catalog before it is written. Only the name column is written: no id changes, no grant is moved and no row is deleted. No principal's grants change, because readers still resolve grants from `permission_set_id`.
+  - **What is left unnamed, and reported in the boot log by count and grant id.** A grant whose id names no set row (`warn`). A grant whose id names another organization's set row (`warn`); nothing about that organization is logged. A grant whose set row carries a name the security catalog does not hold at that boot (`error`): register the permission set definition, or re-point the grant.
+  - **It runs once.** When the pass has nothing left that a later boot could decide differently, it records its verdict in `sys_migration` under the id `adr-0131-grant-permission-set-name-backfill`, and later boots skip it. A grant the catalog could not verify, or a write that did not land, leaves the verdict unrecorded, so the next boot tries again. Without a `sys_migration` table (no `PlatformObjectsPlugin` in the composition) the pass still runs on every boot, and renames nothing it already named.
+  - **Nothing to migrate.** No configuration is needed.
+- e67ba80: The seed ownership claim no longer fires app hooks or record-change flows
+  
+  Clause-②: no
+  
+  On a freshly seeded database, the first sign-up promotes the first user to platform admin, and `claimSeedOwnership` hands every seeded row to that admin inside the same request. That write ran under a bare system context, so every claimed row went through the full write pipeline: hooks bound from app metadata fired, record-change flows ran, approvals opened on seeded records and notifications went to the new admin. Measured on hotcrm `56d98f7e` (17.7.0, a 354-row seed), the first sign-up took about 45 s, and in that time the claim fired 1,254 app hooks, ran 8 flows, opened 2 approvals and handed 8 emails to the transport.
+  
+  The claim's write now runs with `{ isSystem: true, skipAutomations: true }`. The seed itself is end-state data written without automation, and the claim keeps that rule for the write that completes it.
+  
+  - **App hooks no longer fire for the seed ownership claim.** No hook bound from metadata (an app's `hooks`, sandboxed bodies included) runs on the claim's owner change, and no record-change flow is dispatched for it. So the claim opens no approval and sends no notification.
+  - **Which claims.** Every pass of the claim: the promotion pass inside the first sign-up, and the pass that runs on `app:seeded` on every boot, the first and every later one.
+  - **Still runs.** Hooks that plugins register in code still run, so the claim still writes one audit row per claimed record (plugin-audit) and plugin-sharing still recomputes the grants the owner change earns. Every claimed row's `owner_id` is the admin and its `updated_at` still advances, exactly as before. The per-row hook ceiling and the paged fallback for very large objects are unchanged.
+  - **If an app relied on it.** An app hook or flow that reacted to the claim's owner change no longer sees it, just as it never saw the seed's own writes. None of the hooks or flows in ObjectStack's own example apps reads it.
+- ef1fcb2: A declared index states its uniqueness scope: bare `unique: true` on `indexes[]` is refused (protocol 18, ADR-0120 D1/D7), stored metadata converts it to `unique: 'global'` with zero drift, and `VISIBILITY_STRICT_OPTIONS` leaves `@objectstack/spec`'s public surface.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered declared-index-bare-unique-true-retired, visibility-strict-options-unexported -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface and one export removal, shipped as `minor` under the launch-window convention for accept-set narrowings (Changesets pre mode is not in on `main`).
+  
+  **Why.** On a declared index, bare `unique: true` was the one `unique` spelling whose scope was positional. It built the index over exactly `fields`, one holder across the whole installation, while reading like "unique per organization" to an author who knew the field-level meaning. 17.x warned (lint `unique/unscoped-declared-index`). Protocol 18 refuses it, so the scope is always stated.
+  
+  **What is refused.** A declared index (`objects[].indexes[]`, `objectExtensions[].indexes[]`) whose `unique` is bare `true`. The refusal names both replacements, and says which one keeps the index bare `true` built. It is raised by:
+  
+  - the schema (`IndexSchema.unique`, now `false | 'global' | 'organization'`), at every door that parses: `ObjectSchema.create()` and `ObjectSchema.parse()`, `defineStack`, `os validate`, `os build`, and the runtime save door (`422 INVALID_METADATA`). `tsc` refuses it too, because the input type no longer admits `true`;
+  - lint `unique/unscoped-declared-index`, now an `error` and a gating rule on all three commands. It is what refuses the spelling under `os lint`, which never parses.
+  
+  **What converts.** The protocol-18 ADR-0087 conversion `declared-index-unique-scope` rewrites a declared index's bare `true` to `'global'` on every data-at-rest seam: stored `sys_metadata` rows (`applyConversionsToStoredItem`), built artifacts inside their declared-floor window, and `os migrate meta --from 17`. `'global'` is exactly the index bare `true` built, so the physical index is byte-identical and the drift plan is empty. It is retired from the authoring funnel, so a live author is refused and taught instead of converted silently.
+  
+  **What stays accepted.** Field-level `unique: true` still means one holder per organization and stays valid indefinitely. On a declared index, `unique: false` or omitted, `'global'` and `'organization'` parse exactly as before.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `indexes: [{ fields: [...], unique: true }]` | `indexes: [{ fields: [...], unique: 'global' }]`: the same index, nothing on disk changes |
+  | …the same, when you meant one holder per organization | `unique: 'organization'`: the driver prepends the NULL-safe organization key part at registration, and `os migrate plan` shows the index change |
+  | `import { VISIBILITY_STRICT_OPTIONS } from '@objectstack/spec/shared'` (or the root entry) | delete the import: it was an internal option bag for the spec's own visibility-carrying schemas, and those schemas are unchanged |
+  
+  **The one-line fix: on every declared index, write `unique: 'global'` where you wrote `unique: true`.** Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.
+  
+  **Who is affected, measured.** At `e67ba80049`, an AST census found 48 declared indexes with bare `unique: true` in 39 source files of this repository, all platform and plugin objects. Every one is respelled `'global'` in this change, and the nine-key S5 corpus is pinned to build byte-identical indexes before and after (`driver-sql`'s `sql-driver-unique-tenancy.test.ts`). `examples/**` and `apps/**` carry none. Deployed metadata and other repositories were not measured.
+  
+  ### The kit
+  
+  - **The refusal.** `IndexSchema.unique` in `data/object.zod.ts`, with its own prescription. The lint rule moved from `warning` to `error` and from advisory to gating.
+  - **The conversion.** `declared-index-unique-scope` (`toMajor: 18`, retired from the load path, `retiredAfter: '17.7.0'`), with its S4/S5 fixture.
+  - **The ledger.** The D3 semantic entries `declared-index-bare-unique-true-retired` (the scope each respelled index really meant is the author's call) and `visibility-strict-options-unexported`, plus a step-18 rationale fragment.
+  - **The export.** `VISIBILITY_STRICT_OPTIONS` moved to the unbarrelled `shared/visibility-strict-options.ts`, beside its type `StrictObjectOptions`. `check:api-surface` counts the removal.
+  - **The pins.** The "`'global'` is a synonym of `true`" driver pin retired with the bare spelling. The verbatim pin is stated in `'global'`.
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [1920cf3]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [77a94d8]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [879bd38]
+- Updated dependencies [04e776b]
+- Updated dependencies [1c563af]
+- Updated dependencies [a7df552]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [8f2e808]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [299a2c6]
+  - @objectstack/spec@17.8.0
+  - @objectstack/core@17.8.0
+  - @objectstack/platform-objects@17.8.0
+  - @objectstack/metadata-core@17.8.0
+  - @objectstack/types@17.8.0
+  - @objectstack/formula@17.8.0
+
 ## 17.7.0
 
 ### Minor Changes
