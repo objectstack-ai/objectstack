@@ -93,7 +93,7 @@
 - workflow · 随包发的流程与动作:停用要持久、被依赖时拒绝、可克隆、两道门一样严 · automation + api-backend + access-security · packaged-flow-disable-durable, packaged-flow-subflow-disable-refusal, packaged-flow-clone-contract, setup-packaged-automation-board, api-backend.packaged-action-disabled-dispatch, api-backend.action-activation-door-contract, access-security.packaged-flow-write-door-parity
 - access · 装进来的包带着它声明的能力与权限集,只读的包锁住 Studio · access-security + studio-authoring · capability-declaration-lifecycle, packaged-permission-set-lifecycle, readonly-package-locks-studio, studio-authoring.packaged-automation-studio-lock
 - studio · 随包发来的视图与仪表盘,是可以直接改的那一类 · studio-authoring · packaged-display-class-direct-edit
-- devpath · 你拥有:定义在你的仓库里可 diff,整个本体可导出、可在没有我们的情况下自托管跑起来 · platform-core + cli · ontology-export-roundtrip, artifact-reproducible-build, standalone-boot-no-cloud(待清单扫描建项)
+- devpath · 你拥有:定义在你的仓库里可 diff,整个本体可导出、可在没有我们的情况下自托管跑起来 · platform-core + cli · ontology-export-roundtrip, artifact-reproducible-build, standalone-boot-no-cloud(清单项待写)
 
 **⑤ 接一个 Agent(社区版走 MCP),让它完成一次真实业务操作**
 
@@ -114,7 +114,7 @@
 1. 安全与数据完整性永远最高,不等路。
 2. 路断了、或清单上的能力断了 ⇒ P0/P1;能跑但出错 ⇒ P2;不在路上、不在清单上 ⇒ p3 或不做。定级读「路上的功能点」:改那张表即改优先级,⛔ 不逐卡改档。
 3. 本车道队列还有开放的 P0/P1 时,该车道不派 p2/p3 的工具卡、契约卫生卡;解锁产品 P0/P1 的仪器卡沿链继承其优先级。
-4. 因为写的是 AI、用的也是 AI:本体既要 AI 能写——错的必须被响亮拒绝并给处方,永不静默落库;也要人与 Agent 能用——Agent 越权时被权限挡住并留痕——声明了的对象、动作、agent / tool / skill 元数据在运行时兑现,MCP 面暴露的就是应用真能做的。写给 AI 的文档与 skills 说错一句,等于产品缺陷。
+4. 因为写的是 AI、用的也是 AI:本体既要 AI 能写——错的必须被响亮拒绝并给处方,永不静默落库;也要人与 Agent 能用——声明了的对象、动作、agent / tool / skill 元数据在运行时兑现,MCP 面暴露的就是应用真能做的,Agent 越权时被权限挡住并留痕。写给 AI 的文档与 skills 说错一句,等于产品缺陷。
 
 **阶段姿态**:速度优先于兼容。用的人少:退役立即生效,无过渡窗口、无别名双拼;兼容层、迁移窗口一类的工作默认 p3;声明了但不兑现的键按发布批量退役,不一键一卡。
 
