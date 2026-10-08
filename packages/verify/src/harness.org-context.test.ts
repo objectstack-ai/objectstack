@@ -172,6 +172,22 @@ describe('bootStack orgContext (#7762)', () => {
         const orgs = rowsOf(await ql.find('sys_organization', { limit: 10, context: SYS }));
         expect(orgs.map((o) => o.slug)).toEqual(['default']);
         expect(await sessionOrgId(stack)).toBe(orgs[0].id);
+        // The harness line this case pins is the owner bind (ADR-0093 D7), on
+        // for every boot: the admin OWNS the Default Organization. The two
+        // assertions above hold without it (the boot invariant creates the
+        // organization and the membership reconciler binds the admin), but as
+        // `member` — which is what an `objectstack dev` admin never is.
+        const users = rowsOf(
+          await ql.find('sys_user', { where: { email: 'admin@objectos.ai' }, limit: 1, context: SYS }),
+        );
+        const memberships = rowsOf(
+          await ql.find('sys_member', {
+            where: { user_id: users[0]?.id, organization_id: orgs[0].id },
+            limit: 10,
+            context: SYS,
+          }),
+        );
+        expect(memberships.map((m) => m.role)).toEqual(['owner']);
       } finally {
         await stack.stop();
       }
