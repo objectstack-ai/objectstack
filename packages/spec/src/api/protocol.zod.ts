@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { ViewSchema } from '../ui/view.zod';
+import { I18nLabelSchema } from '../ui/i18n.zod';
 import { DiscoverySchema } from './discovery.zod';
 import {
   BatchUpdateRequestSchema,
@@ -1781,11 +1782,27 @@ export const GetPublishedMetaItemResponseSchema = lazySchema(() => z.unknown().d
  *
  * Transcribed from `listDrafts`'s declared return
  * (`@objectstack/metadata-protocol` `protocol.ts`).
+ *
+ * `label` is the one member read off the draft BODY: the only list of
+ * draft-only items a client has is this one, so without it such an item can be
+ * shown by its machine name alone. It is the body's own top-level `label`,
+ * carried as authored. Every registered metadata type that declares a display
+ * label spells it `label` at the top level, as a plain string or, on the UI
+ * types, as an `I18nLabel` inline locale map — which the reader resolves the
+ * way it resolves every other `I18nLabel`, since this route takes no locale.
+ * `null` is the honest answer for a body that declares none; ⛔ never a
+ * machine-name fallback, which would make "has a label" and "has none"
+ * indistinguishable to the reader that has to choose between them.
  */
 export const ListDraftsResponseSchema = lazySchema(() => z.object({
   drafts: z.array(z.object({
     type: z.string().describe('Metadata type name (canonical singular).'),
     name: z.string().describe('Item name.'),
+    label: I18nLabelSchema.nullable().describe(
+      'The draft body\'s own top-level `label`, as authored: a plain string or an inline '
+      + 'locale map (`I18nLabel`), resolved by the reader. `null` when the body declares '
+      + 'none, or none this shape admits — never the item name standing in for it.',
+    ),
     organizationId: z.string().nullable().describe(
       'Owning organization of the draft row, `null` for an environment-wide draft.',
     ),
