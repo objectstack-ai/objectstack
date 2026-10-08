@@ -54,7 +54,7 @@ const REGISTERED_KEY = 'ui/PageHeaderProps:breadcrumb';
 // Unanchored, because a thrown `ZodError`'s message is the JSON of its issues;
 // the key-first house convention is asserted on the issue message itself.
 const PRESCRIPTION =
-  /`page:header` property `breadcrumb` was removed in @objectstack\/spec 17 \(ADR-0087 D2\) — no renderer ever drew a trail for it.*Delete the key, whether it was `true` or `false`.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand\./s;
+  /`page:header` property `breadcrumb` was removed in @objectstack\/spec 17 \(ADR-0087 D2\) — no renderer ever drew a trail for it.*Delete the key, whether it was `true` or `false`.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./s;
 
 /** A page header's live keys — what an author commonly writes, not the retired one. */
 const HEADER = { title: 'Lead', subtitle: '{company}', actions: ['convert_lead'] } as const;

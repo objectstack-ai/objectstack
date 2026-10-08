@@ -1022,7 +1022,7 @@ describe('connector.errorMapping retirement', () => {
     // (`retired-key-migrate-sentence.test.ts`) holds the wording; this only
     // pins that THIS prescription carries it, with the right `--from`.
     expect(issue!.message).toMatch(
-      /Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand\.$/,
+      /Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\.$/,
     );
     // Customer-facing text carries the ADR, never an issue id — a `#NNNN`
     // token resolves to nothing for the reader who meets this refusal; the

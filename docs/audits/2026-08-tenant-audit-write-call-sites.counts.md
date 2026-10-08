@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 233 |
-| Object name statically decidable | 155 |
-| Object name chosen at run time | 78 |
-| Against a tenancy-enabled object | 154 |
+| Write call sites | 234 |
+| Object name statically decidable | 154 |
+| Object name chosen at run time | 80 |
+| Against a tenancy-enabled object | 153 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 171 |
+| Threading a tenant context | 174 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
-| Options argument unreadable | 54 |
+| Options argument unreadable | 52 |
 | …and decidably tenancy-enabled | 31 |
 | Threading a decidably elevated context | 123 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 102 |
+| Threading a context of undecidable elevation | 103 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,13 +90,13 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-07 at `e1171ca48`.
+Measured on 2026-10-08 at `0328884e5`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 612 |
+| tracked non-test sources scanned | 617 |
 | engine-shaped types recognised | 70 |
-| declared objects in the registry | 116 |
+| declared objects in the registry | 117 |
 | same-named calls subtracted as non-engine | 160 |
 
 ## Every site
@@ -143,7 +143,6 @@ Measured on 2026-10-07 at `e1171ca48`.
 | `packages/plugins/plugin-auth/src/objectql-adapter.ts` | `delete` | `objectName` | undecidable | PROVABLY NONE | 5 |
 | `packages/plugins/plugin-auth/src/objectql-adapter.ts` | `insert` | `objectName` | undecidable | options unreadable | 2 |
 | `packages/plugins/plugin-auth/src/objectql-adapter.ts` | `update` | `objectName` | undecidable | options unreadable | 5 |
-| `packages/plugins/plugin-auth/src/phone-sms-texts.ts` | `insert` | `sys_notification_template` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/reconcile-membership.ts` | `insert` | `sys_member` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `insert` | `sys_scim_connection_credential` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/session-tombstone.ts` | `update` | `objectName` | undecidable | options unreadable | 1 |
@@ -168,6 +167,8 @@ Measured on 2026-10-07 at `e1171ca48`.
 | `packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/claim-seed-ownership.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/cleanup-package-permissions.ts` | `delete` | `object` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-security/src/grant-permission-set-name-backfill.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-security/src/grant-permission-set-name-backfill.ts` | `update` | `GRANT_OBJECT` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/invitation-placement.ts` | `insert` | `sys_user_position` | enabled | elevated | 1 |
 | `packages/plugins/plugin-security/src/normalize-managed-by.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/permission-set-overlay-discard.ts` | `delete` | `sys_metadata` | enabled | context, elevation undecidable | 1 |
@@ -238,8 +239,8 @@ Measured on 2026-10-07 at `e1171ca48`.
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_secret` | enabled | elevated | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `update` | `sys_secret` | enabled | elevated | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_setting_audit` | enabled | elevated | 1 |
-| `packages/services/service-settings/src/settings-service.ts` | `insert` | `this.objectName` | undecidable | options unreadable | 1 |
-| `packages/services/service-settings/src/settings-service.ts` | `update` | `this.objectName` | undecidable | options unreadable | 1 |
+| `packages/services/service-settings/src/settings-service.ts` | `insert` | `object` | undecidable | context, elevation undecidable | 1 |
+| `packages/services/service-settings/src/settings-service.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-storage/src/attachment-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 3 |
 | `packages/services/service-storage/src/backfill-file-references.ts` | `update` | `object` | undecidable | options unreadable | 1 |
 | `packages/services/service-storage/src/backfill-file-references.ts` | `update` | `object` | undecidable | elevated | 1 |

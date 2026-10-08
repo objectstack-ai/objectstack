@@ -389,7 +389,7 @@ export const SkillSchema = lazySchema(() => strictObject({
     "`triggerConditions` (AND of context field/operator/value) intersected with the agent's " +
     '`skills[]`, plus explicit /skill-name pinning. Delete the key. Put routing intent in ' +
     '`triggerConditions`; describe intent in `description`/`instructions` for the LLM. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   /**

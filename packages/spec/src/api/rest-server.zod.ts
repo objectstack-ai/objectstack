@@ -197,7 +197,7 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
     + 'To publish something publicly, declare it: a public form view (`sharing.allowAnonymous`), a '
     + "share link, or `book.audience: 'public'` — each derives its own narrow authorization instead of "
     + 'opening the whole data plane. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   /**

@@ -81,6 +81,10 @@ export const SysUser = ObjectSchema.create({
     {
       name: 'invite_user',
       label: 'Invite User',
+      // The parameter dialog's subtitle. Same wording on all three mirrors
+      // (sys_member, sys_invitation) so one translation serves each.
+      description:
+        'Invite someone by email address. They join this organization with the chosen role when they accept the invitation.',
       icon: 'user-plus',
       variant: 'primary',
       locations: ['list_toolbar'],
@@ -95,7 +99,9 @@ export const SysUser = ObjectSchema.create({
       // sys_user CRUD.
       requiresFeature: 'organization',
       requiresMembershipReach: 'invite_member',
-      successMessage: 'Invitation sent',
+      // `${result.email}`: invite-member answers the bare invitation row,
+      // whose top-level `email` is the invitee's address as stored (lowercased).
+      successMessage: 'Invitation sent to ${result.email}',
       refreshAfter: true,
       params: [
         { field: 'email', required: true },

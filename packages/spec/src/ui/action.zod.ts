@@ -622,7 +622,7 @@ const GLOBAL_NAV_RETIRED =
   + '`record_related`, `record_section`), or — for an action that deliberately has no UI home, '
   + 'such as an object-less one invoked over REST/MCP/AI — declare it headless with '
   + '`locations: []`, which keeps its capability gate, param contract and audit trail. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * Action Location — where an action is allowed to surface in the UI.
@@ -1222,7 +1222,7 @@ const actionObject = () => strictObject({
   execute: retiredKey(
     '`execute` was removed in @objectstack/spec 17 — use `target`. ' +
     'Rename the key; the value (a handler / flow / URL ref) is unchanged. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   
   /**
@@ -1534,14 +1534,14 @@ const actionObject = () => strictObject({
     "objectui's keyboard stack (useKeyboardShortcuts) is hand-registered and never consults " +
     'action metadata. Delete the key. For a real shortcut, register the key in the Console ' +
     'keyboard stack and have its handler invoke the action by name. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   bulkEnabled: retiredKey(
     '`action.bulkEnabled` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
     'the multi-select toolbar is driven by the LIST VIEW\'s `bulkActions` / `bulkActionDefs`, ' +
     'never by this flag, so setting it changed nothing. Delete the key and declare the action ' +
     "in the view's `bulkActions` instead. " +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   /**
@@ -1785,7 +1785,7 @@ const actionObject = () => strictObject({
     'actions, author `ariaLabel` / `ariaDescribedBy` / `role` in the `aria` block of the placing ' +
     'node: `page.components[].aria` (the component that renders the actions) or the list view ' +
     '`aria`. ' +
-    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).

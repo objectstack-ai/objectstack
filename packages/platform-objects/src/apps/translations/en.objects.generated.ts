@@ -141,7 +141,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       invite_user: {
         label: "Invite User",
-        successMessage: "Invitation sent"
+        description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
+        successMessage: "Invitation sent to ${result.email}"
       },
       ban_user: {
         label: "Ban User",
@@ -633,7 +634,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       invite_user: {
         label: "Invite User",
-        successMessage: "Invitation sent"
+        description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
+        successMessage: "Invitation sent to ${result.email}"
       },
       add_member: {
         label: "Add Member",
@@ -734,7 +736,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       invite_user: {
         label: "Invite User",
-        successMessage: "Invitation sent"
+        description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
+        successMessage: "Invitation sent to ${result.email}"
       },
       cancel_invitation: {
         label: "Cancel Invitation",
@@ -2602,7 +2605,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       is_system: {
         label: "System Template",
-        help: "Provided by a plugin / platform; tenants may edit but should not delete"
+        help: "Provided by a plugin / platform"
       },
       variables_json: {
         label: "Variables (JSON)",
@@ -2619,7 +2622,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       customized: {
         label: "Customized",
-        help: "Set when an admin edits a package-declared template; boot seeding will no longer overwrite the row (a reworded password-reset mail survives redeploys). Meaningless on admin rows."
+        help: "Set on a package-declared template an admin edited before organization-level template editing closed; boot seeding never overwrites such a row. Nothing sets it any more. Meaningless on admin rows."
       },
       created_at: {
         label: "Created At"
@@ -3257,7 +3260,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Scope",
         help: "Which layer of the config-resolution hierarchy this row belongs to.",
         options: {
-          global: "Global",
           tenant: "Tenant",
           user: "User"
         }
@@ -3276,7 +3278,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       locked: {
         label: "Locked",
-        help: "When true, lower-scope rows cannot override this value; writes against lower scopes return 409. Used by platform administrators to pin a global value for all tenants (Phase 2 cascade)."
+        help: "When true, lower-scope rows cannot override this value; writes against lower scopes return 409. A tenant row pins its value for that tenant's users (Phase 2 cascade)."
       },
       locked_reason: {
         label: "Lock Reason",

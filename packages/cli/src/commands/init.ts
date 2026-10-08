@@ -111,6 +111,11 @@ export function manifestIdSlug(name: string): string {
  * default standalone SQLite store, via knex) ships uncompiled and `serve`
  * fails with "Could not locate the bindings file".
  *
+ * Why each entry is here: `better-sqlite3` is the native SQLite driver, an
+ * `optionalDependencies` entry of `@objectstack/driver-sql` (and of this
+ * package, for its own sqlite tooling); `esbuild` is what compiles
+ * `objectstack.config.ts` when the CLI loads it through `bundle-require`.
+ *
  * Current pnpm reads this from `pnpm-workspace.yaml`, NOT the `pnpm` field in
  * package.json (that field is now ignored and emits a deprecation warning).
  * npm/yarn/bun build native modules by default and ignore this file.
@@ -147,7 +152,10 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  *    hands it to Kysely, and its own sqlite test path uses node's built-in
  *    `node:sqlite` `DatabaseSync`. There is therefore no better-auth call site
  *    that could touch an API moved between better-sqlite3 12 and 13 — the
- *    range is a statement about an instance we never supply.
+ *    range is a statement about an instance we never supply. Re-read
+ *    2026-09-11 on the 1.7.3 pin (the rendered file's prose carried this
+ *    reading until it shrank to one line per block): the published package
+ *    still names better-sqlite3 only in that peer declaration.
  *
  *    ⚠️ TWO CORRECTIONS to what this entry used to say, both measured:
  *      • the 13.x copy better-auth binds to is `@objectstack/cli`'s OWN
@@ -486,9 +494,33 @@ export function renderScaffoldPackageJson(
  * Emitting only the older key is what made a freshly scaffolded project fail
  * its very first `pnpm install` for every user on pnpm 11. Both lists come
  * from the same `builtDeps` argument, so the two populations can never be
- * granted different build permission. This is the shape
- * `packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml`
- * already ships for the other scaffold path.
+ * granted different build permission.
+ *
+ * ## One comment line per block — the reasons live here, not in the file
+ *
+ * The rendered file is the first thing a newcomer opens beside a README that
+ * calls the project a clean slate, and none of the measurements behind it is
+ * that reader's decision. So each block carries ONE comment line naming its
+ * reason, and everything else is kept beside the value it explains:
+ *
+ *   packages: []            this docblock (above) and `SCAFFOLD_PNPM_RANGE`.
+ *   onlyBuiltDependencies,  this docblock (the per-pnpm-version table above)
+ *   allowBuilds             and `SCAFFOLD_BUILT_DEPENDENCIES` (why each
+ *                           package needs its build).
+ *   peerDependencyRules     `SCAFFOLD_ALLOWED_PEER_VERSIONS`: one measured
+ *                           paragraph per entry, its retirement condition,
+ *                           and the retired `@better-auth/scim>better-call`.
+ *
+ * The file carried 57 comment lines here, and 66 in the template, until the
+ * maintainer asked for it to stay minimal with the rationale moved into the
+ * scaffolder source (#22162). A later change to any value meets its reason in
+ * this file, which is where the change is made.
+ *
+ * `packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml`, the
+ * other scaffold path, ships these exact bytes: that package cannot import this
+ * renderer (see the shared emission policy block above), so
+ * `test/scaffold-workspace-consistency.test.ts` holds the two files equal and
+ * holds the comment budget, and an edit to one is made to both.
  */
 export function renderPnpmWorkspaceYaml(
   builtDeps: string[] = SCAFFOLD_BUILT_DEPENDENCIES,
@@ -496,75 +528,25 @@ export function renderPnpmWorkspaceYaml(
 ): string {
   const peerEntries = Object.entries(allowedPeerVersions);
 
+  // One comment line per block, directly above its key and inside 80 columns
+  // (held by test/scaffold-workspace-consistency.test.ts). The reasons behind
+  // each line live in the docblocks named above, not in the user's file.
   return [
-    '# An explicit EMPTY workspace: this project has no member packages, so',
-    '# this file is settings-only. The key is not decoration — pnpm 9.x and',
-    '# 10.0–10.4 parse this file BEFORE they read `engines`, and refuse a file',
-    '# without a `packages:` key outright ("ERROR packages field missing or',
-    '# empty") before resolving a single dependency.',
-    '# Not `packages: [\'.\']`: that would declare this project a workspace',
-    '# MEMBER — a monorepo root, which it is not.',
+    '# Older pnpm needs this key; empty because this project is not a monorepo.',
     'packages: []',
     '',
-    '# pnpm does not run dependency build scripts unless they are approved',
-    '# here. Without this file a fresh `pnpm install` exits 1 on pnpm 11 with',
-    '# ERR_PNPM_IGNORED_BUILDS — pnpm 10 only warned, pnpm 11 made it a hard',
-    '# error. Without the build, better-sqlite3 can ship without a usable',
-    '# binding and `objectstack serve` fails with "Could not locate the',
-    '# bindings file".',
-    '#',
-    '# Both keys are needed; no single pnpm version range reads both:',
-    '#   allowBuilds             pnpm >= 10.26, and the ONLY key pnpm 11 reads',
-    '#                           — with onlyBuiltDependencies alone pnpm 11',
-    '#                           exits 1 exactly as if nothing were approved.',
-    '#   onlyBuiltDependencies   pnpm 10.0–10.25, which ignore allowBuilds.',
-    '#                           pnpm 11 ignores this key.',
-    '#',
-    '# npm, yarn and bun ignore this file and build native modules anyway.',
+    '# Build-script approvals for pnpm 10.0–10.25, which do not read allowBuilds.',
     'onlyBuiltDependencies:',
     ...builtDeps.map((d) => `  - ${d}`),
     '',
+    '# The same approvals for pnpm 10.26 and later; pnpm 11 reads only this key.',
     'allowBuilds:',
     ...builtDeps.map((d) => `  ${d}: true`),
     // No rules, no header: a bare `peerDependencyRules:` would advertise a
     // declaration that is not there.
     ...(peerEntries.length === 0 ? [] : [
       '',
-      '# Third-party peer ranges that resolve outside what their declaring',
-      '# package states, and that pnpm reports on a first install. None is a',
-      '# real incompatibility:',
-      '#',
-      '#   better-auth peers better-sqlite3 ^12.0.0 while the tree resolves 13.x',
-      '#   (the copy @objectstack/cli declares for its own sqlite tooling). That',
-      '#   peer is optional and covers handing better-auth a raw better-sqlite3',
-      '#   `Database`; ObjectStack hands it an ObjectQL adapter instead, so',
-      '#   nothing here goes down that path. Re-measured 2026-09-11 on',
-      '#   better-auth 1.7.3: nothing in the published package references',
-      '#   better-sqlite3 except that peer declaration itself — it only accepts',
-      '#   a Database you construct — so there is no call site that could',
-      '#   depend on what changed between 12 and 13. The upstream',
-      '#   range is stale; pinning back to 12 would just install a second,',
-      '#   unused native copy.',
-      '#',
-      '#   (The \'@better-auth/scim>better-call\' entry that used to sit here is',
-      '#   retired. The rc-era scim pin peered an exact better-call 1.3.7 against',
-      '#   better-auth\'s own 1.4.0 and this map declared that skew away; the pin',
-      '#   is a stable release now, and @better-auth/scim 1.7.3 peers an exact',
-      '#   better-call 1.4.0 — the one copy better-auth depends on. Re-measured',
-      '#   2026-09-12 off the installed manifest: the skew is gone.)',
-      '#',
-      '#   @better-auth/core, /oauth-provider, /scim and /sso each peer an exact',
-      '#   @better-auth/utils 0.4.2, while better-call (better-auth\'s own HTTP',
-      '#   layer) depends on ^0.5.0 and is what the tree resolves them against.',
-      '#   0.5.0 keeps every symbol those four import — base64/base64Url,',
-      '#   createHash, createRandomStringGenerator — with the same signatures',
-      '#   and the same values on the inputs they pass, so the report is the',
-      '#   only difference. Pinning utils back instead would drag better-call',
-      '#   off its own declared range, which is a real violation rather than a',
-      '#   reported one.',
-      '#',
-      '# These suppress the report only — no resolution moves, and the lockfile',
-      '# is byte-identical with and without this block.',
+      '# Upstream peer ranges measured harmless; this only silences the warning.',
       'peerDependencyRules:',
       '  allowedVersions:',
       ...peerEntries.map(([k, v]) => `    '${k}': '${v}'`),

@@ -174,7 +174,7 @@ const HEADING_RETIRED =
   '`text.variant: "heading"` was removed in @objectstack/spec 99 — a heading is a '
   + 'document level, never a text style, so the renderer had to guess one. Use `h2`, or pick the '
   + 'level you mean. '
-  + 'Run `os migrate meta --from 98` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 98` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /** A second retirement on the SAME enum, and one with no conversion behind it. */
 const SUBHEADING_RETIRED =

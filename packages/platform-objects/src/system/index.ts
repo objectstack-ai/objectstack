@@ -11,6 +11,8 @@
  */
 
 export { SysSetting } from './sys-setting.object.js';
+// [ADR-0131 D7] The settings cascade's global rung, tenant-less.
+export { SysPlatformSetting } from './sys-platform-setting.object.js';
 export { SysSecret } from './sys-secret.object.js';
 export { SysMetadataActivation } from './sys-metadata-activation.object.js';
 export { SysSettingAudit } from './sys-setting-audit.object.js';

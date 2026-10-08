@@ -543,4 +543,72 @@ describe('the wired chain — policies, then the real pipeline (#5129)', () => {
 
         expect(queries).toEqual([{ path: '/api/v1/apps/showcase/not-declared', method: 'GET' }]);
     });
+
+    // ── [#22147, ruling C] the principal an anonymous request executes as ──
+    //
+    // An unauthenticated request an `authRequired: false` endpoint admits
+    // executes as the GUEST principal the runtime face's explicit guest entry
+    // (`assembleExecutionContextOrGuest`) builds — never principal-less (which
+    // the security middleware hands straight through, ADR-0096 E1) and never
+    // the system principal. These pin the context the delegated call CARRIES,
+    // which is the one fact a status code cannot show: this boot composes no
+    // security plugin, and once a principal-less context is denied too, a
+    // guest and a principal-less call answer the same 403. The real-boot
+    // counterpart, with the deny it earns, is
+    // `declarative-endpoint-anonymous-guest.dogfood.test.ts`.
+
+    it('[#22147] runs an anonymous object_operation at authRequired:false as the guest — never principal-less, never system', async () => {
+        engineFinds.length = 0;
+        const res = await fetch(`${baseUrl}/api/v1/apps/showcase/open-tasks`);
+        expect(res.status).toBe(200);
+
+        const finds = engineFinds.filter((f) => f.object === 'showcase_task');
+        expect(finds).toHaveLength(1);
+        const context = finds[0]!.options?.context;
+        expect(
+            context,
+            'the anonymous call reached the engine with NO execution context: the principal-less hand-off',
+        ).toBeDefined();
+        expect(context).toMatchObject({ principalKind: 'guest', positions: ['guest'], isSystem: false });
+        expect(context).not.toHaveProperty('userId');
+    });
+
+    it('[#22147] hands the flow executor the guest for an anonymous call — the guest position, no user, no elevation', async () => {
+        flowRuns.length = 0;
+        const res = await fetch(`${baseUrl}/api/v1/apps/showcase/purge`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ params: { olderThanDays: 30 } }),
+        });
+        expect(res.status).toBe(200);
+
+        expect(flowRuns).toHaveLength(1);
+        const context = flowRuns[0]!.context;
+        expect(context.positions).toEqual(['guest']);
+        expect(context).not.toHaveProperty('userId');
+        expect(context).not.toHaveProperty('isSystem');
+        // The door never chooses an elevation for the run: `runAs` is the
+        // flow's own declaration, read by the automation service at setup.
+        expect(context).not.toHaveProperty('runAs');
+    });
+
+    it('[#22147] runs an AUTHENTICATED request at authRequired:false as that user, never as the guest', async () => {
+        engineFinds.length = 0;
+        const res = await fetch(`${baseUrl}/api/v1/apps/showcase/open-tasks`, {
+            headers: { 'x-test-user': 'admin1' },
+        });
+        expect(res.status).toBe(200);
+
+        const context = engineFinds.find((f) => f.object === 'showcase_task')?.options?.context;
+        expect(context).toMatchObject({ userId: 'admin1', principalKind: 'human', isSystem: false });
+        expect(context.positions).not.toContain('guest');
+    });
+
+    it('[#22147] keeps answering 401 at authRequired:true, before the engine is asked anything', async () => {
+        engineFinds.length = 0;
+        const res = await fetch(`${baseUrl}/api/v1/apps/showcase/my-tasks`);
+        expect(res.status).toBe(401);
+        expect((await res.json() as { error: { code: string } }).error.code).toBe('UNAUTHENTICATED');
+        expect(engineFinds.filter((f) => f.object === 'showcase_task')).toEqual([]);
+    });
 });

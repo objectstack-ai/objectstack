@@ -49,7 +49,7 @@ const TABLE = 'sys_email_template';
 type AnyRecord = Record<string, any>;
 
 /**
- * The slice of ObjectQL the template bridge and the provenance stamp touch —
+ * The slice of ObjectQL the template bridge and the organization door touch —
  * the same double `email-plugin.template-runtime-write.test.ts` uses, so this
  * file cannot accept a dispatch shape the real engine would refuse.
  */
@@ -80,7 +80,7 @@ function fakeEngine() {
             if (target) Object.assign(target, data);
             return { affected: target ? 1 : 0 };
         },
-        registerHook() { /* provenance stamp */ },
+        registerHook() { /* organization door */ },
         unregisterHooksByPackage() { return 0; },
     };
 }

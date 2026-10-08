@@ -141,7 +141,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       invite_user: {
         label: "Invitar usuario",
-        successMessage: "Invitación enviada"
+        description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
+        successMessage: "Invitación enviada a ${result.email}"
       },
       ban_user: {
         label: "Bloquear usuario",
@@ -633,7 +634,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       invite_user: {
         label: "Invitar usuario",
-        successMessage: "Invitación enviada"
+        description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
+        successMessage: "Invitación enviada a ${result.email}"
       },
       add_member: {
         label: "Añadir miembro",
@@ -734,7 +736,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       invite_user: {
         label: "Invitar usuario",
-        successMessage: "Invitación enviada"
+        description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
+        successMessage: "Invitación enviada a ${result.email}"
       },
       cancel_invitation: {
         label: "Cancelar invitación",
@@ -2602,7 +2605,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       is_system: {
         label: "Plantilla del sistema",
-        help: "La proporciona un plugin o la plataforma; los tenants pueden editarla, pero no deberían eliminarla."
+        help: "La proporciona un plugin o la plataforma."
       },
       variables_json: {
         label: "Variables (JSON)",
@@ -2619,7 +2622,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       customized: {
         label: "Personalizada",
-        help: "Se establece cuando un administrador edita una plantilla declarada por un paquete; la siembra al arrancar ya no sobrescribirá la fila (un correo de restablecimiento de contraseña reformulado se conserva tras los redespliegues). No tiene significado en las filas de administrador."
+        help: "Marca una plantilla declarada por un paquete que un administrador editó antes de que se cerrara la edición de plantillas por organización; la siembra al arrancar nunca sobrescribe esa fila. Ya nada la establece. No tiene significado en las filas de administrador."
       },
       created_at: {
         label: "Creado el"
@@ -3257,7 +3260,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Ámbito",
         help: "Capa de la jerarquía de resolución de configuración a la que pertenece esta fila.",
         options: {
-          global: "Global",
           tenant: "Inquilino",
           user: "Usuario"
         }
@@ -3276,7 +3278,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       locked: {
         label: "Bloqueado",
-        help: "Si es verdadero, las filas de ámbitos inferiores no pueden sobrescribir este valor; las escrituras contra ámbitos inferiores devuelven 409. Lo utilizan los administradores de la plataforma para fijar un valor global para todos los tenants (cascada Fase 2)."
+        help: "Si es verdadero, las filas de ámbitos inferiores no pueden sobrescribir este valor; las escrituras contra ámbitos inferiores devuelven 409. Una fila de tenant fija su valor para los usuarios de ese tenant (cascada Fase 2)."
       },
       locked_reason: {
         label: "Motivo del bloqueo",

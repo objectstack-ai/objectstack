@@ -148,6 +148,40 @@ const GOVERNED_OBJECTS = new Set([
 const GOVERNED_OPERATIONS = new Set(['insert', 'update', 'delete', 'transfer', 'restore', 'purge']);
 const ANCHOR_POSITIONS = new Set(['everyone', 'guest']);
 
+/**
+ * The governed objects whose rows record their writer in `granted_by` — a
+ * `readonly` provenance column on both (ADR-0090 D12's dual audit: `granted_by`
+ * = writer, `delegated_from` = authority source, `reason` = why).
+ *
+ * The writer is the value, so a caller does not get to name one: every
+ * non-system insert that this gate admits is stamped with its own `userId`,
+ * whatever the payload carried — tenant-level admins, delegates and
+ * self-delegations alike. The stamp is assigned in place on the payload rows
+ * BEFORE the engine's insert pipeline snapshots them; the engine's create-side
+ * `readonly` strip does not judge `sys_` objects, so the stamp is what lands.
+ * A non-system UPDATE gets no stamp: the column is `readonly`, so the engine's
+ * update strip drops a caller's value and the row keeps its writer.
+ *
+ * System writers never reach this gate (`isSystem` short-circuits the security
+ * middleware first) and keep the id or null they wrote: invitation placement
+ * writes its issuer, the organization-admin reconcile the attributed human or
+ * null, the platform-admin promotion null (ADR-0118 D1 — never a sentinel).
+ */
+const GRANTED_BY_OBJECTS = new Set(['sys_user_position', 'sys_user_permission_set']);
+
+/**
+ * Stamp the writer into `granted_by` on every row of an admitted non-system
+ * insert into a {@link GRANTED_BY_OBJECTS} table. Unconditional on purpose:
+ * keeping a supplied value would let a caller name any user as the granter.
+ */
+function stampWriter(opCtx: any, userId: unknown): void {
+  if (opCtx?.operation !== 'insert' || !GRANTED_BY_OBJECTS.has(opCtx?.object)) return;
+  if (userId == null || userId === '') return;
+  for (const row of rowsOf(opCtx)) {
+    if (row && typeof row === 'object') row.granted_by = userId;
+  }
+}
+
 export interface DelegatedAdminGateDeps {
   /** ObjectQL engine handle (system-context reads for pre-images/lookups). */
   ql: any;
@@ -242,6 +276,14 @@ export class DelegatedAdminGate {
     if (!GOVERNED_OBJECTS.has(opCtx?.object)) return;
     if (!GOVERNED_OPERATIONS.has(opCtx?.operation)) return;
 
+    // Authority first: a refused write throws here and is never stamped.
+    await this.authorize(opCtx);
+    // Then provenance, on every admitted path — see {@link GRANTED_BY_OBJECTS}.
+    stampWriter(opCtx, opCtx.context?.userId);
+  }
+
+  /** The authority decision for a governed write: returns when admitted, throws when refused. */
+  private async authorize(opCtx: any): Promise<void> {
     const ctx = opCtx.context ?? {};
     // Every business-unit anchor this call resolves is resolved in the
     // caller's own organization — see {@link callerOrganizationId}.
@@ -346,9 +388,9 @@ export class DelegatedAdminGate {
 
     switch (opCtx.object) {
       case 'sys_user_position':
-        return this.assertAssignmentWrite(opCtx, ctx, held, organizationId);
+        return this.assertAssignmentWrite(opCtx, held, organizationId);
       case 'sys_user_permission_set':
-        return this.assertDirectGrantWrite(opCtx, ctx, held);
+        return this.assertDirectGrantWrite(opCtx, held);
       case 'sys_position_permission_set':
         return this.assertBindingWrite(opCtx, held);
       case 'sys_permission_set':
@@ -536,8 +578,9 @@ export class DelegatedAdminGate {
    *  7. [cloud#830 follow-up] if the delegation carries a `business_unit_id`
    *     anchor, that anchor falls inside the delegator's OWN effective anchor
    *     for the position — a delegation may NARROW visibility, never widen it.
-   * The writer is stamped into `granted_by` (dual audit: `granted_by` = writer,
-   * `delegated_from` = authority source).
+   * The writer is stamped into `granted_by` by {@link DelegatedAdminGate.assert}
+   * once this returns (dual audit: `granted_by` = writer, `delegated_from` =
+   * authority source).
    */
   private async assertSelfDelegation(opCtx: any, ctx: any, organizationId?: string): Promise<void> {
     const now = this.now();
@@ -640,9 +683,6 @@ export class DelegatedAdminGate {
           deny(`position '${positionName}' distributes the admin set '${b.name}' — administration cannot be self-delegated (D12 containment)`, { position: positionName, permissionSet: b.name });
         }
       }
-
-      // Dual audit: stamp the writer (never overwrite an explicit value).
-      if (row.granted_by == null) row.granted_by = ctx.userId;
     }
   }
 
@@ -737,7 +777,6 @@ export class DelegatedAdminGate {
 
   private async assertAssignmentWrite(
     opCtx: any,
-    ctx: any,
     held: HeldScope[],
     organizationId?: string,
   ): Promise<void> {
@@ -777,16 +816,12 @@ export class DelegatedAdminGate {
           { operation: opCtx.operation, object: opCtx.object, position: positionName },
         );
       }
-      // Audit stamp: who granted this (insert only; never overwrite an explicit value).
-      if (opCtx.operation === 'insert' && t.next && t.next.granted_by == null && ctx.userId) {
-        t.next.granted_by = ctx.userId;
-      }
     }
   }
 
   // ── sys_user_permission_set: direct user ↔ set grants ───────────────
 
-  private async assertDirectGrantWrite(opCtx: any, ctx: any, held: HeldScope[]): Promise<void> {
+  private async assertDirectGrantWrite(opCtx: any, held: HeldScope[]): Promise<void> {
     const targets = await this.materializeTargets(opCtx, 'sys_user_permission_set');
     for (const t of targets) {
       const row = t.next ?? t.prev ?? {};
@@ -816,9 +851,6 @@ export class DelegatedAdminGate {
           `[Security] Access denied: delegated '${opCtx.operation}' on sys_user_permission_set rejected — ${failure}.`,
           { operation: opCtx.operation, object: opCtx.object, permissionSet: setName },
         );
-      }
-      if (opCtx.operation === 'insert' && t.next && t.next.granted_by == null && ctx.userId) {
-        t.next.granted_by = ctx.userId;
       }
     }
   }

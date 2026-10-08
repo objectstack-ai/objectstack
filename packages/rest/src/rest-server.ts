@@ -213,6 +213,9 @@ import type {
 // to the implementation is a governed-surface edit, so it is left to the
 // maintainer; this line goes when that row moves.
 export { filterAppForUser } from './meta-item-read-gate.js';
+// [#22141] The `PUT /meta/:type/:name` door's precondition and lifecycle, read
+// through the ONE mapping the runtime dispatcher's `/meta` domain asks too.
+import { metaSaveRequestOptions } from './meta-save-request.js';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
     resolveEffectiveApiMethods,
@@ -1718,54 +1721,24 @@ function mayReadPendingDrafts(caller: unknown): boolean {
 }
 
 /**
- * [#22114] The ADR-0008 pin `PUT /meta/:type/:name` reads off its request
- * headers: `parentVersion` for `saveMetaItem` — the `If-Match` token (ETag-style
- * quotes stripped), `null` for `If-None-Match: *` ("no row of this lifecycle
- * is here", the first-write pin the protocol has always declared), or
- * `undefined` for neither (unpinned, last-write-wins, as before) — or the
- * sentence of a `400` for a pin that cannot be honoured.
+ * [#22128] The ONE reading of `?package=` on the `/meta/:type/:name` item doors
+ * — the read (`GET`), the save (`PUT`) and the publish
+ * (`POST …/publish`): the package the request names, or `undefined` when it
+ * names none. `all` is the metadata list's "show everything" scope and the
+ * empty value states nothing, so both name no package: the save writes the
+ * env-local overlay (its draft inheriting the package of the item's active
+ * row, #11087) and the publish keeps its historical match-any-package draft
+ * resolution. A non-string value is not forwarded either.
  *
- * `If-None-Match` is read on this route from the day it lands with a CLOSED
- * value set, `*` alone (AGENTS.md 〈Route & surface ownership〉 rule 5's reason,
- * one carrier over): a header read for the values it knows and dropped
- * otherwise would write a caller unguarded who asked for a guard. Measured
- * before it landed: no first-party client sends `If-None-Match` on a `PUT`
- * (the SDK sends it only on its cached `GET`, objectui's ETag hook has no
- * caller), and nothing on this path read it. Two refusals, both `400`:
- *
- *  - a value other than `*` — an entity-tag list asks "write unless the head is
- *    one of these", a condition no `/meta` client has and this door does not
- *    evaluate;
- *  - `If-None-Match` beside `If-Match` — the pair can never hold (RFC 9110
- *    §13.2.2 evaluates both: `If-Match` true needs a current row, `*` true
- *    needs none), and a `409` would send the caller round a re-read that
- *    serves a token it would pair with `*` again.
+ * One function because the read's `version` is the token the save at the same
+ * address compares against: a read that forwarded the literal `all` resolved
+ * that token at a package no save writes, so it served `null` beside a row the
+ * save then judged, and a client that pinned `If-None-Match: *` on that `null`
+ * was refused. ⛔ Never a third inline copy at a door: the save and publish
+ * doors each carried one, and the read door had none.
  */
-function metaSavePreconditionPin(headers: Record<string, unknown> | undefined):
-    | { ok: true; parentVersion?: string | null }
-    | { ok: false; message: string } {
-    const ifMatch = headers?.['if-match'] ?? headers?.['If-Match'];
-    const ifNoneMatch = headers?.['if-none-match'] ?? headers?.['If-None-Match'];
-    if (ifNoneMatch !== undefined) {
-        if (ifMatch !== undefined) {
-            return {
-                ok: false,
-                message: 'Send If-Match or If-None-Match, not both. If-Match: <version> saves only over that '
-                    + 'version; If-None-Match: * saves only where no row of this lifecycle exists. A row '
-                    + 'cannot both exist and not exist, so this pair can never be honoured.',
-            };
-        }
-        if (typeof ifNoneMatch !== 'string' || ifNoneMatch.trim() !== '*') {
-            return {
-                ok: false,
-                message: 'If-None-Match on this route takes "*" alone (save only if no row of this lifecycle '
-                    + 'exists). To pin a save to the version you read, send it as If-Match: <version>.',
-            };
-        }
-        return { ok: true, parentVersion: null };
-    }
-    if (typeof ifMatch === 'string') return { ok: true, parentVersion: ifMatch.replace(/^"|"$/g, '') };
-    return { ok: true };
+function metaItemPackageBinding(raw: unknown): string | undefined {
+    return typeof raw === 'string' && raw !== '' && raw !== 'all' ? raw : undefined;
 }
 
 /**
@@ -6867,7 +6840,11 @@ export class RestServer {
                             ));
                         } else {
                             // Non-cached version
-                            const packageId = req.query?.package || undefined;
+                            // [#22128] The save door's reading of `?package=`
+                            // ({@link metaItemPackageBinding}): the served
+                            // `version` is resolved at the address that save
+                            // writes, so `all` names no package here either.
+                            const packageId = metaItemPackageBinding(req.query?.package);
                             // [commit 2a29caa53] Typed against the spec request shape —
                             // the `as any` this literal used to carry is
                             // retired now that the spec declares `state` and
@@ -7135,14 +7112,25 @@ export class RestServer {
                     // stored content hash, never the hash itself; the protocol
                     // compares it in that form, so it passes through here as sent.
                     // [#22114] The item read serves the same token as `version`,
-                    // and `If-None-Match: *` pins a save that expects no row —
-                    // see {@link metaSavePreconditionPin}.
-                    const pin = metaSavePreconditionPin(req.headers);
-                    if (!pin.ok) {
-                        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: pin.message } });
+                    // and `If-None-Match: *` pins a save that expects no row.
+                    // [#22141] The pin and `?mode=draft` are read through
+                    // {@link metaSaveRequestOptions} — the ONE mapping the
+                    // runtime dispatcher's `/meta` door asks too, so the
+                    // `@objectstack/hono` catch-all cannot answer this request
+                    // differently. Its `request` members are spread into the
+                    // save below, each present only when the caller asked.
+                    //
+                    // The multiplicity guard runs FIRST: it refuses a repeated
+                    // `force`, `package` or `mode` (see the `force` read below
+                    // for why that one is sharp) and UNWRAPS one occurrence
+                    // encoded as an array, so `?mode=` reaches the mapping as
+                    // the string it reads.
+                    if (refuseRepeatedQueryParams(req, res, ['force', 'package', 'mode'])) return;
+                    const saveOptions = metaSaveRequestOptions({ headers: req.headers, query: req.query });
+                    if (!saveOptions.ok) {
+                        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: saveOptions.message } });
                         return;
                     }
-                    const parentVersion = pin.parentVersion;
                     // [#7749 producer, #7941 precedence] The request's authenticated
                     // identity — one producer, shared by every `/meta` write (see
                     // resolveMetaWriteActor). `X-Actor` is not consulted.
@@ -7156,8 +7144,8 @@ export class RestServer {
                     // string, and a non-empty array is truthy — so
                     // `?force=false&force=false`, a caller repeating an explicit
                     // OPT-OUT, turned the destructive-change guard ON. An
-                    // inversion, on a destructive verb, reported as 200.
-                    if (refuseRepeatedQueryParams(req, res, ['force', 'package', 'mode'])) return;
+                    // inversion, on a destructive verb, reported as 200. The
+                    // multiplicity guard above refuses it before this read.
                     const forceRaw = req.query?.force;
                     const force = typeof forceRaw === 'string'
                         ? ['true', '1', 'yes', 'on'].includes(forceRaw.toLowerCase())
@@ -7165,11 +7153,9 @@ export class RestServer {
 
                     // Software-package binding (Studio package authoring).
                     // `?package=<id>` binds the saved row to that package
-                    // (sys_metadata.package_id). 'all'/empty = env-local overlay.
-                    const packageRaw = req.query?.package;
-                    const packageId = typeof packageRaw === 'string' && packageRaw && packageRaw !== 'all'
-                        ? packageRaw
-                        : undefined;
+                    // (sys_metadata.package_id). 'all'/empty = env-local overlay
+                    // ({@link metaItemPackageBinding}, the item read's too).
+                    const packageId = metaItemPackageBinding(req.query?.package);
 
                     // [#8805] THE WRITE-SIDE ORGANIZATION. Until this landed the
                     // door passed none, so `recordMetadataAudit` stamped
@@ -7268,13 +7254,13 @@ export class RestServer {
                         // a client cannot smuggle a face in.
                         writeFace: 'meta-envelope',
                         ...(environmentId ? { environmentId } : {}),
-                        ...(parentVersion !== undefined ? { parentVersion } : {}),
+                        // `parentVersion` and `mode`, each only when asked —
+                        // a closed two-key object read off the headers and the
+                        // query, never the body.
+                        ...saveOptions.request,
                         ...(actor ? { actor } : {}),
                         ...(force ? { force: true } : {}),
                         ...(packageId ? { packageId } : {}),
-                        ...((typeof req.query?.mode === 'string'
-                            && req.query.mode.toLowerCase() === 'draft')
-                            ? { mode: 'draft' } : {}),
                     };
                     const result = await p.saveMetaItem(saveRequest);
                     res.json(result);
@@ -7952,10 +7938,7 @@ export class RestServer {
                     // does. Widening `MetadataItem` is a `packages/spec` contract
                     // change and stays filed rather than taken here.
                     if (refuseRepeatedQueryParams(req, res, ['package'])) return;
-                    const packageRaw = req.query?.package;
-                    const packageId = typeof packageRaw === 'string' && packageRaw && packageRaw !== 'all'
-                        ? packageRaw
-                        : undefined;
+                    const packageId = metaItemPackageBinding(req.query?.package);
 
                     // [#8805] The publish half of the same organization, and it
                     // is REQUIRED for the `PUT` fix to be usable rather than a

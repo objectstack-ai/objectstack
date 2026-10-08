@@ -29,7 +29,7 @@
 import { describe, it, expect } from 'vitest';
 // The engine-double contract gate: a fake looser than ObjectQL's own verb
 // dispatch is how #4434 shipped a dead route with its suite green.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, ConflictError } from '@objectstack/metadata-core';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 
 interface Row {
@@ -174,5 +174,85 @@ describe('SysMetadataRepository draft-save package inheritance (#11087)', () => 
     const drafts = engine.rows.filter((r) => r.state === 'draft');
     expect(drafts).toHaveLength(1); // updated in place, never forked
     expect(drafts[0].package_id).toBe('app.k9qk'); // adopted into the package
+  });
+});
+
+/**
+ * [#22128] `headAt` is the parent a write at one address must name: the row
+ * `put` upserts there and locks against, from the same resolution. `get` at
+ * the key the caller named is not — a package-less draft is stored in the
+ * package of the active row, so `get` at the unbound key reads no draft while
+ * `put` judges the inherited one.
+ */
+describe('SysMetadataRepository.headAt — the row put locks against (#22128)', () => {
+  const seededActive = (pkg: string | null) => ({
+    type: REF.type, name: REF.name, organization_id: null, state: 'active',
+    package_id: pkg, metadata: '{"label":"Member"}', checksum: 'sha-active', version: 1,
+  });
+
+  it('a package-less draft address resolves the INHERITED draft, and put accepts its version as the parent', async () => {
+    const engine = makeFakeEngine([seededActive('app.k9qk')]);
+    const repo = makeRepo(engine);
+    const first = await repo.put(REF, { label: 'draft 1' }, { parentVersion: null, actor: 't', state: 'draft' as const });
+
+    const { head, packageId } = await repo.headAt(REF, { state: 'draft', packageId: null });
+    expect(head?.hash).toBe(first.version);
+    // The binding the put writes under: the inherited package.
+    expect(packageId).toBe('app.k9qk');
+    // The key the caller named holds no draft: that read is not the parent.
+    expect(await repo.get(REF, { state: 'draft', packageId: null })).toBeNull();
+
+    await expect(repo.put(REF, { label: 'from null' }, { parentVersion: null, actor: 't', state: 'draft' as const }))
+      .rejects.toBeInstanceOf(ConflictError);
+    const second = await repo.put(REF, { label: 'draft 2' }, { parentVersion: head!.hash, actor: 't', state: 'draft' as const });
+    expect((await repo.headAt(REF, { state: 'draft' })).head?.hash).toBe(second.version);
+    expect(engine.rows.filter((r) => r.state === 'draft').map((r) => r.package_id)).toEqual(['app.k9qk']);
+  });
+
+  it('resolves a pre-fix orphan draft (NULL package) as the head the adopting put judges', async () => {
+    const engine = makeFakeEngine([
+      seededActive('app.k9qk'),
+      {
+        type: REF.type, name: REF.name, organization_id: null, state: 'draft',
+        package_id: null, metadata: '{"label":"orphan"}', checksum: 'sha-orphan', version: 2,
+      },
+    ]);
+    const repo = makeRepo(engine);
+    const adopted = await repo.headAt(REF, { state: 'draft', packageId: null });
+    expect(adopted.head?.hash).toBe('sha-orphan');
+    // The orphan is updated INTO the package: the put's binding is the inherited one.
+    expect(adopted.packageId).toBe('app.k9qk');
+  });
+
+  it('an explicit package is its own address: never another package\'s row', async () => {
+    const engine = makeFakeEngine([seededActive('app.k9qk')]);
+    const repo = makeRepo(engine);
+    await repo.put(REF, { label: 'draft' }, { parentVersion: null, actor: 't', state: 'draft' as const });
+
+    expect(await repo.headAt(REF, { state: 'draft', packageId: 'app.other' })).toEqual({ head: null, packageId: 'app.other' });
+    expect((await repo.headAt(REF, { state: 'draft', packageId: 'app.k9qk' })).head?.hash).toBeDefined();
+  });
+
+  it('an active address inherits nothing: the unbound key is the head, as put writes it', async () => {
+    const engine = makeFakeEngine([seededActive('app.k9qk')]);
+    const repo = makeRepo(engine);
+    expect(await repo.headAt(REF, { state: 'active' })).toEqual({ head: null, packageId: null });
+    expect((await repo.headAt(REF, { state: 'active', packageId: 'app.k9qk' })).head?.hash).toBe('sha-active');
+  });
+
+  it('an org-scoped draft address resolves across the ADR-0005 reach, as the inheriting put does', async () => {
+    const engine = makeFakeEngine([seededActive('app.k9qk')]);
+    const repo = new SysMetadataRepository({
+      engine: engine as never,
+      organizationId: 'org_1',
+      orgLabel: 'org_1',
+    } as never);
+    const first = await repo.put(REF, { label: 'org draft' }, { parentVersion: null, actor: 't', state: 'draft' as const });
+    expect((await repo.headAt(REF, { state: 'draft' })).head?.hash).toBe(first.version);
+  });
+
+  it('a brand-new item drafted first: no head, and the package-less binding (nothing to inherit)', async () => {
+    const repo = makeRepo(makeFakeEngine());
+    expect(await repo.headAt(REF, { state: 'draft' })).toEqual({ head: null, packageId: null });
   });
 });

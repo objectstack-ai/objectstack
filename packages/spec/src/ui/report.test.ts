@@ -236,7 +236,7 @@ describe('A joined report draws no chart — block `chart` removed, container `c
   const CHART = { type: 'bar', xAxis: 'status', yAxis: 'task_count' } as const;
   const BLOCK_FIRST_SENTENCE = '`report.blocks[].chart` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove)';
   const CONTAINER_FIRST_SENTENCE = 'a `joined` report draws no chart — it draws each block as a table and never reads `chart`, on the container or on a block.';
-  const MIGRATE = 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  const MIGRATE = 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
   const issuesOf = (r: { success: boolean; error?: { issues: ReadonlyArray<{ code: string; path: PropertyKey[]; message: string }> } }) =>
     (r.error?.issues ?? []).map((i) => ({ code: i.code, path: i.path, message: i.message }));

@@ -425,6 +425,13 @@ export const SysApprovalRequest = ObjectSchema.create({
     {
       name: 'approval_approve',
       label: 'Approve',
+      // The param dialog's subtitle, phrased as the decision question the way
+      // `approval_reject` below is (top-level `description`, never
+      // `ai.description`). Whether one approval completes the step depends on
+      // the step's behavior (first response, unanimous, quorum, per group),
+      // hence "once this step has the approvals it requires".
+      description:
+        'Approve this request? Your approval is recorded, and the request moves on once this step has the approvals it requires.',
       icon: 'check-circle',
       // Primary decision — the console renders this filled/highlighted so it
       // stands out from the secondary levers in the drawer's action bar,

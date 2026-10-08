@@ -1,0 +1,7 @@
+{
+  "file": "packages/plugins/plugin-security/src/grant-permission-set-name-backfill.ts",
+  "adrs": [
+    "ADR-0131"
+  ],
+  "invariant": "A grant stored before its by-name column existed is given a name only when the name is the set row its own id names inside the grant's organization (that organization or the organization-less bucket) and the security catalog read resolves it (D4); an id naming no set row, another organization's set row, or a name the catalog does not resolve stays unnamed and is reported, never guessed. The pass is idempotent, records its verdict once in sys_migration, and deletes nothing: deletions are C7's and the id column is dropped only by D10's later step."
+}

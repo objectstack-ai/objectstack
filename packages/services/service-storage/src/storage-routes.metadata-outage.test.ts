@@ -267,3 +267,453 @@ describe('Storage routes: a metadata write that never landed is not a 200 (#5216
     expect(await store.getFile(res._json.data.fileId)).toMatchObject({ status: 'pending' });
   });
 });
+
+// ---------------------------------------------------------------------------
+// #22175 — an organization change is not an outage
+// ---------------------------------------------------------------------------
+//
+// The commit door and the chunked-completion door write by id under the
+// uploader's ACTIVE organization, and an engine-backed store scopes that write
+// to it. An uploader who switched organization after starting an upload names
+// a row the scoped write cannot reach, and the engine's miss used to come back
+// through this file's `500` path with the outage text. The doors now ask the
+// store's `organizationOutOfWriteReach` first and answer `409
+// RESOURCE_CONFLICT`, naming the change; the operator log names the cause.
+//
+// #22218 asks the same question at the two doors #22175 left: the chunk door,
+// whose session write follows the chunk, and the progress door, whose one write
+// is the expiry stamp — asked there only when the stamp is due.
+//
+// The double above does NOT scope its writes, so a door that skipped the
+// question would visibly change the row — which is what makes every "row
+// unchanged" assertion below able to fail. The same pins on a booted
+// organization wall, where the write really is scoped, live in
+// `packages/plugins/organizations`.
+
+describe('Storage routes: an organization change is not an outage (#22175)', () => {
+  const COMMIT = '/api/v1/storage/upload/complete';
+  const CHUNKED_COMPLETE = '/api/v1/storage/upload/chunked/:uploadId/complete';
+  const CHUNK = '/api/v1/storage/upload/chunked/:uploadId/chunk/:chunkIndex';
+  const PROGRESS = '/api/v1/storage/upload/chunked/:uploadId/progress';
+  /** The first sentence of the answer — its wording is the ruling's contract. */
+  const FIRST_SENTENCE = 'This upload was started in a different organization than your active one.';
+
+  /** The uploader in three active organizations, and a second user acting elsewhere. */
+  const SESSIONS: Record<string, { userId: string; organizationId?: string }> = {
+    'alice@a': { userId: 'u_alice', organizationId: 'org_a' },
+    'alice@b': { userId: 'u_alice', organizationId: 'org_b' },
+    'alice@none': { userId: 'u_alice' },
+    'carol@b': { userId: 'u_carol', organizationId: 'org_b' },
+  };
+
+  let rootDir: string;
+  let adapter: LocalStorageAdapter;
+  let httpServer: ReturnType<typeof createMockHttpServer>;
+  let warnings: string[];
+
+  const mount = (engine: IDataEngine | null) => {
+    const store = new StorageMetadataStore(engine);
+    registerStorageRoutes(httpServer as any, adapter, store, {
+      basePath: '/api/v1/storage',
+      resolveSession: async (req) => SESSIONS[String(req.headers['x-test-as'] ?? '')] ?? null,
+      logger: { info: () => {}, warn: (msg: string) => { warnings.push(msg); } },
+    });
+    return store;
+  };
+  const drive = async (method: string, path: string, as: string, req: Partial<IHttpRequest> = {}) => {
+    const res = createMockRes();
+    await httpServer._getHandler(method, path)!(
+      createMockReq({ ...req, headers: { ...(req.headers ?? {}), 'x-test-as': as } }),
+      res,
+    );
+    return res;
+  };
+  /**
+   * A pending upload Alice started in `org_a`: its file row and, for the
+   * chunked door, its session — opened on the real adapter, so a completion
+   * that gets past the doors' questions really assembles. Sets {@link uploadId}.
+   *
+   * `null` seeds the session with NO organization. Not `undefined`: an
+   * `undefined` argument takes the parameter's default, so it would seed
+   * `org_a` and a pin about an org-less session would pin nothing.
+   */
+  let uploadId: string;
+  const seed = async (store: StorageMetadataStore, sessionOrganization: string | null = 'org_a') => {
+    uploadId = await adapter.initiateChunkedUpload('user/f1.bin', { contentType: 'application/octet-stream' });
+    await store.createFile({
+      id: 'f1',
+      key: 'user/f1.bin',
+      name: 'f1.bin',
+      status: 'pending',
+      owner_id: 'u_alice',
+      organization_id: 'org_a',
+    });
+    await store.createSession({
+      id: uploadId,
+      file_id: 'f1',
+      key: 'user/f1.bin',
+      filename: 'f1.bin',
+      total_size: 100,
+      chunk_size: 50,
+      total_chunks: 2,
+      status: 'in_progress',
+      ...(sessionOrganization !== null ? { organization_id: sessionOrganization } : {}),
+    });
+  };
+  const expectOrganizationChanged = (res: ReturnType<typeof createMockRes>, label: string) => {
+    const seen = `${label}: ${JSON.stringify(res._json)}`;
+    expect(res._status, seen).toBe(409);
+    expect(res._json.success, seen).toBe(false);
+    expect(res._json.error.code, seen).toBe('RESOURCE_CONFLICT');
+    expect(res._json.data, seen).toBeUndefined();
+    expect(String(res._json.error.message).startsWith(FIRST_SENTENCE), seen).toBe(true);
+  };
+  /** Moves the seeded session's own deadline into the past, so its expiry stamp is due. */
+  const pastDeadline = (store: StorageMetadataStore) =>
+    store.updateSession(uploadId, { expires_at: new Date(Date.now() - 60_000).toISOString() });
+  /** One chunk of the seeded upload, sent as `as`. */
+  const sendChunk = (as: string, headers: Record<string, string> = {}) =>
+    drive('PUT', CHUNK, as, {
+      params: { uploadId, chunkIndex: '0' },
+      headers,
+      rawBody: async () => Buffer.from('chunk-0'),
+    });
+
+  beforeEach(async () => {
+    rootDir = join(tmpdir(), `os-22175-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await fs.mkdir(rootDir, { recursive: true });
+    adapter = new LocalStorageAdapter({ rootDir, signingSecret: 'test-secret' });
+    httpServer = createMockHttpServer();
+    warnings = [];
+  });
+
+  afterEach(async () => {
+    if (rootDir) await fs.rm(rootDir, { recursive: true, force: true });
+  });
+
+  describe('the commit door', () => {
+    it('answers 409 RESOURCE_CONFLICT naming the change, writes nothing, and logs the cause', async () => {
+      const engine = createFakeEngine();
+      await seed(mount(engine));
+      const res = await drive('POST', COMMIT, 'alice@b', { body: { fileId: 'f1', eTag: 'etag-b' } });
+      expectOrganizationChanged(res, 'commit from org_b');
+      expect(engine._rows('sys_file')[0]).toMatchObject({ status: 'pending', organization_id: 'org_a' });
+      expect(engine._rows('sys_file')[0].etag).toBeUndefined();
+      // The operator log names the cause: which upload, where it started, where the uploader acts now.
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("'f1'");
+      expect(warnings[0]).toContain("'org_a'");
+      expect(warnings[0]).toContain("'org_b'");
+    });
+
+    it('CONTROL — same organization: commits as before, and logs nothing', async () => {
+      const engine = createFakeEngine();
+      await seed(mount(engine));
+      const res = await drive('POST', COMMIT, 'alice@a', { body: { fileId: 'f1', eTag: 'etag-a' } });
+      expect(res._status).toBe(200);
+      expect(res._json.data.fileId).toBe('f1');
+      expect(engine._rows('sys_file')[0]).toMatchObject({ status: 'committed', etag: 'etag-a' });
+      expect(warnings).toEqual([]);
+    });
+
+    it('CONTROL — a real engine failure on a same-organization row still answers 500 with the outage text', async () => {
+      const engine = createFakeEngine();
+      await seed(mount(engine));
+      engine._setFailing('update', true);
+      const res = await drive('POST', COMMIT, 'alice@a', { body: { fileId: 'f1', eTag: 'etag-a' } });
+      expect(res._status).toBe(500);
+      expect(res._json.error.code).toBe('INTERNAL');
+      expect(res._json.error.message).toContain('did not land');
+      expect(res._json.error.message).toContain('Restore the data engine');
+      expect(engine._rows('sys_file')[0]).toMatchObject({ status: 'pending' });
+    });
+
+    it('UNCHANGED — no active organization: the write carries no scope, and commits as before', async () => {
+      const engine = createFakeEngine();
+      await seed(mount(engine));
+      expect((await drive('POST', COMMIT, 'alice@none', { body: { fileId: 'f1' } }))._status).toBe(200);
+      expect(engine._rows('sys_file')[0]).toMatchObject({ status: 'committed' });
+    });
+
+    it('UNCHANGED — a row stamped with no organization stays in reach from any organization', async () => {
+      const engine = createFakeEngine();
+      const store = mount(engine);
+      await store.createFile({ id: 'f0', key: 'user/f0.txt', name: 'f0.txt', status: 'pending', owner_id: 'u_alice' });
+      expect((await drive('POST', COMMIT, 'alice@b', { body: { fileId: 'f0' } }))._status).toBe(200);
+      expect(engine._rows('sys_file')[0]).toMatchObject({ status: 'committed' });
+    });
+
+    it('the ownership rule runs FIRST: a non-uploader acting in another organization learns nothing of it', async () => {
+      const engine = createFakeEngine();
+      await seed(mount(engine));
+      const res = await drive('POST', COMMIT, 'carol@b', { body: { fileId: 'f1' } });
+      expect(res._status).toBe(403);
+      expect(res._json.error.code).toBe('PERMISSION_DENIED');
+      expect(JSON.stringify(res._json)).not.toContain('organization');
+      expect(warnings).toEqual([]);
+    });
+  });
+
+  describe('the chunked-completion door', () => {
+    it('answers 409 RESOURCE_CONFLICT naming the change, moves neither row, and logs the cause', async () => {
+      const engine = createFakeEngine();
+      await seed(mount(engine));
+      const res = await drive('POST', CHUNKED_COMPLETE, 'alice@b', { params: { uploadId }, body: { parts: [] } });
+      expectOrganizationChanged(res, 'chunked completion from org_b');
+      expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'in_progress' });
+      expect(engine._rows('sys_file')[0]).toMatchObject({ status: 'pending' });
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(`'${uploadId}'`);
+      expect(warnings[0]).toContain("'org_a'");
+      expect(warnings[0]).toContain("'org_b'");
+    });
+
+    it('a session row with no organization still answers 409 when its FILE row is out of reach — that write would miss', async () => {
+      const engine = createFakeEngine();
+      await seed(mount(engine), null);
+      expect(engine._rows('sys_upload_session')[0].organization_id).toBeUndefined();
+      const res = await drive('POST', CHUNKED_COMPLETE, 'alice@b', { params: { uploadId }, body: { parts: [] } });
+      expectOrganizationChanged(res, 'org-less session, file in org_a');
+      expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'in_progress' });
+      expect(engine._rows('sys_file')[0]).toMatchObject({ status: 'pending' });
+    });
+
+    it('asked BEFORE the expiry write: an expired session is not stamped from the other organization', async () => {
+      const engine = createFakeEngine();
+      const store = mount(engine);
+      await seed(store);
+      await store.updateSession(uploadId, { expires_at: new Date(Date.now() - 60_000).toISOString() });
+      expectOrganizationChanged(
+        await drive('POST', CHUNKED_COMPLETE, 'alice@b', { params: { uploadId }, body: { parts: [] } }),
+        'expired, from org_b',
+      );
+      expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'in_progress' });
+      // Control: from its own organization the uploader reaches the expiry branch, which does write.
+      const home = await drive('POST', CHUNKED_COMPLETE, 'alice@a', { params: { uploadId }, body: { parts: [] } });
+      expect(home._status).toBe(410);
+      expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'expired' });
+    });
+
+    it('CONTROL — same organization: completes as before, and logs nothing', async () => {
+      const engine = createFakeEngine();
+      await seed(mount(engine));
+      const res = await drive('POST', CHUNKED_COMPLETE, 'alice@a', { params: { uploadId }, body: { parts: [] } });
+      expect(res._status).toBe(200);
+      expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'completed' });
+      expect(engine._rows('sys_file')[0]).toMatchObject({ status: 'committed' });
+      expect(warnings).toEqual([]);
+    });
+
+    it('CONTROL — a real engine failure on same-organization rows still answers 500 with the outage text', async () => {
+      const engine = createFakeEngine();
+      await seed(mount(engine));
+      engine._setFailing('update', true);
+      const res = await drive('POST', CHUNKED_COMPLETE, 'alice@a', { params: { uploadId }, body: { parts: [] } });
+      expect(res._status).toBe(500);
+      expect(res._json.error.code).toBe('INTERNAL');
+      expect(res._json.error.message).toContain('Restore the data engine');
+      expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'in_progress' });
+    });
+
+    it('the ownership rule runs FIRST: a non-uploader acting in another organization learns nothing of it', async () => {
+      const engine = createFakeEngine();
+      await seed(mount(engine));
+      const res = await drive('POST', CHUNKED_COMPLETE, 'carol@b', { params: { uploadId }, body: { parts: [] } });
+      expect(res._status).toBe(403);
+      expect(res._json.error.code).toBe('PERMISSION_DENIED');
+      expect(JSON.stringify(res._json)).not.toContain('organization');
+      expect(warnings).toEqual([]);
+    });
+  });
+
+  describe('the chunk door (#22218)', () => {
+    it('answers 409 RESOURCE_CONFLICT naming the change, sends no chunk to the backend, leaves the session, and logs the cause', async () => {
+      const engine = createFakeEngine();
+      await seed(mount(engine));
+      const before = { ...engine._rows('sys_upload_session')[0] };
+      const uploadChunk = vi.spyOn(adapter, 'uploadChunk');
+      const res = await sendChunk('alice@b');
+      expectOrganizationChanged(res, 'chunk from org_b');
+      expect(uploadChunk).not.toHaveBeenCalled();
+      expect(engine._rows('sys_upload_session')[0]).toEqual(before);
+      expect(before).toMatchObject({ status: 'in_progress', organization_id: 'org_a', uploaded_chunks: 0 });
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('chunk:');
+      expect(warnings[0]).toContain(`'${uploadId}'`);
+      expect(warnings[0]).toContain("'org_a'");
+      expect(warnings[0]).toContain("'org_b'");
+    });
+
+    it('asked BEFORE the expiry write: an expired session is not stamped from the other organization', async () => {
+      const engine = createFakeEngine();
+      const store = mount(engine);
+      await seed(store);
+      await pastDeadline(store);
+      expectOrganizationChanged(await sendChunk('alice@b'), 'expired, chunk from org_b');
+      expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'in_progress' });
+      // Control: from its own organization the uploader reaches the expiry branch, which does write.
+      const home = await sendChunk('alice@a');
+      expect(home._status).toBe(410);
+      expect(home._json.error.code).toBe('UPLOAD_SESSION_EXPIRED');
+      expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'expired' });
+    });
+
+    it('CONTROL — same organization: the chunk lands as before, and logs nothing', async () => {
+      const engine = createFakeEngine();
+      await seed(mount(engine));
+      const res = await sendChunk('alice@a');
+      expect(res._status).toBe(200);
+      expect(res._json.data).toMatchObject({ chunkIndex: 0, bytesReceived: 7 });
+      expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'in_progress', uploaded_chunks: 1 });
+      expect(warnings).toEqual([]);
+    });
+
+    it('CONTROL — a real engine failure on a same-organization session still answers 500 with the outage text', async () => {
+      const engine = createFakeEngine();
+      await seed(mount(engine));
+      engine._setFailing('update', true);
+      const res = await sendChunk('alice@a');
+      expect(res._status).toBe(500);
+      expect(res._json.error.code).toBe('INTERNAL');
+      expect(res._json.error.message).toContain('persisted upload progress is stale');
+      expect(res._json.error.message).toContain('Restore the data engine');
+      expect(warnings).toEqual([]);
+    });
+
+    it('UNCHANGED — a session row with no organization stays in reach: this door writes no file row', async () => {
+      const engine = createFakeEngine();
+      await seed(mount(engine), null);
+      expect(engine._rows('sys_upload_session')[0].organization_id).toBeUndefined();
+      expect((await sendChunk('alice@b'))._status).toBe(200);
+      expect(engine._rows('sys_upload_session')[0]).toMatchObject({ uploaded_chunks: 1 });
+    });
+
+    it('the resume token runs FIRST: a caller without it, acting in another organization, learns nothing of it', async () => {
+      const engine = createFakeEngine();
+      const store = mount(engine);
+      await seed(store);
+      await store.updateSession(uploadId, { resume_token: 'token-a' });
+      const res = await sendChunk('alice@b', { 'x-resume-token': 'wrong' });
+      expect(res._status).toBe(403);
+      expect(res._json.error.code).toBe('INVALID_RESUME_TOKEN');
+      expect(JSON.stringify(res._json)).not.toContain('organization');
+      expect(warnings).toEqual([]);
+      // With the token, the same caller is told what changed.
+      expectOrganizationChanged(await sendChunk('alice@b', { 'x-resume-token': 'token-a' }), 'chunk with token');
+    });
+  });
+
+  describe('the progress door, once the expiry stamp is due (#22218)', () => {
+    it('answers 409 RESOURCE_CONFLICT naming the change, does not stamp the session, and logs the cause', async () => {
+      const engine = createFakeEngine();
+      const store = mount(engine);
+      await seed(store);
+      await pastDeadline(store);
+      const res = await drive('GET', PROGRESS, 'alice@b', { params: { uploadId } });
+      expectOrganizationChanged(res, 'progress past the deadline from org_b');
+      expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'in_progress', organization_id: 'org_a' });
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('progress:');
+      expect(warnings[0]).toContain(`'${uploadId}'`);
+      expect(warnings[0]).toContain("'org_a'");
+      expect(warnings[0]).toContain("'org_b'");
+    });
+
+    it('CONTROL — same organization: reports and stamps `expired` as before, and logs nothing', async () => {
+      const engine = createFakeEngine();
+      const store = mount(engine);
+      await seed(store);
+      await pastDeadline(store);
+      const res = await drive('GET', PROGRESS, 'alice@a', { params: { uploadId } });
+      expect(res._status).toBe(200);
+      expect(res._json.data.status).toBe('expired');
+      expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'expired' });
+      expect(warnings).toEqual([]);
+    });
+
+    it('CONTROL — a real engine failure on the same-organization expiry stamp still answers 500 with the outage text', async () => {
+      const engine = createFakeEngine();
+      const store = mount(engine);
+      await seed(store);
+      await pastDeadline(store);
+      engine._setFailing('update', true);
+      const res = await drive('GET', PROGRESS, 'alice@a', { params: { uploadId } });
+      expect(res._status).toBe(500);
+      expect(res._json.error.code).toBe('INTERNAL');
+      expect(res._json.error.message).toContain('Restore the data engine');
+      expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'in_progress' });
+    });
+
+    it('asked only when the stamp is due: a session already `expired` is reported from the other organization, as a read', async () => {
+      const engine = createFakeEngine();
+      const store = mount(engine);
+      await seed(store);
+      await pastDeadline(store);
+      await store.updateSession(uploadId, { status: 'expired' });
+      const res = await drive('GET', PROGRESS, 'alice@b', { params: { uploadId } });
+      expect(res._status).toBe(200);
+      expect(res._json.data.status).toBe('expired');
+      expect(warnings).toEqual([]);
+    });
+
+    it('UNCHANGED — a session row with no organization stays in reach: stamped `expired` from any organization', async () => {
+      const engine = createFakeEngine();
+      const store = mount(engine);
+      await seed(store, null);
+      expect(engine._rows('sys_upload_session')[0].organization_id).toBeUndefined();
+      await pastDeadline(store);
+      const res = await drive('GET', PROGRESS, 'alice@b', { params: { uploadId } });
+      expect(res._status).toBe(200);
+      expect(res._json.data.status).toBe('expired');
+      expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'expired' });
+    });
+
+    it('the ownership rule runs FIRST: a non-uploader acting in another organization learns nothing of it', async () => {
+      const engine = createFakeEngine();
+      const store = mount(engine);
+      await seed(store);
+      await pastDeadline(store);
+      const res = await drive('GET', PROGRESS, 'carol@b', { params: { uploadId } });
+      expect(res._status).toBe(403);
+      expect(res._json.error.code).toBe('PERMISSION_DENIED');
+      expect(JSON.stringify(res._json)).not.toContain('organization');
+      expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'in_progress' });
+      expect(warnings).toEqual([]);
+    });
+  });
+
+  describe('unchanged', () => {
+    it('the progress door still answers the uploader after the switch — it is a read', async () => {
+      const engine = createFakeEngine();
+      await seed(mount(engine));
+      const res = await drive('GET', PROGRESS, 'alice@b', { params: { uploadId } });
+      expect(res._status).toBe(200);
+      expect(res._json.data.fileId).toBe('f1');
+      expect(warnings).toEqual([]);
+    });
+
+    it('the engine-absent stand-in does not scope, so both doors finish the upload from any organization as before', async () => {
+      const store = mount(null);
+      await seed(store);
+      expect((await drive('POST', COMMIT, 'alice@b', { body: { fileId: 'f1' } }))._status).toBe(200);
+      expect((await store.getFile('f1'))?.status).toBe('committed');
+      const chunked = await drive('POST', CHUNKED_COMPLETE, 'alice@b', { params: { uploadId }, body: { parts: [] } });
+      expect(chunked._status).toBe(200);
+      expect((await store.getSession(uploadId))?.status).toBe('completed');
+      expect(warnings).toEqual([]);
+    });
+
+    it('the engine-absent stand-in: the chunk door and the progress door\'s expiry stamp answer from any organization as before (#22218)', async () => {
+      const store = mount(null);
+      await seed(store);
+      expect((await sendChunk('alice@b'))._status).toBe(200);
+      expect((await store.getSession(uploadId))?.uploaded_chunks).toBe(1);
+      await pastDeadline(store);
+      const progress = await drive('GET', PROGRESS, 'alice@b', { params: { uploadId } });
+      expect(progress._status).toBe(200);
+      expect(progress._json.data.status).toBe('expired');
+      expect((await store.getSession(uploadId))?.status).toBe('expired');
+      expect(warnings).toEqual([]);
+    });
+  });
+});

@@ -42,5 +42,5 @@ export const entry: SemanticMigration = {
     + 'its amounts exactly as before the upgrade, because the key never changed a rendered '
     + 'amount. `os migrate meta --stored --apply` rewrites stored rows so the per-row notice '
     + 'stops. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; '
-    + 'apply them by hand.',
+    + '`--write` applies the ones it can prove, and you apply the rest by hand.',
 };

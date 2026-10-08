@@ -51,7 +51,9 @@
 // Since that walk, the seven `sys_account._actions.link_social` provider-brand
 // rows (Google through Discord) left this ledger together with the action,
 // retired under ADR-0049 enforce-or-remove (#21849): the bundle no longer
-// carries those leaves, so the ledger below holds 47 echoes.
+// carries those leaves, so the ledger held 47 echoes. Then the `global` option
+// of `sys_setting.scope` left with the settings cascade's global rung
+// (ADR-0131 D7): the ledger below holds 46.
 //
 // ## What this file deliberately does NOT assert
 //
@@ -178,7 +180,6 @@ const DECISIONS: readonly Decision[] = [
   echo('sys_notification.fields.actor_id.label', 'Actor', SAME_WORD_ACTOR),
   echo('sys_metadata_audit.fields.actor.label', 'Actor', SAME_WORD_ACTOR),
   echo('sys_setting_audit.fields.actor_id.label', 'Actor', SAME_WORD_ACTOR),
-  echo('sys_setting.fields.scope.options.global', 'Global', SAME_WORD_GLOBAL),
   echo('sys_setting_audit.fields.scope.options.global', 'Global', SAME_WORD_GLOBAL),
   echo('sys_email_template.fields.variables_json.label', 'Variables (JSON)', SAME_WORD_VARIABLES),
 
@@ -237,10 +238,13 @@ function undeclaredEchoes(rows: readonly Decision[]): string[] {
 }
 
 describe('#20493 es-ES — the ledger itself (controls before verdicts)', () => {
-  it('is the size it claims: 3 pinned translations and 47 declared echoes, no path twice', () => {
-    expect(DECISIONS.length).toBe(50);
+  // [ADR-0131 D7] 47 → 46 echoes: `sys_setting.scope` no longer declares the
+  // `global` option (the rung moved to `sys_platform_setting`), so its leaf left
+  // the catalog with it. `sys_setting_audit.scope`'s `global` option stays.
+  it('is the size it claims: 3 pinned translations and 46 declared echoes, no path twice', () => {
+    expect(DECISIONS.length).toBe(49);
     expect(DECISIONS.filter((d) => d.verdict === 'translate').length).toBe(3);
-    expect(DECISIONS.filter((d) => d.verdict === 'echo').length).toBe(47);
+    expect(DECISIONS.filter((d) => d.verdict === 'echo').length).toBe(46);
     expect(new Set(DECISIONS.map((d) => d.path)).size).toBe(DECISIONS.length);
   });
 

@@ -161,6 +161,15 @@ const sysSettingObject = {
   ),
 };
 
+/** [ADR-0131 D7] The global rung's store: no `scope`, no `user_id`. */
+const sysPlatformSettingObject = {
+  name: 'sys_platform_setting',
+  label: 'Platform Setting',
+  fields: Object.fromEntries(
+    ['id', 'namespace', 'key', 'value', 'value_enc'].map((f) => [f, textField(f)]),
+  ),
+};
+
 const sysMetadataObject = {
   name: 'sys_metadata',
   label: 'Metadata',
@@ -205,7 +214,7 @@ async function buildRuntime() {
   // `packageId` is required by the built declaration this package resolves
   // (`registerObject(schema, packageId, …)`); the engine's own in-package tests
   // reach a source signature that defaults it.
-  for (const object of [sysSecretObject, sysSettingObject, sysMetadataObject, smtpObject]) {
+  for (const object of [sysSecretObject, sysSettingObject, sysPlatformSettingObject, sysMetadataObject, smtpObject]) {
     engine.registry.registerObject(object as never, TEST_PACKAGE_ID);
   }
 
@@ -329,7 +338,7 @@ describe('the premise: the shipped settings-scoped classifier calls a LIVE crede
   });
 });
 
-describe('family 1 — settings (`sys_setting.value_enc`)', () => {
+describe('family 1 — settings (`sys_setting.value_enc` and `sys_platform_setting.value_enc`)', () => {
   let rt: Runtime;
   beforeEach(async () => { rt = await buildRuntime(); });
 
@@ -358,6 +367,41 @@ describe('family 1 — settings (`sys_setting.value_enc`)', () => {
     const result = await collectSettingsSecretReferences(rt.engine);
     expect(result.status).toBe('gap');
     expect(result.status === 'gap' && result.reason).toContain('connection reset');
+
+    const union = await collect(rt);
+    expect(union.complete).toBe(false);
+    expect(union.gaps.map((g) => g.family)).toContain('settings');
+  });
+
+  // [ADR-0131 D7] The global rung moved to `sys_platform_setting`, and the
+  // deployment-wide values it holds are exactly the provider credentials (mail,
+  // SMS, storage, AI). A union over `sys_setting` alone reads their handles as
+  // unreferenced, and the sweep deletes the credential in force.
+  it('names a handle held ONLY by sys_platform_setting.value_enc — the global rung', async () => {
+    const handle = await rt.crypto.encrypt('relay-api-key', { scope: 'settings', namespace: 'smtp', key: 'password' });
+    rt.store.seed('sys_secret', {
+      id: handle.id, namespace: 'smtp', key: 'password', kms_key_id: handle.kmsKeyId,
+      alg: handle.alg, version: handle.version, ciphertext: handle.ciphertext,
+    });
+    rt.store.seed('sys_platform_setting', { id: 'ps_1', namespace: 'smtp', key: 'password', value_enc: handle.id });
+    // Anti-vacuity: no `sys_setting` row names it, so only the new holder can.
+    expect(rt.store.rowsOf('sys_setting').some((r) => r.value_enc === handle.id)).toBe(false);
+
+    const union = await collect(rt);
+    assertSecretReferenceUnionComplete(union);
+    expect(union.handleIds.has(handle.id)).toBe(true);
+    const refs = union.references.filter((r) => r.handleId === handle.id);
+    expect(refs).toHaveLength(1);
+    expect(refs[0].family).toBe('settings');
+    expect(refs[0].holder).toBe('sys_platform_setting(namespace=smtp,key=password)');
+  });
+
+  it('an unreadable sys_platform_setting gaps the WHOLE settings family', async () => {
+    rt.store.failReadsOf('sys_platform_setting', new Error('relation does not exist'));
+    const result = await collectSettingsSecretReferences(rt.engine);
+    expect(result.status).toBe('gap');
+    expect(result.status === 'gap' && result.reason).toContain('sys_platform_setting');
+    expect(result.status === 'gap' && result.reason).toContain('relation does not exist');
 
     const union = await collect(rt);
     expect(union.complete).toBe(false);

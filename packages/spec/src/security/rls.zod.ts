@@ -134,7 +134,7 @@ const RLS_POLICY_TAGS_RETIRED =
   + 'on them, so a tag scoped, restricted and reported nothing. Delete the key. A tag never limited '
   + 'whom a policy applies to; to do that, list the positions in `positions`. A policy is identified '
   + 'by its `name` and its `object`; say why it exists in `description`. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * Row-Level Security Policy Schema
@@ -548,7 +548,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
   priority: retiredKey(
     '`rowLevelSecurity[].priority` was removed in @objectstack/spec 17.0.0. ' +
     'It never had an effect. Delete the key — policy outcomes are unchanged. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   /**

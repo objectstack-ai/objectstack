@@ -17,7 +17,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SysUser } from '@objectstack/platform-objects/identity';
-import { SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
+import { SysPlatformSetting, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
 import { SettingsService } from './settings-service.js';
 import { buildSettingAuditWriter, wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
 
@@ -83,7 +83,7 @@ beforeEach(async () => {
   rowsOf = memory.rowsOf;
   engine.registerDriver(memory.driver, true);
   await engine.init();
-  for (const o of [SysUser, SysSetting, SysSettingAudit]) engine.registry.registerObject(o as any, '@objectstack/platform-objects');
+  for (const o of [SysUser, SysSetting, SysPlatformSetting, SysSettingAudit]) engine.registry.registerObject(o as any, '@objectstack/platform-objects');
   const user = await engine.insert('sys_user', { name: 'Ada', email: 'ada@example.test' }, SYS);
   userId = String((user as any).id);
 });

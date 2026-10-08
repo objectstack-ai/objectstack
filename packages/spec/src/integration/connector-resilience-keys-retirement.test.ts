@@ -91,7 +91,7 @@ const POINTS_AT: Record<RetiredKey, readonly string[]> = {
 };
 
 const MIGRATE_SENTENCE =
-  /Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand\.$/;
+  /Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\.$/;
 
 function issueAt(result: { success: boolean; error?: { issues: readonly { path: PropertyKey[]; code: string; message: string }[] } }, at: string) {
   expect(result.success, `the parse must refuse \`${at}\``).toBe(false);

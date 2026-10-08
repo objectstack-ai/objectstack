@@ -13,6 +13,11 @@
 // than to a hand-copied literal that would need editing on both sides anyway.
 // A future fourth cascade layer therefore lands here as a red test, not as a
 // silent re-divergence.
+//
+// [ADR-0131 D7] Since the global rung moved to the tenant-less
+// `sys_platform_setting`, this table stores the cascade's OTHER layers: its
+// option list is the spec enum minus `global`, and that difference is pinned
+// as such. The audit trail still records every layer, `global` included.
 import { describe, expect, it } from 'vitest';
 import { SpecifierScopeSchema } from '@objectstack/spec/system';
 import { SysSetting } from './sys-setting.object.js';
@@ -27,8 +32,14 @@ function optionValues(object: unknown, field: string): string[] {
 }
 
 describe('sys_setting.scope — value domain (#6036)', () => {
-  it('declares exactly the cascade layers the resolver walks', () => {
-    expect(optionValues(SysSetting, 'scope')).toEqual(['global', 'tenant', 'user']);
+  it('declares exactly the cascade layers this table stores', () => {
+    expect(optionValues(SysSetting, 'scope')).toEqual(['tenant', 'user']);
+  });
+
+  it('[ADR-0131 D7] does not declare `global` — that rung is stored in sys_platform_setting', () => {
+    // Its own case because re-adding the option breaks nothing at runtime:
+    // the service never writes such a row and excludes one from its reads.
+    expect(optionValues(SysSetting, 'scope')).not.toContain('global');
   });
 
   it('does not declare a `runtime` layer', () => {
@@ -38,17 +49,23 @@ describe('sys_setting.scope — value domain (#6036)', () => {
     expect(optionValues(SysSetting, 'scope')).not.toContain('runtime');
   });
 
-  it('matches SpecifierScopeSchema — the reference truth for the cascade', () => {
+  it('matches SpecifierScopeSchema minus the global rung — the reference truth for the cascade', () => {
     // Set-compare: the spec enum is the authority on which layers exist, the
-    // object definition is the storage mirror. Either side growing alone is
-    // the #6036 defect, in whichever direction it happens next.
+    // object definition is the storage mirror of the layers stored HERE. Either
+    // side growing alone is the #6036 defect, in whichever direction it
+    // happens next.
     expect([...optionValues(SysSetting, 'scope')].sort()).toEqual(
-      [...SpecifierScopeSchema.options].sort(),
+      SpecifierScopeSchema.options.filter((s) => s !== 'global').sort(),
     );
   });
 
-  it('agrees with the audit trail object, which records the same layers', () => {
-    expect(optionValues(SysSettingAudit, 'scope')).toEqual(optionValues(SysSetting, 'scope'));
+  it('the audit trail object records EVERY layer — the global rung\'s changes included', () => {
+    // `buildSettingAuditWriter` writes the changed key's scope, and a
+    // global-scope change is still a change: the audit option list is the
+    // full spec enum, not this table's subset.
+    expect([...optionValues(SysSettingAudit, 'scope')].sort()).toEqual(
+      [...SpecifierScopeSchema.options].sort(),
+    );
   });
 
   it('keeps `tenant` as the default, and the default is a declared option', () => {

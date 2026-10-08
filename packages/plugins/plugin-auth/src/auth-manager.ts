@@ -131,9 +131,8 @@ import {
 } from './user-ban-write.js';
 import {
   PHONE_SMS_TOPICS,
-  builtinPhoneSmsBody,
   interpolatePhoneSms,
-  loadPhoneSmsTemplateBody,
+  resolvePhoneSmsTemplateBody,
 } from './phone-sms-texts.js';
 // commit 35e94c96b — the stored rung of the ruled locale ladder reuses the messaging
 // seam's normalizer rather than growing a second one. `normalizeRecipientLocale`
@@ -5821,9 +5820,7 @@ export class AuthManager {
     storedLocale?: string,
   ): Promise<string> {
     const locale = storedLocale ?? this.smsLocale;
-    const template =
-      (await loadPhoneSmsTemplateBody(this.getDataEngine(), topic, locale)) ??
-      builtinPhoneSmsBody(topic, locale);
+    const template = await resolvePhoneSmsTemplateBody(this.getDataEngine(), topic, locale);
     return interpolatePhoneSms(template, data);
   }
 

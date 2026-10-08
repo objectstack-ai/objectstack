@@ -23,7 +23,7 @@ The runtime publish gate now runs the build's field-rule-slot check on an object
 
 - Stored rows are not migrated, and they are not refused on read. An object stored before this change keeps loading until it is next saved. At that save the gate judges it, because the differential compares the write against the stored universe without its own stored row.
 - `conditionalRequired` is still refused at the save door's schema step, before this gate, as a key retired in protocol 17; `os build` judges it as a field-rule slot as before.
-- Option `visibleWhen` and the object's own action predicates are still not judged at this door. `os build` judges them, and the door does not, as before.
+- Option `visibleWhen` and the object's own action predicates are judged at this door through their own #22032 entries, each its own crossing, not through this one.
 - `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still turns a refusal into a logged write.
 - Measured before crossing: every field-rule slot this repository ships has 0 refusals and 0 advisories, at the build and at the door. That is 9 slots on 8 fields of 3 objects (examples: 8 on `showcase_invoice` and `showcase_invoice_line`, three of them `parent`-scoped; the platform: 1 on `sys_permission_set`), over the 118 objects this repository ships.
 - No public export or signature moves. `validateStackExpressions(stack)` keeps its signature, and no registry entry changes: the expression rule already declared `object`.

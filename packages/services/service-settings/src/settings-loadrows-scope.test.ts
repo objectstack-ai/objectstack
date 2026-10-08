@@ -43,9 +43,21 @@ function matches(row: Record<string, unknown>, where: Record<string, unknown>): 
   });
 }
 
+// [ADR-0131 D7] A row is stored by its rung: a `global` row in
+// `sys_platform_setting` (which has no `scope` and no `user_id` column), every
+// other row in `sys_setting`. The double answers each object from its own rows.
+function storeOf(obj: string, rows: Array<Record<string, unknown>>) {
+  if (obj === 'sys_platform_setting') {
+    return rows
+      .filter((r) => r.scope === 'global')
+      .map(({ scope: _scope, user_id: _userId, ...stored }) => stored);
+  }
+  return rows.filter((r) => r.scope !== 'global');
+}
+
 function makeEngine(rows: Array<Record<string, unknown>>) {
-  const find = vi.fn(async (_obj: string, opts: any) =>
-    rows.filter((r) => matches(r, opts?.where ?? {})),
+  const find = vi.fn(async (obj: string, opts: any) =>
+    storeOf(obj, rows).filter((r) => matches(r, opts?.where ?? {})),
   );
   return {
     find,

@@ -56,7 +56,7 @@ import { authIdentityObjects } from './manifest.js';
 import { withSystemReadContext } from './objectql-adapter.js';
 import { probeHumanUsersPresence, probeSignInAccountsPresence } from './boot-sign-in-reachability.js';
 import { decideDevAdminSeedGate } from './dev-admin-seed-gate.js';
-import { loadPhoneSmsTemplateBody, seedPhoneSmsTemplates } from './phone-sms-texts.js';
+import { resolvePhoneSmsTemplateBody } from './phone-sms-texts.js';
 import { resolveDefaultOrgId } from './tenancy-service.js';
 import { probeAccountIdentityCollisions } from './account-identity-preflight.js';
 import { canonicalizeStoredMemberRoles } from './member-role-canonical.js';
@@ -407,16 +407,14 @@ describe('#15597 — the blocks driven through their real production entry point
     });
   });
 
-  it('phone-sms template load + seed read the bare array (B14, the `data` limb)', async () => {
+  it('phone-sms template read reads the bare array (B14, the `data` limb)', async () => {
     const engine = await bootEngine();
     await seedAll(engine);
-    expect(await loadPhoneSmsTemplateBody(engine as never, 'otp', 'en')).toBe('code {{code}}');
-    expect(await loadPhoneSmsTemplateBody(engine as never, 'nosuchtopic', 'en')).toBeNull();
-    // The seeder's existence read is the second `rowsOf` call site: the row
-    // above is already present, so it must not be duplicated.
-    await seedPhoneSmsTemplates(engine as never);
-    const rows = await engine.find('sys_notification_template', { where: { topic: 'otp', channel: 'sms', locale: 'en' }, limit: 100 }, SYSTEM);
-    expect((rows as unknown[]).length).toBe(1);
+    expect(await resolvePhoneSmsTemplateBody(engine as never, 'otp', 'en')).toBe('code {{code}}');
+    // No row and no built-in text for the topic: the built-in walk's empty
+    // floor, not a row invented from a misread envelope. (The seeder's
+    // existence read, this site's second `rowsOf` call, retired with the seed.)
+    expect(await resolvePhoneSmsTemplateBody(engine as never, 'nosuchtopic', 'en')).toBe('');
   });
 
   it('tenancy resolveDefaultOrgId reads the bare array (B7)', async () => {

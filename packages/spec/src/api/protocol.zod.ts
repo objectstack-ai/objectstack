@@ -717,13 +717,19 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
   ),
   packageId: z.string().nullable().optional().describe(
     'ADR-0048 — the software package to bind the saved row to '
-    + '(`sys_metadata.package_id`; `?package=<id>` on the REST door, sent '
-    + 'only when it names a real package). Set when authoring inside a '
-    + 'Studio package workspace; a named read-only base package is refused. '
-    + 'On create the row is stamped with this id; on update an existing '
-    + 'binding is preserved, never silently re-bound. Absent = env-local '
-    + 'overlay (no package stamp); it also scopes which row the unpinned '
-    + 'parent-version resolution reads.',
+    + '(`sys_metadata.package_id`; `?package=<id>` on the REST door, where '
+    + '`all` and an empty value name no package). Set when authoring inside '
+    + 'a Studio package workspace; a named read-only base package is '
+    + 'refused. On create the row is stamped with this id; on update an '
+    + 'existing binding is preserved, never silently re-bound. Absent or '
+    + '`null` names no package: an `active` save writes the env-local '
+    + 'overlay (no package stamp), and a `draft` save writes the draft of '
+    + 'the package the item\'s active row is bound to when it is '
+    + 'package-bound (a pending change stays in the package it edits), else '
+    + 'the env-local draft. That row is also the one the parent-version '
+    + 'resolution reads: an unpinned save takes its version as the parent '
+    + '(last-write-wins), a pinned one is judged against it, and the item '
+    + 'read at the same scope serves it as `version`.',
   ),
   writeFace: z.enum(['package-duplicate', 'meta-envelope', 'meta-dispatch', 'external-import']).optional().describe(
     'Which write door a refusal is being rendered FOR — stated by the '

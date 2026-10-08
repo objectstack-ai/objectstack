@@ -54,6 +54,9 @@ export const SysInvitation = ObjectSchema.create({
     {
       name: 'invite_user',
       label: 'Invite User',
+      // Same wording as the sys_user / sys_member mirrors.
+      description:
+        'Invite someone by email address. They join this organization with the chosen role when they accept the invitation.',
       icon: 'user-plus',
       variant: 'primary',
       locations: ['list_toolbar'],
@@ -67,7 +70,9 @@ export const SysInvitation = ObjectSchema.create({
       // unreachable in single-org anyway (no invitation rows exist).
       requiresFeature: 'organization',
       requiresMembershipReach: 'invite_member',
-      successMessage: 'Invitation sent',
+      // `${result.email}`: the invitee's address from the invitation row
+      // invite-member answers (see sys_user's mirror).
+      successMessage: 'Invitation sent to ${result.email}',
       refreshAfter: true,
       params: [
         { field: 'email', required: true },

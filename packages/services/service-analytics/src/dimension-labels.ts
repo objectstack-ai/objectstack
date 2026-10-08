@@ -96,8 +96,12 @@ export interface DimensionLabelDeps {
    * `translateObject` (`@objectstack/spec/system`) resolves for
    * `GET /meta/object/:name` (the object-metadata REST endpoint the console's
    * list/kanban/grid renderers already read their translated option labels
-   * from). This hook is how that SAME translator reaches an analytics
-   * dimension's option labels too — implemented once, in the plugin bridge
+   * from). A picklist-bound field (`picklist: '<name>'`) also inherits its
+   * list's labels, `picklists.<name>.options.<value>`, where no field-level
+   * entry exists (#22178) — the bridge hands the translator the field's
+   * `picklist`, as that endpoint does. This hook is how that SAME translator
+   * reaches an analytics dimension's option labels too, for the display pass
+   * and the sort-key pass alike — implemented once, in the plugin bridge
    * (`plugin.ts`), by calling `translateObject` itself; nothing here
    * reimplements the lookup.
    *
@@ -216,8 +220,16 @@ export function createOrderLabelResolver(
       const meta = metaFor(dimension);
       if (!meta) return undefined;
       if (Array.isArray(meta.options) && meta.options.length > 0) {
+        // [#22178] Sort by the label the display pass renders: the options
+        // `translateSelectOptions` answers for this request's locale, else the
+        // authored ones, exactly as `resolveDimensionLabels` reads them below.
+        // Sorting by the authored label while rendering the translated one
+        // ordered a localized grid, and windowed its `limit`, by text the user
+        // never sees. `meta` was found through this dimension, so it is known.
+        const field = dimByName.get(dimension)!.field;
+        const translated = deps.translateSelectOptions?.(baseObject, field, meta.options, context?.locale);
         const labelByValue = new Map<unknown, string>();
-        for (const opt of meta.options) {
+        for (const opt of translated ?? meta.options) {
           if (opt && opt.label != null) labelByValue.set(opt.value, String(opt.label));
         }
         return labelByValue;
