@@ -332,9 +332,13 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
    * A pending upload Alice started in `org_a`: its file row and, for the
    * chunked door, its session — opened on the real adapter, so a completion
    * that gets past the doors' questions really assembles. Sets {@link uploadId}.
+   *
+   * `null` seeds the session with NO organization. Not `undefined`: an
+   * `undefined` argument takes the parameter's default, so it would seed
+   * `org_a` and a pin about an org-less session would pin nothing.
    */
   let uploadId: string;
-  const seed = async (store: StorageMetadataStore, sessionOrganization: string | undefined = 'org_a') => {
+  const seed = async (store: StorageMetadataStore, sessionOrganization: string | null = 'org_a') => {
     uploadId = await adapter.initiateChunkedUpload('user/f1.bin', { contentType: 'application/octet-stream' });
     await store.createFile({
       id: 'f1',
@@ -353,7 +357,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
       chunk_size: 50,
       total_chunks: 2,
       status: 'in_progress',
-      ...(sessionOrganization ? { organization_id: sessionOrganization } : {}),
+      ...(sessionOrganization !== null ? { organization_id: sessionOrganization } : {}),
     });
   };
   const expectOrganizationChanged = (res: ReturnType<typeof createMockRes>, label: string) => {
@@ -466,7 +470,8 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
 
     it('a session row with no organization still answers 409 when its FILE row is out of reach — that write would miss', async () => {
       const engine = createFakeEngine();
-      await seed(mount(engine), undefined);
+      await seed(mount(engine), null);
+      expect(engine._rows('sys_upload_session')[0].organization_id).toBeUndefined();
       const res = await drive('POST', CHUNKED_COMPLETE, 'alice@b', { params: { uploadId }, body: { parts: [] } });
       expectOrganizationChanged(res, 'org-less session, file in org_a');
       expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'in_progress' });
@@ -577,7 +582,8 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
 
     it('UNCHANGED — a session row with no organization stays in reach: this door writes no file row', async () => {
       const engine = createFakeEngine();
-      await seed(mount(engine), undefined);
+      await seed(mount(engine), null);
+      expect(engine._rows('sys_upload_session')[0].organization_id).toBeUndefined();
       expect((await sendChunk('alice@b'))._status).toBe(200);
       expect(engine._rows('sys_upload_session')[0]).toMatchObject({ uploaded_chunks: 1 });
     });
@@ -653,7 +659,8 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
     it('UNCHANGED — a session row with no organization stays in reach: stamped `expired` from any organization', async () => {
       const engine = createFakeEngine();
       const store = mount(engine);
-      await seed(store, undefined);
+      await seed(store, null);
+      expect(engine._rows('sys_upload_session')[0].organization_id).toBeUndefined();
       await pastDeadline(store);
       const res = await drive('GET', PROGRESS, 'alice@b', { params: { uploadId } });
       expect(res._status).toBe(200);
