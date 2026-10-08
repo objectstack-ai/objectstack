@@ -18,8 +18,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * `SendTemplateInput.locale` for the ladder of record.
  *
  * Authoring: built-in templates are seeded by `EmailServicePlugin`
- * on `kernel:ready`; administrators may edit subject/body in Studio
- * and tenants may overlay specific rows.
+ * on `kernel:ready`, and an `email_template` edited in Studio is
+ * projected into its row. An organization does not create or edit a
+ * row here: `@objectstack/plugin-email` refuses a non-system create or
+ * update (ADR-0131 D6).
  *
  * @namespace sys
  */
@@ -135,7 +137,7 @@ export const SysEmailTemplate = ObjectSchema.create({
       required: false,
       defaultValue: false,
       readonly: true,
-      description: 'Provided by a plugin / platform; tenants may edit but should not delete',
+      description: 'Provided by a plugin / platform',
       group: 'Lifecycle',
     }),
 
@@ -156,11 +158,12 @@ export const SysEmailTemplate = ObjectSchema.create({
     // Mirrors sys_webhook (#3461) / sys_sharing_rule (#2909). `is_system`
     // remains the built-in-auth-template axis; these two track the DECLARED
     // metadata door: bootstrapDeclaredEmailTemplates seeds `package` rows and
-    // re-seeds them every boot, while an admin's edit stamps `customized` and
-    // freezes the row. Both are `readonly` — the engine strips them from
-    // non-system payloads, and only the seeder / stamp hook (isSystem) write
-    // them. Deliberately NOT a write gate: editing a template in Studio is a
-    // first-class admin action, it just has to be remembered.
+    // re-seeds them every boot, and skips a row marked `customized`. Both are
+    // `readonly` — the engine strips them from non-system payloads. Since
+    // ADR-0131 ruling C closed the organization door (plugin-email refuses a
+    // non-system create or update), nothing marks a row `customized` any more:
+    // the rows already marked are the population the v18 migration ceremony
+    // promotes to environment-level Studio templates.
     managed_by: Field.select(
       ['platform', 'package', 'admin'],
       {
@@ -181,8 +184,9 @@ export const SysEmailTemplate = ObjectSchema.create({
       readonly: true,
       defaultValue: false,
       description:
-        'Set when an admin edits a package-declared template; boot seeding will no longer ' +
-        'overwrite the row (a reworded password-reset mail survives redeploys). Meaningless on admin rows.',
+        'Set on a package-declared template an admin edited before organization-level template ' +
+        'editing closed; boot seeding never overwrites such a row. Nothing sets it any more. ' +
+        'Meaningless on admin rows.',
       group: 'System',
     }),
 

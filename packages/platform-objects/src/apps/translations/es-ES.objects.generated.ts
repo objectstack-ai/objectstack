@@ -2602,7 +2602,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       is_system: {
         label: "Plantilla del sistema",
-        help: "La proporciona un plugin o la plataforma; los tenants pueden editarla, pero no deberían eliminarla."
+        help: "La proporciona un plugin o la plataforma."
       },
       variables_json: {
         label: "Variables (JSON)",
@@ -2619,7 +2619,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       customized: {
         label: "Personalizada",
-        help: "Se establece cuando un administrador edita una plantilla declarada por un paquete; la siembra al arrancar ya no sobrescribirá la fila (un correo de restablecimiento de contraseña reformulado se conserva tras los redespliegues). No tiene significado en las filas de administrador."
+        help: "Marca una plantilla declarada por un paquete que un administrador editó antes de que se cerrara la edición de plantillas por organización; la siembra al arrancar nunca sobrescribe esa fila. Ya nada la establece. No tiene significado en las filas de administrador."
       },
       created_at: {
         label: "Creado el"

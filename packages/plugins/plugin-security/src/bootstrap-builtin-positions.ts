@@ -32,9 +32,17 @@
  * A `single`-posture deployment keeps exactly one organization-less pass. See
  * `per-organization-catalog.ts` for the doctrine and for the loud guard that
  * stands in place of a reap.
+ *
+ * ## The names come from the declarations
+ *
+ * The six are declared position metadata of this plugin (ADR-0131 D2;
+ * `builtin-positions.ts` holds the one list, which the plugin also registers
+ * with the engine registry). This seed reads that list — it has no list of its
+ * own — and writes the same rows it always has. `bootstrapDeclaredPositions`
+ * skips the six, so this remains their only writer.
  */
 
-import { BUILTIN_IDENTITY_NAMES, BUILTIN_IDENTITY_METADATA, EVERYONE_POSITION, GUEST_POSITION } from '@objectstack/spec';
+import { securityBuiltinPositions } from './builtin-positions.js';
 import {
   createSeedWriteRefusals,
   resolveOwnOrganizationRow,
@@ -45,25 +53,6 @@ import {
   type SeedLogger,
   type SeedWriteRefusals,
 } from './per-organization-catalog.js';
-
-/**
- * [ADR-0090 D5/D9] Audience anchors seeded alongside the identity names.
- * `everyone` — implicit for every authenticated member; its bindings are the
- * tenant's default grants. `guest` — implicit for unauthenticated principals.
- * Both are system-managed and undeletable like the identity rows.
- */
-const AUDIENCE_ANCHOR_METADATA: Record<string, { label: string; description: string }> = {
-  [EVERYONE_POSITION]: {
-    label: 'Everyone',
-    description:
-      'Built-in audience anchor: every authenticated member holds this position implicitly. Permission sets bound to it are the default grants for the tenant (ADR-0090 D5). High-privilege sets cannot be bound here.',
-  },
-  [GUEST_POSITION]: {
-    label: 'Guest',
-    description:
-      'Built-in audience anchor: unauthenticated principals hold this position implicitly and exclusively. Bindings face the strictest checks — named objects only, read-mostly, never a wildcard (ADR-0090 D9).',
-  },
-};
 
 function genId(prefix: string): string {
   const rand = Math.random().toString(36).slice(2, 10);
@@ -129,11 +118,11 @@ export async function bootstrapBuiltinRoles(
   const residue: string[] = [];
   // One log per pass, not per refused row (see the sibling seeders).
   const refusals = createSeedWriteRefusals();
-  const rows: Array<[string, { label: string; description: string }]> = [
-    ...BUILTIN_IDENTITY_NAMES.map((n) => [n, BUILTIN_IDENTITY_METADATA[n]] as [string, { label: string; description: string }]),
-    ...Object.entries(AUDIENCE_ANCHOR_METADATA),
-  ];
-  for (const [name, meta] of rows) {
+  // [ADR-0131 C2 S2] The ONE list of the six — the same declarations the
+  // plugin registers as position metadata (`builtin-positions.ts`). This seed
+  // writes exactly what it wrote from its own code list before.
+  const rows = securityBuiltinPositions;
+  for (const { name, ...meta } of rows) {
     // [A4 #2920] Unified provenance vocab: built-in identity/anchor positions are
     // PLATFORM-shipped (formerly stamped 'system'). Re-upserted every boot, so
     // legacy 'system' rows self-heal to 'platform' on the next kernel:ready.

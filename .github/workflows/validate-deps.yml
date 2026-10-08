@@ -17,6 +17,9 @@ on:
       # that governs it ever running on the PR that adds it.
       - 'osv-scanner.toml'
       - 'scripts/check-osv-exemptions.mjs'
+      # The pull_request verdict of the OSV step (#22082): an edit to it must
+      # be exercised on the PR that makes it.
+      - 'scripts/osv-base-relative.mjs'
       # Re-run when the workflow itself changes, so edits to these gates are
       # exercised on the PR that introduces them.
       - '.github/workflows/validate-deps.yml'
@@ -32,6 +35,11 @@ jobs:
   validate:
     name: Validate Package Dependencies
     runs-on: ubuntu-latest
+    # Measured over the 100 most recent completed runs: p50 1.3 min, max
+    # 1.9 min (#22082). 15 leaves room for a cold pnpm store and two OSV
+    # scans on a pull request, and stops a hung step long before GitHub's
+    # 360-minute default would.
+    timeout-minutes: 15
     permissions:
       contents: read
       issues: write
@@ -138,11 +146,110 @@ jobs:
           node scripts/check-osv-exemptions.mjs --self-test
           node scripts/check-osv-exemptions.mjs
 
+      # Two verdicts, one scanner pin (#22082, ruling A).
+      #
+      # `schedule` and `workflow_dispatch` judge `main` ABSOLUTELY: every
+      # advisory the lockfile matches fails the step. That daily red is the
+      # signal that files the finding card, and this step is unchanged by the
+      # pull_request verdict below.
+      #
+      # A pull request is judged BASE-RELATIVELY: it answers for the advisories
+      # it introduces, not for the ones `main` already carries -- those are
+      # `main`'s to fix, and a pull request that changes no dependency cannot
+      # fix them. The steps below scan the pull request's lockfile and the merge
+      # base's, each under its own `osv-scanner.toml`, and
+      # scripts/osv-base-relative.mjs fails only on an advisory the merge base
+      # does not match; the others become notices naming the advisory and its
+      # open finding card. A scan that does not reach a verdict fails closed.
+      #
+      # The pin is an untagged upstream commit after the v2.5.0 tag whose
+      # action.yml runs the ghcr.io/google/osv-scanner-action:v2.5.0 image (the
+      # comment here used to read v2.3.8). Keep all three `uses:` lines on ONE
+      # sha: the two verdicts must come from the same scanner.
       - name: Audit dependencies for known vulnerabilities (OSV-Scanner)
-        uses: google/osv-scanner-action/osv-scanner-action@f4cfcc01edc9c8b756a9b873b7a623ca674da51e # v2.3.8
+        if: github.event_name != 'pull_request'
+        uses: google/osv-scanner-action/osv-scanner-action@f4cfcc01edc9c8b756a9b873b7a623ca674da51e # untagged, v2.5.0 image
         with:
           scan-args: |-
             --lockfile=pnpm-lock.yaml
+
+      # The checkout is the pull request's test merge (refs/pull/N/merge) at
+      # depth 1. Its first parent is the base-branch commit GitHub merged the
+      # pull request into -- the merge base of the scanned tree and the base
+      # branch -- so ONE depth-1 fetch of that sha is all the history this needs
+      # (never fetch-depth: 0). When neither pnpm-lock.yaml nor osv-scanner.toml
+      # differs from it, the pull request cannot introduce an advisory and no
+      # scan runs. The ledger is part of the condition: a pull request that
+      # deletes an exemption changes the verdict without touching the lockfile.
+      - name: Stage the OSV comparison against the merge base (pull request)
+        id: osv-stage
+        if: github.event_name == 'pull_request'
+        run: |
+          node scripts/osv-base-relative.mjs --self-test
+          mapfile -t parents < <(git cat-file -p HEAD | sed -n 's/^parent //p')
+          if [ "${#parents[@]}" -ne 2 ]; then
+            echo "::error title=OSV base-relative verdict unavailable::HEAD is not the pull request's two-parent test merge (${#parents[@]} parent(s) found), so there is no merge base to judge against"
+            exit 1
+          fi
+          base="${parents[0]}"
+          git fetch --no-tags --depth=1 origin "$base"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          if git diff --quiet "$base" HEAD -- pnpm-lock.yaml osv-scanner.toml; then
+            echo "::notice title=OSV-Scanner verdict (base-relative)::lockfile unchanged — inherits main's verdict. pnpm-lock.yaml and osv-scanner.toml are identical to the merge base ${base:0:12}, so this pull request introduces no advisory; main's daily scheduled scan judges that lockfile."
+            echo "compare=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          for side in base head; do
+            if [ "$side" = base ]; then rev="$base"; else rev=HEAD; fi
+            mkdir -p ".osv-compare/$side"
+            git show "$rev:pnpm-lock.yaml" > ".osv-compare/$side/pnpm-lock.yaml"
+            git show "$rev:osv-scanner.toml" > ".osv-compare/$side/osv-scanner.toml"
+          done
+          echo "compare=true" >> "$GITHUB_OUTPUT"
+
+      # Both scans may exit non-zero (findings), so neither stops the job; the
+      # judge below reads each result file against its step's outcome.
+      # `--config` is explicit because the scanner looks for osv-scanner.toml
+      # only in the scanned lockfile's own directory (measured on 2.5.0: a
+      # ledger one directory up is not applied).
+      - name: OSV-Scanner on the merge base's lockfile (pull request)
+        id: osv-scan-base
+        if: steps.osv-stage.outputs.compare == 'true'
+        continue-on-error: true
+        uses: google/osv-scanner-action/osv-scanner-action@f4cfcc01edc9c8b756a9b873b7a623ca674da51e # untagged, v2.5.0 image
+        with:
+          scan-args: |-
+            --config=.osv-compare/base/osv-scanner.toml
+            --format=json
+            --output-file=.osv-compare/base/results.json
+            --lockfile=.osv-compare/base/pnpm-lock.yaml
+
+      - name: OSV-Scanner on the pull request's lockfile (pull request)
+        id: osv-scan-head
+        if: steps.osv-stage.outputs.compare == 'true'
+        continue-on-error: true
+        uses: google/osv-scanner-action/osv-scanner-action@f4cfcc01edc9c8b756a9b873b7a623ca674da51e # untagged, v2.5.0 image
+        with:
+          scan-args: |-
+            --config=.osv-compare/head/osv-scanner.toml
+            --format=json
+            --output-file=.osv-compare/head/results.json
+            --lockfile=.osv-compare/head/pnpm-lock.yaml
+
+      - name: Judge the pull request's OSV findings against the merge base's (pull request)
+        if: steps.osv-stage.outputs.compare == 'true'
+        env:
+          BASE_OUTCOME: ${{ steps.osv-scan-base.outcome }}
+          HEAD_OUTCOME: ${{ steps.osv-scan-head.outcome }}
+          BASE_SHA: ${{ steps.osv-stage.outputs.base }}
+          # Read-only use: the open-issue search that names an inherited
+          # advisory's finding card. The verdict never depends on it.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/osv-base-relative.mjs \
+            --base-results .osv-compare/base/results.json --base-outcome "$BASE_OUTCOME" \
+            --head-results .osv-compare/head/results.json --head-outcome "$HEAD_OUTCOME" \
+            --base-sha "$BASE_SHA"
 
       - name: List outdated packages
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

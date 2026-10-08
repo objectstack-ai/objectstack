@@ -812,6 +812,19 @@ overlay axis is retired (D6). One remains:
    with a release note? Depends on whether any deployment relies on the feature — this record cannot
    see that; the maintainer rules it when the C4 card is cut.
 
+   **Ruled 2026-10-06: C** ([#22005](https://github.com/objectstack-ai/objectstack/issues/22005), ruling
+   record `6020178017`, the maintainer's 「同意」). At the v18 upgrade the migration ceremony (C7) promotes
+   every customer-edited email template to an environment-level Studio template — both populations: the
+   `sys_email_template` rows stamped `customized: true`, and the organization-scoped `email_template`
+   overlays Studio saved under `single`. Under `single` the meaning is unchanged; on a deployment with more
+   than one organization a name conflict is listed in the plan and the operator chooses per row (D10 fate 4,
+   never guessed). After a verified promotion the customized rows are mirrors (D10 fate 2) and the row table
+   retires under D13 with an ADR-0087 entry. Not taken: A (a kept `(organization, name, locale)` resolution,
+   the door D6 closed) and B (deleting customer rows, which D10 does not sanction). Email templates only:
+   notification templates have no metadata type, so their seed retires and no type is added. C4's retirement
+   list is rewritten for "promote to environment level" and gains `bootstrapEffectiveEmailTemplates` /
+   `EffectiveEmailTemplateSources`.
+
 
 ## 7. Verification notes
 
