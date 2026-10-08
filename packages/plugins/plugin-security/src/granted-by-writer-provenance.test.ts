@@ -13,7 +13,6 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { createInvitationPlacementService } from './invitation-placement.js';
-import { reconcileOrgAdminGrant } from './auto-org-admin-grant.js';
 import {
   SysPermissionSet,
   SysPosition,
@@ -41,6 +40,8 @@ const TENANT_ADMIN = PermissionSetSchema.parse({
     },
   },
 });
+
+const MEMBER = PermissionSetSchema.parse({ name: 'qa_member', objects: {} });
 
 const CRUD = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, viewAllRecords: true };
 const DELEGATE = PermissionSetSchema.parse({
@@ -127,7 +128,7 @@ async function boot() {
     objectql: engine,
     metadata: {
       get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
-      list: async () => [TENANT_ADMIN, DELEGATE],
+      list: async () => [MEMBER, TENANT_ADMIN, DELEGATE],
     },
   };
   const ctx = {
@@ -139,7 +140,7 @@ async function boot() {
       return services[name];
     },
   };
-  const plugin = new SecurityPlugin({ fallbackPermissionSet: 'qa_tenant_admin' });
+  const plugin = new SecurityPlugin({ fallbackPermissionSet: 'qa_member' });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
   return { engine, registered, plugin };
@@ -211,8 +212,8 @@ describe('MEASURE granted_by per writer case', () => {
       { id: 'ps_oa', name: 'organization_admin', label: 'OA', active: true },
       { id: 'ps_oa_nb', name: 'organization_admin_no_bypass', label: 'OA nb', active: true },
     ], SYS);
-    await engine.insert('sys_member', { id: 'm1', user_id: TARGET, organization_id: 'o1', role: 'owner', created_at: new Date().toISOString() }, SYS);
-    const res = await reconcileOrgAdminGrant(engine, TARGET, 'o1', { posture: 'single', attributedUserId: ISSUER });
+    await engine.insert('sys_member', { id: 'm1', user_id: TARGET, organization_id: 'o1', role: 'owner', created_at: new Date().toISOString() }, { context: { isSystem: true, attributedUserId: ISSUER } } as never);
+    const res = 'via-middleware';
     const rows = await engine.find('sys_user_permission_set', { where: { user_id: TARGET }, context: { isSystem: true } } as never) as any[];
     console.log('MEASURE auto-org-admin ->', JSON.stringify({ res, granted_by: rows.map((r) => r.granted_by) }));
   });

@@ -103,9 +103,17 @@ export const SysUserPosition = ObjectSchema.create({
       description: 'Tenant that owns this assignment; null = global (cross-tenant).',
     }),
 
+    // Provenance, not a business link — the same contract as
+    // `sys_user_permission_set.granted_by`: a non-system insert is stamped
+    // with its writer by the DelegatedAdminGate whatever the payload carried,
+    // a system writer (invitation placement) keeps the issuer it wrote, and
+    // `readonly` keeps a non-system update from rewriting it and files a
+    // granter that no longer resolves under the integrity audit's `provenance`
+    // bucket.
     granted_by: Field.lookup('sys_user', {
       label: 'Granted By',
       required: false,
+      readonly: true,
       description: 'User who granted this position assignment (stamped by the delegated-admin gate for delegate writes).',
     }),
 
