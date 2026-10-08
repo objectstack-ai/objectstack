@@ -16,12 +16,4 @@ Clause-②: yes (narrowing)
 
 **What still boots, unchanged.** A kernel that mounts `AuthPlugin` (`os serve` pairs the two; `@objectstack/verify`'s `bootStack` mounts both); a kernel that registers the two objects any other way; and a boot that composes `SecurityPlugin` for its declarations only (`os migrate`, which suppresses `start()`).
 
-## FROM → TO
-
-| you composed | compose instead |
-|:--|:--|
-| `ObjectQLPlugin` + `SecurityPlugin`, no `AuthPlugin` (a test kit) | add `createIdentityObjectsPlugin()` from `@objectstack/plugin-auth` |
-| a hand-written plugin that registers `SysUser` / `SysMember` | `createIdentityObjectsPlugin()`, which registers plugin-auth's own list (the hand-written one still satisfies the check) |
-| `DevPlugin` with `services: { auth: false }` and security on | `services: { security: false }`, or `createIdentityObjectsPlugin()` in `extraPlugins` |
-
-**The one-line fix:** `await kernel.use(createIdentityObjectsPlugin())`, from `@objectstack/plugin-auth`, on a kernel that mounts `SecurityPlugin` without `AuthPlugin`.
+**The remedy.** on a kernel that mounts `SecurityPlugin` without `AuthPlugin`, such as a test kit, add `await kernel.use(createIdentityObjectsPlugin())` from `@objectstack/plugin-auth`. It registers plugin-auth's own identity list, so a hand-written plugin that registers `SysUser` and `SysMember` is no longer needed, though it still satisfies the check. A `DevPlugin` stack with `services: { auth: false }` either turns security off as well or passes `createIdentityObjectsPlugin()` in `extraPlugins`. Nothing in an app's metadata changes.
