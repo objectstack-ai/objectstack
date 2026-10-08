@@ -6,12 +6,9 @@
  *
  * `resolveRequestScope` re-raises only the authorization-store-unavailable
  * class out of identity resolution; any other fault leaves the request's
- * `executionContext` undefined. At an endpoint an application declared
- * `authRequired: false`, the policy chain admits that request, and the
- * delegated data call then reaches the engine with NO execution context —
- * principal-less. The security middleware used to hand such a call straight
- * through (ADR-0096 E1): the declared object's rows were served to a caller
- * nobody identified. With strict mode the middleware refuses it.
+ * `executionContext` undefined, and a data call the request then delegates
+ * reaches the engine with no principal. The engine refuses that class now
+ * (strict mode), whichever door delegated the call.
  *
  * Composition: the real dispatcher plugin over a real hono socket, the real
  * fallback seam, policy chain, endpoint step and `callData`, and the REAL
