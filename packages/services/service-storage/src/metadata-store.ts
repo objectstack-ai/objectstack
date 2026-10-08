@@ -351,6 +351,18 @@ const SESSION_READ_CONSEQUENCE =
   'the row could not be read at all, which is NOT the same as it being absent — answering "upload session not found" here would abort a live upload.';
 
 /**
+ * [#22175] Every store constructed over a wired data engine — the stores whose
+ * by-id writes are SCOPED by the acting organization ({@link StorageWriteContext}).
+ * The engine-absent stand-in is never in it: it does not scope (see the stand-in
+ * branch of {@link StorageMetadataStore.updateFile}).
+ *
+ * A module-private set rather than a class member, so the one fact the upload
+ * doors need — "does this store's write have a reach to miss?" — is answered by
+ * {@link organizationOutOfWriteReach} without widening the class's public face.
+ */
+const ENGINE_BACKED_STORES = new WeakSet<object>();
+
+/**
  * Storage metadata persistence.
  *
  * Backed by `IDataEngine` (objectql). The process-local `Map` is the
@@ -379,7 +391,9 @@ export class StorageMetadataStore {
   private readonly files = new Map<string, FileRecord>();
   private readonly sessions = new Map<string, UploadSessionRecord>();
 
-  constructor(private readonly engine: IDataEngine | null) {}
+  constructor(private readonly engine: IDataEngine | null) {
+    if (engine) ENGINE_BACKED_STORES.add(this);
+  }
 
   /**
    * Run one engine call, converting any failure into a
@@ -651,4 +665,42 @@ export class StorageMetadataStore {
       engine.delete('sys_upload_session', { where: { id }, ...systemByIdWriteOptionsFor(context) }),
     );
   }
+}
+
+/**
+ * [#22175] The organization `row` was started in, when the by-id write `store`
+ * would issue under `context` cannot reach it — `null` when it can.
+ *
+ * The commit and chunked-completion doors ask this BEFORE they write. An
+ * uploader whose active organization changed after starting an upload names a
+ * row the scoped write cannot reach, and the engine raises that miss as an
+ * error {@link StorageMetadataStore}'s `engineOp` can only wrap as a
+ * {@link StorageMetadataStoreError} — an outage, by its text. Asked first, the
+ * door can answer what actually happened instead.
+ *
+ * It reads only what decides the reach of the write this store issues:
+ *  - the engine-absent stand-in does not scope → `null`, always;
+ *  - no organization threaded (`writeOptionsFor` → `undefined`) → the write is
+ *    unscoped → `null`;
+ *  - a row stamped with no organization → `null`: the driver's scope keeps
+ *    org-less rows in reach (#2734's global-row arm);
+ *  - otherwise the row is in reach exactly when its organization is the acting
+ *    one.
+ *
+ * ⛔ It composes no predicate and decides no tenancy rule — the statement's
+ * tenant term stays the driver's (`applyTenantScope`); this reads, in advance,
+ * the reach {@link StorageWriteContext} already documents. ⛔ Not re-exported
+ * from the package entry: it is the doors' question, not API.
+ */
+export function organizationOutOfWriteReach(
+  store: StorageMetadataStore,
+  row: { organization_id?: string | null } | null | undefined,
+  context?: StorageWriteContext,
+): string | null {
+  if (!ENGINE_BACKED_STORES.has(store)) return null;
+  const acting = writeOptionsFor(context)?.context.tenantId;
+  if (acting === undefined) return null;
+  const started = row?.organization_id;
+  if (typeof started !== 'string' || started.length === 0) return null;
+  return started === acting ? null : started;
 }

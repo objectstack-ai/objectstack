@@ -55,7 +55,7 @@ import { describe, expect, it } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
-import { SysSecret, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
+import { SysPlatformSetting, SysSecret, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { SettingsService } from './settings-service.js';
 import { SettingsServicePlugin, wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
@@ -93,6 +93,9 @@ function makeMemoryDriver() {
   const matches = (row: Record<string, unknown>, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
     return Object.entries(where).every(([k, v]) => {
+      // `$or` is the one combinator the settings reads emit (ADR-0131 D7: every
+      // `sys_setting` read names its rungs); anything else still refuses.
+      if (k === '$or') return (v as any[]).some((b) => matches(row, b));
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       return (row[k] ?? null) === (v ?? null);
     });
@@ -232,7 +235,7 @@ async function bootKernel(opts: { withEngine?: boolean } = {}) {
   // [#21516] The settings service writes its audit row through
   // `sys_setting_audit`; the engine refuses a name its registry does not hold,
   // so the harness registers it beside the two it already did, as a boot does.
-  for (const o of [SysSetting, SysSecret, SysSettingAudit]) engine.registry.registerObject(o as any, OWNER_PACKAGE);
+  for (const o of [SysSetting, SysPlatformSetting, SysSecret, SysSettingAudit]) engine.registry.registerObject(o as any, OWNER_PACKAGE);
 
   const probe = new ReadyHookFromInitPlugin();
   const kernel = new LiteKernel({ logger: { level: 'error' } as never });
@@ -247,7 +250,9 @@ async function bootKernel(opts: { withEngine?: boolean } = {}) {
   const svc = kernel.getService<SettingsService>('settings');
   return {
     kernel, engine, svc, probe, rowsOf,
-    settingRows: () => [...rowsOf('sys_setting').values()],
+    // The probe manifests are `scope: 'global'`, so their rows are the global
+    // rung's: `sys_platform_setting` (ADR-0131 D7).
+    settingRows: () => [...rowsOf('sys_platform_setting').values()],
     auditRows: () => [...rowsOf('sys_setting_audit').values()],
   };
 }
@@ -310,7 +315,7 @@ describe('the pre-bind window refuses a write instead of resolving it', () => {
 // ---------------------------------------------------------------------------
 
 describe('after bind, writes behave exactly as before', () => {
-  it('the identical write lands a real `sys_setting` row and a real audit row', async () => {
+  it('the identical write lands a real settings row (in `sys_platform_setting`, the global rung) and a real audit row', async () => {
     const { svc, settingRows, auditRows } = await bootKernel();
 
     svc.registerManifest(probeManifest);
@@ -322,9 +327,11 @@ describe('after bind, writes behave exactly as before', () => {
     expect(rows[0]).toMatchObject({
       namespace: 'receipt_probe',
       key: 'last_run',
-      scope: 'global',
       value: 'written-after-boot',
     });
+    // The global rung's store has no `scope` or `user_id` column to write.
+    expect(rows[0]).not.toHaveProperty('scope');
+    expect(rows[0]).not.toHaveProperty('user_id');
     expect(auditRows()).toHaveLength(1);
   });
 });
@@ -371,7 +378,7 @@ describe('engine-less callers outside the window observe nothing new', () => {
     // [#21516] The settings service writes its audit row through
     // `sys_setting_audit`; the engine refuses a name its registry does not hold,
     // so the harness registers it beside the two it already did, as a boot does.
-    for (const o of [SysSetting, SysSecret, SysSettingAudit]) engine.registry.registerObject(o as any, OWNER_PACKAGE);
+    for (const o of [SysSetting, SysPlatformSetting, SysSecret, SysSettingAudit]) engine.registry.registerObject(o as any, OWNER_PACKAGE);
 
     const svc = new SettingsService({ env: {}, engineBindPending: true });
     svc.registerManifest(probeManifest);

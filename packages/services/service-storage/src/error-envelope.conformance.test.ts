@@ -223,6 +223,31 @@ describe('storage error envelope (#3675)', () => {
       },
     },
     {
+      // #22175: the uploader, acting in another organization than the one the
+      // upload was started in.
+      name: 'committing an upload after switching active organization',
+      status: 409,
+      code: 'RESOURCE_CONFLICT',
+      run: async () => {
+        // An engine-backed store (the stand-in does not scope its writes, so
+        // it never answers this); the door refuses before any write, so the
+        // engine only ever answers the by-id read.
+        const row = {
+          id: 'f-started',
+          key: 'user/f-started.bin',
+          name: 'f.bin',
+          status: 'pending',
+          owner_id: 'u-uploader',
+          organization_id: 'org-start',
+        };
+        const store = new StorageMetadataStore({ findOne: async () => ({ ...row }) } as any);
+        const routes = mount(await tmpAdapter(), store, {
+          resolveSession: async () => ({ userId: 'u-uploader', organizationId: 'org-elsewhere' }),
+        });
+        return drive(routes, 'POST', `${BASE}/upload/complete`, { body: { fileId: 'f-started' } });
+      },
+    },
+    {
       name: 'anonymous upload when a session resolver is wired',
       status: 401,
       code: 'AUTH_REQUIRED',

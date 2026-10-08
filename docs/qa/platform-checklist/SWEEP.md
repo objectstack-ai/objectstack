@@ -31,7 +31,7 @@ kind, no new enum member), so it is found only here.
 
 ## What a sweep is
 
-Five READ-ONLY gap-hunter agents, each enumerating the platform from a different angle
+Six READ-ONLY gap-hunter agents, each enumerating the platform from a different angle
 and diffing it against the current checklist. Different angles catch different miss
 classes — the 2026-08 sweep's finds (4 factually-stale waivers, the untested built-in
 apps, sharing rules, the ACTION_LOCATIONS matrix) each came from a different angle a
@@ -44,16 +44,17 @@ single reader would not have covered.
 | 3. Routes & runtime | ALL route ledgers (runtime, rest, service-*, auth) + non-ledgered mounts | routes reachable but semantically untested; dispatcher-vs-hono seams (#3361 class) |
 | 4. Built-in apps | packages/apps/{setup,studio,account} page by page | admin/user pages nobody walked; settings/session/org surfaces |
 | 5. Docs claims | content/docs/capabilities/*.mdx, release plans, showcase tours | promised capabilities with no item; docs advertising retired features (PD#10) |
+| 6. Surface kinds vs the one design system | objectui `apps/console/src/preview-gallery.tsx`; the `@object-ui/components` primitives a surface composes (Dialog, Table, Input, Checkbox, Button, the custom wrappers under `packages/components/src/custom/`); every widget that composes them into a surface kind — dialog, record picker, list, form, record page, dashboard, empty state, loading state | surfaces that pass their functional items but override the design system — a wrapper carrying a second border, a container killing the primitive's header rhythm, a fixed width unrelated to content, selection without the Checkbox primitive, split status bars, a confirm enabled at zero selected, navigational links inside a picker (the `RecordPickerDialog` class, 2026-10) |
 
 ## How to run it
 
 1. **Read the current state first** — every `areas/*.json`, `coverage.json`, and this
    dir's README/RUNNER. The gap is only real if nothing already covers it.
-2. **Dispatch the five hunters in parallel**, READ-ONLY (they write no files). Each
+2. **Dispatch the six hunters in parallel**, READ-ONLY (they write no files). Each
    returns a structured gap table: `surface | evidence path | current coverage (item id
    or NONE/partial) | proposed item id | sketch | stock fixture?`. Give each hunter the
    list of already-resolved gaps so they don't re-report.
-3. **Dedupe** the five reports into one register (the 2026-08 sweep used a
+3. **Dedupe** the six reports into one register (the 2026-08 sweep used a
    `PENDING-GAPS.md` scratch file, since deleted). Overlap is expected and is signal —
    a gap found from three angles is high-priority.
 4. **Author** the new items via per-area writer agents, one area file per writer so

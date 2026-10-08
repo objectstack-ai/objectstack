@@ -53,7 +53,6 @@ export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_scim_subject.fields.id.label": "00b0385c9c152888",
   "objects.sys_scim_user.fields.id.label": "00b0385c9c152888",
   "objects.sys_secret.fields.id.label": "00b0385c9c152888",
-  "objects.sys_setting.fields.scope.options.global": "5e377106508d2ecd",
   "objects.sys_setting_audit.fields.actor_id.label": "b155813f8a7f06e3",
   "objects.sys_setting_audit.fields.id.label": "00b0385c9c152888",
   "objects.sys_setting_audit.fields.scope.options.global": "5e377106508d2ecd",
