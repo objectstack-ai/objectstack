@@ -20551,8 +20551,8 @@ export class ObjectStackProtocolImplementation implements
         // `migrateStoredMetadata` and `duplicatePackage` re-entering here pay
         // nothing.
         //
-        // [#21982] The schema gate below JUDGES a flow in its canonical
-        // spelling on every path. When no canonicalizer resolved, or it threw,
+        // [#21982] The two gates below — the schema gate and the runtime
+        // authoring gate — JUDGE a flow in its canonical spelling on every path. When no canonicalizer resolved, or it threw,
         // `flowGateVerdictBody` is the raw body with the spec's ADR-0087 D2
         // conversions applied (`applyConversionsToFlow`) — for the VERDICT
         // only: what is stored stays the raw request body, exactly as before.
@@ -20777,7 +20777,12 @@ export class ObjectStackProtocolImplementation implements
             type: request.type,
             name: request.name,
             state: mode === 'draft' ? 'draft' : 'active',
-            body: gatedItem,
+            // [#21982] The same verdict body as the schema gate above: a flow
+            // on the canonicalizer's fallback is judged in its D2-converted
+            // spelling (the lint's config judge refuses an undeclared key, so
+            // the raw `filters` alias would be refused here and nowhere else).
+            // Stored, and handed to the credential walk below, as written.
+            body: flowGateVerdictBody ?? gatedItem,
             source: writeSource,
             // [#6285] The write's organization partition. It was always here;
             // it simply never travelled to the gate, which is the whole reason
