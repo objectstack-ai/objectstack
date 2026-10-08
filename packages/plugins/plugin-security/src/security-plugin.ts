@@ -1458,15 +1458,6 @@ export class SecurityPlugin implements Plugin {
   async init(ctx: PluginContext): Promise<void> {
     ctx.logger.info('Initializing Security Plugin...');
 
-    // The identity objects the authorization store reads must be registered by
-    // the time the boot completes; a kernel without them is refused here, by
-    // name, instead of at its first permission read. Subscribed in `init()` so
-    // it runs ahead of every `kernel:ready` handler registered in `start()`,
-    // this plugin's own bootstraps included.
-    if (typeof (ctx as any).hook === 'function') {
-      (ctx as any).hook('kernel:ready', () => refuseMissingAuthzIdentityObjects(ctx));
-    }
-
     // Register security services
     ctx.registerService('security.permissions', this.permissionEvaluator);
     ctx.registerService('security.rls', this.rlsCompiler);
@@ -1651,6 +1642,17 @@ export class SecurityPlugin implements Plugin {
 
   async start(ctx: PluginContext): Promise<void> {
     ctx.logger.info('Starting Security Plugin...');
+
+    // The identity objects the authorization store reads must be registered by
+    // the time the boot completes: a kernel without them is refused at
+    // `kernel:ready`, by name, instead of at its first permission read.
+    // Subscribed at the head of `start()`, so it runs ahead of this plugin's own
+    // `kernel:ready` bootstraps, and above both bail-outs below. A boot that
+    // composes this plugin for its declarations only (`os migrate`, which
+    // suppresses `start()`) arms nothing that reads the store, and is not refused.
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('kernel:ready', () => refuseMissingAuthzIdentityObjects(ctx));
+    }
 
     // [#10706] Bind the report sink FIRST — above the two bail-outs below.
     // Both of them `return` before the "capture handles" block, so binding the
