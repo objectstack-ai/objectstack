@@ -1,0 +1,37 @@
+{
+  "number": 22153,
+  "kind": "issue",
+  "title": "[finding] client: `envelope-caller-census.test.ts` walks `.cache/`, so `pnpm test` goes red on `main` right after the documented `pnpm objectui:build` — the objectui checkout it leaves behind is counted as a 29th SDK call site",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T03:13:31Z",
+  "updated_at": "2026-10-08T06:59:17Z",
+  "closed_at": "2026-10-08T06:57:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22153",
+  "body": "Filing gate: ① product defect with a named landing spot and a reproduction (`finding` class (a): a documented command sequence on an untouched `main` fails a required test).\nreach: public entry measured once — `pnpm test` on a fresh clone after `pnpm install && pnpm build && pnpm objectui:build` ends `Failed: @objectstack/client#test` (3 of 652 tests), every other package green.\nReader: `domain:cli` seat (`packages/client/src/envelope-caller-census.test.ts`, `SKIP_DIRS` at line 166); optionally `scripts/build-console.sh` for where the clone lands.\nDedup: `search_issues` \"envelope-caller-census test fails after pnpm objectui:build .cache/objectui checkout counted as call site pnpm test red\" (open + closed) → 0 cards.\nFiled on the maintainer's instruction in this session: 「设想你是一个新人,第一次打开 github objectstack 项目主页,了解本项目,并按照文档指引执行完整的试用流程,并对阅读文档和试用过程中遇到的问题立 issue」.\n\n## Summary\n\nA newcomer following the docs in order — README \"Hack on the framework\" (`pnpm install`, `pnpm build`, `pnpm dev`, `pnpm test`) and `content/docs/getting-started/examples.mdx` (`pnpm objectui:build` to get the Console) — ends with a red `pnpm test` on an untouched `main`:\n\n```text\n@objectstack/client:test:  FAIL  src/envelope-caller-census.test.ts > #13079 §3 — every call site is classified > ⭐ THE NUMBER, post-convergence: ZERO call sites still read the envelope, and none is production code\n- Expected\n+ Received\n- []\n+ [\n+   {\n+     \"file\": \".cache/objectui-a58626c88dc8/packages/data-objectstack/src/index.ts\",\n+     \"line\": 6347,\n+     \"method\": \"analytics.query\",\n+     \"receiver\": \"sdk\",\n+   },\n+ ]\n…\n FAIL  … > records the split: 18 payload pins, 10 result-insensitive, 11 not-SDK\n- 28\n+ 29\n Test Files  1 failed | 50 passed (51)\n      Tests  3 failed | 649 passed (652)\nFailed:    @objectstack/client#test\n```\n\n`scripts/build-console.sh` (what `pnpm objectui:build` runs) shallow-clones objectui into `.cache/objectui-<sha>/` when there is no `../objectui` sibling — the normal case on a fresh machine. The census test's walker starts at the repo root and skips only\n\n```ts\nconst SKIP_DIRS = new Set([\n    'node_modules', 'dist', 'build', 'coverage', '.git', '.next', '.turbo', 'out',\n]);\n```\n\nso the whole objectui source tree under `.cache/` is scanned as if it were this repository's code, and its one `sdk.analytics.query(...)` call moves the pinned count from 28 to 29 and fails three assertions. The test's own failure note is misleading in this case: it says \"the delta is a real call\", which is true, but the call is in another repository's checkout.\n\nAGENTS.md already records `.cache/objectui-*` as a stale-artifact hazard for `pnpm lint` (\"a full objectui checkout left by `build-console.sh`, linted as if it were ours\") and prescribes `rm -rf .cache` after the console build. This card is the `pnpm test` half of the same hazard: nothing in the README or the examples page says to delete `.cache/` before testing, and the gate that reds is a count pin whose message blames a real call site.\n\n## Reproduction\n\nFresh clone of `main`, Node v22.22.0, pnpm 10.31.0, no `../objectui` checkout.\n\n```bash\npnpm install && pnpm build          # exit 0\npnpm objectui:build                 # clones objectui@a58626c88dc8 into .cache/, ~10 min, exit 0\npnpm test                           # 131 successful, 135 total; Failed: @objectstack/client#test\n```\n\nThe three failing assertions and their diffs are the ones quoted above; every other package passed. The only counted site outside this repository's packages is the one under `.cache/`.\n\n## Expected\n\n`pnpm test` on an untouched `main` passes after the documented Console build. A repo-walking pin should not read a gitignored cache directory as source.\n\n## Actual\n\n`pnpm test` is red until the reader guesses `rm -rf .cache`, which no on-ramp document mentions.\n\n## Suggested direction\n\n- Add `.cache` (and probably `.objectstack`, `.playwright-mcp`) to `SKIP_DIRS` in `envelope-caller-census.test.ts`; `walk()` is the single entry point, so it is a one-line change, and the ledger sums it compares against do not move.\n- Consider the same skip in the other repo-walking tests (`packages/spec/src/**/*-retirement.test.ts`, `packages/metadata-fs/test/watch-dot-root.test.ts` already know about `.cache` — a shared skip list would keep the walkers in step).\n- Have `scripts/build-console.sh` print the `rm -rf .cache` advice, or clone outside the repo root (e.g. under `$TMPDIR`), so the hazard stops existing instead of being documented.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

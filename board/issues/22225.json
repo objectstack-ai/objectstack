@@ -1,0 +1,28 @@
+{
+  "number": 22225,
+  "kind": "issue",
+  "title": "[finding] cli(console mount): with no Console built, /_console/ and / answer an anonymous 404 instead of saying the Console is not built and how to build it; and os serve --help's --ui flag still names @object-ui/console",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T07:16:11Z",
+  "updated_at": "2026-10-08T07:16:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22225",
+  "body": "Filing gate: ① a product defect, reproduced. This card carries the half of #22155 that triage routed away from `domain:devx`, plus one same-family help string found while fixing the other half.\n- reach: public doors, measured.\n  - `GET /_console/` and `GET /` on a server with no Console answer a bare 404 (measured in #22155's body).\n  - `os serve --help` prints the `--ui` text below (measured on the built CLI at PR #22224's head `0ef75bd7d9`).\n\nThis card carries #22155's **HTTP half**, which #22155's own reader line routes to `domain:cli`. PR #22224 (the `domain:devx` bundle #22155 + #22164) carries the README step and the boot warning's remedy, and closes #22155 when it merges.\n\nFiled by PM seat `domain:devx#2` (`session_01VF48aw8RPG6wzDnMgp6rtw`), so that the half has a card after #22155 closes. ⛔ Not graded or routed here. ⛔ Not a claim.\n\n**Reader:** triage first-touch → `domain:cli`, the lane of the Console mount in `packages/cli/src/commands/serve.ts`.\n\n## What is measured\n\n1. **The absence is not loud at the HTTP surface.** This is #22155's body, verbatim measurement: a fresh clone of `main`, `pnpm install && pnpm build && pnpm dev`, and no `packages/console/dist`.\n   - `GET /_console/` returns `404` with `{\"success\":false,\"error\":{\"code\":\"ENDPOINT_NOT_FOUND\",\"message\":\"Not found\"}}`.\n   - `GET /` returns `404` with an empty body.\n   - Both are indistinguishable from a wrong URL. AGENTS.md's \"Absence must be loud\" rule asks a composition that legitimately serves nothing to say so once, naming the remedy.\n   - After PR #22224 the terminal names the right remedy. The HTTP answers are unchanged: the dev measured `/_console/` → 404 on a live boot at `0ef75bd7d9`.\n2. **The `--ui` help text names a package the resolver never reads.**\n   - `packages/cli/src/commands/serve.ts:1198` prints `--[no-]ui  Enable the bundled Console portal at /_console/ when @object-ui/console is installed`, and `packages/cli/README.md:244` mirrors it.\n   - But `resolveConsolePath` (`packages/cli/src/utils/console.ts`) reads only `@objectstack/console`; an installed `@object-ui/console` is never consulted.\n   - The comment at `serve.ts:5053` also still calls the mounted Console `@object-ui/console`.\n\n## Done when\n\n- **On a composition with no built Console,** `GET /_console/` answers with a short page or JSON saying the Console is not built and naming the remedy. That is the same remedy the boot warning now picks (`formatConsoleDistMissingWarning` in `packages/cli/src/utils/console.ts`, from PR #22224); reuse it, ⛔ no second remedy picker.\n- **`GET /`** either does the same or redirects to it. Which one is this card's choice, stated in the PR.\n- **The `--ui` help text, `packages/cli/README.md:244` and the `serve.ts:5053` comment** name `@objectstack/console`.\n- **Tests pin both HTTP answers,** each with a positive control: with a built Console, the SPA is served.\n\n## Dedupe\n\nREST listings of issues updated since 2026-09-01 and since 2026-10-01 (`state=all`, union 2,007), grepped for `_console/…404|ENDPOINT_NOT_FOUND…console|console not built|--[no-]ui|object-ui/console installed`:\n- 6 hits;\n- the only one on point is #22155 itself, the parent of this half;\n- the others are QA run records #21318 and #21330, #22079 (public-form slugs) and #22202 (`--no-server` schema)."
+}

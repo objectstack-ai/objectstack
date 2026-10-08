@@ -1,0 +1,38 @@
+{
+  "number": 22148,
+  "kind": "issue",
+  "title": "[finding] main's lockfile matches six new OSV advisories on next@16.3.6 (GHSA-mcj8-r9mp-w47p and five more): Validate Package Dependencies goes red on main's scheduled scan and on every dependency-touching PR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:devx",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T03:02:52Z",
+  "updated_at": "2026-10-08T05:37:36Z",
+  "closed_at": "2026-10-08T05:35:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22148",
+  "body": "Filing gate: ① a reproducible defect.\n- `main`'s `pnpm-lock.yaml` (at `ef1fcb26a24f`) resolves `next@16.3.6`, which matches six OSV advisories, none of them exempted in `osv-scanner.toml`.\n- So the repo's own gate `Validate Package Dependencies` (`.github/workflows/validate-deps.yml`, the OSV-Scanner step) is red on `main`'s scheduled scan, and on every dependency-touching PR until PR #22138 (#22082) lands.\n- reach: the gate's own CI runs, cited below.\n\nFiled by PM seat `domain:devx#2` (`session_01VF48aw8RPG6wzDnMgp6rtw`) from its #22082 dev's out-of-scope finding (`class: a`). ⛔ Not graded or routed here; the precedents #22013 and #21945 went to `domain:devx`. ⛔ Not a claim.\n\n**Reader:** triage first-touch → the lane that owns the lockfile (precedent #22013, fixed by PR #22016 in `domain:devx`). The fix is one dependency PR.\n\n## What is measured\n\n- The base-side scan of `main`'s lockfile at `ef1fcb26a24f`, inside PR #22138's own `validate-deps.yml` runs on `pull_request`, matched these six on `next@16.3.6`:\n  - `GHSA-mcj8-r9mp-w47p`\n  - `GHSA-f87g-xv8r-7p7x`\n  - `GHSA-cjq9-62q9-8jv4`\n  - `GHSA-4jqv-mc3x-m676`\n  - `GHSA-3w37-wq28-93x7`\n  - `GHSA-39w2-rjm5-chcv`\n- Runs: `37719190017` (job `113122655549`) and `37719558844` (job `113123838149`). Each advisory is a check-run annotation on those jobs.\n- The previous scheduled scan, `37565270565` (2026-10-07 03:07Z), was green, so the six were published after it.\n- Who resolves `next@16.3.6`, read from `origin/main`'s lockfile:\n  - `apps/docs` pins `\"next\": \"16.3.6\"` exactly (`apps/docs/package.json`);\n  - `better-auth@1.7.3` in `packages/plugins/plugin-auth` also resolves it as `next@16.3.6`.\n- The fixed versions were not read: this container cannot reach the advisory database. Measuring them is the fix's first step.\n\n## Done when\n\n- `main`'s lockfile no longer matches any of the six: every `next` resolution moves to a release that fixes all six.\n- If one has no fixed release, it gets a dated exemption in its own `osv-exemption` PR under `osv-scanner.toml` convention 3 (#4965), ⛔ never in the fix PR.\n- `node scripts/check-osv-exemptions.mjs` and the OSV step are green on the fix PR.\n- The next scheduled `Validate Package Dependencies` run on `main` after the merge is green, and its run id is recorded here.\n\n## Dedupe\n\nREST listing of issues updated since 2026-10-07 (`state=all`), grepped for `next@16|GHSA-mcj8|GHSA-f87g|GHSA-cjq9|GHSA-4jqv|GHSA-3w37|GHSA-39w2|next 16.3|Validate Package Dependencies.*red|OSV.*red`: 1 hit, #22082 (the PR-side verdict, not this fix). None names these advisories.\n\nThe family is the red-main OSV findings #18930, #20561, #20705, #20769, #21055, #21945 and #22013, all closed by their fix PRs."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 22180,
+  "kind": "pull_request",
+  "title": "docs(qa): a repeatable Studio task benchmark — repair-ticket scenario, scoring sheet, user-session protocol and the first baseline",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T04:21:04Z",
+  "updated_at": "2026-10-08T05:35:53Z",
+  "closed_at": "2026-10-08T05:35:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-08T05:35:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/22180",
+  "body": "Fixes #22137\n\n## What this adds\n\nA repeatable Studio task benchmark under `docs/qa/studio-benchmark/` — one fixed scenario, *build a repair-ticket app with no code*, timed and scored — plus its first baseline run.\n\n| file | content |\n|---|---|\n| `SCENARIO.md` | the fixed eight-step script, the boot line, the clock rule, and a server-side oracle per step |\n| `SCORING.md` | the metrics (wall time, red errors, failed writes, code-shaped entries, dead ends), the red-error classes, the rework rule, the headline row, agent-vs-human time |\n| `SCORESHEET.md` | the blank sheet a run fills in |\n| `USER-SESSIONS.md` | the protocol and kit for 3–5 think-aloud sessions with real low-code authors (task card in no product vocabulary, assist-only-to-unblock rule, scoring, summary) |\n| `baselines/2026-10-08-8fc50b76-a58626c8.md` | the baseline run record, keyed to both SHAs |\n| `README.md` | the index, the per-release procedure, and how to run it as an agent |\n\nDocs only; nothing publishes (`skip-changeset`).\n\n## Baseline (agent run)\n\nobjectstack `8fc50b7647d30db2a0837877cf251c1163a3239e` (booted, `main`) · objectui `a58626c88dc85954bd0af24f16ebb69454c03eee` (`.objectui-sha`, console stamp equal, built with `pnpm objectui:build`) · Chromium 141.0.7390.37 at 1440×900 · fresh showcase boot on a private port.\n\n```text\ncompleted 8/8 · total 1511 s · 16 red errors · 13 failed writes · 10 code-shaped entries · 0 dead ends\n```\n\n- Every step finished in the console, and every result was verified through the REST API (draft reads with `?state=draft&package=`, published reads, record reads, and the technician's `sys_inbox_message` row).\n- Step 5 (automation) carried 11 of the 16 red errors and all 12 failed draft writes (`422 INVALID_METADATA` on the flow draft PUT). They come from intermediate states (objectstack-ai/objectui#11786) and from edges left behind when a node is removed, which reproduced twice (objectstack-ai/objectui#11772).\n- Notify recipients could only be entered as JSON (objectstack-ai/objectui#11788).\n- objectstack-ai/objectui#11790 (Interfaces gaps) was **not reached**: the app with navigation was built with Studio's *Create app* dialog, which never opens Interfaces.\n- Two pieces of rework the script does not name, both found at step 8 and timed there:\n  - **8a** — the end user was refused the new object (\"You don't have access\"). The author had to create and publish a permission set and grant it to the user.\n  - **8b** — the validation built with the condition builder could never be evaluated. *is empty / false* compiles to `!record.due_date` (objectui `ConditionBuilder.tsx:484` at `a58626c8`), and the runtime refuses every Done write with `no such overload: !string` / `!null`. The publish check did not catch it, which matches the save-door gap in objectstack-ai/objectstack#22032. The rule had to be rewritten in CEL.\n\n### Where the baseline lives (decision)\n\nThe baseline is a committed markdown file, not a `qa-run` issue. The next release's run has to read the previous one field by field, so a diffable file next to the script it scores, named by both SHAs, is the comparison point. The `qa-run` contract belongs to checklist runs: its title grammar is parsed by `scripts/qa/qa-rollup.mjs` around checklist verdicts, and the checklist's `runs/` folder is git-ignored. The README records the same reasoning.\n\n## Acceptance notes\n\nNew findings from the run are not filed here. They go to the PM seat in the os-dev report on the card, with class, reach and evidence. They are: the condition builder's `!x` emission; flow-designer node insertion that never asks for a type, plus a *Node Type* list without `notify` and no way to connect existing nodes; the entry-condition builder offering only `previous` on a draft object; and machine-name inputs where a picker or a derived value is expected (package id, picklist values, lookup target, condition value, trigger object).\n\n## Verification record\n\n- **Boot:** `OS_PORT=41873 pnpm -C …/examples/app-showcase exec objectstack dev --ui --seed-admin -p 41873 -d file:/tmp/…/data.db` → health 200. The server, browser and recorder were torn down by their recorded PIDs afterwards.\n- **Builds:** `pnpm build --concurrency=2` and `pnpm objectui:build`, run under `scripts/pm/os-verify-lock.sh` → `VERDICT command-exit 0`; console `✓ @objectstack/console dist ready … from objectui@a58626c88dc8`.\n- **Oracles:** quoted per step in the baseline file.\n  - `POST /api/v1/packages/com.acme.repair/publish-drafts` → 200, three times.\n  - Forged create `status=done` without a due date: `400 … could not be evaluated (runtime: no such overload: !null)` before 8b, and `400 Set a due date before marking the ticket Done.` after it.\n  - `GET /api/v1/data/sys_inbox_message` as the technician → one row, *Ticket Leaking tap in room 204 is Done*.\n- **Local gates:** derived by `node scripts/pm/dispatch-gates.mjs --commands` and all 12 run at `686dc621`, each exit 0. They are `check-ci-filter-parity`, `check-closing-keyword-parity` (and `--self-test`), `check-comment-mask-corpus`, `@objectstack/lint check:doc-formula-expressions`, `check:cross-package-test-inputs`, `check:doc-authoring`, `check:driver-memory-census`, `check:gitlink-declared`, `check:nul-bytes`, `check:refd-timer-probe` and `check:watch-hint-literal`. `dispatch-gates --ran` → 12 derived, 12 run, 0 NOT-MEASURED. This PR touches no package, so no build closure or package test is owed.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VenZErfhzG51sJBHRM1pWJ)_\n"
+}

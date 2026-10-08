@@ -1,0 +1,35 @@
+{
+  "number": 22176,
+  "kind": "issue",
+  "title": "finding(skills): objectstack-ui rules/actions.md teaches two action shapes the ActionSchema refinements refuse — a modal carrying a `body` (:77) and a `url` action with no `target` (:176); copying either makes `defineAction` throw",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T03:59:40Z",
+  "updated_at": "2026-10-08T05:57:51Z",
+  "closed_at": "2026-10-08T05:55:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22176",
+  "body": "Filing gate: **① a defect, class (c)**, a teaching error in published text an AI author reads. `reach:` measured once at the public parse door by the #22059 probe dev on head `e6d00e1421` (report 6051826214, `out_of_scope_findings[0]`): the built `defineAction(...)` throws on both blocks at module load, and `os validate` and the metadata save parse with the same `ActionSchema`. Re-read by the filing seat on `origin/main` `ec8f37c890`: the two source sites below and the two refinements that refuse them (`packages/spec/src/ui/action.zod.ts:1988-1996` and `:2016-2036`; `defineAction` is `ActionSchema.parse(config)` at `:2385`). `skills/**` ships with `npx skills add`; `docs/NORTH-STAR.md` priority rule 4: a sentence written for an AI author that is wrong is a product defect. Filed by `domain:skills` seat 1 (`session_01CXydFDyiQwNbGFkmwrcRQq`, seat post #7623); the lane self-triages its own findings, so this card carries its grade and `pm:queue` from filing. ⛔ Not a claim.\n\n**Who acts on it:** the `domain:skills` seat, one PR editing `skills/objectstack-ui/rules/actions.md` only. It is a Tier H surface: draft, maintainer brief, review requested from the authorized approvers, lands on an authorized APPROVED. The fix shapes are the refinement messages' own: at `:77` either drop `body` and keep `type: 'modal'` with `target` naming the page, or make it `type: 'script'` (which collects the same `params` and runs the body); at `:176` add `target`. Which of the two `:77` shapes the lesson wants (\"collect params, then execute server body\") is the dev's reading of the surrounding prose, not this card's.\n\n**Dedupe:** `domain:skills` issues and PRs, open and closed, updated since 2026-09-20 (REST listing, 205 items) grepped for `actions.md`, `defineAction`, `newTabUrl`, `AddToCampaignAction`, `OpenInvoicePdfAction`: 2 hits, both other subjects (#20173 is `pages.md` and `page:header.properties.actions`; #21288 is `guardrails` prose). Control: `objectstack-ui` in a title, 6. The #22059 probe's catalog control is the finder: 110 green, 3 red, these two the only reds that are teaching errors (the third is the upgrade skill's deliberate protocol-16 shape).\n\n## The two positions (read at `origin/main` `ec8f37c890`)\n\n**1. `skills/objectstack-ui/rules/actions.md:77`**, the block carrying the `os:check` marker, \"Modal-typed action (collect params, then execute server body)\":\n\n```typescript\nexport const AddToCampaignAction = defineAction({\n  name: 'create_campaign',\n  label: 'Add to Campaign',\n  objectName: 'lead',\n  icon: 'send',\n  type: 'modal',\n  target: 'create_campaign',\n  locations: ['list_toolbar'],\n  params: [\n    { field: 'campaign_id', objectOverride: 'campaign', required: true },\n  ],\n  body: {\n    language: 'js',\n    source: `...`,\n  },\n});\n```\n\n`ActionSchema`'s second refinement (`action.zod.ts:2016-2036`) returns false for `data.type !== 'script' && data.body`, with the message: \"`body` only runs for `type: 'script'` — a non-script action dispatches on `target` and silently ignores its body. To collect `params` and then run the body, use `type: 'script'`; to open a page/modal, drop the `body` and keep `type: 'modal'` with `target` naming the page.\" The refinement's own comment names this exact authored shape as the #3530 failure it was written to reject. The block carries the `os:check` marker and `check:skill-examples` is green over it on the probe's head: the TypeScript gate sees types, not refinements, so the published example type-checks and throws.\n\n**2. `skills/objectstack-ui/rules/actions.md:176`**, the `opensInNewTab` + `newTabUrl` example (no `os:check` marker):\n\n```typescript\nexport const OpenInvoicePdfAction = defineAction({\n  name: 'open_invoice_pdf',\n  label: 'Open PDF',\n  objectName: 'invoice',\n  type: 'url',\n  opensInNewTab: true,\n  newTabUrl: '/api/v1/invoice/{recordId}/pdf',\n  locations: ['record_header'],\n});\n```\n\n`ActionSchema`'s first refinement (`action.zod.ts:1988-1996`) returns false when `TARGET_REQUIRED_TYPES.has(data.type) && !data.target`, with the message: \"Action 'target' is required when type is 'url', 'flow', 'modal', 'api', or 'form'.\" `type: 'url'` is in the set and the example sets no `target`.\n\n## What is not this card\n\n- The upgrade skill's `references/examples-upgrade.md:7` red is the deliberate protocol-16 FROM shape (a probe gap, noted on #22059), not a teaching error.\n- The gate blind spot itself (a Zod refinement is invisible to a type check) is a reading on #22059, closed under its ruling's C branch; no gate is asked for here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

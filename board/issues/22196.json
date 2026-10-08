@@ -1,0 +1,36 @@
+{
+  "number": 22196,
+  "kind": "pull_request",
+  "title": "test(client): the envelope caller census never enters `.cache/`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T05:57:12Z",
+  "updated_at": "2026-10-08T06:57:10Z",
+  "closed_at": "2026-10-08T06:57:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-08T06:57:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/22196",
+  "body": "Fixes #22153\nClause-②: no\n\n## What changed\n\nOne file, a test, which publishes nothing: `packages/client/src/envelope-caller-census.test.ts`.\n\n- `SKIP_DIRS` gains `.cache`. A docblock says why: when there is no `../objectui` sibling, `pnpm objectui:build` (`scripts/build-console.sh`) shallow-clones the objectui source tree into `.cache/objectui-SHA/`. That tree contains objectui's own SDK call site.\n- Section 1 gains a pin, `[#22153] never enters .cache/`. It runs on a throwaway root under the system temp directory: `mkdtempSync(join(tmpdir(), 'os-census-cache-'))`, removed in `finally`.\n  - A planted `.cache/objectui-0123456789ab/` checkout leaves `scanCallSites` deep-equal: the same sites, the same receiver split and the same files-scanned count.\n  - A positive control shows that the same walk and matcher do count the planted site when they are given it directly. So the equality comes from the skip, not from a fixture the census could never read.\n  - The fixture text is built from parts. Section 6 gives the reason: this file sits inside the tree the census walks, so a whole call shape in it would itself be counted.\n\n## Why `SKIP_DIRS` and not a tracked-files walk (PM reading H2)\n\nTriage's direction allows either. Measured at `8f395597`:\n\n- **It is the shape this repo already uses.** 34 of the 86 one-line `node_modules` skip sets in the tree already list `.cache`. Examples: every `packages/spec/src/**/*-retirement.test.ts` and `scripts/check-agent-test-spelling.mjs`.\n- **It drops nothing the census counts.** `.cache/` is gitignored (`.gitignore:44`), and `git ls-files | grep -cE '(^|/)\\.cache/'` returns 0. Control: the same pattern for `.github/` returns 45.\n- **A `git ls-files` walk would add a git dependency this test does not have today.** Of the 12 tests in the tree that spawn git, none is in `packages/client`. It would also change whether an untracked file is counted before it is staged. No measured case needs either change.\n\n## Reproduction and proof (PM reading H1 confirmed)\n\nI planted `.cache/objectui-test/packages/x/src/index.ts`, holding one `this.client.analytics.query(q)` call, in the worktree. Then I ran `pnpm --filter @objectstack/client exec vitest run --maxWorkers=2 src/envelope-caller-census.test.ts`:\n\n| tree | result |\n|---|---|\n| base `6ed0c0f3`, planted file present | 3 failed, 17 passed (20). `expected 29 to be 28`; the enumeration gains `.cache/objectui-test/packages/x/src/index.ts` (analytics.query, sdk) |\n| this branch `8f395597`, planted file present | 21 passed (21) |\n\nThe planted file was removed afterwards.\n\n**Ablation.** Run from the committed state with `node scripts/ablation-replace.mjs`. Anchor `'out', '.cache',` became `'out', 'ABLATED-22153',`: the anchor count went 1 → 0 and the blob `cbf54580cb85` → `c2a77abdd38a`. After the restore the blob equals HEAD and `git diff HEAD` is empty.\n\n- Clean tree, no planted file: 1 failed, 20 passed. Only the new section-1 pin goes red (`filesScanned` 1 → 2, and the planted site appears). CI never has a `.cache/`, so it still catches the skip being removed.\n- Planted file present: 4 failed, 17 passed. The new pin goes red, and so do the three section-3 assertions.\n- A first attempt used the replacement `'out',`. The tool refused it before any test ran, because the replacement is a substring of the anchor (count 1 → 1). That attempt produced no reading.\n\n## Tests and gates, head `8f395597`\n\n- `pnpm --filter @objectstack/client test`: 51 files, 653 passed. That is the 652 from before plus the new pin.\n- `pnpm --filter @objectstack/client typecheck`: exit 0. `check:test-typecheck` reports OK with 0 errors. The census file is in the `tsconfig.test.json` program (`tsc --listFilesOnly` finds it once).\n- `dispatch-gates --commands` over this diff derives 54 gates, the same list the dispatch named; `pnpm lint` (full repo) was run on top. All exit 0.\n  - `check:skill-examples` and `check:dual-build-cjs-loads` first exited 3 (PREREQUISITE NOT MET, no `dist/`). After `turbo run build --filter=!@objectstack/docs`, both re-ran and exited 0.\n  - `dispatch-gates --ran`: 54 derived, 54 run, 0 NOT-MEASURED, 0 UNRUN.\n- No changeset: a test file publishes nothing.\n\n## Acceptance notes\n\n- **Scope (PM reading H3).** The card's full `pnpm test`, with the checkout present, turned only `@objectstack/client#test` red. No other test suite has a reproduced instance. The repo-root walkers under `scripts/` whose skip sets lack `.cache` have not been measured against a planted checkout. That is inference only, so nothing was filed.\n- **Source of the hazard.** `scripts/build-console.sh` clones into the repo root. Cloning outside the tree, or printing the `rm -rf .cache` advice, would retire the whole class. Not touched here: it is outside the claim's file surface.\n- **New scratch-dir site.** One `mkdtempSync(join(tmpdir(), ...))` under the system temp directory, removed in `finally`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RWZbGvPFcRKvUqASZtunCU)_\n"
+}

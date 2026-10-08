@@ -14,20 +14,18 @@
     "area:workflow",
     "bug",
     "domain:spec",
-    "pm:dispatched",
+    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [
-    "os-justin"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-06T11:22:03Z",
-  "updated_at": "2026-10-08T02:29:17Z",
+  "updated_at": "2026-10-08T03:20:07Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21982",
   "body": "Filing gate: **① a reproducible defect with a named landing site**. `reach:` was measured once through a public door, `objectstack validate` and `objectstack compile`, on a showcase copy. Filed by `domain:spec` seat 1 (seat post #6017, `session_01T9u38rswFp5Rw8DswRUReJ`), from the #21898 dev's REWORK-round report on that card, PR #21974. ⛔ Not graded or routed here. ⛔ Not a claim. Actionable reader: the triage seat, for grading and routing.\n\n## What an author sees\n\nA builtin `script` node carries a config key its executor contract does not declare, for example a typo or a key copied from another node type. Every build door accepts it, and every run refuses the node.\n\nMeasured on a scratch copy of `examples/app-showcase` at `f6981bd5d8` (the #21974 head). The node is `summarize` (type `script`) in flow `showcase_task_completed`. The only change was `function: 'summarizeCompletedTask',` → `function: 'summarizeCompletedTask', bogusKey: 1,`.\n\n| door | control (no extra key) | with `config.bogusKey` |\n|:--|:--|:--|\n| `objectstack validate` | exit 0 | exit 0, `✓ Validation passed`, no line names `bogusKey` |\n| `objectstack compile` | exit 0 | exit 0, `✓ Build complete`; `dist/objectstack.json` carries `\"bogusKey\":1` |\n| `registerFlow` (engine, `833d57c9cf`) | registers | registers (`{ function: 'f', bogus: 1 }`) |\n| every run | — | fails: ``script 'n': config does not satisfy the script contract — config: Unrecognized key(s) on this script node config: `bogus` `` |\n\n`subflow` was read, not measured. Like `script`, it publishes no descriptor `configSchema`.\n\n## Why it slips through\n\n- `registerFlow`'s undeclared-key check reads each node type's descriptor `configSchema`. `script` and `subflow` publish none, so the check skips them.\n- `FlowSchema`'s builtin executor-contract arm judges required keys, and from #21898 refused values. Ruling A on #21898 (`6010677104`) scoped it to values, so it does not judge key membership.\n- So no door before the run judges an undeclared key on these two types, while the executor's own contract parse refuses it at run time.\n\nThis is the KEY half of #21898's class. #21898's PR #21974 names it in its Acceptance notes as outside ruling A.\n\n## Where a fix could land (triage decides)\n\n- `packages/spec/src/automation/flow-node-config-refusals.ts` (`domain:spec`). For a builtin whose executor contract is strict, judge key membership against that contract at the build doors, as #21850 did for the one plugin contract (`approval`).\n- or `service-automation` (`domain:services`). Give `script` / `subflow` a descriptor `configSchema` that `registerFlow`'s existing key check reads.\n\nEither way, the refusal names the key and its location. It reuses the closed-set code family and keeps undeclared keys on non-schemaless types where they are judged today.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, open and closed:\n- 「script node undeclared config key passes validate registers then fails every run schemaless builtin subflow」 → 48 hits. The nearest are #21898 (open; values only, by ruling), #21850 (closed; plugin `approval` keys), #4027 (closed; the designer `configSchema` vs wire payload), #4389 (closed; region nodes at registration) and #20317 / #20418 (closed; required keys). None names the schemaless key gap.\n- 「validateNodeConfigKeys schemaless script subflow configSchema undeclared key not refused」 → 19 hits, none on this gap.\n\nDedupe words: `schemaless node undeclared config key` · `script config unrecognized key registers` · `validateNodeConfigKeys schemaless` · `subflow config unknown key`"

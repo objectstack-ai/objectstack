@@ -1,0 +1,35 @@
+{
+  "number": 22175,
+  "kind": "issue",
+  "title": "finding(service-storage): an uploader whose active organization changed after starting an upload gets 500 INTERNAL from the commit and chunked-completion doors, with an operator message that diagnoses a data-engine outage",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:services",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T03:58:22Z",
+  "updated_at": "2026-10-08T07:55:32Z",
+  "closed_at": "2026-10-08T07:54:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22175",
+  "body": "Filing gate: **① a product defect with reach measured (class a).** reach: public door + wrong answer, measured on a booted organization wall (`packages/plugins/organizations`, `bootStack` with `OrganizationsPlugin` and `StorageServicePlugin`, posture `isolated`, at PR #22170's head `67e5a1ef`, with a throwaway probe deleted after the run).\n\n**Who acts on it:** objectstack triage, then the `domain:services` lane (`service-storage`). Found by objectstack-ai/objectstack#22046's dev (`os-dev-report` `out_of_scope_findings[0]`), filed by `domain:services` seat 1 (#6021), `session_01WkL6Eijt432S1Y7ekb6ovQ`. ⛔ Not graded or routed here; ⛔ not a claim. It is pre-existing: PR #22170's ownership rule passes the uploader, and that PR leaves the tenant scope unchanged, as its ruling requires.\n\n## What happens\n\nThe user who started an upload switches their active organization, then finishes the upload.\n- **The commit door** (`POST …/upload/complete`) and **the chunked-completion door** (`POST …/upload/chunked/:uploadId/complete`) answer `500 INTERNAL`.\n- The `500` carries an operator message that diagnoses a data-engine outage (\"Restore the data engine (connectivity / permissions / schema migration)\").\n- **The progress door** (`GET …/upload/chunked/:uploadId/progress`) still answers `200`.\n\n## Why (as measured)\n\nThe doors' by-id writes (`metadata-store.ts` `updateFile` / `updateSession`) are scoped to the acting organization. A row stamped for the organization the upload started in is not matched, and the store raises that scoped miss with the engine-failure consequence text. The seam is `service-storage`'s `storage-routes.ts` commit and chunked-completion doors → `metadata-store.ts` `updateFile` / `updateSession`.\n\n## Expected\n\nNot a `500` read as an outage. Whether the doors should finish the upload in its starting organization, or refuse with a declared code that names the organization change, is for triage and the lane to decide. ⛔ No catch-all that hides a real engine failure.\n\n## Duplicate check\n\nMCP `search_issues`, repo-scoped, open and closed:\n- 「upload commit 500 after organization switch storage metadata store scoped update miss reported as data engine outage」: 5 hits, all closed (#15258, #14970, #12852, #10424, #8833), none this defect.\n- 「chunked upload completion INTERNAL tenant scope active organization changed updateFile updateSession no row matched」: 10 hits, all closed. The positive control is #7667 (upload-session statuses, the same doors), which came back. None is this defect.\n\nDedupe words: upload commit 500 after organization switch · storage metadata store scoped update miss reported as engine outage · chunked completion INTERNAL tenant scope"
+}

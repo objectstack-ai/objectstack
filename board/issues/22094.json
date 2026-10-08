@@ -2,7 +2,7 @@
   "number": 22094,
   "kind": "pull_request",
   "title": "feat(spec)!: retire the flat string-list arm of manifest.permissions — the structured ADR-0025 block is the only form (#13458)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-07T14:59:00Z",
-  "updated_at": "2026-10-08T02:15:09Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-08T03:18:17Z",
+  "closed_at": "2026-10-08T03:18:15Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-10-08T03:18:15Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/22094",

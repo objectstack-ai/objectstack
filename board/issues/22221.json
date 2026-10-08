@@ -1,0 +1,28 @@
+{
+  "number": 22221,
+  "kind": "issue",
+  "title": "[finding] qa(http-conformance): no composed-host test holds the `@objectstack/hono` catch-all's `/meta` write preconditions — #22141's pins drive `dispatch()` directly, so the adapter's hand-off of the raw `Request` is held only by a quoted probe",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T06:54:56Z",
+  "updated_at": "2026-10-08T06:54:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22221",
+  "body": "Filing gate: **① a test-coverage gap with a named home** (class (b): a regression guard the fix's own tests cannot reach). Raised by the independent contract review of PR #22206 (record `6054267983`, ③ item 2), which the `domain:cli` seat adopted, and filed by that seat (seat post #6024, `session_01RWZbGvPFcRKvUqASZtunCU`). ⛔ Not a claim. Triage sets the grade and the lane.\n\n## What is covered and what is not\n\n- PR #22206 (#22141) makes the runtime dispatcher's `PUT /meta/:type/:name` honour `If-Match`, `If-None-Match: *` and `?mode=draft` through `metaSaveRequestOptions` (`@objectstack/rest`).\n- Its committed pin, `packages/runtime/src/domains/meta-save-preconditions-parity.test.ts`, drives `HttpDispatcher.dispatch()` with the catch-all's exact arguments. It does not go through `createHonoApp` itself:\n  - `runtime` cannot depend on `@objectstack/hono` (hono depends on runtime);\n  - `packages/adapters/hono`'s vitest config aliases `@objectstack/runtime` to a stub.\n- The real `createHonoApp` was measured by an uncommitted scratch probe, quoted in PR #22206's body.\n- So the one line that makes the fix reach a hosted caller has no test: the catch-all hands `dispatch()` `{ request: c.req.raw }` (`packages/adapters/hono/src/index.ts`, about `:739`). If it stopped handing the raw `Request`, or flattened the headers, every `If-Match` and `?mode=draft` behind the catch-all would be dropped again, and nothing in CI would go red.\n\n## The home that already exists\n\n`packages/qa/http-conformance/src/hono-meta-item-read-gate.conformance.test.ts` composes the real `createHonoApp` over a `LiteKernel` for the read-side twin of the same parity (#20193). The write rows belong beside it:\n- a stale `If-Match` → `409 METADATA_CONFLICT`;\n- `If-None-Match: *` over an existing row → `409`;\n- `?mode=draft` leaves the active row untouched;\n- control: an unguarded save writes the active row.\n\n## Reader who acts\n\nTriage grades and routes it. `packages/qa` is `domain:cli`'s. Test only: `Clause-②: no`, no changeset.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped: 「hono createHonoApp composed host conformance test meta write If-Match draft http-conformance」 gives 1 hit, #22141 itself (the fix, not this gap).\n\nDedupe words: `hono catch-all meta write conformance` · `createHonoApp If-Match draft composed host test` · `http-conformance meta save preconditions`"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 22205,
+  "kind": "pull_request",
+  "title": "docs(north-star): priority item 4 states the human-facing standard",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T06:15:38Z",
+  "updated_at": "2026-10-08T06:57:10Z",
+  "closed_at": "2026-10-08T06:57:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-08T06:57:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/22205",
+  "body": "Fixes #22194\n\nClause-②: no\n\n## What changes\n\n`docs/NORTH-STAR.md`, 「优先级」 item 4 gains one sentence: the maintainer's own text, inserted byte-for-byte as the card's \"The one edit, and only this\" section gives it, between the item's penultimate sentence and its final sentence 「写给 AI 的文档与 skills 说错一句,等于产品缺陷。」. No other byte of the file moves. Docs only; Tier H governed surface, so this PR stays draft and lands on an authorized APPROVED review or the maintainer's hand.\n\nThe inserted sentence, copied programmatically out of the card body (never retyped) and compared byte-equal to the dispatch order's quotation:\n\n```text\n人用的那一半也有标准:作者不写一行界面代码,得到的界面要像设计师经手过——同一套设计系统、同一种版式;看着不对与渲染不出同样是缺陷,在「看到」那一步就被拒。\n```\n\n**Insertion point.** The card's quoted context predates PR #22179 (#22172 is landed, merge `5d1d1aca6d`). On `origin/main` `13aea18959` the penultimate sentence ends 「……Agent 越权时被权限挡住并留痕。」 rather than 「……真能做的。」. The card's rule is applied as written (between the penultimate and the final sentence), and the 「,Agent 越权时被权限挡住并留痕」 clause #22179 added stays exactly where it is.\n\n### Item 4, before (`origin/main` `13aea18959`)\n\n```text\n4. 因为写的是 AI、用的也是 AI:本体既要 AI 能写——错的必须被响亮拒绝并给处方,永不静默落库;也要人与 Agent 能用——声明了的对象、动作、agent / tool / skill 元数据在运行时兑现,MCP 面暴露的就是应用真能做的,Agent 越权时被权限挡住并留痕。写给 AI 的文档与 skills 说错一句,等于产品缺陷。\n```\n\n### Item 4, after (this branch)\n\n```text\n4. 因为写的是 AI、用的也是 AI:本体既要 AI 能写——错的必须被响亮拒绝并给处方,永不静默落库;也要人与 Agent 能用——声明了的对象、动作、agent / tool / skill 元数据在运行时兑现,MCP 面暴露的就是应用真能做的,Agent 越权时被权限挡住并留痕。人用的那一半也有标准:作者不写一行界面代码,得到的界面要像设计师经手过——同一套设计系统、同一种版式;看着不对与渲染不出同样是缺陷,在「看到」那一步就被拒。写给 AI 的文档与 skills 说错一句,等于产品缺陷。\n```\n\n## Verification (head `40ae9bc4dd`)\n\n- `git diff --stat` against base `13aea18959`: 1 file, `docs/NORTH-STAR.md`, +1/-1; `git diff -U0` shows exactly one hunk (`@@ -117 +117 @@`, item 4).\n- `grep -c -F` of the full sentence in `docs/NORTH-STAR.md`: 0 at base, 1 at head.\n- Byte proof: deleting the sentence's 226 UTF-8 bytes from the head file reproduces the base blob `824f77668f` exactly, so the insertion is the whole diff.\n- The insertion ran as a script that refused to write unless the anchor (the sentence ending 「留痕。」 directly followed by 「写给 AI 的文档」) occurred exactly once, then checked the result on disk.\n- 「美观」 occurs 0 times in the file before and after; no section, number or per-screen rule added.\n- Punctuation: the sentence carries the card's bytes as-is. It uses ASCII comma, colon and semicolon (U+002C, U+003A, U+003B) with CJK 、。「」 and em dashes, which is the file's own convention (0 occurrences of the full-width U+FF0C, U+FF1A, U+FF1B before and after).\n- No raw control bytes (`grep -naP` over the file: no match).\n\nGates: `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derives 13 families for this change set (5 by path, 8 whole-tree). All 13 run on head `40ae9bc4dd`, every one exit 0:\n\n```text\nnode scripts/check-ci-filter-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:watch-hint-literal :: exit 0\n```\n\n`--ran` reconciliation over that record: \"13 derived, 13 run, 0 NOT-MEASURED, 0 UNRUN\" (a derived zero: all 13 carry an exit code, none is 3). `check:doc-formula-expressions` first exited 3 (PREREQUISITE NOT MET, the fresh worktree had no `@objectstack/formula` / `@objectstack/lint` dist; nothing measured); after `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` under the verify lock it ran and exited 0. Outside the derived 13 (artifact rosters, wide-population families, CI type-check lanes) is CI's.\n\nNo changeset: `docs/NORTH-STAR.md` ships from no package. The root package is private, and no `package.json` `files[]` names the file (positive control: 69 package manifests with a `files[]` were read by the same grep). Hence `skip-changeset`.\n\n## Acceptance notes\n\n- The dispatch order's mechanism assumption 3 expected \"full-width punctuation as the file already uses\". Measured: the file uses ASCII comma/colon/semicolon throughout, and so does the card's sentence, so the card's bytes already match the file; nothing was converted.\n- Three package files mention `docs/NORTH-STAR.md` in comments only (`packages/cli/src/utils/author-time-rules.ts`, `packages/cli/test/verify-author-time-stage.test.ts`, `packages/lint/src/validate-security-posture.runtime-surface.test.ts`); none reads the file, and the clause the lint test cites (「声明了的…在运行时兑现」) is unchanged.\n\n## 维护者速读(草稿)\n\n### 改了什么\n\n北极星文件 `docs/NORTH-STAR.md` 的「优先级」第 4 条加了一句话,就是您在卡上同意的原文,一字不差:用户界面也有标准,作者不写一行界面代码,得到的界面也要像设计师处理过(同一套设计系统、同一种版式);界面看着不对,和渲染不出来一样算缺陷,在「看到」这一步就被拒。这句话放在「Agent 越权时被权限挡住并留痕」之后、「写给 AI 的文档与 skills 说错一句」之前。文件其他内容一个字节都没动。\n\n### 为什么改\n\n在这个平台上,应用作者不写界面代码,也改不了平台自带的弹窗,所以每一个渲染出来的界面都是平台的责任。以前「渲染不出来」会在「本地跑起来、看到」这一步被拦下,「渲染得难看」却拦不住;这句话把两者放到同一个关口。它只承诺两件能检查的事(一套设计系统、每类界面一种版式),不写「美观」二字,避免变成没完没了的审美卡。\n\n### 风险与代价(含回滚)\n\n纯文档改动,不影响任何发布的包,也不改变运行时行为,所以不需要 changeset。代价在后面:今后定级和复核时,「看着不对」的界面也会按缺陷排队,工作量会增加;具体检查哪些界面种类、怎么判定,由配套的测试清单卡负责,不写在北极星里。回滚:撤销(revert)这个 PR 即可,只涉及一行。\n\n### 席位意见\n\n\n\n### 你要做的\n\n核对上面「before / after」两段,确认这句话的原文和位置无误后,在本 PR 上点 Approve。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CXydFDyiQwNbGFkmwrcRQq)_\n"
+}

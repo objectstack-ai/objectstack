@@ -1,0 +1,32 @@
+{
+  "number": 22188,
+  "kind": "issue",
+  "title": "finding(rest): `?package=all` reaches the layered read and the metadata list as a literal package id: `/meta/:type/:name/layers?package=all` answers 404 and `GET /meta/:type?package=all` answers [] for an item stored in a package",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T05:20:21Z",
+  "updated_at": "2026-10-08T07:21:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22188",
+  "body": "Filing gate: **① a reproducible defect, class (a)**. The doors give a wrong answer, and `reach:` was measured on the real stack. Found by #22128's dev (PR #22185, report `6052880125`, `out_of_scope_findings[0]`) and filed by the `domain:spec` seat 3 (seat post #18883, `session_01RPo7FUd6bSnAfkWMAKi848`). ⛔ Not graded or routed here; ⛔ not a claim.\n\n## What is measured (by the dev, on the real `RestServer` routes over better-sqlite3)\n\nA view `case_grid` whose active row is stored in package `com.probe.pkg`:\n\n| request | answer | the same request without `?package=all` |\n|:--|:--|:--|\n| `GET /meta/view/case_grid/layers?package=all` | **404** | `GET /meta/view/case_grid/layers` → 200, overlay `live` |\n| `GET /meta/view?package=all` | **`[]`** | `GET /meta/view` → `['case_grid']` |\n\n`all` is the metadata list's \"show everything\" scope. The save and publish doors read it as naming no package. These doors forward it as the literal package id `all`, so they find nothing.\n\n## Where it is (read at PR #22185's head `07c229054`)\n\n`packages/rest/src/rest-server.ts`:\n- the layered read: `layeredPackageId = req.query?.package || undefined` (`:3971`);\n- the list door (`:6096`) and the book lookup (`:6430`), which forward the literal `all`.\n\nPR #22185 (#22128) adds `metaItemPackageBinding` (`:1788`), the one reading of `?package=` that the item read, save and publish doors now share. These three doors are the rest of that family. #22128's claim covered only the item read's fold, so they were left as they are.\n\n## Who reaches it\n\n- **Named producer:** objectui's `ResourceEditPage.tsx` (read at objectui `9990f9e`) scopes its layered and draft reads with the raw router `?package=`. Its own docblock says `ownerPackageId` \"does not fold all\".\n- So the Studio editor, opened from the list under its \"show everything\" scope, asks `/layers?package=all` and gets 404 for an item stored in a package.\n\n## Reader who acts\n\nTriage grades and routes it. The landing site is `packages/rest/src/rest-server.ts`. Once PR #22185 lands, the shared fold exists, and the fix routes these three doors through it. Pins: each door with `?package=all`, a package-bound item, and the plain-read control.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included: 「package=all meta layers list door returns 404 empty fold ?package= like save door」 → 3 hits, all closed. The nearest are #20507 (the layered read's absent-name oracle), #20156 (alternate read doors skip per-caller gates) and #20478 (the dispatcher's `?layers=true` envelope). None is this.\n\nDedupe words: `package=all layers 404` · `package=all list empty` · `?package= fold meta doors` · `layeredPackageId all`"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 22207,
+  "kind": "pull_request",
+  "title": "docs(qa): the coverage sweep gains a sixth angle — surface kinds vs the one design system",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T06:21:19Z",
+  "updated_at": "2026-10-08T07:54:13Z",
+  "closed_at": "2026-10-08T07:54:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-08T07:54:12Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/22207",
+  "body": "Fixes #22195\n\nClause-②: no\n\n## What changes\n\nTwo files under `docs/qa/platform-checklist/`, and nothing else.\n\n`SWEEP.md`, section \"What a sweep is\":\n\n- The angle table (angle · enumerate from · catches) gains row 6, \"Surface kinds vs the one design system\". Its three cells are the card's \"What the angle is\" bullets, byte-for-byte: a script compared each stored cell with the card body's bullet text and all three matched. The angle cell carries the `6. ` prefix and no bold, because rows 1 to 5 carry a number prefix and no bold; the bold in the card is the bullet's label, not the table's grammar.\n- The prose that counts the angles moves from five to six with the row:\n  - line 34, \"Six READ-ONLY gap-hunter agents\"\n  - line 53, step 2 \"Dispatch the six hunters in parallel\"\n  - line 57, step 3 \"Dedupe the six reports into one register\"\n\nThe card lists the first two count sites. The third (step 3's \"the five reports\") is also a count of the angles. The card's acceptance says \"every count word in both files agrees with the table\", so it changes with the row. I'm declaring it here instead of changing it silently.\n\n`README.md`, line 457 (item 4, \"Periodic re-sweep\"):\n\n- \"five independent gap-hunt angles\" becomes \"six independent gap-hunt angles\". That one count word is the whole change to the file. `SWEEP.md` step 1 sends every sweep to this README first, so it would state a false count the moment the sixth row lands. The seat added this file to the claim's file surface in a patch round on this PR (card comment 6053913569); it was acceptance note 1 in the first version of this body.\n\nRow position: on `origin/main` 13aea18959 the table held five rows and no other angle had landed, so this row is number 6. `origin/main` has since moved one commit (7d7943dd0d), which touches neither file, so the branch was not merged forward.\n\nAfter the change, `grep -n -i -w five` finds no match in either file. The remaining \"six\" hits that are not angle counts are untouched: `SWEEP.md` line 80 (\"Four of six coverage waivers\", a 2026-08 finding) and `README.md` line 254 (\"three areas and six references\").\n\nThe skill's three count words (`five-angle` in the description line, \"5 个 hunter\", \"五个角度\") are in a separate draft PR on branch `claude/issue-22195-checklist-author-angle-count`. That file is under `.claude/**` (Tier S), and keeping it out of this PR means this diff touches no governed surface.\n\n## Verification, at HEAD 13555f1d89\n\nEvery command's exit code was captured before any pipe:\n\n| command | exit |\n|---|---|\n| `node scripts/check-platform-checklist.mjs` | 0 (`OK — 16 areas, 279 items (275 active, 2 planned); coverage: 39 kinds mapped, 2 waived`) |\n| `pnpm check:platform-checklist` | 0 (selector self-test 31 cases, validator self-test 221 assertions, validator) |\n| `pnpm check:nul-bytes` | 0 (10174 text files, no raw ASCII control bytes) |\n| `pnpm check:doc-authoring` | 0 |\n| `pnpm --filter @objectstack/lint run check:doc-formula-expressions` | 0 (first run exited 3, PREREQUISITE NOT MET because formula and lint were unbuilt in the fresh worktree; rerun at 0 after building those two under the verify lock) |\n| `node scripts/check-ci-filter-parity.mjs` | 0 |\n| `node scripts/check-closing-keyword-parity.mjs` / `--self-test` | 0 / 0 |\n| `node scripts/check-comment-mask-corpus.mjs` | 0 |\n| `pnpm check:cross-package-test-inputs` | 0 |\n| `pnpm check:driver-memory-census` | 0 |\n| `pnpm check:gitlink-declared` | 0 |\n| `pnpm check:refd-timer-probe` | 0 |\n| `pnpm check:watch-hint-literal` | 0 |\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran` reconciled this list against the tree's own derivation over both paths: \"13 derived famil(ies) accounted for — 13 run, 0 NOT-MEASURED (a DERIVED zero — all 13 recorded an exit code and none of them is 3)\". Its stale-tree warning named one file changed on `origin/main` since the merge base, a new ADR anchor for a `plugin-security` source file. A control derivation from a tree at `origin/main` 7d7943dd0d, given the same two paths, printed the same 13 commands. The type-check lanes, artifact rosters and wide-population families that the derivation lists outside its runnable set are CI's, and were NOT MEASURED locally.\n\nThe diff is Markdown prose only, so no build, unit test or reverse verification applies.\n\n## Changeset\n\n`skip-changeset`: `docs/qa/` sits under no workspace package (the `pnpm-workspace.yaml` globs are `packages/*`, `apps/*`, `examples/*` and their nested roots), no `package.json` names it in `files`, and the root package is `private: true`. Nothing publishes.\n\n## Acceptance notes\n\n1. The card also gives the items this angle authors some binding properties: one item per surface kind, not one per screen; oracle `screenshot`, then `dom` for the checkable facts; the reference is the design system's own composition (objectui `AGENTS.md` rule 3); and never a reference image checked into the repo. This PR does not write any of them into `SWEEP.md`, because the card's acceptance limits the diff to the row and the count words. After this lands they exist only in the card body, so a sweep hunter reading `SWEEP.md` will not see them. The seat has put this to the maintainer.\n2. `FOLLOW-UPS.md` lines 8 and 422 say \"five-angle sweep\". Both record the 2026-08 sweeps and are still accurate, so they are unchanged.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CXydFDyiQwNbGFkmwrcRQq)_\n"
+}

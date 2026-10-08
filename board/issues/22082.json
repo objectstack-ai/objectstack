@@ -2,8 +2,8 @@
   "number": 22082,
   "kind": "issue",
   "title": "ci(validate-deps): on pull_request the OSV scan judges the whole lockfile, so a PR that changes no dependency inherits main's red for hours (7 red-main findings in 5 weeks) — judge base-relative on PRs, keep the daily main scan, add a job timeout",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-07T13:45:25Z",
-  "updated_at": "2026-10-08T01:33:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-08T04:05:59Z",
+  "closed_at": "2026-10-08T04:04:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22082",
   "body": "Ruled: 6049727506 · letter A · 2026-10-08T00:40Z\n\nFiling gate: ③ a maintainer-directed task — the maintainer, after this seat's CI assessment in this session, verbatim: 「CI 优化按照你的建议创建任务」 — carrying ① a measured defect with a named fix site: on `pull_request`, `validate-deps.yml` runs OSV-Scanner against the PR's whole `pnpm-lock.yaml`, so every advisory already matching `main`'s lockfile reds every PR that touches a dependency file, whether or not the PR changed a dependency; the job also has no `timeout-minutes`. Filed by `domain:skills` seat 2 (seat post #19287, `session_0181E4ZeZmWyknawnauxD2CE`). ⛔ Not a claim. The `tooling` entry rule (`triage-duties.md:34`) is met by the maintainer's instruction quoted here; the guarded surface is the `Validate Package Dependencies` check on every dependency-touching PR.\nReader: triage first-touch → `domain:devx` (the lane of #14645, #22013); the devx seat dispatches it. Protocol statement: this changes what the gate judges on PRs (base-relative instead of absolute); the gate still blocks on any severity the PR introduces and on `main`'s daily scan — if triage reads the PR-side change as a weakening of a gate, the card goes to the decision box instead of the queue.\nDedupe: page-looped REST listings, closed included (union 1,266: `domain:devx` since 2026-09-07: 391; `ci/cd`: 63; every issue updated since 2026-10-01: 636; `tooling` since 2026-09-07: 417; `domain:skills` since 2026-09-23: 109) grepped for `validate-deps|OSV|Validate Package Dependencies|lockfile.*red|advisor` → 12 hits: the red-main findings #18930, #20561, #20705, #20769, #21055, #21945, #22013 (all closed by a fix PR), #14645 (closed: the weekly scan became daily so a new advisory is found by the schedule, not by the next PR author) and #22016 (the fix PR for #22013). Every one took the fix; none changed how a PR is judged while the fix is on its way, which is this card.\n\n## What is measured\n\n- `.github/workflows/validate-deps.yml`: `pull_request` on dependency paths (`**/package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, the gate scripts, the exemption ledger), `schedule` daily 03:00 UTC (#14645), `workflow_dispatch`; the OSV step (`google/osv-scanner-action` v2.3.8) \"blocks on any severity\"; the only escape is a dated exemption in `osv-scanner.toml` for advisories with no fix (#4965 conventions, enforced by `scripts/check-osv-exemptions.mjs`); the job declares no `timeout-minutes` (the 360-minute default applies).\n- The 100 most recent completed runs (7.1 days): 92 `pull_request`, 8 `schedule`; 54 success, 19 failure, 27 `action_required` (Dependabot PRs awaiting approval); the failures cluster on the days new advisories were published (10-01 and 10-06), including 3 failed scheduled runs on `main`.\n- Seven red-main findings in five weeks, each red-gating unrelated PRs until its fix landed: #18930, #20561, #20705, #20769, #21055, #21945, #22013. Measured on this seat's PR #22002: it removed one `package.json` scripts line, inherited `main`'s two advisories (sharp, shell-quote; run 37483796939), was parked under landing-operations §C for about six hours until PR #22016 landed, and needed an `update-branch` to go green.\n- The ledger's own header states the principle: \"a permanently red required check is worth exactly as much as no scan at all\" — the same holds for a check that is red on every PR for reasons the PR cannot fix.\n\n## Done when\n\n- On `pull_request`, the OSV verdict is base-relative: the scanner runs on the PR's lockfile and on the base's (the merge-base `pnpm-lock.yaml`); advisories matched by both are reported as inherited (a notice naming them and, when one exists, the anchor finding card) and do not fail the step; an advisory matched only by the PR's lockfile fails the step as today. Equivalent and simpler where it applies: when the PR does not change `pnpm-lock.yaml`, the OSV step reports \"lockfile unchanged — inherits main's verdict\" and does not fail.\n- The daily scheduled scan and `workflow_dispatch` keep the absolute verdict on `main` and remain the red-main signal that files the finding card.\n- The exemption ledger's conventions are untouched (`ignoreUntil` mandatory, 30/90-day bounds, no lowering of the gate); the gate scripts (`check:override-consistency`, `check-changeset-fixed`, the vendor-export contract, the exemption check) run unchanged.\n- The job gets a `timeout-minutes` sized from the measured run time (p50 1.3 / max 1.9 min in the window): 15 is ample.\n- Pin: a PR that touches only a `package.json` `scripts` line against a `main` whose lockfile carries a known advisory passes the check with the inherited notice; a PR whose lockfile introduces a new advisory fails it; both measured on real runs and quoted in the PR body with run ids.\n- ⛔ No new gate; ⛔ no change to what `main`'s scan judges; ⛔ no exemption added.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

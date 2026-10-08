@@ -1,0 +1,35 @@
+{
+  "number": 22219,
+  "kind": "issue",
+  "title": "cli(migrate meta): `os migrate meta --from 17 --write` leaves `engines.protocol: '^17'`, so the load refusal that names this command as its resolution still refuses the migrated manifest",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p1",
+    "target:v18"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T06:43:26Z",
+  "updated_at": "2026-10-08T07:50:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22219",
+  "body": "Filing gate: **① a product defect.** `reach:` public door, measured. Reported by #22130's dev on PR #22215 (report `6053991953`, `out_of_scope_findings[0]`). Read in source and filed by the `domain:spec` seat 1 (seat post #6017, `session_01LAi5BVvQNiYzepSAcsoFLK`). ⛔ Not graded or routed here; ⛔ not a claim.\n\n## What was measured (by #22130's dev, CLI built from PR #22215's branch, where `PROTOCOL_VERSION` reads `18.0.0`)\n\n- `os migrate meta objectstack.config.ts --from 17 --write` rewrote a declared index (`objects[0].indexes[0].unique`) and left `engines: { protocol: '^17' }` as it was. Its output never mentions the range.\n- The load seam then refuses the same manifest: `ProtocolIncompatibleError … targets protocol ^17.1.0 … Run: objectstack migrate meta --from 17` (measured in the same PR's runtime run).\n- So an author who follows the refusal's own prescription, runs it with `--write`, and reloads gets the same refusal back.\n\n## What the source says (read at `origin/main` `7d7943dd0d`)\n\n- `ProtocolIncompatibleDiagnostic.migrateCommand` in `packages/metadata-core` is documented as \"The command that resolves the refusal (wired end-to-end by ADR-0087 P2)\".\n- `packages/cli/src/commands/migrate/meta.ts` reads and writes no `engines.protocol`.\n\n## Reach on `main` today: not measured\n\n`main` is still on protocol 17. The same shape would apply to a `^16` manifest and `--from 16 --write`. That case was not measured. The 17 → 18 case becomes reachable for every app when PR #22215 (#22130) lands.\n\n## Reader\n\nTriage grades and routes this. The fix lands in `packages/cli`'s `migrate meta`, which is `domain:cli`. Whether `--write` should bump the range or the default run should say how is the fix's question; this card does not answer it. `Part of` the v18 upgrade path (#22085, #22130).\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included:\n- 「os migrate meta --write does not rewrite engines.protocol range; ProtocolIncompatibleError migrateCommand resolves refusal」: 23 hits. The nearest are #9591 (open; the `--write` retirement sentence), #20696 (closed; `migrate meta` aborting at load on a retired key), #21727 (closed; the install refusal dropping its diagnostic) and #17134 (closed; `--to` defaulting to the current major). None of them is this defect.\n- 「migrate meta handshake range not rewritten engines protocol bump after conversions」: 3 hits. #4097 (closed; example apps declaring no range) is the nearest, and it is not this defect.\n\nDedupe words: `migrateCommand engines.protocol` · `migrate meta range bump` · `OS_PROTOCOL_INCOMPATIBLE resolves refusal` · `handshake range not rewritten`"
+}

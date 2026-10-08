@@ -1,0 +1,34 @@
+{
+  "number": 22160,
+  "kind": "issue",
+  "title": "[maintainer] dev-mode noise budget: a blank project written verbatim from the tutorial boots with 4 WARN lines and only one needs the author's hand — expected degradations to info, stacks only at debug, the actionable line highlighted with a one-line fix",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:cli",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T03:29:30Z",
+  "updated_at": "2026-10-08T08:16:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22160",
+  "body": "Filing gate: ③ task dispatched by the maintainer, quoted verbatim below; the measurements are class (a) and were taken in this session.\nreach: `npx os dev --ui` on a fresh `npm create objectstack@latest` project carrying the Build-with-Claude-Code tutorial's four files (17.7.0 packages): `⚠ Boot diagnostics — 4 warnings logged during startup`; `pnpm dev -- --fresh` on the showcase at `main` (post-#22097): 4 WARN lines plus 2 unarmed-trigger lines.\nReader: `domain:cli` seat for the policy and the boot-diagnostics printer (`packages/cli/src/utils/format.ts`, `packages/cli/src/utils/console.ts`); each WARN line's owner for its level (`packages/services/service-analytics`, `packages/objectql/src/engine.ts` + `driver-sql`, `packages/objectql/src/action-governance.ts`, `service-settings`, `plugin-sharing`).\nDedup: `search_issues` \"dev mode boot diagnostics too noisy warnings expected degradation should be info stack trace only at debug noise budget\" → 5 hits, all closed: #22073 (one line per warning class, loopback OAuth → info; PR #22097), #3420 (官方示例应零警告启动), #13256, #4012, #3430. None states a dev-mode budget; this card generalises #22073's per-class fix into a rule and lists the four lines that survive it.\nPrior rulings read: #22073 / PR #22097 (per-class summary lines, each printed once, loopback OAuth at info); #3420 (the examples should boot with zero warnings).\nFiled on the maintainer's instruction in this session (category ③, quoted verbatim): 「终端噪音是最大的体验问题。 一个按教程原样写的空白项目,`os dev` 启动就打出 4 条 WARN:OAuth 明文(localhost 下属预期)、analytics 误报、`sys_migration` 带完整 knex 堆栈、action 无 handler。其中只有最后一条真的需要用户动手,却被淹没在其它三条里。建议给 dev 模式定一个\"噪音预算\":预期中的降级记 info,堆栈只在 `--log-level debug` 出现,真正需要动手的那条单独高亮并给一行修法。」\n\n## What a first boot looks like today\n\nA blank project with the tutorial's object, action, view and app, `npx os dev --ui`, `@objectstack/*` 17.7.0 — the whole *Boot diagnostics* block, abridged:\n\n```text\n⚠ Boot diagnostics — 4 warnings logged during startup:\n  WARN [Analytics] No admitObjectRead configured and no \"security\" service registered at init — … any authenticated caller can post an inline dataset and read counts … (#22154: false alarm, Security registers on the same boot)\n  WARN [action-governance] declared script actions with NO handler — a button wired to nothing (ADR-0078); add a `body`, or register a handler under the declared `target` {\"count\":1,\"actions\":[\"my_app_ticket:resolve_ticket\"]}   ← the only line the author must act on\n  WARN OAuth is served UNENCRYPTED: … (http://localhost:38421/api/v1/auth) … The transport rule accepts this origin only because the host is loopback …   (info since PR #22097 on main; still WARN in 17.7.0)\n  WARN Insert operation failed {\"object\":\"sys_migration\",\"error\":{\"message\":\"UNIQUE constraint failed: sys_migration.id …\",\"stack\":\"SqliteError: … at Client_BetterSQLite3._query (…/knex/lib/dialects/better-sqlite3/index.js:52:40) … (9 more frames)\"}}   (#22099)\n```\n\nOn `main` (showcase, `pnpm dev -- --fresh`) the OAuth line is gone and the block reads: `[Analytics] No admitObjectRead …`, `[SettingsService] Pre-bind READ of namespace 'auth' …`, `Insert operation failed {\"object\":\"sys_migration\" … full stack}`, `[sharing-rule] active business-unit rule expands to NO recipients …`, plus two `flow … declares a 'schedule' trigger but is NOT bound — disabled by deployment policy …` lines. Not one of those six asks the showcase author to change anything.\n\nThe one line that does — the dead button — is visually identical to the rest: same `WARN`, same timestamp prefix, same density, a JSON tail. A newcomer reads four alarms and cannot tell the real one from the three they are supposed to ignore; the previous card in this series (#22152) is exactly the reader who missed it.\n\n## The rule being asked for\n\nA **dev-mode noise budget**, stated once and enforced by a pin:\n\n1. **Expected degradations print at `info`.** A line that says of itself \"this is accepted / not a failure / resolves per query / disabled by policy\" is not a warning: loopback OAuth (done in #22097), `[Analytics] … the bridge resolves per query` (#22154), `[SettingsService] Pre-bind READ …`, `schedule trigger … disabled by deployment policy`, `[sharing-rule] … expands to NO recipients` when the seed simply has no members.\n2. **Stack traces only at `--log-level debug`.** The `sys_migration` line carries a 10-frame knex stack into the default banner; the banner keeps the one-sentence message and the object name, the stack waits for debug (#22099 removes the line altogether, this rule covers the next one).\n3. **The actionable line is the exception, and it looks like one.** Anything with a fix the author can apply (`add a body, or register a handler …`) prints once, highlighted, with the one-line fix on its own line, and is counted separately: `1 needs your attention · 3 informational`.\n4. **A pin holds it.** The blank template and the Build-with-Claude-Code example (with a registered handler) boot with `0 warnings`; `examples/app-showcase` boots with zero lines above `info` that are not actionable. `packages/cli/src/utils/format.boot-warning-classes.test.ts` is where #22097's classes already live.\n\n## Why it matters\n\nThe boot banner is the one place the tutorial sends the reader to look (\"run it and look\"); AGENTS.md's own log-level rule says escalating functional degradations to `warn` \"trains everyone to skim `error`\". Today it trains a newcomer to skim everything.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

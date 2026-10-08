@@ -1,0 +1,36 @@
+{
+  "number": 22223,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): a card that narrows a published accept set is Clause-② no, stays in its lane and owes one contract-review-tier review before the queue",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T06:56:27Z",
+  "updated_at": "2026-10-08T08:20:43Z",
+  "closed_at": "2026-10-08T08:20:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-08T08:20:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/22223",
+  "body": "Part of #22167\n\nClause-②: no\n\n## What changes\n\n`.claude/skills/pm-dispatch/references/execution-duties.md` 〈派发〉 gains one bullet directly under the Clause-② lines — after 「条款②只指已发布契约面,拉回已声明契约不触它;卡面复述仍是条款②。」 and before 「删已发布契约文本本就否定的误拒本身是 `no`;…」:\n\n```text\n- 收窄已发布接受集的卡是 `Clause-②: no`,不移车道;入队前欠一次契约复审档复核。\n```\n\nIt states the three facts the director's ruling (letter C, comment 6053791774 on the card) settles: a card that narrows a published accept set (refuses tomorrow what passes today) is `Clause-②: no`, does not move lanes, and owes one contract-review-tier review before the queue. The Clause-② definition lines — 「`Clause-②: yes | no` 恰这两种拼写,恒英文机器判据;判据:本卡放宽接受集或扩大公开面吗。」 and 「强制条款②:放宽接受集或扩大公开面的卡默认判断档施工;命中即 spec 车道的活。」 — are unchanged byte for byte (re-read on `origin/main` at `7d7943dd0d`, lines 67 and 101).\n\nThe ruling's gloss 「明天拒绝今天还能通过的」 is not inside the line: with it the bullet measured 143 bytes against the ratchet's 120-byte per-line budget (`check:pm-skill-ratchet` went red on exactly that line), and wrapping it would cost a second line the file's ceiling does not have. 「收窄接受集」 reads against the neighbouring 「放宽接受集」 without a gloss; the gloss stays in this PR and on the card.\n\nNo issue number enters the operational text (`pnpm check:pm-skill-id-lint` green).\n\n## Line ratchet (`pnpm check:pm-skill-ratchet`)\n\n- Ceiling for this file: 183. Count on `origin/main`: 183 (headroom 0). Count after this PR: 183. The ceiling row is untouched.\n- The new line is paid by deleting one line the same file restates — 〈收集〉 「探活是每轮巡检的固定动作;完成通知不可靠,缺席什么都不证明。」 Where its content survives, all in the same 〈收集〉 section: the probe as a fixed patrol action is step 「③ 已派发未回报的 dev 逐个发状态询问;派发后 ~45 分钟无远程产出即到门槛。」 (and 「已有远程分支/PR 不豁免探针。」); \"absence proves nothing\" is 「⛔ 永不把没收到失败通知读作还在跑」 in the section's second bullet and 「⑤ 判据永远取正向证据:分支、PR、报告、探活回包。」.\n- No re-wrap anywhere: the diff is exactly +1 / -1 lines, the new line is 108 bytes, the widest-table-row pin stays at 0.\n\n## The card's remainder (not in this PR)\n\nThe `--tier` note in `scripts/pm/dispatch-gates.mjs` (the string \"a card that changes contract accept/reject behaviour or widens the public surface owes a contract-review-tier REVIEW too …\") is reworded to the same meaning when #22060 W3 unfreezes that file; the file is frozen (ruling 208 R6, read as whole-file) and this PR does not touch it. #22167 stays open for that remainder. #22135 was already amended to `Clause-②: no` by triage; nothing more there.\n\n## 维护者速读(草稿)\n\n**改了什么**:PM 派发规则文件 `execution-duties.md` 的〈派发〉节,在条款②那四行之下加一句:收窄已发布接受集的卡(明天开始拒绝今天还能通过的元数据)是 `Clause-②: no`,不换车道;入队前要过一次契约复审档复核。条款②本身的定义一字未动。为付行数棘轮(该文件 183 行、余量 0),删掉了〈收集〉节一句本文件别处已经说过的话(探活是固定巡检动作、通知缺席不证明什么),它的内容仍在同节的 ③ 与 ⑤ 两条里。\n\n**为什么改**:两段 PM 规则对\"收紧\"卡给出两个答案——一段说不欠复审、留本车道,另一段说欠复审且归 spec 车道;哪个席位先读到哪段,决定了客户看到的那次\"被拒绝\"有没有人按契约档看过。裁决(批次 290 第 5 项,字母 C)拆成两问:条款②只问\"扩不扩面\"(定车道与施工档);收紧的卡另加一句,欠一次契约复审档复核、不移车道。本 PR 落第一半;`dispatch-gates.mjs` 里 `--tier` 注释那一半等该文件解冻后随 #22060 W3 落地。\n\n**风险与代价(含回滚)**:只改一行协议文本,不改任何闸门脚本与机制,不加标签不加链;代价是每张收紧已发布接受集的卡入队前多一次契约档复核。回滚 = revert 本 PR,无数据与行为残留。\n\n**席位意见**:\n\n**你要做的**:无需操作——Tier S 面,skills 席席内契约复审档复核 PASS 后翻 ready 入队;若不同意这句话的措辞,在卡上留一句即可。\n\n## Verification (tree `869d7896df`)\n\nDerived with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` on this tree (17 families: 9 matched by path, 8 whole-tree), every command run in the foreground with its exit code captured before any pipe, and reconciled with `--ran`:\n\n| family | exit | verdict line |\n|:--|:--|:--|\n| `pnpm check:pm-skill-ratchet` | 0 | `execution-duties.md is 183 lines (ceiling 183; headroom 0)`; 157 self-test cases pass |\n| `pnpm check:pm-skill-id-lint` | 0 | `34 file(s) clean (pattern /#[0-9]{3,}/g)` |\n| `pnpm check:skill-frame-sync` | 0 | one declared copy coherent; 90 markdown files scanned for undeclared copies |\n| `node scripts/pm/check-harness-current.mjs --self-test` | 0 | all 26 cases passed |\n| `pnpm check:nul-bytes` | 0 | scanned 10178 text files, no raw ASCII control bytes |\n| `node scripts/check-closing-keyword-parity.mjs` (+ `--self-test`) | 0 / 0 | green |\n| `node scripts/check-comment-mask-corpus.mjs` | 0 | green |\n| `pnpm check:agent-test-spelling` | 0 | green |\n| `pnpm check:cross-package-test-inputs` | 0 | green |\n| `pnpm check:doc-authoring` | 0 | green |\n| `pnpm check:driver-memory-census` | 0 | green |\n| `pnpm check:gitlink-declared` | 0 | green |\n| `pnpm check:pm-governed-merges` | 0 | green |\n| `pnpm check:refd-timer-probe` | 0 | green |\n| `pnpm check:watch-hint-literal` | 0 | green |\n| `pnpm --filter @objectstack/lint run check:doc-formula-expressions` | 3 then 0 | first run exit 3 (PREREQUISITE NOT MET: `@objectstack/formula` and `@objectstack/lint` not built — nothing measured); after `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` under the verify lock, rerun exit 0: `✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 468 files / 1384 TS blocks judged clean by @objectstack/formula.` |\n\nNot derived, not run: the package builds and type-checks (`.claude/**` is outside every package), the 53 artifact-roster families (silent on every card), the 11 wide-population families and the type-check lanes — CI owns those. No changeset: `.claude/**` publishes nothing from any released package, so this PR carries `skip-changeset`.\n\nThe ratchet's red-then-green sequence is recorded on the branch: the first commit carried the 143-byte line (ratchet red on L105), the second shortened it to 108 bytes (ratchet green at 183/183).\n\n## Acceptance notes\n\n- Observation, not filed: 〈收集〉 「标记两种拼写等效(HTML 注释形、首行 `os-dev-report`)」 keeps the HTML-comment spelling readable on the collecting side while the dev-side rules call that spelling bad; a read-side tolerance, no defect class, left as is.\n- The PM-suggested closing clause 「席内达档或至档子代理皆可」 was not added: it restates 「契约三面自审资格按车道:spec/skills 席达档席内审;未达档 ⛔ 不自审,起隔离达档子代理。」 and the ruling fixes three facts, not four.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CXydFDyiQwNbGFkmwrcRQq)_\n"
+}

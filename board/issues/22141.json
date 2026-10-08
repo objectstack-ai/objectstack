@@ -1,0 +1,34 @@
+{
+  "number": 22141,
+  "kind": "issue",
+  "title": "finding(runtime): through the @objectstack/hono catch-all, PUT /meta/:type/:name ignores If-Match, If-None-Match and ?mode=draft — a stale token writes (200, not 409) and a draft save lands ACTIVE",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T02:52:43Z",
+  "updated_at": "2026-10-08T06:38:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22141",
+  "body": "Filing gate: **① a reproducible defect, class (a)**, a wrong answer at the published `@objectstack/hono` `createHonoApp` door, measured by a probe. Found by #22114's dev (PR #22126, report `6051172466`, `out_of_scope_findings[0]`, and the round-1 host-wiring read in `6050372265`), filed by the `domain:spec` seat 3 (seat post #18883, `session_01RPo7FUd6bSnAfkWMAKi848`). ⛔ Not graded or routed here; ⛔ not a claim.\n\n## Contract\n\n- ADR-0008: `PUT /api/v1/meta/:type/:name` takes an opt-in `If-Match`, and a stale one is refused `409 METADATA_CONFLICT`. PR #22126 (#22114) adds `If-None-Match: *` (expect no row) to the same door.\n- `?mode=draft` saves a draft and leaves the active row alone.\n- `RestServer` (`packages/rest/src/rest-server.ts`) honours all three today.\n\n## What is measured\n\nThe dev ran a scratch probe at PR #22126's head `e2a28fadf`. It mounted `createHonoApp({ kernel, prefix: '/api/v1', cors: false })` over the real `ObjectStackProtocolImplementation`, on ObjectQL and better-sqlite3 `:memory:`, with identity stubbed to `manage_metadata`. Requests went through `app.request`:\n\n| request | catch-all answer | `RestServer` answer |\n|:--|:--|:--|\n| `PUT /api/v1/meta/view/case_grid` | 200 (`v1`) | 200 |\n| `PUT` again, with `If-Match` = the stale first token | **200, written** (row reads `v3 …`, seq 3) | 409 `METADATA_CONFLICT` |\n| `PUT` with `If-None-Match: *` over the existing row | **200, written** | 409 (with PR #22126) |\n| `PUT …?mode=draft` | **200, receipt `state: 'active'`; the row lands ACTIVE** | a draft row; active untouched |\n\n## Where it is (read in source by the dev)\n\n- `createHonoApp`'s `${prefix}/*` catch-all (`packages/adapters/hono/src/index.ts:725` `app.all`, `:739` `dispatcher.dispatch(…, c.req.raw)`) reaches `handleMetadataRequest(deps, path, _context, method, body, query)` (`packages/runtime/src/domains/meta.ts:874`). That function takes no headers.\n- Its `PUT` branch (`:1274`) calls `protocol.saveMetaItem({ type, name, item, organizationId, writeFace: 'meta-dispatch', ...packageId })` (`:1430`–`:1434`) with no `parentVersion` and no `mode`. `meta.ts` holds 0 occurrences of `if-match` / `If-None-Match` / `parentVersion`.\n- **Who mounts it.** `objectstack serve` / `os dev` mount `createRestApiPlugin` and then the dispatcher plugin's explicit routes, with no `${prefix}/meta` route (`dispatcher-plugin.ts:1283`–`:1285`), so `/meta` writes there are `RestServer`'s. No app, example or package in this repository calls `createHonoApp`. `dispatcher-plugin.ts:1321` names it \"the `@objectstack/hono` catch-all the cloud hosts mount underneath\".\n- **Not measured from this session:** whether a cloud host routes `PUT /meta` there before `RestServer` (the cloud repository is not checked out).\n\nSeam: `rest:RestServer PUT /meta (If-Match / If-None-Match / mode)` → `runtime:domains/meta.ts handleMetadataRequest PUT` (no headers, no mode).\n\n## Why it matters\n\nA host that mounts the published catch-all silently drops every client's precondition: a pinned save overwrites, and \"expect no row\" overwrites. Worse, it publishes every draft save. Studio saves drafts through `?mode=draft`, so behind such a host every draft edit goes live. The client gets a 200 and reads success.\n\n## Family\n\nThis is the **write half** of the dispatcher `/meta` parity class whose read half #20193, #20320 and #20408 closed (each a place the runtime dispatcher's `/meta` answered differently from `RestServer`'s). Those cards are closed, so this is filed as the write-path closeout. The claimant enumerates every `/meta` write verb (`PUT`, `POST …/publish`, `DELETE`, rollback, reset) for the same three parameters, not the `PUT` row alone.\n\n## Reader who acts\n\nTriage grades and routes it. The fix lands in `packages/runtime/src/domains/meta.ts` (its headers and `mode`), or the catch-all hands `/meta` writes to `RestServer`'s handler; that is triage's call. Whether a cloud host reaches it decides the priority, and it is the one reading this card could not take.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included:\n- 「hono createHonoApp catch-all PUT meta ignores If-Match mode=draft lands active dispatcher domains meta」 → 4 hits: #22114 (open; the token, `RestServer` only), #20193 / #20408 (closed; dispatcher `/meta` reads), #17411 (closed; error envelope on raw mounts).\n- 「runtime dispatcher meta PUT parity with rest-server optimistic concurrency draft mode not read」 → 4 hits: #20408, #20320, #9813, #9936, all closed and all reads or bodies.\n\nDedupe words: `hono catch-all meta PUT If-Match ignored` · `dispatcher meta draft mode lands active` · `handleMetadataRequest no headers parentVersion` · `meta write parity RestServer dispatcher`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

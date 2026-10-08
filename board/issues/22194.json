@@ -1,0 +1,34 @@
+{
+  "number": 22194,
+  "kind": "issue",
+  "title": "docs(north-star): priority rule 4 gains the human-facing standard — zero UI code from the author, a surface that looks wrong is a defect (Tier H, maintainer-directed, lands after #22172)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T05:44:40Z",
+  "updated_at": "2026-10-08T07:06:23Z",
+  "closed_at": "2026-10-08T06:57:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22194",
+  "body": "Filing gate: **③ a maintainer-directed task**, carrying the maintainer's own decision. Filed by the director seat (seat post #12708, summon #35, `session_01VYToj6PQehTEKNrjGM9akg`) after a decision discussion in chat. The maintainer showed a screenshot of the console's \"Assign user\" dialog and asked, verbatim: 「北极星是否应该加上用户体验,用户界面美观度相关的要求,我发现了很丑的界面」. The seat traced the dialog to objectui's shared `RecordPickerDialog` (ten call sites), showed that every visible defect maps to an ad-hoc style override of a design-system primitive, and proposed one sentence in priority rule 4 instead of the word 美观: the standard is stated through two checkable things (one design system, one layout per surface kind) and the judgement is left to the checklist. The maintainer answered 「同意,立卡」. ⛔ The seat files; it writes no text of the file itself.\n\nBlocked-by: #22172\nUnlock-action: re-check PR #22179\n\nWhy blocked: PR #22179 (card #22172) edits the very sentence this card extends (priority rule 4). This card lands after it, on the text as #22179 leaves it, so the two never race on one line.\n\nReader: the dev the skills lane dispatches (the maintainer may direct the dispatch as for #22172). `docs/NORTH-STAR.md` is a governed Tier H surface: the PR stays draft and lands on the maintainer's APPROVED review.\n\n## The one edit, and only this\n\nIn 「**优先级**」 item 4, as it reads after PR #22179 lands, the item ends with these two sentences:\n\n`……声明了的对象、动作、agent / tool / skill 元数据在运行时兑现,MCP 面暴露的就是应用真能做的。写给 AI 的文档与 skills 说错一句,等于产品缺陷。`\n\nInsert one sentence between them, so the item ends:\n\n`……MCP 面暴露的就是应用真能做的。人用的那一半也有标准:作者不写一行界面代码,得到的界面要像设计师经手过——同一套设计系统、同一种版式;看着不对与渲染不出同样是缺陷,在「看到」那一步就被拒。写给 AI 的文档与 skills 说错一句,等于产品缺陷。`\n\nEvery other byte of the file stays as it is.\n\n## Why this sentence, and why here (the seat's analysis the maintainer agreed to)\n\n- In a hand-written app an ugly screen is the app team's to fix. On this platform the app author writes no UI code and has no way to fix a platform dialog; every rendered pixel is the platform's responsibility, permanently. That makes the standard structural, not taste.\n- The path's step ② is 「本地跑起来、看到」. Today \"does not render\" breaks that step and \"renders wrong\" does not. The sentence closes that gap: a surface that looks wrong fails at the same step.\n- AI developers optimise for the test in front of them. The `RecordPickerDialog` file carries at least five issue-pinned fixes, each correct in isolation, and still renders a title glued to a search box with a doubled border, a blank selection column, a fixed width unrelated to its three columns, two misaligned status lines and a Confirm button enabled at zero selected. Without a stated standard a reviewer has nothing to refuse the next override with; objectui's own `AGENTS.md` rule #3 (\"Shadcn-native aesthetics\") binds contributors but not the product definition.\n- The sprawl risk of writing 「美观」 is real: endless taste cards that never close. The sentence therefore promises only two checkable things — one design system, one layout per surface kind — and names the step where the judgement happens. The finite list of surface kinds and the oracle live in the checklist (the companion card for the coverage-sweep angle, filed with this one), not here.\n\n## ⛔ Not changed, by the maintainer's word\n\n- No new section, no numbers, no per-screen rules, no word 「美观」 anywhere in the file.\n- No \"core before projection\" rule (withdrawn by the maintainer at #22172): human-facing surfaces and the agent surface weigh alike.\n- The capability list, the path, the feature-point table, 「阶段姿态」, 「仪器为车队服务」, 「现在不做」, 「账本」 stay as they are.\n\n## Landing shape\n\n- One docs-only PR, `Fixes` this card, `Clause-②: no`, `skip-changeset`, draft, base `main`. Tier H: ⛔ the dev does not flip ready, queue or merge; the seat posts the 维护者速读 and the maintainer approves.\n- Acceptance: `git diff --stat` shows one file; the diff is one hunk at priority item 4; the inserted sentence is byte-for-byte the one above; the file's existing gates pass (the lint battery the dispatch gates derive).\n- Companions, not this card: the coverage-sweep angle that gives the sentence its measurable form (objectstack card filed together with this one, titled \"qa(checklist): the coverage sweep gains an angle — surface kinds vs the one design system\"); the first concrete repair, objectui's `RecordPickerDialog` contract card (filed together with this one).\n\nDedupe: the 128 open objectstack issues were listed through the repository endpoint and scanned (title and body) for NORTH-STAR / 北极星 / 美观 / 视觉 / 设计师 / design system: 0 on this subject (#22172 is the predecessor on the same file; #22176 and #22144 mention the file in unrelated findings). Prior rulings read: recordpickerdialog, design system, 设计系统, 美观, visual baseline, shadcn → 0 hits.\n\nRelated: `docs/NORTH-STAR.md` · #22172 · PR #22179 · `docs/qa/platform-checklist/SWEEP.md` · objectui `packages/fields/src/widgets/RecordPickerDialog.tsx` · objectui `AGENTS.md` rule #3.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

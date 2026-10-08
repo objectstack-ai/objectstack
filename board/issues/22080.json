@@ -2,8 +2,8 @@
   "number": 22080,
   "kind": "issue",
   "title": "release(v18): enter Changesets pre mode on main (`changeset pre enter next`) with one `major` marker, so the first v18 prerelease is 18.0.0-next.0 — the opening ruled B on #22050",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -24,9 +24,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-07T12:46:31Z",
-  "updated_at": "2026-10-08T00:42:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-08T07:54:14Z",
+  "closed_at": "2026-10-08T07:54:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 7,
   "locked": false,

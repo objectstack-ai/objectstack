@@ -1,0 +1,34 @@
+{
+  "number": 22155,
+  "kind": "issue",
+  "title": "[finding] README's `pnpm install && pnpm build && pnpm dev` serves no Console on a fresh clone: `/_console/` and `/` answer 404, and the boot warning names a remedy that does not exist in this repo",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T03:14:51Z",
+  "updated_at": "2026-10-08T07:43:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22155",
+  "body": "Filing gate: ① product defect with a named landing spot and a reproduction (`finding` class (a): the README's command sequence yields a 404 where the same README says the Console is; plus a boot message whose prescription is wrong for this repository).\nreach: public entry measured once — after the README's three commands, `GET /_console/` on the showcase dev server answers `404 {\"success\":false,\"error\":{\"code\":\"ENDPOINT_NOT_FOUND\"…}}` and `GET /` answers 404; after the undocumented `pnpm objectui:build` the same requests answer 200 and 302.\nReader: `domain:devx` seat for `README.md` (one line) and the boot warning's remedy text in the Console-mount code path (`packages/cli` / `plugin-hono-server`, whichever prints `Console dist not found — install @object-ui/console …`); the bare-404 half is `domain:cli`.\nDedup: `search_issues` \"README pnpm dev Console dist not found fresh clone /_console/ 404 objectui:build step missing Hack on the framework\" (open + closed) → 0 cards.\nFiled on the maintainer's instruction in this session: 「设想你是一个新人,第一次打开 github objectstack 项目主页,了解本项目,并按照文档指引执行完整的试用流程,并对阅读文档和试用过程中遇到的问题立 issue」.\n\n## Summary\n\nThe README's contributor on-ramp is three commands:\n\n```bash\npnpm install     # Node 22+, pnpm 10 (corepack enable)\npnpm build       # build all packages\npnpm dev         # showcase example: REST + Console on :3000\n```\n\nOn a fresh clone of `main` that sequence boots the showcase API but **no Console**. `packages/console/dist` is gitignored and `turbo run build` never produces it (by design — `scripts/check-console-sha.mjs` and `content/docs/getting-started/examples.mdx` both say so), so the step that actually produces the Console, `pnpm objectui:build`, is missing from the README. A newcomer who follows the README then opens `http://localhost:3000/_console/` (the URL the same README gives in **Try it in five minutes**) and gets a JSON 404.\n\nTwo smaller problems compound it:\n\n1. **The boot-time warning names the wrong remedy for this repository.** The server prints\n   `⚠ Console dist not found — install \\`@object-ui/console\\` (already built) or run \\`pnpm --filter @object-ui/console build\\` in the objectui workspace`.\n   Neither instruction applies inside `objectstack-ai/objectstack`: `@object-ui/console` is not a dependency anyone installs here, and `pnpm --filter @object-ui/console build` assumes a cwd inside the objectui workspace. The repo's own remedy is `pnpm objectui:build` (which `scripts/build-console.sh` resolves against a `../objectui` sibling or, failing that, a shallow clone into `.cache/`), and `pnpm check:console-sha` already prints exactly that line one step earlier. The two messages disagree on the same boot.\n2. **The absence is not loud at the HTTP surface.** With no Console, `GET /` returns `404` with an empty body and `GET /_console/` returns `{\"success\":false,\"error\":{\"code\":\"ENDPOINT_NOT_FOUND\",\"message\":\"Not found\"}}` — indistinguishable from a wrong URL. AGENTS.md's \"Absence must be loud\" rule asks for a composition that legitimately serves nothing to say so once, naming the remedy; here the remedy is only in the terminal, and it is the wrong one.\n\n## Reproduction\n\nFresh clone of `main`, Node v22.22.0, pnpm 10.31.0.\n\n```bash\npnpm install                        # 16 s\npnpm build                          # 72 turbo tasks, ~7 min, exit 0\nls packages/console/dist            # No such file or directory\npnpm dev -- --fresh -p 38431        # README's `pnpm dev`, on a spare port\n```\n\nBoot output (abridged):\n\n```text\nℹ No console dist at packages/console/dist — skipping SHA check. Build it with: pnpm objectui:build\n…\n  ⚠ Page source and `requires` not validated at save: no SDUI component manifest at …/examples/app-showcase/sdui.manifest.json or …/packages/console/dist/sdui.manifest.json …\n  ⚠ Console dist not found — install `@object-ui/console` (already built) or run `pnpm --filter @object-ui/console build` in the objectui workspace\n  ✓ Server is ready\n  ➜  API:       http://localhost:38431/\n  ➜  MCP:       http://localhost:38431/api/v1/mcp\n```\n\n(Note the `➜ Console:` line that a scaffolded project prints is absent — the only hint on the banner.)\n\n```bash\ncurl -s -o /dev/null -w '%{http_code}\\n' http://localhost:38431/_console/   # 404 (application/json, ENDPOINT_NOT_FOUND)\ncurl -s -o /dev/null -w '%{http_code}\\n' http://localhost:38431/            # 404\ncurl -s http://localhost:38431/api/v1/health                                # {\"success\":true,…}  — the API itself is fine\n```\n\nFor contrast, a project scaffolded with `npm create objectstack@latest` serves `/_console/` (200, the SPA) out of the box because the published `@objectstack/cli` depends on the prebuilt `@objectstack/console` package.\n\nThe missing step itself works on a fresh machine with no `../objectui` checkout: `pnpm objectui:build` shallow-cloned objectui at the pinned SHA into `.cache/`, built it in 10 m 36 s, wrote `packages/console/dist` (63 MB), left `git status` clean, and `pnpm check:console-sha` then reported `✓ Console dist matches the objectui pin`. So the fix on the README side is one line.\n\n## Expected\n\n- The README's three-command flow either produces a Console or says in the same block that `pnpm objectui:build` is the extra step (and that it needs network or a `../objectui` checkout), matching `examples.mdx`.\n- The boot warning names the remedy that works in the cwd it is printed from — for this repo, `pnpm objectui:build`.\n- `GET /_console/` (and ideally `/`) on a composition with no Console answer with a short page or JSON that says the Console is not built and how to build it, instead of a bare `ENDPOINT_NOT_FOUND`.\n\n## Actual\n\nThe README omits the step, the warning sends the reader to a different repository's command, and the HTTP surface returns anonymous 404s.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

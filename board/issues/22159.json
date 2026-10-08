@@ -1,0 +1,37 @@
+{
+  "number": 22159,
+  "kind": "pull_request",
+  "title": "fix(spec): the sharing.publicLink describe says the value is a slug and names where it is served",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T03:27:03Z",
+  "updated_at": "2026-10-08T04:41:43Z",
+  "closed_at": "2026-10-08T04:41:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-08T04:41:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/22159",
+  "body": "Fixes #22079\nClause-②: no\n\nThe describe half of the card. The redirect half landed as PR #22098 (`dd39171835`), so this PR closes the card.\n\n## What changes\n\n`FormView.sharing.publicLink` (`packages/spec/src/ui/sharing.zod.ts`) described itself as a `Generated public share URL`. It is neither generated nor a URL. The describe now reads:\n\n> Public slug of the form, chosen by the author: not a URL, and never generated. `/forms/x`, `forms/x` and `x` name one slug, `x`. It is served to anonymous visitors only while `enabled` and `allowAnonymous` are both true: the REST form door answers `GET /api/v1/forms/:slug` (default API base), and a host that serves the console shows the form at `/_console/f/:slug` and redirects `/forms/:slug` there, query string carried.\n\nThe two generated reference pages that print it (`content/docs/references/ui/sharing.mdx`, `content/docs/references/ui/view.mdx`) are regenerated with `gen:docs` after the spec build (which runs `gen:schema`). Nothing is hand-edited. The changeset is `@objectstack/spec` `patch`.\n\nDescribe text only. The accepted values, keys, types and exports do not change.\n\n## Each clause, and what makes it true on every host (read at base `ef1fcb26a2`)\n\n- **A slug, not a URL.** `publicFormSlug()` (`packages/spec/src/ui/anonymous-form-intake.ts:69-71`) strips leading slashes and one `forms/` prefix, so `/forms/x`, `forms/x` and `x` are one slug. Every door compares that slug to the request's `:slug` (`anonymousFormIntakeCandidates`, `c.slug !== slug` in `findPublicFormView`, `packages/rest/src/rest-server.ts:10749`).\n- **Never generated.** No server path writes it. The only first-party writer outside authored metadata is objectui's Public Forms page, which saves `/forms/` plus the slug the user typed (objectui `apps/console/src/pages/developer/PublicFormsPage.tsx:243`, `:314`, at `9990f9e`). objectui's `validateSharingConfig` refuses an enabled config without one; it does not make one.\n- **Only while `enabled` and `allowAnonymous` are both true.** `anonymousFormIntakeSlug()` returns `null` unless `enabled === true`, `allowAnonymous === true` and `publicLink` is a non-empty string (`anonymous-form-intake.ts:74-81`). Those two switches are necessary, not sufficient: a withdrawal in another layer or the tenancy posture can still withhold the form. \"Only while\" claims no more than that.\n- **The REST form door.** `registerFormEndpoints` registers `GET {basePath}/forms/:slug` and `POST {basePath}/forms/:slug/submit` (`rest-server.ts:10842`, `:11012`) for every base (`registerForBase`, `:4519`). The default base is `/api/v1` (`getApiBasePath`, `:4472-4475`); `api.apiPath` can move it, hence \"(default API base)\".\n- **The console page, only where the console is served.** The console mounts at the constant `CONSOLE_PATH = '/_console'` (`packages/cli/src/utils/console.ts:54`). The pinned console (`.objectui-sha` `a58626c88`) routes `/f/:slug` to the public `FormPage` (objectui `apps/console/src/App.tsx:242`). The CLI mounts the console only when the UI tier is on, `--no-console` / `OS_DISABLE_CONSOLE=1` are absent and a console dist resolves (`packages/cli/src/commands/serve.ts:5035`, `:5064`). So the describe says \"a host that serves the console\".\n- **The redirect, with its query.** `GET /forms/:slug` answers `302` to `${CONSOLE_PATH}/f/${encodeURIComponent(slug)}` plus the request's query string, only when the anonymous door serves that slug (`console.ts:578-585`, `anonymousFormDoorServes` `:865`). It is registered inside `createConsoleStaticPlugin`, so it exists exactly where the console does.\n\n## Pins and readers\n\n`git grep \"Generated public share URL\"` at base: three hits, the describe and the two generated pages. No test pins the text. At head: one hit, the changeset quoting the old text.\n\n## Out of scope\n\n- objectstack-ai/objectui#11769 (Studio's Public Forms link), per triage `6044725872`.\n- The hand-written docs pages (`content/docs/ui/forms.mdx`, `content/docs/ui/public-data-collection.mdx`) still do not name the visitor link. That was kept as an Acceptance note with no carrier on PR #22098, and it stays one here.\n\n## Verification\n\nAll at head `8d2e686f3` unless named. Each exit code captured before any pipe.\n\n- **Build:** `pnpm --filter @objectstack/spec build` exit 0 (at `8479c9a3a`; the later commit touches only the two generated pages, not `packages/spec`).\n- **Generated artifacts:** `pnpm --filter @objectstack/spec check:generated` at `8479c9a3a`: exit 1, `1 of 15 artifact(s) stale: content/docs/references/**`. Then `gen:docs` (exit 0) changed exactly `ui/sharing.mdx` and `ui/view.mdx`, one line each. At `8d2e686f3`: `All 15 generated artifacts are up to date`, exit 0.\n- **Tests:** `pnpm --filter @objectstack/spec test`: `Test Files 623 passed (623)`, `Tests 18619 passed | 1 todo (18620)`, exit 0.\n- **Typecheck:** `pnpm --filter @objectstack/spec typecheck` exit 0 (`check:test-typecheck: OK`).\n- **Gates:** `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 103 commands for the 4 paths. All 103 ran. Six first exited 3 (PREREQUISITE NOT MET: `@objectstack/formula`, `@objectstack/lint`, `@objectstack/client`, `@objectstack/client-react`, `@objectstack/objectql` and the workspace were not built). They exited 0 after `turbo run build` of those closures and then the whole workspace (`--filter=!@objectstack/docs`). `dispatch-gates --ran`: `103 derived famil(ies) accounted for, 103 run, 0 NOT-MEASURED`. Also run, for the six roster families the derivation flags as rostered under one of these paths: `check-changeset-fixed`, `check:meta-url-spelling`, `check:spec-changes`, `check:authz-resolver`, `check:error-code-casing`, `check:filter-alias-parity`, all exit 0.\n- **Lint (narrowed, declared):** `pnpm exec eslint --no-inline-config --format json packages/spec/src/ui/sharing.zod.ts`: 1 file, 0 errors, 0 warnings. The population comes from `eslint.config.mjs:971` (`**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}`), so the `.md`/`.mdx` paths are outside it. The config never enables type-aware linting (`eslint.config.mjs:326-328`), so this diff cannot change the verdict on any file it does not touch. The full `pnpm lint` is CI's.\n- **Control bytes:** `check:nul-bytes` exit 0, and a self-scan of the 4 files for C0/DEL bytes found none.\n- No reverse verification or ablation: no type and no behaviour changes, and no test was added. Describe prose is not pinned, because nothing parses it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RPo7FUd6bSnAfkWMAKi848)_\n"
+}

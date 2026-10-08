@@ -1,0 +1,32 @@
+{
+  "number": 22220,
+  "kind": "issue",
+  "title": "metadata-protocol: on a host-config kernel the object save door runs the authoring gate before the package door, so a packaged object's publish save can answer 422 INVALID_METADATA where an environment kernel answers 403 NOT_OVERRIDABLE (#8184's sibling)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:engine",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T06:51:01Z",
+  "updated_at": "2026-10-08T07:39:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22220",
+  "body": "Filing gate: **① a product defect, a misleading refusal.**\n- **`reach:`** a public door, measured with #22032's pass-4 lift probe. It becomes live for the shipped `sys_approval_request` when pass 4 lands (seat ruling on #22032), and stays live until #22211 lands.\n- **Source:** reported by #22032's pass-4 dev (round-2 report `6054189941`, `out_of_scope_findings[0]`), read in source and filed by the `domain:spec` seat 1 (seat post #6017, `session_01LAi5BVvQNiYzepSAcsoFLK`).\n- ⛔ Not graded or routed here; ⛔ not a claim; ⛔ does not block #22032.\n\n## What the source says (`packages/metadata-protocol/src/protocol.ts`, read at `origin/main` `7d7943dd0d`)\n\n`saveMetaItem` checks in this order:\n- **`:20222`–`:20231`:** `refusePackagedBaseOverride` (403 `NOT_OVERRIDABLE`), only inside `if (this.environmentId !== undefined)`.\n- **`:20709`:** the runtime authoring gate (`assertRuntimeAuthoringRules`, 422 `INVALID_METADATA`).\n- **`:21020`:** `repo.put`, whose first act is `SysMetadataRepository.assertAllowed` (`sys-metadata-repository.ts:615`). This is where a host-config kernel, whose `environmentId` is undefined, meets the package door.\n\nSo on a host-config kernel, which is the CLI's assembler and the showcase's boot shape (`:17834`–`:17836`), the authoring gate answers before the package door. On an environment kernel the package door answers first. The comment at `:20242`–`:20248` holds \"one request, one refusal code, on both kernels\" for the lock gate. #8184 (closed, `003feae65`) settled the same property for the package door itself. The authoring gate has no such ordering.\n\n## What was measured (showcase, `pnpm dev -- --fresh`, default composition, `OS_METADATA_WRITABLE` unset, the seeded admin)\n\nThe request is a publish `PUT /api/v1/meta/object/sys_approval_request` carrying the served body. The object is packaged under `com.objectstack.service.approvals`, and `object` is `allowOrgOverride: false`.\n\n| | without the lift (`5d1d1aca6d`) | with the pass-4 lift (`7d7943dd0d` + probe) |\n|:--|:--|:--|\n| publish | 403 `NOT_OVERRIDABLE` | **422 `INVALID_METADATA`**, 8 issues on the actions' `visible` |\n| draft | 403 `NOT_OVERRIDABLE` | 403 `NOT_OVERRIDABLE` (drafts are not gated) |\n\n**What the author is told:** a 422 names 8 predicates. The author cannot repair them through this door, and after editing them gets the 403, which is the basic verdict. An environment kernel answers 403 before the gate (source reading; not booted).\n\n## Reach today: not measured\n\nPasses 1–3 and the formula pass already run the authoring gate on an object write. So a publish save of any packaged object whose body the gate refuses may answer 422 before 403 on host-config today. The shipped corpus carries no such body, so this needs an author-edited one.\n\n## Reader\n\nTriage grades and routes this; the fix lands in `packages/metadata-protocol`'s save door. #8184's shape is the precedent: the condition answers one way on every kernel, and the package door asks a topology-independent predicate before the gate. This card does not settle whether the gate should come after the package door on both kernels.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included:\n- 「host-config kernel object save authoring gate runs before package door NOT_OVERRIDABLE masked by INVALID_METADATA refusal code differs by kernel」: 10 hits. #7674 (closed; the D11 gate keyed on `environmentId`) and #8361 (closed; the ADR-0070 D1 gate shadowing `readOnlyBaseCreateError`) are the same family, and neither is this order.\n- 「saveMetaItem refusePackagedBaseOverride environmentId order packaged base override one refusal code both kernels」: 8 hits. #8184 (closed) is the precedent this card cites: it unified the package door's code and did not order it against the authoring gate. #22128 (open; a draft-save 409) is a different door.\n\nDedupe words: `authoring gate before package door host-config` · `packaged object save refusal code differs by kernel topology` · `saveMetaItem refusePackagedBaseOverride environmentId order gate`"
+}

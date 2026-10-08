@@ -1,0 +1,35 @@
+{
+  "number": 22169,
+  "kind": "issue",
+  "title": "plugin-security: the boot heal re-projects drifted sys_permission_set rows by name, so duplicate rows are warned about every boot and never healed, each one paying a discarded layered read; and a refused existence read inserts another duplicate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:services",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T03:48:31Z",
+  "updated_at": "2026-10-08T08:21:38Z",
+  "closed_at": "2026-10-08T08:19:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22169",
+  "body": "Filing gate: ① a product defect, reach measured. A hosted staging environment (cloud `1ac85ba2`) times out on every kernel build: 591 `drifted … re-projected` warns, about 14.5 minutes. It was reproduced locally through cloud's `ArtifactKernelFactory` on the hosted Turso face at the cloud pin `56bf27affb`: 99.85 s at `7d078148`, 170.70 s at `56bf27affb` (36 ms per statement).\n\nFound by the objectstack-ai/cloud#2637 round-3 dev (os-dev-report objectstack-ai/cloud#2637 comment 6051676219, which carries the full measurement, a unified diff and the unit pins). Filed by the `repo:cloud` seat (`repo:cloud#1`, R45, session `session_011jobP72PwN3whNm55GetXQ`), because the fix lands in this repo. ⛔ Not a claim.\n\n## The defect (read at `56bf27affb`; the dev reports the same hunks on `main` `ec8f37c8`)\n\n1. **The heal does not converge.** `reconcilePermissionSetProjection` (`packages/plugins/plugin-security/src/permission-set-projection.ts`, the page read `ORDER BY id LIMIT 1000`) checks every non-package, overlay-less row on that page. A drifted row is logged `re-projected` and handed to `upsertEnvPermissionSet`, which re-reads **by name** (`ORDER BY id LIMIT 1`). So it only ever writes the lowest-id row of that name. With more than one row per name, every later row is warned about and left as it was, on every boot. `driftHealed` and the warn both report writes that did not happen.\n2. **A layered read is discarded on every row.** `getMetaItemLayered` is awaited for every such row before the trust rule asks for it. The hosted kernel never uses the answer, because a `SchemaRegistry` is always readable there.\n   - The read is 2 serial statements at `7d078148` and 4 since `18c2ddc1e` (#21761, `overlayLockLayerAt`).\n   - A clean environment pays 8 × 4 per boot. `1ac85ba2` pays 959 × 4.\n3. **The producer.** `bootstrapPlatformAdmin` reads by name: `tryFind` collapses a refused read into `[]`, and the function inserts on both \"absent\" and \"refused\". The heal's insert branch does the same.\n   - The declared unique index `uniq_sys_permission_set_organization_id_name` made this safe. But remote tables lacked that index before `bdea10a185` (#17609), and a table that already holds duplicates can never build it again: the remote retrofit reports that at `error` on every boot.\n\n## Fix (the dev's draft; the patch is in the cloud#2637 report)\n\n- Heal the row that was read, by its id, facets only.\n- Read the layered item lazily, once per name, and only when no `SchemaRegistry` answers.\n- Decline the insert when the existence read was refused, and say so once.\n\nMeasured on the staging shape at 36 ms: 173 s, then 72.6 s on the first patched boot (595 one-time UPDATEs by id), then 4.1 s. Under refused reads it makes 0 inserts, where unpatched code made 603 (or 8). The new unit pins fail on unpatched source (3 failed | 81 passed).\n- One package (`plugin-security`): 2 source files (+38 / -6) and 2 test files (+68).\n- No spec, schema, contract or migration change, and no new gate.\n\n**Not in scope:** deleting existing duplicates. That is an operator repair, cloud's `scripts/ops/unique-dedupe.mjs` door (cloud#2629). Also left for its own card, as the file's own comment asks: `upsertEnvPermissionSet`'s per-item read on the live single-mutation path still inserts on a refused read.\n\n## Done when\n\n- A boot over a table holding duplicate rows of a declared name writes each drifted row once, by id.\n- The next boot logs no drift warn, and issues no layered read while a `SchemaRegistry` is readable.\n- A refused existence read inserts nothing.\n\n## Reach and timing\n\n- **Staging:** `1ac85ba2`, as measured above.\n- **Production:** unread for this index today. The 72-hour split taken through 2026-10-05 counted 0 production errors on `uniq_sys_permission_set_organization_id_name` (objectstack-ai/cloud#2629 comment 5991442880). Cloud consumes this repo by pin and stays on `56bf27affb` until v18 (objectstack#22050, ruling B), so this fix reaches cloud with v18.\n\n## Reader\n\nTriage routes it. By its package it lands in the `plugin-security` lane.\n\n## Dedupe\n\n- REST enumeration of every objectstack issue updated since 2026-09-15 (2,347 issues). Local grep for `reconcilePermissionSetProjection`, `drifted from its metadata definition`, `uniq_sys_permission_set_organization_id_name` and `upsertEnvPermissionSet`: 0 hits each.\n- The control, #22062, is present.\n- A semantic search finds closed predecessors only: #11097, #4669 and #4884.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

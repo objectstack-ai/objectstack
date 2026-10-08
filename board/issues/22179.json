@@ -1,0 +1,37 @@
+{
+  "number": 22179,
+  "kind": "pull_request",
+  "title": "docs(north-star): align the North Star to ontology-as-software — five edits",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "needs-user-decision",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T04:13:34Z",
+  "updated_at": "2026-10-08T05:51:33Z",
+  "closed_at": "2026-10-08T05:51:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-08T05:51:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/22179",
+  "body": "Fixes #22172\nClause-②: no\n\nDocs-only. Five maintainer-specified edits to `docs/NORTH-STAR.md` (the maintainer's own text); every other byte of the file is unchanged. `docs/NORTH-STAR.md` is a Tier H governed surface: this PR stays draft and no seat readies, queues or merges it — the maintainer approves and merges by hand.\n\n## The five edits (line numbers at `91854796c`, base `7ef50a4fb`)\n\n| # | Where | Line (before → after) | Edit |\n|---|---|---|---|\n| 1 | 「我们是什么」 line | 3 → 3 | Whole line replaced. 「一个应用开发平台;创业阶段。」 becomes the 本体即软件 definition (对象与字段、关系、动作、权限、流程、Agent 与工具定义 — AI 写、运行时跑、人与 Agent 用、你拥有;创业阶段) followed by the 投影 sentence (视图、仪表盘、应用、翻译是本体的投影). |\n| 2 | 「做出来的是什么」 paragraph | 7 → 7 | The capability sentence is untouched. One sentence appended after 「参考实现 hotcrm。」: 「两类用户:今天的业务人员经界面、验收者经控制台;明天的 Agent 经 MCP。路的每一步都要对两类用户成立。」 |\n| 3 | 「唯一的度量,那条路」 paragraph | 11 → 11 | One sentence appended after the six steps, after 「跑得通但结果错的是 P2。」: 「四个承诺各由一步兑现:① AI 可写 · ②③ 可执行 · ④ 你拥有 · ⑤ Agent 可操作 · ⑥ 是闭环。」 |\n| 4 | Step ④ 「发布并装进一个环境」 list | new line 96 (after old line 95) | One row appended in the file's own row grammar `轴 · 功能点(业务语言) · 清单区 · 项 id`: `- devpath · 你拥有:定义在你的仓库里可 diff,整个本体可导出、可在没有我们的情况下自托管跑起来 · platform-core + cli · ontology-export-roundtrip, artifact-reproducible-build, standalone-boot-no-cloud(待清单扫描建项)` |\n| 5 | 优先级 item 4 | 116 → 117 | Two phrase swaps only: 「元数据既要 AI 能写」 → 「本体既要 AI 能写」 and 「也要 AI 能用」 → 「也要人与 Agent 能用——Agent 越权时被权限挡住并留痕」. The rest of the item is byte-identical. |\n\n`git diff -U0 7ef50a4fb` shows exactly five hunks (`@@ -3 +3 @@`, `@@ -7 +7 @@`, `@@ -11 +11 @@`, `@@ -95,0 +96 @@`, `@@ -116 +117 @@`). `git diff --stat` is one file, +5 / -4, and `--ignore-all-space --stat` reads the same, so no whitespace or line-ending change rides along; the file keeps its trailing newline and carries no CR bytes.\n\nPremise check: every anchor the card quotes was present verbatim on `origin/main` at `7ef50a4fb` (the file's last landing is still `78e3e3a62`, no same-day churn), so there is no quote difference to report.\n\n## Deliberately NOT changed (the maintainer's four)\n\n- No global 元数据 → 本体 replacement: the word 元数据 still stands everywhere else (「给谁」, 「什么算做好」, 「唯一的度量」, the step rows, 「阶段姿态」).\n- No 「核心优先于投影」 ordering rule added.\n- The 「做出来的是什么」 capability list is neither reordered nor trimmed.\n- 「现在不做」, 「阶段姿态」, 「仪器为车队服务」 and 「账本」 are untouched.\n\n## Verification\n\nRow grammar: every `- ` row in the file (80 after the edit) splits on ` · ` into exactly four fields, the new row at line 96 included; its 清单区 cell `platform-core + cli` uses the same `A + B` shape line 91 already uses (`cli + platform-core`).\n\nControl bytes: `grep -naP` over the control-character class on the file is clean (exit 1, no match).\n\nGates: derived with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` from the real changeset against merge base `7ef50a4fb` (13 commands, byte-identical to the `docs/NORTH-STAR.md` path form), run on HEAD `91854796c`, each exit code captured before any pipe:\n\n| command | exit |\n|---|---|\n| `node scripts/check-ci-filter-parity.mjs` | 0 |\n| `node scripts/check-closing-keyword-parity.mjs` | 0 |\n| `node scripts/check-closing-keyword-parity.mjs --self-test` | 0 |\n| `node scripts/check-comment-mask-corpus.mjs` | 0 |\n| `pnpm --filter @objectstack/lint run check:doc-formula-expressions` | first run 3 = PREREQUISITE NOT MET (`@objectstack/formula` and `@objectstack/lint` not built; nothing measured); after `pnpm exec turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` under the shared verify lock (lock verdict exit 0, 88 s held): rerun exit **0** |\n| `pnpm check:cross-package-test-inputs` | 0 |\n| `pnpm check:doc-authoring` | 0 |\n| `pnpm check:driver-memory-census` | 0 |\n| `pnpm check:gitlink-declared` | 0 |\n| `pnpm check:nul-bytes` | 0 |\n| `pnpm check:pm-governed-merges` | 0 |\n| `pnpm check:refd-timer-probe` | 0 |\n| `pnpm check:watch-hint-literal` | 0 |\n\n`node scripts/pm/dispatch-gates.mjs --ran` over that record: exit 0 — 「13 derived, 13 run, 0 NOT-MEASURED, 0 UNRUN」, the zero derived from recorded exit codes (none is 3).\n\nDrift from the dispatch's gate snapshot (taken earlier the same day): the derived list carries `pnpm --filter @objectstack/lint run check:doc-formula-expressions` where the snapshot named `pnpm --filter @objectstack/lint run check:doc-authoring`, and it adds `pnpm check:watch-hint-literal`; both derived commands were run. `package.json` has no `check:*` script named `north-star`.\n\nNOT MEASURED locally, by design (CI owns them): the whole-tree `pnpm lint`, the type-check lanes and the Test Core shards the derivation lists as CI-only. This diff touches no package source, so the dependency closure of affected packages is empty and no package `build`, `test` or `typecheck` is owed by the diff itself; the one build run here (`@objectstack/formula` + `@objectstack/lint`, under the shared verify lock) was a declared prerequisite of the doc-formula gate, not a consequence of the change.\n\n## Acceptance notes\n\n- The three checklist ids in the new row (`ontology-export-roundtrip`, `artifact-reproducible-build`, `standalone-boot-no-cloud`) do not exist yet in `docs/qa/platform-checklist/`. The row marks them 「待清单扫描建项」 per the maintainer's text, while line 13 of the file spells the convention for unwritten items as 「清单项待写」. Observation only, maintainer wording kept verbatim; no script under `scripts/` reads the row ids, so no gate is affected. Carrier: the checklist-author sweep that creates the three items. Noted, not filed.\n- The dispatch's gate snapshot drifted within the day (see Verification). Recorded for the PM; no action in this PR.\n\n## 维护者速读(草稿)\n\n### 改了什么\n\n只改 `docs/NORTH-STAR.md`,五处,每处都是你在卡上给的原文:① 「我们是什么」整行换成「本体即软件」的定义与投影句;② 「做出来的是什么」段末追加「两类用户」一句,能力清单一字不动;③ 「唯一的度量」段末追加「四个承诺各由一步兑现」一句;④ 第 ④ 步清单末尾加一行「你拥有」(devpath · platform-core + cli,三个待建清单项);⑤ 优先级第 4 条两处措辞:「元数据既要 AI 能写」→「本体既要 AI 能写」,「也要 AI 能用」→「也要人与 Agent 能用——Agent 越权时被权限挡住并留痕」。其余字节不动;你点名不改的四项(不全文替换 元数据→本体、不加「核心优先于投影」、能力清单不重排不删、「现在不做」「阶段姿态」「仪器为车队服务」「账本」)都没碰。\n\n### 为什么改\n\n北极星从「应用开发平台」对齐到「本体即软件」:把产品定义、两类用户、四个承诺与路的六步一一对应写进去,并把「你拥有」(可 diff、可导出、可自托管)列为路上的一个功能点。这是卡 #22172 的全部内容,不多不少。\n\n### 风险与代价(含回滚)\n\n纯文档,无代码、无发布面、无 changeset(`skip-changeset`)。风险在措辞:第 ④ 步新行的三个清单项 id 还不存在,行尾已标「待清单扫描建项」;文件第 13 行对未写项的约定拼法是「清单项待写」,这里按你的原文保留,没有门禁读这些 id。回滚 = revert 这一个 commit,无副作用。\n\n### 席位意见\n\n(留空,席位填)\n\n### 你要做的\n\n在本 PR 上 Approve 并合并(Tier H;席位不翻 ready、不入队)。若第 ④ 步新行的「待清单扫描建项」要改成文件既有的「清单项待写」拼法,请在评论里说一句,席位代改。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VYToj6PQehTEKNrjGM9akg)_\n"
+}

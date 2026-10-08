@@ -2,8 +2,8 @@
   "number": 22128,
   "kind": "issue",
   "title": "finding(metadata-protocol): a second package-less draft save of a package-owned item is refused 409 METADATA_CONFLICT with no If-Match — the save door's head read and the repository's draft package inheritance read different rows",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:studio",
     "bug",
     "domain:spec",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T00:23:08Z",
-  "updated_at": "2026-10-08T00:56:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-08T07:08:06Z",
+  "closed_at": "2026-10-08T07:06:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22128",
   "body": "Filing gate: **① a reproducible defect, class (a)**, a wrong answer at a public door (`PUT /api/v1/meta/:type/:name`), with reach measured on the real route. Found by #22114's dev (PR #22126, report `6049503570`, `out_of_scope_findings[0]`) and filed by the `domain:spec` seat 3 (seat post #18883, `session_01RPo7FUd6bSnAfkWMAKi848`). ⛔ Not graded or routed here; ⛔ not a claim.\n\n## Contract\n\n- ADR-0008: the lock on `PUT /meta` is opt-in. A save with no `If-Match` is last-writer-wins.\n- `SaveMetaItemRequestSchema.packageId` describe: absent means env-local, and it \"also scopes which row the unpinned parent-version resolution reads\".\n\n## What is measured (by the dev, on the real `RestServer` `PUT /meta/:type/:name` route over better-sqlite3, at PR #22126's head `8f04870ef`)\n\n1. `PUT /meta/view/case_grid?package=com.probe.pkg` → 200 (an active row in the package).\n2. `PUT …?mode=draft` with no `package` and no `If-Match` → 200. The repository stores the draft with `package_id = com.probe.pkg`, inherited from the active row.\n3. The same `PUT …?mode=draft` again, still with no `If-Match` → **409 `METADATA_CONFLICT`**: \"Expected parent null but current is hmac-sha256:…\".\n\nAn unpinned save, which ADR-0008 makes last-writer-wins, is refused.\n\n## Where it is (read in source by the dev)\n\n- `saveMetaItem`'s head read (`packages/metadata-protocol/src/protocol.ts`) asks the repository for the draft at `packageId: null`, which is the package-unbound row. It finds none, so the save's expected parent is `null`.\n- `SysMetadataRepository.put` (`sys-metadata-repository.ts`) inherits the active row's package for a package-less draft, and its lock compares against that inherited row. The two sides disagree about which row is \"the\" draft head for this address.\n- PR #22126 (#22114) serves the read's new `version` from the same head read (`storedHeadAt`). So on this path `?state=draft` serves `version: null` while a draft exists. Its describe (\"`null` means no stored row is there, so the next save is a create\") is false here until this is fixed. The dev reports that one fix at the shared head read fixes both.\n\nSeam: `spec:SaveMetaItemRequestSchema.packageId` (absent = env-local; scopes the unpinned parent-version read) → `runtime:metadata-protocol saveMetaItem head read` vs `sys-metadata-repository put` (draft package inheritance).\n\n## Why it matters\n\nAn author editing a package-owned item's draft in Studio, which saves without a package, is refused on their second save. Nobody else is editing; the 409 names a version they were never served. That is the first-save-after-load path #22114 opens.\n\n## Reader who acts\n\nTriage grades and routes it. The decision is which row a package-less draft save of a package-owned item addresses. Spec text says env-local; the repository inherits the package. Each side has a landing site, so per the anchoring rule this is a `Seam:` card. History: #11087 (closed) fixed \"`mode=draft` saves drop `package_id`\", which is where the inheritance likely comes from. Read its ruling first.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included:\n- 「package-less draft save of a package-owned metadata item refused 409 METADATA_CONFLICT unpinned parent null inherited package」 → 40 hits. Nearest: #22114 (open; the read token, not this refusal), #21978 (closed; a null checksum column, a different row), #22113 (open; package membership by key).\n- 「saveMetaItem head read packageId null vs SysMetadataRepository put draft inherits active row package lock」 → 37 hits. Nearest: #11087 (closed; the drop this inheritance answered), #21861 (closed; a permission-set fork on a different door).\n\nDedupe words: `package-less draft save 409 METADATA_CONFLICT` · `inherited package draft parent null` · `second draft save conflict unpinned` · `storedHeadAt package inheritance`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

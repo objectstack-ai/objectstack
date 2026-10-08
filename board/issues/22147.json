@@ -1,0 +1,36 @@
+{
+  "number": 22147,
+  "kind": "issue",
+  "title": "security(rest, runtime): an anonymous request at an app-declared `authRequired: false` endpoint executes principal-less — execute it as the guest principal (ruled C), never principal-less, never system",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:cli",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T03:01:21Z",
+  "updated_at": "2026-10-08T06:31:00Z",
+  "closed_at": "2026-10-08T06:31:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22147",
+  "body": "Ruled: 6053767508 · letter A · 2026-10-08T06:27Z\nRuled: 6051299672 · letter C · 2026-10-08T03:05Z\n\nFiling gate: **① a product defect, exception class: security.** `reach:` a static reading of the dispatcher path by #21908's census dev, held privately as the second of the two producer rows on #21908 and handed to the director seat by the maintainer in chat; ⛔ not measured at a door yet; the first measurement is the claimant's. Filed by the director seat (seat post #12708, summon #35, `session_01VYToj6PQehTEKNrjGM9akg`) on the maintainer's ruling, recorded as this card's first comment. ⛔ Not a claim. ⛔ Classes, positions and functions only.\n\nReader: the `domain:cli` seat (`packages/rest` and `packages/runtime` are that lane's). `priority:p1` · `security`: the card is a producer #21908's engine-level deny waits on, and the deny lands LAST.\n\n## What is wrong\n\nAn application may declare an `apis:` endpoint with `authRequired: false` (ADR-0121: the channel for callers outside the platform, paired with an armed `rateLimit` by D6). The published docs promise that such a request \"still runs through the same pipeline the built-in routes use, under the anonymous principal — so an anonymous endpoint reaches exactly what your permission model grants anonymous callers, and nothing more\" (`content/docs/api/declarative-endpoints.mdx`, the section on anonymous endpoints). The executor does not build that principal: `packages/runtime/src/endpoint-executor.ts` threads `executionContext` as `undefined` for anonymous (`:95`), so the data calls of an `object_operation` endpoint, and the flow executor's calls of a `flow` endpoint, reach the engine principal-less and pass the security middleware's principal-less hand-off (ADR-0096 E1), the hand-off #21908 closes. The file's own note near `:100` records the shape: a no-context call reads as a system principal with RLS bypassed.\n\nThe runtime already has the principal the docs promise: the 2026-08-08 Option A ruling (commit `f586f1a89`) named two entries in `packages/core/src/security/assemble-execution-context.ts`, the fail-closed `assembleExecutionContext` (401) and the explicit `assembleExecutionContextOrGuest` (a first-class guest envelope, `principalKind: 'guest'`, `positions: ['guest']`, `isSystem: false`), the latter for surfaces that genuinely serve anonymous principals. A declared `authRequired: false` endpoint is such a surface by declaration.\n\n## The ruling (first comment): C, the guest entry\n\nAt a matched endpoint declared `authRequired: false`, an unauthenticated request executes as the guest principal from `assembleExecutionContextOrGuest`, threaded into the `object_operation` data calls and the `flow` executor alike; it is never principal-less and never `isSystem`. Today no channel grants a guest a permission set (#21158's gap, folded into the guest-model design card filed beside this one), so an `object_operation` under the guest principal is denied: that is the correct answer until the grants channel lands, and the same path serves when it does. An endpoint with `authRequired: true` keeps answering 401 to anonymous requests, unchanged.\n\n## Measure first, then build\n\n1. Reach: on a booted showcase with a throwaway declared endpoint (not committed) of each executable type, what an anonymous request reaches today at each of the six security gates and at the driver; by class, privately if it is an exploit recipe.\n2. Confirm the two entries' contract on `origin/main` and that the executor can take the guest envelope without a `packages/spec` change (expected: it can).\n\n## Pins (each with its ablation)\n\n- An anonymous request at a declared `authRequired: false` `object_operation` reaches the engine with `principalKind: 'guest'` and `positions: ['guest']`, never a principal-less context; ablating the guest entry reddens it.\n- With no permission set bound to the guest, the operation is denied, not served, and nothing of the row is disclosed.\n- The same endpoint declared `authRequired: true` answers 401 to the same request, unchanged.\n- `isSystem` is never set on the anonymous path.\n- A `flow` endpoint's data calls carry the same guest context (today `undefined`).\n\n## Landing shape\n\nBefore #21908's deny (this card is a `Blocked-by:` target of #21908). `Clause-②: no (narrowing)`: an anonymous call that passed the hand-off is now evaluated as a guest; no accepted input or published shape widens. Security boundary: the at-tier contract review before the queue. The docs sentence quoted above becomes true and is not edited; the release note says what changed for anonymous endpoints.\n\nRelated: #21908 · the guest-model design card (filed in the same act) · #21158 · ADR-0121 D6 · ADR-0090 D9/D10 · ADR-0096 E1.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}

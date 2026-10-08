@@ -1,0 +1,37 @@
+{
+  "number": 22150,
+  "kind": "issue",
+  "title": "[finding] create-objectstack: the scaffolded Dockerfile runs `npm ci`, but a pnpm-scaffolded project ships only `pnpm-lock.yaml` — `docker build` fails at the build stage",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T03:12:28Z",
+  "updated_at": "2026-10-08T08:22:16Z",
+  "closed_at": "2026-10-08T08:20:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22150",
+  "body": "Filing gate: ① product defect with a named landing spot and a reproduction (`finding` class (a): reproducible defect).\nreach: public entry measured once — the Dockerfile's own build stage (`COPY package*.json ./` + `RUN npm ci`) run against a fresh `npm create objectstack@latest` project exits 1 with `EUSAGE`, before `os build` ever runs.\nReader: `domain:cli` seat (create-objectstack owns the template); fix lands in `packages/create-objectstack/src/templates/blank/Dockerfile` or the scaffolder's package-manager-aware emission, plus the matching Dockerfile in `content/docs/deployment/self-hosting.mdx`.\nDedup: `search_issues` \"scaffolded Dockerfile npm ci fails pnpm-lock.yaml package-lock.json docker build create-objectstack\" (open + closed) → 0 cards on this defect; nearest are the registry-canary cards #20382 / #19510 / #16500 (closed, about the npm install itself, not the Dockerfile).\nFiled on the maintainer's instruction in this session: 「设想你是一个新人,第一次打开 github objectstack 项目主页,了解本项目,并按照文档指引执行完整的试用流程,并对阅读文档和试用过程中遇到的问题立 issue」.\n\n## Summary\n\n`npm create objectstack@latest my-app` detects pnpm when it is on PATH, installs with pnpm, and writes `pnpm-lock.yaml` (no `package-lock.json`). The `Dockerfile` it writes into the same project hard-codes the build stage as:\n\n```dockerfile\nFROM node:22-slim AS build\nWORKDIR /app\nCOPY package*.json ./\nRUN npm ci\nCOPY . .\nRUN npx os build\n```\n\n`npm ci` refuses to run without `package-lock.json` / `npm-shrinkwrap.json`, so the first command the README's **Ship it** section tells a new user to run (`docker build -t my-app . && docker compose up -d`) fails before the artifact is compiled. The README states the scaffolded project is \"container-ready\", and `content/docs/deployment/self-hosting.mdx` repeats the same `npm ci` Dockerfile.\n\nThe scaffolder is already package-manager aware elsewhere: the closing summary prints `pnpm run dev`, and the generated `.github/workflows/ci.yml` uses `pnpm/action-setup` + `pnpm install --frozen-lockfile` and comments that `pnpm-lock.yaml` \"has to be committed\". Only the Dockerfile still assumes npm.\n\n## Reproduction\n\nEnvironment: `create-objectstack@17.7.0`, Node v22.22.0, pnpm 10.31.0 on PATH, npm 10.9.4.\n\n```bash\nnpm create objectstack@latest my-app     # scaffolder reports \"→ Installing dependencies...\" via pnpm\ncd my-app\nls *lock*                                # pnpm-lock.yaml  skills-lock.json   (no package-lock.json)\ngrep -n 'npm ci' Dockerfile              # 16:RUN npm ci\n```\n\nRunning the build stage exactly as the Dockerfile does (copy the tree without `node_modules`, run `npm ci`):\n\n```text\nnpm error code EUSAGE\nnpm error\nnpm error The `npm ci` command can only install with an existing package-lock.json or\nnpm error npm-shrinkwrap.json with lockfileVersion >= 1. Run an install with npm@5 or\nnpm error later to generate a package-lock.json file, then try again.\n```\n\nExit code 1, so `docker build` stops at `RUN npm ci`. (This session had no Docker daemon, so the stage was reproduced by running the same two commands in a copy of the project; the failure does not depend on Docker.)\n\n## Expected\n\n`docker build -t my-app .` on a freshly scaffolded project succeeds with whichever package manager the scaffolder actually used — or the scaffolder writes a Dockerfile that matches the lockfile it just produced.\n\n## Actual\n\nThe build stage fails with `EUSAGE` for every project scaffolded on a machine where pnpm is present.\n\n## Suggested direction\n\nEither keeps the Dockerfile and the lockfile in agreement:\n\n- Emit the build stage from the detected package manager (the scaffolder already carries `detect-package-manager.ts`): for pnpm, `COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./` + `corepack enable && pnpm install --frozen-lockfile`; for npm, the current `npm ci`.\n- Or make the stage package-manager neutral (`COPY package.json ./` + `npm install --no-audit --no-fund`), accepting the loss of lockfile pinning inside the image.\n\nThe self-hosting docs page should follow whichever shape lands.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 22152,
+  "kind": "issue",
+  "title": "[finding] docs(getting-started): the Build-with-Claude-Code tutorial's `resolve_ticket` action names a `target` handler nothing registers — the \"Resolve\" button it tells you to verify in the Console is the dead-button trap the Actions page warns about",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T03:13:09Z",
+  "updated_at": "2026-10-08T07:21:42Z",
+  "closed_at": "2026-10-08T07:19:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22152",
+  "body": "Filing gate: ① product defect with a named landing spot and a reproduction (`finding` classes (a) — the example copied verbatim produces a non-working button — and (c) — metadata the runtime accepts but that does nothing at click time).\nreach: public entry measured once — `os validate` on the tutorial's verbatim files passes (`1 Actions`), and `os dev` then prints `WARN [action-governance] declared script actions with NO handler … [\"my_app_ticket:resolve_ticket\"]`; the Actions page documents the click-time outcome as `Action 'x' on object 'y' not found`.\nReader: `domain:devx` seat (`content/docs/getting-started/build-with-claude-code.mdx` step 3 and step 5, and the mirrored example on `quick-start.mdx`); the optional authoring-time check is `domain:spec` / `packages/lint`.\nDedup: `search_issues` \"docs build-with-claude-code resolve_ticket script action target resolveTicket no handler button wired to nothing action-governance\" (open + closed) → 0 cards.\nFiled on the maintainer's instruction in this session: 「设想你是一个新人,第一次打开 github objectstack 项目主页,了解本项目,并按照文档指引执行完整的试用流程,并对阅读文档和试用过程中遇到的问题立 issue」.\n\n## Summary\n\n`content/docs/getting-started/build-with-claude-code.mdx` is the main on-ramp (\"This is the main way you build on ObjectStack\"). Step 3 shows the \"representative result\" the agent writes, including:\n\n```typescript title=\"src/actions/ticket.actions.ts\"\nexport const ResolveTicketAction = defineAction({\n  name: 'resolve_ticket',\n  label: 'Resolve',\n  objectName: 'support_desk_ticket',\n  type: 'script',\n  target: 'resolveTicket',\n  …\n});\n```\n\nNothing on the page registers a `resolveTicket` handler — there is no `body`, no `onEnable` / `registerAction`, no `functions` export, and the scaffolded `objectstack.config.ts` carries none. Step 5 then tells the reader to open the Console and \"Check the **Resolve** action shows on an open ticket — and **disappears** once the ticket is resolved\". The button shows, but clicking it cannot resolve anything.\n\nThe Actions page (`content/docs/ui/actions.mdx`, \"The dead-button trap\" callout) already documents this exact shape: a `script` action whose `target` names a handler that was never `registerAction`-ed \"compiles fine but throws `Action 'x' on object 'y' not found` at click time\". The tutorial reproduces the trap as its model answer, and the runtime says so on every boot:\n\n```text\nWARN [action-governance] declared script actions with NO handler — a button wired to nothing (ADR-0078);\nadd a `body`, or register a handler under the declared `target` {\"count\":1,\"actions\":[\"my_app_ticket:resolve_ticket\"]}\n```\n\nThe same action is reused as the reading example on `getting-started/quick-start.mdx` (\"Reading the other pieces → Actions\").\n\n## Reproduction\n\n`create-objectstack@17.7.0` / `@objectstack/cli@17.7.0`, Node v22.22.0.\n\n1. `npm create objectstack@latest my-app && cd my-app`\n2. Author the four files from the tutorial's step 3 verbatim (object, action, view, app), with the namespace rewritten to `my_app_*`, and add the four barrel export lines.\n3. `pnpm run validate` → `✓ Validation passed`, `Data: 2 Objects 6 Fields  UI: 1 Apps 1 Views 1 Actions` — exactly the counts the tutorial prints. The gate does not mention the missing handler.\n4. `npx os dev --ui` → boot diagnostics print the `[action-governance] … NO handler` warning quoted above.\n5. The Actions page states the click-time outcome: `Action 'resolve_ticket' on object 'my_app_ticket' not found`.\n\nSo the tutorial's own sentence — \"Every example on this page passes `os validate` verbatim in a freshly scaffolded project\" — is true, and that is the problem: the gate the tutorial advertises as the thing that catches AI mistakes lets this one through, and the page never tells the reader the button is inert.\n\n## Expected\n\nThe model answer on the main tutorial page is a working action, and the reader's verification step in the Console succeeds. Either the example carries an inline `body` (Path A on the Actions page — a metadata-only handler, no code to register), or the page shows the `onEnable` registration (Path B) alongside the action, and the prose in step 5 asks the reader to click Resolve and watch the status change.\n\n## Actual\n\nThe tutorial ships a `script` action with an unregistered `target`, `os validate` accepts it, the Console renders a button that fails at click time, and the only signal is a boot-time WARN the tutorial never mentions.\n\n## Also worth deciding\n\nWhether `os validate` should at least warn on a `script` action whose `target` names no handler the stack declares (`functions`, `onEnable` registration) — today the same condition is a boot-time WARN under ADR-0078 but silent at authoring time, which is the gap the tutorial falls into.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

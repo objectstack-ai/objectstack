@@ -1,0 +1,37 @@
+{
+  "number": 22172,
+  "kind": "issue",
+  "title": "docs(north-star): align the compass with the 'ontology is the software' positioning — identity line, two user classes, promise-to-step mapping, the 'you own it' row, rule 4 wording (Tier H, maintainer-directed)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T03:54:55Z",
+  "updated_at": "2026-10-08T05:51:33Z",
+  "closed_at": "2026-10-08T05:51:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22172",
+  "body": "Filing gate: **③ a maintainer-directed task**, carrying the maintainer's own text decisions. Filed by the director seat (seat post #12708, summon #35, `session_01VYToj6PQehTEKNrjGM9akg`) after a decision discussion in chat. The maintainer asked 「项目定位已经修改的 本体即软件,北极星是否需要修改?checklist 是否需要修改?」; the seat read `docs/NORTH-STAR.md` (last edited 2026-10-01, before the positioning landed in `README.md`, `content/docs/index.mdx`, `content/docs/concepts/ontology.mdx` and the 2026-10-05 blog post) and proposed an alignment; the maintainer corrected one point, verbatim 「本体即软件,未来是 agent 操作,短期之内还是需要人操作,这些也重要吧?视图、仪表盘、应用、翻译」, which withdrew a proposed \"core before projection\" priority rule; the maintainer then answered 「采纳」 and directed the dispatch: 「这个卡你直接用 fable派发」. ⛔ The seat files and dispatches on that instruction; it writes no text of the file itself.\n\nReader: the dev the director seat dispatches (model tier `fable`, by the maintainer's word). `docs/NORTH-STAR.md` is a governed Tier H surface: the PR stays draft and lands on the maintainer's APPROVED review.\n\n## The five edits, and only these\n\nThe file is the maintainer's text; every edit below is an insertion or a one-line replacement at the stated location. Nothing else in the file moves.\n\n1. **「我们是什么」** — replace the line `**我们是什么**:一个应用开发平台;创业阶段。` with:\n\n   `**我们是什么**:本体即软件——一个可执行的业务本体(对象与字段、关系、动作、权限、流程、Agent 与工具定义),AI 写、运行时跑、人与 Agent 用、你拥有;创业阶段。视图、仪表盘、应用、翻译是本体的投影,是今天人用它、看它、验它的面。`\n\n2. **「做出来的是什么」** — keep the existing capability sentence as it is and append, as a new sentence at the end of that paragraph:\n\n   `两类用户:今天的业务人员经界面、验收者经控制台;明天的 Agent 经 MCP。路的每一步都要对两类用户成立。`\n\n3. **「唯一的度量,那条路」** — append one sentence at the end of that paragraph (after the path's six steps):\n\n   `四个承诺各由一步兑现:① AI 可写 · ②③ 可执行 · ④ 你拥有 · ⑤ Agent 可操作 · ⑥ 是闭环。`\n\n4. **Step ④ 「发布并装进一个环境」** — add one feature-point row at the end of that list, in the row grammar the file uses (`轴 · 功能点(业务语言) · 清单区 · 项 id`); the item ids do not exist yet, so the row names the areas and carries the planned ids the coverage sweep will create:\n\n   `- devpath · 你拥有:定义在你的仓库里可 diff,整个本体可导出、可在没有我们的情况下自托管跑起来 · platform-core + cli · ontology-export-roundtrip, artifact-reproducible-build, standalone-boot-no-cloud(待清单扫描建项)`\n\n5. **优先级第 4 条** — in the sentence `因为写的是 AI、用的也是 AI:元数据既要 AI 能写……也要 AI 能用……`, replace `元数据既要 AI 能写` with `本体既要 AI 能写`, and replace `也要 AI 能用` with `也要人与 Agent 能用——Agent 越权时被权限挡住并留痕`. The rest of the item stays byte-for-byte.\n\n## ⛔ Not changed, by the maintainer's word\n\n- No global vocabulary swap: `元数据` stays everywhere else (metadata is the authoring form; ontology is the meaning, as `content/docs/concepts/ontology.mdx` itself says).\n- No \"core before projection\" priority rule: priority rule 2 (the path or a checklist capability broken ⇒ P0/P1) stays as it is and weighs the human-facing surfaces and the agent surface alike.\n- The capability list under 「做出来的是什么」 is not reordered or trimmed.\n- 「现在不做」, 「阶段姿态」, 「仪器为车队服务」, 「账本」 unchanged.\n\n## Landing shape\n\n- One docs-only PR, `Fixes` this card, `Clause-②: no`, `skip-changeset`; draft; base `main`. The file is Tier H: ⛔ the dev does not flip ready, queue or merge; the director seat posts the 维护者速读 and the maintainer approves and merges.\n- Acceptance: the five edits present as specified and nothing else in the diff (`git diff --stat` shows one file; the diff hunks are exactly the five locations); the file's existing gates pass (`pnpm check:north-star` if present, else the lint battery the dispatch gates derive); the row in edit 4 parses in the row grammar the file's other rows use.\n- The checklist half of the maintainer's question is NOT this card: the `checklist-author` coverage sweep with a sixth angle (the four promises; angle 5's sources extended to `README.md`, `concepts/ontology.mdx` and the blog post) runs when the maintainer triggers it after this lands, and creates the items edit 4 names.\n\nRelated: `docs/NORTH-STAR.md` · `README.md` · `content/docs/concepts/ontology.mdx` · `content/blog/the-ontology-is-the-software.mdx` · `docs/qa/platform-checklist/SWEEP.md`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

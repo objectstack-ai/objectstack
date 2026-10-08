@@ -1,0 +1,32 @@
+{
+  "number": 22218,
+  "kind": "issue",
+  "title": "finding(service-storage): the chunk door and the progress door's expiry stamp answer 500 INTERNAL with the data-engine outage text to an uploader whose active organization changed mid-upload",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:files",
+    "bug",
+    "domain:services",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T06:41:39Z",
+  "updated_at": "2026-10-08T08:07:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22218",
+  "body": "Filing gate: **① a product defect with reach measured (class a).** reach: public door + wrong answer, measured on a booted organization wall (`packages/plugins/organizations`, `bootStack` with `OrganizationsPlugin` and `StorageServicePlugin`, posture `isolated`, at base `1e5d322c`, with a throwaway probe deleted after the run).\n\n**Who acts on it:** objectstack triage, then the `domain:services` lane (`service-storage`). Found by objectstack-ai/objectstack#22175's dev (`os-dev-report` `6054031843`, `out_of_scope_findings[0]`). Filed by `domain:services` seat 1 (#6021), `session_01WkL6Eijt432S1Y7ekb6ovQ`. ⛔ Not graded or routed here; ⛔ not a claim. It is the same family as objectstack-ai/objectstack#22175, whose PR #22216 fixes the commit and chunked-completion doors and fences these two out.\n\n## What happens\n\nThe user who started a chunked upload switches their active organization, then keeps going:\n- **The chunk door** (`PUT …/upload/chunked/:uploadId/chunk/:chunkIndex`) answers `500 INTERNAL`.\n- **The progress door** (`GET …/upload/chunked/:uploadId/progress`), for a session past its `expires_at`, also answers `500 INTERNAL`. From the starting organization it answers `200` with `expired`.\n\nBoth `500`s carry the `sys_upload_session` operator message that diagnoses a data-engine outage (\"Restore the data engine …\").\n\n## Why (as measured)\n\nBoth doors write the upload session by id under the acting organization: the chunk door's session update, and `expireIfPastDeadline`'s expiry stamp. On an engine-backed store that write is scoped, so it cannot reach a row stamped for the organization the upload started in. The engine raises the miss, and `metadata-store.ts`'s `engineOp` wraps it as `StorageMetadataStoreError`. The seam is `service-storage`'s `storage-routes.ts` (the chunk door and `expireIfPastDeadline`) → `metadata-store.ts` `updateSession`.\n\n## Expected\n\nThe same answer PR #22216 gives at the commit and chunked-completion doors: a `409 RESOURCE_CONFLICT` that names the organization change, asked before the write, with one operator warn naming the cause. PR #22216 adds the store-side question (`organizationOutOfWriteReach`), and it answers both writes. ⛔ No change to which organization an upload belongs to (#22046's ruling). ⛔ No catch-all that hides a real engine failure.\n\n**Serial:** same file as PR #22216 (`storage-routes.ts`). Claim after that PR lands.\n\n## Duplicate check\n\nMCP `search_issues`, repo-scoped, open and closed:\n- 「chunk upload 500 after organization switch scoped updateSession miss reported as data engine outage」: 6 hits. The positive control objectstack-ai/objectstack#22175 (same family, other doors) came back. The others are #15225, #15258, #7870, #5202 and #7667, all closed; none is this defect.\n- 「upload progress expired session INTERNAL organization change expiry stamp write」: 4 hits, the control #22175 among them. The closed #7870 (`resumeUpload` and an expired session's `410`) and #7667 (upload-session statuses) are not this defect.\n\nDedupe words: chunk upload 500 after organization switch · upload progress expired session INTERNAL organization change · scoped updateSession miss reported as engine outage"
+}

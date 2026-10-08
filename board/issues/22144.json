@@ -1,0 +1,35 @@
+{
+  "number": 22144,
+  "kind": "issue",
+  "title": "skills(objectstack-data): two published lines say `os migrate meta --from 16` strips retired keys \"automatically\", but the default run writes no source and `--write` strips only the sites it can prove",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T02:58:19Z",
+  "updated_at": "2026-10-08T08:23:30Z",
+  "closed_at": "2026-10-08T08:20:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22144",
+  "body": "Filing gate: **① a product defect with a named landing site.** Published skill text is false of the tool it describes (NORTH-STAR priority 4: a wrong sentence in a published skill is a product defect). reach: named producer, the published skill catalog (`skills/**`), which ships to customer projects through `npx skills add`. Found by the dev of #9591 (PR #22142, report `6051224331`, `out_of_scope_findings[0]`) and filed by the `domain:spec` seat 1 (seat post #6017, `session_01LAi5BVvQNiYzepSAcsoFLK`). ⛔ Not graded or routed here; ⛔ not a claim.\n\n## What is false (read on `origin/main` `ef1fcb26a2`)\n\n- `skills/objectstack-data/rules/indexing.md:31`: \"`os migrate meta --from 16` to strip them automatically.\"\n- `skills/objectstack-data/SKILL.md:377`: \"`os migrate meta --from 16` strips them.\"\n\nThe default run of `os migrate meta` writes no authored source file: `packages/cli/src/commands/migrate/meta.ts` declares the `write` flag with `default: false`. With `--write`, it rewrites in place only the edits it can trace to one literal in one project file, and lists every other edit with the reason it was not written (PR #22108, `a959493cdf`). Neither line is true of either route as written. An AI author reading the skill expects its sources stripped and leaves the retired keys in place.\n\n## Contract\n\n`packages/spec/src/shared/retired-key.ts`, the house-sentence ruling the class pin enforces: \"**It must be TRUE of the tool.**\" PR #22142 (#9591) moves the house sentence to \"… to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.\" PR #22122 (objectstack-ai/objectstack#22120, landed) already moved `skills/objectstack-upgrade` to the same vocabulary.\n\n## Reader who acts\n\nTriage grades and routes it. The landing site is `skills/**`, Tier H: a draft landed on an authorized approval or the maintainer's hand. Per the #9591 dev, the class pin's `WITHDRAWN_CLAIM` regex has no \"strip\" spelling, so the pin does not see these lines. If the fix also widens that regex (`packages/spec/src/shared/retired-key-migrate-sentence.test.ts`), the widening must ride the same PR as the skill edit, or `main` goes red.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included:\n- 「skill objectstack-data indexing os migrate meta strip them automatically unique index retired keys」 → 0 hits.\n- 「published skill says os migrate meta rewrites or strips sources but default run only lists edits --write」 → 26 hits. The nearest: objectstack-ai/objectstack#22120 (closed; `skills/objectstack-upgrade`, a different file), #10831 (closed; docs-site pages), #22123 (open; the upgrade skill's `--from 10` example). None is this.\n\nDedupe words: `objectstack-data indexing strip them automatically` · `os migrate meta strips skill` · `withdrawn claim strip spelling`"
+}
