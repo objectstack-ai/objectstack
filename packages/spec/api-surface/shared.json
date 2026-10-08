@@ -97,7 +97,6 @@
     "TemplateExpressionInputSchema (const)",
     "TypedExpressionDialect (type)",
     "VISIBILITY_ALIAS_KEYS (const)",
-    "VISIBILITY_STRICT_OPTIONS (const)",
     "ValueDomain (type)",
     "ValueDomainSchema (const)",
     "applyProtection (function)",

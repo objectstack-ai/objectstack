@@ -8,7 +8,7 @@
  * `metadata-core`'s `sys-view-definition.object.ts` declares
  *
  * ```ts
- * { name: 'idx_sys_view_def_active', fields: ['name', 'organization_id', 'owner'], unique: true }
+ * { name: 'idx_sys_view_def_active', fields: ['name', 'organization_id', 'owner'], unique: 'global' }
  * ```
  *
  * and its comment has always promised uniqueness **among ACTIVE rows**. It

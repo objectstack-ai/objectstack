@@ -628,10 +628,11 @@ indexes:
     unique: global
 ```
 
-Bare `unique: true` on a *declared index* is the deprecated spelling of
-`'global'` (materialized over exactly the listed columns). It is warned by
-`os lint` / `os build` / `os validate` as `unique/unscoped-declared-index` and
-rejected at protocol 18 — state the scope instead. A legacy index that lists the
+Bare `unique: true` on a *declared index* is refused since protocol 18. It was
+the positional spelling of `'global'` (materialized over exactly the listed
+columns); `os validate` / `os build` refuse it at the schema and `os lint`
+reports it as `unique/unscoped-declared-index` — state the scope instead.
+Stored metadata carrying it converts to `'global'`, the same physical index. A legacy index that lists the
 organization column itself (`fields: [organization_id, code]`) keeps working
 unchanged; respelling its scope to `'organization'` makes the listed column
 NULL-safe in place.

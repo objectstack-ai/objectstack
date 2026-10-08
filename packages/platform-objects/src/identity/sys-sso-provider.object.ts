@@ -340,7 +340,7 @@ export const SysSsoProvider = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['provider_id'], unique: true },
+    { fields: ['provider_id'], unique: 'global' },
     { fields: ['domain'] },
     { fields: ['user_id'] },
   ],

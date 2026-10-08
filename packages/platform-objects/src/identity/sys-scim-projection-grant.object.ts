@@ -147,7 +147,7 @@ export const SysScimProjectionGrant = ObjectSchema.create({
 
   indexes: [
     // UNIQUE mirrors @better-auth/scim's own declaration.
-    { fields: ['grant_key'], unique: true },
+    { fields: ['grant_key'], unique: 'global' },
     { fields: ['scim_user_id'] },
     { fields: ['user_id'] },
     { fields: ['connection_id'] },

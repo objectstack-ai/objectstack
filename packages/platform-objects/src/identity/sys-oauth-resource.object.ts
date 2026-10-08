@@ -157,7 +157,7 @@ export const SysOauthResource = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['identifier'], unique: true },
+    { fields: ['identifier'], unique: 'global' },
   ],
 
   enable: {

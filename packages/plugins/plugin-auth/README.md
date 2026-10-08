@@ -214,7 +214,7 @@ export const AuthUser = ObjectSchema.create({
     // ... other fields
   },
   indexes: [
-    { fields: ['email'], unique: true }
+    { fields: ['email'], unique: 'global' }
   ]
 });
 ```
