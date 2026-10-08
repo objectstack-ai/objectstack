@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
+import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import {
   ensureDefaultOrganization,
   isDefaultOrganizationBootstrapTrigger,
@@ -551,7 +552,9 @@ describe('[ADR-0131 D3 / ADR-0093 D7] the first admin is the owner even when the
     ql.getObject = (name: string) => (name === 'sys_migration' ? { name } : undefined);
     ql.findOne = async (object: string, q: any) =>
       (ql.tables[object] ?? []).find((r: Row) => r.id === q?.where?.id) ?? null;
-    ql.update = vi.fn(async (object: string, data: Row) => {
+    ql.update = vi.fn(async (object: string, data: Row, options?: any) => {
+      // Pinned to ObjectQL.update's dispatch predicate (the promotion is by id).
+      assertEngineUpdateDispatch(data, options);
       const row = (ql.tables[object] ?? []).find((r: Row) => r.id === data.id);
       if (row) Object.assign(row, data);
       return row ?? null;

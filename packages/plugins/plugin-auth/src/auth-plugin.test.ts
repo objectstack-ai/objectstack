@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthPlugin } from './auth-plugin';
 import { AuthManager } from './auth-manager';
 import type { PluginContext } from '@objectstack/core';
-import { assertEngineFindOnePredicate } from '@objectstack/objectql';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
 
 describe('AuthPlugin', () => {
   let mockContext: PluginContext;
@@ -1339,7 +1339,10 @@ describe('AuthPlugin', () => {
           (tables[object] ??= []).push(data);
           return data;
         }),
-        update: vi.fn(async (object: string, data: any) => {
+        update: vi.fn(async (object: string, data: any, options?: any) => {
+          // Pinned to ObjectQL.update's dispatch predicate: the promotion is a
+          // by-id update, and a looser fake would pass one the engine refuses.
+          assertEngineUpdateDispatch(data, options);
           const row = (tables[object] ?? []).find((r) => r.id === data.id);
           if (row) Object.assign(row, data);
           return row ?? null;

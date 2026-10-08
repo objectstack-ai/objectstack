@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 233 |
-| Object name statically decidable | 155 |
+| Write call sites | 235 |
+| Object name statically decidable | 157 |
 | Object name chosen at run time | 78 |
-| Against a tenancy-enabled object | 154 |
+| Against a tenancy-enabled object | 156 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 171 |
+| Threading a tenant context | 173 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 54 |
 | …and decidably tenancy-enabled | 31 |
-| Threading a decidably elevated context | 123 |
+| Threading a decidably elevated context | 125 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 102 |
 
@@ -90,11 +90,11 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-07 at `e1171ca48`.
+Measured on 2026-10-08 at `955a951d2`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 612 |
+| tracked non-test sources scanned | 614 |
 | engine-shaped types recognised | 70 |
 | declared objects in the registry | 116 |
 | same-named calls subtracted as non-engine | 160 |
@@ -133,7 +133,9 @@ Measured on 2026-10-07 at `e1171ca48`.
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_oauth_application` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `SystemObjectName.USER` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-auth/src/default-organization-invariant.ts` | `insert` | `sys_organization` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `insert` | `object` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `update` | `sys_member` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/member-role-canonical.ts` | `update` | `MEMBER_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/membership-backfill-ledger.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/membership-ended-session.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 2 |
