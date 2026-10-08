@@ -75,6 +75,15 @@ export const SysFlowDispatch = ObjectSchema.create({
   icon: 'repeat',
   isSystem: true,
   managedBy: 'engine-owned',
+  // [ADR-0131 D7] Deployment-level state: NO tenant column. The sole writer,
+  // `ObjectStoreFlowDispatchStore` (`claim` / `settle`), writes under a system
+  // context carrying no organization, and a row is only a dispatch key and its
+  // outcome. Who may read is object permission (D7): the platform-only
+  // capability below — a key names the record a dispatch was for, so without
+  // the wall a walled deployment's `organization_admin` would otherwise read
+  // every organization's dispatch keys.
+  systemFields: { tenant: false },
+  requiredPermissions: ['manage_platform_settings'],
   // ADR-0057: pure telemetry — every row's key embeds the one sweep day it can
   // be claimed on, so rows have no read value after the window passes. 30-day
   // retention per the #10220 ruling (>= the cloud#1288 catch-up horizon).

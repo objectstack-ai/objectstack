@@ -34,4 +34,5 @@ export const entry: SemanticMigration = {
     + 'buttons meant to open an object\'s form declare `actionType: \'form\'` with an '
     + '`<object>.<view>` target instead. Clicking each converted button opens the intended '
     + 'page or form rather than a refusal dialog.',
+  relevantWhen: { kind: 'stack-declares', keys: ['dashboards'] },
 };

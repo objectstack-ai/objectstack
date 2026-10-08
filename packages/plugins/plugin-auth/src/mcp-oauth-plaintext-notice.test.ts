@@ -24,6 +24,12 @@
  * here, and the two sentences are held distinct so a log grep can tell them
  * apart by count alone.
  *
+ * [#22073] The accepted line's LEVEL follows the host: `info` when the issuer
+ * is loopback (nothing crosses a network — it fired as a `warn` on every
+ * localhost boot), `warn` for a private or link-local issuer, which is the
+ * control. The sentence itself is unchanged and still emitted on every
+ * accepted plain-HTTP boot, so D1 holds across both levels.
+ *
  * ⚠️ The subject is `registerOidcDiscoveryRoutes` driven against a STUB
  * manager and a stub Hono app — it can answer "does the mount emit this
  * line", never "does the authorization server behave". Anything whose truth
@@ -154,9 +160,40 @@ describe('plain-HTTP OAuth startup notice', () => {
     expect(notices[0]).not.toMatch(CJK_RANGE);
   });
 
-  it('fires on a loopback deployment too — plain HTTP is plain HTTP', async () => {
-    const { warns } = await mountDiscoveryFor('http://localhost:3000');
+  // [#22073] Flipped from `warn` on purpose (triage ruling on #22073: the line
+  // is `info` when every published origin is loopback). Every loopback
+  // spelling the transport rule accepts — the names, the whole 127.0.0.0/8
+  // block, ::1, and WHATWG-canonicalised forms of them — gets the SAME
+  // sentence at `info`, and no warning.
+  it.each([
+    'http://localhost:3000',
+    'http://app.localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.2:3000',
+    'http://127.1:3000',
+    'http://[::1]:3000',
+  ])('logs the sentence at info, never warn, on a LOOPBACK deployment: %s', async (baseUrl) => {
+    const { warns, infos } = await mountDiscoveryFor(baseUrl);
+    expect(noticesIn(warns)).toHaveLength(0);
+    const notices = noticesIn(infos);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain(`${new URL(baseUrl).origin}/api/v1/auth`);
+  });
+
+  // The control for the leg above: every NON-loopback host the rule accepts
+  // is reachable from its network and keeps the warning — RFC 1918,
+  // link-local in both families, and IPv6 unique-local.
+  it.each([
+    'http://10.0.0.5:3000',
+    'http://172.16.0.1:3000',
+    'http://192.168.1.10:3000',
+    'http://169.254.10.20:3000',
+    'http://[fd00::1]:3000',
+    'http://[fe80::1]:3000',
+  ])('keeps the warning on a PRIVATE or LINK-LOCAL deployment: %s', async (baseUrl) => {
+    const { warns, infos } = await mountDiscoveryFor(baseUrl);
     expect(noticesIn(warns)).toHaveLength(1);
+    expect(noticesIn(infos)).toHaveLength(0);
   });
 
   it('⛔ does NOT fire under TLS — neither sentence does', async () => {
@@ -228,6 +265,8 @@ describe('plain-HTTP OAuth startup notice', () => {
   });
 
   it('every plain-HTTP boot gets exactly one of the two sentences', async () => {
+    // [#22073] Counted across BOTH levels: the loopback line moved to `info`,
+    // and D1 is about whether a sentence is emitted, not at which level.
     const cases: Array<[string, number, number]> = [
       ['http://localhost:3000', 1, 0],
       ['http://192.168.1.10:3000', 1, 0],
@@ -235,8 +274,9 @@ describe('plain-HTTP OAuth startup notice', () => {
       ['http://203.0.113.5', 0, 1],
     ];
     for (const [baseUrl, accepted, refused] of cases) {
-      const { warns } = await mountDiscoveryFor(baseUrl, { mcpServerEnabled: false });
-      expect([baseUrl, noticesIn(warns).length, publicNoticesIn(warns).length]).toEqual([
+      const { warns, infos } = await mountDiscoveryFor(baseUrl, { mcpServerEnabled: false });
+      const emitted = [...warns, ...infos];
+      expect([baseUrl, noticesIn(emitted).length, publicNoticesIn(emitted).length]).toEqual([
         baseUrl,
         accepted,
         refused,
@@ -260,7 +300,7 @@ describe('plain-HTTP OAuth startup notice', () => {
     expect(publicNoticesIn(warns)).toHaveLength(1);
   });
 
-  it('is emitted at warn — a visibly smaller security posture, not a durability loss', async () => {
+  it('is emitted at warn on a private address — a visibly smaller security posture, not a durability loss', async () => {
     const { warns, infos } = await mountDiscoveryFor('http://172.16.0.1:3000');
     expect(noticesIn(warns)).toHaveLength(1);
     expect(infos.filter((i) => i.includes(NOTICE_MARKER))).toHaveLength(0);

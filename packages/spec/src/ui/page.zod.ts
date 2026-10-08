@@ -924,6 +924,10 @@ export const PageSchema = lazySchema(() => strictObject({
    *   re-authoring the rest of the page.
    *
    * Only meaningful when `type === 'record'`. Ignored otherwise.
+   *
+   * The no-Tailwind styling rule is ADR-0065 plus ADR-0080's 2026-06-30
+   * amendment; the describe cites the ADRs and leaves the amendment date here,
+   * since it is form help in Studio (#22093).
    */
   kind: z.enum(['full', 'slotted', 'html', 'react', 'jsx']).default('full')
     .describe(
@@ -938,7 +942,7 @@ export const PageSchema = lazySchema(() => strictObject({
       "disabled server-side via the OS_PAGE_REACT=off env toggle. " +
       "Do not author Tailwind classes in page source in either tier: `source` is " +
       "runtime metadata the build-time Tailwind never scans, so utility classNames " +
-      "silently produce no CSS (ADR-0065; ADR-0080 amendment 2026-06-30).",
+      "silently produce no CSS (ADR-0065; ADR-0080).",
     ),
 
   /**
@@ -987,7 +991,7 @@ export const PageSchema = lazySchema(() => strictObject({
    * styles via inline `style` with the same token colors.
    */
   source: z.string().optional()
-    .describe("Page source text. For kind==='html' (alias 'jsx') it is constrained JSX compiled to the tree by @objectstack/sdui-parser at save time (parse, never execute), styled by the registered components' structured props plus a JSON `style` object with hsl(var(--token)) theme colors. For kind==='react' it is real React/JSX executed at render by @object-ui/react-runtime (trusted tier), styled by inline `style` with the same token colors. Do not author Tailwind classes in page source in either tier: `source` is runtime metadata the build-time Tailwind never scans, so utility classNames silently produce no CSS (ADR-0065; ADR-0080 amendment 2026-06-30). Authoritative over `regions` in both."),
+    .describe("Page source text. For kind==='html' (alias 'jsx') it is constrained JSX compiled to the tree by @objectstack/sdui-parser at save time (parse, never execute), styled by the registered components' structured props plus a JSON `style` object with hsl(var(--token)) theme colors. For kind==='react' it is real React/JSX executed at render by @object-ui/react-runtime (trusted tier), styled by inline `style` with the same token colors. Do not author Tailwind classes in page source in either tier: `source` is runtime metadata the build-time Tailwind never scans, so utility classNames silently produce no CSS (ADR-0065; ADR-0080). Authoritative over `regions` in both."),
   /**
    * Plugin namespaces an html page's source uses (ADR-0080 §5; ADR-0048
    * provenance). Derived from the source at save, so authors omit it. The key

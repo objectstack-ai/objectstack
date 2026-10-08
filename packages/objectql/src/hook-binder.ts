@@ -305,9 +305,13 @@ export function bindHooksToEngine(
             object,
             priority: typeof hook.priority === 'number' ? hook.priority : 100,
             packageId: opts.packageId,
-            // Reflect metadata so future tooling can introspect / unregister
-            // and so we can detect duplicate name collisions.
-            // The engine ignores unknown options today; this is forward-only.
+            // `meta` is the METADATA BINDING, and the engine reads it: the
+            // `skipAutomations` opt-out skips every entry that carries it
+            // (`triggerHooks`, `dispatchUnscopedMultiWriteHooks`). So every hook
+            // bound here is skippable by that opt-out. A platform hook that must
+            // run under it — audit, security — is registered in code with
+            // `engine.registerHook` and no `meta`, never through this binder
+            // (#22070). `hookName` names the hook in the engine's diagnostics.
             ...({ meta: hook, hookName: hook.name } as any),
           } as any);
           result.registered += 1;

@@ -25,12 +25,12 @@
   "population": "every object registered by a tracked packages/**/*.object.ts module whose name carries a platform prefix (sys_ / cloud_ / ai_). The cloud repository's own cloud_ objects are not in this tree and so not in this census.",
   "totals": {
     "registered": 83,
-    "inReach": 57,
-    "outOfReach": 26
+    "inReach": 50,
+    "outOfReach": 33
   },
   "reasonTotals": {
     "managedBy: 'better-auth'": 25,
-    "systemFields.tenant: false": 1,
+    "systemFields.tenant: false": 8,
     "tenancy.enabled: false": 2
   },
   "unexplained": [],
@@ -192,9 +192,11 @@
     {
       "name": "sys_flow_dispatch",
       "file": "packages/services/service-automation/src/sys-flow-dispatch.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
+      ]
     },
     {
       "name": "sys_http_delivery",
@@ -229,23 +231,29 @@
     {
       "name": "sys_job",
       "file": "packages/platform-objects/src/audit/sys-job.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
+      ]
     },
     {
       "name": "sys_job_queue",
       "file": "packages/platform-objects/src/audit/sys-job-queue.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
+      ]
     },
     {
       "name": "sys_job_run",
       "file": "packages/platform-objects/src/audit/sys-job-run.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
+      ]
     },
     {
       "name": "sys_jwks",
@@ -305,16 +313,20 @@
     {
       "name": "sys_migration",
       "file": "packages/platform-objects/src/system/sys-migration.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
+      ]
     },
     {
       "name": "sys_migration_journal",
       "file": "packages/platform-objects/src/system/sys-migration-journal.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
+      ]
     },
     {
       "name": "sys_notification",
@@ -454,9 +466,11 @@
     {
       "name": "sys_presence",
       "file": "packages/services/service-realtime/src/objects/sys-presence.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
+      ]
     },
     {
       "name": "sys_record_share",

@@ -659,6 +659,58 @@ jobs:
           echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
           cat "$RUNNER_TEMP/shard-packages.txt"
 
+      # ⛔ THIS SHARD'S `^build` CLOSURE IS BUILT HERE, ON THE TURBO REMOTE
+      # CACHE (#22077), so `Run this shard's tests` REPLAYS it from the local
+      # cache instead of building it. Before this step the closure was built
+      # inside the test step's own turbo run (the slice step below runs zero
+      # iterations since #21487). Merge-queue run 37623284168, `Test Core
+      # (3/6)`: `Tasks: 72 successful, 72 total` / `Cached: 1 cached, 72
+      # total` / `Time: 11m43.373s` for the tests AND their closure in one
+      # run. That run cannot read the remote, because `test` / `test:repo`
+      # stay off it (Build Core's PINS), so the closure moves here.
+      #
+      # `--filter=PKG^...` selects PKG's dependencies without PKG: the
+      # `^build` closure that `test` and `test:repo` schedule. Measured on
+      # 3d9188502e, turbo 2.11.5, all six shards of the local partition: this
+      # plan equals the test plan's build tasks, 32 to 63 per shard, with
+      # identical hashes, 0 differing and 0 extra, and every one of them has
+      # Build Core's hash. A `test` task that `dependsOn: ["build"]` (cli and
+      # metadata in turbo.json) also needs its OWN package's build. This filter
+      # leaves that out on purpose, so a shard never builds a package its tests
+      # do not need; the test step builds it as before. Today that is one task,
+      # `cli#build` on shard 1/6.
+      #
+      # Its own guarded step, for the reason the slice step below gives: a
+      # guarded SITE is (file, job, step). No `--summarize`: `.turbo/runs/`
+      # stays the test step's alone, and that is what the drift check and the
+      # timings capture read. The four TURBO_* lines are Build Core's,
+      # verbatim; its "Turbo remote cache (#21186)" comment holds the write
+      # rule, the signing and the PINS. ⛔ An empty FILTERS must exit here:
+      # `turbo run build` with no filter builds the whole workspace.
+      - name: Build this shard's dependency closure
+        env:
+          NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
+          TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
+          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
+        run: |
+          FILTERS=""
+          if [ -s "$RUNNER_TEMP/shard-packages.txt" ]; then
+            while read -r PKG _; do
+              [ -n "$PKG" ] || continue
+              FILTERS="$FILTERS --filter=$PKG^..."
+            done < "$RUNNER_TEMP/shard-packages.txt"
+          fi
+          if [ -z "$FILTERS" ]; then
+            echo "No packages on this shard — nothing to build."
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/stall-reports"
+          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core-closure-build.log" --stall-minutes 10 \
+            --report-dir "$RUNNER_TEMP/stall-reports" -- \
+            pnpm turbo run build $FILTERS --concurrency=4 --log-order=stream
+
       # ⛔ A FILE-LEVEL SLICE BUILDS ITS DEPENDENCY CLOSURE HERE, IN ITS OWN
       # GUARDED STEP, so the slice leg in the next step REPLAYS it. Since #19278
       # that leg carries its slice in `OS_TEST_SHARD`, which only the `test`
@@ -1503,7 +1555,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Turbo remote cache (#22077), on all four of this job's build steps: the
+      # four TURBO_* lines are Build Core's, verbatim, and Build Core's "Turbo
+      # remote cache (#21186)" comment holds the write rule, the signing and the
+      # PINS. Each of these plans is all `build` tasks with Build Core's hashes
+      # (8, 18, 14 and 31 nodes, measured). The suites between them run vitest
+      # through `pnpm --filter`, not turbo, and carry no credentials.
       - name: Build driver-sql and its dependencies
+        env:
+          TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
+          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
         run: pnpm exec turbo run build --filter=@objectstack/driver-sql... --concurrency=4
 
       # The whole driver-sql suite runs under the skewed process zone — not
@@ -1561,6 +1624,11 @@ jobs:
       # which is what a ratchet is for — it makes the property enforced rather
       # than incidental.
       - name: Build the non-SQL temporal backends
+        env:
+          TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
+          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
         run: >-
           pnpm exec turbo run build
           --filter=@objectstack/service-analytics...
@@ -1640,6 +1708,11 @@ jobs:
       # single shorter substring (`live-`) would select the same set today and
       # silently widen with the next unrelated file that happens to spell it.
       - name: Build metadata-protocol and its dependencies
+        env:
+          TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
+          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
         run: pnpm exec turbo run build --filter=@objectstack/metadata-protocol... --concurrency=4
 
       - name: Run the metadata-protocol migration statements against live MySQL and PostgreSQL
@@ -1697,6 +1770,11 @@ jobs:
       # speaks up when a named path selects no tests — a second net, not a
       # licence to change the form.)
       - name: Build runtime and its dependencies
+        env:
+          TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
+          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
         run: pnpm exec turbo run build --filter=@objectstack/runtime... --concurrency=4
 
       - name: Run the runtime cascade-delete matrix against live PostgreSQL
@@ -1820,9 +1898,20 @@ jobs:
       # own `--stall-minutes` and its own headroom row. The step is NOT allowed
       # to buy itself room by raising this job's `timeout-minutes`: that budget
       # is the instrument that shows this fix working (#16886).
+      #
+      # Turbo remote cache (#22077): the four TURBO_* lines are Build Core's,
+      # verbatim, and Build Core's "Turbo remote cache (#21186)" comment holds
+      # the write rule, the signing and the PINS. This plan is 66 `build` nodes
+      # (63 with a command), each with Build Core's hash (measured). ⛔ They stay on THIS step: the
+      # test step below runs `dogfood#test`, which must never read the remote,
+      # and replays this closure from the local cache this step fills.
       - name: Build the dogfood package's dependency closure
         env:
           NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
+          TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
+          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
         run: |
           mkdir -p "$RUNNER_TEMP/stall-reports"
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/dogfood-build.log" --stall-minutes 10 \
@@ -2189,10 +2278,15 @@ jobs:
       # in both places (72 of 72 build tasks, read from both CI logs at one
       # SHA), so a pin bump there can replay what this step built on `main`.
       #
-      # Scope: THIS step only, i.e. `build` tasks. `test` / `test:repo` stay
-      # off the remote: their cross-package inputs are hand-declared, and a
-      # wrong hash replayed from a remote reaches every run and cloud too.
-      # Build Docs forces execution and carries no credentials.
+      # Scope: `turbo run build` steps only, i.e. `build` tasks. Since #22077
+      # that is this step plus the build steps of the Test Core shards, the
+      # dogfood shards, Temporal Conformance and lint.yml's three Type Check
+      # build lanes, each carrying the four lines below verbatim; the PINS
+      # paragraph at the end says what keeps that set honest. `test` /
+      # `test:repo` stay off the remote: their cross-package inputs are
+      # hand-declared, and a wrong hash replayed from a remote reaches every
+      # run and cloud too. Build Docs forces execution and carries no
+      # credentials.
       #
       # TURBO_CACHE is the env form of `--cache`. Writes happen on
       # `merge_group` and on `push` / `workflow_dispatch` against main; every
@@ -2211,6 +2305,30 @@ jobs:
       # upload and verify every download with that key. Any of the three
       # unset: remote caching is off and the build is unchanged; the summary
       # then reads `Remote caching disabled (remote cache requested — …)`.
+      #
+      # PINS, for every step that carries these four lines (#22077). Each
+      # carrier points back here.
+      #   - BUILD TASKS ONLY. #19086's lesson: a step that writes artifacts from
+      #     a cache-served dist must not itself be served. Each carrier runs one
+      #     `turbo run build` whose `--dry=json` plan is all `#build` tasks.
+      #     ⛔ Never put these lines on a step that runs `test`, `test:repo`,
+      #     `typecheck` or a `gen:*` task (turbo.json caches `gen:schema` and
+      #     `gen:skill-refs`), or on a step that writes tracked files.
+      #   - SAME HASHES AS THIS STEP. Every carrier's build tasks are a subset
+      #     of this step's plan with identical hashes (measured on 3d9188502e,
+      #     turbo 2.11.5: 8 to 77 tasks per carrier, 0 differing), so a PR read
+      #     hits what this step wrote on `main` or in the queue. Filters and
+      #     `--concurrency` do not enter a task hash; an env var a carrier sets
+      #     that turbo.json hashes would, so do not add one to a carrier.
+      #   - A HIT IS ONLY AS CORRECT AS THE HASH (#21193). Every root file a
+      #     build reads is a `$TURBO_ROOT$` input in turbo.json. Re-measured for
+      #     #22077 on 3d9188502e: one appended line in each of the 17 declared
+      #     root inputs moves the build hashes (72, 71 or 6 of 72, #21193's
+      #     numbers); the root tsup.config.ts control moves 72/72; an unrelated
+      #     script, ci.yml and lint.yml move 0. The static import closure of
+      #     every root script a build command or tsup config names is inside
+      #     those declarations. A build that starts reading a new root file
+      #     must declare it in turbo.json before this cache can be trusted.
       - name: Build packages (excluding docs)
         env:
           TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}

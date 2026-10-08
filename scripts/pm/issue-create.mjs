@@ -51,6 +51,12 @@
  * Only when no annotation names it is the number found by READING the board:
  * the newest issue on the target created at or after the dispatch whose title
  * is the one sent. Either way, then the same read-back as the direct path.
+ * ⛔ Once a dispatch is ACCEPTED, its run is the only answer: no run in the
+ * start window, or none completed, is exit 6 under `auto` exactly as under
+ * `dispatch` — never the direct POST after it. The relay may merely be
+ * queued, and the POST would create the card as the seat's personal account
+ * instead of the fleet's — and a second card if the run then executes
+ * (`fleet-write/dispatch.mjs`'s no-run conformance pins every sender to this).
  *
  * ## Read-back
  *
@@ -82,7 +88,7 @@ import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, resolveSweepRepo } from './check-half-states.mjs';
-import { EXIT_UNCONFIRMED, exitForResult, fallbackText, matchRunAnnotations, packRequest, parseRelayAnnotation, relayAnnotationMessage, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { EXIT_UNCONFIRMED, exitForResult, matchRunAnnotations, packRequest, parseRelayAnnotation, relayAnnotationMessage, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
 import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
 import { classifyHttp } from './label-write.mjs';
 import { EXIT_WRITE_PACE_REFUSED, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from './write-pace.mjs';
@@ -340,9 +346,9 @@ export async function createIssue(plan, deps = {}) {
         author = hit.user?.login ?? null;
         lines.push(`✓ issue-create: created #${number}${url ? ` ${url}` : ''}${author ? ` (as ${author})` : ''} — via the relay run ${sent.run?.url ?? sent.run?.id ?? ''}`);
       }
-    } else if (route.requested === 'auto' && sent.state === 'no-run') {
-      lines.push(`  ${fallbackText(sent, 'issue-create')}`);
     } else if (sent.state === 'no-run' || sent.state === 'timeout') {
+      // ⛔ Under EVERY transport request, `auto` included: the dispatch was accepted and may still run, so the direct
+      // POST here would be a card created as the seat's personal account — and a second card when the run executes.
       lines.push(unconfirmedText(sent, 'issue-create'));
       return { exitCode: EXIT_UNCONFIRMED, number: null, url: null, author: null, lines, transport: route.transport, relay: sent };
     } else {
@@ -382,6 +388,32 @@ export async function createIssue(plan, deps = {}) {
   return { exitCode: EXIT_OK, number, url, author, lines, transport: route.transport, relay };
 }
 
+/**
+ * The no-run conformance probe — `fleet-write/dispatch.mjs`'s header names the
+ * contract and its self-test drives it: ONE create through `createIssue`, the
+ * real write path, against an offline fake platform, on the route, the sender
+ * and the throttle the conformance hands in. Answers the exit, every request
+ * that left this process directly (`METHOD /path`), and what the tool printed.
+ */
+export async function relayMissProbe({ route, send, pace }) {
+  const repo = 'objectstack-ai/objectstack';
+  const files = { 'probe-title.txt': 'relay-miss probe', 'probe-body.md': 'A probe card, never sent anywhere real.' };
+  const plan = planFrom(parseArgs(['--repo', repo, '--title-file', 'probe-title.txt', '--body-file', 'probe-body.md']), { read: (p) => files[p], env: {} });
+  const answers = {
+    [`POST /repos/${repo}/issues`]: { status: 201, json: { number: 12, html_url: `https://github.test/${repo}/issues/12`, user: { login: 'probe' } } },
+    [`GET /repos/${repo}/issues/12`]: { status: 200, json: { number: 12, title: plan.payload.title, state: 'open', labels: [] } },
+  };
+  const calls = [];
+  const fetch = async (url, init = {}) => {
+    const call = `${init.method ?? 'GET'} ${new URL(url).pathname}`;
+    calls.push(call);
+    const a = answers[call] ?? { status: 404, json: { message: 'Not Found' } };
+    return { status: a.status, headers: new Headers({ 'x-ratelimit-remaining': '4999' }), json: async () => a.json };
+  };
+  const r = await createIssue(plan, { fetch, token: 'probe-token', pace, route, send });
+  return { exit: r.exitCode, calls, text: r.lines.join('\n') };
+}
+
 // ---------------------------------------------------------------------------
 // Self-test — offline: a fake platform, injected file reads, no network.
 // ---------------------------------------------------------------------------
@@ -392,7 +424,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the transport: a fake platform, and what each answer does to the exit code': 9,
   'dry-run: no request leaves, and the plan is printed': 3,
   'the wiring: both halves around the one POST, on the write verb only': 4,
-  'the relay transport: ONE dispatch carrying the create, the card found by title since the dispatch, auto falls back only on no-run': 8,
+  'the relay transport: ONE dispatch carrying the create, the card found by title since the dispatch, and an accepted dispatch with no run UNCONFIRMED under auto too — never the direct POST': 9,
   "the relay annotation: the number the relay run's annotation carries is read first — the card read back at it with NO list; absent, the title finds it as before; the read-back still judges the annotated card": 5,
 });
 const SELF_TEST_BATTERY_FLOOR = 7;
@@ -535,7 +567,7 @@ export async function selfTest() {
     }
 
     // ── the relay transport ─────────────────────────────────────────────────
-    battery('the relay transport: ONE dispatch carrying the create, the card found by title since the dispatch, auto falls back only on no-run');
+    battery('the relay transport: ONE dispatch carrying the create, the card found by title since the dispatch, and an accepted dispatch with no run UNCONFIRMED under auto too — never the direct POST');
     {
       const SESSION = 'session_01ABCDEFGHJKMNPQRSTVWXYZ';
       const NOW = Date.UTC(2026, 8, 22, 9, 4, 0);
@@ -571,7 +603,8 @@ export async function selfTest() {
       const noRunExplicit = await drive(orgHappy, { plan: orgPlan, route: dispatchRoute('dispatch'), send: outcome('no-run') });
       t('under an EXPLICIT dispatch, no run is exit 6 — no fall-back', [noRunExplicit.exitCode, noRunExplicit.seen.length], [EXIT_UNCONFIRMED, 0]);
       const noRunAuto = await drive(orgHappy, { plan: orgPlan, route: dispatchRoute('auto'), send: outcome('no-run') });
-      t('under AUTO, no run falls back to the direct POST — said out loud — and the card is created and read back', [noRunAuto.exitCode, noRunAuto.number, noRunAuto.lines.some((l) => l.includes('Falling back to DIRECT')), noRunAuto.seen.map((s) => s.call)], [EXIT_OK, 12, true, [`POST /repos/${ORG_REPO}/issues`, `GET /repos/${ORG_REPO}/issues/12`]]);
+      t('⛔ under AUTO, an accepted dispatch with no run is exit 6 UNCONFIRMED too — no number, and ZERO requests after it: no POST, no read-back', [noRunAuto.exitCode, noRunAuto.number, noRunAuto.seen.map((s) => s.call)], [EXIT_UNCONFIRMED, null, []]);
+      t('…the answer an EXPLICIT dispatch gives, in the shared UNCONFIRMED sentence (go READ, never re-run blind)', [noRunAuto.exitCode === noRunExplicit.exitCode, noRunAuto.relay ? noRunAuto.lines.includes(unconfirmedText(noRunAuto.relay, 'issue-create')) : false], [true, true]);
       const failedRun = await drive(orgHappy, { plan: orgPlan, route: dispatchRoute('auto'), send: outcome('failure', { run: { ...RUN, conclusion: 'failure' }, detail: 'conclusion failure' }) });
       t('⛔ a run that FAILED is never fallen back from, even under auto: exit 5, no POST', [failedRun.exitCode, failedRun.seen.length], [EXIT_PLATFORM_REFUSAL, 0]);
 

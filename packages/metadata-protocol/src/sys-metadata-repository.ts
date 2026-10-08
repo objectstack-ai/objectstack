@@ -387,6 +387,50 @@ export function resetEnvWritableMetadataTypes(): void {
 }
 
 /**
+ * [#22090] The `sys_metadata` predicate for "the rows of one state that a
+ * caller in `organizationId` sees, optionally narrowed to a `type` and a
+ * package" — the ONE statement of that rule, which
+ * {@link SysMetadataRepository.listDrafts} asks for `'draft'` and the
+ * protocol's package revert asks for `'active'`.
+ *
+ * A package's membership in storage is its rows' `package_id` column, the
+ * same column the read path decorates as `_packageId`. The revert has to know
+ * which of a package's rows are published as well as which are drafts, and a
+ * second spelling of the org half below is exactly the drift #3115 / #7705 /
+ * #7779 each had to repair on one copy at a time — so the revert asks this
+ * function, never a `where` of its own.
+ *
+ * Deliberately NOT exported from the package entry: it is a shared predicate
+ * between this module and `protocol.ts`, not a public read.
+ */
+export function packageScopedRowWhere(
+  organizationId: string | null,
+  state: 'draft' | 'active',
+  filter?: { type?: string; packageId?: string },
+): Record<string, unknown> {
+  const where: Record<string, unknown> = { state };
+  // Surface BOTH org-scoped drafts and env-wide (`organization_id IS NULL`)
+  // drafts. Env-wide drafts are real pending changes — `getMetaItems`/preview
+  // overlays them and `publish-drafts` promotes them — but a strict
+  // `organization_id = this.organizationId` equality silently dropped them
+  // whenever the active org was non-null. AI-authored metadata is written
+  // env-wide, so its drafts vanished from the pending-changes list and the
+  // Publish CTA never appeared: the change showed in preview yet could not be
+  // published from the UI (the "orphaned draft" bug).
+  if (organizationId != null) {
+    where.$or = [
+      { organization_id: organizationId },
+      { organization_id: null },
+    ];
+  } else {
+    where.organization_id = null;
+  }
+  if (filter?.type) where.type = filter.type;
+  if (filter?.packageId) where.package_id = filter.packageId;
+  return where;
+}
+
+/**
  * One live `watch()` subscription, as a record rather than a bare listener.
  *
  * Both halves live together because SHUTDOWN NEEDS THE SECOND ONE. A registry
@@ -1238,25 +1282,7 @@ export class SysMetadataRepository implements MetadataRepository {
     }>
   > {
     this.assertOpen();
-    const where: Record<string, unknown> = { state: 'draft' };
-    // Surface BOTH org-scoped drafts and env-wide (`organization_id IS NULL`)
-    // drafts. Env-wide drafts are real pending changes — `getMetaItems`/preview
-    // overlays them and `publish-drafts` promotes them — but a strict
-    // `organization_id = this.organizationId` equality silently dropped them
-    // whenever the active org was non-null. AI-authored metadata is written
-    // env-wide, so its drafts vanished from the pending-changes list and the
-    // Publish CTA never appeared: the change showed in preview yet could not be
-    // published from the UI (the "orphaned draft" bug).
-    if (this.organizationId != null) {
-      where.$or = [
-        { organization_id: this.organizationId },
-        { organization_id: null },
-      ];
-    } else {
-      where.organization_id = null;
-    }
-    if (filter?.type) where.type = filter.type;
-    if (filter?.packageId) where.package_id = filter.packageId;
+    const where = packageScopedRowWhere(this.organizationId, 'draft', filter);
     const rows = await this.engine.find('sys_metadata', { where, context: { isSystem: true } });
     return (rows as any[]).map((row) => ({
       type: row.type,

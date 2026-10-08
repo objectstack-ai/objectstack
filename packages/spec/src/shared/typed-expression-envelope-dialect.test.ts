@@ -25,6 +25,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { PromptTemplateSchema } from '../ai/model-registry.zod.js';
 import { ObjectStackDefinitionSchema } from '../stack.zod.js';
 import {
   CronExpressionInputSchema,
@@ -36,6 +37,7 @@ import {
   type TemplateExpressionInput,
   type TypedExpressionDialect,
 } from './expression.zod.js';
+import { templateExpressionInput } from './typed-expression-input.js';
 
 const NEITHER_SOURCE_NOR_AST = 'Expression requires at least one of `source` or `ast`';
 
@@ -229,5 +231,84 @@ describe('through `ObjectStackDefinitionSchema` — the stack-reachable typed sl
   it('the deliberate non-verdict holds through the stack: `\'not a cron\'` in a job schedule parses green', () => {
     const result = ObjectStackDefinitionSchema.safeParse({ manifest, jobs: [job('not a cron')] });
     expect(result.success, result.success ? '' : JSON.stringify(result.error.issues)).toBe(true);
+  });
+});
+
+/**
+ * `templateExpressionInput` — the package-internal constructor of the template-typed input,
+ * refusing with the sentences it is given (#22081). A template slot whose
+ * renderer reads a spelling other than `{{var}}` (a notify node's `title` /
+ * `message`, rendered by the flow interpolator) is built with it so its refusal
+ * prescribes that renderer's spelling; `TemplateExpressionInputSchema` is the
+ * same constructor with the shared `{{record.name}}` sentences. It is NOT on
+ * the public face: `check:api-surface` holds `api-surface/shared.json` to the
+ * exports `shared/index.ts` re-exports, and this module is not one of them.
+ *
+ * Pinned: the accept set does not move with the sentences, the given sentences
+ * are the ONLY refusal text — the branch issue the formatters expand included —
+ * and the slots that keep the shared input still prescribe `{{record.name}}`.
+ */
+describe('templateExpressionInput — the same input, refusing with the slot\'s own sentences', () => {
+  const OWN = {
+    sourceRequired: 'OWN source-required sentence. Write `\'{x}\'`.',
+    dialectOnly: 'OWN dialect-only sentence. Write `\'{x}\'`.',
+  };
+  const own = templateExpressionInput(ExpressionSchema, OWN);
+
+  /** Every message in a refusal's tree: the union's own, then each branch issue beneath it. */
+  function messagesIn(issue: { message: string; errors?: ReadonlyArray<ReadonlyArray<unknown>> }): string[] {
+    const nested = (issue.errors ?? []).flat() as Array<{ message: string; errors?: ReadonlyArray<ReadonlyArray<unknown>> }>;
+    return [issue.message, ...nested.flatMap(messagesIn)];
+  }
+
+  it('accepts exactly what `TemplateExpressionInputSchema` accepts, and parses it to the same value', () => {
+    for (const value of [
+      '{x}',
+      '{{x}}',
+      '  padded  ',
+      { dialect: 'template', source: '{x}', meta: { rationale: 'r' } },
+      { dialect: 'template', ast: { kind: 'const' } },
+    ]) {
+      expect(slotValue(own, value), JSON.stringify(value)).toEqual(slotValue(TemplateExpressionInputSchema, value));
+    }
+  });
+
+  it('refuses what `TemplateExpressionInputSchema` refuses, with the given sentence by kind', () => {
+    for (const blank of ['', '   ']) {
+      expect(slotIssues(own, blank)).toEqual([{ code: 'invalid_union', path: 'slot', message: OWN.sourceRequired }]);
+    }
+    for (const foreign of [42, { source: 'x' }, { dialect: 'cel', source: 'x' }, { dialect: 'cron', source: '0 9 * * *' }]) {
+      expect(slotIssues(own, foreign), JSON.stringify(foreign))
+        .toEqual([{ code: 'invalid_union', path: 'slot', message: OWN.dialectOnly }]);
+    }
+    // The persistence contract's own refusal is untouched by the sentences.
+    expect(slotIssues(own, { dialect: 'template' })).toEqual([{ code: 'custom', path: 'slot', message: NEITHER_SOURCE_NOR_AST }]);
+  });
+
+  it('the given sentences are the only refusal text — no branch issue carries the shared `{{record.name}}` sentence', () => {
+    // `formatZodIssue` and the wire mapper expand an `invalid_union`'s
+    // branches, so the string arm's own message reaches the author too.
+    for (const value of ['', '   ', 42, { dialect: 'cel', source: 'x' }]) {
+      const result = z.object({ slot: own }).safeParse({ slot: value });
+      expect(result.success).toBe(false);
+      const messages = result.success ? [] : messagesIn(result.error.issues[0] as unknown as { message: string });
+      expect(messages[0], JSON.stringify(value)).toBe(typeof value === 'string' ? OWN.sourceRequired : OWN.dialectOnly);
+      expect(messages.filter((m) => m.includes('{{')), JSON.stringify(value)).toEqual([]);
+    }
+  });
+
+  it('control: the slots that keep the shared input — whose renderers read `{{var}}` — still prescribe `{{record.name}}`', () => {
+    for (const sentence of [TYPED_EXPRESSION_SOURCE_REQUIRED.template, TYPED_EXPRESSION_DIALECT_ONLY.template]) {
+      expect(sentence).toContain("`'{{record.name}}'`");
+      expect(sentence).toContain("`{ dialect: 'template', source: '{{record.name}}' }`");
+    }
+    const prompt = (user: unknown) => PromptTemplateSchema.safeParse({ id: 'p', name: 'p', label: 'P', user });
+    const blank = prompt('   ');
+    const foreign = prompt(42);
+    expect(blank.success || foreign.success).toBe(false);
+    expect(blank.success ? [] : blank.error.issues.map((i) => ({ code: i.code, path: i.path.join('.'), message: i.message })))
+      .toEqual([{ code: 'invalid_union', path: 'user', message: TYPED_EXPRESSION_SOURCE_REQUIRED.template }]);
+    expect(foreign.success ? [] : foreign.error.issues.map((i) => ({ code: i.code, path: i.path.join('.'), message: i.message })))
+      .toEqual([{ code: 'invalid_union', path: 'user', message: TYPED_EXPRESSION_DIALECT_ONLY.template }]);
   });
 });

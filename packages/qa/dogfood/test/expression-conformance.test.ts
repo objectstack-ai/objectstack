@@ -105,6 +105,18 @@ const EXPRESSION_INPUT_SCHEMAS = [
   'SettingsVisibilityInputSchema',
   'CronExpressionInputSchema',
   'TemplateExpressionInputSchema',
+  // [#22081] The package-internal constructors (`shared/typed-expression-input.ts`)
+  // the two typed schemas above are built with: the same input, refusing with
+  // the slot's own sentences. A notify node's `title` / `message` are typed
+  // with a call of `templateExpressionInput` (their refusals prescribe the flow
+  // interpolator's `{record.name}`), so without its row both positions drop out
+  // of discovery and `template-notify-content` goes STALE — #7327's shape
+  // again; `cronExpressionInput` is listed for the same reason ahead of a slot
+  // that needs it. Their definitions live in a plain `.ts` module this
+  // `.zod.ts` scan never reads, and the two `export const …Schema = …(…)` lines
+  // in `expression.zod.ts` are roster definitions `LOCAL_BINDING` skips.
+  'cronExpressionInput',
+  'templateExpressionInput',
 ];
 /**
  * A roster (or alias) name as an IDENTIFIER, anywhere on the line — #17630.

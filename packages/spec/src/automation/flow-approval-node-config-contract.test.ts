@@ -21,7 +21,8 @@
  * `validateStackExpressions` calls the same judge.
  *
  * No plugin is loaded for any of it: the contract is the spec's own. The
- * builtin arm is unchanged, presence-only — a control below holds it there.
+ * builtin arm judges no key membership — a control below holds it there; its
+ * value half has its own pins (`flow-builtin-node-config-values.test.ts`).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -174,7 +175,7 @@ describe('what stays accepted (lit controls)', () => {
     expect(issuesOf(flowWith({ approvers: APPROVERS }))).toEqual([]);
   });
 
-  it('CONTROL: the builtin arm stays presence-only — an undeclared key on a builtin node still parses', () => {
+  it('CONTROL: the builtin arm judges no key membership — an undeclared key on a builtin node still parses', () => {
     const flow = {
       ...flowWith(VALID),
       nodes: [

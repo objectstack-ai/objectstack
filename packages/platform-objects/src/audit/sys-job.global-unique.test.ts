@@ -56,6 +56,8 @@ import { SysJob } from './sys-job.object.js';
  * incidentally (`organization_id` is kernel-injected, never authored), the
  * installation-wide constraint is correct, and the remedy is to state it —
  * plus correct the field `description`, which published the bare claim.
+ * (Since ADR-0131 D7 the incidental column itself is gone — the writer fact
+ * above is what removed it; the last assertion under "the reading" says so.)
  *
  * ## What this file pins, and why that is the point
  *
@@ -150,17 +152,22 @@ describe('sys_job — declared uniqueness is installation-wide (#8578)', () => {
       expect((flow as any).allowOrgOverride).toBe(false);
     });
 
-    it('carries an injected organization_id — so the scope is a real choice, not a default', () => {
-      // `sys_job` IS tenant-scoped structurally (this is why the sweep flagged
-      // it at all). The column exists; the verdict is that no writer ever
-      // populates it per organization. Pinning this keeps the `'global'`
-      // spelling an argued decision rather than an artifact of the column
-      // being absent — and if the injection is ever switched off, the reading
-      // above needs re-checking from a different direction (ADR-0120 S11).
+    it("carries NO tenant column (ADR-0131 D7) — so `'global'` is the only scope that states the truth", () => {
+      // This assertion used to pin the OPPOSITE: the column was injected, and
+      // the `'global'` verdict was argued against it from the writer — no
+      // writer ever populated it per organization. That same writer fact is
+      // what ADR-0131 D7 turns into the column's removal
+      // (`systemFields: { tenant: false }`), so the reading was re-checked
+      // from the direction this comment asked for (ADR-0120 S11), and it
+      // holds more strongly: with no tenant column, an `'organization'` scope
+      // would silently degrade to the listed columns alone — identical DDL,
+      // and a declaration claiming a per-organization boundary that does not
+      // exist. `'global'` is now the only spelling that is true.
       const plan = resolveInjectedSystemColumns(SysJob);
       expect((SysJob as any).tenancy).toBeUndefined();
-      expect(plan.tenant).toBe(true);
-      expect(plan.names.has('organization_id')).toBe(true);
+      expect((SysJob as any).systemFields).toEqual({ tenant: false });
+      expect(plan.tenant).toBe(false);
+      expect(plan.names.has('organization_id')).toBe(false);
     });
   });
 

@@ -515,11 +515,12 @@ measured to create a detail record whose master reference is null — a record t
 readable by nobody and answers 422 on every later write by id. The refusal is correct; only
 its status departs from the rule above.
 
-**These shapes are authorable today.** Publish-time lint reports a `master_detail` without
-`required` as a *warning* (`relationship/master-detail-required`), and does not report the
-`readonly`, `system`, or fallback-`lookup` shapes at all — so a stack can publish clean and
-still reach the 422. Branch on `code`, and read the status off the response rather than
-deriving it from this page.
+**These shapes are authorable today.** `os lint` refuses the three `master_detail` shapes at
+*error* (`relationship/master-detail-required`), but that rule is not part of the publish
+gate — `os build`, `os validate` and the metadata save door do not run it — and it does not
+report the fallback-`lookup` shape at all. So a stack can publish clean and still reach the
+422. Branch on `code`, and read the status off the response rather than deriving it from this
+page.
 
 #### `INVALID_FIELD`
 **HTTP Status:** 400  

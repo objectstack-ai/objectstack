@@ -45,4 +45,5 @@ export const entry: SemanticMigration = {
     + 'declares `reflectionInterval` without an enabled `longTerm`. Every agent parses under the new '
     + 'schema.',
   conversionIds: ['agent-memory-long-term-store-removed'],
+  relevantWhen: { kind: 'stack-declares', keys: ['agents'] },
 };

@@ -50,4 +50,5 @@ export const entry: SemanticMigration = {
     + 'rule needs a `criteria` predicate that names the same population, checked against a '
     + 'representative record. Where a single business unit was meant, use `business_unit`; '
     + '`unit_and_subordinates` is the subtree and grants strictly more.',
+  relevantWhen: { kind: 'stack-declares', keys: ['sharingRules'] },
 };

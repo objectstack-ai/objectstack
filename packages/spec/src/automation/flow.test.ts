@@ -2212,13 +2212,18 @@ describe('FlowSchema — top-level node ids are unique', () => {
   });
 
   it('raises one issue per later occurrence, each naming the FIRST declaration of that id', () => {
-    const result = FlowSchema.safeParse(flowWith([
-      { id: 'a', type: 'start', label: 'Start' },
-      { id: 'b', type: 'assignment', label: 'B' },
-      { id: 'a', type: 'assignment', label: 'A again' },
-      { id: 'b', type: 'assignment', label: 'B again' },
-      { id: 'a', type: 'end', label: 'A once more' },
-    ]));
+    // Edges of its own (#22088): the shared `start → n → end` pair names no
+    // node of THIS node list, and an edge must resolve in its graph.
+    const result = FlowSchema.safeParse({
+      ...flowWith([
+        { id: 'a', type: 'start', label: 'Start' },
+        { id: 'b', type: 'assignment', label: 'B' },
+        { id: 'a', type: 'assignment', label: 'A again' },
+        { id: 'b', type: 'assignment', label: 'B again' },
+        { id: 'a', type: 'end', label: 'A once more' },
+      ]),
+      edges: [{ id: 'e1', source: 'a', target: 'b' }],
+    });
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.error.issues.map((i) => i.path)).toEqual([
@@ -2570,5 +2575,192 @@ describe('FlowSchema — one node-id space across the top-level nodes[] and ever
       ['left'],
       ['right'],
     ]);
+  });
+});
+
+describe('FlowSchema — an edge resolves in its own graph, and is followed once', () => {
+  // #22088. The card's two reproductions, both from flows the Studio designer
+  // saved and publish answered 200 for: a draft whose edges named a node it no
+  // longer held (`start → node_1`, `node_1 → end` over nodes `[start, end]`),
+  // and a flow holding `start → node_1` three times, which ran `node_1` once
+  // per edge. "Repeated" is the key the engine SELECTS on — `source`, `target`,
+  // `type`, `condition` (dialect + source) and branch `label`; the controls
+  // below pin that an edge differing in any of them is still accepted.
+  const start: FlowNode = { id: 'start', type: 'start', label: 'Start' };
+  const end: FlowNode = { id: 'end', type: 'end', label: 'End' };
+  const step = (id: string): FlowNode => ({ id, type: 'assignment', label: id });
+  const flowOf = (nodes: FlowNode[], edges: FlowEdge[]): Flow => ({
+    name: 'repro_edges',
+    label: 'Repro edges',
+    type: 'autolaunched',
+    nodes,
+    edges,
+  });
+  const issuesOf = (flow: Flow) => {
+    const result = FlowSchema.safeParse(flow);
+    expect(result.success).toBe(false);
+    if (result.success) return [];
+    return result.error.issues;
+  };
+
+  it('refuses the card\'s dangling draft — one issue per endpoint that names no node, anchored at that endpoint', () => {
+    const issues = issuesOf(flowOf([start, end], [
+      { id: 'e1', source: 'start', target: 'node_1' },
+      { id: 'e2', source: 'node_1', target: 'end' },
+    ]));
+    expect(issues.map((i) => [i.code, i.path])).toEqual([
+      ['custom', ['edges', 0, 'target']],
+      ['custom', ['edges', 1, 'source']],
+    ]);
+    expect(issues[0].message).toContain("`target: 'node_1'`");
+    expect(issues[0].message).toContain("the flow's top-level graph");
+    expect(issues[1].message).toContain("`source: 'node_1'`");
+  });
+
+  it('an edge with BOTH endpoints missing is refused at both, and never also as a repeat', () => {
+    const issues = issuesOf(flowOf([start, end], [
+      { id: 'e1', source: 'start', target: 'end' },
+      { id: 'g1', source: 'ghost_a', target: 'ghost_b' },
+      { id: 'g2', source: 'ghost_a', target: 'ghost_b' },
+    ]));
+    expect(issues.map((i) => i.path)).toEqual([
+      ['edges', 1, 'source'],
+      ['edges', 1, 'target'],
+      ['edges', 2, 'source'],
+      ['edges', 2, 'target'],
+    ]);
+  });
+
+  it('refuses the card\'s repeated edge — each later copy, anchored on the copy, naming the first', () => {
+    const issues = issuesOf(flowOf([start, step('node_1'), end], [
+      { id: 'e1', source: 'start', target: 'node_1' },
+      { id: 'edge_1', source: 'start', target: 'node_1' },
+      { id: 'edge_3', source: 'start', target: 'node_1' },
+      { id: 'edge_2', source: 'node_1', target: 'end' },
+    ]));
+    expect(issues.map((i) => [i.code, i.path])).toEqual([
+      ['custom', ['edges', 1]],
+      ['custom', ['edges', 2]],
+    ]);
+    for (const issue of issues) {
+      expect(issue.message).toContain('`start` → `node_1`');
+      expect(issue.message).toContain('`edges[0]` `e1`');
+    }
+  });
+
+  it('renders through formatZodError as lines that point at the edge to fix', () => {
+    const result = FlowSchema.safeParse(flowOf([start, end], [{ id: 'e1', source: 'start', target: 'node_1' }]));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const rendered = formatZodError(result.error);
+    expect(rendered).toContain('Validation failed (1 issue):');
+    expect(rendered).toContain("✗ edges.0.target: Edge `e1` (`edges[0]`) has `target: 'node_1'`");
+  });
+
+  it('the same condition is one condition in either spelling — a bare CEL string and its envelope repeat each other', () => {
+    const issues = issuesOf(flowOf([start, end], [
+      { id: 'e1', source: 'start', target: 'end', condition: 'record.amount > 1' },
+      { id: 'e2', source: 'start', target: 'end', condition: { dialect: 'cel', source: 'record.amount > 1' } },
+    ]));
+    expect(issues.map((i) => i.path)).toEqual([['edges', 1]]);
+  });
+
+  it('an `isDefault` copy of an unconditional edge is a repeat — both are taken whenever no conditioned sibling holds', () => {
+    const issues = issuesOf(flowOf([start, end], [
+      { id: 'e1', source: 'start', target: 'end' },
+      { id: 'e2', source: 'start', target: 'end', isDefault: true },
+    ]));
+    expect(issues.map((i) => i.path)).toEqual([['edges', 1]]);
+  });
+
+  it('CONTROL — one pair of nodes joined by edges the engine tells apart (condition, fault type, branch label) is accepted', () => {
+    const result = FlowSchema.safeParse(flowOf([start, step('check'), end], [
+      { id: 'e0', source: 'start', target: 'check' },
+      { id: 'hi', source: 'check', target: 'end', condition: 'record.amount > 100' },
+      { id: 'lo', source: 'check', target: 'end', condition: 'record.amount < 0' },
+      { id: 'flt', source: 'check', target: 'end', type: 'fault' },
+      { id: 'yes', source: 'check', target: 'end', label: 'approve' },
+      { id: 'no', source: 'check', target: 'end', label: 'reject' },
+    ]));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.edges.map((e) => e.id)).toEqual(['e0', 'hi', 'lo', 'flt', 'yes', 'no']);
+  });
+
+  const loopOf = (bodyNodes: FlowNode[], bodyEdges: FlowEdge[]): FlowNode => ({
+    id: 'sweep', type: 'loop', label: 'Sweep',
+    config: { collection: '{items}', body: { nodes: bodyNodes, edges: bodyEdges } },
+  });
+
+  it('a region edge resolves in its region body — an endpoint on the top-level graph is refused at the region path, naming where that node lives', () => {
+    const issues = issuesOf(flowOf([start, loopOf([step('b1')], [{ id: 'out', source: 'b1', target: 'end' }]), end], [
+      { id: 'e1', source: 'start', target: 'sweep' },
+      { id: 'e2', source: 'sweep', target: 'end' },
+    ]));
+    expect(issues.map((i) => [i.code, i.path])).toEqual([
+      ['custom', ['nodes', 1, 'config', 'body', 'edges', 0, 'target']],
+    ]);
+    expect(issues[0].message).toContain("`loop 'sweep' body`");
+    expect(issues[0].message).toContain("`end` is a node of the flow's top-level graph");
+  });
+
+  it('a top-level edge into a region node is refused — the node-id space is one for uniqueness, not for resolution', () => {
+    const issues = issuesOf(flowOf([start, loopOf([step('b1')], []), end], [
+      { id: 'e1', source: 'start', target: 'b1' },
+      { id: 'e2', source: 'start', target: 'sweep' },
+      { id: 'e3', source: 'sweep', target: 'end' },
+    ]));
+    expect(issues.map((i) => i.path)).toEqual([['edges', 0, 'target']]);
+    expect(issues[0].message).toContain("`b1` is a node of `loop 'sweep' body`");
+  });
+
+  it('a repeated edge inside a region body is refused at the region path', () => {
+    const issues = issuesOf(flowOf([start, loopOf([step('b1'), step('b2')], [
+      { id: 'be1', source: 'b1', target: 'b2' },
+      { id: 'be2', source: 'b1', target: 'b2' },
+    ]), end], [
+      { id: 'e1', source: 'start', target: 'sweep' },
+      { id: 'e2', source: 'sweep', target: 'end' },
+    ]));
+    expect(issues.map((i) => i.path)).toEqual([['nodes', 1, 'config', 'body', 'edges', 1]]);
+    expect(issues[0].message).toContain("`loop 'sweep' body → edges[0]` `be1`");
+  });
+
+  it('a region its own schema refused is judged at the AUTHORED edge index, past a non-record member', () => {
+    // `label` is required on every node, so this body fails `FlowRegionSchema`
+    // and stays raw; `FlowGraph.edges` would drop the `null` and renumber.
+    const issues = issuesOf(flowOf([start, {
+      id: 'sweep', type: 'loop', label: 'Sweep',
+      config: {
+        collection: '{items}',
+        body: { nodes: [{ id: 'b1', type: 'assignment' }], edges: [null, { id: 'x', source: 'b1', target: 'ghost' }] },
+      },
+    } as never, end], [
+      { id: 'e1', source: 'start', target: 'sweep' },
+      { id: 'e2', source: 'sweep', target: 'end' },
+    ]));
+    expect(issues.map((i) => i.path)).toEqual([['nodes', 1, 'config', 'body', 'edges', 1, 'target']]);
+  });
+
+  it('CONTROL — a well-formed multi-region flow is accepted end to end, edges in authored order', () => {
+    const flow = flowOf([
+      start,
+      loopOf([step('b1'), step('b2')], [{ id: 'be1', source: 'b1', target: 'b2' }]),
+      {
+        id: 'fan', type: 'parallel', label: 'Fan out',
+        config: { branches: [{ nodes: [step('left')] }, { nodes: [step('right')] }] },
+      },
+      end,
+    ], [
+      { id: 'e1', source: 'start', target: 'sweep' },
+      { id: 'e2', source: 'sweep', target: 'fan' },
+      { id: 'e3', source: 'fan', target: 'end' },
+    ]);
+    const result = FlowSchema.safeParse(flow);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.edges.map((e) => e.id)).toEqual(['e1', 'e2', 'e3']);
+    expect(() => validateControlFlow(result.data)).not.toThrow();
+    expect(defineFlow(flow).edges.map((e) => e.id)).toEqual(['e1', 'e2', 'e3']);
   });
 });

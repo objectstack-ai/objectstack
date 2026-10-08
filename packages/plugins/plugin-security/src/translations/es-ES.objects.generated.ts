@@ -330,6 +330,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Conjunto de permisos",
         help: "Clave foránea a sys_permission_set."
       },
+      permission_set: {
+        label: "Nombre del conjunto de permisos",
+        help: "[ADR-0131 D4] Nombre de máquina del conjunto de permisos que otorga esta asignación (sys_permission_set.name). La plataforma lo escribe a partir de permission_set_id en cada escritura que lo incluye; un valor proporcionado debe coincidir con ese nombre o la escritura se rechaza. NULL en una asignación escrita antes de que existiera la columna."
+      },
       organization_id: {
         label: "Organización",
         help: "Ámbito de organización opcional. NULL = se aplica en cualquier contexto de organización."

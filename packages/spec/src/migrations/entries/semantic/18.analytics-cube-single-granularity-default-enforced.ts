@@ -63,4 +63,5 @@ export const entry: SemanticMigration = {
     + 'beside a dimension over a joined object — or each one that did now groups by a dimension '
     + 'without a single interval. A host that overrides `queryCapabilities` to raw SQL only either '
     + 'adds an engine aggregate bridge or groups by no one-interval dimension.',
+  relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
 };

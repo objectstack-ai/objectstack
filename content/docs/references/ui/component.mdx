@@ -686,7 +686,7 @@ Sort field and direction pair
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **kind** | `'redirect'` | ✅ |  |
-| **url** | `string` | ✅ | Where the browser goes after a successful submit. Ruled 2026-08-11: (1) RELATIVE paths only — it must start with `/`, and absolute or protocol-relative URLs are refused, which is what closes the open-redirect face; (2) interpolation ONLY from declared record fields, spelled `{{record.field_name}}`, and every interpolated value is URL-escaped when the redirect is built; (3) a verbatim redirect on the resolved relative path is the intended consumption. To send the browser OUT of the app, use an app navigation item (`{ type: 'url', url }`) instead. |
+| **url** | `string` | ✅ | Where the browser goes after a successful submit. (1) RELATIVE paths only — it must start with `/`, and absolute or protocol-relative URLs are refused, which is what closes the open-redirect face; (2) interpolation ONLY from declared record fields, spelled `{{record.field_name}}`, and every interpolated value is URL-escaped when the redirect is built; (3) a verbatim redirect on the resolved relative path is the intended consumption. To send the browser OUT of the app, use an app navigation item (`{ type: 'url', url }`) instead. |
 | **delayMs** | `integer` | optional |  |
 
 ### Nested Shape: `ObjectFormProps.mobile`
