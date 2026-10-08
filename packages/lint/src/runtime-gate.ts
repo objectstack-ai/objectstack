@@ -615,22 +615,11 @@ const fingerprint = (f: AuthoringFinding) => `${f.rule}\u0000${f.where}\u0000${f
  *   for `objects` every lookup in the tenant's model would read as dangling.
  *   For any other type the item is the sole member of its own collection, so
  *   index-0 paths in the findings are unambiguously this write.
- * - [#22118] `stored` is the STORED universe: the baseline with the written
- *   item's stored self put back, at the slot the item takes in the candidate.
- *   Present only on an UPDATE into a context collection — a create has no
- *   stored self, and a non-context type's item is never carried as context —
- *   so in every other case the gate runs exactly the two passes it always ran.
- *   It exists because the baseline alone answers the wrong question for a
- *   SIBLING's finding that needs the written item present: a detail's
- *   `lookupColumns` entry is judged against its master only when the master
- *   is in the snapshot, so with the master dropped the baseline cannot hold
- *   the finding, and a label-only master save was charged with a stored
- *   detail's condition. The stored universe holds it.
- *   Its slot is the point: every sibling sits at the same index in all three
- *   snapshots, and the stored self sits where the candidate puts the item,
- *   so a positional path names the same entry in `stored` as in `candidate`.
- *   {@link runRuntimeAuthoringRules} reads only the `stored` findings located
- *   on ANOTHER entry; the stored self's own findings never cancel anything.
+ * - [#22118] The gate also judges a third snapshot on an update into a
+ *   context collection, the STORED universe — see
+ *   {@link buildRuntimeWriteSnapshotSet}, which this function reads its two
+ *   snapshots off. It is not returned here: this signature is on both package
+ *   entries, and the third snapshot is the gate's own business.
  *
  * Cost (the #4463 D2 question, measured rather than assumed): built per
  * write, never cached. The construction is one filter + one spread over the
@@ -638,8 +627,8 @@ const fingerprint = (f: AuthoringFinding) => `${f.rule}\u0000${f.where}\u0000${f
  * Over the shipped corpus (30 objects, 10 permission sets, 1 book) that is
  * microseconds on a PUBLISH (never a draft autosave, D1) — a cache would buy
  * nothing and would need cross-org invalidation the gate has no seam for. An
- * update into a context collection pays a third pass of the same size, for
- * `stored`.
+ * update into a context collection pays one more spread, for the stored
+ * universe.
  */
 export function buildRuntimeWriteSnapshots(args: {
   /** Singular metadata type of the item being written. */
@@ -654,7 +643,40 @@ export function buildRuntimeWriteSnapshots(args: {
    * rules the WHOLE `objects` collection, exactly as before.
    */
   packageScope?: RuntimePackageScope;
-}): { baseline: AnyRec; candidate: AnyRec; stored?: AnyRec } | null {
+}): { baseline: AnyRec; candidate: AnyRec } | null {
+  const set = buildRuntimeWriteSnapshotSet(args);
+  return set ? { baseline: set.baseline, candidate: set.candidate } : null;
+}
+
+/**
+ * {@link buildRuntimeWriteSnapshots}' baseline and candidate, plus — on an
+ * UPDATE into a context collection — `stored` (#22118).
+ *
+ * Exported for the pins in `runtime-gate.stored-self-baseline.test.ts` and for
+ * that only — it is on neither package entry.
+ *
+ * `stored` is the STORED universe: the baseline with the written item's stored
+ * self put back, at the slot the item takes in the candidate. Present only on
+ * an update into a context collection — a create has no stored self, and a
+ * non-context type's item is never carried as context — so in every other case
+ * the gate runs exactly the two passes it always ran.
+ *
+ * It exists because the baseline alone answers the wrong question for a
+ * SIBLING's finding that needs the written item present: a detail's
+ * `lookupColumns` entry is judged against its master only when the master is
+ * in the snapshot, so with the master dropped the baseline cannot hold the
+ * finding, and a label-only master save was charged with a stored detail's
+ * condition. The stored universe holds it.
+ *
+ * Its slot is the point: every sibling sits at the same index in all three
+ * snapshots, and the stored self sits where the candidate puts the item, so a
+ * positional path names the same entry in `stored` as in `candidate`.
+ * {@link runRuntimeAuthoringRules} reads only the `stored` findings located on
+ * ANOTHER entry; the stored self's own findings never cancel anything.
+ */
+export function buildRuntimeWriteSnapshotSet(
+  args: Parameters<typeof buildRuntimeWriteSnapshots>[0],
+): { baseline: AnyRec; candidate: AnyRec; stored?: AnyRec } | null {
   const stackKey = stackKeyForType(args.type);
   if (!stackKey) return null;
   if (!args.item || typeof args.item !== 'object') return null;
@@ -1063,7 +1085,7 @@ export function runRuntimeAuthoringRules(args: {
   // universe on an update into a context collection. See the builder's own
   // docblock; it is exported precisely so tests exercise this construction
   // and not a mirror of it.
-  const snapshots = buildRuntimeWriteSnapshots({
+  const snapshots = buildRuntimeWriteSnapshotSet({
     type: args.type,
     item: args.item,
     ...(args.context !== undefined ? { context: args.context } : {}),

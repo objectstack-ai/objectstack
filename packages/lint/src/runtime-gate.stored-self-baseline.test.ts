@@ -31,6 +31,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AuthoringFinding } from './authoring-rules.js';
 import {
+  buildRuntimeWriteSnapshotSet,
   buildRuntimeWriteSnapshots,
   isLocatedOnAnotherEntry,
   runRuntimeAuthoringRules,
@@ -119,7 +120,7 @@ describe('#22118 — a label-only master save is not charged with a stored detai
   for (const { label, detail, rule, rawPath } of MEASURED) {
     it(`⭐ RESOLVES — ${label}`, () => {
       const stored = [master(), account, detail];
-      const snapshots = buildRuntimeWriteSnapshots({
+      const snapshots = buildRuntimeWriteSnapshotSet({
         type: 'object',
         item: relabelled(master()),
         context: { objects: stored },
@@ -206,7 +207,7 @@ describe('#22118 — the controls: what the write changes is still the write\'s'
       const stored = master(fields as Fields, over);
       // Non-vacuous: the stored self carries the identical finding, so a
       // baseline that let it cancel would wave this write through.
-      const snapshots = buildRuntimeWriteSnapshots({
+      const snapshots = buildRuntimeWriteSnapshotSet({
         type: 'object',
         item: relabelled(stored),
         context: { objects: [stored, account] },
@@ -222,7 +223,7 @@ describe('#22118 — the controls: what the write changes is still the write\'s'
   it('a CREATE is judged as before: no stored self, so the stored universe is the baseline', () => {
     // Creating the master makes the stored detail's picker column judgeable;
     // the stored universe never held that finding, so it is this write's.
-    const snapshots = buildRuntimeWriteSnapshots({
+    const snapshots = buildRuntimeWriteSnapshotSet({
       type: 'object',
       item: master(),
       context: { objects: [account, pickerDetail(['nope_col'])] },
@@ -274,7 +275,7 @@ describe('#22118 — the same differential on a PERMISSION write', () => {
 describe('#22118 — the snapshot shape', () => {
   it('`stored` puts the stored self at the slot the item takes in the candidate; siblings keep theirs', () => {
     const stored = master();
-    const s = buildRuntimeWriteSnapshots({
+    const s = buildRuntimeWriteSnapshotSet({
       type: 'object',
       item: relabelled(stored),
       context: { objects: [stored, account, pickerDetail([])] },
@@ -288,8 +289,19 @@ describe('#22118 — the snapshot shape', () => {
     expect((s.candidate.objects as { label: string }[])[2]!.label).toBe('Master (renamed)');
   });
 
+  it('the published builder still returns exactly its baseline/candidate pair — `stored` is the gate\'s own', () => {
+    const args = { type: 'object', item: relabelled(master()), context: { objects: [master(), account] } };
+    const published = buildRuntimeWriteSnapshots(args)!;
+    const set = buildRuntimeWriteSnapshotSet(args)!;
+
+    expect(Object.keys(published)).toEqual(['baseline', 'candidate']);
+    expect(set.stored).toBeDefined();
+    expect(published.baseline).toEqual(set.baseline);
+    expect(published.candidate).toEqual(set.candidate);
+  });
+
   it('`stored` is absent for a write whose type is not a context collection', () => {
-    const s = buildRuntimeWriteSnapshots({
+    const s = buildRuntimeWriteSnapshotSet({
       type: 'flow',
       item: { name: 'f1' },
       context: { objects: [master()] },
