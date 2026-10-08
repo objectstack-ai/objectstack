@@ -31,7 +31,11 @@
  * and nothing said why.
  *
  * The interpolator walks objects, arrays, and primitives recursively so it
- * can be applied wholesale to a node's `config.fields`/`config.filter` blocks.
+ * can be applied wholesale to a node's `config.filter` block and its text
+ * slots. The value slots (`fields.*`, `assignments.*`) no longer read this
+ * dialect (#19939): a `{…}` token there is refused before it gets here, except
+ * the date macros and `$User` paths, which CEL cannot spell yet
+ * (`@objectstack/spec/automation`'s `flow-value-slot-template.ts`).
  */
 
 import type { AutomationContext } from '@objectstack/spec/contracts';
