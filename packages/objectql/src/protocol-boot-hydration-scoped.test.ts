@@ -22,7 +22,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { MetadataManager } from '@objectstack/metadata';
-import { createSecurityCatalogReader, ObjectKernel } from '@objectstack/core';
+import { createSecurityCatalogReader, ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
 import { SchemaRegistry, NAMESPACE_CONFLICT_CODE } from './registry.js';
 import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
 import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
@@ -389,18 +389,19 @@ describe('cold boot — a package-held catalog name the environment catalog hold
         kernels.push(kernel);
         let ql!: ObjectQL;
         await kernel.use(new ObjectQLPlugin({ registerProtocol: false }));
-        await kernel.use({
+        const storedRowsAndPackage: Plugin = {
             name: 'test.stored-rows-and-package',
             version: '1.0.0',
             dependencies: ['com.objectstack.engine.objectql'],
-            init: async (ctx: any) => {
-                ql = ctx.getService('objectql');
+            init: async (ctx: PluginContext) => {
+                ql = ctx.getService<ObjectQL>('objectql');
                 ql.registry.logLevel = 'silent';
                 ctx.registerService('protocol', new ObjectStackProtocolImplementation(makeEngine(ql.registry, rows)));
-                await ctx.getService('manifest').register(pkg);
+                await ctx.getService<{ register(m: unknown): Promise<void> | void }>('manifest').register(pkg);
                 beforeHydration?.(ql);
             },
-        } as any);
+        };
+        await kernel.use(storedRowsAndPackage);
         try {
             await kernel.bootstrap();
             return { ql };
