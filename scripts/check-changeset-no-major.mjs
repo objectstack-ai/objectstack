@@ -14,9 +14,20 @@
  *      package, so a PR-scoped predicate is the whole of what it entails. Read
  *      the block headed "The LEVEL axis" for what it cross-checks, where the
  *      declaration comes from, and the residual it records.
+ *   3. THE PROTOCOL LOCKSTEP EVIDENCE (ruling records 6049734955 and
+ *      6056808625) — the one question here about the TREE rather than the
+ *      diff. `PROTOCOL_VERSION` moves to the next major in an ordinary pull
+ *      request, not in the version pass, so between that pull request and the
+ *      line's first prerelease the constant is one major ahead of
+ *      `@objectstack/spec`'s stable version. `protocol-version.test.ts`
+ *      recognises that SHAPE and hands the judgement here, because the
+ *      evidence lives in `.changeset/` and a `local` spec test may not read
+ *      outside its package. The shape is admitted only in pre mode with a
+ *      pending `major` for `@objectstack/spec`; otherwise it is refused, naming
+ *      the remedy. Read the block headed "The protocol lockstep evidence".
  *
- * The run exits with the WORSE of the two verdicts and prints both, because
- * they are independent facts about one changeset set.
+ * The run exits with the WORST of the three verdicts and prints all of them,
+ * because they are independent facts about one tree.
  *
  * Run:  node scripts/check-changeset-no-major.mjs --base <ref-or-sha> [--head <ref>]
  *       node scripts/check-changeset-no-major.mjs              # base defaults to origin/main
@@ -2023,6 +2034,181 @@ export function readPre(root) {
   }
 }
 
+// ── The protocol lockstep evidence (ruling records 6049734955, 6056808625) ──
+//
+// `PROTOCOL_VERSION` is held equal to `@objectstack/spec`'s package major by
+// `packages/spec/src/kernel/protocol-version.test.ts`. The ruling moves the
+// protocol major in an ordinary pull request with full CI rather than in the
+// version pass, and gives that lockstep exactly one exception: in Changesets pre
+// mode with a pending `major`, the protocol major may equal the major about to
+// be published. Between that pull request and the line's first version pass the
+// tree therefore carries a stable package version (`17.7.0`) beside a protocol
+// one major ahead (`18.0.0`).
+//
+// The lockstep test recognises that SHAPE and nothing more: it runs in the spec
+// package's `local` vitest project (release.yml's post-version check runs it by
+// that project), and a `local` test may not read the repository's `.changeset/`
+// (check:cross-package-test-inputs). The EVIDENCE is judged here, beside the two
+// readings this gate already makes of the same directory: `pre.json` (the RC
+// exemption) and the pending majors (`--list`). It reads the TREE, not the diff,
+// on purpose: the condition is a property of the state a pull request leaves
+// behind, and a state that breaks it was introduced by the pull request that
+// removed the marker, exited pre mode or moved the constant, each of which is
+// then refused here.
+//
+// ⛔ Both inputs are read from SOURCE text, never from a built `dist`: the gate
+// runs before `pnpm install` and needs no build. The constant's declaration is
+// the line `sync-protocol-version.mjs` rewrites at version time, read with the
+// same literal shape.
+
+/** The repository paths this question reads, relative to the root. */
+export const PROTOCOL_VERSION_SOURCE = 'packages/spec/src/kernel/protocol-version.ts';
+export const SPEC_MANIFEST = 'packages/spec/package.json';
+export const SPEC_PACKAGE = '@objectstack/spec';
+
+/**
+ * The protocol major declared in `protocol-version.ts`'s source text, or `null`
+ * when the declaration is not there.
+ *
+ * @param {string | null} text
+ * @returns {number | null}
+ */
+export function protocolMajorIn(text) {
+  const m = /^export const PROTOCOL_VERSION = (['"])(\d+)\.\d+\.\d+\1;/m.exec(String(text ?? ''));
+  if (!m) return null;
+  const major = Number.parseInt(m[2], 10);
+  return Number.isInteger(major) && major >= 1 ? major : null;
+}
+
+/**
+ * Everything the lockstep question reads off one tree. Each field is `null`
+ * (or empty) when it cannot be read, and `judgeProtocolLockstep` turns an
+ * unreadable REQUIRED input into a failure, never a pass (#4690).
+ *
+ * @param {string} root
+ * @returns {{ protocolMajor: number | null, specVersion: string | null,
+ *   pre: { mode?: string, tag?: string } | null, pendingSpecMajors: string[] | null }}
+ */
+export function readProtocolLockstepInputs(root) {
+  let protocolMajor = null;
+  try {
+    protocolMajor = protocolMajorIn(readFileSync(join(root, PROTOCOL_VERSION_SOURCE), 'utf8'));
+  } catch {
+    protocolMajor = null;
+  }
+  let specVersion = null;
+  try {
+    const version = JSON.parse(readFileSync(join(root, SPEC_MANIFEST), 'utf8'))?.version;
+    specVersion = typeof version === 'string' && version.length > 0 ? version : null;
+  } catch {
+    specVersion = null;
+  }
+  const changesets = readChangesets(root);
+  const pendingSpecMajors = changesets
+    ? [...changesets.keys()].sort().filter((name) => majorPackagesIn(changesets.get(name)).includes(SPEC_PACKAGE))
+    : null;
+  return { protocolMajor, specVersion, pre: readPre(root), pendingSpecMajors };
+}
+
+/**
+ * Decide the lockstep question. Pure, like `judge`.
+ *
+ *   unreadable       a required input could not be read            -> exit 1 (#4690)
+ *   not-applicable   no shape: the constant is not exactly one major ahead
+ *                    of a STABLE package version (equal majors, a
+ *                    prerelease package, any other drift — the last is the
+ *                    lockstep test's own red)                       -> exit 0
+ *   evidenced        the shape, in pre mode, with a pending `major` for
+ *                    `@objectstack/spec`                             -> exit 0
+ *   refused          the shape without that evidence               -> exit 1
+ *
+ * `pendingSpecMajors` is only required once the shape is present: a tree that
+ * is not in the window has nothing for it to prove.
+ *
+ * @param {{ protocolMajor: number | null, specVersion: string | null,
+ *   pre: { mode?: string, tag?: string } | null, pendingSpecMajors: string[] | null }} input
+ * @returns {{ verdict: string, protocolMajor: number | null, specVersion: string | null,
+ *   missing: string[], evidence: string[], tag: string | null }}
+ */
+export function judgeProtocolLockstep({ protocolMajor, specVersion, pre, pendingSpecMajors }) {
+  const base = { protocolMajor, specVersion, missing: [], evidence: [], tag: null };
+  const unreadable = [];
+  if (protocolMajor === null) unreadable.push(`the PROTOCOL_VERSION declaration in ${PROTOCOL_VERSION_SOURCE}`);
+  const m = /^(\d+)\.(\d+)\.(\d+)(-.+)?$/.exec(String(specVersion ?? ''));
+  if (!m) unreadable.push(`the version in ${SPEC_MANIFEST}`);
+  if (unreadable.length) return { ...base, verdict: 'unreadable', missing: unreadable };
+
+  const specMajor = Number.parseInt(m[1], 10);
+  const stable = m[4] === undefined;
+  if (!(stable && protocolMajor === specMajor + 1)) return { ...base, verdict: 'not-applicable' };
+
+  if (pendingSpecMajors === null) {
+    return { ...base, verdict: 'unreadable', missing: ['the .changeset directory'] };
+  }
+  const missing = [];
+  if (pre?.mode !== 'pre') missing.push('pre-mode');
+  if (pendingSpecMajors.length === 0) missing.push('pending-major');
+  if (missing.length) return { ...base, verdict: 'refused', missing };
+  return { ...base, verdict: 'evidenced', evidence: pendingSpecMajors, tag: pre.tag ?? 'unknown' };
+}
+
+/**
+ * Render the lockstep verdict. Pure, like `render`: the self-test asserts the
+ * MESSAGE, and a refusal carries ONE `::error::` annotation (#18263).
+ *
+ * @param {ReturnType< typeof judgeProtocolLockstep >} result
+ * @returns {{ exitCode: number, stdout: string[], stderr: string[] }}
+ */
+export function renderProtocolLockstep(result) {
+  const stdout = [];
+  const stderr = [];
+  const where = `PROTOCOL_VERSION major ${result?.protocolMajor ?? '?'}, ${SPEC_PACKAGE}@${result?.specVersion ?? '?'}`;
+  switch (result?.verdict) {
+    case 'unreadable': {
+      const what = result.missing.join(' and ');
+      stderr.push(
+        `⛔ check-changeset-no-major: the protocol lockstep evidence could not be judged — ${what} could not be read. ` +
+          'Missing input is a failure, never a pass (#4690).',
+      );
+      stdout.push(
+        errorAnnotation({
+          title: 'Check Changeset: the protocol lockstep inputs could not be read',
+          message: `${what} could not be read, so the protocol lockstep exception was not judged. A gate that cannot read its input has verified nothing.`,
+        }),
+      );
+      return { exitCode: 1, stdout, stderr };
+    }
+    case 'not-applicable':
+      stdout.push(`✓ Protocol lockstep: ${where} — not one major ahead of a stable version, so there is no pre-mode exception to judge.`);
+      return { exitCode: 0, stdout, stderr };
+    case 'evidenced':
+      stdout.push(
+        `✓ Protocol lockstep: ${where} — the one exception, evidenced: pre mode (tag \`${result.tag}\`) and a pending ` +
+          `\`major\` for ${SPEC_PACKAGE} (${result.evidence.map((f) => `.changeset/${f}`).join(', ')}).`,
+      );
+      return { exitCode: 0, stdout, stderr };
+    case 'refused': {
+      const specMajor = Number.parseInt(String(result.specVersion).split('.')[0], 10);
+      const lacks = [];
+      if (result.missing.includes('pre-mode')) lacks.push('Changesets is not in pre mode (`.changeset/pre.json` with `"mode": "pre"`)');
+      if (result.missing.includes('pending-major')) lacks.push(`no pending changeset declares \`"${SPEC_PACKAGE}": major\``);
+      const remedy =
+        `Either put the constant back in lockstep — \`PROTOCOL_VERSION = '${specMajor}.0.0'\` in ${PROTOCOL_VERSION_SOURCE} — ` +
+        `or open the next major line first: \`changeset pre enter <tag>\` and a changeset declaring \`"${SPEC_PACKAGE}": major\`, ` +
+        `so the version pass publishes ${specMajor + 1}.0.0-<tag>.0 and the protocol major matches it.`;
+      const message =
+        `${where}: the protocol major is one ahead of the package, which the lockstep admits only in pre mode with a ` +
+        `pending major for ${SPEC_PACKAGE}, and here ${lacks.join(', and ')}. ${remedy}`;
+      stderr.push(`⛔ check-changeset-no-major: protocol lockstep refused. ${message}`);
+      stdout.push(errorAnnotation({ title: 'Check Changeset: PROTOCOL_VERSION is ahead of the package without pre mode and a pending major', message }));
+      return { exitCode: 1, stdout, stderr };
+    }
+    default:
+      stderr.push(`⛔ check-changeset-no-major: unknown protocol lockstep verdict ${JSON.stringify(result?.verdict)}.`);
+      return { exitCode: 1, stdout, stderr };
+  }
+}
+
 /**
  * `--list`: the whole pending `.changeset` directory, majors called out.
  *
@@ -2135,7 +2321,15 @@ function main(argv) {
   for (const line of level.stdout) console.log(line);
   for (const line of level.stderr) console.error(line);
 
-  process.exit(Math.max(exitCode, level.exitCode));
+  // ── The protocol lockstep evidence (ruling records 6049734955, 6056808625) ─
+  //
+  // The third independent fact, read off the TREE (see its block above), and
+  // folded into the exit code the same way: the worst verdict wins.
+  const lockstep = renderProtocolLockstep(judgeProtocolLockstep(readProtocolLockstepInputs(REPO_ROOT)));
+  for (const line of lockstep.stdout) console.log(line);
+  for (const line of lockstep.stderr) console.error(line);
+
+  process.exit(Math.max(exitCode, level.exitCode, lockstep.exitCode));
 }
 
 // ── Self-test ────────────────────────────────────────────────────────────────
@@ -2182,13 +2376,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'THE ROOT: a packed `bin` target is a published surface the axis can refuse (#16692)': 37,
   '#18263: the refusal says its reason, and says it where the API can read it': 35,
   '#19008: the level headline is the parsed declaration, not a literal': 30,
+  'The protocol lockstep evidence, in BOTH directions (ruling 6056808625)': 39,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too. Lowered 20 → 19 when the
 // carrier-axis battery left with the gate label it read (ruling record
-// 5770886272 on #19061): the ordinary direction, one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 19;
+// 5770886272 on #19061): the ordinary direction, one battery, one row. Raised
+// 19 → 20 with the protocol lockstep battery (ruling record 6056808625).
+const SELF_TEST_BATTERY_FLOOR = 20;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -4208,6 +4404,107 @@ function selfTest() {
     );
   }
 
+  // ── The protocol lockstep evidence (ruling records 6049734955, 6056808625) ─
+  battery('The protocol lockstep evidence, in BOTH directions (ruling 6056808625)');
+  {
+    const MARKER = ['22080-v18-line-opens.md'];
+    const PRE = { mode: 'pre', tag: 'next' };
+    const shape = (over) => ({ protocolMajor: 18, specVersion: '17.7.0', pre: PRE, pendingSpecMajors: MARKER, ...over });
+
+    // The admitting direction: the shape WITH both halves of the evidence.
+    const ok = judgeProtocolLockstep(shape({}));
+    assert(ok.verdict === 'evidenced', `lockstep: shape + pre mode + pending spec major is evidenced — got ${ok.verdict}`);
+    const okOut = renderProtocolLockstep(ok);
+    assert(okOut.exitCode === 0, 'lockstep: an evidenced shape exits 0');
+    assert(okOut.stdout.join('\n').includes('.changeset/22080-v18-line-opens.md'), 'lockstep: the evidenced line names the changeset that carries the major');
+
+    // The refusing direction, one missing half at a time, then both.
+    const noPre = judgeProtocolLockstep(shape({ pre: null }));
+    assert(noPre.verdict === 'refused' && noPre.missing.join() === 'pre-mode', `lockstep: the shape without pre.json is refused for pre mode — got ${noPre.verdict} ${noPre.missing}`);
+    const exited = judgeProtocolLockstep(shape({ pre: { mode: 'exit', tag: 'next' } }));
+    assert(exited.verdict === 'refused' && exited.missing.join() === 'pre-mode', 'lockstep: `pre exit` is not pre mode — refused');
+    const noMajor = judgeProtocolLockstep(shape({ pendingSpecMajors: [] }));
+    assert(noMajor.verdict === 'refused' && noMajor.missing.join() === 'pending-major', `lockstep: pre mode without a pending spec major is refused — got ${noMajor.verdict} ${noMajor.missing}`);
+    const neither = judgeProtocolLockstep(shape({ pre: null, pendingSpecMajors: [] }));
+    assert(neither.verdict === 'refused' && neither.missing.join() === 'pre-mode,pending-major', 'lockstep: with neither half, both are named');
+
+    // The refusal says its reason and its remedy, once, where the API reads it.
+    const refusedOut = renderProtocolLockstep(noPre);
+    const refusedText = [...refusedOut.stdout, ...refusedOut.stderr].join('\n');
+    assert(refusedOut.exitCode === 1, 'lockstep: a refusal exits 1');
+    assert(refusedOut.stdout.filter((l) => l.startsWith('::error ')).length === 1, 'lockstep: a refusal carries exactly ONE ::error annotation (#18263)');
+    assert(refusedText.includes("PROTOCOL_VERSION = '17.0.0'"), 'lockstep: the remedy names the in-lockstep constant for THIS package major');
+    assert(refusedText.includes('changeset pre enter'), 'lockstep: the remedy names entering pre mode');
+    assert(refusedText.includes('"@objectstack/spec": major'), 'lockstep: the remedy names the pending major it needs');
+    assert(renderProtocolLockstep(noMajor).stderr.join('\n').includes('no pending changeset declares'), 'lockstep: a missing major is named as such, not as a pre-mode problem');
+
+    // No shape: nothing to judge, whatever the evidence says.
+    assert(judgeProtocolLockstep({ protocolMajor: 17, specVersion: '17.7.0', pre: null, pendingSpecMajors: [] }).verdict === 'not-applicable', 'lockstep: equal majors outside pre mode are not-applicable (the ordinary PR)');
+    assert(judgeProtocolLockstep({ protocolMajor: 18, specVersion: '18.0.0-next.0', pre: PRE, pendingSpecMajors: [] }).verdict === 'not-applicable', 'lockstep: after the line opens (a prerelease of the protocol major) there is no shape');
+    assert(judgeProtocolLockstep({ protocolMajor: 19, specVersion: '17.7.0', pre: PRE, pendingSpecMajors: MARKER }).verdict === 'not-applicable', 'lockstep: two majors ahead is NOT the exception — it is the lockstep test\'s own red');
+    assert(judgeProtocolLockstep({ protocolMajor: 18, specVersion: '17.8.0-next.2', pre: PRE, pendingSpecMajors: MARKER }).verdict === 'not-applicable', 'lockstep: a prerelease of the OLD major is not the stable shape');
+    assert(judgeProtocolLockstep({ protocolMajor: 17, specVersion: '17.7.0', pre: null, pendingSpecMajors: null }).verdict === 'not-applicable', 'lockstep: an unreadable .changeset is not demanded when there is no shape');
+    assert(renderProtocolLockstep(judgeProtocolLockstep({ protocolMajor: 17, specVersion: '17.7.0', pre: null, pendingSpecMajors: [] })).exitCode === 0, 'lockstep: not-applicable exits 0');
+
+    // Missing input is a failure, never a pass (#4690).
+    assert(judgeProtocolLockstep(shape({ protocolMajor: null })).verdict === 'unreadable', 'lockstep: an unreadable constant is a failure');
+    assert(judgeProtocolLockstep(shape({ specVersion: null })).verdict === 'unreadable', 'lockstep: an unreadable package version is a failure');
+    assert(judgeProtocolLockstep(shape({ pendingSpecMajors: null })).verdict === 'unreadable', 'lockstep: the shape with an unreadable .changeset is a failure');
+    assert(renderProtocolLockstep(judgeProtocolLockstep(shape({ protocolMajor: null }))).exitCode === 1, 'lockstep: unreadable exits 1');
+
+    // The source reader: the declaration sync-protocol-version.mjs rewrites, read as TEXT (no build).
+    assert(protocolMajorIn("export const PROTOCOL_VERSION = '18.0.0';\n") === 18, 'lockstep reader: the single-quoted declaration');
+    assert(protocolMajorIn('export const PROTOCOL_VERSION = "18.0.0";\n') === 18, 'lockstep reader: a double-quoted declaration');
+    assert(protocolMajorIn("// export const PROTOCOL_VERSION = '19.0.0';\n") === null, 'lockstep reader: a commented-out declaration declares nothing');
+    assert(protocolMajorIn('export const PROTOCOL_MAJOR = 18;\n') === null, 'lockstep reader: a file without the declaration reads null');
+
+    // The live tree reads: every input this question needs is readable here.
+    const live = readProtocolLockstepInputs(REPO_ROOT);
+    assert(Number.isInteger(live.protocolMajor), `lockstep: the live ${PROTOCOL_VERSION_SOURCE} yields an integer major — got ${live.protocolMajor}`);
+    assert(typeof live.specVersion === 'string', `lockstep: the live ${SPEC_MANIFEST} yields a version`);
+    assert(Array.isArray(live.pendingSpecMajors), 'lockstep: the live .changeset directory reads');
+    assert(judgeProtocolLockstep(live).verdict !== 'unreadable', 'lockstep: the live tree is judgeable');
+
+    // The readers on a real temp tree, the shape and each half of the evidence.
+    const tmp = mkdtempSync(join(tmpdir(), 'cnm-lockstep-'));
+    try {
+      const write = (rel, text) => {
+        mkdirSync(dirname(join(tmp, rel)), { recursive: true });
+        writeFileSync(join(tmp, rel), text);
+      };
+      write(PROTOCOL_VERSION_SOURCE, "/** doc */\nexport const PROTOCOL_VERSION = '18.0.0';\n");
+      write(SPEC_MANIFEST, JSON.stringify({ name: SPEC_PACKAGE, version: '17.7.0' }));
+      write('.changeset/pre.json', JSON.stringify(PRE));
+      write('.changeset/22080-v18-line-opens.md', MAJOR);
+      write('.changeset/other.md', MINOR);
+      write('.changeset/pre/consumed.md', MAJOR);
+      const read = readProtocolLockstepInputs(tmp);
+      assert(read.pendingSpecMajors.join() === '22080-v18-line-opens.md', `lockstep readers: only a TOP-LEVEL pending changeset counts — got ${JSON.stringify(read.pendingSpecMajors)}`);
+      assert(judgeProtocolLockstep(read).verdict === 'evidenced', 'lockstep readers: the window tree is evidenced');
+      rmSync(join(tmp, '.changeset/22080-v18-line-opens.md'));
+      assert(judgeProtocolLockstep(readProtocolLockstepInputs(tmp)).verdict === 'refused', 'lockstep readers: a major consumed into .changeset/pre/ is not pending — refused');
+      write('.changeset/22080-v18-line-opens.md', MAJOR);
+      rmSync(join(tmp, '.changeset/pre.json'));
+      assert(judgeProtocolLockstep(readProtocolLockstepInputs(tmp)).verdict === 'refused', 'lockstep readers: no pre.json — refused');
+      write(SPEC_MANIFEST, JSON.stringify({ name: SPEC_PACKAGE, version: '18.0.0-next.0' }));
+      assert(judgeProtocolLockstep(readProtocolLockstepInputs(tmp)).verdict === 'not-applicable', 'lockstep readers: after the version pass there is no shape');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+
+    // The wiring: main() judges it and folds it into the exit code, and the
+    // spec test's hand-off names this file, so neither half points at nothing.
+    const selfText = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+    assert(
+      selfText.includes('renderProtocolLockstep(judgeProtocolLockstep(readProtocolLockstepInputs(REPO_ROOT)))'),
+      'lockstep wiring: main() judges the live tree',
+    );
+    assert(/process\.exit\(Math\.max\(exitCode, level\.exitCode, lockstep\.exitCode\)\)/.test(selfText), 'lockstep wiring: the verdict reaches the exit code');
+    const handOffPath = join(REPO_ROOT, 'packages/spec/src/kernel/protocol-version.test.ts');
+    const handOff = existsSync(handOffPath) ? readFileSync(handOffPath, 'utf8') : '';
+    assert(handOff.includes('check-changeset-no-major.mjs'), 'lockstep wiring: the lockstep test hands the shape to THIS gate by name');
+  }
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -4260,7 +4557,7 @@ function selfTest() {
   }
   console.log(
     `✓ check-changeset-no-major --self-test: ${checked} assertions ` +
-      '(frontmatter dialects measured against @changesets/parse + the pre/exit exemption switch in both directions + the #7005 diff scoping over real temp git repos + the #4690 pins + the LEVEL axis on #16044\'s two real heads + the wiring).',
+      '(frontmatter dialects measured against @changesets/parse + the pre/exit exemption switch in both directions + the #7005 diff scoping over real temp git repos + the #4690 pins + the LEVEL axis on #16044\'s two real heads + the protocol lockstep evidence in both directions + the wiring).',
   );
 
   return SELF_TEST_VERDICT;
