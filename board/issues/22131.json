@@ -1,0 +1,35 @@
+{
+  "number": 22131,
+  "kind": "issue",
+  "title": "release(v18): in pre mode, sync-docs-image-tags and check-docs-image-tag pin the documented image and install versions to the newest GA, not 18.0.0-next.N (#22085 Q3)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p1",
+    "target:v18",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T01:38:24Z",
+  "updated_at": "2026-10-08T02:24:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22131",
+  "body": "This card carries **#22085's Q3 half**: the ruling `6049734955` (Q3 → B). #22085 keeps Q1, filed as the `domain:spec` card #22130, and Q2, the v18 release page, a release-side action recorded there.\n\n**Filing gate: ③ a direct task from a maintainer ruling.** The ruling `6049734955` records the maintainer's 「22082 22085 同意」 (2026-10-08T00:37Z) taking Q3 → B. Its 裁后执行, from `6040990462`, is 「席位立一张 devx 卡改 `sync-docs-image-tags` 和 `check-docs-image-tag`」.\n\n**Reader:** PM seat `domain:devx#2` (`session_01VF48aw8RPG6wzDnMgp6rtw`) dispatches it directly. It is an in-flight sub-issue of #22085, so it inherits `domain:devx` and `priority:p1` (`execution-duties.md`, the in-flight-derivative rule). ⛔ Not a claim; the claim follows.\n\n## What is measured (on `origin/main` `8fc50b7647`)\n\n- The root `version` script (`package.json:20`) is `changeset version && … && node scripts/sync-docs-image-tags.mjs && …`. `changesets/action` runs it on `release.yml`'s `version-pr` lane.\n- `sync-docs-image-tags.mjs` rewrites every concrete version a doc surface pins for the runtime image or the CLI to `VERSION_SOURCE`'s version. `check-docs-image-tag.mjs:198` sets `VERSION_SOURCE = 'packages/cli/package.json'`. The gate holds the same surfaces to that same version.\n  - `SURFACES` (`check-docs-image-tag.mjs:207`) lists `docker/README.md`, `content/docs/deployment/self-hosting.mdx` and `content/docs/upgrading.mdx`.\n  - The prose claims add `content/docs/deployment/index.mdx`.\n- Once PR #22084 (#22080) puts `main` in pre mode (`.changeset/pre.json`, tag `next`), `changeset version` sets `packages/cli` to `18.0.0-next.N`. The next version pass would then stamp `18.0.0-next.N` into the self-hosting and upgrade docs.\n  - Meanwhile npm `latest` and the published image stay at 17.7.0.\n  - A production reader copying those documents is led into the breaking prerelease line. That is the cost the ruling names under ⛔ A.\n- The newest GA is already readable in one place: `check-release-section-coverage.mjs` exports `SPEC_CHANGELOG`, `gaVersions` and `newestGaOfMajor`. `sync-release-index-currency.mjs` imports them, and since PR #22095 (`8a925b3b47`) it no longer re-dates the GA entry on prerelease cuts.\n\n## Done when\n\n- **In pre mode** (`.changeset/pre.json` present with `mode: \"pre\"`):\n  - `sync-docs-image-tags` pins the doc surfaces to the newest GA, read from the CHANGELOG through the existing exports. ⛔ No second GA reader.\n  - `check-docs-image-tag` judges them against that same value. Both read it from one function: the rewriter and the gate must never disagree on the expected version.\n- **Outside pre mode** nothing changes: both read `packages/cli/package.json` as today.\n- Each script's `--self-test` gains the pre-mode cases with their positive controls:\n  - a pre-mode tree whose CLI is `18.0.0-next.0` and whose newest GA is `17.7.0` expects `17.7.0`;\n  - the same tree without `pre.json` expects the CLI's version;\n  - a pre-mode tree whose docs already read the newest GA rewrites nothing.\n- **Pin, replayed** on a throwaway tree carrying PR #22084's two `.changeset` files:\n  - the root `version` script leaves the doc surfaces at the newest GA;\n  - `pnpm check:docs-image-tag` exits 0 on the result;\n  - the same replay on `main` without `pre.json` moves them to the CLI's version as today.\n  - Quoted in the PR body.\n- ⛔ No edit to `content/docs/**` by hand, to `release.yml`, `cut-rc.yml` or the `version` script's order. ⛔ No publish, tag or release workflow run. ⛔ #21988 is not touched.\n\n## Dedupe\n\nREST page loop (since 2026-09-01, `state=all`, 1,940 issues: 45 open, 1,895 closed) grepped for `docs-image-tag|sync-docs-image|check:docs-image|image tag` → 3 hits:\n- #22085, the parent;\n- #20163, this seat's post;\n- #20562 (closed), which rehearses `pnpm run version` on `main` on a schedule.\n\nNone pins the docs to the GA in pre mode."
+}

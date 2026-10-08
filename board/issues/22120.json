@@ -2,8 +2,8 @@
   "number": 22120,
   "kind": "issue",
   "title": "skills(objectstack-upgrade): the upgrade skill says `os migrate meta` \"writes nothing but `--out`\", which `--write` (PR #22108) now makes incomplete",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:devpath",
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-07T19:52:42Z",
-  "updated_at": "2026-10-07T20:15:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-08T02:34:11Z",
+  "closed_at": "2026-10-08T02:10:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22120",
   "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) as the skills half of #9591's remainders (release `6044979380`). ⛔ Not a claim.\n\n## What is now incomplete (read on `main` `f2a45db2ad`)\n\n- `skills/objectstack-upgrade/SKILL.md:62`: \"# 1 · mechanical — replay the chain (reads the config, writes nothing but --out)\".\n- `skills/objectstack-upgrade/SKILL.md:469`, the troubleshooting row: \"Working as designed — the command writes nothing but `--out`.\"\n- Both are true of the default invocation. Since PR #22108 (`a959493cdf`), `os migrate meta --write` also rewrites authored sources. An AI author reading the skill is never told that the flag exists.\n\n## Direction\n\n- Name `--write` at both sites. It writes only the sites it can prove, and lists every other site with a refusal kind. It restores every file and exits 1 on any disagreement.\n- Say the default run still only lists.\n- Keep the skill line ratchet: net 0 lines where the ratchet requires it.\n- Word it consistently with the retirement sentence that #9591 restores in `packages/spec/src/shared/retired-key.ts` (spec lane). Neither waits on the other.\n\n## Landing\n\n`skills/**` is Tier H. The PR lands on an authorized approval or the maintainer's hand.\n\n`Clause-②: no`. No changeset (skill text).\n\nDedupe: `objectstack-upgrade skill migrate meta writes nothing but --out` · `--write codemod skill text`."

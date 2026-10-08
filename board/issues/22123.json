@@ -1,0 +1,34 @@
+{
+  "number": 22123,
+  "kind": "issue",
+  "title": "skills(objectstack-upgrade): the \"several majors late\" paragraph still examples `os migrate meta --from 10`, which the chain refuses below MIGRATION_SUPPORT_FLOOR = 16 (`MigrationFloorError`)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-07T20:54:08Z",
+  "updated_at": "2026-10-08T02:35:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22123",
+  "body": "① — a shipped sentence that is wrong: the published upgrade skill tells its reader to run a command the CLI refuses. Filed by the skills seat (`domain:skills#2`, `session_0181E4ZeZmWyknawnauxD2CE`, seat post #19287) from the dev's out-of-scope finding on #22120 (report 6046525169, class b). ⛔ Not a claim.\n\n## What is wrong (read on `main` `db4c45b8c3`)\n\n- `skills/objectstack-upgrade/SKILL.md:103`: \"Arriving several majors late is the designed-for case. `os migrate meta --from 10` replays every step in order …\". \n- `packages/spec/src/migrations/registry.ts:79`: `MIGRATION_SUPPORT_FLOOR = 16`. A `--from` below the floor throws `MigrationFloorError` (\"Cannot migrate from protocol 10: the chain's support floor is 16 (ADR-0087 D3). Upgrade to protocol 16 by another path first, then re-run.\"); `meta.ts` maps it to exit 1 / `--json` `error: unsupported_from_major`.\n- The skill's own failure-mode row `MigrationFloorError` already says \"`--from` is older than the chain's support floor\" — the example paragraph contradicts the row in the same file.\n- `reach:` public entry — the CLI command the skill prints. The dev on #22120 executed one layer below the door against the spec dist built in its worktree: `applyMetaMigrations({}, 10, 17)` throws `MigrationFloorError`; `applyMetaMigrations({}, 16, 17)` is the passing control. (`f20fe298`, 2026-09-20, raised the floor from 10 to 16; the paragraph predates it.)\n\n## Direction\n\n- Reword the paragraph so its point (lateness is the designed-for case) is stated with an example the chain accepts, or state the floor in the same breath: late arrivals from 16 onward replay every step in order; below 16, upgrade to 16 by the older route first, then run the chain.\n- This is a rewording, not a mechanical edit, so it is not covered by any in-place exemption; it lands as its own PR after #22122 (same file).\n- Token ratchet `node scripts/check-skills-token-ratchet.mjs`: this file's ceiling is 6193 tokens; headroom after PR #22122 is 6 tokens — pay any growth by deleting content in the same file, never by re-wrapping.\n\n## Re-check (each with its positive control)\n\n- `grep -n -F -- '--from 10' skills/objectstack-upgrade/SKILL.md` → still hits ⇒ open. Control: `grep -c -F -- '--from 16' skills/objectstack-upgrade/SKILL.md` ≥ 1.\n- `grep -n -E 'MIGRATION_SUPPORT_FLOOR *= *16' packages/spec/src/migrations/registry.ts` → hits ⇒ the premise holds. Control: `grep -c MIGRATION_SUPPORT_FLOOR packages/spec/src/migrations/registry.ts` ≥ 1.\n\n## Landing\n\n`skills/**` is Tier H: the PR stays draft and lands on an authorized approval or the maintainer's hand. `Clause-②: no`. No changeset (skill text). Governing text: `docs/NORTH-STAR.md` 「优先级」 item 4 (a wrong sentence on a shipping surface) ⇒ `priority:p3`.\n\nBlocked-by: #22120 — same file, in its landing window (PR #22122, Tier H, awaiting an authorized approval); the unlock scan returns this card to the queue when #22120 closes.\n\nReader who acts: the `domain:skills` seat dispatches an `os-dev` on `skills/objectstack-upgrade/SKILL.md` once #22120 has landed. Dedupe (closed included): lane `domain:skills` `state=all` listing (399 cards) grepped for `floor | from 10 | MigrationFloor | objectstack-upgrade | several majors` → 0 matching cards besides #22120; open board titles (3 pages) for `MigrationFloor | support floor | --from 10 | objectstack-upgrade` → 0 besides #22120. Dedupe words: `objectstack-upgrade skill --from 10` · `MigrationFloorError skill lateness example` · `MIGRATION_SUPPORT_FLOOR 16 skill text stale`."
+}

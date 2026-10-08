@@ -2,8 +2,8 @@
   "number": 22051,
   "kind": "issue",
   "title": "[Decision] the >5000-line SIZE limb counts a pure deletion the maintainer already ruled (ruling 208), and the Tier H wait for an authorized APPROVED has no clock — PR #22002 idles green",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:skills",
-    "needs-user-decision",
     "priority:p3",
     "tooling"
   ],
@@ -20,11 +19,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-07T03:55:25Z",
-  "updated_at": "2026-10-07T05:01:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-08T02:20:54Z",
+  "closed_at": "2026-10-08T02:20:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22051",
   "body": "Filing gate: ② a decision only the maintainer can make — whether the over-5,000-line SIZE limb of the human-merge predicate keeps counting a pure deletion the maintainer already ruled (ruling 208, 「同意」), and whether a Tier H terminal that waits on an authorized APPROVED gets a clock. Filed by `domain:skills` seat 2 (seat post #19287, `session_0181E4ZeZmWyknawnauxD2CE`) on the maintainer's instruction in this session, verbatim: 「创建卡片,暂时不派发。」 ⛔ Not a claim, ⛔ not a dispatch.\nReader: the maintainer (the `needs-user-decision` inbox); after the ruling, the `domain:skills` seat executes per 「裁后执行」 below.\nDedupe: REST listings, closed included (`labels=tooling` since 2026-09-07: 417; `labels=needs-user-decision` since 2026-09-07: 2; every issue updated since 2026-10-01: 625; `domain:skills` since 2026-09-23: 109; union 1,030) grepped for `5000|human-merge|size limb|deletion` → 6 hits, 2 relevant and both closed: #19344 (the limb prescribed a human merge the ruleset made unreachable) and #20153 (an authorized APPROVED lifts the limb). Neither asks what this card asks. `approval SLA|Tier H wait|escalation` → 0 relevant.\n\n## 维护者速读\n\n**问题**:一张按裁决执行的纯删除 PR(#22002:删 6,528 行的只报告仪器,外加 17 行改注释)因超过 5,000 行阈值进入 Tier H 终局,全绿之后空等授权 APPROVED 约 12 小时;这个终局本身没有时钟。要裁两件事:阈值要不要给「已裁的纯删除」开口;等待要不要有升级点。\n\n**推荐**:D(两样都不改)。阈值不开口,因为「删除不算行」正是 AI 顺手删门禁的温床;不加时钟,因为 `needs-user-decision` 收件箱已经是你消化的节奏,今天只是第一次撞上(n=1)。\n\n**你要做的**:回一个字母 A / B / C / D。选 D 本卡即关、规则文本不动;选别的,席位按「裁后执行」段派发。\n\n## Governing text\n\n- `AGENTS.md:510-512`: \"(c) a PR whose **changed lines exceed 5,000** (`additions + deletions`, …) … the owning seat, or a human merge. Read the PR's file list (`get_files`), **its author and its size** before …\".\n- `scripts/pm/check-governed-merges.mjs:187`, maintainer verbatim (2026-09-18): 「还有应该完善skills,修改代码量超过某个行数(比如5000)就应该人工审核。」; `:255` (2026-09-27, #20153): 「所以阈值写死成 5000 行 , 维护者已经批准了就是可以合并。」; `:1105` `HUMAN_MERGE_LINE_THRESHOLD = 5000`; header: \"generated files INCLUDED — no exemption for regen artefacts, docs builds or reverts\".\n- `.claude/skills/pm-dispatch/references/landing-operations.md:60`: 「Tier H(其余受管面)者:四件套留 draft 等人批,⛔ 不翻正式不入队;获授权批准后认领席落地。」\n- `.claude/skills/pm-dispatch/SKILL.md:269`: 「卡先于弹窗:需裁决先落 `needs-user-decision` 卡;收件箱由维护者定期消化,⛔ 不 assign 推送。」; `SKILL.md:275`: 「每场召唤把带席内 ACCEPT 的受管草稿呈为一批 ≤5 行决裁;批准与合并仍是维护者的点击。」\n- `.claude/skills/pm-dispatch/references/instrument-discipline.md:7-8` (ruling 208: report-only instruments get no dev; their only in-flight work is deletion).\n- Protocol statement: options A–C change the protocol (the SIZE predicate and/or the Tier H wait); D changes nothing.\n\n## 前提(每条带 re-check 命令)\n\n1. PR #22002 is 6,580 changed lines (+17 / −6,563), 6,528 of them one deleted file. — `gh api repos/objectstack-ai/objectstack/pulls/22002 --jq '\"\\(.additions)/\\(.deletions)/\\(.changed_files)\"'`\n2. The deletion was ruled before the PR existed (card #21959 provenance: decision batch 2 item 2, verbatim 「同意」; ruling 208). — `gh api repos/objectstack-ai/objectstack/issues/21959 --jq .body | grep -c '「同意」'`\n3. The PR is ACCEPTed (6019427107), every check on `fab444b4` is green, and it has 0 reviews. — `gh api repos/objectstack-ai/objectstack/pulls/22002/reviews --jq length`\n4. No rule gives the Tier H wait a clock or an escalation; the director batch runs only when the maintainer convenes it. — `grep -n -E \"小时|hours|SLA|clock|超时\" .claude/skills/pm-dispatch/references/landing-operations.md | wc -l` → 0\n5. Frequency of ruled pure deletions over 5,000 lines: 1 in the window read (this PR). — `gh api 'repos/objectstack-ai/objectstack/pulls?state=all&per_page=100' --jq '[.[] | select(.deletions > 5000 and .additions < 100)] | length'`\n\n## 一句话问题\n\n一个人已经点头删掉的文件,删掉它的 PR 还要不要等这个人第二次点头;等的时候要不要有人被叫号。\n\n## 选项 × 真实代价\n\n| 选项 | 做什么 | 车队可感知后果 |\n|---|---|---|\n| A | SIZE 判据对纯删除不计行(或只计新增行) | 大删除当天落地;但 AI 删五万行(含门禁、测试)也绕开人眼——删代码在 CI 上会红,删门禁本身是静默的 |\n| B | 阈值不动;送审后 N 小时无 APPROVED → 席位在收件箱卡上写一行 idle 小时数,并呈进下一场 director 决裁批 | 判据不动;等待可见;维护者仍是唯一点击者;多一条协议行 |\n| C | A + B | 两边代价叠加 |\n| D | 都不改 | 大删除按今天的路径多等一个收件箱周期(本例约 12 小时);零协议改动 |\n\n## 业务含义直译\n\nA = 「删东西不用复核」;B = 「排队有叫号」;C = 两者都要;D = 「维护者消化收件箱的节奏就是 SLA」。\n\n## 四轴论证(从业务立场)\n\n- **实际业务需求**:实测拉动 n=1(#22002),代价是一张 PR 的等待时间,零产品影响;ruling 208 类删除是普查表里的有限集合,不会成规模。零拉动 ⇒ 默认 defer。\n- **项目长远合理性**:SIZE 判据今天是一个数、一个运算(`additions + deletions > 5000`,生成物不豁免、revert 不豁免)。A 给它开第一个口子,「revert 为什么不豁免」必然跟来——扩大特例与契约增生。B / D 不碰判据。\n- **防 AI 犯错**:删除是 AI 最容易「顺手做大」的动作,而删门禁、删测试在 CI 上不响亮(门禁只减不增正是靠人眼守)。A 让这类错误静默通过;B / D 让它停在 draft 等人,是响亮拒绝。\n- **创业阶段不扩散**:新增时钟或升级机制是新的协议零件;维护者收件箱是既有机制。D 不增零件;B 增一行协议;A 增一个例外分支。\n\n## 推荐 + 回退 + 置信缺口\n\n**推荐 D**(两样都不改)。回退 **B**:若维护者认为等待不可见才是真问题,只加「收件箱卡上写 idle 小时数 + 呈进下一场决裁批」一行,不加自动升级,不加门禁。置信缺口:只测了本车道这一张 Tier H 等待,看不见其他车道的等待分布;看不见维护者消化收件箱的实际周期。\n自检行:只看①选 D;②③④ 是否翻转:否。\n终态句:两年后这个判据仍是一个数、一个运算,人工审核的边界由人决定而不是由例外表决定;参照 GitHub 自身的 required reviews,也不按删除行豁免。\n\nos-decision-facets\n① 项目长远合理性:D 保持单一判据零特例;A 开第一个口子,revert 与生成物的豁免会跟着来。\n② 实际业务拉动:n=1(#22002,等约 12 小时),零产品影响;零拉动默认 defer。\n③ 防 AI 犯错:大删除停在 draft 等人是响亮拒绝;删除免审会让删门禁静默通过。\n④ 创业阶段不扩散:D 零新零件;B 一行协议;A 一个新例外分支。\nPrior rulings read: human-merge,5000,size,deletion,approval,draft,governed → 51 ADR / 31 AGENTS.md / 334 spec term hits, 10 ADR candidates, none on this limb; ADR none; thread: #20153, #19344\n推荐 D;选项 A / B / C / D;自检「只看①选 D;②③④ 是否翻转:否」。置信缺口:仅本车道一例;收件箱周期未测。\n\n## 裁后执行\n\n- **D**:本卡以 `completed` 关闭,规则文本不动;PR #22002 继续等 APPROVED。\n- **B**:一张 `domain:skills` 卡改 `landing-operations.md` 的 Tier H 段与座位贴模板(idle 小时行、呈批动作),无工具改动;N 由维护者在回批里定(建议默认 24 小时)。\n- **A / C**:一张卡改 `check-governed-merges.mjs` 的 SIZE 判据与自测、`check-governed-queue-guard.mjs` 的同源导入(#11705 单一推导)、`AGENTS.md:510` 与 `SKILL.md` 对应行;维护者须在回批里写出豁免的精确判据(例如 `deletions-only && additions ≤ 100`),席位不代拟。\n\nRelated: PR #22002 · #21959 · #20153 · #19344 · ruling 208 (`instrument-discipline.md:7-8`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
