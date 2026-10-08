@@ -10,6 +10,7 @@ import { normalizeStackInput } from '@objectstack/spec';
 import { referenceCarrierOf } from '@objectstack/spec/data';
 import { printHeader, printSuccess, printWarning, printError, printStep, printInfo } from '../utils/format.js';
 import { loadConfig, configExists } from '../utils/config.js';
+import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 import { cwdConfigJoinsBoot, resolveArtifactBootSource } from '../utils/artifact-precedence.js';
 import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
 // #5644 — "the optional package is not installed" and "it is installed and
@@ -2312,7 +2313,13 @@ export default class Doctor extends Command {
         // `withDotenvOverlay` would revert the overlay while `loadConfig()`'s
         // promise was still pending — applied, then removed, never read.
         const { config: rawConfig } = await withDotenvOverlayAsync(dotenvReading, () => loadConfig());
-        const config: any = normalizeStackInput(rawConfig as Record<string, unknown>);
+        // [#22288] Folded once, here, before any analysis below reads a
+        // collection: a multi-package `preserve` config carries every object,
+        // view, flow, app and dashboard in its package bodies and none at its
+        // top level, so every check below skipped such an app and doctor
+        // printed a clean bill of health. Envelope keys (`manifest`) are
+        // untouched, and a stack with no `packages[]` comes back by identity.
+        const config: any = authoringRuleUnionStack(normalizeStackInput(rawConfig as Record<string, unknown>));
 
         // Protocol drift: installed platform outside the range the app declares.
         printStep('Checking platform protocol version...');
