@@ -138,9 +138,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * - `todos` is the stack's own list — every semantic entry of every hop
  *   crossed is in it whatever the stack holds, so a body's run lists the same
  *   entries again.
- * - `absentTodos` keeps an entry only when the stack's run AND every body's
- *   run prove its surface absent — a surface present in one package is
- *   present in the artifact. Matched by hop and id.
+ * - `absentTodos` keeps an entry only when every run names it — the stack's
+ *   own and each body's — matched by hop and id. The relevance question
+ *   already reads `packages[]` itself; what a body's run adds is its own
+ *   applications, and an entry that judges a conversion which applied an
+ *   edit is never named absent.
  * - A stack without a `packages` list, which is every one-package project,
  *   gets the plain chain result back unchanged.
  */
