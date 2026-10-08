@@ -38,10 +38,11 @@
  * `false`. A handful of door probes then show the verdicts are the door's own:
  * a hidden affordance is one the server refuses, a shown one is one it admits.
  *
- * Harness note: `bootStack` disables the default-org bootstrap, so this file
- * mints the organization and sets membership roles in system context — the
- * shape `delegated-admin-invite.dogfood.test.ts` uses, and the only writer
- * better-auth-managed tables accept (ADR-0092).
+ * Harness note: `bootStack` boots the production `single` shape, so the
+ * organization is the Default Organization the boot creates (ADR-0131 D3) and
+ * every sign-up is its member; this file sets membership roles in system
+ * context — the shape `delegated-admin-invite.dogfood.test.ts` uses, and the
+ * only writer better-auth-managed tables accept (ADR-0092).
  *
  * ## The one affordance no grade reaches: "Add Member"
  *
@@ -144,7 +145,11 @@ describe('org-admin affordances follow the membership grade (served metadata × 
     tokens.owner = await stack.signIn(); // the seeded dev admin
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 
-    const org = await ql.insert('sys_organization', { name: 'Reach Org', slug: 'reach-org' }, { context: SYSTEM_CTX });
+    // [ADR-0131 D3] The one organization of a `single` deployment is the
+    // Default Organization the boot created; the reconciler binds every
+    // sign-up below to it, so it is the organization the grades are measured in.
+    const [org] = await findRows(ql, 'sys_organization', { slug: 'default' }, 1);
+    expect(org?.id, 'the boot created the Default Organization').toBeTruthy();
     orgId = String(org.id);
 
     const [ownerUser] = await findRows(ql, 'sys_user', { email: 'admin@objectos.ai' }, 1);

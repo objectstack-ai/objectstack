@@ -316,6 +316,18 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: 'reads an index declaration, not a row',
   },
+  'registry.ts#applyDeploymentTenancy :: organization_id': {
+    disposition: 'not-a-read',
+    why:
+      "drops the platform's own injected definition from a declared object's schema (ADR-0131 D7); " +
+      'it reads a definition, never a row',
+  },
+  'registry.ts#setDeploymentPlatformGlobalObjects :: organization_id': {
+    disposition: 'not-a-read',
+    why:
+      'tells an authored organization_id from the injection while re-planning registered schemas ' +
+      '(ADR-0131 D7); it reads definitions, never a row',
+  },
   'tenancy/system-write-organization.ts#<module> :: organization_id': {
     disposition: 'not-a-read',
     why: 'the declaration of the default tenant column name',

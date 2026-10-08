@@ -15,9 +15,10 @@
  * builtin node's executor contract refuses**, where the build can know what
  * the run will parse — see {@link flowNodeConfigRefusals}' first arm for what
  * that excludes, and why. And (#21982) **a key a builtin's executor contract
- * does not declare, where no other door judges it** — `script` and `subflow`,
- * whose descriptors publish no `configSchema` for registration's key check to
- * read ({@link builtinKeysJudged}).
+ * does not declare** — every builtin in the contract map but `try_catch`
+ * ({@link builtinNodeConfigKeysJudged}), the one judge of a builtin's
+ * undeclared key at every door: `registerFlow`'s descriptor walk stands aside
+ * for exactly the types this judges.
  *
  * Its refusal codes join the closed flow slot table
  * (`FLOW_SLOT_REFUSAL_CODES`, `flow-node-expression-paths.ts`); the
@@ -47,10 +48,7 @@ import {
   UpdateRecordConfigSchema,
 } from './builtin-node-config.zod';
 import { HttpConfigSchema, NotifyConfigSchema } from './io-node-config.zod';
-// [#21982] `SCHEMALESS_NODE_CONFIG_SCHEMAS` is the spec's own record of the
-// node types that publish no descriptor `configSchema`; read only inside
-// `builtinKeysJudged`, like the contracts beside it.
-import { SCHEMALESS_NODE_CONFIG_SCHEMAS, ScriptConfigSchema, SubflowConfigSchema } from './schemaless-node-config.zod';
+import { ScriptConfigSchema, SubflowConfigSchema } from './schemaless-node-config.zod';
 // [#21850] The one plugin node contract the spec declares. Read only inside
 // `getDeclaredPluginNodeConfigContracts`, like the executor contracts above.
 // `approval.zod.ts` imports nothing from `automation/` (zod, the membership-role
@@ -79,6 +77,12 @@ export interface BuiltinNodeConfigContract {
    * the ADR-0031 construct its contract describes and is deliberately not
    * parsed (`loop-node.ts`), so `collection` is required only once a `body`
    * is there.
+   *
+   * (#21982) It gates presence and values only. Key MEMBERSHIP is judged
+   * whatever it says, for a type {@link builtinNodeConfigKeysJudged} judges:
+   * an undeclared key is never read on either path. Registration refused one
+   * on a body-less `loop` before the build doors judged keys, and it still
+   * refuses one there.
    */
   readonly parsedWhen?: (config: Readonly<Record<string, unknown>>) => boolean;
 }
@@ -338,11 +342,10 @@ interface ContractIssue {
  *
  *  - key membership — an undeclared key (`unrecognized_keys`) and a tombstoned
  *    one (a `retiredKey()`, an `invalid_type` expecting `never`): an undeclared
- *    key is the key arm's where no descriptor publishes a `configSchema`
- *    ({@link builtinKeysJudged}: `script`, `subflow`), and registration's
- *    everywhere else — it refuses one against the descriptor with its own
- *    prescriptions; the lint names the retired script keys, and the conversion
- *    layer rewrites a retired spelling before the two doors that convert first;
+ *    key is the key arm's ({@link builtinNodeConfigKeysJudged}), and on
+ *    `try_catch` registration's, against its descriptor; the lint names the
+ *    retired script keys, and the conversion layer rewrites a retired spelling
+ *    before the two doors that convert first;
  *  - an ADR-0031 region slot, the slot itself included (`try: 5`): a region's
  *    shape is `validateControlFlow`'s, and its nodes are the region walk's;
  *  - a `predicate` or `value` ledger slot, at or inside it
@@ -373,25 +376,64 @@ function builtinValueJudged(
 // ─── The builtin KEY arm (#21982) ─────────────────────────────────────
 
 /**
- * [#21982] Does the build judge KEY MEMBERSHIP on this builtin's executor
- * contract? Only where no door before the run does: a builtin whose descriptor
- * publishes no `configSchema`, the spec's own schemaless class
- * ({@link SCHEMALESS_NODE_CONFIG_SCHEMAS}). `registerFlow`'s undeclared-key
- * walk (`validateNodeConfigKeys`) derives the declared set from that
- * descriptor schema, so it skips these types, while their executors parse the
- * strict contract and refuse the node on an undeclared key at every run.
+ * [#21982] The builtins whose key membership stays `registerFlow`'s, each with
+ * the measured reason the spec cannot take it: their descriptor's
+ * `configSchema` closes a key set their executor contract does not, so the
+ * descriptor walk (`validateNodeConfigKeys`) refuses a key the contract would
+ * accept, and moving the judge would widen registration.
  *
- * Today `script` and `subflow`. `decision` is in the schemaless class but has
- * no builtin contract: its executor parses nothing, so an undeclared key fails
- * no run. Every other builtin's undeclared key stays registration's, judged
- * against its descriptor with that walk's own prescriptions — the spec arm
- * does not shadow it, because `registerFlow` parses `FlowSchema` first.
- *
- * Asked only for a type in {@link getBuiltinNodeConfigContracts}; read on
- * first use, like the contracts.
+ * Today one: `try_catch`. The walk closes `retry` to the five keys its
+ * descriptor declares, while the contract's `retry` is the shared
+ * `RetryPolicySchema` — a plain `z.object`, which strips an unknown key rather
+ * than refusing it. One type, one judge: its top level and its regions stay
+ * the walk's too, never split between two judges.
  */
-function builtinKeysJudged(nodeType: string): boolean {
-  return Object.prototype.hasOwnProperty.call(SCHEMALESS_NODE_CONFIG_SCHEMAS, nodeType);
+const BUILTIN_KEYS_JUDGED_AT_REGISTRATION: ReadonlyMap<string, string> = new Map([
+  ['try_catch', 'its contract\'s `retry` (`RetryPolicySchema`) strips an unknown key, where the descriptor closes `retry` to its five declared keys'],
+]);
+
+/**
+ * [#21982] Does the spec judge KEY MEMBERSHIP on this node type's `config`, at
+ * every door that parses a flow — `FlowSchema.parse`, `objectstack validate`,
+ * `objectstack compile`, the metadata save door and `registerFlow` (which
+ * parses first)? True for every builtin in {@link
+ * getBuiltinNodeConfigContracts} but the ones in
+ * {@link BUILTIN_KEYS_JUDGED_AT_REGISTRATION}: each of those contracts is
+ * strict, and its executor parses it before anything else.
+ *
+ * The ONE judge of a builtin's undeclared key. `registerFlow`'s descriptor walk
+ * (`service-automation` `validateNodeConfigKeys`) asks this and stands aside
+ * for every type it answers `true` for, so no type has two judges; the walk
+ * keeps every other type — `try_catch`, and the plugin node types the spec
+ * does not declare. Measured before the move: on every type it answers `true`
+ * for, the descriptor's declared key sets, at every position the walk descends
+ * to, equal the keys the contract accepts there, so the move changed no verdict
+ * at registration and only added the build doors.
+ *
+ * `false` for a declared PLUGIN contract (`approval`): that one is judged whole
+ * by {@link flowNodeConfigRefusals}, a different arm, and is not a builtin.
+ */
+export function builtinNodeConfigKeysJudged(nodeType: string): boolean {
+  return getBuiltinNodeConfigContracts().has(nodeType) && !BUILTIN_KEYS_JUDGED_AT_REGISTRATION.has(nodeType);
+}
+
+/**
+ * [#21982] Does an `unrecognized_keys` issue sit at or under an ADR-0031
+ * region slot — on a region object (`body`, `try`, `catch`, a `branches`
+ * element) or deeper, on a region node or edge? The issue's `path` is the
+ * object that holds the key, so `[]` is the config itself and `['body']` the
+ * loop's region object. A region's shape is `validateControlFlow`'s, as the
+ * value arm's own carve-out says ({@link builtinValueJudged}): it parses each
+ * region against the strict region contract at `registerFlow` and refuses an
+ * undeclared key on the region object and on its nodes and edges alike
+ * (measured: `try_catch 'n1' try: invalid region — Unrecognized key(s) on this
+ * control-flow region`), while the flow parse leaves a refused region raw for
+ * it to name (the region policy `flow.zod.ts` states). So such a key has its
+ * judge, one door later, and this arm does not add a second.
+ */
+function unknownKeyUnderRegionSlot(nodeType: string, path: ReadonlyArray<PropertyKey>): boolean {
+  if (path.length === 0) return false;
+  return (FLOW_REGION_SLOTS_BY_TYPE.get(nodeType) ?? []).some((slot) => slot.key === path[0]);
 }
 
 /**
@@ -452,27 +494,49 @@ function nodeConfigKeyMissingMessage(nodeType: string, key: string): string {
 }
 
 /**
+ * How a {@link nodeConfigRefusedByContractMessage} refusal closes: `value`
+ * prescribes a value the contract accepts (a plain value finding); `key`
+ * (#21982) prescribes renaming or removing an undeclared key on a builtin,
+ * whose contract sentence says what is wrong but, for a key with no
+ * did-you-mean and no guidance, not what to do; `none` adds nothing (a rule's
+ * text, and a whole-judged plugin contract's, already say what to write).
+ */
+type RefusalClosing = 'value' | 'key' | 'none';
+
+/**
  * [#21850] The refusal for a key a WHOLE-judged contract does not declare, or a
  * value it refuses — and (#21898) a value a builtin contract refuses, and
  * (#21982) a key a key-judged builtin contract does not declare — where the
- * author wrote it: the contract's own sentence,
- * inside one that names the node type and the key. `prescribe` adds the closing
- * instruction for a plain value finding; an unknown key's text (with its
- * did-you-mean) and a rule's text already say what to write.
+ * author wrote it: the contract's own sentence, inside one that names the node
+ * type and the key, closed per {@link RefusalClosing}.
+ *
+ * `parsedAtRun` false is a key on a config its executor does not parse — a
+ * body-less legacy `loop` (#21982): the run would not fail there, but nothing
+ * reads the key, and `registerFlow` refused the flow on it before the build
+ * doors did, so the sentence says that instead.
  */
 function nodeConfigRefusedByContractMessage(
   nodeType: string,
   key: string,
   contractMessage: string,
-  prescribe: boolean,
+  closing: RefusalClosing,
+  parsedAtRun = true,
 ): string {
   const reason = contractMessage.trim();
   return (
     `This \`${nodeType}\` node's config is refused at \`${key}\` by the ${nodeType} contract: `
-    + `${/[.!?]$/.test(reason) ? reason : `${reason}.`} Its executor parses the config against that contract `
-    + 'before it does anything else and refuses the node on any finding, so every run that reached this node '
-    + 'would fail there; the config is metadata, and re-running changes nothing.'
-    + (prescribe ? ` Write a value the ${nodeType} contract accepts at \`${key}\`.` : '')
+    + `${/[.!?]$/.test(reason) ? reason : `${reason}.`} `
+    + (parsedAtRun
+      ? 'Its executor parses the config against that contract before it does anything else and refuses the '
+        + 'node on any finding, so every run that reached this node would fail there; the config is metadata, '
+        + 'and re-running changes nothing.'
+      : 'Its executor reads no key the contract does not declare, and registration refuses the whole flow on '
+        + 'one, so the flow would never run; the config is metadata, and re-running changes nothing.')
+    + (closing === 'value' ? ` Write a value the ${nodeType} contract accepts at \`${key}\`.` : '')
+    + (closing === 'key'
+      ? ` Rename the key to one the ${nodeType} contract declares there, or remove it: an undeclared key is never `
+        + 'read, so it can only be a typo or dead config.'
+      : '')
   );
 }
 
@@ -518,17 +582,21 @@ function unrecognizedKeysOf(issue: { readonly code: string }): readonly string[]
  *    next one's, a tombstoned key nobody's here), nor a region slot, a
  *    `predicate` / `value` ledger slot, a run-resolved key, or any value
  *    carrying a `{token}`: never refused for its pre-interpolation type.
- *  - (#21982) A key the contract does not declare, on a builtin whose
- *    descriptor publishes no `configSchema` ({@link builtinKeysJudged}:
- *    `script`, `subflow`) → `node-config-refused-by-contract`, anchored at the
- *    key, one refusal per undeclared key (`bogusKey` on a `script`), in the
+ *  - (#21982) A key the contract does not declare, on every builtin
+ *    {@link builtinNodeConfigKeysJudged} judges (all but `try_catch`) →
+ *    `node-config-refused-by-contract`, anchored at the key, one refusal per
+ *    undeclared key (`bogusKey` on a `notify`; `fields[0].visibleIf` on a
+ *    `screen` field; `flowName` on a body-less `loop`), in the
  *    contract's own words — its prescription for a known slip included
- *    (`subflow` `timeoutMs` belongs on the node). Registration's undeclared-key
- *    walk reads the descriptor schema these types do not publish, and their
- *    executors parse the strict contract before anything else, so this is the
- *    one door before the run that refuses them. Every other builtin's
- *    undeclared key stays registration's, and a tombstoned key (a
- *    `retiredKey()`) keeps the path it had.
+ *    (`fieldValues` → `fields`, `bulk` → `multi`, `visibleIf` →
+ *    `visibleWhen`, a `subflow` `timeoutMs` that belongs on the node) — and
+ *    closed with the rename-or-remove remedy. Each executor parses its strict
+ *    contract before anything else, so the run refuses such a node; this arm
+ *    is the one judge of it at every door, and `registerFlow`'s descriptor
+ *    walk stands aside for these types. A key at or under a region slot — on
+ *    the region object, or a region node's or edge's own key — is the
+ *    region's (`validateControlFlow`, at `registerFlow`), and a tombstoned
+ *    key (a `retiredKey()`) keeps the path it had.
  *
  * Where the build cannot read the config whole, it reads only what is sound,
  * and each such type is named here, not skipped in silence:
@@ -538,8 +606,10 @@ function unrecognizedKeysOf(issue: { readonly code: string }): readonly string[]
  *    the identity), a rule only when the whole config carries none, and
  *    `signingSecret` never (the credential channel may supply it);
  *  - `loop` parses only with a `body` (`parsedWhen`), so a legacy flat-graph
- *    loop is judged for nothing, and a loop with a body on its own keys
- *    (`collection`, `iteratorVariable`, `indexVariable`, `maxIterations`);
+ *    loop is judged on key membership alone (#21982: nothing reads an
+ *    undeclared key on either path, and registration refused one there
+ *    already), and a loop with a body on its own keys as well (`collection`,
+ *    `iteratorVariable`, `indexVariable`, `maxIterations`);
  *  - the region containers — `loop` (`body`), `parallel` (`branches`) and
  *    `try_catch` (`try`, `catch`) — hold regions, judged as graphs of their
  *    own; a container is judged on the keys beside them (`try_catch`'s
@@ -621,12 +691,17 @@ export function flowNodeConfigRefusals(nodeType: string, config: unknown): FlowN
   const contract = builtin ?? declared;
   if (!contract) return out;
   const whole = declared !== undefined;
-  // [#21982] Key membership: a declared plugin contract's always, a builtin's
-  // only where no descriptor `configSchema` lets registration judge it.
-  const keysJudged = whole || builtinKeysJudged(nodeType);
+  // [#21982] Key membership: a declared plugin contract's always, and a
+  // builtin's wherever the spec is its one judge (every builtin but the ones
+  // whose key set stays registration's).
+  const keysJudged = whole || builtinNodeConfigKeysJudged(nodeType);
   const authored = config ?? {};
   if (!isRecord(authored)) return out;
-  if (contract.parsedWhen && !contract.parsedWhen(authored)) return out;
+  // [#21982] `parsedWhen` gates presence and values, never key membership: a
+  // body-less `loop` is judged on its keys alone, which is what registration
+  // refused there before the build doors judged keys.
+  const parsedAtRun = !contract.parsedWhen || contract.parsedWhen(authored);
+  if (!parsedAtRun && !keysJudged) return out;
   const result = contract.schema.safeParse(authored);
   if (result.success) return out;
   const seen = new Set<string>();
@@ -635,20 +710,23 @@ export function flowNodeConfigRefusals(nodeType: string, config: unknown): FlowN
       // An unknown key's issue sits on the object that holds it (the config
       // itself for a top-level key, so its `path` is empty): anchor one
       // refusal at each key the author wrote, with the contract's sentence.
-      for (const unknownKey of unrecognizedKeysOf(issue)) {
+      // A key at or under a region slot is the region's (`validateControlFlow`).
+      const keys = unknownKeyUnderRegionSlot(nodeType, issue.path) ? [] : unrecognizedKeysOf(issue);
+      for (const unknownKey of keys) {
         const key = ledgerPathOf([...issue.path, unknownKey]);
         if (seen.has(key)) continue;
         seen.add(key);
         out.push({
           code: 'node-config-refused-by-contract',
           params: { nodeType, key },
-          message: nodeConfigRefusedByContractMessage(nodeType, key, issue.message, false),
+          message: nodeConfigRefusedByContractMessage(nodeType, key, issue.message, whole ? 'none' : 'key', parsedAtRun),
           source: '',
           path: key,
         });
       }
       if (issue.code === 'unrecognized_keys') continue;
     }
+    if (!parsedAtRun) continue;
     if (issue.path.length === 0) continue;
     if (insideRegion(nodeType, issue.path)) continue;
     if (insideValueSlot(nodeType, issue.path)) continue;
@@ -663,7 +741,7 @@ export function flowNodeConfigRefusals(nodeType: string, config: unknown): FlowN
       out.push({
         code: 'node-config-refused-by-contract',
         params: { nodeType, key },
-        message: nodeConfigRefusedByContractMessage(nodeType, key, issue.message, issue.code !== 'custom'),
+        message: nodeConfigRefusedByContractMessage(nodeType, key, issue.message, issue.code !== 'custom' ? 'value' : 'none'),
         source: '',
         path: key,
       });

@@ -2883,9 +2883,11 @@ export interface OperationContext {
    * to stamp `BulkDataEvent.organizationId`.
    *
    * The seam ruled on #15706: the wall is computed ONCE, where every input is
-   * visible (the posture in force, the caller's organization scope, the
-   * object's tenancy clauses AND the deployment's #12699 carve-out, which no
-   * schema carries), and its decision travels here as a value. A reader
+   * visible (the posture in force, the caller's organization scope and the
+   * object's tenancy clauses — which, since ADR-0131 D7, include the
+   * deployment's #12699 platform-global declaration, recorded on the
+   * registered object as `systemFields.tenant: false`), and its decision
+   * travels here as a value. A reader
    * answers from this member ALONE and re-derives nothing — a re-derivation
    * is a mirror of the wall, and a mirror structurally sees only the clauses
    * it was taught (the #15706 mislabel).
@@ -3545,10 +3547,14 @@ function eventOrganizationValue(value: unknown): string | undefined {
  * re-derived the wall here — from the enforced posture, the execution
  * context's `tenantId` / `accessible_org_ids` / `posture` rung, and the
  * object schema's tenancy clauses. It could not see the third clause
- * plugin-security folds into `tenancyDisabled` — the deployment-declared
- * `platformGlobalObjects` carve-out (#12699), which no schema carries — and
+ * plugin-security then folded into `tenancyDisabled` — the deployment-declared
+ * `platformGlobalObjects` carve-out (#12699), which no schema carried — and
  * stamped the caller's organization onto a batch Layer 0 had never
- * constrained: a WRONG key, the #13566 leak shape. The ruling's acceptance
+ * constrained: a WRONG key, the #13566 leak shape. (ADR-0131 D7 has since
+ * made that declaration total: a declared object is registered with no
+ * organization column and declaring `systemFields.tenant: false`, so the fold
+ * is retired — but the rule below does not lean on that; the ruling's
+ * acceptance criterion is about the seam, not one clause.) The ruling's acceptance
  * criterion, verbatim: the verdict recorded must be what the wall decided,
  * not a re-statement of its inputs; if the recorded value can be derived by
  * the reader from anything else on the context, the mirror has not been
@@ -5737,7 +5743,9 @@ export class ObjectQL implements IObjectQLEngine {
    * [#9261] "The probe found no organizations" and "the probe could not run"
    * are different facts (ADR-0110 D3), and this returns the FIRST one only when
    * it measured it. The `catch {}` this replaces answered both with `[]`, which
-   * `resolveSystemWriteOrganization` reads as `no-organization-yet` — so one
+   * `resolveSystemWriteOrganization` then read as "no organization yet" (a
+   * branch that landed the row; since ADR-0131 D9 a registered-but-empty
+   * organization object is refused instead) — so one
    * transient failure silently skipped both halves of the #8844 ruling: the
    * single-organization stamp (rows land untenanted and fork exactly the
    * counter the ruling exists to protect) and the multi-organization REFUSAL
@@ -5820,8 +5828,9 @@ export class ObjectQL implements IObjectQLEngine {
    * Returns the organization id to thread as `DriverOptions.tenantId` (the same
    * knob a session write sets, so the driver stamps the column and the counter
    * scopes by it), or `undefined` when there is nothing to resolve. Throws
-   * {@link SystemWriteOrganizationRequiredError} on the multi-organization
-   * branch.
+   * {@link SystemWriteOrganizationRequiredError} wherever no owner is
+   * derivable (ADR-0131 D9): a wall, several organizations, or — under
+   * `single`, in a composition that registers the organization object — none.
    *
    * Called AFTER the beforeInsert hooks on purpose: a hook that stamps the
    * organization itself has carried it, and must not then be refused for a
@@ -5865,12 +5874,18 @@ export class ObjectQL implements IObjectQLEngine {
     if (rows.every((row) => carriesOrganization(row?.[tenantField]))) return undefined;
 
     const posture = this.resolveEnginePosture();
+    // [ADR-0131 D9] Zero organizations is refused under `single` only where
+    // the composition registers the organization object; the composition that
+    // registers none keeps today's branch (`no-organization-object`). The
+    // probe itself is unchanged and answers `[]` for both — this is the one
+    // fact that tells them apart, read from the same registry the probe reads.
     const decision = await resolveSystemWriteOrganization({
       posture,
       probeOrganizations: () => this.probeInstallOrganizations(),
+      organizationObjectRegistered: !!this._registry.getObject(ORGANIZATION_OBJECT),
     });
     if (decision.kind === 'derived') return decision.organizationId;
-    if (decision.kind === 'no-organization-yet') return undefined;
+    if (decision.kind === 'no-organization-object') return undefined;
     throw new SystemWriteOrganizationRequiredError(
       object,
       posture,

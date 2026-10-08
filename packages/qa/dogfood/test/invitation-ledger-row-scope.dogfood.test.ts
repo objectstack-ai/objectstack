@@ -59,10 +59,11 @@
  * Layer 0 / Layer 1 composition and the REST layer. So every assertion below
  * reads a real `GET /api/v1/data/sys_invitation` response body.
  *
- * Harness note: `bootStack` disables the default-org bootstrap, so this file
- * mints the organization itself and sets membership roles through the system
- * context — the only writer better-auth-managed tables accept (ADR-0092) and
- * exactly what the single-org bootstrap would do. The two invitation rows are
+ * Harness note: `bootStack` boots the production `single` shape, so the
+ * organization is the Default Organization the boot creates (ADR-0131 D3) and
+ * every sign-up is its member; this file sets membership roles through the
+ * system context — the only writer better-auth-managed tables accept
+ * (ADR-0092). The two invitation rows are
  * created through the REAL `invite-member` endpoint, so they carry whatever
  * better-auth actually writes rather than a hand-built approximation. Sessions
  * are stamped with the active organization the way a real org switch does
@@ -169,16 +170,16 @@ describe('#8095/#8240: the sys_invitation ledger, read by four personas', () => 
     const adminToken = await stack.signIn(); // the seeded dev admin (platform admin)
     ql = await stack.kernel.getServiceAsync<unknown>('objectql');
 
-    const org = await ql.insert(
-      'sys_organization',
-      { name: 'Acme Test Org', slug: 'acme-8095' },
-      { context: SYSTEM_CTX },
-    );
+    // [ADR-0131 D3] Under `single` the one organization is the Default
+    // Organization the boot created, and the membership reconciler binds every
+    // sign-up below to it — so it is the organization this ledger is about.
+    const [org] = await findRows(ql, 'sys_organization', { slug: 'default' }, 1);
+    expect(org?.id, 'the boot created the Default Organization').toBeTruthy();
     orgId = String(org.id);
 
-    // The seeded dev admin predates the org row; give it the owner membership
-    // the single-org bootstrap would have, so `invite-member` has an authorized
-    // caller for the fixture rows.
+    // The owner bind made the seeded dev admin the organization's owner; this
+    // re-asserts that membership, so `invite-member` has an authorized caller
+    // for the fixture rows.
     const adminUserId = await userIdOf(ql, 'admin@objectos.ai');
     const adminMembers = await findRows(ql, 'sys_member', { user_id: adminUserId }, 5);
     if (adminMembers.length > 0) {

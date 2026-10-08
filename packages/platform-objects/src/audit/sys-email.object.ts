@@ -150,12 +150,17 @@ export const SysEmail = ObjectSchema.create({
     // `sys_secret` row per delivery with no cascade or retention, a
     // boot-window fail-open, a per-row decrypt on every tick); this card
     // adopts that decision rather than re-deciding it.
+    //
+    // The description below is this field's help in Studio's object forms, so
+    // it reads as product guidance (#22093): the headers are the ones the
+    // caller of `IEmailService.send` passed (its `headers` option, stored
+    // through `encodeHeadersForRow`) — recorded here, not in the help text.
     headers_json: Field.textarea({
       label: 'Headers (JSON)',
       required: false,
       internal: true,
       description:
-        'Custom headers supplied to IEmailService.send, as a JSON object of name → value. '
+        'Custom headers supplied with the message when it was sent, as a JSON object of name → value. '
         + 'Written in both delivery modes (it is audit evidence as much as delivery input). '
         + 'Absent on rows written before this column existed, which read back as "no custom headers". '
         + 'Never returned on the generic data path — headers are the ordinary place a '
@@ -184,7 +189,9 @@ export const SysEmail = ObjectSchema.create({
         label: 'Status',
         required: true,
         defaultValue: 'queued',
-        description: 'Lifecycle state — queued by IEmailService.send before transport call',
+        // Studio form help, so product words (#22093): `IEmailService.send`
+        // writes the row as `queued` before its first transport call.
+        description: 'Lifecycle state — queued when the message is submitted for sending, before the first delivery attempt',
         group: 'State',
       },
     ),

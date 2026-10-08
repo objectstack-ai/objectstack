@@ -22,6 +22,7 @@ import type { NodeExecutor } from './engine.js';
 import { registerLoopNode } from './builtin/loop-node.js';
 import { registerLogicNodes } from './builtin/logic-nodes.js';
 import { registerCrudNodes } from './builtin/crud-nodes.js';
+import { defineActionDescriptor } from '@objectstack/spec/automation';
 
 function silentLogger() {
   return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } } as any;
@@ -255,15 +256,30 @@ describe('#4389 — registration validators cover region graphs', () => {
   });
 
   describe('validateNodeConfigKeys (hard-fail)', () => {
+    // [#21982] A builtin's undeclared key is the spec's now (`FlowSchema.parse`,
+    // `builtinNodeConfigKeysJudged`), and the descriptor walk stands aside for
+    // it. The walk keeps the PLUGIN node types — so its region coverage (#4389)
+    // is pinned on one: `region_stamp` declares `count`, and `countz` is the
+    // #4277 typo class.
+    const STAMP = 'region_stamp';
+    const stampExecutor: NodeExecutor = {
+      type: STAMP,
+      descriptor: defineActionDescriptor({
+        type: STAMP, version: '1.0.0', name: 'Region stamp', category: 'custom', paradigms: ['flow'], source: 'plugin',
+        configSchema: { type: 'object', properties: { count: { type: 'number' } } },
+      }),
+      async execute() { return { success: true }; },
+    };
+
     let engine: AutomationEngine;
     beforeEach(() => {
       engine = new AutomationEngine(silentLogger());
       registerLoopNode(engine, ctx());
       registerCrudNodes(engine, ctx());
+      engine.registerNodeExecutor(stampExecutor);
     });
 
-    // `fieldz` is not on the `create_record` descriptor — the #4277 typo class.
-    const typoNode = [{ id: 'w', type: 'create_record', label: 'W', config: { objectName: 'lead', fieldz: { a: 1 } } }];
+    const typoNode = [{ id: 'w', type: STAMP, label: 'W', config: { count: 1, countz: 2 } }];
 
     it('rejects an undeclared config key at the top level (unchanged)', () => {
       expect(() => engine.registerFlow('sweep', flowWith(false, typoNode))).toThrow(/undeclared config key/);
@@ -281,13 +297,29 @@ describe('#4389 — registration validators cover region graphs', () => {
       } catch (err) {
         const msg = (err as Error).message;
         expect(msg).toMatch(/1 undeclared config key/);
-        expect(msg.match(/`fieldz`/g)).toHaveLength(1);
+        expect(msg.match(/`countz`/g)).toHaveLength(1);
       }
     });
 
     it('leaves a correct region alone', () => {
-      const ok = [{ id: 'w', type: 'create_record', label: 'W', config: { objectName: 'lead', fields: { a: 1 } } }];
+      const ok = [{ id: 'w', type: STAMP, label: 'W', config: { count: 1 } }];
       expect(() => engine.registerFlow('sweep', flowWith(true, ok))).not.toThrow();
+    });
+
+    it('[#21982] a builtin\'s undeclared key in a loop body is the spec\'s, refused once at the path the author wrote', () => {
+      const builtinTypo = [{ id: 'w', type: 'create_record', label: 'W', config: { objectName: 'lead', fieldz: { a: 1 } } }];
+      for (const nested of [false, true]) {
+        let issues: Array<{ path: PropertyKey[] }> = [];
+        try {
+          engine.registerFlow('sweep', flowWith(nested, builtinTypo));
+          throw new Error('expected a rejection');
+        } catch (err) {
+          issues = (err as { issues?: Array<{ path: PropertyKey[] }> }).issues ?? [];
+        }
+        expect(issues.map((i) => i.path.join('.')), String(nested)).toEqual([
+          nested ? 'nodes.1.config.body.nodes.0.config.fieldz' : 'nodes.1.config.fieldz',
+        ]);
+      }
     });
   });
 

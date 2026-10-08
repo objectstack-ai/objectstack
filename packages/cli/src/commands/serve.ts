@@ -105,6 +105,8 @@ import {
   shouldAutoRegisterStorageDriver,
   stackDeclaresMetadata,
   bundleDeclaresTranslations,
+  resolveStackCollection,
+  stackDeclaredCapabilities,
 } from '../utils/stack-collections.js';
 import { redactConnectionUrl, describeDriverConnection, describeDriverSqliteFile } from '../utils/connection-display.js';
 import { captureServedDatabaseFile, watchServedDatabaseFile } from '../utils/served-database-file.js';
@@ -2844,9 +2846,15 @@ export default class Serve extends Command {
       // `aiStudio`/`aiSeat` alias canonicalization was removed in framework#3308
       // — legacy spellings are now unknown tokens (warned below, rejected at
       // authoring by defineStack).
-      const rawRequires: string[] = Array.isArray((config as any).requires)
-        ? (config as any).requires.filter((c: unknown) => typeof c === 'string')
-        : [];
+      //
+      // [#22288] Read by `resolveStackCollection`'s rule: the top-level list
+      // when the config carries one, otherwise each package body's. A
+      // multi-package `preserve` config carries `requires` only in the body of
+      // the package that declared it, so a top-level read mounted none of its
+      // providers on a config boot with no compiled artifact. (An artifact boot
+      // already answered here: `createStandaloneStack` resolves the artifact's
+      // packages and `mergeBootConfig` lays its `requires` over the top level.)
+      const rawRequires: string[] = stackDeclaredCapabilities(config);
       const requires: string[] = [...new Set(rawRequires)];
       // Snapshot the app's EXPLICIT capability declarations BEFORE the platform
       // appends its own convenience defaults (auth→email, mcp, pinyin-search,
@@ -2915,10 +2923,12 @@ export default class Serve extends Command {
       const requiredTiers = requires
         .map((c) => CAPABILITY_TO_TIER[c])
         .filter((t): t is string => typeof t === 'string');
-      const baseTiers =
-        Array.isArray((config as any).tiers) && (config as any).tiers.length > 0
-          ? (config as any).tiers
-          : presetTiers;
+      // [#22288] `tiers` is package-owned like `requires`, and no boot path
+      // lays it over the top level (`createStandaloneStack` does not carry it),
+      // so a package's own `tiers` were ignored on `os serve`, `os dev` and
+      // `os start` alike. Same rule as `requires` above.
+      const declaredTiers = resolveStackCollection(config, 'tiers') as string[];
+      const baseTiers = declaredTiers.length > 0 ? declaredTiers : presetTiers;
       const tiers: Set<string> = new Set([...baseTiers, ...requiredTiers]);
       const tierEnabled = (t: string) => tiers.has(t);
       const requiresCapability = (c: string) => requires.includes(c);
@@ -4450,14 +4460,69 @@ export default class Serve extends Command {
       }
 
       // Register REST API and Dispatcher plugins (consume http.server + protocol services)
+      //
+      // [#22202] The REST API plugin is composed on EVERY boot; only the
+      // dispatcher and the no-auth refusal below ride `flags.server`. The REST
+      // plugin is not only a route mounter: its `init()` registers
+      // `sys_import_job`, the object its async-import routes persist to, and
+      // schema sync creates tables only for the objects registered in THIS
+      // boot. While the whole plugin rode the listener flag, a `--no-server`
+      // `OS_MIGRATE_AND_EXIT=1` run provisioned one table fewer than the server
+      // boot it prepares for (measured on `examples/app-todo`: 69 tables
+      // against 70, `sys_import_job` the only difference), so a deployment that
+      // migrated "kernel only" and then served with schema sync off had no
+      // import-job table at all.
+      //
+      // Composed here, it behaves like the service plugins composed above
+      // (storage, settings, sharing, auth, i18n …): its object registers
+      // whatever the flag says, and with no `http.server` its `start()` mounts
+      // nothing and says so in one `warn`. `--no-server` still means "kernel
+      // only": no HTTP server plugin, no dispatcher, no route.
+      // `test/serve-migrate-exit-schema-parity.integration.test.ts` pins the
+      // table-set equality.
+      //
+      // Read environment-scoping config from the stack's top-level `api` field
+      // (e.g. { api: { enableProjectScoping: true, projectResolution: 'auto' } }).
+      // Forwarded to both REST and Dispatcher plugins so they mount scoped
+      // routes consistently.
+      const apiConfig = (config as any).api ?? {};
+      const enableProjectScoping = apiConfig.enableProjectScoping ?? false;
+      const projectResolution = apiConfig.projectResolution ?? 'auto';
+      // [#3963] Anonymous access to object data is denied unconditionally —
+      // there is no `api.requireAuth` opt-out any more (auth is a kernel
+      // concern; every legitimately session-less surface derives its own narrow
+      // authorization from a declaration instead).
+      //
+      // The CLI used to hand an EXPLICIT fail-open to a stack with no auth at
+      // all, reasoning that nobody could authenticate against it so denying
+      // would brick its data API. Under A1 that inverts the conclusion: a stack
+      // with no auth has no security model, so it must not serve a data API —
+      // and it should say so at boot instead of quietly serving object data to
+      // the internet. Auth availability = the tier auto-registers it OR the
+      // stack mounts AuthPlugin explicitly.
+      if (flags.server && !(tierEnabled('auth') || hasAuthPlugin)) {
+        throw new Error(
+          'This stack mounts no auth, so no caller can authenticate — and anonymous access to object '
+          + 'data is always denied, with no setting that turns that off, which would leave the data API unusable.\n'
+          + 'Fix it one of two ways:\n'
+          + `  • enable auth — add the 'auth' tier (or mount AuthPlugin in \`plugins\`);\n`
+          + '  • or serve without the data API — run with --no-server, or drop the REST/dispatcher plugins.\n'
+          + "Publishing a genuinely public surface does not need anonymous data access: use a public form "
+          + "view, a share link, or `book.audience: 'public'`.",
+        );
+      }
+
+      try {
+        const { createRestApiPlugin } = await import('@objectstack/rest');
+        await kernel.use(
+          createRestApiPlugin({ api: { api: { enableProjectScoping, projectResolution } } as any }),
+        );
+        trackPlugin('RestAPI');
+      } catch (e: any) {
+        // @objectstack/rest is optional
+      }
+
       if (flags.server) {
-        // Read environment-scoping config from the stack's top-level `api` field
-        // (e.g. { api: { enableProjectScoping: true, projectResolution: 'auto' } }).
-        // Forwarded to both REST and Dispatcher plugins so they mount scoped
-        // routes consistently.
-        const apiConfig = (config as any).api ?? {};
-        const enableProjectScoping = apiConfig.enableProjectScoping ?? false;
-        const projectResolution = apiConfig.projectResolution ?? 'auto';
         // Per-project membership (sys_environment_member 403 gate) is, by
         // default, ON whenever project-scoping is on. A host can opt OUT
         // (env-native auth IS the membership — ADR-0135 D9) by setting
@@ -4465,8 +4530,8 @@ export default class Serve extends Command {
         const enforceProjectMembership = apiConfig.enforceProjectMembership;
         // [#4910] The stack's top-level `server:` block — deliberately narrow:
         // only keys with a consumer are declared, and both of these have one in
-        // the dispatcher's inbound rate limiter. Read here, next to `api:`, for
-        // the same reason that one is: this is the single place the authored
+        // the dispatcher's inbound rate limiter. Read here, like the `api:` block
+        // above and for the same reason: this is the single place the authored
         // stack is turned into plugin configuration.
         //
         // NOTE the budget is deliberately NOT validated here. An unusable one
@@ -4481,39 +4546,6 @@ export default class Serve extends Command {
             ...(serverConfig.security?.rateLimit ? { budget: serverConfig.security.rateLimit } : {}),
             trustProxy: serverConfig.trustProxy === true,
         };
-        // [#3963] Anonymous access to object data is denied unconditionally —
-        // there is no `api.requireAuth` opt-out any more (auth is a kernel
-        // concern; every legitimately session-less surface derives its own narrow
-        // authorization from a declaration instead).
-        //
-        // The CLI used to hand an EXPLICIT fail-open to a stack with no auth at
-        // all, reasoning that nobody could authenticate against it so denying
-        // would brick its data API. Under A1 that inverts the conclusion: a stack
-        // with no auth has no security model, so it must not serve a data API —
-        // and it should say so at boot instead of quietly serving object data to
-        // the internet. Auth availability = the tier auto-registers it OR the
-        // stack mounts AuthPlugin explicitly.
-        if (flags.server && !(tierEnabled('auth') || hasAuthPlugin)) {
-          throw new Error(
-            'This stack mounts no auth, so no caller can authenticate — and anonymous access to object '
-            + 'data is always denied, with no setting that turns that off, which would leave the data API unusable.\n'
-            + 'Fix it one of two ways:\n'
-            + `  • enable auth — add the 'auth' tier (or mount AuthPlugin in \`plugins\`);\n`
-            + '  • or serve without the data API — run with --no-server, or drop the REST/dispatcher plugins.\n'
-            + "Publishing a genuinely public surface does not need anonymous data access: use a public form "
-            + "view, a share link, or `book.audience: 'public'`.",
-          );
-        }
-
-        try {
-          const { createRestApiPlugin } = await import('@objectstack/rest');
-          await kernel.use(
-            createRestApiPlugin({ api: { api: { enableProjectScoping, projectResolution } } as any }),
-          );
-          trackPlugin('RestAPI');
-        } catch (e: any) {
-          // @objectstack/rest is optional
-        }
 
         // Register Dispatcher plugin (auth, graphql, analytics, packages, hub, storage, automation)
         try {
@@ -4768,7 +4800,13 @@ export default class Serve extends Command {
             // this root by the automation service's package file loader.
             arg = { packageRoot: path.dirname(absolutePath) };
           } else if (spec.configKey === 'analyticsCubes') {
-            const cubes = (config as any).analyticsCubes ?? (config as any).cubes ?? [];
+            // [#22288] The top level first, as before (its own array, then the
+            // legacy `cubes` spelling), and only then the package bodies: a
+            // multi-package config carries a package's `analyticsCubes` in that
+            // body alone, and `analytics` is always on, so its cubes were
+            // dropped on every boot of such an app (`os dev` included).
+            const cubes = (config as any).analyticsCubes ?? (config as any).cubes
+              ?? resolveStackCollection(config, 'analyticsCubes');
             arg = { cubes };
           } else if (cap === 'email') {
             // Throws on a mail configuration that cannot deliver (#5087,
@@ -5281,9 +5319,12 @@ export default class Serve extends Command {
       // read off the live engine. Collect it here (after restore) and surface it
       // in the banner: declared-but-engine-missing, unbound triggered flows, and
       // bound-but-dead (unknown object) flows.
+      // [#22288] Counted by `resolveStackCollection`'s rule, so a flow a
+      // package declares is counted: the "declared but the automation engine is
+      // not enabled" line used to stay silent for every multi-package app.
       const automationSummary = collectAutomationSummary(
         kernel,
-        Array.isArray((config as any)?.flows) ? (config as any).flows.length : 0,
+        resolveStackCollection(config, 'flows').length,
       );
 
       // ── Seed outcome summary (#3415/#3430) ─────────────────────────

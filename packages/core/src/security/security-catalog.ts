@@ -50,18 +50,19 @@
  * misses the platform's own permission sets, so a resolver reading it would
  * fail the platform administrator anchor closed.
  *
- * ## A name two packages ship — today's answer, pinned until it is ruled
+ * ## A name two packages ship — ruled: there is only ever one holder
  *
  * The by-name read takes no package context, because an assignment carries
- * only the name (ADR-0131 D4). So which body a name two installed packages both
- * ship resolves to is decided by the registry's own by-name precedence: a
- * stored override in the bare slot first (ADR-0005), else the FIRST-registered
- * package's body. Measured: with no override every by-name read answers the
- * first-registered package; once one package stores an override bound to
- * itself, every by-name read answers that override. Whether the catalog should
- * refuse a shared name instead is an open maintainer question; until it is
- * ruled, the pins beside this module hold today's answer, and a change to it
- * is a decision, not a refactor.
+ * only the name (ADR-0131 D4). So a name two installed packages both shipped
+ * would resolve by the registry's own precedence — measured before the ruling:
+ * the FIRST-registered package's body, or whichever package stored an override.
+ * The maintainer ruled that ambiguity out instead (Q4 = A on #15196): each
+ * catalog type holds one name per deployment, and the engine registry refuses
+ * a package registering a name an installed package, the environment catalog
+ * or a built-in already holds (`@objectstack/objectql`,
+ * `security-catalog-namespace.ts`). So this read never chooses between two
+ * packages' bodies; a stored override in the bare slot is the holder's own
+ * (ADR-0005), and it answers ahead of the holder's shipped body.
  *
  * ## What this read does NOT answer
  *

@@ -10823,9 +10823,10 @@ export function isTestFilePath(path) {
  *
  * ## Why this one is judged from CONTENT, when every other kind reads a PATH
  *
- * The four predicates around this one answer questions about a path: is it a
+ * The four path predicates around this one answer questions about a path: is it a
  * test file, does its package own an extract config, is it a gate script, is it
- * in the root program. This one cannot, and the reason is recorded elsewhere in
+ * in the root program (`emitsAnHttpStatus` below is the one other CONTENT
+ * predicate, for the same reason). This one cannot, and the reason is recorded elsewhere in
  * the tree rather than argued here. The vocabulary gate computes its own
  * population by walking a bare top-level root, and `scripts/pm/bare-root-
  * worklist.mjs` already carries the verdict for that spelling: REFUSE-WIDE,
@@ -10925,6 +10926,93 @@ export function stampsAnErrorCodeLiteral(path, readSource = readTrackedSource) {
   // have reported, so it costs no recall in the expensive direction.
   const masked = maskedComments(source);
   return CODE_STAMP_POSITION.test(masked) || CODE_CONSTANT_BINDING.test(masked);
+}
+
+/**
+ * Does this file bind an HTTP STATUS to an error response? This is the content
+ * trigger for `check:error-status-conformance` (#22320).
+ *
+ * ## Why a SIBLING of the code predicate above, not a second gate on its entry
+ *
+ * That gate reconciles the (code, HTTP status) pairs the runtime can emit with
+ * the statuses the two error pages publish. It walks the same bare top-level
+ * root the vocabulary gate walks, and the bare-root ledger records it
+ * REFUSE-WIDE for the same trade. So no path prefix names it either, and it
+ * reaches a card here, by content, the way its sibling does. ⛔ That ledger row
+ * is not re-decided to make a path match possible: REFUSE-WIDE refuses a TRUE
+ * declaration on purpose, and re-deciding it would take a ruling.
+ *
+ * It does not simply join the entry above, because the two questions DIVERGE
+ * on this tree. Measured at 11e2a5299b (the bytes of main 28bff18d0c) with the
+ * gate's own deriver, one file at a time: 128 files carry a derived (code,
+ * status) producer, and 19 of them, holding 86 producer sites, carry no
+ * code-shaped value `stampsAnErrorCodeLiteral` can see. Two shapes account for
+ * all 19. The four-argument `sendError` door takes its code as a POSITIONAL
+ * argument, with no `code` token near it. The assignment pair reads its code
+ * from an enum member (`StandardErrorCode.enum.X`), not a quoted literal or a
+ * bare SCREAMING_SNAKE name. A dev editing one of those files is exactly where
+ * PR #22311 stood: the derived union read green, and CI failed this gate.
+ *
+ * ## What it matches
+ *
+ * Every rule the gate derives a producer with needs either a status VALUE in a
+ * status position or the door call. So the limbs read those, never the code:
+ *
+ *   - STATUS POSITION: the token `status` or `statusCode`, bound through `:` or
+ *     `=` (never `==`, `=>` or `::`) to a 4xx/5xx literal, or to a
+ *     SCREAMING_SNAKE name, bare or ending a member chain. That covers a class's
+ *     own `readonly status`, the `{ code, status }` and `{ status, body }`
+ *     terminals, and the `err.status =` assignment.
+ *   - DOOR CALL: `sendError(` whose second argument is a 4xx/5xx literal or
+ *     such a name. This is the positional door, the first shape the code
+ *     predicate misses.
+ *   - STATUS CONSTANT BINDING: a SCREAMING_SNAKE binding to a 4xx/5xx literal,
+ *     which is how this repo declares a refusal's status before any emit site
+ *     uses it (`const NOT_UPLOADER_STATUS = 403`). The gate resolves such a
+ *     name across files, so the declaring file moves the gate even though it
+ *     emits nothing itself.
+ *
+ * ⛔ This is not a copy of the gate's derivation rules, for the reason the code
+ * predicate gives about `SHAPES`: a net broader than the rules already holds a
+ * rule added there, so staleness can only fall in the cheap direction.
+ *
+ * ## Measured, so a narrowing has a number to beat
+ *
+ * On the same tree, 185 of the 3247 non-test TypeScript files match. Every one
+ * of them is inside the gate's own scanned population, and 128 of them carry a
+ * producer (69%). All 128 producer files match, so recall over what can fail
+ * the gate is complete. The code predicate names 283 files for its own gate.
+ * There are two residues, both stated here rather than left to be found:
+ *
+ *   - 9 files hold only UNRESOLVED pairs, where the status is a runtime value,
+ *     and 6 of them do not match. The gate reports those and never fails on
+ *     them, so as written they cannot fail it. The edit that would make one
+ *     resolvable writes a status value, which this predicate then sees.
+ *   - 4 files resolve a producer elsewhere through a constant they declare.
+ *     The binding limb reaches 3 of them. The fourth declares only a CODE
+ *     constant, and the entry above reaches it, this one does not. A
+ *     code-constant limb here would add 45 matches (185 to 230) for that one
+ *     file, and this entry declines that precision trade.
+ *
+ * The false-positive trade is the code predicate's: one extra run of a gate
+ * that needs no build, against a CI round trip. The unreadable branch is the
+ * code predicate's too: a file with nothing on disk answers false. ⛔ Do not
+ * close it by falling back to a path.
+ */
+const STATUS_STAMP_POSITION =
+  /\b(?:status|statusCode)\s*\??\s*(?::(?!:)|=(?![=>]))\s*(?:[45]\d\d\b|(?:[A-Za-z_$][\w$]*\.)*[A-Z][A-Z0-9_]*\b)/;
+const STATUS_DOOR_CALL = /\bsendError\(\s*[\w$.]+\s*,\s*(?:[45]\d\d\b|(?:[A-Za-z_$][\w$]*\.)*[A-Z][A-Z0-9_]*\b)/;
+const STATUS_CONSTANT_BINDING = /\b(?:const|readonly|static|let)\s+[A-Z][A-Z0-9_]*\s*(?::[^=;\n]+)?=\s*[45]\d\d\b/;
+
+export function emitsAnHttpStatus(path, readSource = readTrackedSource) {
+  if (!/\.[cm]?tsx?$/.test(path) || /\.d\.[cm]?ts$/.test(path)) return false;
+  if (isTestFilePath(path)) return false;
+  const source = readSource(path);
+  if (source === null || source === undefined) return false;
+  // Masked for the code predicate's reason: a status DISCUSSED in prose is not
+  // a status bound in source.
+  const masked = maskedComments(source);
+  return STATUS_STAMP_POSITION.test(masked) || STATUS_DOOR_CALL.test(masked) || STATUS_CONSTANT_BINDING.test(masked);
 }
 
 /**
@@ -11507,6 +11595,12 @@ export function reachesMetadataFormModule(path, modulePaths) {
  *     about whether a dispatch brief can NAME it. ⛔ Nor does this predicate
  *     going quiet on a given card: it reads content, so silence about a file
  *     nobody can read yet is not evidence in either direction.
+ *   - status entry: on the same criterion as the error-code entry. The
+ *     conformance gate's source would have to declare the population it walks
+ *     in a form this derivation can read, and that means its bare-root ledger
+ *     row moving off REFUSE-WIDE, which takes a ruling. ⛔ Growing the gate's
+ *     derivation rules does NOT qualify, and ⛔ neither does this predicate
+ *     going quiet on a card, for the reason given above.
  *   - root-program entry: when the gate's own source names its root population
  *     in a form this derivation can read — a positive literal, or a generated
  *     manifest of the resolved program — the ordinary path match names it and
@@ -11618,6 +11712,16 @@ export const CHANGE_KIND_GATES = [
       {
         name: 'check:dispatcher-error-vocabulary',
         why: 'it sweeps the non-test TypeScript sources under the package root for every site that stamps an error code, and reports each value the registered vocabulary (StandardErrorCode joined with ERROR_CODE_LEDGER) does not contain — so a code arriving through a quoted literal, a SCREAMING_SNAKE constant, a typeof reference to one, or a template moves it. This is the gate no path derivation can name: it computes its own population from a bare top-level root, which the bare-root ledger records as REFUSE-WIDE at 39% of the tracked tree, so it scores the same quiet silence for every card and #12843 paid a CI round trip for that silence. It needs NO build — a source scan, one pass, whole tree, and it names the file and line. Repair by REGISTERING the code where the vocabulary is declared, never by widening a consumer to tolerate it; reconciliation runs BOTH ways, so a table row whose site is gone fails too, and a pending-registration row whose code has since been registered fails as the discharge it is. ⚠ This lead is deliberately WIDE — it fires on a file that merely carries a code-shaped value, not only one that adds a new one — because the wasted run is one cheap gate and the miss is a CI round trip',
+      },
+    ],
+  },
+  {
+    kind: 'adds or edits a file that binds an HTTP STATUS to an error response (judged from CONTENT — no path derivation can name this gate)',
+    matches: emitsAnHttpStatus,
+    gates: [
+      {
+        name: 'check:error-status-conformance',
+        why: 'it derives every (code, HTTP status) pair the non-test TypeScript sources under the package root can emit (an error class declaring both, the four-argument sendError door, a code-and-status or status-and-body terminal, an assignment pair on one error) and reconciles that set in BOTH directions with the statuses the error catalog and the error-handling page publish. So a status added, changed or removed at an emit site moves it, and so does a status constant another file resolves. This is a gate no path derivation can name: it walks a bare top-level root that the bare-root ledger records as REFUSE-WIDE, so it scores the same quiet silence for every card, and PR #22311 paid a CI round trip for that silence (#22320). It needs NO build, being a source scan in one pass over the whole tree, and it names the code, the status and the emit site. Repair by DOCUMENTING the status on that code entry (an exception line when the code already publishes another status), or by correcting the emit site when the status is the defect. ⛔ Never by admitting the code to the unpinned baseline, which is ⛔ MAINTAINER-ONLY under the #8435 convention. ⚠ This lead fires on any file that binds a status value, not only one that changes it, for the trade the vocabulary entry above states: the wasted run is one cheap gate and the miss is a CI round trip',
       },
     ],
   },
@@ -20780,8 +20884,9 @@ function selfTest() {
 
   // ── The error-code CONTENT kind (#12850) ─────────────────────────────────
   //
-  // The only entry in this table judged from a file's CONTENT rather than its
-  // path, so its cases are shaped differently: the limbs are driven through an
+  // The first entry in this table judged from a file's CONTENT rather than its
+  // path (the HTTP-status entry below is the second), so its cases are shaped
+  // differently: the limbs are driven through an
   // INJECTED reader (offline, no tree), and the tree itself is used only for
   // the two properties a fixture cannot pin — that the predicate still reaches
   // the real specimen, and that it still DISCRIMINATES.
@@ -20857,6 +20962,77 @@ function selfTest() {
   // narrowing that drops this sentence fails here.
   t('…and writes the false-positive trade down, so nobody assumes narrowing is free',
     /deliberately WIDE/.test(codeLine) && /CI round trip/.test(codeLine));
+
+  // ── The HTTP-status CONTENT kind (#22320) ────────────────────────────────
+  //
+  // The second content entry, pinned in the first one's shape: limbs through an
+  // injected reader, then the live tree for the specimen and the controls, then
+  // the rendered section. The specimen is the emit site PR #22311 lost a CI
+  // round on. Two of the limb cases are paired with the CODE predicate missing
+  // the same text, because that divergence is the whole reason this is a
+  // sibling entry and not a second gate on the one above.
+  const emits = (text, path = 'packages/x/src/a.ts') => emitsAnHttpStatus(path, codeSrc(text));
+  t('a status literal in a status-and-body terminal is a hit',
+    emits("return { status: 409, body: { code: 'RESOURCE_CONFLICT' } };"));
+  t('an error class declaring its own status is a hit',
+    emits("class E extends Error { readonly code = 'X_Y'; readonly status = 422; }"));
+  const ENUM_PAIR = 'err.code = StandardErrorCode.enum.INVALID_FILTER;\nerr.status = 400;';
+  t('an assignment pair whose code is an enum member is a hit', emits(ENUM_PAIR));
+  t('…and the code predicate misses that text, so the status entry is not redundant', !stamps(ENUM_PAIR));
+  const DOOR_CALL = "sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message);";
+  t('the positional four-argument sendError door is a hit', emits(DOOR_CALL));
+  t('…and the code predicate misses that one too', !stamps(DOOR_CALL));
+  t('a status named by a SCREAMING_SNAKE constant is a hit',
+    emits('return { code: NOT_UPLOADER_CODE, status: NOT_UPLOADER_STATUS };'));
+  t('a status constant declared for another file to resolve is a hit', emits('export const NOT_UPLOADER_STATUS = 403;'));
+  t('a quoted status WORD is not a hit', !emits("const row = { status: 'active' };"));
+  t('a 2xx status is not a hit: the gate reconciles 4xx and 5xx only', !emits('return { status: 200, body: {} };'));
+  t('a comparison is not a binding', !emits('if (res.status === 404) return null;'));
+  t('a status read from a runtime value is not a hit: the gate cannot resolve it either', !emits('err.status = status;'));
+  t('a status discussed only in a comment is not a hit', !emits('// status: 409 is answered elsewhere\nexport const x = 1;'));
+  t('a .ts file with no status and no code at all is not a hit',
+    !emits('export function add(a: number, b: number) { return a + b; }'));
+  t('a test file binding a status is not a hit', !emits('const e = { status: 409 };', 'packages/x/src/a.test.ts'));
+  t('a d.ts binding a status is not a hit', !emits('const e = { status: 409 };', 'packages/x/src/a.d.ts'));
+  t('a non-TS file binding a status is not a hit', !emits('status: 409', 'packages/x/README.md'));
+  t('a path with nothing to read is not a hit, and does not throw', !emitsAnHttpStatus('packages/x/src/a.ts', () => null));
+
+  // The live tree: the specimen is reached, and the card's controls are not.
+  // Spelled rather than discovered, like the code specimen above: a derived
+  // probe would answer about some other file.
+  const STATUS_SPECIMEN = 'packages/services/service-storage/src/storage-routes.ts';
+  t('the live tree still carries the #22311 emit site, and the predicate reaches it', emitsAnHttpStatus(STATUS_SPECIMEN));
+  t('a docs-only page is not reached', !emitsAnHttpStatus('content/docs/ai/agents.mdx'));
+  t('the package README beside the specimen is not reached', !emitsAnHttpStatus('packages/services/service-storage/README.md'));
+  t('a live .ts with no status and no code (the package barrel) is reached by neither content entry',
+    !emitsAnHttpStatus('packages/services/service-storage/src/index.ts')
+      && !stampsAnErrorCodeLiteral('packages/services/service-storage/src/index.ts'));
+  const statusHits = codeCorpus.filter((f) => emitsAnHttpStatus(f));
+  t(`the status trigger discriminates: ${statusHits.length} of ${codeCorpus.length} non-test TS files (neither vacuous nor tree-wide)`,
+    statusHits.length > 20 && statusHits.length < codeCorpus.length / 4);
+
+  // The rendered section, through this entry alone and then through the whole
+  // table, which is where the card's controls have to hold.
+  const statusEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => g.name === 'check:error-status-conformance'));
+  t('exactly one entry in the table names the status gate', statusEntry.length === 1);
+  const statusKind = changeKindLines([STATUS_SPECIMEN], resolved, statusEntry);
+  t('the emit-site path emits the status convention section',
+    statusKind.length === 2 && statusKind[0].includes('HTTP STATUS') && statusKind[0].includes('judged from CONTENT'));
+  t('and it names the status gate runnably, anchored on the delimiter',
+    statusKind.some((l) => l.includes('- pnpm check:error-status-conformance   —')));
+  const statusLine = statusKind.find((l) => l.includes('- pnpm check:error-status-conformance   —')) ?? '';
+  t('the status line states why no path derivation reaches it', /REFUSE-WIDE/.test(statusLine));
+  t('…and pushes the repair to documenting the status, with the baseline remedy kept maintainer-only',
+    /DOCUMENTING/.test(statusLine) && /MAINTAINER-ONLY/.test(statusLine));
+  t('…and says it needs no build', /needs NO build/.test(statusLine));
+  const throughTable = (p) => changeKindLines([p], resolved).some((l) => l.includes('check:error-status-conformance'));
+  t('through the whole table, the specimen derives the status gate', throughTable(STATUS_SPECIMEN));
+  t('…a docs-only path does not', !throughTable('content/docs/ai/agents.mdx'));
+  t('…the package README does not', !throughTable('packages/services/service-storage/README.md'));
+  t('…and the package barrel does not', !throughTable('packages/services/service-storage/src/index.ts'));
+  const statusStale = changeKindLines([STATUS_SPECIMEN], () => null, statusEntry);
+  t('an undiscoverable status gate renders STALE for this entry',
+    statusStale.filter((l) => l.includes('⚠ check:error-status-conformance: STALE')).length === 1);
 
   // ── The metadata-form edge (#9116) ────────────────────────────────────────
   //
@@ -21862,11 +22038,14 @@ function selfTest() {
     liveFamilies.has('check:cross-package-test-inputs'),
   );
   // #12850's entry, pinned here for the same reason and with one of its own:
-  // this is the only gate in the table reached by a CONTENT predicate, so the
-  // census guard above is the only thing standing between a rename and a lead
-  // that renders STALE on a card nobody re-reads.
+  // its gate is reached only by a CONTENT predicate, so the census guard above
+  // is the only thing standing between a rename and a lead that renders STALE
+  // on a card nobody re-reads.
   t('check:dispatcher-error-vocabulary is a live family, so naming it is not a guess',
     liveFamilies.has('check:dispatcher-error-vocabulary'));
+  // #22320's entry, the second content-reached gate, pinned for the same reason.
+  t('check:error-status-conformance is a live family, so naming it is not a guess',
+    liveFamilies.has('check:error-status-conformance'));
 
   // ── The test-file entry's deletion criterion, MEASURED (#11199) ───────────
   //

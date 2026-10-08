@@ -79,8 +79,11 @@ const ROWS: Stores = {
     { namespace: 'localization', key: 'timezone', value: 'America/New_York' },
   ],
   sys_setting: [
-    { namespace: 'localization', key: 'locale', scope: 'user', value: 'zh-CN', user_id: 'u1' },
-    { namespace: 'localization', key: 'currency', scope: 'tenant', value: 'USD', user_id: null },
+    // `organization_id` spelled as a real driver hands it back: the column is
+    // injected into every tenant-scoped object, and a row written with no
+    // organization reads back NULL there, not absent.
+    { namespace: 'localization', key: 'locale', scope: 'user', value: 'zh-CN', user_id: 'u1', organization_id: null },
+    { namespace: 'localization', key: 'currency', scope: 'tenant', value: 'USD', user_id: null, organization_id: null },
   ],
 };
 

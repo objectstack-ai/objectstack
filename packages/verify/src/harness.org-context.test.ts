@@ -1,7 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#7762] `bootStack({ orgContext: true })` — the harness's only way to mint an
-// admin whose RESOLVED execution context carries an `organizationId`.
+// [#7762] `bootStack({ orgContext: true })` — the harness's assertion that the
+// admin's RESOLVED execution context carries an `organizationId`. Since
+// ADR-0131 D3 every `single` boot binds the admin (see the default-boot case
+// below); the flag keeps the guard that refuses a boot where it did not.
 //
 // Why it exists: before this option, `bootStack`'s admin resolved org-less, so
 // every `organization_id`-filtered read in the platform was structurally
@@ -157,17 +159,35 @@ describe('bootStack orgContext (#7762)', () => {
   );
 
   it(
-    'the DEFAULT boot is unchanged — no organization, no active org on the session',
+    '[ADR-0131 D3] the DEFAULT boot is the production `single` shape — the Default Organization, carried by the admin\'s session',
     async () => {
-      // The other half of the contract, and the reason the existing 579-test
-      // dogfood suite is unaffected: `orgContext` is opt-in, and the org-less
-      // admin every current fixture asserts against stays org-less.
+      // The flag is now only the vacuity guard: every `single` boot has the
+      // Default Organization (a boot invariant), and the admin is bound to it
+      // without asking — the shape `objectstack dev` / `serve` boot. There is
+      // no org-less `single` boot left to keep a fixture on (ADR-0131 D11).
       const stack = await bootStack(app, {});
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ql = await stack.kernel.getServiceAsync<any>('objectql');
-        expect(rowsOf(await ql.find('sys_organization', { limit: 10, context: SYS }))).toHaveLength(0);
-        expect(await sessionOrgId(stack)).toBeNull();
+        const orgs = rowsOf(await ql.find('sys_organization', { limit: 10, context: SYS }));
+        expect(orgs.map((o) => o.slug)).toEqual(['default']);
+        expect(await sessionOrgId(stack)).toBe(orgs[0].id);
+        // The harness line this case pins is the owner bind (ADR-0093 D7), on
+        // for every boot: the admin OWNS the Default Organization. The two
+        // assertions above hold without it (the boot invariant creates the
+        // organization and the membership reconciler binds the admin), but as
+        // `member` — which is what an `objectstack dev` admin never is.
+        const users = rowsOf(
+          await ql.find('sys_user', { where: { email: 'admin@objectos.ai' }, limit: 1, context: SYS }),
+        );
+        const memberships = rowsOf(
+          await ql.find('sys_member', {
+            where: { user_id: users[0]?.id, organization_id: orgs[0].id },
+            limit: 10,
+            context: SYS,
+          }),
+        );
+        expect(memberships.map((m) => m.role)).toEqual(['owner']);
       } finally {
         await stack.stop();
       }

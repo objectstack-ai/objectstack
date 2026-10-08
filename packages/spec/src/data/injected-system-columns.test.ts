@@ -151,3 +151,66 @@ describe('resolveInjectedSystemColumns — the injected columns, so author-time 
     expect(resolveInjectedSystemColumns({}).owner).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// [ADR-0131 D7] The #12699 deployment declaration made total: the plan's one
+// deployment input. An object the deployment declares platform-global gets no
+// organization column on that deployment; nothing else moves, and an absent
+// input is the authored plan, byte for byte.
+// ---------------------------------------------------------------------------
+describe('resolveInjectedSystemColumns — the deployment\'s platform-global declaration (ADR-0131 D7)', () => {
+  const declared = { name: 'sys_widget_registry', fields: { title: { type: 'text' } } };
+  const sibling = { name: 'crm_task', fields: { title: { type: 'text' } } };
+  const deployment = { platformGlobalObjects: new Set(['sys_widget_registry']) };
+
+  it('withholds organization_id from a declared object, and only that column', () => {
+    const authored = resolveInjectedSystemColumns(declared);
+    const plan = resolveInjectedSystemColumns(declared, deployment);
+    expect(authored.tenant).toBe(true);
+    expect(plan.tenant).toBe(false);
+    expect(plan.names.has('organization_id')).toBe(false);
+    // Every other decision is the authored one.
+    expect({ audit: plan.audit, owner: plan.owner, owningBusinessUnit: plan.owningBusinessUnit }).toEqual({
+      audit: authored.audit,
+      owner: authored.owner,
+      owningBusinessUnit: authored.owningBusinessUnit,
+    });
+    expect([...plan.names].sort()).toEqual([...authored.names].filter((n) => n !== 'organization_id').sort());
+  });
+
+  it('CONTROL: a non-declared object on the same deployment keeps its column', () => {
+    const plan = resolveInjectedSystemColumns(sibling, deployment);
+    expect(plan.tenant).toBe(true);
+    expect(plan.names.has('organization_id')).toBe(true);
+  });
+
+  it('accepts the declaration as an array as well as a set', () => {
+    expect(resolveInjectedSystemColumns(declared, { platformGlobalObjects: ['sys_widget_registry'] }).tenant).toBe(false);
+  });
+
+  it.each([
+    ['no second argument', undefined],
+    ['an absent key', {}],
+    ['an empty set', { platformGlobalObjects: new Set<string>() }],
+    ['an empty list', { platformGlobalObjects: [] as string[] }],
+  ])('%s: every plan is byte-identical to the authored one', (_label, input) => {
+    for (const def of [
+      declared,
+      sibling,
+      { ...declared, systemFields: { tenant: false } },
+      { ...declared, tenancy: { enabled: false } },
+      { ...declared, systemFields: false },
+      { ...declared, managedBy: 'better-auth' },
+      { ...sibling, ownership: 'business_unit' },
+      {},
+    ]) {
+      const authored = resolveInjectedSystemColumns(def);
+      const plan = resolveInjectedSystemColumns(def, input);
+      expect({ ...plan, names: [...plan.names] }).toEqual({ ...authored, names: [...authored.names] });
+    }
+  });
+
+  it('a nameless record is never declared, whatever the declaration names', () => {
+    expect(resolveInjectedSystemColumns({}, { platformGlobalObjects: [''] }).tenant).toBe(true);
+  });
+});

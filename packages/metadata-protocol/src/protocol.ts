@@ -150,7 +150,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IObjectQLEngine, IPubSub, ISecurityService } from '@objectstack/spec/contracts';
-import { applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
+import { applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
@@ -7114,12 +7114,18 @@ export class ObjectStackProtocolImplementation implements
         requestOrgId: string | null,
     ): Promise<string | null> {
         if (requestOrgId === null) return null;
+        // [#21908, ADR-0096 D5] The explicit system opt-in on both probes: a
+        // platform store read the door that asked already authorized, scoped by
+        // the protocol itself (`organization_id` in each `where`). Principal-
+        // less, the engine refuses it.
         const inOrg = await this.engine.findOne('sys_metadata_history', {
             where: { organization_id: requestOrgId, type: singularType, name },
+            context: { isSystem: true },
         });
         if (inOrg) return requestOrgId;
         const inEnv = await this.engine.findOne('sys_metadata_history', {
             where: { organization_id: null, type: singularType, name },
+            context: { isSystem: true },
         });
         return inEnv ? null : requestOrgId;
     }
@@ -7212,12 +7218,18 @@ export class ObjectStackProtocolImplementation implements
         // package, and these probes keep asking that same question. See the
         // docblock above for the ruling commit c74aefe63 records and its accepted narrowing.
         const packageDim = packageId !== undefined ? { package_id: packageId } : {};
+        // [#21908, ADR-0096 D5] The explicit system opt-in on both probes: a
+        // platform store read the door that asked already authorized, scoped by
+        // the protocol itself (`organization_id` in each `where`). Principal-
+        // less, the engine refuses it.
         const inOrg = await this.engine.findOne('sys_metadata', {
             where: { organization_id: requestOrgId, type: singularType, name, state: 'draft', ...packageDim },
+            context: { isSystem: true },
         });
         if (inOrg) return requestOrgId;
         const inEnv = await this.engine.findOne('sys_metadata', {
             where: { organization_id: null, type: singularType, name, state: 'draft', ...packageDim },
+            context: { isSystem: true },
         });
         return inEnv ? null : requestOrgId;
     }
@@ -11298,10 +11310,15 @@ export class ObjectStackProtocolImplementation implements
             // life and never its recent changes (#4674). The `as any` is gone
             // for the same reason: `EngineQueryOptionsParsed` rejects the wrong key,
             // and erasing the type is what let it through.
+            // [#21908, ADR-0096 D5] The explicit system opt-in: the audit
+            // trail is a platform store the audit door already authorized the
+            // caller to read; the protocol builds the `where` itself.
+            // Principal-less, the engine refuses it and this door answered 503.
             const rows = await this.engine.find('sys_metadata_audit', {
                 where,
                 orderBy: [{ field: 'occurred_at', order: 'desc' }],
                 limit,
+                context: { isSystem: true },
             });
             const events = (Array.isArray(rows) ? rows : []).map((r: any) => ({
                 id: r.id,
@@ -19774,7 +19791,9 @@ export class ObjectStackProtocolImplementation implements
      */
     private async metaTypeNamespaceExists(type: string): Promise<boolean> {
         try {
-            const row = await this.engine.findOne('sys_metadata', { where: { type } });
+            // [#21908, ADR-0096 D5] The explicit system opt-in: an existence
+            // probe of the platform store, never a read on a caller's behalf.
+            const row = await this.engine.findOne('sys_metadata', { where: { type }, context: { isSystem: true } });
             return row != null;
         } catch (error) {
             this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
@@ -20531,11 +20550,28 @@ export class ObjectStackProtocolImplementation implements
         // an already-canonical body comes back reference-identical, so
         // `migrateStoredMetadata` and `duplicatePackage` re-entering here pay
         // nothing.
+        //
+        // [#21982] The two gates below — the schema gate and the runtime
+        // authoring gate — JUDGE a flow in its canonical spelling on every path. When no canonicalizer resolved, or it threw,
+        // `flowGateVerdictBody` is the raw body with the spec's ADR-0087 D2
+        // conversions applied (`applyConversionsToFlow`) — for the VERDICT
+        // only: what is stored stays the raw request body, exactly as before.
+        // The flow parse judges an undeclared config key on the builtin node
+        // types, so a D2 spelling the load path still rewrites (`filters`,
+        // script `functionName`, subflow `flow`, …) would otherwise be refused
+        // here and accepted at every converting door (`os validate`,
+        // `defineStack`, `registerFlow`): a verdict that depended on whether
+        // this host runs an automation service. No `reservedNodeTypes` (no
+        // engine here): a node-type rename's conflict guard keeps its one home
+        // in the engine's canonicalizer, and this converted body is never
+        // persisted. A key no conversion rewrites is judged exactly as written.
+        let flowGateVerdictBody: unknown;
         if (singularType === 'flow' && request.item) {
             // No automation service reachable (control-plane / metadata-only
             // host): save exactly as today — a host must not start refusing
             // flow writes it accepted yesterday.
             const canonicalizeFlow = this.resolveFlowCanonicalizer();
+            let canonicalized = false;
             if (canonicalizeFlow) {
                 let result: StoredFlowCanonicalization | undefined;
                 try {
@@ -20597,8 +20633,10 @@ export class ObjectStackProtocolImplementation implements
                         throw err;
                     }
                     request.item = result.storable;
+                    canonicalized = true;
                 }
             }
+            if (!canonicalized) flowGateVerdictBody = applyConversionsToFlow(request.item);
         }
 
         // Spec-conformance check: if a Zod schema is registered for this
@@ -20623,7 +20661,10 @@ export class ObjectStackProtocolImplementation implements
         {
             const schema = resolveOverlaySchema(request.type, request.item);
             if (schema) {
-                const parsed = schema.safeParse(request.item);
+                // [#21982] A flow on the canonicalizer's fallback is judged in
+                // its D2-converted spelling (see `flowGateVerdictBody` above);
+                // every other body is judged as stored.
+                const parsed = schema.safeParse(flowGateVerdictBody ?? request.item);
                 if (!parsed.success) {
                     const issues = zodIssuesToMetadataIssues(parsed.error.issues);
                     // [#10524 → commit d806081dd] The findings clause is rendered PER
@@ -20736,7 +20777,12 @@ export class ObjectStackProtocolImplementation implements
             type: request.type,
             name: request.name,
             state: mode === 'draft' ? 'draft' : 'active',
-            body: gatedItem,
+            // [#21982] The same verdict body as the schema gate above: a flow
+            // on the canonicalizer's fallback is judged in its D2-converted
+            // spelling (the lint's config judge refuses an undeclared key, so
+            // the raw `filters` alias would be refused here and nowhere else).
+            // Stored, and handed to the credential walk below, as written.
+            body: flowGateVerdictBody ?? gatedItem,
             source: writeSource,
             // [#6285] The write's organization partition. It was always here;
             // it simply never travelled to the gate, which is the whole reason
@@ -21392,7 +21438,9 @@ export class ObjectStackProtocolImplementation implements
         // metadata. Archived bodies are never even read.
         const rows: any[] = [];
         for (const state of ['active', 'draft'] as const) {
-            rows.push(...await this.engine.find('sys_metadata', { where: { state } }));
+            // [#21908, ADR-0096 D5] The explicit system opt-in: the migration
+            // door already authorized an operator to scan the whole store.
+            rows.push(...await this.engine.find('sys_metadata', { where: { state }, context: { isSystem: true } }));
         }
 
         for (const row of rows) {
@@ -22232,8 +22280,16 @@ export class ObjectStackProtocolImplementation implements
             // is the 503 the lock read raised before this read moved above it.
             let draftRow: unknown;
             try {
+                // [#21908, ADR-0096 D5] The explicit system opt-in: a platform
+                // store read, which no caller's grants scope. The publish door
+                // already authorized the caller, the request carries no
+                // execution context to forward (only its `actor`), and the
+                // protocol scopes the row itself (`organization_id` above),
+                // exactly as its sibling store reads do. Principal-less, the
+                // engine now refuses it.
                 draftRow = await this.engine.findOne('sys_metadata', {
                     where: { type: singularType, name: request.name, organization_id: orgId, state: 'draft' },
+                    context: { isSystem: true },
                 });
             } catch (error) {
                 this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
@@ -25164,9 +25220,13 @@ export class ObjectStackProtocolImplementation implements
                     { organization_id: null },
                 ];
             }
+            // [#21908, ADR-0096 D5] The explicit system opt-in: the commit ledger is a
+            // platform store the door already authorized; the protocol scopes the
+            // `where` by organization itself. Principal-less, the engine refuses it.
             const rows = (await this.engine.find('sys_metadata_commit', {
                 where,
                 ...(request.limit ? { limit: request.limit } : {}),
+                context: { isSystem: true },
             })) as any[];
             const mapped = rows.map((r) => ({
                 id: r.id,
@@ -25296,7 +25356,10 @@ export class ObjectStackProtocolImplementation implements
                 { organization_id: null },
             ];
         }
-        const row = (await this.engine.findOne('sys_metadata_commit', { where })) as any;
+        // [#21908, ADR-0096 D5] The explicit system opt-in: the commit ledger is a
+        // platform store the door already authorized; the protocol scopes the
+        // `where` by organization itself. Principal-less, the engine refuses it.
+        const row = (await this.engine.findOne('sys_metadata_commit', { where, context: { isSystem: true } })) as any;
         if (!row) {
             const err: any = new Error(`No commit '${request.commitId}'.`);
             err.code = 'COMMIT_NOT_FOUND';
@@ -25827,7 +25890,10 @@ export class ObjectStackProtocolImplementation implements
                 { organization_id: null },
             ];
         }
-        const target = (await this.engine.findOne('sys_metadata_commit', { where })) as any;
+        // [#21908, ADR-0096 D5] The explicit system opt-in: the commit ledger is a
+        // platform store the door already authorized; the protocol scopes the
+        // `where` by organization itself. Principal-less, the engine refuses it.
+        const target = (await this.engine.findOne('sys_metadata_commit', { where, context: { isSystem: true } })) as any;
         if (!target) {
             const err: any = new Error(`No commit '${request.commitId}'.`);
             err.code = 'COMMIT_NOT_FOUND';
@@ -26268,12 +26334,18 @@ export class ObjectStackProtocolImplementation implements
         const histRows: Array<{ version: number; body: Record<string, unknown> | null }> = [];
         try {
             const engineAny = this.engine as any;
+            // [#21908, ADR-0096 D5] The explicit system opt-in: the history
+            // lineage is a platform store the diff door already authorized;
+            // the protocol scopes it by organization itself. Principal-less,
+            // the engine refuses it, and the `catch` below would have answered
+            // an empty diff for an item that has history.
             const rows = await engineAny.find('sys_metadata_history', {
                 where: {
                     organization_id: orgId,
                     type: singularType,
                     name: request.name,
                 },
+                context: { isSystem: true },
             });
             rows.sort((a: any, b: any) => (a.version ?? 0) - (b.version ?? 0));
             for (const r of rows) {
@@ -26360,8 +26432,11 @@ export class ObjectStackProtocolImplementation implements
             // compared. ⛔ Do not recover a number by matching bodies or hashes
             // against history: a publish and a revert both write rows whose
             // bodies repeat earlier ones.
+            // [#21908, ADR-0096 D5] The explicit system opt-in, as the history
+            // read above.
             const current = (await this.engine.findOne('sys_metadata', {
                 where: { organization_id: orgId, type: singularType, name: request.name, state: 'active' },
+                context: { isSystem: true },
             })) as { metadata?: unknown; version?: unknown } | null;
             toBody = current?.metadata == null
                 ? null
@@ -26871,7 +26946,12 @@ export class ObjectStackProtocolImplementation implements
         };
 
         try {
-            const existing = await this.engine.findOne('sys_metadata', { where: scopedWhere });
+            // [#21908, ADR-0096 D5] The explicit system opt-in on the read and
+            // the delete: a platform store row the delete door already
+            // authorized the caller to remove, addressed by the protocol's own
+            // `scopedWhere` and then by id. Principal-less, the engine refuses
+            // both.
+            const existing = await this.engine.findOne('sys_metadata', { where: scopedWhere, context: { isSystem: true } });
             if (!existing) {
                 return {
                     success: true,
@@ -26882,7 +26962,7 @@ export class ObjectStackProtocolImplementation implements
                         : `No ${singularTypeForRepo} '${request.name}' found — nothing to delete.`,
                 };
             }
-            await this.engine.delete('sys_metadata', { where: { id: existing.id } });
+            await this.engine.delete('sys_metadata', { where: { id: existing.id }, context: { isSystem: true } });
 
             // Storage teardown (opt-in) — see the repo-path branch above.
             {

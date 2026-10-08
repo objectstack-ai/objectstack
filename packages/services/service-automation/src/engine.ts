@@ -48,6 +48,11 @@ import { FlowValueSlotSchema, VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/a
 // judge, shared with `objectstack validate` (`@objectstack/lint` calls the same
 // function on the same config), so build and registration give one verdict.
 import { flowNodeValueTemplateRefusals } from '@objectstack/spec/automation';
+// [#21982] Which node types the spec judges an undeclared config key for — the
+// ONE judge of a builtin's undeclared key, met here through `FlowSchema.parse`.
+// `validateNodeConfigKeys` asks it and stands aside for every type it names,
+// so no node type has two judges.
+import { builtinNodeConfigKeysJudged } from '@objectstack/spec/automation';
 // [#17322] The EVALUATED-slot rule, IMPORTED rather than re-derived. It is the
 // rule `FlowEdgeSchema.condition` already composes since #15807, so a node's
 // `config.condition` — which no schema stands in front of — is held to the same
@@ -168,6 +173,16 @@ interface ConfigSchemaNode {
  * history is noise. The generic rejection already carries the path, the
  * did-you-mean and the declared set; an entry here adds the *mechanism* the
  * author was reaching for.
+ *
+ * ⚠️ [#21982] UNREAD today: every type keyed below (`create_record`,
+ * `update_record`, `delete_record`, `screen`) is one the spec judges
+ * ({@link builtinNodeConfigKeysJudged}), so {@link
+ * AutomationEngine.validateNodeConfigKeys} stands aside for it and never
+ * reaches this table. Each entry's prescription is carried by that type's
+ * executor contract (`builtin-node-config.zod.ts`, its strictObject
+ * `guidance`), which is what an author now meets, at every door. Kept only
+ * until the comments in that spec module stop naming this table; a plugin
+ * node type would add its own entry here.
  */
 /**
  * The bulk-intent spellings, shared by `update_record` and `delete_record`
@@ -4386,7 +4401,9 @@ export class AutomationEngine implements IAutomationService {
         // silence). Hard-fail with per-key prescriptions: see
         // validateNodeConfigKeys for why the #4045 reconciliation made this
         // safe, and for the deliberate exemptions (`assignment`, schemaless
-        // types, keyValue maps).
+        // types, keyValue maps). [#21982] Only for the types the spec does not
+        // judge — `try_catch` and plugin node types; every other builtin's
+        // undeclared key was refused by the `FlowSchema.parse` above.
         this.validateNodeConfigKeys(name, parsed);
 
         // #15429 — parse every `decision` node's config against the spec's
@@ -10273,6 +10290,19 @@ export class AutomationEngine implements IAutomationService {
      * keys with documented history — a per-key tombstone from
      * {@link FLOW_NODE_UNKNOWN_KEY_GUIDANCE}.
      *
+     * **[#21982] One judge per node type.** For every builtin the spec judges
+     * ({@link builtinNodeConfigKeysJudged} — every builtin with an executor
+     * contract but `try_catch`), the spec's key arm is the judge, at every
+     * door: `FlowSchema.parse` above already refused such a key, anchored at
+     * `nodes.N.config.<key>` in the contract's own words, before this walk
+     * runs. So this walk stands aside for those types and keeps the rest:
+     * `try_catch`, whose descriptor closes `retry` where its contract's `retry`
+     * strips an unknown key, and every PLUGIN node type, whose contract the
+     * spec does not declare and whose descriptor `configSchema` is the only
+     * declaration there is. The per-key tombstones below
+     * ({@link FLOW_NODE_UNKNOWN_KEY_GUIDANCE}) live on in the contracts' own
+     * unknown-key prescriptions for the types the spec now judges.
+     *
      * Deliberate exemptions, unchanged from the warn era:
      *  - **`assignment` is exempt wholesale**: with no `assignments` wrapper
      *    its top-level config keys ARE the author's variable names
@@ -10305,6 +10335,9 @@ export class AutomationEngine implements IAutomationService {
                 // `assignment` config keys are the author's variable names — see the
                 // exemption note above.
                 if (node.type === 'assignment') continue;
+                // [#21982] The spec judged this type's keys in `FlowSchema.parse`:
+                // one judge per type, never two.
+                if (builtinNodeConfigKeysJudged(node.type)) continue;
                 const schema = this.actionDescriptors.get(node.type)?.configSchema as ConfigSchemaNode | undefined;
                 if (!schema) continue;
                 this.collectUndeclaredConfigKeys(node, schema, node.config, 'config', scoped);

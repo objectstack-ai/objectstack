@@ -52,7 +52,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { resolveAuthzContext } from '@objectstack/core';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
-import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
+import { SecurityPlugin } from '@objectstack/plugin-security';
 import { assertArmed, principalArmed } from './armed.js';
 
 /**
@@ -205,15 +205,10 @@ describe('[#8023] a public_read_write OWD opens row-level writes (and nothing el
       // users to (ADR-0093 D1), which is the shape a real deployment boots in
       // and the shape QA run #7637 measured.
       orgContext: true,
-      security: new SecurityPlugin({
-        defaultPermissionSets: [
-          ...securityDefaultPermissionSets,
-          EditorSet as any,
-          ViewerSet as any,
-          ScopedSet as any,
-        ],
-        fallbackPermissionSet: 'member_default',
-      }),
+      // The three sets are the app's own (`permissions` above); ⛔ not ALSO
+      // handed to `defaultPermissionSets`, which would declare each under a
+      // second package and refuse the boot (one holder per permission-set name).
+      security: new SecurityPlugin({ fallbackPermissionSet: 'member_default' }),
     });
     await stack.signIn(); // dev admin seed (first user)
     aliceToken = await stack.signUp('owdw-alice@verify.test');

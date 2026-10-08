@@ -44,10 +44,16 @@ import { FlowSchema, validateControlFlow } from '@objectstack/spec/automation';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 
-/** Config keys the fake's `notify` descriptor declares (the #4277 legal set). */
-// `title` joined the set when the flow parse began refusing a notify node with
-// neither `title` nor `template` (#20316) — the real notify descriptor declares it.
-const NOTIFY_DECLARED_CONFIG_KEYS = ['title', 'message', 'recipients', 'channel'];
+/**
+ * [#21982] The node type the fake's #4277 walk judges: a PLUGIN type the spec
+ * knows nothing about, because the real walk (`validateNodeConfigKeys`) now
+ * judges only those (and `try_catch`). A builtin's undeclared key is refused
+ * one step earlier, by the real `FlowSchema.parse` this fake runs first
+ * (`builtinUndeclaredConfigKey` below).
+ */
+const STAMP = 'test_stamp';
+/** Config keys the fake's `test_stamp` descriptor declares (the #4277 legal set). */
+const STAMP_DECLARED_CONFIG_KEYS = ['count', 'label'];
 
 /**
  * The #4277 refusal, reproduced from `service-automation/src/engine.ts`
@@ -58,7 +64,7 @@ function undeclaredConfigKeyRefusal(flowName: string, nodeId: string, nodeType: 
     const violation =
         `node '${nodeId}' (${nodeType}): unknown config key \`${key}\` at config.${key}` +
         ` It is not declared by this node type's configSchema, so nothing reads it.` +
-        ` Declared here: ${NOTIFY_DECLARED_CONFIG_KEYS.join(', ')}.`;
+        ` Declared here: ${STAMP_DECLARED_CONFIG_KEYS.join(', ')}.`;
     return new Error(
         `Flow '${flowName}' rejected: 1 undeclared config key(s) (#4277).\n` +
         `  - ${violation}\n` +
@@ -87,9 +93,9 @@ function makeDispatcher() {
             const parsed = FlowSchema.parse(definition) as { nodes?: Array<Record<string, any>> };
             validateControlFlow(parsed as any);
             for (const node of parsed.nodes ?? []) {
-                if (node.type !== 'notify') continue;
+                if (node.type !== STAMP) continue;
                 for (const key of Object.keys(node.config ?? {})) {
-                    if (!NOTIFY_DECLARED_CONFIG_KEYS.includes(key)) {
+                    if (!STAMP_DECLARED_CONFIG_KEYS.includes(key)) {
                         throw undeclaredConfigKeyRefusal(String((definition as any)?.name), node.id, node.type, key);
                     }
                 }
@@ -162,8 +168,16 @@ const BAD_BODIES = {
             config: { try: [], catch: { nodes: [], edges: [] } },
         }],
     },
-    /** 4 — a config key the node type's descriptor does not declare (#4277). */
+    /** 4 — a config key a PLUGIN node type's descriptor does not declare (#4277). */
     undeclaredConfigKey: {
+        ...WELL_FORMED,
+        nodes: [{
+            id: 'n', type: STAMP, label: 'Stamp',
+            config: { count: 1, totallyBogusKey: 'oops' },
+        }],
+    },
+    /** 5 — [#21982] a config key a BUILTIN node's executor contract does not declare: the spec refuses it in the parse. */
+    builtinUndeclaredConfigKey: {
         ...WELL_FORMED,
         nodes: [{
             id: 'n', type: 'notify', label: 'Notify',
@@ -248,12 +262,24 @@ describe('#8123 — POST and PUT agree on the class of an identical flow refusal
         expect(message).toContain('unknown config key `totallyBogusKey`');
         expect(message).toContain('at config.totallyBogusKey');
         expect(message).toContain("not declared by this node type's configSchema");
-        expect(message).toContain(`Declared here: ${NOTIFY_DECLARED_CONFIG_KEYS.join(', ')}.`);
-        expect(message).toContain("node 'n' (notify)");
+        expect(message).toContain(`Declared here: ${STAMP_DECLARED_CONFIG_KEYS.join(', ')}.`);
+        expect(message).toContain(`node 'n' (${STAMP})`);
         // …and the same substance reaches the field entry, not a stub.
         const fields = result.response.body.error.details.fields;
         expect(fields).toHaveLength(1);
         expect(fields[0]).toEqual({ field: '(body)', code: 'invalid_value', message });
+    });
+
+    it('case "builtinUndeclaredConfigKey" (#21982): the spec\'s located refusal on PUT, the walk never consulted', async () => {
+        const { dispatcher } = makeDispatcher();
+        const body = BAD_BODIES.builtinUndeclaredConfigKey;
+        const result: any = await putFlow(dispatcher, body.name, body);
+
+        assertValidationEnvelope(result.response, 'PUT builtin undeclared config key');
+        expect(result.response.body.error.message).not.toContain('#4277');
+        const located = result.response.body.error.details.fields.filter((f: any) => f.field === 'nodes.0.config.totallyBogusKey');
+        expect(located).toHaveLength(1);
+        expect(located[0].message).toContain('`totallyBogusKey`');
     });
 
     it('case "missingNodeLabel": the raw Zod issue array does not reach the wire on PUT either', async () => {

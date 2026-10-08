@@ -9,12 +9,10 @@
  * ADR-0093 D2 gives the invariant ONE owner — a reconciler composed into
  * better-auth's `user.create.after` hook.
  *
- * Harness note: `bootStack` deliberately disables the default-org bootstrap
- * (`autoDefaultOrganization: false` — the ADR-0057 "single-tenant, no org row"
- * posture) and does not enable the better-auth admin plugin. So these tests
- * mint the single-org Default Organization themselves (system context, exactly
- * what the bootstrap would do) and drive the invariant through the REAL
- * better-auth sign-up pipeline — the path with no endpoint-side bind, where a
+ * Harness note: `bootStack` boots the production `single` shape, so the
+ * Default Organization exists from the boot (ADR-0131 D3); it does not enable
+ * the better-auth admin plugin. So these tests read that organization and
+ * drive the invariant through the REAL better-auth sign-up pipeline — the path with no endpoint-side bind, where a
  * membership can only come from the `user.create.after` reconciler. The
  * endpoint-side create-user bind has its own unit coverage
  * (plugin-auth/src/admin-user-endpoints.test.ts).
@@ -41,14 +39,11 @@ describe('ADR-0093: membership lifecycle (single-org, real stack)', () => {
     stack = await bootStack(showcaseStack, {}); // single-org (no OS_MULTI_ORG_ENABLED)
     await stack.signIn();
     ql = await stack.kernel.getServiceAsync<any>('objectql');
-    // Mint the Default Organization the single-org bootstrap would create
-    // (the harness disables that bootstrap — see header). System context is
-    // the legitimate writer for better-auth-managed tables (ADR-0092).
-    const org = await ql.insert(
-      'sys_organization',
-      { name: 'Default Organization', slug: 'default' },
-      { context: SYSTEM_CTX },
-    );
+    // [ADR-0131 D3] The Default Organization is a boot invariant under
+    // `single`: the boot created it before the seeds loaded. Read it — minting
+    // a second `slug: 'default'` row is refused as a duplicate.
+    const [org] = await findRows(ql, 'sys_organization', { slug: 'default' }, 1);
+    expect(org?.id, 'the boot created the Default Organization').toBeTruthy();
     defaultOrgId = String(org.id);
   }, 120_000);
 

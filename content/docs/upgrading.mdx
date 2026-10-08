@@ -237,11 +237,15 @@ against, never as the file you ship.
 it can prove the site.** A change is written when it traces to one object or
 array literal in one project file: through `define*` calls and `.create`
 factories, `const` bindings, relative imports and re-exports, and
-`Object.values()` over a namespace import. Only that site's bytes change; a
-renamed key keeps its value and its comments. Every other change — a value
-built by a function call or an expression, a key a spread supplies, a binding
-something else also uses, a file in a package — is listed with the reason it was
-not written, for you to port by hand. The command then re-runs the chain over
+`Object.values()` over a namespace import. A change inside a package body of a
+`composeStacks([…])` project (a path under `packages[i].manifest`) traces into
+input i, but only when input i and every input before it is a stack literal
+that writes its own `manifest` and no `packages`: only then is package i that
+one input's body. Only that site's bytes change; a renamed key keeps its value
+and its comments. Every other change — a value built by any other function call
+or an expression, a key a spread supplies, a binding something else also uses,
+a file in a package — is listed with the reason it was not written, for you to
+port by hand. The command then re-runs the chain over
 the written files and restores them all unless it comes back with exactly the
 changes it left. Commit first, and review the diff like any other change.
 </Callout>

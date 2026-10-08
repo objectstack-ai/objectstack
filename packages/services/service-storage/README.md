@@ -103,6 +103,25 @@ Changing `keyPrefix` moves the backing store — the old namespace's objects are
 not reachable through the new one — so it is treated exactly as changing the
 bucket is, and the swap prints the migration warning.
 
+### Limits — upload size and URL / session lifetimes
+
+The `storage` settings namespace's "Limits" group is enforced at the upload
+doors whenever the plugin is bound to settings (the default):
+
+| Setting | Default | Applies to |
+|:---|:---|:---|
+| `max_upload_mb` | 100 (MB, counted as MiB) | Every upload door: the presigned upload's declared `size`, the chunked upload's declared `totalSize`, the local raw PUT body and each chunk's running total. Over it ⇒ `413` with code `VALIDATION_ERROR`, before anything is stored. |
+| `presigned_ttl` | 3600 s | Presigned upload URLs and non-gated download URLs issued from then on. |
+| `session_ttl` | 86400 s | Chunked upload sessions started from then on. |
+
+Per key, a saved value (an admin save or an env override) wins over the
+constructor's `presignedTtl` / `sessionTtl`, and those win over the namespace's
+declared default. A save reaches the doors without a restart; URLs and sessions
+already issued keep their lifetime. With no settings namespace bound
+(`bindToSettings: false`, or no settings service) the constructor TTLs apply and
+no upload size limit is enforced. On the S3 adapter a presigned upload is judged
+by its declared size — the bytes go straight to the bucket.
+
 ## REST API Endpoints
 
 All routes are mounted at `/api/v1/storage` (configurable via `basePath`).

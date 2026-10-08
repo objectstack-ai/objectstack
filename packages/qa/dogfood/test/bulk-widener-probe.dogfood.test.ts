@@ -57,7 +57,7 @@ import { defineStack, definePermissionSet } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { resolveAuthzContext } from '@objectstack/core';
-import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
+import { SecurityPlugin } from '@objectstack/plugin-security';
 
 // ── the app under probe ────────────────────────────────────────────────────
 
@@ -165,13 +165,13 @@ describe('[#6736 PROBE] app-authored RLS wideners on the bulk write path', () =>
 
   beforeAll(async () => {
     stack = await bootStack(probeApp, {
-      // The app's own set must be resolvable alongside the platform seeds; the
-      // fallback stays the platform `member_default` so nothing about this
-      // fixture's baseline differs from an ordinary deployment's.
-      security: new SecurityPlugin({
-        defaultPermissionSets: [...securityDefaultPermissionSets, ProbeWidenerSet as any],
-        fallbackPermissionSet: 'member_default',
-      }),
+      // The app's own set is registered by the app (`permissions` above), as in
+      // an ordinary deployment — ⛔ not ALSO handed to `defaultPermissionSets`,
+      // which would declare it under a second package and refuse the boot (one
+      // holder per permission-set name). The fallback stays the platform
+      // `member_default` so nothing about this fixture's baseline differs from an
+      // ordinary deployment's.
+      security: new SecurityPlugin({ fallbackPermissionSet: 'member_default' }),
     });
     await stack.signIn();                                   // seed dev admin (platform admin)
     bobToken = await stack.signUp('probe-bob@verify.test');  // plain member

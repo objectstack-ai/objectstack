@@ -23,9 +23,17 @@
 // `showcase-d7-default-profile.dogfood.test.ts` pins that wiring; this module
 // USES it, so fixtures are now more faithful to the running app than they were.
 //
-// The lightweight verify harness does not seed permission metadata, so the
-// declared set is handed to the plugin directly — the identical note that test
-// carries.
+// The app's set is registered by the app's own package, exactly as in the CLI
+// boot: `bootStack`'s `AppPlugin` registers the stack's `permissions` in the
+// engine registry and the metadata service, so the plain branch below wires the
+// default by NAME only — the CLI's `appSecurityPluginOptions` wiring. ⛔ It must
+// not ALSO hand the declared set to the plugin's `defaultPermissionSets`: that
+// declares one permission set under two packages (the app's and
+// `plugin-security`'s), and a permission set holds one name per deployment —
+// the boot is refused with `NAMESPACE_CONFLICT`, naming both holders
+// (`@objectstack/objectql`, `security-catalog-namespace.ts`). The scaffolding
+// branch hands the plugin a set of a DIFFERENT name, which the app never
+// declares, so it has one holder.
 import showcaseStack from '@objectstack/example-showcase';
 import {
   SecurityPlugin,
@@ -68,10 +76,8 @@ export function showcaseAppDefaultSecurity(extraObjectGrants?: ObjectGrants): Se
   }
   const appDefault = PermissionSetSchema.parse(declaredDefault) as PermissionSet;
   if (!extraObjectGrants) {
-    return new SecurityPlugin({
-      defaultPermissionSets: [...securityDefaultPermissionSets, appDefault],
-      fallbackPermissionSet: appDefault.name,
-    });
+    // The CLI wiring: the default named, the set itself the app's own.
+    return new SecurityPlugin({ fallbackPermissionSet: appDefault.name });
   }
   const baseline = PermissionSetSchema.parse({
     ...appDefault,

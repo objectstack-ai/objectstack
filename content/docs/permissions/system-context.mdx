@@ -10,8 +10,8 @@ the seed loader replaying package fixtures, a plugin's boot reconciler, a
 service self-write, a migration.
 
 This page is **the authority** for what that flag actually does. It exists
-because the flag is not one concept: it is a single boolean read at **117
-distinct sites across 19 packages**, and knowing three of those behaviours gives
+because the flag is not one concept: it is a single boolean read at **118
+distinct sites across 20 packages**, and knowing three of those behaviours gives
 no hint that the other hundred-and-four exist. Every documented app-side bug
 traced to `isSystem` had the same shape — the metadata was complete and correct,
 and the gap was observable only by querying the resulting rows.
@@ -115,6 +115,7 @@ that silently does not happen.
 | 16 | **Read-audit rows are not written** | plugin-audit | Lose: the "a person opened this record" trail. `sudo()` keeps the caller's `userId`, so this flag is the only thing separating a human read from a platform one | `packages/plugins/plugin-audit/src/read-audit.ts#installReadAuditWriter` |
 | 17 | Approval snapshot payload redaction skipped, and so is the snapshot query guard | plugin-approvals | Get: the whole snapshot on `find` / `findOne` — the audit/replay channel — and a filter, sort or grouping by it on any read. Lose: field-visibility redaction over approval payloads, and the refusal of a query over the snapshot for a reader withheld a field of the objects it can reach | `packages/plugins/plugin-approvals/src/payload-redaction-middleware.ts#bindSnapshotRedactionMiddleware`, `packages/plugins/plugin-approvals/src/payload-predicate-guard.ts#bindSnapshotPredicateGuard` |
 | 18 | REST anonymous-deny seam satisfied | rest | Get: `enforceAuth` passes with no `userId`. Not reachable from the wire — `isSystem` is never set on an inbound request | `packages/rest/src/rest-server.ts#enforceAuth` |
+| 18b | Settings namespace read scope not applied | service-settings | Get: a read of `sys_setting`, `sys_setting_audit` or `sys_platform_setting` across every namespace, whatever each namespace's `readPermission` names — the settings service's own reads of its stores take this path. Lose: the per-namespace read gate the generic data API applies to every other caller, the same rule the settings routes enforce | `packages/services/service-settings/src/settings-read-door.ts#settingsReadDoorMiddleware` |
 
 ### 2. Write pipeline and data integrity
 
@@ -140,7 +141,7 @@ that silently does not happen.
 
 ### 3. Sharing (`plugin-sharing`)
 
-The largest single consumer — **17 of the 117 sites**.
+The largest single consumer — **17 of the 118 sites**.
 
 | # | Behaviour when `isSystem` | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|
@@ -283,8 +284,8 @@ Ownership injection, `readonly` bypass and sharing materialisation are
 independent decisions, and a seed loader plausibly wants the first two but not
 the third. The concept is nevertheless **staying as one boolean**:
 
-- **Shipped semantics.** `isSystem` is a published contract with 117 read sites
-  in 19 packages. Splitting it is a breaking contract change across all of them.
+- **Shipped semantics.** `isSystem` is a published contract with 118 read sites
+  in 20 packages. Splitting it is a breaking contract change across all of them.
   (The ruling was taken when the census read 80 sites in 18 packages; the count
   has grown, which strengthens rather than weakens the argument.)
 - **No business pull.** No app has asked for the combinations a split would
@@ -357,16 +358,16 @@ still holds equal to the census on every pull request:
 | Appearances of the bare identifier `isSystem` in non-test sources | 813 | — |
 | — parsed as a declaration | 27 | ✅ |
 | — parsed as an object-literal / type key (producers and option objects) | 310 | — |
-| — parsed as a property **read** | 123 | ✅ |
+| — parsed as a property **read** | 124 | ✅ |
 | — parsed in some other syntactic position (a local, a cast, a conditional) | 9 | ✅ |
 | — the remainder: text inside comments and string literals | 358 | — |
 | Of those reads: reads of one of the unrelated metadata fields | 6 | ✅ |
-| Of those reads: reads of `ExecutionContext.isSystem` | **117** | ✅ |
-| — behaviour-bearing (rows 1–61 above) | 114 | ✅ |
+| Of those reads: reads of `ExecutionContext.isSystem` | **118** | ✅ |
+| — behaviour-bearing (rows 1–61 above) | 115 | ✅ |
 | — carry the flag onward only (rows 62–64 above) | 3 | ✅ |
-| Packages containing at least one elevation read | **19** | ✅ |
-| Files containing at least one elevation read | 54 | ✅ |
-| — the distinct symbols those reads live in — what this page anchors | 100 | ✅ |
+| Packages containing at least one elevation read | **20** | ✅ |
+| Files containing at least one elevation read | 55 | ✅ |
+| — the distinct symbols those reads live in — what this page anchors | 101 | ✅ |
 | — of those files, the ones holding more than one read in one symbol | 8 | ✅ |
 
 The six rows marked — are a **dated decomposition, not a live claim**: they were
@@ -430,7 +431,7 @@ same resolver, and the same registration shape, that holds `docs/adr/**`.
 Renaming a symbol is now a loud red instead of a silent misdirection.
 
 ⚠️ **The precision that costs, priced here rather than buried.** A symbol anchor
-cannot say WHICH read inside a function it means, and **8** of the **54**
+cannot say WHICH read inside a function it means, and **8** of the **55**
 anchored files hold more than one read inside a single symbol. So the population
 check runs per file at symbol granularity: every file the census finds a read in
 must be anchored, and the set of symbols this page cites into that file must

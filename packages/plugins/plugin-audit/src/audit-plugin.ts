@@ -56,6 +56,86 @@ export interface AuditPluginReadAuditOptions {
 export interface AuditPluginOptions {
   /** [#8992] Record-view auditing. Off unless objects are named. */
   readAudit?: AuditPluginReadAuditOptions;
+  /**
+   * Host locale resolver: the language this plugin writes its reader-facing
+   * text in — `sys_activity.summary`, and the title of the @mention
+   * notification it emits. Called with the write's organization (`tenantId`)
+   * and user (`userId`; for an @mention title, the mentioned recipient).
+   *
+   * **Precedence: host first, settings second.** When given, this resolver is
+   * asked first. When it answers nothing (`undefined`, `null` or a blank
+   * string), the plugin uses the locale it resolves without this option: the
+   * deployment's settings-derived `localization.locale` (ADR-0053, read
+   * through `resolveLocalizationContext`). Two faults fall back the same way,
+   * and neither fails the audited write: a throw (or a rejected promise), and
+   * an answer that is not a well-formed BCP-47 locale tag (`zh_CN`, a
+   * non-string). Each fault is logged once at `warn`. An accepted answer is
+   * used in its canonical form (`zh-cn` → `zh-CN`).
+   *
+   * Absent, the settings-derived locale is the only source, exactly as for a
+   * plugin built without this option. The writer memoizes the answer per
+   * tenant/user scope for a short TTL, so an implementation may read its own
+   * storage directly. The locale only picks the message catalog: a locale the
+   * deployment's i18n service has no catalog for degrades the way a
+   * settings-derived one does, to the service's declared fallback and then to
+   * the English literal.
+   */
+  getLocale?: (tenantId?: string, userId?: string) => string | undefined | Promise<string | undefined>;
+}
+
+/**
+ * The host half of the write locale ({@link AuditPluginOptions.getLocale}).
+ *
+ * Answers the resolver's locale when it is usable, else `undefined`, which
+ * sends the caller on to the settings-derived locale. A throw is caught here
+ * rather than left to the writer: the writer turns a thrown lookup into NO
+ * locale (English summaries), where the host's fault should cost only the
+ * host's half. Each fault is reported once per install — the writer asks per
+ * tenant/user scope, so a broken resolver would otherwise log once per scope.
+ */
+function createHostLocaleReader(
+  resolver: NonNullable<AuditPluginOptions['getLocale']>,
+  logger: PluginContext['logger'],
+): (tenantId?: string, userId?: string) => Promise<string | undefined> {
+  const fallsBack =
+    'activity summaries and @mention notification titles fall back to the settings-derived locale (localization.locale)';
+  let throwReported = false;
+  let malformedReported = false;
+  return async (tenantId, userId) => {
+    let answer: unknown;
+    try {
+      answer = await resolver(tenantId, userId);
+    } catch (err) {
+      if (!throwReported) {
+        throwReported = true;
+        logger.warn(
+          `AuditPlugin: the host getLocale resolver threw — ${fallsBack} wherever it throws. Reported once.`,
+          { err: err instanceof Error ? err.message : String(err) },
+        );
+      }
+      return undefined;
+    }
+    if (answer === undefined || answer === null) return undefined;
+    if (typeof answer === 'string') {
+      const trimmed = answer.trim();
+      if (trimmed === '') return undefined;
+      try {
+        const [canonical] = Intl.getCanonicalLocales(trimmed);
+        if (canonical) return canonical;
+      } catch {
+        // Not a well-formed BCP-47 tag — reported below.
+      }
+    }
+    if (!malformedReported) {
+      malformedReported = true;
+      const shown = typeof answer === 'string' ? JSON.stringify(answer) : `a ${typeof answer}`;
+      logger.warn(
+        `AuditPlugin: the host getLocale resolver answered ${shown}, which is not a well-formed BCP-47 locale tag — `
+          + `${fallsBack} wherever it does. Reported once.`,
+      );
+    }
+    return undefined;
+  };
 }
 
 /**
@@ -215,7 +295,17 @@ export class AuditPlugin implements Plugin {
           return undefined;
         }
       };
+      // The host's resolver, when given, is asked first (`getLocale` on
+      // AuditPluginOptions documents the precedence); without a usable answer
+      // the settings-derived locale below decides, as it does with no option.
+      const readHostLocale = this.options.getLocale
+        ? createHostLocaleReader(this.options.getLocale, ctx.logger)
+        : undefined;
       const getLocale = async (tenantId?: string, userId?: string): Promise<string | undefined> => {
+        if (readHostLocale) {
+          const hostLocale = await readHostLocale(tenantId, userId);
+          if (hostLocale !== undefined) return hostLocale;
+        }
         let settings: unknown;
         try {
           settings = ctx.getService('settings');

@@ -3,6 +3,7 @@
 import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import { loadConfig } from '../utils/config.js';
+import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 import {
   printHeader,
   printSuccess,
@@ -214,8 +215,13 @@ export default class Diff extends Command {
     }
 
     try {
-      const { config: beforeConfig } = await loadConfig(beforePath);
-      const { config: afterConfig } = await loadConfig(afterPath);
+      // [#22288] Each side folded before any category is read: a
+      // multi-package `preserve` config carries its objects, views, flows
+      // and the rest in its package bodies, none at its top level, so a diff
+      // of two such configs compared two empty stacks and reported nothing.
+      // A stack with no `packages[]` comes back by identity.
+      const beforeConfig: any = authoringRuleUnionStack((await loadConfig(beforePath)).config);
+      const afterConfig: any = authoringRuleUnionStack((await loadConfig(afterPath)).config);
 
       if (!flags.json) {
         printInfo(`Before: ${chalk.white(beforePath)}`);
