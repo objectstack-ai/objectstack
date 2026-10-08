@@ -40,6 +40,17 @@ const LICENSE = {
 };
 const ORGANIZATION = { name: 'sys_organization', fields: { name: { type: 'text' }, slug: { type: 'text' } } };
 
+/**
+ * Equality only: a combinator this double does not implement is refused, never
+ * read as a field name (`check:where-matcher`).
+ */
+function matchesWhere(row: Row, where: Record<string, unknown>): boolean {
+  return Object.entries(where).every(([k, v]) => {
+    if (k.startsWith('$')) throw new Error(`fake engine: unsupported operator ${k}`);
+    return row[k] === v;
+  });
+}
+
 function createEngine(store: Record<string, Row[]>) {
   let idCounter = 0;
   const inserted: Array<{ object: string; row: Row }> = [];
@@ -47,7 +58,8 @@ function createEngine(store: Record<string, Row[]>) {
     find: vi.fn(async (object: string, query?: { where?: Record<string, unknown>; limit?: number }) => {
       let rows = store[object] ?? [];
       if (query?.where) {
-        rows = rows.filter((r) => Object.entries(query.where!).every(([k, v]) => r[k] === v));
+        const where = query.where;
+        rows = rows.filter((r) => matchesWhere(r, where));
       }
       return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
     }),

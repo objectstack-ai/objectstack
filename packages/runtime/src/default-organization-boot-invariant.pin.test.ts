@@ -38,8 +38,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ObjectKernel } from '@objectstack/core';
-import { ObjectQLPlugin } from '@objectstack/objectql';
+import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
+import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/rest';
 import { AuthPlugin } from '@objectstack/plugin-auth';
@@ -107,11 +107,12 @@ interface Booted {
 
 async function boot(secret: string): Promise<Booted> {
   const booted = { inserts: [], memberInsertRoles: [] } as unknown as Booted;
-  const probe: any = {
+  const probe: Plugin = {
     name: 'pin.default-org-15195.probe',
+    version: '0.0.0',
     dependencies: ['com.objectstack.engine.objectql'],
-    async init(ctx: any) {
-      const ql = ctx.getService('objectql');
+    init: async (ctx: PluginContext) => {
+      const ql = ctx.getService<ObjectQL>('objectql');
       ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
         if (opCtx.operation === 'insert') {
           booted.inserts.push(String(opCtx.object));
