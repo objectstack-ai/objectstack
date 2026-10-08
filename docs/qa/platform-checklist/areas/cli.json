@@ -1499,7 +1499,7 @@
       "title": "os plugin build enforces the manifest at the packaging boundary: an invalid manifest is refused with located errors, `packaging` forks the artifact, and the compiled manifest the artifact carries is readable back",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "cli",
       "personas": [
@@ -1536,7 +1536,7 @@
           "evidence": "each refusal's full output with its exit code, plus the directory listing taken after it"
         },
         {
-          "clause": "identity is guarded at the SCHEMA, with located errors for every shape: `id` and `version` are required by ManifestSchema (an absent one fails safeParse with a located error), a non-semver version fails its SemVer regex, and `id: \"\"` fails manifest.id's reverse-domain rule — a located Zod error ('Invalid package id '' on `manifest.id`. Expected reverse-domain notation …'), not the build's post-parse 'must declare both \"id\" and \"version\"' guard. That guard (build.ts) is now unreachable from a manifest that passed safeParse; an empty id never reaches it, and it is not scored",
+          "clause": "identity is guarded at the SCHEMA, with located errors for every shape: `id` and `version` are required by ManifestSchema (an absent one fails safeParse with a located error), a non-semver version fails its SemVer regex, and `id: \"\"` fails manifest.id's reverse-domain rule — a located Zod error ('Invalid package id ''. A package id (`manifest.id`) is written in reverse-domain notation, like …'), not the build's post-parse 'must declare both \"id\" and \"version\"' guard. That guard (build.ts) is now unreachable from a manifest that passed safeParse; an empty id never reaches it, and it is not scored",
           "oracle": "log",
           "verify": "probes 6b, 6c and 6d, each read as its OWN located refusal under 'objectstack.plugin.json is invalid:' — 6b the missing key, 6c the version regex, 6d the reverse-domain refusal naming manifest.id with the received '' — each exiting nonzero with no artifact. 6d printing 'must declare both \"id\" and \"version\"' instead would mean the schema rule regressed. Collapsing the three into one 'it refuses' observation cannot tell which rule answered",
           "evidence": "the three refusals side by side, each with its exit code"
@@ -1593,6 +1593,12 @@
           "date": "2026-10-04",
           "change": "A2 and refusal probe (d) re-pointed: `id: \"\"` is now a located Zod error at safeParse — manifest.id enforces the reverse-domain rule (MANIFEST_ID_PATTERN / manifestIdRefusal, manifest.zod.ts) — so the build.ts post-parse 'must declare both \"id\" and \"version\"' guard is unreachable from it and is no longer scored. Stale clause. Source 097d26859 (#18319)",
           "ref": "#21735"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-08",
+          "change": "text refresh only, no property change: A2 quoted the package-id refusal headline as 'Invalid package id '' on `manifest.id`. Expected reverse-domain notation …', which manifestIdRefusal (manifest.zod.ts) no longer prints — the headline now names the package id in product words and the key rides in the second sentence as a parenthetical locator. Requoted from the source at 6729e107e. The scored property is unchanged: probe (d) is still a located reverse-domain refusal at safeParse that names manifest.id and echoes the received ''",
+          "ref": "#22093"
         }
       ]
     },

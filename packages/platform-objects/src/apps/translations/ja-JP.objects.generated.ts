@@ -2500,7 +2500,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       headers_json: {
         label: "ヘッダー（JSON）",
-        help: "IEmailService.send に渡されたカスタムヘッダーを、name → value の JSON オブジェクトとして保持します。両方の配信モードで書き込まれます（配信の入力であると同時に監査証跡でもあるため）。この列が存在する前に書き込まれた行には値がなく、「カスタムヘッダーなし」として読み戻されます。"
+        help: "メッセージの送信時に指定されたカスタムヘッダーを、name → value の JSON オブジェクトとして保持します。両方の配信モードで書き込まれます（配信の入力であると同時に監査証跡でもあるため）。この列が存在する前に書き込まれた行には値がなく、「カスタムヘッダーなし」として読み戻されます。"
       },
       attachments_json: {
         label: "添付ファイル（JSON）",
@@ -2508,7 +2508,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       status: {
         label: "ステータス",
-        help: "ライフサイクル状態 — トランスポート呼び出し前に IEmailService.send がキューに入れます",
+        help: "ライフサイクル状態 — 送信が要求された時点で、最初の配信試行の前にキューに入ります",
         options: {
           queued: "キュー済み",
           sent: "送信済み",
