@@ -1554,6 +1554,12 @@ importers:
       '@objectstack/rest':
         specifier: workspace:*
         version: link:../../rest
+      '@objectstack/service-storage':
+        specifier: workspace:*
+        version: link:../../services/service-storage
+      '@objectstack/verify':
+        specifier: workspace:*
+        version: link:../../verify
       '@types/node':
         specifier: ^26.6.3
         version: 26.6.3
