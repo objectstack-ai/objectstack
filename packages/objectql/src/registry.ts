@@ -3040,11 +3040,6 @@ export class SchemaRegistry {
     return { replanned: [...replanned].sort(), keptAuthoredColumn: [...keptAuthoredColumn].sort() };
   }
 
-  /** [ADR-0131 D7] The objects THIS deployment declares platform-global (read-only view). */
-  getDeploymentPlatformGlobalObjects(): ReadonlySet<string> {
-    return this.deploymentPlatformGlobalObjects;
-  }
-
   /**
    * [ADR-0131 D7] Record the deployment's platform-global declaration on one
    * base-layer body: a declared object carries no `organization_id` here and
