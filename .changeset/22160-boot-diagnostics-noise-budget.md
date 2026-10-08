@@ -6,7 +6,7 @@
 
 Clause-②: no
 
-- **The record that needs you comes first, with its fix.** A script action declared with no handler (a button wired to nothing) prints first in *Boot diagnostics*, highlighted, naming each action, with its fix on the next line. A blank project with the tutorial's Resolve action now shows:
+- **The record that needs you comes first, with its fix.** A script action declared with no handler (a button wired to nothing) prints first in *Boot diagnostics*, highlighted, naming each action, with its fix on the next line. A blank project with one such action shows:
 
   ```text
   ⚠ Boot diagnostics — 1 needs your attention · 2 informational:

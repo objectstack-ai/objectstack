@@ -4,18 +4,21 @@
  * #22160 — the dev-mode noise budget, over a REAL boot of the blank starter.
  *
  * A project scaffolded by the on-ramp (`npm create objectstack`) and given the
- * Build-with-Claude-Code tutorial's ticket object and Resolve action, written
- * as the tutorial writes them, boots with exactly ONE record that needs the
- * author: the action is `type: 'script'` with a `target` and nothing registers
- * a handler for it, so it is a button wired to nothing. Measured on `main`
- * 7d7943dd with `os dev --ui --fresh`: three WARN records under *Boot
- * diagnostics*, that one indistinguishable from the other two.
+ * Build-with-Claude-Code tutorial's ticket object and two actions boots with
+ * exactly ONE record that needs the author. The tutorial's Resolve action is
+ * a declarative update and needs no handler. The second action, Escalate, is
+ * `type: 'script'` with a `target` that nothing registers, so it is a button
+ * wired to nothing. (Until the tutorial moved Resolve to a declarative update,
+ * Resolve itself had that shape. Measured on `main` 7d7943dd with
+ * `os dev --ui --fresh`: three WARN records under *Boot diagnostics*, the dead
+ * button indistinguishable from the other two.)
  *
  * What this file pins is the printer's half only, over the whole command:
- * that one record is the ONE line highlighted as needing attention, with its
- * fix line under it, and no stack trace reaches the banner. It deliberately
- * pins NO informational count — the level every other boot record is logged
- * at belongs to that record's producer, and those owners are changing them.
+ * Escalate's record is the ONE line highlighted as needing attention, with its
+ * fix line under it. Resolve is named on no line, and no stack trace reaches
+ * the banner. It deliberately pins NO informational count — the level every
+ * other boot record is logged at belongs to that record's producer, and those
+ * owners are changing them.
  * The per-shape legs (each log format, the stack withholding, the debug-level
  * stream) are `src/utils/format.boot-warning-classes.test.ts`.
  *
@@ -38,7 +41,10 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const ON_RAMP_BIN = resolve(HERE, '../../..', 'packages/create-objectstack/bin/create-objectstack.js');
 
 const PROJECT = 'support-desk';
-const DEAD_BUTTON = 'support_desk_ticket:resolve_ticket';
+/** The handler-less script action: the one record that needs the author. */
+const DEAD_BUTTON = 'support_desk_ticket:escalate_ticket';
+/** The tutorial's declarative Resolve: no handler needed, so never highlighted. */
+const DECLARATIVE = 'resolve_ticket';
 
 /** The tutorial's `src/objects/ticket.object.ts`. */
 const TICKET_OBJECT = `import { ObjectSchema, Field } from '@objectstack/spec/data';
@@ -78,20 +84,34 @@ export const Ticket = ObjectSchema.create({
 });
 `;
 
-/** The tutorial's `src/actions/ticket.actions.ts`: a script action, a `target`, no `body`, no handler. */
-const RESOLVE_ACTION = `import { defineAction } from '@objectstack/spec/ui';
+/**
+ * `src/actions/ticket.actions.ts`: the tutorial's Resolve, a declarative
+ * single-record update that needs no handler, beside Escalate, a script action
+ * whose `target` nothing registers, with no `body`.
+ */
+const TICKET_ACTIONS = `import { defineAction } from '@objectstack/spec/ui';
 
 export const ResolveTicketAction = defineAction({
   name: 'resolve_ticket',
   label: 'Resolve',
   objectName: 'support_desk_ticket',
   icon: 'check-circle',
-  type: 'script',
-  target: 'resolveTicket',
+  operation: 'update',
+  patch: { status: 'resolved' },
   locations: ['record_header', 'list_item'],
   visible: 'has(record.status) && record.status != "resolved" && record.status != "closed"',
   successMessage: 'Ticket resolved.',
   refreshAfter: true,
+});
+
+export const EscalateTicketAction = defineAction({
+  name: 'escalate_ticket',
+  label: 'Escalate',
+  objectName: 'support_desk_ticket',
+  icon: 'arrow-up',
+  type: 'script',
+  target: 'escalateTicket',
+  locations: ['record_header'],
 });
 `;
 
@@ -123,8 +143,11 @@ beforeAll(async () => {
   const dir = join(root, PROJECT);
   writeFileSync(join(dir, 'src', 'objects', 'ticket.object.ts'), TICKET_OBJECT);
   appendFileSync(join(dir, 'src', 'objects', 'index.ts'), "export { Ticket } from './ticket.object.js';\n");
-  writeFileSync(join(dir, 'src', 'actions', 'ticket.actions.ts'), RESOLVE_ACTION);
-  appendFileSync(join(dir, 'src', 'actions', 'index.ts'), "export { ResolveTicketAction } from './ticket.actions.js';\n");
+  writeFileSync(join(dir, 'src', 'actions', 'ticket.actions.ts'), TICKET_ACTIONS);
+  appendFileSync(
+    join(dir, 'src', 'actions', 'index.ts'),
+    "export { ResolveTicketAction, EscalateTicketAction } from './ticket.actions.js';\n",
+  );
   boot = await runServe(dir, ['--port', randomPort()], { waitFor: /Press Ctrl\+C to stop/, timeoutMs: RUN_TIMEOUT_MS - 60_000 });
 }, RUN_TIMEOUT_MS);
 
@@ -141,7 +164,7 @@ function bootDiagnosticsBlock(run: ServeRun): string[] {
   return lines.slice(from, to === -1 ? undefined : to);
 }
 
-describe('[#22160] the tutorial project boots with exactly one line that needs the author', () => {
+describe('[#22160] a project with one dead button boots with exactly one line that needs the author', () => {
   it('scaffolds and boots', () => {
     expect(scaffold.code, scaffold.output).toBe(0);
     expect(boot, 'os serve never reached its banner').toBeDefined();
@@ -160,6 +183,8 @@ describe('[#22160] the tutorial project boots with exactly one line that needs t
     expect(named[0]).toMatch(/^ {4}⚠ \[action-governance\] declared script actions with NO handler/);
     expect(block[block.indexOf(named[0]) + 1]).toMatch(/^ {6}fix: \S/);
     expect(block.filter((line) => /^ {6}fix: /.test(line))).toHaveLength(1);
+    // The control in the same boot: the declarative action is named nowhere.
+    expect(block.filter((line) => line.includes(DECLARATIVE)), block.join('\n')).toEqual([]);
   });
 
   it('carries no stack trace into the banner', () => {

@@ -48,11 +48,14 @@ import { collectAutomationSummary } from '../commands/serve.js';
  *
  * ## #22160 — the dev-mode noise budget, the printer's half
  *
- * A blank project written verbatim from the Build-with-Claude-Code tutorial
- * booted (measured on `main` 7d7943dd, `os dev --ui --fresh`) with three WARN
- * records under *Boot diagnostics*, one of which needs the author: the
- * tutorial's `resolve_ticket` action is a button wired to nothing. It looked
- * exactly like the other two, and one of those carried a ten-frame knex stack.
+ * A blank project carrying the Build-with-Claude-Code tutorial's files as they
+ * stood on `main` 7d7943dd booted (`os dev --ui --fresh`) with three WARN
+ * records under *Boot diagnostics*, one of which needs the author: its
+ * `resolve_ticket` action was `type: 'script'` with a `target` nothing
+ * registers — a button wired to nothing. It looked exactly like the other
+ * two, and one of those carried a ten-frame knex stack. (The tutorial has
+ * since made Resolve a declarative update; a script action whose handler
+ * never registers is still what this record names.)
  * The pins (the seat's scope cut on #22160):
  *
  *   - a record carrying a stack prints WITHOUT it at the default level, and
@@ -400,11 +403,11 @@ describe('print-once: Boot diagnostics withholds what the banner restated (forma
 // ---------------------------------------------------------------------------
 
 /**
- * The tutorial's ticket object as the inventory reads it: its Resolve action
- * is `type: 'script'` with a `target` and no `body`, and nothing registers a
- * handler — the dead button a verbatim tutorial project boots with.
+ * A ticket object as the inventory reads it, with a Resolve action that is
+ * `type: 'script'` with a `target` and no `body`, and no handler registered —
+ * the dead button the measured boot carried.
  */
-const TUTORIAL_TICKET = {
+const DEAD_BUTTON_TICKET = {
   name: 'support_desk_ticket',
   actions: [{ name: 'resolve_ticket', label: 'Resolve', type: 'script', target: 'resolveTicket' }],
 };
@@ -442,7 +445,7 @@ describe('the noise budget over real producers (#22160)', () => {
   /**
    * One boot's worth of boot-phase records through the REAL `ObjectLogger`
    * and `BootLogCapture`: an expected degradation, the REAL
-   * `@objectstack/objectql` action inventory over the tutorial's ticket, and a
+   * `@objectstack/objectql` action inventory over that ticket, and a
    * failed insert carrying a stack. Returns the captured records and the
    * inventory's own message, read off the producer as it logged it.
    */
@@ -458,12 +461,12 @@ describe('the noise budget over real producers (#22160)', () => {
     };
     await underQuietWindow(capture, async () => {
       logger.warn('[Analytics] No admitObjectRead configured at init — the bridge resolves per query');
-      await runActionGovernanceInventory({ registered: [], objects: [TUTORIAL_TICKET], logger: inventoryLogger });
+      await runActionGovernanceInventory({ registered: [], objects: [DEAD_BUTTON_TICKET], logger: inventoryLogger });
       logFailedInsert(logger);
     });
     const captured = capture.diagnostics();
     printBootDiagnostics({ lines: captured, dropped: capture.droppedCount });
-    expect(messages, 'the real inventory logged nothing for the tutorial ticket').toHaveLength(1);
+    expect(messages, 'the real inventory logged nothing for the ticket').toHaveLength(1);
     return { captured, inventoryMessage: messages[0] };
   }
 
