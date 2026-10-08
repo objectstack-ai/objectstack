@@ -74,14 +74,14 @@ describe('ADR-0108: the membership-role vocabulary is closed; capability goes th
     ownerToken = await stack.signIn(); // the seeded dev admin
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 
-    // `bootStack` disables the default-org bootstrap, so mint the org the way
-    // the bootstrap would (system context — the only writer better-auth-managed
-    // tables accept, ADR-0092) and bind the dev admin as its owner.
-    const org = await ql.insert(
-      'sys_organization',
-      { name: 'Default Organization', slug: 'default' },
-      { context: SYSTEM_CTX },
-    );
+    // [ADR-0131 D3] The Default Organization is a boot invariant under
+    // `single`: the boot created it before the seeds loaded. Read it — minting
+    // a second `slug: 'default'` row is refused as a duplicate.
+    // The owner bind made the dev admin its owner; the block below re-asserts
+    // that membership (system context — the only writer better-auth-managed
+    // tables accept, ADR-0092), so the fixture does not lean on the bind.
+    const [org] = await findRows(ql, 'sys_organization', { slug: 'default' }, 1);
+    expect(org?.id, 'the boot created the Default Organization').toBeTruthy();
     orgId = String(org.id);
 
     const [adminUser] = await findRows(ql, 'sys_user', { email: 'admin@objectos.ai' }, 1);

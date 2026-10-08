@@ -53,7 +53,10 @@ describe('delegation of duty (ADR-0091 D3) — end to end', () => {
     const u = await ql.findOne('sys_user', { where: { email }, context: SYS.context });
     return String(u?.id ?? '');
   };
-  const sessionFor = (userId: string) => async () => ({ user: { id: userId }, session: {} });
+  // [ADR-0131 D3] Every sign-up is a member of the Default Organization, so the
+  // delegate's real session carries it as the active organization.
+  let orgId: string;
+  const sessionFor = (userId: string) => async () => ({ user: { id: userId }, session: { activeOrganizationId: orgId } });
 
   beforeAll(async () => {
     stack = await bootStack(showcaseStack, {
@@ -70,12 +73,20 @@ describe('delegation of duty (ADR-0091 D3) — end to end', () => {
     delegatorId = await idOf(DELEGATOR);
     delegateId = await idOf(DELEGATE);
 
+    // [ADR-0131 D3] The boot created the Default Organization and the
+    // delegator is its member, so the gate reads the delegator's OWN
+    // organization's position row and assignments (ADR-0091 D3 rule 5): both
+    // are the Default Organization's rows, as an org-bound deployment holds them.
+    const org = await ql.findOne('sys_organization', { where: { slug: 'default' }, context: SYS.context });
+    expect(org?.id, 'the boot created the Default Organization').toBeTruthy();
+    orgId = String(org.id);
+
     // A delegatable position + a non-delegatable one (system inserts sidestep
     // authoring rules). The delegator DIRECTLY holds the delegatable one.
-    await ql.insert('sys_position', { id: 'pos_vac_appr', name: 'vacation_approver', label: 'Vacation Approver', delegatable: true, active: true }, SYS);
-    await ql.insert('sys_position', { id: 'pos_locked', name: 'locked_duty', label: 'Locked Duty', delegatable: false, active: true }, SYS);
-    await ql.insert('sys_user_position', { id: 'hold_boss', user_id: delegatorId, position: 'vacation_approver' }, SYS);
-    await ql.insert('sys_user_position', { id: 'hold_boss_locked', user_id: delegatorId, position: 'locked_duty' }, SYS);
+    await ql.insert('sys_position', { id: 'pos_vac_appr', name: 'vacation_approver', label: 'Vacation Approver', delegatable: true, active: true, organization_id: orgId }, SYS);
+    await ql.insert('sys_position', { id: 'pos_locked', name: 'locked_duty', label: 'Locked Duty', delegatable: false, active: true, organization_id: orgId }, SYS);
+    await ql.insert('sys_user_position', { id: 'hold_boss', user_id: delegatorId, position: 'vacation_approver', organization_id: orgId }, SYS);
+    await ql.insert('sys_user_position', { id: 'hold_boss_locked', user_id: delegatorId, position: 'locked_duty', organization_id: orgId }, SYS);
   }, 90_000);
 
   afterAll(async () => { await stack?.stop(); });
