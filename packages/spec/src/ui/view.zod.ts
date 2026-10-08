@@ -54,7 +54,8 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { closedObject, strictObject, strictObjectError } from '../shared/strict-object';
 import { SnakeCaseIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
-import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
+import { normalizeVisibleWhen } from '../shared/visibility';
+import { VISIBILITY_STRICT_OPTIONS } from '../shared/visibility-strict-options';
 import { SELECT_OPTION_EDITABILITY_GUIDANCE, VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
 // [#13855] The section → field-group reference form, shared with the
 // `record:details` section shape (component.zod.ts) so one mixing rule serves

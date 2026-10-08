@@ -135,7 +135,7 @@ export const SysPresence = ObjectSchema.create({
 
   indexes: [
     { fields: ['user_id'], unique: false },
-    { fields: ['session_id'], unique: true },
+    { fields: ['session_id'], unique: 'global' },
     { fields: ['status'], unique: false },
   ],
 

@@ -92,7 +92,6 @@
     "TemplateExpressionInputSchema": "src/shared/expression.zod.ts#TemplateExpressionInputSchema (const)",
     "TypedExpressionDialect": "src/shared/expression.zod.ts#TypedExpressionDialect (type)",
     "VISIBILITY_ALIAS_KEYS": "src/shared/visibility.ts#VISIBILITY_ALIAS_KEYS (const)",
-    "VISIBILITY_STRICT_OPTIONS": "src/shared/visibility.ts#VISIBILITY_STRICT_OPTIONS (const)",
     "ValueDomain": "src/shared/value-domain.zod.ts#ValueDomain (type)",
     "ValueDomainSchema": "src/shared/value-domain.zod.ts#ValueDomainSchema (const)",
     "applyProtection": "src/shared/protection.zod.ts#applyProtection (function)",

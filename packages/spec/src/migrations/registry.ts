@@ -5450,6 +5450,23 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'carries the rest.',
   },
   {
+    id: 'declared-index-bare-unique-true-retired',
+    order: 86,
+    text:
+      'It also makes a declared index state its uniqueness scope (ADR-0120 D1, staged to this '
+      + 'protocol by D7). On `indexes[].unique`, bare `true` was the one spelling whose scope was '
+      + 'positional: it built the index over exactly `fields`, one holder across the whole '
+      + 'installation, while reading like "unique per organization" to an author who knew the '
+      + 'field-level meaning. The parse now refuses it with a prescription naming both words — '
+      + '`\'global\'` (installation-wide, the index bare `true` built) and `\'organization\'` (one '
+      + 'holder per organization). Field-level `unique: true` is untouched. The D2 conversion '
+      + '`declared-index-unique-scope` rewrites a declared index\'s bare `true` to `\'global\'`, '
+      + 'which is lossless and drift-free by construction, retired from the load path so authors '
+      + 'are refused at the door while stored rows, built artifacts and `os migrate meta` replay '
+      + 'it. Its D3 record is the semantic entry `declared-index-bare-unique-true-retired`: '
+      + 'whether each respelled index was really meant installation-wide is the author\'s call.',
+  },
+  {
     id: 'deployment-plumbing-organization-columns-retired',
     order: 86,
     text:
@@ -10685,6 +10702,37 @@ const step18: MigrationStep = {
         'has a username in that URL\'s userinfo and connects authenticated as that user; every ' +
         'datasource meant to connect anonymously carries no `credentialsRef`; no datasource ' +
         'parse reports this URL-branch refusal.',
+    },
+    // ADR-0120 D1 / D2 / D5a, staged by D7 to protocol 18: the declared index's
+    // positional `unique: true` is refused, and the chain respells it `'global'`.
+    {
+      id: 'declared-index-bare-unique-true-retired',
+      surface: '`indexes[].unique: true` on a declared index (`objects[]` and `objectExtensions[]`) — '
+        + 'the bare boolean, the one `unique` spelling whose scope was positional',
+      replacement: 'a stated scope: `unique: \'global\'` (one holder across the whole installation — '
+        + 'exactly the index bare `true` built, which is what the chain writes) or '
+        + '`unique: \'organization\'` (one holder per organization — the driver prepends the NULL-safe '
+        + 'organization key part `COALESCE(organization_id, \'__global__\')` to `fields` at '
+        + 'registration). `unique: false` / omitted is unchanged, and field-level `unique: true` is '
+        + 'unchanged and stays valid (it means per organization there)',
+      reason:
+        'The mechanical rewrite keeps every index exactly as it was built — `\'global\'` IS the verbatim '
+        + 'column list bare `true` materialized, so nothing on disk changes. What the chain cannot know '
+        + 'is what the author MEANT. On a declared index bare `true` read like "unique per '
+        + 'organization" to anyone who knew the field-level meaning, and silently built an '
+        + 'installation-wide constraint instead: an index meant per organization has been refusing a '
+        + 'second organization\'s value all along, and its refusal told that organization somebody '
+        + 'else holds it. Each respelled index is therefore a decision the owner makes once: keep '
+        + '`\'global\'` for a genuinely installation-wide key (a hostname, an external provider id, an '
+        + 'engine dedup key), or move it to `\'organization\'` so each organization may hold the value '
+        + 'once — a change to the physical index that `os migrate plan` shows before anything is '
+        + 'applied.',
+      acceptanceCriteria:
+        'No declared index in the sources carries `unique: true`: `os validate` passes, and every '
+        + 'stored `object` row reads back with `\'global\'` where it held bare `true`. `os migrate plan` '
+        + 'against the existing database shows no index operation for an index kept at `\'global\'`. '
+        + 'Each index moved to `\'organization\'` appears in that plan as a planned index change.',
+      conversionIds: ['declared-index-unique-scope'],
     },
     {
       id: 'device-request-response-interval-unit-in-key',
@@ -18774,7 +18822,7 @@ const step18: MigrationStep = {
         + 'sign-in failed `INVALID_EMAIL_OR_PASSWORD` behind a "User not found" warn pointing at the '
         + '`sys_user` row rather than at the account — four checklist items rediscovered that '
         + 'independently. Its discriminating power here was near zero: `sys_sso_provider` declares '
-        + '`{ fields: [\'provider_id\'], unique: true }`, so `provider_id → issuer` is a function '
+        + '`{ fields: [\'provider_id\'], unique: \'global\' }`, so `provider_id → issuer` is a function '
         + 'within an environment.',
       acceptanceCriteria:
         'BEFORE the column is dropped, `os migrate account-issuer` reads zero on the deployment: no '
@@ -22426,6 +22474,33 @@ const step18: MigrationStep = {
         + '`pagination: { pageSize: 25 }` still parses to 25; `pageSize: 0`, a negative and a '
         + 'fraction are still refused. A view that must keep 25 rows per page declares '
         + '`pagination: { pageSize: 25 }` and shows 25 rows on its first page.',
+    },
+    // A TS/API surface, never stored in stack metadata: there is no source for the
+    // chain to rewrite, so this entry is the whole ADR-0087 registration.
+    {
+      id: 'visibility-strict-options-unexported',
+      surface:
+        '`VISIBILITY_STRICT_OPTIONS` (const) on `@objectstack/spec/shared` — the shared '
+        + '`strictObject` options of the visibility-carrying view/page shapes (ADR-0089 D3a)',
+      replacement:
+        '(removed from the public surface — no replacement export. It was an internal option bag '
+        + 'for this package\'s own schemas; the visibility contract it configures is unchanged and '
+        + 'still published through the schemas that use it — `FormFieldSchema`, `FormSectionSchema` '
+        + 'and the page component — together with `normalizeVisibleWhen` and '
+        + '`VISIBILITY_ALIAS_KEYS`, which stay exported.)',
+      reason:
+        'ADR-0049 enforce-or-remove applied to an export. The const was barrel-exported while its '
+        + 'type, `StrictObjectOptions`, is deliberately unpublished, so no consumer could annotate it, '
+        + 'spread it into a typed option bag or name it in a parameter — a published value with no '
+        + 'usable contract and zero measured pull outside this package. Publishing the type instead '
+        + 'was weighed and not adopted: no consumer ever asked for it, and it would turn the '
+        + 'strict-object template\'s internals into public API.',
+      acceptanceCriteria:
+        'No code imports `VISIBILITY_STRICT_OPTIONS` from `@objectstack/spec`, `@objectstack/spec/shared` '
+        + 'or any other entry (TS2305 after upgrade). Every visibility-carrying shape parses and '
+        + 'refuses exactly as before — the options object is unchanged, only where it is exported '
+        + 'from moved. No authored metadata document ever carried it, so `os migrate meta` has '
+        + 'nothing to visit.',
     },
     {
       id: 'wait-node-event-config-required',

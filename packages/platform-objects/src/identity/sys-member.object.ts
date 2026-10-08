@@ -344,7 +344,7 @@ export const SysMember = ObjectSchema.create({
   },
   
   indexes: [
-    { fields: ['organization_id', 'user_id'], unique: true },
+    { fields: ['organization_id', 'user_id'], unique: 'global' },
     { fields: ['user_id'] },
   ],
   

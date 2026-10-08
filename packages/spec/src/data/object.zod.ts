@@ -382,29 +382,60 @@ export const ObjectCapabilities = strictObject({
  * finding 7 (a suggestion pointing into a second rejection).
  */
 /**
+ * The refusal of a bare `unique: true` on a DECLARED INDEX (ADR-0120 D1 / D5a,
+ * retired at protocol 18 per D7).
+ *
+ * Bare `true` was the one spelling on this key whose scope was encoded by
+ * POSITION: on a declared index it set neither driver flag and materialized
+ * over exactly `fields` — installation-wide — while reading like "unique per
+ * organization" to anyone who knew the field-level meaning (the #4986 trap).
+ * 17.x warned (lint `unique/unscoped-declared-index`); protocol 18 refuses it,
+ * so the scope is always STATED. Field-level `unique: true` is untouched — it
+ * has one documented meaning there and stays valid (D1).
+ *
+ * Stored and built metadata never meets this refusal: the protocol-18 ADR-0087
+ * conversion `declared-index-unique-scope` rewrites a declared index's bare
+ * `true` to `'global'` — byte-identical physical index, zero drift — on every
+ * data-at-rest seam (`applyConversionsToStoredItem`, the artifact door inside
+ * its declared-floor window, `os migrate meta`). It is retired from the
+ * authoring funnel, so a live author is refused here and taught the explicit
+ * spelling instead of being converted silently.
+ *
+ * ⛔ Runtime text — no tracker numbers (`check:doc-authoring`).
+ */
+const DECLARED_INDEX_BARE_TRUE_RETIRED =
+  '`indexes[].unique: true` was retired at protocol 18 (ADR-0120 D1) — on a declared index '
+  + 'bare `true` never stated a scope: it built the index over exactly `fields`, one holder '
+  + 'across the whole installation, while reading like "unique per organization". State the '
+  + "scope: `unique: 'global'` (installation-wide — the exact index bare `true` built, so "
+  + "nothing on disk changes) or `unique: 'organization'` (one holder per organization — the "
+  + 'driver prepends the NULL-safe organization key part to `fields` at registration). '
+  + 'Field-level `unique: true` is unaffected. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+/**
  * Prescriptive rejection for a mis-spelled `unique` scope **on a DECLARED
  * INDEX** — the sibling of `field.zod.ts`'s `uniqueScopeError`, and the reason
  * the two are not one map.
  *
- * Same vocabulary (`boolean | 'global' | 'organization'`), same near-miss
- * table, same `invalid_union` channel. The difference is the one clause an
- * author acts on: **what bare `true` positionally means here.** At field level
- * `true` resolves per-organization, so naming `'organization'` "the explicit
- * spelling of true" is a true and useful hint. On this surface `true` sets
- * neither driver flag (`isGlobalUnique` / `isOrganizationUnique` are both
- * false) and the index materializes over exactly `fields` — i.e. `'global'` is
- * what `true` spells. The shared text therefore told an author who had just
- * been refused on this key to write `'organization'` for what they already had,
- * which asks the driver to prepend the NULL-safe organization key part at
- * registration — a materialization change, silently, on an index that may
- * already exist on deployed databases. That is precisely the unannounced index
- * reinterpretation the #8323 ruling (maintainer, 2026-08-13) rejects and the
- * #5082 protocol-18 sequencing is there to stage.
+ * Same near-miss table, same `invalid_union` channel. The two surfaces differ
+ * on exactly one member, and it is the one an author acts on: **bare `true`.**
+ * At field level `true` resolves per-organization, so naming `'organization'`
+ * "the explicit spelling of true" is a true and useful hint. On this surface
+ * `true` used to set neither driver flag and materialize over exactly
+ * `fields` — i.e. `'global'` is what it spelled — and since protocol 18 it is
+ * REFUSED here with {@link DECLARED_INDEX_BARE_TRUE_RETIRED}, which names both
+ * replacements and which one keeps the index it built. Telling an author who
+ * had just been refused on this key to write `'organization'` for what they
+ * already had would ask the driver to prepend the NULL-safe organization key
+ * part at registration — a materialization change, silently, on an index that
+ * may already exist on deployed databases: the unannounced index
+ * reinterpretation the #8323 ruling (maintainer, 2026-08-13) rejects.
  *
- * ⛔ Message text only. The accepted and rejected sets are byte-identical to
- * `UniqueScopeSchema`'s and must stay so — `unique-scope-message.test.ts` pins
- * both surfaces against the same value table, so a member added or dropped on
- * either side fails there rather than diverging quietly.
+ * ⛔ The accepted set is `UniqueScopeSchema`'s MINUS bare `true`, and nothing
+ * else may differ — `unique-scope-message.test.ts` pins both surfaces against
+ * one value table whose only split row is `true`, so a member added or dropped
+ * on either side fails there rather than diverging quietly.
  *
  * Declared before `IndexSchema` because `OS_EAGER_SCHEMAS=1` evaluates the
  * factory at module load (TDZ) — same constraint as the field-surface map.
@@ -412,31 +443,36 @@ export const ObjectCapabilities = strictObject({
 const declaredIndexUniqueScopeError: z.core.$ZodErrorMap = (issue) => {
   if (issue.code !== 'invalid_union') return undefined;
   const input = (issue as { input?: unknown }).input;
+  if (input === true) return DECLARED_INDEX_BARE_TRUE_RETIRED;
   const spelled = typeof input === 'string' ? `'${input}'` : String(input);
   const nearMiss =
     input === 'tenant' || input === 'org'
       ? ` ${spelled} is not accepted and is not an alias — the per-organization scope is spelled 'organization' (ADR-0120: "tenant" is overloaded across deployment topologies, and the platform spells the word out).`
       : '';
   return (
-    `Invalid unique scope ${spelled}. Allowed: true/false, 'organization' ` +
+    `Invalid unique scope ${spelled}. Allowed: false, 'organization' ` +
     `(one holder per organization — the driver prepends the NULL-safe ` +
     `organization key part to \`fields\` at registration), or 'global' ` +
     `(one holder across the whole installation — materialized over exactly ` +
-    `\`fields\`, and the positional meaning of bare true on a declared index: ` +
-    `bare true is warned by lint unique/unscoped-declared-index in 17.x and ` +
-    `rejected at protocol 18).${nearMiss}`
+    `\`fields\`). Bare true is not accepted on a declared index: state the ` +
+    `scope.${nearMiss}`
   );
 };
 
 /**
- * `UniqueScopeSchema`'s declared-index twin: the same union, refused in the
- * index surface's own words. See `declaredIndexUniqueScopeError` above for why
- * the message cannot be shared, and `field.zod.ts`'s `UniqueScopeSchema` for
- * the scope vocabulary itself (ADR-0120 D1) — the member list is duplicated
- * deliberately and pinned equivalent, never re-derived.
+ * `UniqueScopeSchema`'s declared-index twin: the same vocabulary minus bare
+ * `true` (retired at protocol 18 — see {@link DECLARED_INDEX_BARE_TRUE_RETIRED}),
+ * refused in the index surface's own words. See `declaredIndexUniqueScopeError`
+ * above for why the message cannot be shared, and `field.zod.ts`'s
+ * `UniqueScopeSchema` for the scope vocabulary itself (ADR-0120 D1) — the
+ * member list is written out deliberately and pinned against the field's,
+ * never re-derived.
+ *
+ * `false` stays a member: "not unique" states no scope and needs none, and it
+ * is the key's default.
  */
 const DeclaredIndexUniqueScopeSchema = lazySchema(() =>
-  z.union([z.boolean(), z.literal('global'), z.literal('organization')], {
+  z.union([z.literal(false), z.literal('global'), z.literal('organization')], {
     error: declaredIndexUniqueScopeError,
   }),
 );
@@ -477,17 +513,21 @@ export const IndexSchema = lazySchema(() => strictObject({
   //     Materialization lands with #5030's driver PR. On an object with no
   //     organization column it degrades to the listed columns alone,
   //     mirroring field-level behavior.
-  //   - bare `true` — the DEPRECATED positional spelling of `'global'`
-  //     (today's verbatim behavior, unchanged). It is the spelling whose
-  //     meaning was encoded by position — the #4986 trap — so 17.x warns
-  //     (lint `unique/unscoped-declared-index`) and protocol 18 rejects it
-  //     with a prescriptive error (#5082). State the scope.
+  //   - bare `true` — REFUSED since protocol 18 (#5082, ADR-0120 D7). It
+  //     was the positional spelling of `'global'`, the one spelling whose
+  //     meaning was encoded by position (the #4986 trap): 17.x warned
+  //     through lint `unique/unscoped-declared-index`, and the parse now
+  //     refuses it with a prescription naming both words. Stored and built
+  //     metadata converts to `'global'` instead (the ADR-0087 conversion
+  //     `declared-index-unique-scope`, byte-identical physical index). State
+  //     the scope.
+  //   - `false` (or omitted) — not unique; states no scope and needs none.
   //
   // The old advice "spell a per-tenant index as
   // `fields: ['organization_id', 'code']`" survives as valid legacy input,
   // but new code says `unique: 'organization'` — the hand-written composite
   // is NOT NULL-safe (#5030).
-  unique: DeclaredIndexUniqueScopeSchema.optional().default(false).describe("Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; bare true = deprecated positional spelling of 'global' (warned in 17.x by lint unique/unscoped-declared-index, rejected at protocol 18) — state the scope. 'tenant'/'org' are rejected — the word is 'organization'").meta({ title: 'Unique' }),
+  unique: DeclaredIndexUniqueScopeSchema.optional().default(false).describe("Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; false/omitted = not unique. Bare true is refused (retired at protocol 18 — it was the positional spelling of 'global'): state the scope. 'tenant'/'org' are rejected — the word is 'organization'").meta({ title: 'Unique' }),
 
   // ── Tombstones (ADR-0049 / ADR-0087) ─────────────────────────────────
   // Kept LAST in the shape on purpose — see the #5606 note in the block

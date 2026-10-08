@@ -111,7 +111,7 @@ export const NotificationReceipt = ObjectSchema.create({
     },
 
     indexes: [
-        { fields: ['notification_id', 'user_id', 'channel'], unique: true },
+        { fields: ['notification_id', 'user_id', 'channel'], unique: 'global' },
         { fields: ['user_id', 'state'] },
     ],
 
