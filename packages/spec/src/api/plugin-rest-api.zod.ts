@@ -895,7 +895,7 @@ export const DEFAULT_METADATA_ROUTES: RestApiRouteRegistration = {
         'Promotes the item\'s pending DRAFT overlay to the live `active` row and records an '
         + '`op=\'publish\'` history event. The sibling write door of `PUT /:type/:name` — the '
         + 'ADR-0033 two-step spelling, where `?mode=draft` stages a body and this makes it live. '
-        + '404 `NO_DRAFT` when there is nothing to publish; 409 `metadata_conflict` when the '
+        + '404 `NO_DRAFT` when there is nothing to publish; 409 `METADATA_CONFLICT` when the '
         + 'published row advanced while the draft was held. The route was served for a long time with no '
         + 'declaration behind it — this entry is what makes its response contract nameable, the same '
         + 'declared-equals-returned rule the save door follows.',
