@@ -486,7 +486,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable public sharing |
-| **publicLink** | `string` | optional | Generated public share URL |
+| **publicLink** | `string` | optional | Public slug of the form, chosen by the author: not a URL, and never generated. `/forms/x`, `forms/x` and `x` name one slug, `x`. It is served to anonymous visitors only while `enabled` and `allowAnonymous` are both true: the REST form door answers `GET /api/v1/forms/:slug` (default API base), and a host that serves the console shows the form at `/_console/f/:slug` and redirects `/forms/:slug` there, query string carried. |
 | **password** | `string` | optional | Password required to access shared link |
 | **allowedDomains** | `string[]` | optional | Restrict access to specific email domains (e.g. ["example.com"]) |
 | **expiresAt** | `string` | optional | Expiration date/time in ISO 8601 format |
