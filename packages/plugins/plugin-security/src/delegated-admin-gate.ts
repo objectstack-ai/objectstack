@@ -82,9 +82,11 @@ const DEFAULT_DELEGATION_CEILING_MS = 30 * 24 * 60 * 60 * 1000;
  * any other organization pairs an authority minted in one tenant with a tree
  * owned by another — which is what an unscoped by-name read did.
  *
- * Undefined for a `single`-posture caller, and for any context carrying no
- * organization at all: the organization-less surface that posture correctly
- * has, where a by-name anchor is unambiguous and nothing here changes.
+ * Under the `single` posture this is the Default Organization: since ADR-0131
+ * C1 it exists from boot, and every session on a stock `single` deployment —
+ * the administrator's and a delegate's alike — carries it as its active
+ * organization. Undefined only for a context carrying no organization at all,
+ * where a by-name anchor is read organization-less and nothing here changes.
  *
  * Under the `group` posture (ADR-0105 D2) this is the ACTIVE organization, not
  * the caller's whole membership set. That is the narrower of the two, which is
@@ -102,7 +104,7 @@ function callerOrganizationId(context: any): string | undefined {
  * The runtime resolver's own answer (`resolveAuthzContext` step 4, in
  * `@objectstack/core`): a holding stamped with a DIFFERENT organization grants
  * nothing there; an organization-less holding grants in every organization;
- * `organizationId` undefined (a `single`-posture caller) drops nothing.
+ * `organizationId` undefined (a context carrying no organization) drops nothing.
  *
  * Every holding the gate reasons about goes through this, because
  * `sys_user_position.position` is a position NAME and `sys_position.name` is
