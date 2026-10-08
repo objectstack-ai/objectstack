@@ -10,6 +10,7 @@ import type {
   PresignedDownloadDescriptor,
   PresignedDownloadOptions,
 } from '@objectstack/spec/contracts';
+import type { StorageLimitsSnapshot } from './storage-limits.js';
 
 /**
  * SwappableStorageService — IStorageService proxy with a swappable
@@ -33,6 +34,15 @@ import type {
 export class SwappableStorageService implements IStorageService {
   private inner: IStorageService;
   private readonly onSwap?: (previous: IStorageService, next: IStorageService) => void;
+  /**
+   * [#22283] The `storage` namespace's Limits group as last read — carried
+   * HERE, beside the adapter the same namespace selects, because this object
+   * is what every storage door is composed over: the plugin's own mount and a
+   * host's `mountStorageRoutes` both receive it as the kernel's `storage`
+   * service, so a save reaches both doors the way an adapter save already does.
+   * `undefined` until a settings read lands (no namespace bound ⇒ never).
+   */
+  private limits: StorageLimitsSnapshot | undefined;
 
   constructor(
     initial: IStorageService,
@@ -52,6 +62,20 @@ export class SwappableStorageService implements IStorageService {
   /** Expose the active inner adapter — primarily for tests. */
   getInner(): IStorageService {
     return this.inner;
+  }
+
+  /** [#22283] Record the `storage` namespace's Limits group, as `StorageServicePlugin` read it. */
+  setLimitsSnapshot(snapshot: StorageLimitsSnapshot): void {
+    this.limits = snapshot;
+  }
+
+  /**
+   * [#22283] The Limits group as last read, or `undefined` when no settings
+   * read has landed. The upload doors resolve it per request
+   * (`resolveStorageLimits`), so it is read when used, never frozen at mount.
+   */
+  getLimitsSnapshot(): StorageLimitsSnapshot | undefined {
+    return this.limits;
   }
 
   upload(key: string, data: Buffer | ReadableStream, options?: StorageUploadOptions): Promise<void> {

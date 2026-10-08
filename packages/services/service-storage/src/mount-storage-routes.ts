@@ -73,9 +73,17 @@ export type { StorageRouteKernel, StorageRoutesMountReport } from './storage-ser
 export interface MountStorageRoutesOptions {
   /** Wire prefix. @default '/api/v1/storage' */
   basePath?: string;
-  /** Default presigned upload URL TTL in seconds. @default 3600 */
+  /**
+   * Default presigned upload URL TTL in seconds. @default 3600
+   *
+   * [#22283] When the kernel's `storage` service is `StorageServicePlugin`'s
+   * and that plugin is bound to the `storage` settings namespace, a SAVED
+   * `presigned_ttl` wins over this option, and this option wins over the
+   * namespace default — the same precedence the plugin's own mount applies.
+   * The saved `max_upload_mb` reaches this door the same way.
+   */
   presignedTtl?: number;
-  /** Default chunked upload session TTL in seconds. @default 86400 */
+  /** Default chunked upload session TTL in seconds; a SAVED `session_ttl` wins over it. @default 86400 */
   sessionTtl?: number;
   /** TTL of the signed URL minted on a GATED download. @default 300 */
   downloadTtl?: number;
