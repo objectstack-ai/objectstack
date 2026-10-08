@@ -90,6 +90,9 @@ export const SysMember = ObjectSchema.create({
       // BUILTIN_MEMBERSHIP_ROLE_OPTIONS constant sys_invitation reads.
       name: 'invite_user',
       label: 'Invite User',
+      // Same wording as the sys_user / sys_invitation mirrors.
+      description:
+        'Invite someone by email address. They join this organization with the chosen role when they accept the invitation.',
       icon: 'user-plus',
       variant: 'primary',
       locations: ['list_toolbar'],
@@ -102,7 +105,9 @@ export const SysMember = ObjectSchema.create({
       // ...and the grades that reach the endpoint (ADR-0108 D1): owner,
       // admin and delegated_admin — a plain member is not offered it.
       requiresMembershipReach: 'invite_member',
-      successMessage: 'Invitation sent',
+      // `${result.email}`: the invitee's address from the invitation row
+      // invite-member answers (see sys_user's mirror).
+      successMessage: 'Invitation sent to ${result.email}',
       refreshAfter: true,
       params: [
         { field: 'email', objectOverride: 'sys_invitation', required: true },
