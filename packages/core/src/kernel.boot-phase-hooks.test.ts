@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import type { Mock } from 'vitest';
 import { ObjectKernel } from './kernel';
 import type { ObjectKernelConfig } from './kernel';
 import type { Plugin } from './types';
@@ -49,10 +50,10 @@ function newKernel(extra: ObjectKernelConfig = {}): ObjectKernel {
  * and a spy on each of the three boot-phase hooks.
  */
 function composition() {
-    const spies: Record<BootPhaseHook, ReturnType<typeof vi.fn>> = {
-        'kernel:ready': vi.fn(),
-        'kernel:bootstrapped': vi.fn(),
-        'kernel:listening': vi.fn(),
+    const spies: Record<BootPhaseHook, Mock<() => void>> = {
+        'kernel:ready': vi.fn<() => void>(),
+        'kernel:bootstrapped': vi.fn<() => void>(),
+        'kernel:listening': vi.fn<() => void>(),
     };
     const order: string[] = [];
 
