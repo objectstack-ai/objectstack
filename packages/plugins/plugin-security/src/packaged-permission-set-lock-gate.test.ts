@@ -23,7 +23,9 @@
  * IDENTITY (`instanceof PackagedPermissionSetLockedError`), not only the
  * `code`/`status` envelope: `NOT_OVERRIDABLE`/403 is shared with the ADR-0005
  * tier gate by design, so the class is the only fingerprint that proves WHICH
- * layer answered. And every refusal case asserts the ROW COUNT — the defect
+ * layer answered. With the hatch CLOSED the protocol's own package door
+ * answers ahead of the seam on every topology, so that one case asserts the
+ * class is NOT the lock's. And every refusal case asserts the ROW COUNT — the defect
  * this card measured was a write that landed, so "threw" alone is half a pin.
  *
  * ## What is deliberately NOT re-pinned here (Prime Directive #8)
@@ -210,12 +212,16 @@ describe('#11843 — the lock answers at the metadata door', () => {
     expect(metaRowsOf(engine)).toEqual([]);
   }, 30_000);
 
-  it('hatch CLOSED: the identical save is refused by the same lock — the refusal does not depend on the hatch', async () => {
+  it('hatch CLOSED: the identical save is still refused, with the same envelope — the refusal does not depend on the hatch', async () => {
     const { engine, protocol } = boot();
 
     const err = await save(protocol, { type: 'permission', name: PACKAGED_SET, item: body(PACKAGED_SET) });
 
-    expect(err).toBeInstanceOf(PackagedPermissionSetLockedError);
+    // With the hatch closed the protocol's own package door answers first, on
+    // this topology as on an environment kernel (`saveMetaItem` asks it on
+    // every topology, ahead of the authoring-gate seam), so the lock is not
+    // reached. Same condition, same envelope: NOT_OVERRIDABLE / 403.
+    expect(err).not.toBeInstanceOf(PackagedPermissionSetLockedError);
     expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
     expect(metaRowsOf(engine)).toEqual([]);
   }, 30_000);
