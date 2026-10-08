@@ -27,16 +27,15 @@
  * the only shape that can hold duplicates, and a table that already holds them
  * can never build the index again.
  *
- * The engine is OBSERVED, never replaced: every verb forwards to it, and the
- * dispatch-shaped verbs open with the producer's own predicates
- * (`check:engine-double-contract`). The protocol is a counting stub — what is
- * pinned about it is whether it is CALLED, which a stub answers exactly.
+ * The engine is SPIED, never replaced: each spied verb counts and then runs
+ * the real method, so no double stands between the heal and the engine's own
+ * dispatch contract. The protocol is a counting stub — what is pinned about it
+ * is whether it is CALLED, which a stub answers exactly.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 import { SysPermissionSet } from './objects/sys-permission-set.object.js';
 import {
@@ -81,6 +80,7 @@ const driftedRow = (id: string, name: string) => ({
 
 const engines: ObjectQL[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   while (engines.length) {
     try { await engines.pop()?.destroy(); } catch { /* noop */ }
   }
@@ -111,33 +111,43 @@ async function boot(declaredNames: string[], rows: Array<Record<string, any>>): 
   return engine;
 }
 
-/** The real engine with its verbs counted; `refuseNameReads` makes every by-name read of the table throw. */
+/**
+ * The real engine with its verbs SPIED — every call still runs the real method,
+ * so the engine's own dispatch contract answers it; the spies only count and,
+ * when `refuseNameReads` is set, make a by-name read of the table throw.
+ *
+ * `withRegistry: false` hands the heal the same engine with `registry` hidden,
+ * the shape of a kernel whose SchemaRegistry is not readable — the one shape
+ * whose trust rule still reads the layered item.
+ */
 function observe(engine: any, opts: { withRegistry?: boolean } = {}) {
-  const log = { updatedIds: [] as string[], inserts: 0, nameReads: 0 };
+  const log = { updatedIds: [] as string[], inserts: 0 };
   const state = { refuseNameReads: false };
-  const ql: any = {
-    ...(opts.withRegistry === false ? {} : { registry: engine.registry }),
-    find: async (o: string, q?: any, opt?: any) => {
-      if (o === 'sys_permission_set' && q?.where && typeof q.where === 'object' && 'name' in q.where) {
-        log.nameReads += 1;
-        if (state.refuseNameReads) throw new Error('fake outage: the by-name read was refused');
-      }
-      return engine.find(o, q, opt);
-    },
-    findOne: (o: string, q?: any, opt?: any) => {
-      assertEngineFindOnePredicate(o, q);
-      return engine.findOne(o, q, opt);
-    },
-    insert: async (o: string, d: any, opt?: any) => {
-      if (o === 'sys_permission_set') log.inserts += 1;
-      return engine.insert(o, d, opt);
-    },
-    update: async (o: string, d: any, opt?: any) => {
-      assertEngineUpdateDispatch(d, opt);
-      if (o === 'sys_permission_set') log.updatedIds.push(String(d?.id));
-      return engine.update(o, d, opt);
-    },
-  };
+  const realFind = engine.find.bind(engine);
+  const realInsert = engine.insert.bind(engine);
+  const realUpdate = engine.update.bind(engine);
+  vi.spyOn(engine, 'find').mockImplementation(async (o: any, q?: any, opt?: any) => {
+    const byName = o === 'sys_permission_set' && q?.where && typeof q.where === 'object' && 'name' in q.where;
+    if (byName && state.refuseNameReads) throw new Error('fake outage: the by-name read was refused');
+    return realFind(o, q, opt);
+  });
+  vi.spyOn(engine, 'insert').mockImplementation(async (o: any, d: any, opt?: any) => {
+    if (o === 'sys_permission_set') log.inserts += 1;
+    return realInsert(o, d, opt);
+  });
+  vi.spyOn(engine, 'update').mockImplementation(async (o: any, d: any, opt?: any) => {
+    if (o === 'sys_permission_set') log.updatedIds.push(String(d?.id));
+    return realUpdate(o, d, opt);
+  });
+  const ql = opts.withRegistry === false
+    ? new Proxy(engine, {
+      get(target, prop) {
+        if (prop === 'registry') return undefined;
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    })
+    : engine;
   return { ql, log, state };
 }
 
