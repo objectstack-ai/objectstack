@@ -32,10 +32,13 @@ cron-typed slot is parsed and reaches no engine, and `@objectstack/formula`'s
 registered `cron` engine has no caller outside that package.
 
 A TYPED slot — one declared with `CronExpressionInputSchema` or
-`TemplateExpressionInputSchema` — takes a bare, non-blank string (shorthand
-for its own dialect) or an envelope declaring that one dialect. An envelope
-naming any other dialect, and a blank string, are refused at the slot with
-one issue whose message names the dialect and the fix. Only the untyped
+`TemplateExpressionInputSchema`, or with the same input carrying its own
+refusal sentences (a notify node's `title` / `message`) — takes a bare,
+non-blank string (shorthand for its own dialect) or an envelope declaring
+that one dialect. An envelope naming any other dialect, and a blank string,
+are refused at the slot with one issue whose message names the dialect and
+the fix; a template slot's fix is written in the placeholder spelling its
+renderer reads. Only the untyped
 `ExpressionInputSchema` takes every declared dialect in envelope form.
 
 Those three are the whole list — it is exactly the `ExpressionDialect` enum

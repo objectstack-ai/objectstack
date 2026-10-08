@@ -2180,7 +2180,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       identity: {
         label: "ID",
-        description: "IEmailService.sendTemplate({ template: name, locale, ... }) が解決するテンプレート識別子。"
+        description: "送信側はこのテンプレートを名前で指定し、ロケールによって送信される言語版が選ばれます。"
       },
       subject: {
         label: "件名",

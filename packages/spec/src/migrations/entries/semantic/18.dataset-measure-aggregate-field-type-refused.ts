@@ -73,4 +73,5 @@ export const entry: SemanticMigration = {
     + 'stands down rather than guessing wherever the type cannot be resolved: no '
     + '`sourceFieldMeta` wired, an unknown field, or a `relationship.field` path whose '
     + 'column lives on a joined object.',
+  relevantWhen: { kind: 'stack-declares', keys: ['datasets'] },
 };

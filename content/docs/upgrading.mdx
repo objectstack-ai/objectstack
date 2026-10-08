@@ -215,6 +215,7 @@ Useful flags:
 | Flag | What it does |
 | :--- | :--- |
 | `--step` | Report each major's hop separately, so a failure bisects to the exact major |
+| `--all` | Also list, in full, the manual changes whose surface the command proved absent from your stack — by default they are only counted. `--json` always reports them in `todos` and names them in `absentTodos` |
 | `--out migrated.stack.json` | Also write the migrated stack as a JSON snapshot |
 | `--write` | Write the mechanical changes into your source files, where each can be traced to one literal; list the rest with the reason (see below) |
 | `--to 17` | Stop at an intermediate major instead of this runtime's |

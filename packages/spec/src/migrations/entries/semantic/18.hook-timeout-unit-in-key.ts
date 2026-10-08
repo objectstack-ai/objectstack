@@ -26,4 +26,5 @@ export const entry: SemanticMigration = {
     + 'to be allowed thirty seconds reads `timeoutMs: 30000`. A hook that runs longer than its '
     + '`timeoutMs` fails with a timeout at that limit, and one that finishes inside it completes as '
     + 'it did before the upgrade. No code reads or writes `timeout` on a hook definition.',
+  relevantWhen: { kind: 'stack-declares', keys: ['hooks'] },
 };

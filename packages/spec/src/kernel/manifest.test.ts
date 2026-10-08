@@ -686,6 +686,23 @@ describe('manifest.id — reverse-domain identifier', () => {
       for (const example of MANIFEST_ID_EXAMPLES) expect(msg).toContain(example);
     });
 
+    it('reads as product guidance: a headline in product words, neutral examples (#22093)', () => {
+      // The Studio-measured case: a display name typed where the id goes.
+      const r = ManifestSchema.safeParse(legal('Repairs Center'));
+      const issue = r.success ? undefined : r.error.issues.find((i) => i.path[0] === 'id');
+      expect(issue?.code).toBe('invalid_format');
+      const msg = issue?.message ?? '';
+      const headline = msg.slice(0, msg.indexOf('. ') + 1);
+      expect(headline).toContain("'Repairs Center'");
+      // The key is still named (#4001), as a locator after the headline — the
+      // sentence an author reads first does not lead with a JSON path.
+      expect(headline).not.toContain('manifest.id');
+      expect(msg).toContain('(`manifest.id`)');
+      // The examples are in no real vendor's namespace.
+      expect(msg).not.toMatch(/steedos|superset|apache/i);
+      for (const example of MANIFEST_ID_EXAMPLES) expect(example).not.toMatch(/steedos|superset|apache/i);
+    });
+
     it('suggests com.example.<value> for a bare word', () => {
       expect(refusalFor('blank')).toContain("Did you mean 'com.example.blank'?");
     });

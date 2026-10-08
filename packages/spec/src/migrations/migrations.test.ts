@@ -609,6 +609,10 @@ describe('migration chain (ADR-0087 D3)', () => {
         MIGRATIONS_BY_MAJOR[OLDEST_HOP]!.semantic.map((s) => s.id).sort(),
       );
       expect(result.todos.length).toBeGreaterThan(0);
+      // `absentTodos` only NAMES a subset of them — the same objects, never a
+      // removal (`semantic-relevance.test.ts` pins which entries can be named).
+      for (const t of result.absentTodos) expect(result.todos).toContain(t);
+      expect(result.absentTodos.filter((t) => !t.relevantWhen)).toEqual([]);
     });
 
     it('is immutable — the input stack is not mutated', () => {

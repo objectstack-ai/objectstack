@@ -27,4 +27,5 @@ export const entry: SemanticMigration = {
     + "(or `'previousYear'`), and `dimension` is named wherever the selection dates more than one "
     + 'time dimension. `objectstack validate` passes, and each affected widget renders a '
     + '`<measure>__compare` column over the window its author intended.',
+  relevantWhen: { kind: 'stack-declares', keys: ['dashboards'] },
 };

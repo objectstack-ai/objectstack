@@ -45,4 +45,5 @@ export const entry: SemanticMigration = {
     + 'agent that relied on coercion declares the exact types in `schema` and a test turn returns an '
     + 'answer that validates without conversion.',
   conversionIds: ['agent-structured-output-refused-members-removed'],
+  relevantWhen: { kind: 'stack-declares', keys: ['agents'] },
 };

@@ -2044,6 +2044,7 @@ const step17: MigrationStep = {
         + "(or `'previousYear'`), and `dimension` is named wherever the selection dates more than one "
         + 'time dimension. `objectstack validate` passes, and each affected widget renders a '
         + '`<measure>__compare` column over the window its author intended.',
+      relevantWhen: { kind: 'stack-declares', keys: ['dashboards'] },
     },
     {
       id: 'data-driver-find-stream-retired',
@@ -2356,6 +2357,7 @@ const step17: MigrationStep = {
         + '`inputMapping` on find/get/delete, or two endpoints claiming one METHOD + path); and '
         + '(4) after publishing, each endpoint answers as you expect — an anonymous request to '
         + 'a session-only endpoint returns 401 rather than data.',
+      relevantWhen: { kind: 'stack-declares', keys: ['apis'] },
     },
     {
       id: 'delete-by-id-before-hook-repoint-retired',
@@ -3549,6 +3551,7 @@ const step17: MigrationStep = {
         + '`backoffMultiplier` below 1 remain, and each adjusted value was re-chosen knowing a '
         + 'retry re-runs the handler with its writes and callouts. No job fails to register '
         + 'with the retry-policy bound prescription.',
+      relevantWhen: { kind: 'stack-declares', keys: ['jobs'] },
     },
     {
       id: 'notification-list-cursor-retired',
@@ -4275,6 +4278,7 @@ const step17: MigrationStep = {
         + 'rule needs a `criteria` predicate that names the same population, checked against a '
         + 'representative record. Where a single business unit was meant, use `business_unit`; '
         + '`unit_and_subordinates` is the subtree and grants strictly more.',
+      relevantWhen: { kind: 'stack-declares', keys: ['sharingRules'] },
     },
     {
       id: 'sort-node-direction-rejected',
@@ -4514,6 +4518,7 @@ const step17: MigrationStep = {
         + 'Deleting it without that decision leaves exactly the state the retirement exists to '
         + 'end: a destructive tool nobody is approving, now without even the false flag to show '
         + 'that somebody once meant to.',
+      relevantWhen: { kind: 'stack-declares', keys: ['tools'] },
     },
     {
       id: 'ui-interaction-config-family-retired',
@@ -7166,6 +7171,7 @@ const step18: MigrationStep = {
         + 'declares `reflectionInterval` without an enabled `longTerm`. Every agent parses under the new '
         + 'schema.',
       conversionIds: ['agent-memory-long-term-store-removed'],
+      relevantWhen: { kind: 'stack-declares', keys: ['agents'] },
     },
     // #21277 — ADR-0049 enforce-or-remove (ruling record 5945617233, letter A) —
     // the D3 entry of the `agent-structured-output-refused-members-removed`
@@ -7210,6 +7216,7 @@ const step18: MigrationStep = {
         + 'agent that relied on coercion declares the exact types in `schema` and a test turn returns an '
         + 'answer that validates without conversion.',
       conversionIds: ['agent-structured-output-refused-members-removed'],
+      relevantWhen: { kind: 'stack-declares', keys: ['agents'] },
     },
     {
       id: 'ai-conversation-analytics-duration-unit-in-key',
@@ -7392,6 +7399,7 @@ const step18: MigrationStep = {
         + 'to be queried) or keep it and confirm that `/analytics/meta` omits the cube and that a query '
         + 'naming it answers 404 `CUBE_NOT_FOUND`. Every compiled artifact in use was built by '
         + '`os compile` from this release or later.',
+      relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
     },
     // An inert key made real, and the request class that goes from answered to
     // refused because of it: the engine aggregate path's whole refusal set, which a
@@ -7454,6 +7462,7 @@ const step18: MigrationStep = {
         + 'beside a dimension over a joined object — or each one that did now groups by a dimension '
         + 'without a single interval. A host that overrides `queryCapabilities` to raw SQL only either '
         + 'adds an engine aggregate bridge or groups by no one-interval dimension.',
+      relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
     },
     {
       id: 'analytics-date-range-array-two-bounds-required',
@@ -7743,6 +7752,7 @@ const step18: MigrationStep = {
         + 'meant to cache for one minute reads `cacheTtlSeconds: 60`. A GET to the endpoint repeated '
         + 'inside that window is answered from the cache, and one repeated after it reflects a record '
         + 'changed in between.',
+      relevantWhen: { kind: 'stack-declares', keys: ['apis'] },
     },
     {
       id: 'api-error-retry-after-unit-in-key',
@@ -8647,6 +8657,7 @@ const step18: MigrationStep = {
         + '`description` conveying what that label was meant to announce, or the author has confirmed '
         + 'the existing description does. With a screen reader, focusing the chart graphic announces '
         + 'the description as its name.',
+      relevantWhen: { kind: 'stack-declares', keys: ['dashboards', 'reports', 'pages'] },
     },
     {
       id: 'cli-command-contribution-retired',
@@ -9357,6 +9368,7 @@ const step18: MigrationStep = {
         + 'derived ON clause reads, so a join keyed after the object it REACHES never resolved at all. '
         + 'Nothing else regresses: `joins.<alias>.name` is unchanged, and it is what both the joined '
         + 'table and the per-object RLS/tenant read scope are resolved from.',
+      relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
     },
     // #20300 — ADR-0049 enforce-or-remove (triage verdict RETIRE) — the D3 entry of
     // the `cube-member-inner-name-removed` family (one D3 entry per retirement
@@ -9389,6 +9401,7 @@ const step18: MigrationStep = {
         + 'author has either kept the key (nothing else changes) or re-keyed the member to the intended '
         + 'name and updated every query, dashboard and report that names `<cube>.<old key>`. '
         + '`GET /api/v1/analytics/meta` lists each member as `<cube>.<key>` exactly as before the upgrade.',
+      relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
     },
     // #20943, maintainer ruling D — a cube member's `sql` is a column reference;
     // the expression half is retired at the contract (ADR-0021's zero raw
@@ -9441,6 +9454,7 @@ const step18: MigrationStep = {
         + 'ratio: the same value divided by 100 when the expression returned percentage points). '
         + 'Every dashboard, report or saved query that named the cube member now names the dataset '
         + 'measure. A cube member that aggregates a column parses byte-identically to before.',
+      relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
     },
     // #21000 (ADR-0049 enforce-or-remove) — `AggregationMetricType`'s `number`,
     // `string` and `boolean` declared a custom SQL expression returning that type,
@@ -9486,6 +9500,7 @@ const step18: MigrationStep = {
         + 'returns the aggregate the author chose, and every dashboard, report or saved query that read '
         + 'the measure is checked against the number it now returns. A measure typed with one of the six '
         + 'aggregates parses byte-identically to before.',
+      relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
     },
     // #10414 (ADR-0049 enforce-or-remove) — the D3 entry of the
     // `metric-filters-removed` family (ruling B on #17152: one D3 entry per
@@ -9517,6 +9532,7 @@ const step18: MigrationStep = {
         + 'renamed the metric if its name promised the filter. With the condition re-expressed, a query '
         + 'over a fixture where the condition excludes rows returns the filtered aggregate (strictly '
         + 'smaller for a positive sum over excluded rows), not the unfiltered one.',
+      relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
     },
     // #20637 — ADR-0049 enforce-or-remove (maintainer ruling, letter C) — the D3
     // entry of the `cube-refresh-key-removed` family (one D3 entry per retirement
@@ -9541,6 +9557,7 @@ const step18: MigrationStep = {
         'No cube carries `refreshKey`, and the parse refuses one with the prescription. Every analytics '
         + 'query answers as it did before the upgrade. Nothing the author maintains relies on cube results '
         + 'being cached or refreshed on a schedule.',
+      relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
     },
     // #19992 (ADR-0049 enforce-or-remove; triage direction REMOVE under ruling 乙
     // on #19910: 「a currency's decimal places are the currency's, not a
@@ -9616,6 +9633,7 @@ const step18: MigrationStep = {
         + 'buttons meant to open an object\'s form declare `actionType: \'form\'` with an '
         + '`<object>.<view>` target instead. Clicking each converted button opens the intended '
         + 'page or form rather than a refusal dialog.',
+      relevantWhen: { kind: 'stack-declares', keys: ['dashboards'] },
     },
     // #15680 (stack card of #14478, maintainer ruling B: a duration key carries its
     // unit in its NAME) — the D3 entry of the
@@ -9646,6 +9664,7 @@ const step18: MigrationStep = {
         + 'console the deployment runs, an open dashboard re-queries its widgets at that cadence; '
         + 'where it does not, the console build predates the renderer\'s move to the new key, and the '
         + 'author has recorded that until the console is upgraded.',
+      relevantWhen: { kind: 'stack-declares', keys: ['dashboards'] },
     },
     // The judgement half of `dashboard-widget-chart-config-structure-removed`. The
     // D2 conversion strips the four keys mechanically; what they CARRIED cannot be
@@ -10273,6 +10292,7 @@ const step18: MigrationStep = {
         + 'stands down rather than guessing wherever the type cannot be resolved: no '
         + '`sourceFieldMeta` wired, an unknown field, or a `relationship.field` path whose '
         + 'column lives on a joined object.',
+      relevantWhen: { kind: 'stack-declares', keys: ['datasets'] },
     },
     {
       id: 'dataset-measure-selecting-aggregate-field-type-refused',
@@ -10349,6 +10369,7 @@ const step18: MigrationStep = {
         + 'wired, an unknown field, or a `relationship.field` path whose column lives on a '
         + 'joined object. A measure column over such a pair also stops carrying a corrected '
         + '`fields[].type`, because the pair no longer produces a column at all.',
+      relevantWhen: { kind: 'stack-declares', keys: ['datasets'] },
     },
     // #21220 (ADR-0049 enforce-or-remove) — an ADR-0021 dataset dimension's and
     // measure's `field` is a column reference, the accept set the cube members it
@@ -14054,6 +14075,7 @@ const step18: MigrationStep = {
         + 'to be allowed thirty seconds reads `timeoutMs: 30000`. A hook that runs longer than its '
         + '`timeoutMs` fails with a timeout at that limit, and one that finishes inside it completes as '
         + 'it did before the upgrade. No code reads or writes `timeout` on a hook definition.',
+      relevantWhen: { kind: 'stack-declares', keys: ['hooks'] },
     },
     {
       id: 'hot-reload-inert-state-strategies-retired',
@@ -14479,6 +14501,7 @@ const step18: MigrationStep = {
         + '`timeoutMs` fails with a timeout and is retried under `retryPolicy`, and an attempt that '
         + 'finishes inside it succeeds as before. No code reads or writes `timeout` on a job '
         + 'definition.',
+      relevantWhen: { kind: 'stack-declares', keys: ['jobs'] },
     },
     {
       id: 'kernel-compatibility-matrix-estimated-migration-time-unit-in-key',
@@ -15278,6 +15301,7 @@ const step18: MigrationStep = {
         + '(no `import_reference_not_found` row) — or the missing referenced records are created by a '
         + 'step that runs before the import, since the import itself never creates them. Row counts '
         + 'and links match the pre-upgrade import of the same file.',
+      relevantWhen: { kind: 'stack-declares', keys: ['mappings'] },
     },
     // #15680 (stack card of #14478, maintainer ruling B: a duration key carries its
     // unit in its NAME) — the D3 entry of the
@@ -16604,6 +16628,7 @@ const step18: MigrationStep = {
         + 'upgrade, and `allowTransfer` behaves as before. Every documented process that assumed a '
         + 'restore or purge grant — an erasure-request runbook, an access review, an audit control — '
         + 'names the mechanism it actually uses instead.',
+      relevantWhen: { kind: 'stack-declares', keys: ['permissions'] },
     },
     // #20321 (ADR-0049 enforce-or-remove) — the D3 entry of the
     // `permission-rls-tags-removed` family (ruling B on #17152: one D3 entry per
