@@ -454,7 +454,7 @@ ever matters more than PR independence, re-adding the one-line CI step
    v<current>` item (same discipline as changesets); the release sweep filter catches
    stragglers.
 4. **Periodic re-sweep** → [SWEEP.md](./SWEEP.md) is a runbook any AI session can
-   execute on request ("run a coverage sweep") — five independent gap-hunt angles,
+   execute on request ("run a coverage sweep") — six independent gap-hunt angles,
    dedupe, author, validate. The 2026-08 sweep it encodes found 3 stale waivers and
    ~55 missing items; re-running it is how drift that slips past 1–3 gets caught.
 
