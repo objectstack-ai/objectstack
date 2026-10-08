@@ -183,3 +183,13 @@ export type {
     MetaSaveRequestMembers,
     MetaSaveRequestOptions,
 } from './meta-save-request.js';
+
+// [#22188] …and the one reading of `?package=` on every `/meta` door: the
+// package a request names, or none for `all` (the list's "show everything"
+// scope), the empty value or a non-string. `RestServer`'s doors read it, and so
+// does the runtime dispatcher's `/meta` domain on its own copies of them — the
+// layered read, the list, the book tree and the item read and save — which
+// forwarded `all` to the store as a package id until this landed. It stays in
+// `rest-server.ts`, beside the doors that read it (its docblock is the
+// authority); this entry already loads that module.
+export { metaItemPackageBinding } from './rest-server.js';
