@@ -74,7 +74,9 @@ async function read(exit: string, caller: Record<string, unknown>, readable: rea
         { request: {}, environmentId: 'platform', executionContext: { ...caller } } as any,
         'GET',
     );
-    return { status: res.response.status, data: res.response.body?.data };
+    const response = res.response;
+    if (!response) throw new Error('the dispatcher answered /object/crm_opportunity with no response');
+    return { status: response.status, data: response.body?.data };
 }
 
 for (const exit of Object.keys(EXITS)) {
