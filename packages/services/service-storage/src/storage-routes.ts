@@ -2,6 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { IHttpServer, IHttpRequest, IHttpResponse, IStorageService } from '@objectstack/spec/contracts';
+import type { StandardErrorCode } from '@objectstack/spec/api';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
 // [#15999] The BRAND predicate, never `instanceof` — this error crosses package
@@ -16,6 +17,9 @@ import type {
   UploadSessionRecord,
   StorageWriteContext,
 } from './metadata-store.js';
+// [#22175] Whether a door's scoped by-id write can reach the row it names —
+// the store's own answer, asked before the write.
+import { organizationOutOfWriteReach } from './metadata-store.js';
 import type { LocalStorageAdapter } from './local-storage-adapter.js';
 // [#22046] The ONE upload ownership rule. Declared in its own module and only
 // CALLED here — the three doors below share it rather than each carrying a
@@ -34,6 +38,27 @@ import { contentDispositionValue } from './content-disposition.js';
 
 /** Authorization verdict for an attachments-scope download (#2970 item 2). */
 export type FileReadVerdict = 'allow' | 'deny' | 'unauthenticated';
+
+/**
+ * [#22175] The answer the commit and chunked-completion doors give an uploader
+ * whose active organization is no longer the one the upload was started in —
+ * see `requireStartingOrganization` inside {@link registerStorageRoutes}.
+ *
+ * `409` / `RESOURCE_CONFLICT`, the standard-catalog member HTTP 409 derives
+ * (ADR-0112; no storage extension code is registered for this): the request
+ * conflicts with where the upload stands, and the caller can resolve it — the
+ * same call succeeds once they switch back. Not `403 PERMISSION_DENIED`: that
+ * code is the ownership rule's one refusal, and this caller IS the uploader.
+ */
+const ORGANIZATION_CHANGED_STATUS = 409;
+const ORGANIZATION_CHANGED_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
+/**
+ * Constant, and naming no organization: it tells the uploader what changed and
+ * what finishes the upload. The organization ids go to the operator log only.
+ */
+const ORGANIZATION_CHANGED_MESSAGE =
+  'This upload was started in a different organization than your active one. ' +
+  'Switch your active organization back to the one the upload was started in, then finish the upload.';
 
 /**
  * What the upload routes need to know about the caller (#2755, widened #12745).
@@ -343,6 +368,60 @@ export function registerStorageRoutes(
     return false;
   };
 
+  // ── Starting-organization gate (#22175) ──────────────────────────────
+  // The commit and chunked-completion doors write by id under the ACTING
+  // organization (`StorageWriteContext`), and on an engine-backed store that
+  // write is SCOPED to it: the driver's statement reaches a row stamped for
+  // the acting organization or for none, and no other. An uploader who
+  // switched their active organization after starting an upload therefore
+  // names a row the write cannot reach, and that scoped miss used to surface
+  // as `500 INTERNAL` carrying the store's outage text ("Restore the data
+  // engine…") — an organization change diagnosed, to the caller and to the
+  // operator, as a data-engine fault.
+  //
+  // Each door now asks this right after the ownership rule (so only the
+  // uploader ever learns of it) and BEFORE any write, the expiry stamp
+  // included. `false` ⇒ the 409 was already sent and the handler must stop.
+  //
+  // The question is the write's own reach and nothing wider, and the store
+  // answers it (`organizationOutOfWriteReach`) for the write context the door
+  // is about to pass: open mode and a session with no active organization
+  // thread no scope; a row stamped with no organization stays in reach; the
+  // engine-absent stand-in does not scope at all, so it never refuses here and
+  // its answers are unchanged. Every row the door is about to write is asked —
+  // the chunked door writes the upload session AND its file, and either one
+  // out of reach means the write misses.
+  //
+  // ⛔ It changes nothing about where an upload belongs: it asks, it never
+  // re-stamps, and the write context the doors pass is untouched — switching
+  // back finishes the upload in the organization it was started in.
+  // ⛔ It is not a `catch`: a real engine failure on a row in the caller's own
+  // organization still reaches the door's outer `catch` and its `500`.
+  const requireStartingOrganization = (
+    writeContext: StorageWriteContext,
+    rows: ReadonlyArray<{ organization_id?: string | null } | null>,
+    door: string,
+    upload: string,
+    res: IHttpResponse,
+  ): boolean => {
+    for (const row of rows) {
+      const started = organizationOutOfWriteReach(store, row, writeContext);
+      if (started === null) continue;
+      // The operator log names the cause — a `4xx` is otherwise quiet in the
+      // server-fault log, which used to carry the misleading outage line.
+      opts.logger?.warn(
+        `[storage] ${door}: refused upload '${upload}' with ${ORGANIZATION_CHANGED_STATUS} ` +
+          `${ORGANIZATION_CHANGED_CODE} — it was started in organization '${started}', and the ` +
+          `uploader's active organization is now '${writeContext.organizationId}'. The door writes by ` +
+          'id under the active organization, which cannot reach a row stamped for another one: an ' +
+          `organization change, not a data-engine fault. Switching back to '${started}' finishes the upload.`,
+      );
+      sendError(res, ORGANIZATION_CHANGED_STATUS, ORGANIZATION_CHANGED_CODE, ORGANIZATION_CHANGED_MESSAGE);
+      return false;
+    }
+    return true;
+  };
+
   // ── Terminal upload-session statuses (#7667) ─────────────────────────────
   // `sys_upload_session.status` declares `failed` and `expired`, the retention
   // backstop reaps on them (`onlyWhen: { status: { $in: ['completed',
@@ -509,6 +588,10 @@ export function registerStorageRoutes(
       // [#22046] Only the uploader commits — before the write below and
       // before anything about the row is answered.
       if (!requireUploader(session, file, res)) return;
+      // [#22175] …and only while the scoped write below can reach the row —
+      // asked of the SAME write context that write is about to carry.
+      const writeContext: StorageWriteContext = { organizationId: session?.organizationId };
+      if (!requireStartingOrganization(writeContext, [file], 'commit', fileId, res)) return;
 
       const updated = await store.updateFile(
         fileId,
@@ -516,7 +599,7 @@ export function registerStorageRoutes(
           status: 'committed',
           etag: eTag ?? undefined,
         },
-        { organizationId: session?.organizationId },
+        writeContext,
       );
 
       sendOk(res, {
@@ -734,7 +817,11 @@ export function registerStorageRoutes(
       // [#22046] The session row names no user; it reaches its uploader
       // through `file_id`. Asked before the expiry stamp, the status writes
       // and the completion answer below.
-      if (!requireUploader(authSession, await store.getFile(session.file_id), res)) return;
+      const file = await store.getFile(session.file_id);
+      if (!requireUploader(authSession, file, res)) return;
+      // [#22175] Both rows this door writes must be in the scoped writes'
+      // reach — asked before the expiry stamp, which is the first of them.
+      if (!requireStartingOrganization(writeContext, [session, file], 'chunked completion', uploadId, res)) return;
 
       const live = await expireIfPastDeadline(session, writeContext);
       if (live.status === 'expired') {
