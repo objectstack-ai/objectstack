@@ -418,20 +418,22 @@ export function builtinNodeConfigKeysJudged(nodeType: string): boolean {
 }
 
 /**
- * [#21982] Does an `unrecognized_keys` issue sit INSIDE an ADR-0031 region
- * rather than on the region object itself? The issue's `path` is the object
- * that holds the key: `[]` for the config, `['body']` / `['try']` for a region
- * object (arity `one`), `['branches', 0]` for one of a `many` slot's regions.
- * A key on the region object is the container's, judged here like any other
- * config key; anything deeper — a region node's or edge's own key — is the
- * region's, refused at `registerFlow` by `validateControlFlow` and never
- * re-reported against the container (the region policy `flow.zod.ts` states).
+ * [#21982] Does an `unrecognized_keys` issue sit at or under an ADR-0031
+ * region slot — on a region object (`body`, `try`, `catch`, a `branches`
+ * element) or deeper, on a region node or edge? The issue's `path` is the
+ * object that holds the key, so `[]` is the config itself and `['body']` the
+ * loop's region object. A region's shape is `validateControlFlow`'s, as the
+ * value arm's own carve-out says ({@link builtinValueJudged}): it parses each
+ * region against the strict region contract at `registerFlow` and refuses an
+ * undeclared key on the region object and on its nodes and edges alike
+ * (measured: `try_catch 'n1' try: invalid region — Unrecognized key(s) on this
+ * control-flow region`), while the flow parse leaves a refused region raw for
+ * it to name (the region policy `flow.zod.ts` states). So such a key has its
+ * judge, one door later, and this arm does not add a second.
  */
-function unknownKeyInsideRegion(nodeType: string, path: ReadonlyArray<PropertyKey>): boolean {
+function unknownKeyUnderRegionSlot(nodeType: string, path: ReadonlyArray<PropertyKey>): boolean {
   if (path.length === 0) return false;
-  const slot = (FLOW_REGION_SLOTS_BY_TYPE.get(nodeType) ?? []).find((s) => s.key === path[0]);
-  if (!slot) return false;
-  return path.length > (slot.arity === 'many' ? 2 : 1);
+  return (FLOW_REGION_SLOTS_BY_TYPE.get(nodeType) ?? []).some((slot) => slot.key === path[0]);
 }
 
 /**
@@ -584,16 +586,17 @@ function unrecognizedKeysOf(issue: { readonly code: string }): readonly string[]
  *    {@link builtinNodeConfigKeysJudged} judges (all but `try_catch`) →
  *    `node-config-refused-by-contract`, anchored at the key, one refusal per
  *    undeclared key (`bogusKey` on a `notify`; `fields[0].visibleIf` on a
- *    `screen` field; `body.bogusKey` on a `loop`'s region object), in the
+ *    `screen` field; `flowName` on a body-less `loop`), in the
  *    contract's own words — its prescription for a known slip included
  *    (`fieldValues` → `fields`, `bulk` → `multi`, `visibleIf` →
  *    `visibleWhen`, a `subflow` `timeoutMs` that belongs on the node) — and
  *    closed with the rename-or-remove remedy. Each executor parses its strict
  *    contract before anything else, so the run refuses such a node; this arm
  *    is the one judge of it at every door, and `registerFlow`'s descriptor
- *    walk stands aside for these types. A key INSIDE a region — a region
- *    node's or edge's own key — is the region's (`validateControlFlow`), and
- *    a tombstoned key (a `retiredKey()`) keeps the path it had.
+ *    walk stands aside for these types. A key at or under a region slot — on
+ *    the region object, or a region node's or edge's own key — is the
+ *    region's (`validateControlFlow`, at `registerFlow`), and a tombstoned
+ *    key (a `retiredKey()`) keeps the path it had.
  *
  * Where the build cannot read the config whole, it reads only what is sound,
  * and each such type is named here, not skipped in silence:
@@ -611,8 +614,7 @@ function unrecognizedKeysOf(issue: { readonly code: string }): readonly string[]
  *    `try_catch` (`try`, `catch`) — hold regions, judged as graphs of their
  *    own; a container is judged on the keys beside them (`try_catch`'s
  *    `errorVariable` and `retry`), so `parallel`, whose one key is its region
- *    slot, is judged for presence and for the keys on each region object
- *    alone.
+ *    slot, is judged for presence alone.
  *
  * A key only the conversion layer spells canonically (`object` →
  * `objectName`, `flow` → `flowName`, …) is judged AFTER the conversion at
@@ -708,9 +710,8 @@ export function flowNodeConfigRefusals(nodeType: string, config: unknown): FlowN
       // An unknown key's issue sits on the object that holds it (the config
       // itself for a top-level key, so its `path` is empty): anchor one
       // refusal at each key the author wrote, with the contract's sentence.
-      // A key inside a region (a region node's or edge's own key) is the
-      // region's, never the container's.
-      const keys = unknownKeyInsideRegion(nodeType, issue.path) ? [] : unrecognizedKeysOf(issue);
+      // A key at or under a region slot is the region's (`validateControlFlow`).
+      const keys = unknownKeyUnderRegionSlot(nodeType, issue.path) ? [] : unrecognizedKeysOf(issue);
       for (const unknownKey of keys) {
         const key = ledgerPathOf([...issue.path, unknownKey]);
         if (seen.has(key)) continue;
