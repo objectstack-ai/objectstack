@@ -1,7 +1,7 @@
 ---
-'@objectstack/spec': minor
-'@objectstack/service-automation': minor
-'@objectstack/lint': minor
+'@objectstack/spec': major
+'@objectstack/service-automation': major
+'@objectstack/lint': major
 ---
 
 A flow VALUE slot no longer reads the single-brace `{…}` template dialect: a `create_record` / `update_record` `fields` value or an `assignment` value that carries a `{…}` token is refused at `objectstack validate`, at `registerFlow` and by the executor, with the CEL spelling of each token. A computed value is a CEL value envelope, `{ dialect: 'cel', source: '…' }`; a string is the literal text it spells.
@@ -10,7 +10,7 @@ Clause-②: yes (narrowing)
 
 <!-- adr-0087: registered flow-value-slot-template-dialect-refused -->
 
-**BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `minor` under the launch-window convention for accept-set narrowings (the v18 line's `.changeset/pre.json` is not open on `main`).
+**BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
 
 **Why.** Since #19938 the value slots also evaluate a CEL value envelope, so a flow had two dialects for one job — two function sets, two meanings of `/`, and a template that wrote nothing where CEL refuses. The maintainer's ruling D on the flow expression dialects put the template's retirement from these slots on the v18 train, with a remedy for every spelling and an automatic conversion only where one is lossless (ADR-0087 D2).
 
