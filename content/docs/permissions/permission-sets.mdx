@@ -368,7 +368,9 @@ either can be live on one row, and they need different remedies:
   current artifact immediately. It refuses on any set that no installed code
   package ships (a set created in this environment, a clone, or a set saved
   into a writable runtime package), so it can never destroy a genuinely
-  environment-authored set.
+  environment-authored set. **Discard it before you upgrade:** from the
+  release that adds ADR-0048's cold-boot check, a deployment that still holds
+  such an overlay does not boot, so the action can no longer reach it.
 - **Provenance skip.** The record's `managed_by` column predates package
   provenance tracking (a legacy insert without `managed_by: 'package'` —
   typically a database first initialized on an older release line), so boot
