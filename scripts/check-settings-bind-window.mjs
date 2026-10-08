@@ -129,6 +129,46 @@ const SETTINGS_SERVICE = 'settings';
 const READY_HOOK = 'kernel:ready';
 
 /**
+ * The hooks a PLUGIN fires during Phase 1 / Phase 2 — from its own `init()` or
+ * `start()` — and therefore strictly before the kernel triggers {@link READY_HOOK}
+ * at all. Every handler of one of these runs before the settings bind under
+ * EVERY composition order, so its settings reads are part of this gate's
+ * population exactly as an `init()` / `start()` body is.
+ *
+ * The kernel never fires these; plugins do, so the list is not knowable from
+ * `packages/core`. It is NOT hand-trusted either: `audit()` re-derives the set
+ * from the source on every run — every `.trigger('<name>', …)` and
+ * `trigger.call(<ctx>, '<name>', …)` the walk below reaches from a plugin's
+ * `init()` / `start()` or from a pre-bind handler — and refuses on drift in
+ * EITHER direction: a newly fired name that is missing here (its handlers would
+ * fall outside the population, the hole `app:seeded` sat in), and a pinned name
+ * no longer fired before the bind (a stale pin, and the anti-vacuity limb — a
+ * scan that finds no emit at all stales every row). Each value is the emit site
+ * the derivation found, so a reader can check the row without re-running it.
+ */
+const PRE_BIND_HOOKS = Object.freeze({
+  'app:registered':
+    'packages/runtime/src/app-plugin.ts — AppPlugin.start() → this.emitCatalogEvent(ctx, \'app:registered\', sys) → trigger.call(ctx, event, payload)',
+  'app:seeded':
+    'packages/runtime/src/app-plugin.ts — AppPlugin.start() → emitSeedSettled(false), the in-budget inline seed → trigger.call(ctx, \'app:seeded\', …)',
+  'auth:configure':
+    'packages/plugins/plugin-auth/src/auth-plugin.ts — AuthPlugin.init() → ctx.trigger(\'auth:configure\', authConfig, ctx)',
+  'automation:ready':
+    'packages/services/service-automation/src/plugin.ts — AutomationServicePlugin.start() → ctx.trigger(\'automation:ready\', this.engine)',
+  'analytics:ready':
+    'packages/services/service-analytics/src/plugin.ts — AnalyticsServicePlugin.start() → ctx.trigger(\'analytics:ready\', this.service)',
+  'datasource-admin:ready':
+    'packages/services/service-datasource/src/datasource-admin-plugin.ts — start() → ctx.trigger(\'datasource-admin:ready\', this.service)',
+  'external-datasource:ready':
+    'packages/services/service-datasource/src/plugin.ts — start() → ctx.trigger(\'external-datasource:ready\', this.service)',
+  'mcp:ready':
+    'packages/mcp/src/plugin.ts — MCPPlugin.start() → ctx.trigger(\'mcp:ready\', this.runtime)',
+});
+
+/** The method a plugin context fires a hook through. */
+const EMIT_CALLEE = 'trigger';
+
+/**
  * The accessors that RESOLVE A NAMED SERVICE out of the kernel registry.
  *
  * Identical to `check-init-service-contract.mjs`'s `SERVICE_LOOKUP_CALLEES`,
@@ -139,8 +179,12 @@ const READY_HOOK = 'kernel:ready';
  */
 const SERVICE_LOOKUP_CALLEES = new Set(['getService', 'getServiceAsync', 'getServiceScoped']);
 
-/** Tokens whose absence proves a file can contribute nothing — see `scan()`. */
-const PREFILTER_TOKENS = [...SERVICE_LOOKUP_CALLEES, 'providesServices'];
+/**
+ * Tokens whose absence proves a file can contribute nothing — see `scan()`.
+ * `EMIT_CALLEE` is here because a file that fires a pre-bind hook contributes
+ * to the population's DERIVATION even when it reads no service itself.
+ */
+const PREFILTER_TOKENS = [...SERVICE_LOOKUP_CALLEES, 'providesServices', EMIT_CALLEE];
 
 /**
  * Pre-bind reads that are KNOWN, MEASURED and owned by another card.
@@ -403,23 +447,40 @@ function objectUnit(file, src, obj, fileFunctions) {
 /**
  * Every settings lookup that executes BEFORE the settings plugin's engine bind,
  * tagged with the sub-window it sits in (see the header for why that decides
- * the remedy).
+ * the remedy) — plus every hook the same walk sees FIRED, which is what
+ * `audit()` derives {@link PRE_BIND_HOOKS} from.
  *
  * The walk starts at `init()` and `start()`, follows same-class `this.m(...)`,
  * same-file free functions and local block-scoped bindings transitively, and
- * does NOT descend into nested function bodies. Every `<expr>.hook('kernel:ready',
- * handler)` it passes hands `handler` to a second walk of the same kind, whose
- * origin records which lifecycle method registered it.
+ * does NOT descend into nested function bodies. Every `<expr>.hook(name,
+ * handler)` it passes for a name in `hookNames` (the ready hook plus the
+ * pre-bind hooks) hands `handler` to a second walk of the same kind:
+ *
+ *  - `kernel:ready` registered from a lifecycle body → `ready-hook-from-<phase>`;
+ *  - a pre-bind hook registered from a lifecycle body → `<name>-hook-from-<phase>`,
+ *    which is never the fixable origin — the hook fires before `kernel:ready`;
+ *  - ANY of them registered from inside a handler → that handler's own origin,
+ *    because it can only run once the registering handler has.
+ *
+ * A fired hook's name is a string literal, or a parameter the call site bound
+ * to one (`emitCatalogEvent(ctx, 'app:registered', sys)` reaches
+ * `trigger.call(ctx, event, payload)`); anything else is recorded UNRESOLVED,
+ * and `audit()` refuses on it rather than derive a population it cannot name.
  */
-function preBindReads(unit, src) {
+function preBindReads(unit, src, hookNames = new Set([READY_HOOK, ...Object.keys(PRE_BIND_HOOKS)])) {
   const reads = [];
+  const emits = [];
 
   /** Local (block-scoped) function bindings seen anywhere along the walk. */
   const locals = new Map();
 
-  const walk = (fnNode, origin, visited, onReadyHook) => {
-    if (!fnNode || visited.has(fnNode)) return;
-    visited.add(fnNode);
+  const walk = (fnNode, origin, visited, onHook, bindings = new Map()) => {
+    if (!fnNode) return;
+    // Keyed on the node AND its string bindings: one helper reached twice with
+    // two different literal arguments fires two different hooks.
+    const key = bindings.size ? `${fnNode.pos}:${JSON.stringify([...bindings])}` : fnNode;
+    if (visited.has(key)) return;
+    visited.add(key);
     const body = fnNode.body;
     if (!body) return;
 
@@ -431,6 +492,33 @@ function preBindReads(unit, src) {
         return unit.methods.get(node.name.text);
       }
       return undefined;
+    };
+
+    /** A string-literal argument, or a parameter this call frame bound to one. */
+    const resolveString = (node) => {
+      if (!node) return undefined;
+      if (ts.isStringLiteralLike(node)) return node.text;
+      if (ts.isIdentifier(node)) return bindings.get(node.text);
+      return undefined;
+    };
+
+    /** The callee's parameters bound to whatever string arguments resolve. */
+    const bindArgs = (target, args) => {
+      const out = new Map();
+      (target.parameters ?? []).forEach((p, i) => {
+        if (!ts.isIdentifier(p.name)) return;
+        const value = resolveString(args[i]);
+        if (value !== undefined) out.set(p.name.text, value);
+      });
+      return out;
+    };
+
+    const recordEmit = (nameArg, node) => {
+      const line = src.getLineAndCharacterOfPosition(node.getStart(src)).line + 1;
+      const name = resolveString(nameArg);
+      emits.push(name === undefined
+        ? { name: undefined, unresolved: nameArg ? nameArg.getText(src) : '(no argument)', origin, line }
+        : { name, origin, line });
     };
 
     const visit = (node) => {
@@ -470,26 +558,39 @@ function preBindReads(unit, src) {
               });
             }
           }
-          // `<anything>.hook('kernel:ready', handler)` — `ctx.hook`,
-          // `(ctx as any).hook`, `this.ctx.hook` all land here.
-          if (callee.name.text === 'hook' && onReadyHook) {
+          // `<anything>.hook(name, handler)` — `ctx.hook`, `(ctx as any).hook`,
+          // `this.ctx.hook` and the optional-call form all land here.
+          if (callee.name.text === 'hook' && onHook) {
             const [nameArg, handlerArg] = node.arguments;
-            if (nameArg && ts.isStringLiteralLike(nameArg) && nameArg.text === READY_HOOK) {
+            if (nameArg && ts.isStringLiteralLike(nameArg) && hookNames.has(nameArg.text)) {
               const handler = resolveCallable(handlerArg);
-              if (handler) onReadyHook(handler);
+              if (handler) onHook(nameArg.text, handler);
             }
+          }
+          // `<anything>.trigger(name, …)` — the hook is FIRED here.
+          if (callee.name.text === EMIT_CALLEE) recordEmit(node.arguments[0], node);
+          // `trigger.call(thisArg, name, …)` — AppPlugin's spelling, which
+          // reads the method off the context first so a kernel without one
+          // is a no-op rather than a throw.
+          if (callee.name.text === 'call' &&
+            ((ts.isIdentifier(callee.expression) && callee.expression.text === EMIT_CALLEE) ||
+              (ts.isPropertyAccessExpression(callee.expression) && callee.expression.name.text === EMIT_CALLEE))) {
+            recordEmit(node.arguments[1], node);
+          }
+          if (process.env.PROBE_THEN === '1' && ['then', 'catch', 'finally'].includes(callee.name.text)) {
+            for (const a of node.arguments) { const t = resolveCallable(a); if (t) walk(t, origin, visited, onHook, new Map()); }
           }
           // `this.m(...)` → same-class method or function-valued property.
           if (callee.expression.kind === ts.SyntaxKind.ThisKeyword) {
             const target = unit.methods.get(callee.name.text);
-            if (target) walk(target, origin, visited, onReadyHook);
+            if (target) walk(target, origin, visited, onHook, bindArgs(target, node.arguments));
           }
         }
 
         // `f(...)` → local binding first (inner scope wins), then same-file.
         if (ts.isIdentifier(callee)) {
           const target = locals.get(callee.text) ?? unit.fileFunctions.get(callee.text);
-          if (target) walk(target, origin, visited, onReadyHook);
+          if (target) walk(target, origin, visited, onHook, bindArgs(target, node.arguments));
         }
       }
       ts.forEachChild(node, visit);
@@ -509,15 +610,27 @@ function preBindReads(unit, src) {
   ]) {
     const root = unit.methods.get(phase);
     if (!root) continue;
+    /** [handler, origin] — origin decided by WHAT registered it, see above. */
     const handlers = [];
-    walk(root, bodyOrigin, new Set(), (h) => handlers.push(h));
-    // Handlers registered by a handler inherit the registering phase's window.
+    walk(root, bodyOrigin, new Set(), (name, h) => {
+      handlers.push([h, name === READY_HOOK ? hookOrigin : `${name}-hook-from-${phase}`]);
+    });
+    // Handlers registered by a handler inherit the registering handler's window.
     for (let i = 0; i < handlers.length; i++) {
-      walk(handlers[i], hookOrigin, new Set(), (h) => handlers.push(h));
+      const [handler, origin] = handlers[i];
+      walk(handler, origin, new Set(), (_name, h) => handlers.push([h, origin]));
     }
   }
 
-  return reads;
+  // One read reached along two paths is one read.
+  const seen = new Set();
+  const uniqueReads = reads.filter((r) => {
+    const k = `${r.line}|${r.origin}|${r.accessor}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  return { reads: uniqueReads, emits };
 }
 
 // ── Scan + audit ─────────────────────────────────────────────────────────────
@@ -537,7 +650,7 @@ function scan(files = discoverFiles()) {
       if (!unit.pluginName && unit.nameRef) {
         unit.pluginName = resolveNameThroughImport(file, src, unit.nameRef, readSource);
       }
-      units.push({ ...unit, reads: preBindReads(unit, src) });
+      units.push({ ...unit, ...preBindReads(unit, src) });
     }
   }
   return units;
@@ -654,6 +767,44 @@ function auditUnits(units, providerOverride) {
 }
 
 /**
+ * The pre-bind hooks, DERIVED from the source: every hook name the walk saw
+ * FIRED. Emits are recorded only along walks rooted at `init()` / `start()` or
+ * at a handler of a pre-bind hook, so every recorded emit fires before the bind
+ * under at least one composition order. `READY_HOOK` itself is the kernel's,
+ * fired after Phase 2, and is never a derived name.
+ */
+function derivePreBindHooks(units) {
+  /** name → the sites that fire it */
+  const fired = new Map();
+  const unresolved = [];
+  for (const unit of units) {
+    for (const e of unit.emits ?? []) {
+      const site = { file: unit.file, line: e.line, anchor: unit.anchor, origin: e.origin };
+      if (e.name === undefined) { unresolved.push({ ...site, text: e.unresolved }); continue; }
+      if (e.name === READY_HOOK) continue;
+      if (!fired.has(e.name)) fired.set(e.name, []);
+      fired.get(e.name).push(site);
+    }
+  }
+  return { fired, unresolved };
+}
+
+/**
+ * Hold {@link PRE_BIND_HOOKS} equal to the derivation, in both directions.
+ * `missing` — fired before the bind and absent from the pin, so its handlers
+ * are outside the population; `stalePins` — pinned and no longer fired, which
+ * is also what an empty derivation produces (the anti-vacuity limb);
+ * `unresolved` — a fire site whose hook name this walk cannot name.
+ */
+function reconcilePreBindHooks(derived, pinned = PRE_BIND_HOOKS) {
+  return {
+    missing: [...derived.fired.keys()].filter((n) => !Object.hasOwn(pinned, n)).sort(),
+    stalePins: Object.keys(pinned).filter((n) => !derived.fired.has(n)).sort(),
+    unresolved: derived.unresolved,
+  };
+}
+
+/**
  * Apply the shrink-only ledger. Returns the problems that remain, plus the
  * ledger entries that no longer match anything — which are errors in their own
  * right, because a ledger that outlives its defect quietly re-admits it.
@@ -727,6 +878,12 @@ function list() {
     }
   }
   if (findings.length === 0) console.log('(no pre-bind settings reads found)');
+  const { fired, unresolved } = derivePreBindHooks(units);
+  for (const [name, sites] of [...fired].sort(([a], [b]) => a.localeCompare(b))) {
+    const pin = Object.hasOwn(PRE_BIND_HOOKS, name) ? 'pinned  ' : 'UNPINNED';
+    for (const s of sites) console.log(`fires ${pin}  ${name.padEnd(26)} ${s.file}:${s.line}  ${s.anchor}  <${s.origin}>`);
+  }
+  for (const s of unresolved) console.log(`fires UNRESOLVED  ${s.text}  ${s.file}:${s.line}  ${s.anchor}  <${s.origin}>`);
 }
 
 // ── Self-test ────────────────────────────────────────────────────────────────
@@ -745,7 +902,7 @@ function selfTest() {
 
   const auditSource = (code, ledger = []) => {
     const src = parseSourceFile('fixture.ts', code);
-    const units = collectPluginUnits('fixture.ts', src).map((u) => ({ ...u, reads: preBindReads(u, src) }));
+    const units = collectPluginUnits('fixture.ts', src).map((u) => ({ ...u, ...preBindReads(u, src) }));
     const { problems, findings, provider } = auditUnits(units);
     const { remaining, stale } = applyLedger(problems, ledger);
     return { problems, remaining, stale, findings, provider, units };
