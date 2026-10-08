@@ -126,6 +126,23 @@ describe('the upload doors after the uploader switches organization, on a booted
   const progress = (uploadId: string) =>
     stack.apiAs(uploader, 'GET', `/storage/upload/chunked/${uploadId}/progress`);
   /**
+   * The upload's declared 10 bytes, as chunk 0 — a completion assembles only
+   * an upload that holds them (#22313). Sent from the organization the upload
+   * was started in.
+   */
+  const holdTheDeclaredBytes = async (uploadId: string, resumeToken: string) => {
+    const res = await stack.api(`/storage/upload/chunked/${uploadId}/chunk/0`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${uploader}`,
+        'Content-Type': 'application/octet-stream',
+        'x-resume-token': resumeToken,
+      },
+      body: new TextEncoder().encode('0123456789'),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+  };
+  /**
    * Moves a session's own `expires_at` into the past, as SYSTEM and in the
    * organization it was started in, so its expiry stamp is due. The row's
    * organization is untouched.
@@ -254,7 +271,8 @@ describe('the upload doors after the uploader switches organization, on a booted
 
     it('ORGANIZATION CHANGED: 409 RESOURCE_CONFLICT naming the change, not 500; neither row moves; switching back completes it', async () => {
       await switchTo(startOrg);
-      const { uploadId, fileId } = await startChunked();
+      const { uploadId, fileId, resumeToken } = await startChunked();
+      await holdTheDeclaredBytes(uploadId, resumeToken);
       const sessionBefore = await stored('sys_upload_session', uploadId);
       const fileBefore = await stored('sys_file', fileId);
 
@@ -274,7 +292,8 @@ describe('the upload doors after the uploader switches organization, on a booted
 
     it('CONTROL — SAME ORGANIZATION: the uploader completes exactly as before', async () => {
       await switchTo(startOrg);
-      const { uploadId, fileId } = await startChunked();
+      const { uploadId, fileId, resumeToken } = await startChunked();
+      await holdTheDeclaredBytes(uploadId, resumeToken);
       const own = await answer(await complete(uploadId));
       expect(own.status, JSON.stringify(own.body)).toBe(200);
       expect(own.body.data.fileId).toBe(fileId);

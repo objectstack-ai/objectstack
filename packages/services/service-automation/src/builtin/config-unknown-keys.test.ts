@@ -10,17 +10,25 @@
  * the only symptom was a feature that quietly did not happen. That is the
  * diagnostic vacuum that made #3528 take three passes and two wrong diagnoses.
  *
- * #4059 turned that into a warning while the #4045 reconciliation closed the
- * read-but-undeclared population; #4277 tightens it into a rejection. These
- * tests pin both halves of the tightened behavior: registration THROWS with an
- * actionable prescription (path, declared set, did-you-mean, per-key
- * tombstones), AND the deliberate exemptions still register — `assignment`
- * (author-named keys), keyValue-map keys (author data), schemaless types
- * (nothing declared ⇒ nothing undeclared).
+ * [#21982] One judge per node type. A builtin's undeclared key is the spec's:
+ * `flowNodeConfigRefusals` refuses it inside the `FlowSchema.parse`
+ * `registerFlow` makes first — the same verdict `objectstack validate`,
+ * `objectstack compile` and the save door give — for every type
+ * `builtinNodeConfigKeysJudged` names, and the descriptor walk
+ * (`validateNodeConfigKeys`) stands aside for those types. The walk's pins are
+ * re-pointed here, not dropped: the key, its location, the prescription for a
+ * known slip and a rename-or-remove remedy all reach the author from the spec
+ * refusal. The walk keeps `try_catch` (its contract's `retry` strips an unknown
+ * key where its descriptor closes it) and every PLUGIN node type, and its own
+ * prescriptions are pinned on those. The deliberate exemptions still register:
+ * `assignment` (author-named keys), keyValue-map keys (author data),
+ * `decision` (no executor contract).
  */
 
 import { describe, it, expect } from 'vitest';
+import { builtinNodeConfigKeysJudged, defineActionDescriptor, flowNodeConfigRefusals } from '@objectstack/spec/automation';
 import { AutomationEngine } from '../engine.js';
+import type { NodeExecutor } from '../engine.js';
 import { installBuiltinNodes } from './index.js';
 
 function recordingLogger() {
@@ -33,9 +41,21 @@ function recordingLogger() {
   return { logger, warnings };
 }
 
+/** A plugin node type the spec knows nothing about: its descriptor declares `count` and `label`. */
+const STAMP = 'test_stamp';
+const stampExecutor: NodeExecutor = {
+  type: STAMP,
+  descriptor: defineActionDescriptor({
+    type: STAMP, version: '1.0.0', name: 'Stamp', category: 'custom', paradigms: ['flow'], source: 'plugin',
+    configSchema: { type: 'object', properties: { count: { type: 'number' }, label: { type: 'string' } } },
+  }),
+  async execute() { return { success: true }; },
+};
+
 function engineWith(logger: any) {
   const engine = new AutomationEngine(logger);
   installBuiltinNodes(engine, { logger, getService() { throw new Error('none'); } } as any);
+  engine.registerNodeExecutor(stampExecutor);
   return engine;
 }
 
@@ -55,93 +75,142 @@ function flowWith(type: string, config: Record<string, unknown>) {
   };
 }
 
-/** Register and return the rejection message (fails the test if it registers). */
-function rejectionOf(engine: AutomationEngine, type: string, config: Record<string, unknown>): string {
+/** Register and return what it threw (fails the test if it registers). */
+function rejectionOf(engine: AutomationEngine, type: string, config: Record<string, unknown>): Error & { issues?: any[] } {
   try {
     engine.registerFlow('f', flowWith(type, config));
   } catch (err) {
-    return (err as Error).message;
+    return err as Error & { issues?: any[] };
   }
   throw new Error(`flow with ${type} config ${JSON.stringify(config)} should have been rejected`);
 }
 
-describe('unknown node config keys are rejected (#4277)', () => {
+/** The spec refusal `registerFlow` met: every issue's path, with the judge's own refusal beside it. */
+function specRefusalsOf(engine: AutomationEngine, type: string, config: Record<string, unknown>) {
+  const err = rejectionOf(engine, type, config);
+  expect(err.issues, 'the FlowSchema parse, not the descriptor walk, refused it').toBeDefined();
+  const judged = flowNodeConfigRefusals(type, config);
+  return (err.issues ?? []).map((issue: any, i: number) => ({
+    path: issue.path.join('.'),
+    message: issue.message as string,
+    code: judged[i]?.code,
+    judgedMessage: judged[i]?.message,
+  }));
+}
+
+describe('a builtin\'s undeclared key is the spec\'s, met at registration (#4277 re-pointed, #21982)', () => {
   it('rejects a misspelled key inside the field repeater, locating the exact element', async () => {
     const { logger } = recordingLogger();
     const engine = engineWith(logger);
 
     // The typo lives INSIDE the field repeater — where the real #3528 one did.
-    const msg = rejectionOf(engine, 'screen', {
-      fields: [{ name: 'opportunityName', required: true, visibleIf: 'createOpportunity == true' }],
-    });
-
-    expect(msg).toContain("node 'n1'");
-    expect(msg).toContain('(screen)');
+    const config = { fields: [{ name: 'opportunityName', required: true, visibleIf: 'createOpportunity == true' }] };
+    const [refusal, ...rest] = specRefusalsOf(engine, 'screen', config);
+    expect(rest).toEqual([]);
     // Located to the exact element, so the author knows WHICH field.
-    expect(msg).toContain('config.fields[0].visibleIf');
-    // The load-bearing half for an agent author: the correct key is named. Note
-    // it comes from the DECLARED SET, not the suggestion — `visibleIf` →
-    // `visibleWhen` is edit-distance 4 against `nearestName`'s threshold of 3,
-    // so this exact typo gets no did-you-mean. Printing the declared set is
-    // what makes the diagnostic actionable regardless.
-    // #17306 added `min`/`max`/`inlineHelpText`/`reference`; the enumeration is
-    // pinned in full rather than sampled, so a key that arrives or vanishes on
-    // this surface has to be acknowledged here.
-    expect(msg).toContain(
-      'Declared here: name, label, type, required, options, defaultValue, placeholder, '
-      + 'min, max, inlineHelpText, reference, visibleWhen.',
-    );
-    // …and this particular key has a documented incident, so it also carries
-    // its tombstone (the UNKNOWN_KEY_GUIDANCE pattern).
-    expect(msg).toContain('visibleWhen');
-    expect(msg).toContain('blocks the screen from ever being submitted');
+    expect(refusal!.path).toBe('nodes.1.config.fields.0.visibleIf');
+    expect(refusal!.code).toBe('node-config-refused-by-contract');
+    expect(refusal!.message).toBe(refusal!.judgedMessage);
+    // The load-bearing half for an agent author: the correct key is named, by
+    // the screen field contract's own prescription for this exact typo.
+    expect(refusal!.message).toContain('`visibleWhen`');
     // The flow is NOT registered.
     await expect(engine.getFlow('f')).resolves.toBeNull();
   });
 
   it('adds a did-you-mean when the typo IS within edit distance', () => {
-    const { logger } = recordingLogger();
-    const engine = engineWith(logger);
-
-    const msg = rejectionOf(engine, 'screen', { titl: 'Details' });
-    expect(msg).toContain('did you mean `title`?');
-    // …and still lists the declared set alongside it.
-    expect(msg).toContain('Declared here:');
+    const engine = engineWith(recordingLogger().logger);
+    const [refusal] = specRefusalsOf(engine, 'screen', { titl: 'Details' });
+    expect(refusal!.path).toBe('nodes.1.config.titl');
+    expect(refusal!.message).toContain('`title`');
   });
 
   it('carries the fieldValues → fields tombstone on the CRUD write map', () => {
-    const { logger } = recordingLogger();
-    const engine = engineWith(logger);
-
-    const msg = rejectionOf(engine, 'create_record', {
-      objectName: 'crm_lead',
-      fieldValues: { name: 'x' },
-    });
-    expect(msg).toContain('unknown config key `fieldValues`');
+    const engine = engineWith(recordingLogger().logger);
+    const [refusal] = specRefusalsOf(engine, 'create_record', { objectName: 'crm_lead', fieldValues: { name: 'x' } });
+    expect(refusal!.path).toBe('nodes.1.config.fieldValues');
     // The tombstone names the mechanism, not just the nearest key.
-    expect(msg).toContain('The write map is `fields`');
+    expect(refusal!.message).toContain('The write map is `fields`');
   });
 
   it('reports every undeclared key in ONE rejection, not just the first', () => {
-    const { logger } = recordingLogger();
-    const engine = engineWith(logger);
-
-    const msg = rejectionOf(engine, 'screen', { hideWhen: 'x', submitLabel: 'Go' });
-    expect(msg).toContain('hideWhen');
-    expect(msg).toContain('submitLabel');
-    expect(msg).toContain('2 undeclared config key(s)');
+    const engine = engineWith(recordingLogger().logger);
+    const refusals = specRefusalsOf(engine, 'screen', { hideWhen: 'x', submitLabel: 'Go' });
+    expect(refusals.map((r) => r.path).sort()).toEqual(['nodes.1.config.hideWhen', 'nodes.1.config.submitLabel']);
   });
 
-  it('the rejection carries the declare-it prescription for genuinely-read keys', () => {
-    const { logger } = recordingLogger();
-    const engine = engineWith(logger);
+  it('a key with no did-you-mean still carries the rename-or-remove remedy', () => {
+    const engine = engineWith(recordingLogger().logger);
+    const [refusal] = specRefusalsOf(engine, 'screen', { totallyMadeUp: 42 });
+    expect(refusal!.path).toBe('nodes.1.config.totallyMadeUp');
+    expect(refusal!.message).not.toContain('did you mean');
+    expect(refusal!.message).toMatch(/Rename the key .* or remove it/);
+  });
 
-    const msg = rejectionOf(engine, 'screen', { totallyMadeUp: 42 });
-    expect(msg).not.toContain('did you mean');
+  it('a body-less legacy loop with an undeclared key is still refused at registration — registerFlow widens nowhere', async () => {
+    const engine = engineWith(recordingLogger().logger);
+    const [refusal] = specRefusalsOf(engine, 'loop', { collection: 'rows', bogusKey: 1 });
+    expect(refusal!.path).toBe('nodes.1.config.bogusKey');
+    await expect(engine.getFlow('f')).resolves.toBeNull();
+    // CONTROL: the same legacy loop without the key registers.
+    expect(() => engine.registerFlow('f', flowWith('loop', { collection: 'rows' }))).not.toThrow();
+  });
+
+  it('the descriptor walk stands aside for every type the spec judges, and keeps the rest', () => {
+    const engine = engineWith(recordingLogger().logger);
+    const walk = (type: string, config: Record<string, unknown>) => () =>
+      (engine as any).validateNodeConfigKeys('f', flowWith(type, config));
+    // One judge per type: the spec already refused these in `FlowSchema.parse`.
+    for (const [type, config] of [
+      ['screen', { fields: [{ name: 'a', visibleIf: 'x' }] }],
+      ['notify', { recipients: 'u1', title: 'T', bogusKey: 1 }],
+      ['loop', { collection: 'rows', bogusKey: 1 }],
+    ] as const) {
+      expect(builtinNodeConfigKeysJudged(type), type).toBe(true);
+      expect(walk(type, config), type).not.toThrow();
+    }
+    // The walk keeps try_catch and plugin types.
+    expect(builtinNodeConfigKeysJudged('try_catch')).toBe(false);
+    expect(walk('try_catch', { try: { nodes: [], edges: [] }, bogusKey: 1 })).toThrow(/undeclared config key/);
+    expect(builtinNodeConfigKeysJudged(STAMP)).toBe(false);
+    expect(walk(STAMP, { count: 1, bogusKey: 1 })).toThrow(/undeclared config key/);
+  });
+});
+
+describe('the descriptor walk keeps try_catch and plugin node types, with its own prescriptions', () => {
+  it('try_catch: a key its descriptor closes on `retry` — one the contract would strip — is refused, located', async () => {
+    const engine = engineWith(recordingLogger().logger);
+    const tryRegion = { nodes: [{ id: 'a', type: 'assignment', label: 'A', config: { assignments: { x: 1 } } }], edges: [] };
+    const err = rejectionOf(engine, 'try_catch', { try: tryRegion, retry: { maxRetries: 1, bogusKey: 1 } });
+    expect(err.issues).toBeUndefined();
+    expect(err.message).toContain("node 'n1' (try_catch)");
+    expect(err.message).toContain('unknown config key `bogusKey` at config.retry.bogusKey');
+    expect(err.message).toContain('Declared here: maxRetries, backoffMs, backoffMultiplier, maxRetryDelayMs, jitter.');
+    expect(err.message).toContain('(rename or remove the key)');
+    await expect(engine.getFlow('f')).resolves.toBeNull();
+  });
+
+  it('a plugin node type: did-you-mean, the declared set, and the declare-it prescription', () => {
+    const engine = engineWith(recordingLogger().logger);
+    const err = rejectionOf(engine, STAMP, { coutn: 1 });
+    expect(err.issues).toBeUndefined();
+    expect(err.message).toContain(`node 'n1' (${STAMP}): unknown config key \`coutn\` at config.coutn`);
+    expect(err.message).toContain('did you mean `count`?');
+    expect(err.message).toContain('Declared here: count, label.');
     // The way OUT for a custom executor whose schema lags its reads.
-    expect(msg).toContain("declare it on the node type's descriptor configSchema");
+    expect(err.message).toContain("declare it on the node type's descriptor configSchema");
   });
 
+  it('a plugin node type: every undeclared key in ONE rejection', () => {
+    const engine = engineWith(recordingLogger().logger);
+    const err = rejectionOf(engine, STAMP, { hideWhen: 'x', submitLabel: 'Go' });
+    expect(err.message).toContain('hideWhen');
+    expect(err.message).toContain('submitLabel');
+    expect(err.message).toContain('2 undeclared config key(s)');
+  });
+});
+
+describe('what still registers (controls)', () => {
   it('registers a fully declared config without complaint', async () => {
     const { logger, warnings } = recordingLogger();
     const engine = engineWith(logger);
@@ -174,8 +243,8 @@ describe('unknown node config keys are rejected (#4277)', () => {
   });
 
   it('stays quiet for a node type that publishes no configSchema', () => {
-    // `decision` / `script` are deliberately schemaless (config-schemas.test.ts):
-    // nothing is declared, so nothing can be undeclared.
+    // `decision` is deliberately schemaless (config-schemas.test.ts) and has no
+    // executor contract either: nothing is declared, so nothing can be undeclared.
     const { logger } = recordingLogger();
     const engine = engineWith(logger);
 
@@ -184,7 +253,7 @@ describe('unknown node config keys are rejected (#4277)', () => {
   });
 
   it('does not flag the keys of a keyValue map — those are author data', () => {
-    // The walk descends where the schema declares structure and STOPS at a
+    // Both judges descend where the contract declares structure and STOP at a
     // free-form map: `filter: { status: 'stale' }` keys are data, not config keys.
     const { logger } = recordingLogger();
     const engine = engineWith(logger);

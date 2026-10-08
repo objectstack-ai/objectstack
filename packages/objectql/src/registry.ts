@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, isTenancyDisabled, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, isInjectedColumnDefinition, isTenancyDisabled, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -512,7 +512,15 @@ const OWNING_BUSINESS_UNIT_FIELD: typeof SystemFieldName.OWNING_BUSINESS_UNIT_ID
 
 export function applySystemFields(
   schema: ServiceObject,
-  opts: { multiTenant: boolean }
+  opts: {
+    multiTenant: boolean;
+    /**
+     * [ADR-0131 D7] The objects THIS deployment declares platform-global — the
+     * plan's one deployment input. A declared object gets no `organization_id`
+     * here. Omitted or empty ⇒ the plan is byte-identical to the authored one.
+     */
+    platformGlobalObjects?: ReadonlySet<string>;
+  }
 ): ServiceObject {
   // WHICH columns this object carries is the spec's derivation
   // (`resolveInjectedSystemColumns`, #5378) — one answer shared with every
@@ -532,7 +540,16 @@ export function applySystemFields(
   // spreads — the definitions must stay byte-identical to the shipped tables,
   // because the #7859 Layer-0 guard and the #4326 round-trip strip both read
   // them by exact identity. Do not add keys here; consumers ask the API.
-  const plan = resolveInjectedSystemColumns(schema);
+  //
+  // [ADR-0131 D7] …and the deployment's platform-global declaration is the
+  // plan's one deployment input: a declared object is planned with no tenant
+  // column, so nothing below injects `organization_id` for it. Passed only when
+  // a deployment declared something, so every other call is the one-argument
+  // plan, byte for byte.
+  const plan =
+    opts.platformGlobalObjects && opts.platformGlobalObjects.size > 0
+      ? resolveInjectedSystemColumns(schema, { platformGlobalObjects: opts.platformGlobalObjects })
+      : resolveInjectedSystemColumns(schema);
 
   // 1. Hard opt-out at object level (e.g. seed/migration tables).
   //    Folded into the plan (`systemFields: false` ⇒ every flag false), so the
@@ -853,10 +870,10 @@ const TENANT_SCOPE_INDEX: { fields: string[] } = { fields: ['organization_id'] }
 
 function provisionTenantScopeIndex(
   schema: ServiceObject,
-  opts: { multiTenant: boolean },
+  opts: { multiTenant: boolean; platformGlobalObjects?: ReadonlySet<string> },
 ): ServiceObject {
   if (!opts.multiTenant) return schema;
-  if (!carriesTenantScopeColumn(schema)) return schema;
+  if (!carriesTenantScopeColumn(schema, opts.platformGlobalObjects)) return schema;
   if (declaresTenantIndex(schema)) return schema;
 
   return {
@@ -950,7 +967,10 @@ function provisionTenantScopeIndex(
  * sites above, and ⛔ not a contract for any other package to answer the
  * wall from — the wall answers for itself (ADR-0131 D8).
  */
-function carriesTenantScopeColumn(schema: ServiceObject): boolean {
+function carriesTenantScopeColumn(
+  schema: ServiceObject,
+  platformGlobalObjects?: ReadonlySet<string>,
+): boolean {
   // Clause 1 — the wall's own two clauses, spelled here because
   // plugin-security spells them there (option C, the single exported
   // predicate, is bounded to no new `@objectstack/spec` export and no
@@ -961,8 +981,16 @@ function carriesTenantScopeColumn(schema: ServiceObject): boolean {
     return false;
   }
   // Clause 2 — there is a column for the wall's predicate to filter on.
+  // [ADR-0131 D7] The injection plan is asked with the deployment's
+  // platform-global declaration, the same input `applySystemFields` planned the
+  // column from: a declared object carries no injected tenant column, so there
+  // is nothing for an index to serve.
+  const plan =
+    platformGlobalObjects && platformGlobalObjects.size > 0
+      ? resolveInjectedSystemColumns(schema, { platformGlobalObjects })
+      : resolveInjectedSystemColumns(schema);
   return (
-    resolveInjectedSystemColumns(schema).tenant ||
+    plan.tenant ||
     (schema as { fields?: Record<string, unknown> }).fields?.organization_id != null
   );
 }
@@ -1920,6 +1948,17 @@ function collectBundle(
   return { bare: canonicalFirst(bare), local: canonicalFirst(local), other: canonicalFirst(other) };
 }
 
+/**
+ * `schema` without the field `name` — `schema` itself, by reference, when it
+ * does not carry one. Never mutates its input.
+ */
+function withoutField(schema: ServiceObject, name: string): ServiceObject {
+  const fields = schema.fields as Record<string, unknown> | undefined;
+  if (!fields || fields[name] === undefined) return schema;
+  const { [name]: _dropped, ...rest } = fields;
+  return { ...schema, fields: rest } as ServiceObject;
+}
+
 export class SchemaRegistry {
   // ==========================================
   // Logging control
@@ -1936,6 +1975,16 @@ export class SchemaRegistry {
 
   /** Cross-package base-layer collision policy (ADR-0048). */
   private readonly collisionPolicy: 'error' | 'warn';
+
+  /**
+   * [ADR-0131 D7] The objects THIS deployment declares platform-global — the
+   * #12699 declaration made total: each one gets NO organization column here.
+   *
+   * Empty until the engine plugin installs the deployment's validated reading
+   * ({@link setDeploymentPlatformGlobalObjects}), which it does at `start()`,
+   * before the first schema sync. See that method for the ordering.
+   */
+  private deploymentPlatformGlobalObjects: ReadonlySet<string> = new Set<string>();
 
   constructor(options: SchemaRegistryOptions = {}) {
     if (options.multiTenant !== undefined) {
@@ -2431,7 +2480,10 @@ export class SchemaRegistry {
     // the registered schema (driver syncSchema, REST projector, hooks)
     // sees the same canonical shape. Author-declared fields win — see
     // applySystemFields().
-    schema = applySystemFields(schema, { multiTenant: this.multiTenant });
+    schema = applySystemFields(schema, {
+      multiTenant: this.multiTenant,
+      platformGlobalObjects: this.deploymentPlatformGlobalObjects,
+    });
 
     // [ADR-0092 / #1591] Reconcile generic-write `apiMethods` against the CRUD
     // affordances a better-auth-managed object actually grants — strip verbs
@@ -2848,6 +2900,14 @@ export class SchemaRegistry {
   ): ServiceObject {
     let out = schema;
 
+    // [ADR-0131 D7] The deployment's platform-global declaration, recorded on
+    // the base layer. FIRST, because every later stamp asks its question of the
+    // object as this deployment provisions it — the tenant index below must
+    // see a declared object as carrying no tenant column. See
+    // {@link applyDeploymentTenancy}; its write-side inverse is the LAST strip
+    // in {@link stripMaterializedStampsFrom}.
+    out = this.applyDeploymentTenancy(out);
+
     // [ADR-0079] DESIGNATE-ONLY primary-title provisioning — `synthesize:
     // false` never adds a column, so this is safe against title-less
     // system/junction tables (see the call in `registerObject` for the full
@@ -3099,8 +3159,180 @@ export class SchemaRegistry {
    */
   stripMaterializedStampsFrom<T>(base: T): T {
     if (base === null || typeof base !== 'object') return base;
-    return this.stripProvisionedPrimaryFrom(
-      this.stripProvisionedSearchCompanionFrom(this.stripProvisionedTenantIndexFrom(base)),
+    return this.stripDeploymentTenancyFrom(
+      this.stripProvisionedPrimaryFrom(
+        this.stripProvisionedSearchCompanionFrom(this.stripProvisionedTenantIndexFrom(base)),
+      ),
+    );
+  }
+
+  // ==========================================
+  // [ADR-0131 D7] The deployment's platform-global declaration
+  // ==========================================
+
+  /**
+   * Install the objects THIS deployment declares platform-global — the
+   * validated reading of the mounted `org-scoping` service's
+   * `OrgScopingEntitlement.platformGlobalObjects` (#12699, made total by
+   * ADR-0131 D7: "an object a deployment declares platform-global gets no
+   * organization column on that deployment (the injected-columns plan reads
+   * the declaration), so Layer 0 and the driver agree by having nothing to
+   * scope").
+   *
+   * ## When, and what orders it
+   *
+   * The engine plugin calls this at `start()`, before its first schema sync.
+   * The plan is computed at {@link registerObject}, which runs inside whichever
+   * plugin's `init()` registers the object — and the `org-scoping` provider
+   * cannot be hoisted ahead of every one of those: it hard-depends on the
+   * engine (its own `init()` registers a manifest), so an engine-side
+   * `optionalDependencies` edge on it is a cycle, and an edge from every
+   * object registrant is an open-ended set. What does order them is ADR-0116's
+   * Phase 1/2 split: every `init()` completes before any `start()`, and the
+   * provider declares `org-scoping` in `providesServices`, i.e. registers it
+   * unconditionally in `init()`. So at the engine's `start()` the declaration
+   * is final, and no table exists yet.
+   *
+   * ## What it does to an object registered before it
+   *
+   * Re-plans it, so the registry answers exactly what {@link registerObject}
+   * answers for an object registered after it: on every base layer the
+   * platform's tenant index entry and the platform's own `organization_id`
+   * come off and `systemFields.tenant: false` is recorded
+   * ({@link applyDeploymentTenancy}); an `extend` layer loses the platform's
+   * own `organization_id` and tenant index. A column the AUTHOR declared is the author's — it
+   * stays, the object stays walled on it, and its name is returned in
+   * `keptAuthoredColumn` for the caller to report.
+   *
+   * The declaration is constant for the kernel's life (the `org-scoping`
+   * service's keys are readonly). Installing again re-plans with the new set;
+   * an object dropped from it is not re-injected.
+   */
+  setDeploymentPlatformGlobalObjects(names: Iterable<string>): {
+    readonly replanned: readonly string[];
+    readonly keptAuthoredColumn: readonly string[];
+  } {
+    this.deploymentPlatformGlobalObjects = new Set(names);
+    const replanned = new Set<string>();
+    const keptAuthoredColumn = new Set<string>();
+    if (this.deploymentPlatformGlobalObjects.size === 0) {
+      return { replanned: [], keptAuthoredColumn: [] };
+    }
+    for (const contributors of this.objectContributors.values()) {
+      for (const contributor of contributors) {
+        const before = contributor.definition;
+        const name = (before as { name?: unknown })?.name;
+        if (typeof name !== 'string') continue;
+        const orgField = (before.fields as Record<string, unknown> | undefined)?.organization_id;
+        const authoredColumn = orgField !== undefined && !isInjectedColumnDefinition(orgField, TENANT_SCOPE_FIELD_DEF);
+        // Asked of the body WITHOUT its column: the plan decides whether the
+        // deployment withholds one, and the column's presence is not an input.
+        if (!this.deploymentWithholdsTenant(withoutField(before, 'organization_id'))) continue;
+        if (authoredColumn) {
+          keptAuthoredColumn.add(name);
+          continue;
+        }
+        // The tenant index comes off FIRST, while the body is still in the
+        // state it was stamped in (the strip re-stamps to prove the entry is
+        // the platform's own); an `extend` layer carried both too, because
+        // `applySystemFields` runs on every contributor.
+        const unindexed = this.stripProvisionedTenantIndexFrom(before);
+        const after =
+          contributor.ownership === 'extend'
+            ? withoutField(unindexed, 'organization_id')
+            : this.applyDeploymentTenancy(unindexed);
+        if (after !== before) {
+          contributor.definition = after;
+          replanned.add(name);
+        }
+      }
+    }
+    this.invalidateAll();
+    return { replanned: [...replanned].sort(), keptAuthoredColumn: [...keptAuthoredColumn].sort() };
+  }
+
+  /**
+   * [ADR-0131 D7] Record the deployment's platform-global declaration on one
+   * base-layer body: a declared object carries no `organization_id` here and
+   * declares `systemFields.tenant: false`.
+   *
+   * Why the record and not only the missing column: `systemFields.tenant:
+   * false` is the vocabulary every reader of a registered object already
+   * answers "no organization column" from — the security layer's
+   * `tenancyDisabled` (so Layer 0 composes nothing and a wildcard
+   * `organization_id` policy is not applicable, with no second reading of the
+   * declaration), the tenant-index predicate above, the lifecycle's
+   * provenance (`absent`), and the `/meta` read exits' own injection pass,
+   * which re-plans a served body WITHOUT the deployment and would otherwise
+   * add the column back. The object is then exactly what a deployment-level
+   * object that declares the key itself is (ADR-0131 D7: governed by object
+   * permission, not by the wall), on this deployment only.
+   *
+   * Withheld — `schema` returned by reference — when the object is not
+   * declared, when its own declaration already plans no tenant column, and
+   * when it DECLARES its own `organization_id` (not the platform's
+   * definition, byte for byte): an authored column is the author's, and the
+   * object stays walled on it. The decision reads only the body, so the read
+   * exits ({@link materializeServedObjectOnto}) reach the same answer.
+   */
+  private applyDeploymentTenancy(schema: ServiceObject): ServiceObject {
+    if (!this.deploymentWithholdsTenant(schema)) return schema;
+    const fields = schema.fields as Record<string, unknown> | undefined;
+    const orgField = fields?.organization_id;
+    if (orgField !== undefined && !isInjectedColumnDefinition(orgField, TENANT_SCOPE_FIELD_DEF)) return schema;
+    const sf = (schema as { systemFields?: unknown }).systemFields;
+    const out = withoutField(schema, 'organization_id') as ServiceObject & { systemFields?: unknown };
+    return {
+      ...out,
+      systemFields: {
+        ...(sf && typeof sf === 'object' && !Array.isArray(sf) ? (sf as Record<string, unknown>) : {}),
+        tenant: false,
+      },
+    } as ServiceObject;
+  }
+
+  /**
+   * [ADR-0131 D7] The write-side inverse of {@link applyDeploymentTenancy}:
+   * take the recorded `systemFields.tenant: false` back off a declared
+   * object's body on its way IN, so a Studio GET → edit → PUT on the declaring
+   * deployment persists the body the author wrote (#4326), not a deployment
+   * fact that would outlive the declaration in `sys_metadata`.
+   *
+   * Exact in the way its siblings are: only a declared object, only the
+   * `tenant: false` member, and the `systemFields` key itself only when that
+   * member was all it held. The trade is theirs too — an author who wrote
+   * `systemFields: { tenant: false }` on a declared object has it dropped on
+   * the first save that carries it, and on this deployment the answer is
+   * re-derived at every load, so nothing it provisions changes.
+   *
+   * Returns `base` by reference when nothing was owed.
+   */
+  private stripDeploymentTenancyFrom<T>(base: T): T {
+    if (base === null || typeof base !== 'object') return base;
+    const sf = (base as { systemFields?: unknown }).systemFields;
+    if (!sf || typeof sf !== 'object' || Array.isArray(sf)) return base;
+    if ((sf as { tenant?: unknown }).tenant !== false) return base;
+    const { tenant: _tenant, ...restSystemFields } = sf as Record<string, unknown>;
+    const out = { ...(base as Record<string, unknown>) };
+    if (Object.keys(restSystemFields).length === 0) delete out.systemFields;
+    else out.systemFields = restSystemFields;
+    // Redundant with the derivation only where the deployment's plan withholds
+    // the column from the body without the record — i.e. on a declared object.
+    return this.deploymentWithholdsTenant(out as unknown as ServiceObject) ? (out as unknown as T) : base;
+  }
+
+  /**
+   * [ADR-0131 D7] Does the deployment's declaration — and nothing else — plan
+   * this body with no tenant column? The ONE reading of the declaration in
+   * this registry: the spec's plan answers it, with and without the
+   * deployment input, so the registry never re-derives which objects are
+   * declared.
+   */
+  private deploymentWithholdsTenant(schema: ServiceObject): boolean {
+    if (this.deploymentPlatformGlobalObjects.size === 0) return false;
+    return (
+      resolveInjectedSystemColumns(schema).tenant &&
+      !resolveInjectedSystemColumns(schema, { platformGlobalObjects: this.deploymentPlatformGlobalObjects }).tenant
     );
   }
 
