@@ -58,7 +58,9 @@ function recordingEngine() {
     },
     async insert(object: string, data: Record<string, unknown>, options?: any) {
       calls.push({ verb: 'insert', object, context: options?.context });
-      if (object === 'sys_setting' || object === 'sys_secret') rows.push({ __object: object, ...data });
+      if (object === 'sys_setting' || object === 'sys_platform_setting' || object === 'sys_secret') {
+        rows.push({ __object: object, ...data });
+      }
       return { ...data };
     },
     async update(object: string, data: Record<string, unknown>, options?: any) {
@@ -104,7 +106,38 @@ describe('[#21913] SettingsService engine calls carry the explicit system opt-in
     expect(onSettings.filter((c) => c.verb === 'insert')).toHaveLength(1);
     // …and the insert's user-reference probe ran too, under the same opt-in.
     expect(calls.filter((c) => c.object === 'sys_user')).toHaveLength(1);
-    expect(onSettings.length + 1).toBe(calls.length);
+    // [ADR-0131 D7] Every resolution also reads the global rung's own store.
+    const onPlatform = calls.filter((c) => c.object === 'sys_platform_setting');
+    expect(onPlatform.filter((c) => c.verb === 'find').length).toBeGreaterThanOrEqual(3);
+    expect(onSettings.length + onPlatform.length + 1).toBe(calls.length);
+    for (const call of calls) {
+      expect(call.context, `${call.verb} on ${call.object}`).toEqual({ isSystem: true });
+    }
+  });
+
+  it('[ADR-0131 D7] a GLOBAL write: the probe, insert, update and re-reads on sys_platform_setting pass isSystem', async () => {
+    const { engine, calls, rows } = recordingEngine();
+    const svc = new SettingsService();
+    svc.registerManifest({
+      namespace: 'mail_probe',
+      label: 'Mail probe',
+      scope: 'global',
+      specifiers: [{ key: 'from_email', type: 'text', default: 'noreply@example.com' }],
+    } as any);
+    svc.bindEngine(wrapEngineAsSettingsEngine(engine as any));
+
+    await svc.set('mail_probe', 'from_email', 'ops@example.com');
+    await svc.set('mail_probe', 'from_email', 'it@example.com');
+    expect((await svc.get('mail_probe', 'from_email')).value).toBe('it@example.com');
+
+    // The population: one row, in the global rung's store, written once and
+    // updated once — and no write reached `sys_setting` at all.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ __object: 'sys_platform_setting', namespace: 'mail_probe', key: 'from_email' });
+    const verbs = calls.map((c) => `${c.verb}:${c.object}`);
+    expect(verbs.filter((v) => v === 'insert:sys_platform_setting')).toHaveLength(1);
+    expect(verbs.filter((v) => v === 'update:sys_platform_setting')).toHaveLength(1);
+    expect(verbs.filter((v) => v.startsWith('insert:sys_setting') || v.startsWith('update:sys_setting'))).toEqual([]);
     for (const call of calls) {
       expect(call.context, `${call.verb} on ${call.object}`).toEqual({ isSystem: true });
     }

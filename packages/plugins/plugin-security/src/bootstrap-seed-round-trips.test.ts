@@ -47,6 +47,22 @@ import { bootstrapDeclaredPositions } from './bootstrap-declared-positions.js';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
 import { bootstrapSystemCapabilities, KNOWN_CAPABILITIES } from './bootstrap-system-capabilities.js';
 
+/**
+ * The engine registry as the security catalog read uses one — its list, its
+ * by-name read and its disabled-package question — over a fixed list. The
+ * declared-positions seeder reads through that catalog read (ADR-0131 C2 S2b),
+ * which also takes the metadata service: {@link NO_METADATA_POSITIONS} is one
+ * that declares nothing, so every position here comes from the registry.
+ */
+function catalogRegistry(type: string, items: () => any[]) {
+  return {
+    listItems: (t: string) => (t === type ? [...items()] : []),
+    getItem: (t: string, name: string) => (t === type ? items().find((i) => i?.name === name) : undefined),
+    isPackageDisabled: () => false,
+  };
+}
+const NO_METADATA_POSITIONS = { get: async () => undefined, list: async () => [] };
+
 interface CountingQl {
   rows: any[];
   calls: { find: number; insert: number; update: number };
@@ -56,7 +72,7 @@ interface CountingQl {
   wheres: any[];
   roundTrips(): number;
   reset(): void;
-  registry: { listItems: (type: string) => any[] };
+  registry: ReturnType<typeof catalogRegistry>;
   find(object: string, q: any, opts?: any): Promise<any[]>;
   insert(object: string, data: any, opts?: any): Promise<any>;
   update(object: string, data: any, options?: any): Promise<any>;
@@ -106,7 +122,7 @@ function makeCountingQl(
     wheres: [],
     roundTrips() { return this.calls.find + this.calls.insert + this.calls.update; },
     reset() { this.calls = { find: 0, insert: 0, update: 0 }; this.log = []; this.wheres = []; },
-    registry: { listItems: (type: string) => (type === metadataType ? [...declared] : []) },
+    registry: catalogRegistry(metadataType, () => declared),
     async find(obj: string, q: any) {
       if (obj !== object) return [];
       ql.calls.find += 1;
@@ -217,9 +233,9 @@ describe('#10946 — steady-state rebuild is O(1) round trips (positions)', () =
   it('does not grow the rebuild round-trip count with the number of declared positions', async () => {
     const measure = async (n: number) => {
       const ql = positionQl(declaredPositions(n));
-      await bootstrapDeclaredPositions(ql, null);
+      await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
       ql.reset();
-      const r = await bootstrapDeclaredPositions(ql, null);
+      const r = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
       expect(r.seeded).toBe(0);
       expect(r.updated).toBe(0);
       expect(r.unchanged).toBe(n);
@@ -232,9 +248,9 @@ describe('#10946 — steady-state rebuild is O(1) round trips (positions)', () =
 
   it('issues ONE batched `$in` existence read for the whole declaration', async () => {
     const ql = positionQl(declaredPositions(12));
-    await bootstrapDeclaredPositions(ql, null);
+    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
     ql.reset();
-    await bootstrapDeclaredPositions(ql, null);
+    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
     expect(ql.calls.find).toBe(1);
     expect(ql.wheres[0]).toEqual({ name: { $in: declaredPositions(12).map((p) => p.name) } });
   });
@@ -277,14 +293,14 @@ describe('#10946 — drift STILL reconciles', () => {
 
   it('a position row whose stored label/description differ still gets its UPDATE', async () => {
     const ql = positionQl(declaredPositions(20));
-    await bootstrapDeclaredPositions(ql, null);
+    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
 
     const upgraded = declaredPositions(20);
     upgraded[3] = { ...upgraded[3], label: 'Renamed', description: 'new text' };
-    (ql as any).registry = { listItems: (t: string) => (t === 'position' ? upgraded : []) };
+    (ql as any).registry = catalogRegistry('position', () => upgraded);
 
     ql.reset();
-    const r = await bootstrapDeclaredPositions(ql, null);
+    const r = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
     expect(r.updated).toBe(1);
     expect(r.unchanged).toBe(19);
     expect(ql.calls.update).toBe(1);
@@ -299,7 +315,7 @@ describe('#10946 — drift STILL reconciles', () => {
       id: 'pos_1', name: 'contributor', label: 'Contributor', description: 'old',
       active: false, is_default: true, delegatable: true, managed_by: 'package',
     });
-    await bootstrapDeclaredPositions(ql, null);
+    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
     const row = ql.rows[0];
     expect(row.label).toBe('Contributor v2');
     expect(row.active).toBe(false);
@@ -330,13 +346,13 @@ describe('#10946 — a genuinely NEW declaration is still created', () => {
 
   it('the batched read does not turn "absent" into "present" (positions)', async () => {
     const ql = positionQl(declaredPositions(5));
-    await bootstrapDeclaredPositions(ql, null);
+    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
 
     const grown = [...declaredPositions(5), { name: 'pkg_pos_new', label: 'New', description: null }];
-    (ql as any).registry = { listItems: (t: string) => (t === 'position' ? grown : []) };
+    (ql as any).registry = catalogRegistry('position', () => grown);
 
     ql.reset();
-    const r = await bootstrapDeclaredPositions(ql, null);
+    const r = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
     expect(r.seeded).toBe(1);
     expect(r.unchanged).toBe(5);
     expect(ql.roundTrips()).toBe(2);
@@ -393,11 +409,11 @@ describe('#10946 — a read that CANNOT ANSWER is not the answer "none exist"', 
 
   it('a throwing read does NOT re-create rows that are already seeded (positions)', async () => {
     const seeded = positionQl(declaredPositions(4));
-    await bootstrapDeclaredPositions(seeded, null);
+    await bootstrapDeclaredPositions(seeded, NO_METADATA_POSITIONS);
 
     const broken = positionQl(declaredPositions(4), { findThrows: true });
     broken.rows.push(...seeded.rows.map((r) => ({ ...r })));
-    const r = await bootstrapDeclaredPositions(broken, null);
+    const r = await bootstrapDeclaredPositions(broken, NO_METADATA_POSITIONS);
     expect(r.seeded).toBe(0);
     expect(r.unreadable).toBe(4);
     expect(broken.calls.insert).toBe(0);

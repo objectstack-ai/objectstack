@@ -1845,3 +1845,40 @@ describe('#11097 — a read that CANNOT ANSWER is not the answer "none exist"', 
     expect(ql.permRows).toHaveLength(1);
   });
 });
+
+/**
+ * [#22169] The heal's layered read is cached per NAME for the pass — and a
+ * backfill is the one write in this pass that changes that name's answer, so it
+ * drops the cached one. Without the drop, a second row of a name this pass had
+ * just backfilled would see the pre-write "no definition" answer and backfill
+ * AGAIN, replacing the definition with whichever duplicate the page served last.
+ * This suite's double has no SchemaRegistry, which is the only shape that reads
+ * the layered item at all.
+ */
+describe('#22169 — the per-name layered read is re-asked after this pass backfills the name', () => {
+  it('a second row of a just-backfilled name heals to the backfilled body instead of backfilling again', async () => {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    const layeredReads: string[] = [];
+    const layered = protocol.getMetaItemLayered.bind(protocol);
+    (protocol as any).getMetaItemLayered = async (req: { type: string; name: string }) => {
+      layeredReads.push(req.name);
+      return layered(req);
+    };
+    const legacy = (id: string, systemPermissions: string[]) => ({
+      id, name: 'support_agent', managed_by: 'admin', active: true,
+      ...permissionSetRowFields(envBody({ name: 'support_agent', systemPermissions })),
+    });
+    ql.permRows.push(legacy('ps_first', ['support.use']), legacy('ps_second', ['support.other']));
+
+    const out = await reconcilePermissionSetProjection(protocol, { ql, logger: { warn: () => {} } });
+
+    expect(protocol.saves, 'ONE definition is backfilled for the name').toHaveLength(1);
+    expect(out.backfilledIntoMetadata).toBe(1);
+    expect(layeredReads, 'asked for the first row, and again after the backfill wrote').toEqual(['support_agent', 'support_agent']);
+    expect(out.driftHealed).toBe(1);
+    for (const row of ql.permRows) {
+      expect(JSON.parse(row.system_permissions), `${row.id} carries the backfilled body`).toEqual(['support.use']);
+    }
+  });
+});
