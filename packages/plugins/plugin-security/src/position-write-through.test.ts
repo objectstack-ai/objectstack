@@ -20,7 +20,8 @@
  *   door's own refusal and keeps nothing (seat re-rule Q1 = A); an edit of a
  *   row that already carries such a name still lands as a row write;
  * - a name a package or a built-in holds stands the write-through down: the
- *   edit lands exactly as before and nothing reaches metadata (Q2 = A);
+ *   write is passed on and nothing reaches metadata (Q2 = A), pinned at the
+ *   write-through's own level rather than at the data door's answer;
  * - a package registering a name a Setup position holds in the environment
  *   ledger is refused `NAMESPACE_CONFLICT` (Q3 = A, within Q4 = A);
  * - controls: a walled posture, a system write and a kernel without a metadata
@@ -51,6 +52,7 @@ import { SysPermissionSet } from './objects/sys-permission-set.object.js';
 import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { createPositionWriteThrough } from './position-write-through.js';
 import {
   POSITION_ENVIRONMENT_BACKFILL_MIGRATION_ID,
   backfillRowOnlyPositions,
@@ -392,14 +394,44 @@ describe('[ADR-0131 D3] Q1 = A — a name the metadata door refuses is refused w
 });
 
 describe('[ADR-0131 D3] Q2 = A — a name a package or a built-in holds stands the write-through down', () => {
-  it('a Setup edit of a package-declared position lands exactly as before, and nothing reaches metadata', async () => {
+  // Pinned at the write-through's own level, never at the data door's answer:
+  // whether the data door admits an edit of a package-declared row is the
+  // system-row gate's call, decided on the row's provenance stamp, and that
+  // stamp is another change's. The write-through must stand down whatever the
+  // stamp says, because it reads the name's holder from the engine registry.
+  it('the write-through passes a write on a package-held or built-in name to the next step, and writes nothing to metadata', async () => {
     const b = await boot();
-    const saves = vi.spyOn(b.protocol, 'saveMetaItem');
-    await patch(b, 'pos_pkg', { label: 'Field lead (edited)', delegatable: true });
-    const [row] = await b.rows(PKG_POSITION);
-    expect({ label: row.label, delegatable: !!row.delegatable }).toEqual({ label: 'Field lead (edited)', delegatable: true });
-    expect(saves).not.toHaveBeenCalled();
+    const door = { saveMetaItem: vi.fn(async () => undefined), deleteMetaItem: vi.fn(async () => undefined) };
+    const writeThrough = createPositionWriteThrough({
+      ql: b.engine, getProtocol: () => door, getPosture: () => 'single', logger: b.logger,
+    });
+    const passOn = async (opCtx: any, write: () => Promise<unknown>) => {
+      const next = vi.fn(async () => { opCtx.result = await write(); });
+      await writeThrough(opCtx, next);
+      return next.mock.calls.length;
+    };
+
+    // An edit of the package-declared row (the label and delegatable a Setup edit sends).
+    const edit = { object: 'sys_position', operation: 'update', data: { id: 'pos_pkg', label: 'Edited', delegatable: true }, context: b.admin };
+    expect(await passOn(edit, () => b.engine.update('sys_position', { id: 'pos_pkg', label: 'Edited', delegatable: true }, { context: SYS } as any)))
+      .toBe(1);
+    // A create under a built-in name (the plugin registers the six under its own package).
+    const builtIn = { object: 'sys_position', operation: 'insert', data: { name: 'everyone', label: 'Everyone' }, context: b.admin };
+    expect(await passOn(builtIn, async () => ({ id: 'pos_builtin', name: 'everyone' }))).toBe(1);
+    // A delete of the package-declared row.
+    const del = { object: 'sys_position', operation: 'delete', options: { where: { id: 'pos_pkg' } }, context: b.admin };
+    expect(await passOn(del, () => b.engine.delete('sys_position', { where: { id: 'pos_pkg' }, context: SYS } as any))).toBe(1);
+
+    expect(door.saveMetaItem).not.toHaveBeenCalled();
+    expect(door.deleteMetaItem).not.toHaveBeenCalled();
     expect(await b.envRows(PKG_POSITION)).toEqual([]);
+
+    // Control: the same write-through, the same door, a name only Setup holds — it writes the definition.
+    const setupOnly = { object: 'sys_position', operation: 'insert', data: { name: 'setup_lead', label: 'Setup lead' }, context: b.admin };
+    expect(await passOn(setupOnly, () => b.engine.insert('sys_position', { name: 'setup_lead', label: 'Setup lead' }, { context: SYS } as any)))
+      .toBe(1);
+    expect(door.saveMetaItem).toHaveBeenCalledTimes(1);
+    expect(door.saveMetaItem.mock.calls[0][0]).toMatchObject({ type: 'position', name: 'setup_lead' });
   });
 
   it('control: the metadata door itself refuses an environment save over that name (NOT_OVERRIDABLE)', async () => {

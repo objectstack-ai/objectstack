@@ -22,8 +22,6 @@
 //  - a create named outside the metadata door's grammar is refused with the
 //    door's own answer (400 INVALID_REQUEST, 422 INVALID_METADATA) and keeps no
 //    row (seat re-rule Q1 = A);
-//  - a Setup edit of a position the showcase package declares lands exactly as
-//    before, with nothing written to metadata (Q2 = A);
 //  - a package registering a name a Setup position now holds in the
 //    environment ledger is refused 422 NAMESPACE_CONFLICT (Q3 = A);
 //  - the backfill: on a deployment upgraded from before the stage (row-only
@@ -46,8 +44,6 @@ const SHOWCASE_DIR = fileURLToPath(new URL('../../../../examples/app-showcase/',
 const SYS = { context: { isSystem: true } } as const;
 /** The backfill's ledger row (`position-environment-backfill.ts`). */
 const LEDGER_ID = 'adr-0131-position-environment-backfill';
-/** A position the showcase package declares. */
-const SHIPPED = 'manager';
 
 describe('[ADR-0131 D3] Setup positions reach the environment ledger under single (showcase)', () => {
   let prevCwd: string;
@@ -128,15 +124,6 @@ describe('[ADR-0131 D3] Setup positions reach the environment ledger under singl
     expect({ status: dotted.status, code: dotted.code }).toEqual({ status: 422, code: 'INVALID_METADATA' });
     expect(await rows('S7 Lead')).toEqual([]);
     expect(await rows('s7.lead')).toEqual([]);
-  });
-
-  it('Q2: a Setup edit of a position the showcase package declares lands as before, with nothing in metadata', async () => {
-    const [row] = await rows(SHIPPED);
-    expect(row?.id, 'the showcase declares the position').toBeTruthy();
-    const edited = await call('PATCH', `/data/sys_position/${row.id}`, { label: 'Manager (edited)' });
-    expect(edited.status, JSON.stringify(edited.json)).toBe(200);
-    expect((await rows(SHIPPED))[0]?.label).toBe('Manager (edited)');
-    expect(await envRows(SHIPPED)).toEqual([]);
   });
 
   it('Q3: a package registering a name a Setup position holds is refused 422 NAMESPACE_CONFLICT', async () => {
