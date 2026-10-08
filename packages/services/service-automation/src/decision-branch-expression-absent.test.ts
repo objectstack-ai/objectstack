@@ -86,7 +86,7 @@ describe('registerFlow refuses a decision branch with no `expression` (#19961)',
     it('refuses an absent branch inside an ADR-0031 region body, anchored where the author wrote it', () => {
         const refusal = refusalOf(new AutomationEngine(silentLogger), flowWith({
             id: 'sweep', type: 'loop', label: 'Sweep',
-            config: { collection: '{items}', itemVariable: 'item', body: { nodes: [decision({ label: 'y' })], edges: [] } },
+            config: { collection: '{items}', iteratorVariable: 'item', body: { nodes: [decision({ label: 'y' })], edges: [] } },
         }));
         expect(refusal?.issues?.map((i) => [i.code, i.path])).toEqual([
             ['custom', ['nodes', 1, 'config', 'body', 'nodes', 0, 'config', 'conditions', 0, 'expression']],

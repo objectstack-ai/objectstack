@@ -138,7 +138,7 @@ Each node performs a specific action in the flow.
 | `id` | `string` | ✅ | Unique node identifier — unique across the **whole flow**: the top-level `nodes[]` and every region body (`loop.body`, `parallel.branches[]`, `try_catch.try` / `.catch`, at any depth) share one id space, and `FlowSchema` refuses a reused id at parse (`Duplicate node id …`, naming both locations) |
 | `type` | `string` | ✅ | Node type — a built-in id from the table above **or** a plugin-registered one. Per ADR-0018 the spec does not gate this with a closed enum; it is checked against the live action registry once that registry is complete — plugins contribute node types while they start, so flows registered during boot are checked in one pass when the vocabulary closes (all plugins started), and anything registered after that (Studio publish, dev reload) is checked immediately. Unknown types warn, never reject; executing one fails with `NO_EXECUTOR` |
 | `label` | `string` | ✅ | Display label |
-| `config` | `object` | optional | Type-specific configuration — the registered executor's `configSchema` owns its shape. Keys that schema does not declare are rejected at `registerFlow()`, an `approval` node's config is judged whole against its declared contract at the flow parse, and the built-in executors `parse()` the value against their Zod contract before running (#4277) |
+| `config` | `object` | optional | Type-specific configuration — its node type owns its shape. On a built-in node type with an executor contract other than `try_catch`, a key that contract does not declare is refused at the flow parse, at the key's path; on `try_catch` and on a plugin node type, a key the published `configSchema` does not declare is rejected at `registerFlow()`. An `approval` node's config is judged whole against its declared contract at the flow parse, and the built-in executors `parse()` the value against their Zod contract before running |
 | `connectorConfig` | `object` | ✅ on `connector_action` | `{ connectorId, actionId, input }` — the only input a `connector_action` node's executor reads. `FlowSchema` refuses a `connector_action` node without it, and one whose `connectorId` or `actionId` is blank (empty or whitespace only), at any depth including a region body. `connectorId` is the registered connector's `name`, `actionId` one of the action keys it declares; `input` is optional |
 | `position` | `{ x, y }` | optional | Visual position on canvas |
 | `timeoutMs` | `number` | optional | Per-node execution timeout |
@@ -149,13 +149,23 @@ Each node performs a specific action in the flow.
 <Callout type="info">
 The flow, node, edge, and variable **shells are `.strict()`** — a key they do not
 declare is a parse error naming the likely intended key, not a silent strip. A
-node's `config` is open at the flow-parse level (plugin node types keep their own
-vocabulary), but it is not unchecked: `registerFlow()` rejects config keys the
-node type's published `configSchema` does not declare — naming the path, the
-declared key set, and a did-you-mean — and the contract-carrying builtins
+node's `config` has no single shape at the flow-parse level (each node type owns
+its vocabulary), but it is not unchecked. On every built-in node type with an
+executor contract except `try_catch` — `get_record`, `create_record`,
+`update_record`, `delete_record`, `notify`, `http`, `screen`, `map`, `loop`,
+`parallel`, `script` and `subflow` — the flow parse refuses a config key that
+contract does not declare, at the key's own path and in the contract's words
+(its did-you-mean, or its prescription for a known slip such as `fieldValues` →
+`fields`), so `objectstack validate`, `objectstack compile`, the metadata save
+door and `registerFlow()` all refuse it before anything runs (a key on a `loop`
+body or a `parallel` branch, or on a region's nodes and edges, is the region
+check's at `registerFlow()`). A `try_catch` node
+and a plugin node type are judged at `registerFlow()` instead, against the
+`configSchema` the node type publishes — naming the path, the declared key set,
+and a did-you-mean; a plugin node type that publishes no `configSchema` declares
+nothing, so nothing can be undeclared. The contract-carrying builtins
 additionally `parse()` their config at execute time, refusing the node on a type
-or missing-`required` violation (#4277). A node type that publishes no
-`configSchema` declares nothing, so nothing can be undeclared. An `approval`
+or missing-`required` violation. An `approval`
 node's config is judged whole by the flow parse, against the contract the spec
 declares for it: an undeclared key or a value its executor would refuse
 (`escalation.timeoutHours: 0.5` under its `>= 1`) refuses the flow at the

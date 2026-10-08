@@ -338,8 +338,19 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
    * `org_a` and a pin about an org-less session would pin nothing.
    */
   let uploadId: string;
-  const seed = async (store: StorageMetadataStore, sessionOrganization: string | null = 'org_a') => {
+  /**
+   * `holding` (#22313): the upload also HOLDS its declared 100 bytes — both
+   * 50-byte chunks in the backend and in the session's record — so a
+   * completion gets past the door's own check that it does, and reaches the
+   * writes the pins below are about.
+   */
+  const seed = async (store: StorageMetadataStore, sessionOrganization: string | null = 'org_a', holding = false) => {
     uploadId = await adapter.initiateChunkedUpload('user/f1.bin', { contentType: 'application/octet-stream' });
+    const parts: Array<{ chunkIndex: number; eTag: string; size: number }> = [];
+    for (const chunkIndex of holding ? [0, 1] : []) {
+      const eTag = await adapter.uploadChunk(uploadId, chunkIndex + 1, Buffer.alloc(50, 0x61 + chunkIndex));
+      parts.push({ chunkIndex, eTag, size: 50 });
+    }
     await store.createFile({
       id: 'f1',
       key: 'user/f1.bin',
@@ -357,6 +368,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
       chunk_size: 50,
       total_chunks: 2,
       status: 'in_progress',
+      ...(holding ? { parts: JSON.stringify(parts), uploaded_chunks: 2, uploaded_size: 100 } : {}),
       ...(sessionOrganization !== null ? { organization_id: sessionOrganization } : {}),
     });
   };
@@ -496,7 +508,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
 
     it('CONTROL — same organization: completes as before, and logs nothing', async () => {
       const engine = createFakeEngine();
-      await seed(mount(engine));
+      await seed(mount(engine), 'org_a', true);
       const res = await drive('POST', CHUNKED_COMPLETE, 'alice@a', { params: { uploadId }, body: { parts: [] } });
       expect(res._status).toBe(200);
       expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'completed' });
@@ -506,7 +518,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
 
     it('CONTROL — a real engine failure on same-organization rows still answers 500 with the outage text', async () => {
       const engine = createFakeEngine();
-      await seed(mount(engine));
+      await seed(mount(engine), 'org_a', true);
       engine._setFailing('update', true);
       const res = await drive('POST', CHUNKED_COMPLETE, 'alice@a', { params: { uploadId }, body: { parts: [] } });
       expect(res._status).toBe(500);
@@ -694,7 +706,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
 
     it('the engine-absent stand-in does not scope, so both doors finish the upload from any organization as before', async () => {
       const store = mount(null);
-      await seed(store);
+      await seed(store, 'org_a', true);
       expect((await drive('POST', COMMIT, 'alice@b', { body: { fileId: 'f1' } }))._status).toBe(200);
       expect((await store.getFile('f1'))?.status).toBe('committed');
       const chunked = await drive('POST', CHUNKED_COMPLETE, 'alice@b', { params: { uploadId }, body: { parts: [] } });

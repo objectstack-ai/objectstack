@@ -12,7 +12,9 @@ import {
   MigrationFloorError,
   MIGRATION_MAJORS,
   MIGRATION_SUPPORT_FLOOR,
+  type MigrationApplication,
   type MigrationChainResult,
+  type MigrationHopResult,
   type MigrationTodo,
 } from '@objectstack/spec/migrations';
 import { PROTOCOL_MAJOR, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
@@ -102,6 +104,109 @@ const VALUE_SHAPE_GATE_MAJOR = 17;
  * major moved past the last registered step.
  */
 const CHAIN_TERMINUS_MAJOR = Math.max(PROTOCOL_MAJOR, ...MIGRATION_MAJORS);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/**
+ * The migration chain over a stack AND each package body it carries — what
+ * `applyMetaMigrations` is for this command, at every call site.
+ *
+ * ## Why the bodies need their own run
+ *
+ * The conversions walk a stack's own collections (`objects[]`, `views[]`,
+ * `pages[]`, …) and do not descend into `packages[]`. A multi-package
+ * artifact built by `composeStacks(…, { manifest: 'preserve' })` carries each
+ * definition ONCE, under the package that owns it (ADR-0130 D4 addendum): its
+ * top level holds `manifest` and `packages` and no flattened copy. So a
+ * retired spelling inside a package was reached by no conversion — `applied`
+ * came back empty and the schema verdict refused the very spelling the chain
+ * exists to convert.
+ *
+ * A body (`packages[i].manifest`) is a stack-shaped bag — manifest fields and
+ * collections side by side — so the chain runs over each body as a stack, and
+ * each of its applications is listed under the body's own path
+ * (`packages[0].manifest.objects[0]…`), which names the package and is the
+ * path `--write` traces to the input that authored it. A conversion whose
+ * reach already includes `packages[].manifest` (the manifest's permission
+ * list) runs in the stack's own run and finds no `manifest` key in a body,
+ * so nothing is applied twice.
+ *
+ * ## The merged result
+ *
+ * - `applied` keeps application order hop by hop: the stack's own edits of a
+ *   hop, then each body's, in package order.
+ * - `todos` is the stack's own list — every semantic entry of every hop
+ *   crossed is in it whatever the stack holds, so a body's run lists the same
+ *   entries again.
+ * - `absentTodos` keeps an entry only when every run names it — the stack's
+ *   own and each body's — matched by hop and id. The relevance question
+ *   already reads `packages[]` itself; what a body's run adds is its own
+ *   applications, and an entry that judges a conversion which applied an
+ *   edit is never named absent.
+ * - A stack without a `packages` list, which is every one-package project,
+ *   gets the plain chain result back unchanged.
+ */
+export function applyMetaMigrationsToPackages(
+  stack: Record<string, unknown>,
+  fromMajor: number,
+  toMajor: number,
+): MigrationChainResult {
+  const own = applyMetaMigrations(stack, fromMajor, toMajor);
+  const entries = own.stack.packages;
+  if (!Array.isArray(entries)) return own;
+
+  const bodies: Array<{ index: number; prefix: string; run: MigrationChainResult }> = [];
+  for (const [index, entry] of entries.entries()) {
+    if (!isRecord(entry) || !isRecord(entry.manifest)) continue;
+    bodies.push({
+      index,
+      prefix: `packages[${index}].manifest`,
+      run: applyMetaMigrations(entry.manifest, fromMajor, toMajor),
+    });
+  }
+  if (bodies.length === 0) return own;
+
+  const located = (prefix: string) => (application: MigrationApplication): MigrationApplication => ({
+    ...application,
+    path: application.path ? `${prefix}.${application.path}` : prefix,
+  });
+  const todoKey = (todo: MigrationTodo) => `${todo.toMajor}:${todo.id}`;
+  const absentEverywhere = (absent: readonly MigrationTodo[], bodyAbsent: (run: MigrationChainResult) => readonly MigrationTodo[]) => {
+    const bodySets = bodies.map(({ run }) => new Set(bodyAbsent(run).map(todoKey)));
+    return absent.filter((todo) => bodySets.every((set) => set.has(todoKey(todo))));
+  };
+  /** `base` with each body replaced by its stack from `pick`, copied only where one changed. */
+  const withBodies = (base: Record<string, unknown>, pick: (run: MigrationChainResult) => Record<string, unknown>) => {
+    const list = base.packages;
+    if (!Array.isArray(list)) return base;
+    let changed = false;
+    const next = list.slice();
+    for (const { index, run } of bodies) {
+      const entry = next[index];
+      const body = pick(run);
+      if (!isRecord(entry) || entry.manifest === body) continue;
+      next[index] = { ...entry, manifest: body };
+      changed = true;
+    }
+    return changed ? { ...base, packages: next } : base;
+  };
+
+  const hops: MigrationHopResult[] = own.hops.map((hop, k) => ({
+    ...hop,
+    stack: withBodies(hop.stack, (run) => run.hops[k]!.stack),
+    applied: [...hop.applied, ...bodies.flatMap(({ prefix, run }) => run.hops[k]!.applied.map(located(prefix)))],
+    absentTodos: absentEverywhere(hop.absentTodos, (run) => run.hops[k]!.absentTodos),
+  }));
+
+  return {
+    ...own,
+    stack: withBodies(own.stack, (run) => run.stack),
+    applied: hops.flatMap((hop) => hop.applied),
+    absentTodos: absentEverywhere(own.absentTodos, (run) => run.absentTodos),
+    hops,
+  };
+}
 
 /** Flags that mean something only in `--stored` mode (#4327). */
 const STORED_ONLY_FLAGS = ['apply', 'yes', 'force', 'type', 'database-url'] as const;
@@ -222,7 +327,7 @@ function printEmptyRangeAnswer(
     return;
   }
 
-  const wider = applyMetaMigrations(stack, fromMajor, CHAIN_TERMINUS_MAJOR);
+  const wider = applyMetaMigrationsToPackages(stack, fromMajor, CHAIN_TERMINUS_MAJOR);
   const widerListed = listedTodos(wider.todos, wider.absentTodos);
   if (wider.applied.length === 0 && widerListed.length === 0) {
     printInfo(
@@ -1060,7 +1165,7 @@ export default class MigrateMeta extends Command {
       const normalized = normalizeStackInput(config as Record<string, unknown>, { convert: false });
 
       if (!flags.json) printStep(`Replaying chain: protocol ${fromMajor} → ${toMajor}…`);
-      const result = applyMetaMigrations(normalized, fromMajor, toMajor);
+      const result = applyMetaMigrationsToPackages(normalized, fromMajor, toMajor);
 
       // Prove the migrated stack is schema-valid — the "generated, provably valid
       // diff" the consumer agent reviews (ADR-0087 D3/D5).
@@ -1237,7 +1342,7 @@ export default class MigrateMeta extends Command {
     try {
       const reloaded = await loadConfig(input.configArg, { authoredSource: true });
       const rerunInput = normalizeStackInput(reloaded.config as Record<string, unknown>, { convert: false });
-      const rerun = applyMetaMigrations(rerunInput, result.fromMajor, result.toMajor);
+      const rerun = applyMetaMigrationsToPackages(rerunInput, result.fromMajor, result.toMajor);
       // The range the written sources still owe, judged as it was before the write.
       const rerunRange = planProtocolRange(rerunInput, result.fromMajor, result.toMajor);
       verification = verifyAuthoredSourceWrite(
