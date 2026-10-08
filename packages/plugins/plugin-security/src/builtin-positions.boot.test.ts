@@ -427,10 +427,164 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
  * `position`); the two built-in rows are refused on their `platform`
  * provenance.
  */
-const REFUSAL_GOLDEN: Record<string, WriteOutcome> = {};
+const REFUSAL_GOLDEN: Record<string, WriteOutcome> = {
+  'assign a position no catalog row carries': {
+    ok: false,
+    code: 'VALIDATION_FAILED',
+    fields: ['position:reference_not_found'],
+  },
+  'control: create a position': {
+    ok: true,
+  },
+  'control: assign it': {
+    ok: true,
+  },
+  'delete the everyone row': {
+    ok: false,
+    code: 'PERMISSION_DENIED',
+    status: 403,
+  },
+  'relabel the platform_admin row': {
+    ok: false,
+    code: 'PERMISSION_DENIED',
+    status: 403,
+  },
+};
+
+/**
+ * Each recorded row's `label | description`, as the census spells it — one
+ * entry per name, the same in every organization.
+ */
+const TEXT: Record<string, string> = {
+  everyone:
+    'Everyone | Built-in audience anchor: every authenticated member holds this position implicitly. Permission sets bound to it are the default grants for the tenant (ADR-0090 D5). High-privilege sets cannot be bound here.',
+  field_rep:
+    'Field Rep | Works the territory',
+  guest:
+    'Guest | Built-in audience anchor: unauthenticated principals hold this position implicitly and exclusively. Bindings face the strictest checks — named objects only, read-mostly, never a wildcard (ADR-0090 D9).',
+  org_admin:
+    'Organization Admin | Organization administrator within a tenant.',
+  org_member:
+    'Organization Member | Organization member within a tenant.',
+  org_owner:
+    'Organization Owner | Organization owner within a tenant.',
+  platform_admin:
+    'Platform Admin | Platform operator (SaaS admin). NOT a tenant user role.',
+  door_authored:
+    'Door Authored | -',
+};
 
 /** Recorded before the declarations (module doc). */
-const CATALOG_GOLDEN: Record<ScenarioName, { census: string[]; ledger: string[] }> = {} as never;
+const CATALOG_GOLDEN: Record<ScenarioName, { census: string[]; ledger: string[] }> = {
+  single: {
+    census: [
+      `everyone | - | platform | true | false | ${TEXT.everyone}`,
+      `field_rep | - | admin | true | false | ${TEXT.field_rep}`,
+      `guest | - | platform | true | false | ${TEXT.guest}`,
+      `org_admin | - | platform | true | false | ${TEXT.org_admin}`,
+      `org_member | - | platform | true | false | ${TEXT.org_member}`,
+      `org_owner | - | platform | true | false | ${TEXT.org_owner}`,
+      `platform_admin | - | platform | true | false | ${TEXT.platform_admin}`,
+    ],
+    ledger: [
+      'insert field_rep@-',
+      'insert platform_admin@- managed_by=platform',
+      'insert org_owner@- managed_by=platform',
+      'insert org_admin@- managed_by=platform',
+      'insert org_member@- managed_by=platform',
+      'insert everyone@- managed_by=platform',
+      'insert guest@- managed_by=platform',
+    ],
+  },
+  'single + organization': {
+    census: [
+      `everyone | - | platform | true | false | ${TEXT.everyone}`,
+      `field_rep | - | admin | true | false | ${TEXT.field_rep}`,
+      `guest | - | platform | true | false | ${TEXT.guest}`,
+      `org_admin | - | platform | true | false | ${TEXT.org_admin}`,
+      `org_member | - | platform | true | false | ${TEXT.org_member}`,
+      `org_owner | - | platform | true | false | ${TEXT.org_owner}`,
+      `platform_admin | - | platform | true | false | ${TEXT.platform_admin}`,
+    ],
+    ledger: [
+      'insert field_rep@-',
+      'insert platform_admin@- managed_by=platform',
+      'insert org_owner@- managed_by=platform',
+      'insert org_admin@- managed_by=platform',
+      'insert org_member@- managed_by=platform',
+      'insert everyone@- managed_by=platform',
+      'insert guest@- managed_by=platform',
+    ],
+  },
+  walled: {
+    census: [
+      `everyone | org_eq | platform | true | false | ${TEXT.everyone}`,
+      `everyone | org_late | platform | true | false | ${TEXT.everyone}`,
+      `field_rep | org_eq | admin | true | false | ${TEXT.field_rep}`,
+      `field_rep | org_late | admin | true | false | ${TEXT.field_rep}`,
+      `guest | org_eq | platform | true | false | ${TEXT.guest}`,
+      `guest | org_late | platform | true | false | ${TEXT.guest}`,
+      `org_admin | org_eq | platform | true | false | ${TEXT.org_admin}`,
+      `org_admin | org_late | platform | true | false | ${TEXT.org_admin}`,
+      `org_member | org_eq | platform | true | false | ${TEXT.org_member}`,
+      `org_member | org_late | platform | true | false | ${TEXT.org_member}`,
+      `org_owner | org_eq | platform | true | false | ${TEXT.org_owner}`,
+      `org_owner | org_late | platform | true | false | ${TEXT.org_owner}`,
+      `platform_admin | org_eq | platform | true | false | ${TEXT.platform_admin}`,
+      `platform_admin | org_late | platform | true | false | ${TEXT.platform_admin}`,
+    ],
+    ledger: [
+      'insert field_rep@org_eq',
+      'insert platform_admin@org_eq managed_by=platform',
+      'insert org_owner@org_eq managed_by=platform',
+      'insert org_admin@org_eq managed_by=platform',
+      'insert org_member@org_eq managed_by=platform',
+      'insert everyone@org_eq managed_by=platform',
+      'insert guest@org_eq managed_by=platform',
+      'insert field_rep@org_late',
+      'insert platform_admin@org_late managed_by=platform',
+      'insert org_owner@org_late managed_by=platform',
+      'insert org_admin@org_late managed_by=platform',
+      'insert org_member@org_late managed_by=platform',
+      'insert everyone@org_late managed_by=platform',
+      'insert guest@org_late managed_by=platform',
+    ],
+  },
+  'walled, a door-authored position in the registry': {
+    census: [
+      `door_authored | org_eq | admin | true | false | ${TEXT.door_authored}`,
+      `door_authored | org_late | admin | true | false | ${TEXT.door_authored}`,
+      `everyone | org_eq | platform | true | false | ${TEXT.everyone}`,
+      `everyone | org_late | platform | true | false | ${TEXT.everyone}`,
+      `guest | org_eq | platform | true | false | ${TEXT.guest}`,
+      `guest | org_late | platform | true | false | ${TEXT.guest}`,
+      `org_admin | org_eq | platform | true | false | ${TEXT.org_admin}`,
+      `org_admin | org_late | platform | true | false | ${TEXT.org_admin}`,
+      `org_member | org_eq | platform | true | false | ${TEXT.org_member}`,
+      `org_member | org_late | platform | true | false | ${TEXT.org_member}`,
+      `org_owner | org_eq | platform | true | false | ${TEXT.org_owner}`,
+      `org_owner | org_late | platform | true | false | ${TEXT.org_owner}`,
+      `platform_admin | org_eq | platform | true | false | ${TEXT.platform_admin}`,
+      `platform_admin | org_late | platform | true | false | ${TEXT.platform_admin}`,
+    ],
+    ledger: [
+      'insert door_authored@org_eq',
+      'insert platform_admin@org_eq managed_by=platform',
+      'insert org_owner@org_eq managed_by=platform',
+      'insert org_admin@org_eq managed_by=platform',
+      'insert org_member@org_eq managed_by=platform',
+      'insert everyone@org_eq managed_by=platform',
+      'insert guest@org_eq managed_by=platform',
+      'insert door_authored@org_late',
+      'insert platform_admin@org_late managed_by=platform',
+      'insert org_owner@org_late managed_by=platform',
+      'insert org_admin@org_late managed_by=platform',
+      'insert org_member@org_late managed_by=platform',
+      'insert everyone@org_late managed_by=platform',
+      'insert guest@org_late managed_by=platform',
+    ],
+  },
+};
 
 /**
  * Recorded before the declarations (module doc). `field_default` on every
@@ -440,4 +594,101 @@ const CATALOG_GOLDEN: Record<ScenarioName, { census: string[]; ledger: string[] 
  * set. The organization administrator's set is the walled `organization_admin`
  * against the wall-less `organization_admin_no_bypass` (ADR-0105 D4).
  */
-const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {} as never;
+const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
+  single: {
+    agent: {
+      onBehalfOf: {
+        principalKind: 'human',
+        userId: 'usr_orgadmin',
+      },
+      permissions: ['mcp_agent_data_read'],
+      positions: [],
+      principalKind: 'agent',
+      systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+    },
+    member: {
+      accessible_org_ids: ['org_eq'],
+      email: 'member@eq.example',
+      org_user_ids: ['usr_member', 'usr_orgadmin'],
+      permissions: ['field_default', 'member_default', 'viewer_readonly'],
+      positions: ['everyone', 'org_member'],
+      posture: 'MEMBER',
+      systemPermissions: [],
+    },
+    organizationAdmin: {
+      accessible_org_ids: ['org_eq'],
+      email: 'orgadmin@eq.example',
+      org_user_ids: ['usr_member', 'usr_orgadmin'],
+      permissions: ['field_default', 'member_default', 'organization_admin_no_bypass'],
+      positions: ['everyone', 'org_owner'],
+      posture: 'TENANT_ADMIN',
+      systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+    },
+    platformAdmin: {
+      accessible_org_ids: [],
+      email: 'admin@eq.example',
+      org_user_ids: ['usr_admin', 'usr_member', 'usr_orgadmin'],
+      permissions: ['admin_full_access', 'field_default', 'member_default'],
+      positions: ['everyone', 'platform_admin'],
+      posture: 'PLATFORM_ADMIN',
+      systemPermissions: [
+        'manage_metadata',
+        'manage_platform_settings',
+        'manage_sharing',
+        'manage_users',
+        'setup.access',
+        'setup.write',
+        'studio.access',
+        'view_all_audit_log',
+      ],
+    },
+  },
+  isolated: {
+    agent: {
+      onBehalfOf: {
+        principalKind: 'human',
+        userId: 'usr_orgadmin',
+      },
+      permissions: ['mcp_agent_data_read'],
+      positions: [],
+      principalKind: 'agent',
+      systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+    },
+    member: {
+      accessible_org_ids: ['org_eq'],
+      email: 'member@eq.example',
+      org_user_ids: ['usr_member', 'usr_orgadmin'],
+      permissions: ['field_default', 'viewer_readonly'],
+      positions: ['everyone', 'org_member'],
+      posture: 'MEMBER',
+      systemPermissions: [],
+    },
+    organizationAdmin: {
+      accessible_org_ids: ['org_eq'],
+      email: 'orgadmin@eq.example',
+      org_user_ids: ['usr_member', 'usr_orgadmin'],
+      permissions: ['field_default', 'organization_admin'],
+      positions: ['everyone', 'org_owner'],
+      posture: 'TENANT_ADMIN',
+      systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+    },
+    platformAdmin: {
+      accessible_org_ids: [],
+      email: 'admin@eq.example',
+      org_user_ids: ['usr_admin', 'usr_member', 'usr_orgadmin'],
+      permissions: ['admin_full_access', 'field_default'],
+      positions: ['everyone', 'platform_admin'],
+      posture: 'PLATFORM_ADMIN',
+      systemPermissions: [
+        'manage_metadata',
+        'manage_platform_settings',
+        'manage_sharing',
+        'manage_users',
+        'setup.access',
+        'setup.write',
+        'studio.access',
+        'view_all_audit_log',
+      ],
+    },
+  },
+};
