@@ -212,7 +212,7 @@ async function insertUnnamedGrants(engine: Engine, rows: Array<Record<string, un
 async function clearAllNames(engine: Engine): Promise<void> {
   unregisterGrantPermissionSetNameHooks(engine);
   try {
-    const rows = (await engine.find('sys_user_permission_set', { fields: ['id'], context: SYS } as any)) as any[];
+    const rows = (await engine.find('sys_user_permission_set', { fields: ['id'], context: SYS })) as any[];
     for (const row of rows) {
       await engine.update('sys_user_permission_set', { id: row.id, permission_set: null }, { context: SYS } as any);
     }
@@ -226,19 +226,19 @@ async function grants(engine: Engine): Promise<Array<Record<string, any>>> {
     fields: ['id', 'user_id', 'permission_set_id', 'permission_set', 'organization_id'],
     orderBy: [{ field: 'id', order: 'asc' }],
     context: SYS,
-  } as any)) as any[];
+  })) as any[];
   return rows;
 }
 
 async function grant(engine: Engine, id: string): Promise<Record<string, any> | null> {
-  return (await engine.findOne('sys_user_permission_set', { where: { id }, context: SYS } as any)) as any;
+  return (await engine.findOne('sys_user_permission_set', { where: { id }, context: SYS })) as any;
 }
 
 async function ledgerRows(engine: Engine): Promise<Array<Record<string, any>>> {
   return (await engine.find(DATA_MIGRATION_FLAG_OBJECT, {
     where: { id: GRANT_SET_NAME_BACKFILL_MIGRATION_ID },
     context: SYS,
-  } as any)) as any[];
+  })) as any[];
 }
 
 /** Every string a logger mock was handed — message and meta — for disclosure checks. */
@@ -272,7 +272,7 @@ async function seedPrincipals(world: World, posture: Posture): Promise<void> {
 
   if (posture === 'isolated') {
     for (const name of ['organization_admin', 'organization_admin_no_bypass', 'viewer_readonly']) {
-      const [bucket] = (await engine.find('sys_permission_set', { where: { name }, context: SYS } as any)) as any[];
+      const [bucket] = (await engine.find('sys_permission_set', { where: { name }, context: SYS })) as any[];
       const { id: _id, created_at: _c, updated_at: _u, ...rest } = bucket;
       await insertSet(engine, { ...rest, id: `ps_${name}_${ORG}`, organization_id: ORG }, ORG);
     }
@@ -288,7 +288,7 @@ async function seedPrincipals(world: World, posture: Posture): Promise<void> {
   const [viewer] = (await engine.find('sys_permission_set', {
     where: { name: 'viewer_readonly', ...(posture === 'isolated' ? { organization_id: ORG } : {}) },
     context: SYS,
-  } as any)) as any[];
+  })) as any[];
   await engine.insert(
     'sys_user_permission_set',
     { user_id: 'usr_member', permission_set_id: viewer.id },
@@ -339,7 +339,7 @@ describe('[ADR-0131 D4] grant name backfill — every name agrees with the id an
       // the shape grants written before the per-organization catalog carry.
       const [bucketViewer] = (await engine.find('sys_permission_set', {
         where: { name: 'viewer_readonly', organization_id: null }, context: SYS,
-      } as any)) as any[];
+      })) as any[];
       await insertUnnamedGrants(engine, [
         { id: 'g_bucket', user_id: 'usr_orgadmin', permission_set_id: bucketViewer.id, organization_id: ORG },
       ]);
@@ -354,7 +354,7 @@ describe('[ADR-0131 D4] grant name backfill — every name agrees with the id an
       expect(outcome.backfill?.named.length).toBe(before.length);
 
       for (const g of await grants(engine)) {
-        const [set] = (await engine.find('sys_permission_set', { where: { id: g.permission_set_id }, context: SYS } as any)) as any[];
+        const [set] = (await engine.find('sys_permission_set', { where: { id: g.permission_set_id }, context: SYS })) as any[];
         expect(g.permission_set, g.id).toBe(set.name);
         const entry = await catalog.resolve('permission', g.permission_set);
         expect(entry?.name, g.id).toBe(g.permission_set);
@@ -472,7 +472,7 @@ describe('[ADR-0131 D4] grant name backfill — a name never crosses organizatio
       await insertSet(engine, { id: 'ps_own', name: OWN_SET.name, label: 'Reviewer' }, ORG);
       const [bucketViewer] = (await engine.find('sys_permission_set', {
         where: { name: 'viewer_readonly', organization_id: null }, context: SYS,
-      } as any)) as any[];
+      })) as any[];
       await insertUnnamedGrants(engine, [
         // The organization's grant on the other organization's set.
         { id: 'g_cross', user_id: 'usr_member', permission_set_id: 'ps_other', organization_id: ORG },
@@ -569,7 +569,7 @@ describe('[ADR-0131 D4] grant name backfill — the write path', () => {
     });
     expect(outcome.status).toBe('ran');
     for (const g of await grants(world.engine)) {
-      const [set] = (await world.engine.find('sys_permission_set', { where: { id: g.permission_set_id }, context: SYS } as any)) as any[];
+      const [set] = (await world.engine.find('sys_permission_set', { where: { id: g.permission_set_id }, context: SYS })) as any[];
       expect(g.permission_set, g.id).toBe(set.name);
     }
   });
