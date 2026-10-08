@@ -80,9 +80,14 @@ function makeEngine() {
 
 /** A settings occupant whose `localization.locale` is `ja-JP` (the fallback every case can see). */
 function makeSettings(locale = 'ja-JP') {
+  const values: Record<string, unknown> = { locale };
   return {
-    async getMany(_ns: string, _keys: string[]) {
-      return { timezone: undefined, locale: { value: locale }, currency: undefined };
+    // `resolveLocalizationContext` takes the settings path only when `get` exists, then prefers `getMany`.
+    async get(_ns: string, key: string) {
+      return values[key] === undefined ? undefined : { value: values[key] };
+    },
+    async getMany(_ns: string, keys: string[]) {
+      return Object.fromEntries(keys.map((k) => [k, values[k] === undefined ? undefined : { value: values[k] }]));
     },
   };
 }
