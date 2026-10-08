@@ -70,7 +70,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       tenant_id: {
         label: "Tenant",
-        help: "Tenant context for multi-tenant isolation"
+        help: "Organization this event is about; empty for a deployment-level action"
       },
       metadata: {
         label: "Metadata",
