@@ -1112,16 +1112,17 @@ export function inferExpressionType(input: ExprInput, schema?: ExprSchemaHint): 
  *
  * ## This is a CURATED SUBSET of what the environment resolves — by construction
  *
- * The evaluation `Environment` resolves **72** distinct function names. This list
- * carries 35 of them, and the 37-name gap is NOT staleness. Measured decomposition
+ * The evaluation `Environment` resolves **75** distinct function names. This list
+ * carries 37 of them, and the 38-name gap is NOT staleness. Measured decomposition
  * (`cel-stdlib-drift.test.ts` re-measures all four numbers on every run):
  *
- *   72 registered names
- *    = 39 callable BARE, as `fn(x)`            -> the only shape this list may carry
- *    + 33 callable only on a RECEIVER, `x.fn()` -> structurally ineligible
+ *   75 registered names
+ *    = 41 callable BARE, as `fn(x)`            -> the only shape this list may carry
+ *    + 34 callable only on a RECEIVER, `x.fn()` -> structurally ineligible
+ *                                                 (cel-js's 33, plus our `can`)
  *
- *   39 bare-callable
- *    = 27 added by `registerStdLib`   -> ALL advertised (one per registration site)
+ *   41 bare-callable
+ *    = 29 added by `registerStdLib`   -> ALL advertised (one per registration site)
  *    +  8 cel-js built-ins            -> advertised: has size int string bool double
  *                                        timestamp duration
  *    +  4 cel-js built-ins WITHHELD   -> bytes dyn type uint
@@ -1144,13 +1145,14 @@ export function inferExpressionType(input: ExprInput, schema?: ExprSchemaHint): 
  * cel-js built-in cannot arrive unnoticed.
  *
  * ⛔ This list is NOT an oracle for rejecting unknown functions. A gate that
- * rejects what is absent here would reject 37 names that resolve and evaluate
+ * rejects what is absent here would reject 38 names that resolve and evaluate
  * today. The unknown-function verdict belongs to the engine's own `check()`
  * (ruling on #13594); `@objectstack/lint` uses that and never reads this list.
  */
 export const CEL_STDLIB_FUNCTIONS: string[] = [
   // Dates (registered stdlib)
   'now', 'today', 'daysFromNow', 'daysAgo', 'daysBetween', 'addDays', 'addMonths', 'date', 'datetime',
+  'isoDate', 'isoDatetime',
   // Numbers (registered stdlib)
   'abs', 'round', 'floor', 'ceil', 'min', 'max',
   // Strings (registered stdlib)

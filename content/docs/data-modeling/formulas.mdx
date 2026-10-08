@@ -178,6 +178,7 @@ All functions are pure given a pinned `now`, which is what makes
 | `daysFromNow(n)` / `daysAgo(n)` | timestamp | `today() ± n` days (calendar-day, not wall-clock) |
 | `addDays(d, n)` / `addMonths(d, n)` | timestamp | Shift a *given* date; `addMonths` clamps to month end (Jan 31 + 1mo → Feb 28) |
 | `date(s)` / `datetime(s)` | timestamp | Parse an ISO date / date-time string (aliases) |
+| `isoDate(t)` / `isoDatetime(t)` | string | A timestamp as ISO text on the UTC calendar: `YYYY-MM-DD` / `YYYY-MM-DDTHH:mm:ss.sssZ`, the bytes a flow template's `{TODAY()}` / `{NOW()}` wrote. Refuses text, numbers and `null`: write `isoDate(date(s))` for ISO text |
 | `daysBetween(a, b)` | int | Whole days from `a` to `b` (negative when `b` is earlier) |
 | `isBlank(v)` | bool | True for `null`, `undefined`, `''`, `[]` |
 | `isEmpty(v)` | bool | True for `null` or zero-length string/list/map |
