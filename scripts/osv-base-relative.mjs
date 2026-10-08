@@ -62,7 +62,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 
 const OUTCOMES = new Set(['success', 'failure']);
-const ANCHOR_LOOKUP_CAP = 10;
+const ANCHOR_PAGE_CAP = 10;
 
 // ── Reading one side ────────────────────────────────────────────────────────
 
@@ -147,44 +147,53 @@ export function compare(base, head) {
 // ── Anchor finding cards (informational; never part of the verdict) ─────────
 
 /**
- * Look up open issues that name each id in their title or body.
+ * Find the open issues whose title or body names each id. One repo-scoped
+ * listing of the open issues serves every id: it has no search-index lag, so a
+ * finding card filed minutes ago is found, and it does not depend on the card
+ * carrying a label (the red-main cards have not all carried the same ones).
+ * A seat's board post (label `pm:seat`) quotes advisories in passing and is
+ * never a finding card, so it is skipped.
  * Returns Map<id, { cards: [{ number, title }] } | { error }>.
  */
+const isBoardPost = (it) => (it?.labels ?? []).some((l) => (typeof l === 'string' ? l : l?.name) === 'pm:seat');
+
 export async function findAnchors(ids, { repo, token, fetchImpl }) {
   const out = new Map();
-  for (const [i, id] of ids.entries()) {
-    if (i >= ANCHOR_LOOKUP_CAP) {
-      out.set(id, { error: `not looked up (lookup cap ${ANCHOR_LOOKUP_CAP})` });
-      continue;
-    }
-    if (!repo) {
-      out.set(id, { error: 'not looked up (GITHUB_REPOSITORY unset)' });
-      continue;
-    }
-    const q = `repo:${repo} is:issue is:open in:title,body "${id}"`;
-    const url = `https://api.github.com/search/issues?per_page=10&q=${encodeURIComponent(q)}`;
-    const headers = {
-      accept: 'application/vnd.github+json',
-      'user-agent': 'objectstack-osv-base-relative',
-      'x-github-api-version': '2022-11-28',
-    };
-    if (token) headers.authorization = `Bearer ${token}`;
-    try {
-      const res = await fetchImpl(url, { headers, signal: AbortSignal.timeout(15000) });
-      if (!res.ok) {
-        out.set(id, { error: `lookup answered HTTP ${res.status}` });
-        continue;
+  const failAll = (error) => {
+    for (const id of ids) out.set(id, { error });
+    return out;
+  };
+  if (ids.length === 0) return out;
+  if (!repo) return failAll('not looked up (GITHUB_REPOSITORY unset)');
+  const headers = {
+    accept: 'application/vnd.github+json',
+    'user-agent': 'objectstack-osv-base-relative',
+    'x-github-api-version': '2022-11-28',
+  };
+  if (token) headers.authorization = `Bearer ${token}`;
+  const issues = [];
+  try {
+    for (let page = 1; ; page += 1) {
+      if (page > ANCHOR_PAGE_CAP) {
+        return failAll(`lookup incomplete (more than ${ANCHOR_PAGE_CAP * 100} open issues and pull requests)`);
       }
-      const body = await res.json();
-      const cards = (body?.items ?? [])
-        .filter((it) => !it.pull_request)
-        .filter((it) => `${it.title ?? ''}\n${it.body ?? ''}`.includes(id))
-        .map((it) => ({ number: it.number, title: it.title ?? '' }))
-        .sort((a, b) => a.number - b.number);
-      out.set(id, { cards });
-    } catch (e) {
-      out.set(id, { error: `lookup failed (${e?.name ?? 'Error'}: ${e?.message ?? e})` });
+      const url = `https://api.github.com/repos/${repo}/issues?state=open&per_page=100&page=${page}`;
+      const res = await fetchImpl(url, { headers, signal: AbortSignal.timeout(15000) });
+      if (!res.ok) return failAll(`lookup answered HTTP ${res.status}`);
+      const batch = await res.json();
+      if (!Array.isArray(batch)) return failAll('lookup answered something other than a list');
+      issues.push(...batch.filter((it) => !it?.pull_request && !isBoardPost(it)));
+      if (batch.length < 100) break;
     }
+  } catch (e) {
+    return failAll(`lookup failed (${e?.name ?? 'Error'}: ${e?.message ?? e})`);
+  }
+  for (const id of ids) {
+    const cards = issues
+      .filter((it) => `${it.title ?? ''}\n${it.body ?? ''}`.includes(id))
+      .map((it) => ({ number: it.number, title: it.title ?? '' }))
+      .sort((a, b) => a.number - b.number);
+    out.set(id, { cards });
   }
   return out;
 }
@@ -208,7 +217,7 @@ function anchorText(anchor) {
 /** Every line the verdict prints, in order, and the exit code. Pure. */
 export function render({ errors, verdict, anchors, baseSha }) {
   const lines = [];
-  const base = baseSha ? `the merge base (${baseSha.slice(0, 12)})` : 'the merge base';
+  const at = baseSha ? ` (${baseSha.slice(0, 12)})` : '';
   if (errors.length > 0) {
     for (const e of errors) lines.push(command('error', 'OSV base-relative verdict unavailable', e));
     lines.push('OSV base-relative verdict: NONE -- a scan did not reach a verdict, so this step fails closed.');
@@ -221,7 +230,7 @@ export function render({ errors, verdict, anchors, baseSha }) {
         'notice',
         'OSV advisory inherited from the merge base',
         `${f.id} (here: ${f.headPkgs.join(', ')}; at the merge base: ${f.basePkgs.join(', ')}) is matched by ` +
-          `${base}'s lockfile too, so it is main's to fix and does not fail this pull request; ` +
+          `the merge base's lockfile${at} too, so it is main's to fix and does not fail this pull request; ` +
           `${anchorText(anchors.get(f.id))}.`,
       ),
     );
@@ -231,13 +240,13 @@ export function render({ errors, verdict, anchors, baseSha }) {
       command(
         'error',
         'OSV advisory introduced by this pull request',
-        `${f.id} (${f.headPkgs.join(', ')}) is matched by this pull request's lockfile and not by ${base}'s. ` +
+        `${f.id} (${f.headPkgs.join(', ')}) is matched by this pull request's lockfile and not by the merge base's${at}. ` +
           'Take the fixed version; an advisory with no fix goes through the osv-scanner.toml ledger in its own PR.',
       ),
     );
   }
   lines.push(
-    `OSV base-relative verdict against ${base}: ${introduced.length} introduced, ` +
+    `OSV base-relative verdict against the merge base${at}: ${introduced.length} introduced, ` +
       `${inherited.length} inherited, ${resolved.length} resolved.`,
   );
   for (const f of introduced) lines.push(`  introduced  ${f.id}  ${f.headPkgs.join(', ')}`);
@@ -267,7 +276,7 @@ export async function run({ base, head, baseSha, repo, token, fetchImpl }) {
 
 // The pinned minimum number of cases: a battery that silently shrinks below it
 // fails, so "every case held" cannot be printed by a battery that never ran.
-const SELF_TEST_MIN_CASES = 18;
+const SELF_TEST_MIN_CASES = 23;
 let selfTestReachedVerdict = false;
 
 const result = (rows) =>
@@ -284,17 +293,16 @@ const result = (rows) =>
     ].filter((r) => r.packages.length > 0),
   });
 
-const fakeFetch = (cardsById, { status = 200, throws = false } = {}) => async (url) => {
+// A fake of the open-issues listing: `cards` is the open issues (and pull
+// requests) the repository holds, served 100 to a page like the real endpoint.
+const fakeFetch = (cards, { status = 200, throws = false } = {}) => async (url) => {
   if (throws) throw new Error('network down');
-  const q = decodeURIComponent(new URL(url).searchParams.get('q'));
-  const id = /"([^"]+)"/.exec(q)[1];
-  return {
-    ok: status === 200,
-    status,
-    json: async () => ({
-      items: (cardsById[id] ?? []).map((c) => ({ number: c.number, title: c.title, body: c.body ?? '' })),
-    }),
-  };
+  const u = new URL(url);
+  if (u.pathname !== '/repos/o/r/issues' || u.searchParams.get('state') !== 'open') {
+    return { ok: false, status: 404, json: async () => ({}) };
+  }
+  const page = Number(u.searchParams.get('page'));
+  return { ok: status === 200, status, json: async () => cards.slice((page - 1) * 100, page * 100) };
 };
 
 async function selfTest() {
@@ -305,7 +313,10 @@ async function selfTest() {
     ['sharp', '0.35.4', [SHARP]],
     ['shell-quote', '1.10.0', [QUOTE]],
   ]);
-  const cards = { [SHARP]: [{ number: 22013, title: `[finding] sharp ${SHARP}` }] };
+  const cards = [
+    { number: 22013, title: `[finding] main's lockfile matches sharp 0.35.4 ${SHARP}`, body: 'measured' },
+    { number: 22000, title: 'an unrelated open card', body: 'nothing to see' },
+  ];
   const ok = (code) => (r) => r.code === code;
   const has = (re) => (r) => r.lines.some((l) => re.test(l));
   const hasNot = (re) => (r) => !r.lines.some((l) => re.test(l));
@@ -349,13 +360,13 @@ async function selfTest() {
     {
       name: 'introduced against a clean base: fails',
       args: { base: side(result([]), 'success'), head: side(result([['minimist', '1.2.5', [MINI]]]), 'failure') },
-      fetch: fakeFetch({}),
+      fetch: fakeFetch([]),
       expect: [ok(1), has(new RegExp(`^::error .*::${MINI} `)), hasNot(/^::notice/)],
     },
     {
       name: 'clean on both sides: passes silently',
       args: { base: side(result([]), 'success'), head: side(result([]), 'success') },
-      fetch: fakeFetch({}),
+      fetch: fakeFetch([]),
       expect: [ok(0), hasNot(/^::/), has(/0 introduced, 0 inherited, 0 resolved/)],
     },
     {
@@ -382,7 +393,7 @@ async function selfTest() {
     {
       name: 'head scan answered success with no result file (the wrapper\'s 128 -> 0): fails closed',
       args: { base: side(result([]), 'success'), head: side(null, 'success') },
-      fetch: fakeFetch({}),
+      fetch: fakeFetch([]),
       expect: [ok(1), has(/wrote no result file \(outcome 'success'\)/)],
     },
     {
@@ -394,7 +405,7 @@ async function selfTest() {
     {
       name: 'failure outcome with zero findings: the scanner errored, fails closed',
       args: { base: side(result([]), 'success'), head: side(result([]), 'failure') },
-      fetch: fakeFetch({}),
+      fetch: fakeFetch([]),
       expect: [ok(1), has(/failed with zero findings/)],
     },
     {
@@ -406,7 +417,7 @@ async function selfTest() {
     {
       name: 'a skipped or cancelled scan step is not a verdict',
       args: { base: side(result([]), 'skipped'), head: side(result([]), 'cancelled') },
-      fetch: fakeFetch({}),
+      fetch: fakeFetch([]),
       expect: [ok(1), count(/^::error title=OSV base-relative verdict unavailable/, 2)],
     },
     {
@@ -430,8 +441,50 @@ async function selfTest() {
     {
       name: 'a search hit that does not name the id is not an anchor',
       args: { base: side(mainRed, 'failure'), head: side(mainRed, 'failure') },
-      fetch: fakeFetch({ [SHARP]: [{ number: 1, title: 'sharp is slow' }] }),
+      fetch: fakeFetch([{ number: 1, title: 'sharp is slow', body: 'GHSA-wq5f is not the whole id' }]),
       expect: [ok(0), has(new RegExp(`::${SHARP} .*no open issue names it yet`))],
+    },
+    {
+      name: 'the anchor is found on the second page, and in the body as well as the title',
+      args: { base: side(mainRed, 'failure'), head: side(mainRed, 'failure') },
+      fetch: fakeFetch([
+        ...Array.from({ length: 100 }, (_, i) => ({ number: 100 + i, title: 'filler', body: '' })),
+        { number: 21000, title: 'red main again', body: `the scan matches ${QUOTE} on shell-quote` },
+      ]),
+      expect: [ok(0), has(new RegExp(`::${QUOTE} .*anchor finding card: #21000`))],
+    },
+    {
+      name: 'a seat board post that quotes the id is not a finding card',
+      args: { base: side(mainRed, 'failure'), head: side(mainRed, 'failure') },
+      fetch: fakeFetch([{ number: 6024, title: '[PM seat] domain:cli', body: `exempt ${SHARP}`, labels: [{ name: 'pm:seat' }] }]),
+      expect: [ok(0), has(new RegExp(`::${SHARP} .*no open issue names it yet`))],
+    },
+    {
+      name: 'a pull request that names the id is not a finding card',
+      args: { base: side(mainRed, 'failure'), head: side(mainRed, 'failure') },
+      fetch: fakeFetch([{ number: 5, title: `fix ${SHARP}`, body: '', pull_request: { url: 'x' } }]),
+      expect: [ok(0), has(new RegExp(`::${SHARP} .*no open issue names it yet`))],
+    },
+    {
+      name: 'a listing that is not a list is named, and the verdict holds',
+      args: { base: side(mainRed, 'failure'), head: side(result([['minimist', '1.2.5', [MINI]]]), 'failure') },
+      fetch: async () => ({ ok: true, status: 200, json: async () => ({ message: 'odd' }) }),
+      expect: [ok(1), has(/^::error title=OSV advisory introduced/), hasNot(/^::notice/)],
+    },
+    {
+      name: 'introduced and inherited together: one error, one notice per inherited advisory',
+      args: {
+        base: side(result([['sharp', '0.35.4', [SHARP]]]), 'failure'),
+        head: side(result([['sharp', '0.35.4', [SHARP]], ['minimist', '1.2.5', [MINI]]]), 'failure'),
+      },
+      fetch: fakeFetch(cards),
+      expect: [
+        ok(1),
+        count(/^::error/, 1),
+        count(/^::notice/, 1),
+        has(new RegExp(`^::notice .*::${SHARP} .*merge base's lockfile \\(abcdef012345\\) too.*#22013`)),
+        has(/1 introduced, 1 inherited, 0 resolved/),
+      ],
     },
   ];
 
