@@ -148,13 +148,13 @@ const CAPABILITIES_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     'soft-delete that never ran). Delete the key. For recoverability use per-field ' +
     '`trackHistory` (audit trail) or a `lifecycle` policy; soft delete is parked, ' +
     'and if built returns as a live enforced flag (ADR-0049 prune-or-build). ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   mru:
     '`enable.mru` was removed from @objectstack/spec in the 16.x line (' +
     'ADR-0049) — Most-Recently-Used tracking was never implemented; no reader ' +
     'existed, so the flag changed nothing. Delete the key. If MRU tracking is ' +
     'built it returns as a live enforced flag (ADR-0049 prune-or-build). ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
 };
 
 /**
@@ -411,7 +411,7 @@ const DECLARED_INDEX_BARE_TRUE_RETIRED =
   + "nothing on disk changes) or `unique: 'organization'` (one holder per organization — the "
   + 'driver prepends the NULL-safe organization key part to `fields` at registration). '
   + 'Field-level `unique: true` is unaffected. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * Prescriptive rejection for a mis-spelled `unique` scope **on a DECLARED
@@ -546,7 +546,7 @@ export const IndexSchema = lazySchema(() => strictObject({
     'output. Delete the key. The index method is the driver/dialect\'s decision (Postgres ' +
     'defaults to B-tree; `gin`/`gist`/`fulltext` are dialect-specific and are chosen by a ' +
     'database-layer migration when a workload actually needs one). ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   partial: retiredKey(
     '`indexes[].partial` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no ' +
@@ -556,7 +556,7 @@ export const IndexSchema = lazySchema(() => strictObject({
     'WHERE <predicate>` from a runtime migration (this is what `metadata-protocol`\'s ' +
     '`ensureOverlayIndex` already does for `sys_metadata`). Drift detection is unaffected — it ' +
     'reads partiality back from the database\'s own DDL, never from this key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 }));
 
@@ -593,7 +593,7 @@ const TENANCY_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     '`@objectstack/metadata-core`; an object whose tenant column genuinely is not ' +
     '`organization_id` declares `tenancy.tenantField`, which both walls it and stamps ' +
     'its platform rows. ' +
-    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
 };
 
 /**
@@ -1478,7 +1478,7 @@ const MANAGED_BY_SYSTEM_RETIRED =
   + 'and can be deleted; keep it only to NARROW. CSV `import` is deliberately NOT in that '
   + 'default: it stays opt-in per object via `userActions: { import: true }`, which '
   + 'is what a v16 `system` object already resolved to. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * Known-confusable schema keys → precise authoring guidance.

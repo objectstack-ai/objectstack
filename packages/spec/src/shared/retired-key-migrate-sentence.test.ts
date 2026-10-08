@@ -1,37 +1,44 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#6856, reworded #9529] Class pin: every `os migrate meta --from <N>`
- * prescription sentence in `packages/spec/src` is the house sentence, whether
- * the backing ADR-0087 conversion STRIPS the key or REWRITES the value
- * (maintainer-ruled route D, 2026-08-09; reworded by maintainer ruling
- * 2026-08-18):
+ * [#6856, reworded #9529, `--write` named #9591] Class pin: every
+ * `os migrate meta --from <N>` prescription sentence in the corpora below is
+ * the house sentence, whether the backing ADR-0087 conversion STRIPS the key
+ * or REWRITES the value (maintainer-ruled route D, 2026-08-09; reworded by
+ * maintainer ruling 2026-08-18):
  *
  *     Run `os migrate meta --from <N>` to list the mechanical edits for
- *     existing sources; apply them by hand.
+ *     existing sources; `--write` applies the ones it can prove, and you
+ *     apply the rest by hand.
  *
  * The sentence states a property of the TOOL, never the fate of the key — the
  * retired "rewrite it" spelling was misread over strip conversions because
  * "it" has two antecedents (the key vs your sources), and the key's fate is
  * the body prose's job ("Delete the key…", "Rename the key to…").
  *
- * [#9529] It must also be TRUE of the tool, which is why the wording moved off
- * "rewrite existing sources automatically": `os migrate meta` replays the chain
- * in memory and prints the attributed mechanical change list; the only file it
- * writes is the `--out` JSON snapshot. It has never written an authored source
- * file, so 90-odd shipped prescriptions promised an affordance that did not
- * exist. This pin therefore holds BOTH directions — the new sentence is
- * required where a prescription names the command, and the withdrawn claim is
- * a hard RED wherever it reappears. Full rule: `shared/retired-key.ts` module
- * docblock. (When #9591's in-place codemod lands, the claim may be restored —
- * by editing this pin in the same PR, never by exempting a site.)
+ * [#9529] It must also be TRUE of the tool. The sentence once promised
+ * "rewrite existing sources automatically" while `os migrate meta` wrote no
+ * authored source at all, so #9529 withdrew the claim. [#9591] `--write` has
+ * since landed, and the claim came back only as far as the tool honours it:
+ * the default run still writes no source (it lists the mechanical edits and
+ * writes only the `--out` snapshot), and `--write` rewrites in place only the
+ * edits it can prove — each traced to one literal in one project file — and
+ * lists every other with its reason. Hence the sentence NAMES `--write` and
+ * QUALIFIES it, and the rest stays the author's. This pin holds every
+ * direction: the house sentence is required where a prescription names the
+ * command (so the #9529 sentence, which never mentions `--write`, is now RED
+ * too); the unqualified automatic-rewrite claim stays a hard RED wherever it
+ * reappears; and the two facts the sentence rests on — that `--write` exists
+ * and that it is not the default — are read from the command itself. Full
+ * rule: `shared/retired-key.ts` module docblock.
  *
  * ONE allowed variant, by SHAPE and never by site (#6935's no-allowlist
  * discipline): a conversion that covers only PART of the value keeps the
- * two-clause form naming which part —
- * "… to list the mechanical edits for the <X> case; <what the tool does with
- * the rest>." (`ui/dashboard.zod.ts` `compareTo.offset` is the model; the
- * script node's `config.actionType` is the other member.)
+ * two-clause form naming which part, with the same `--write` clause —
+ * "… to list the mechanical edits for the <X> case; `--write` applies the
+ * ones it can prove, and <what the tool does with the rest>."
+ * (`ui/dashboard.zod.ts` `compareTo.offset` is the model; the script node's
+ * `config.actionType` is the other member.)
  *
  * [#7030] Widened, not duplicated: `packages/lint/src/validate-expressions.ts`
  * carries one live occurrence of the identical sentence (the lint diagnostic
@@ -44,6 +51,12 @@
  * site could only drift from this one the moment either wording changes;
  * one pin covering both corpora cannot.
  *
+ * [#9591] Widened once more, on the same terms: `@objectstack/driver-turso`'s
+ * config schema carries three live occurrences (its `timeout` / `localPath` /
+ * `wasm` tombstones), whose docblock defers to `retired-key.ts` for the
+ * wording. The pin did not walk it, so a rewording would have left those three
+ * on the old sentence with every assertion here green.
+ *
  * Mechanism: a SOURCE scan over string literals (this pin pins textual facts —
  * the sentences ARE text in source). Comment lines are skipped: descriptive
  * prose about the tool ("`os migrate meta` rewrites sources") is not a
@@ -52,6 +65,11 @@
  * not tombstone prescriptions an author meets in a parse error. That is a
  * scope bound on the spec corpus, not a per-site exemption: every
  * prescription string in every scanned file is judged, with no allowlist.
+ * The scan reads single- and double-quoted literals only: inside a template
+ * literal the backticks are escaped, so `MARKER` never matches there. A
+ * sentence that should be judged is therefore written plain-quoted, as the
+ * lint corpus's two sites are (`validate-expressions.ts`,
+ * `data-model-rules.ts`).
  *
  * What this pin deliberately does NOT check: a tombstone whose prescription
  * carries no `os migrate meta` sentence at all (#6914's worklist) — absence of
@@ -67,8 +85,15 @@ import { describe, expect, it } from 'vitest';
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const SPEC_SRC_ROOT = path.resolve(HERE, '..');
-/** #7030: `packages/lint/src`, the one other corpus carrying this sentence. */
+/** #7030: `packages/lint/src`, a second corpus carrying this sentence. */
 const LINT_SRC_ROOT = path.resolve(HERE, '../../../lint/src');
+/** #9591: `@objectstack/driver-turso`'s config schema, a third. */
+const TURSO_SRC_ROOT = path.resolve(HERE, '../../../drivers/driver-turso/src');
+/**
+ * #9591: the command the sentence names. Read, never imported — the pin asks
+ * two facts of the command's own flag table, not of a built CLI.
+ */
+const MIGRATE_META_COMMAND = path.resolve(HERE, '../../../cli/src/commands/migrate/meta.ts');
 /**
  * [#10848] The population widened by EXACTLY ONE governed file (maintainer
  * ruling 2026-08-22, deliberately not all of `.claude/`): the retirement
@@ -123,6 +148,12 @@ const CORPORA: Corpus[] = [
     root: LINT_SRC_ROOT,
     outOfScope: new Set(),
   },
+  {
+    // #9591: the `turso` config tombstones (`spec/turso.zod.ts`).
+    name: 'driver-turso',
+    root: TURSO_SRC_ROOT,
+    outOfScope: new Set(),
+  },
 ];
 
 const MARKER = /(?:Run )?`os migrate meta --from \d+`/g;
@@ -133,21 +164,23 @@ const MARKER = /(?:Run )?`os migrate meta --from \d+`/g;
  * quote), so a prescription cannot bury the command mid-prose either.
  */
 const HOUSE_AT_MARKER =
-  /^Run `os migrate meta --from \d+` to list the mechanical edits for existing sources; apply them by hand\.['"]/;
+  /^Run `os migrate meta --from \d+` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\.['"]/;
 
 /**
  * MIXED two-clause shape: clause one names the part of the value the chain
- * covers mechanically, clause two says what it does with the rest. Shape, not
- * sites.
+ * covers mechanically, clause two says what `--write` does with it and what
+ * happens to the rest. Shape, not sites.
  */
 const MIXED_AT_MARKER =
-  /^Run `os migrate meta --from \d+` to list the mechanical edits for the [^;'"]+ case[^;'"]*; [^;'"]+\.['"]/;
+  /^Run `os migrate meta --from \d+` to list the mechanical edits for the [^;'"]+ case[^;'"]*; `--write` applies the ones it can prove, and [^;'"]+\.['"]/;
 
 /**
  * [#9529] The withdrawn claim, in every spelling the sweep found. Judged over
  * the SAME reconstructed text as the house form, but as a hard RED wherever it
  * appears — a site reverting to it fails even if it never names `--from <N>`
- * (three enum-value prescriptions spell the bare command).
+ * (a prescription can spell the bare command, or name the tool mid-prose).
+ * [#9591] Unchanged by `--write`: the tool still never rewrites existing
+ * sources UNQUALIFIED, so every spelling below stays withdrawn.
  */
 const WITHDRAWN_CLAIM =
   /to rewrite (?:existing sources|it) automatically|rewrites (?:it for you|existing sources|author(?:ed)? sources|your sources?|your source files?)/g;
@@ -268,7 +301,7 @@ function claimTree(): Array<{ file: string; line: number; excerpt: string }> {
 }
 
 describe('`os migrate meta` sentences are the house sentence, across corpora', () => {
-  it('every prescription sentence in packages/spec/src and packages/lint/src is house-form or MIXED two-clause', () => {
+  it('every prescription sentence in every corpus is house-form or MIXED two-clause', () => {
     const judged = judgeTree();
     const violations = judged.filter((j) => !j.ok);
     expect(
@@ -292,22 +325,38 @@ describe('`os migrate meta` sentences are the house sentence, across corpora', (
     expect(judged.every((j) => j.ok)).toBe(true);
   });
 
-  it('anti-vacuity: the lint corpus specifically is reached, not just outnumbered by spec', () => {
+  it('anti-vacuity: each widened corpus is reached, not just outnumbered by spec', () => {
     // The combined floor above (>=50) is already satisfied by packages/spec/src
-    // alone, so a broken LINT_SRC_ROOT (wrong relative path, corpus silently
-    // walking zero files) would NOT fail it — this assertion is the one thing
-    // that actually exercises #7030's widening rather than merely declaring it.
+    // alone, so a broken LINT_SRC_ROOT or TURSO_SRC_ROOT (wrong relative path,
+    // corpus silently walking zero files) would NOT fail it — this assertion is
+    // the one thing that actually exercises #7030's and #9591's widenings
+    // rather than merely declaring them.
     const judged = judgeTree();
-    const lintSites = judged.filter((j) => j.file.startsWith('lint:'));
-    expect(lintSites.length).toBeGreaterThanOrEqual(1);
-    expect(lintSites.every((j) => j.ok)).toBe(true);
+    for (const corpus of CORPORA.filter((c) => c.name !== 'spec')) {
+      const sites = judged.filter((j) => j.file.startsWith(`${corpus.name}:`));
+      expect(sites.length, corpus.name).toBeGreaterThanOrEqual(1);
+      expect(sites.every((j) => j.ok), corpus.name).toBe(true);
+    }
+  });
+
+  it('the sentence is TRUE of the command it names: `--write` exists, and the default run does not write', () => {
+    // The two facts the house sentence rests on, read from `os migrate meta`'s
+    // own flag table: it names `--write` because that flag exists, and it says
+    // the default run LISTS because `--write` is not the default. Renaming the
+    // flag, or flipping its default, would leave every prescription above
+    // stating something the tool no longer does — so either reds here, not in
+    // an author's terminal.
+    const command = fs.readFileSync(MIGRATE_META_COMMAND, 'utf8');
+    const flag = /\n\s*write: Flags\.boolean\(\{([\s\S]*?)\n\s*\}\),/.exec(command);
+    expect(flag, 'os migrate meta declares no `write` boolean flag').not.toBeNull();
+    expect(flag![1]).toMatch(/\bdefault: false\b/);
   });
 
   it('the withdrawn automatic-rewrite claim is absent from every prescription', () => {
-    // The other direction of the same ruling: requiring the new sentence where
+    // The other direction of the same ruling: requiring the house sentence where
     // `--from <N>` appears would still let the claim survive in a prescription
-    // that spells the bare command (`CHATTER_POSITION_RETIRED` does) or names
-    // the tool mid-prose. `os migrate meta` writes no authored source file.
+    // that spells the bare command or names the tool mid-prose. `--write`
+    // rewrites only the edits it can prove; no spelling here is ever true.
     const claims = claimTree();
     expect(
       claims,
@@ -329,10 +378,16 @@ describe('`os migrate meta` sentences are the house sentence, across corpora', (
     for (const src of withdrawn) {
       expect(findWithdrawnClaims(src, 'withdrawn.zod.ts'), src).not.toEqual([]);
     }
-    // And the house sentence itself must NOT trip it.
+    // And neither legal shape may trip it: naming `--write` is not the claim.
     expect(findWithdrawnClaims(
-      "const h = 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';",
+      "const h = 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; "
+        + "`--write` applies the ones it can prove, and you apply the rest by hand.';",
       'house.zod.ts',
+    )).toEqual([]);
+    expect(findWithdrawnClaims(
+      "const m = 'Run `os migrate meta --from 16` to list the mechanical edits for the `1y` case; "
+        + "`--write` applies the ones it can prove, and the other durations are reported for you to re-state.';",
+      'mixed.zod.ts',
     )).toEqual([]);
   });
 
@@ -360,10 +415,21 @@ describe('`os migrate meta` sentences are the house sentence, across corpora', (
       "'Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically.'",
       // …and the MIXED shape's withdrawn spelling.
       "'Run `os migrate meta --from 16` to rewrite the `1y` case automatically; the rest are reported.'",
+      // #9591: the #9529 sentence, true of the default run but silent on
+      // `--write` — the ruling requires the sentence to name it.
+      "'Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.'",
+      // …and the MIXED shape's #9529 spelling, silent on `--write` the same way.
+      "'Run `os migrate meta --from 16` to list the mechanical edits for the `1y` case; the rest are reported.'",
+      // #9591: names `--write` but drops the qualification — the unproved edits
+      // are left unaccounted for, which is the unqualified claim by omission.
+      "'Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies them.'",
+      // #9591: names `--write` and qualifies it, but leaves the rest unowned.
+      "'Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove.'",
       // Emptied sentence: the command with no object at all.
       "'Delete the key. Run `os migrate meta --from 16`.'",
       // Sentence not final in its literal: prose buries the command.
-      "'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. Also do X.'",
+      "'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; "
+        + "`--write` applies the ones it can prove, and you apply the rest by hand. Also do X.'",
     ];
     for (const literal of bad) {
       const judged = judgeMigrateSentences(`const s = ${literal};`, 'bad.zod.ts');
@@ -375,13 +441,20 @@ describe('`os migrate meta` sentences are the house sentence, across corpora', (
   it('accepts the two legal shapes, including across concatenation seams', () => {
     const good = [
       // House, single literal.
-      "const a = '`k` was removed (#1). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';",
+      "const a = '`k` was removed (#1). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits "
+        + "for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';",
       // House, sentence split across a cross-line concatenation seam.
-      "const b = '`k` was removed (#1). Run `os migrate meta --from 16` to list the mechanical edits for existing sources; '\n  + 'apply them by hand.';",
+      "const b = '`k` was removed (#1). Run `os migrate meta --from 16` to list the mechanical edits for existing sources; '\n"
+        + "  + '`--write` applies the ones it can prove, and you apply the rest by hand.';",
+      // House, split mid-clause across a double-quoted seam.
+      "const c = \"Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies \"\n"
+        + "  + 'the ones it can prove, and you apply the rest by hand.';",
       // MIXED two-clause (the dashboard model).
-      "const c = 'Run `os migrate meta --from 16` to list the mechanical edits for the `1y` case; the other durations are reported for you to re-state.';",
+      "const d = 'Run `os migrate meta --from 16` to list the mechanical edits for the `1y` case; "
+        + "`--write` applies the ones it can prove, and the other durations are reported for you to re-state.';",
       // MIXED two-clause (the script `actionType` member).
-      "const d = 'Run `os migrate meta --from 16` to list the mechanical edits for the shorthand case into `config.function`; the stub and marker values are removed.';",
+      "const e = 'Run `os migrate meta --from 16` to list the mechanical edits for the shorthand case into "
+        + "`config.function`; `--write` applies the ones it can prove, and the stub and marker values are removed.';",
     ];
     for (const src of good) {
       const judged = judgeMigrateSentences(src, 'good.zod.ts');
@@ -429,8 +502,8 @@ describe('`os migrate meta` sentences are the house sentence, across corpora', (
  * property, since nothing but a code span could ever satisfy it, but a trap
  * that fires the moment the corpus stops being one file. So a non-span
  * occurrence is judged for its WORDING, ending at its own period. What that
- * gives up, deliberately and only in prose: burying (`… apply them by hand.
- * Also do X.`) passes there, while it stays RED inside a template and in every
+ * gives up, deliberately and only in prose: burying (`… apply the rest by
+ * hand. Also do X.`) passes there, while it stays RED inside a template and in every
  * `.ts` prescription above — the two places a reader copies text from.
  */
 const SKILL_FROM_OPERAND = /(?:\d+|<[^>`]+>)/.source;
@@ -439,8 +512,8 @@ const SKILL_MARKER = new RegExp(
   'g',
 );
 /** The two legal wordings, from the marker up to the sentence's final period. */
-const SKILL_HOUSE_BODY = `^Run \`os migrate meta --from ${SKILL_FROM_OPERAND}\` to list the mechanical edits for existing sources; apply them by hand\\.`;
-const SKILL_MIXED_BODY = `^Run \`os migrate meta --from ${SKILL_FROM_OPERAND}\` to list the mechanical edits for the [^;]+ case[^;]*; [^;]+?\\.`;
+const SKILL_HOUSE_BODY = `^Run \`os migrate meta --from ${SKILL_FROM_OPERAND}\` to list the mechanical edits for existing sources; \`--write\` applies the ones it can prove, and you apply the rest by hand\\.`;
+const SKILL_MIXED_BODY = `^Run \`os migrate meta --from ${SKILL_FROM_OPERAND}\` to list the mechanical edits for the [^;]+ case[^;]*; \`--write\` applies the ones it can prove, and [^;]+?\\.`;
 /** Container-final anchors: a code span closes; a quoted sentence just ends. */
 const SKILL_TEMPLATE_END = '``';
 const SKILL_PROSE_END = '(?:\\s|$)';
@@ -568,8 +641,10 @@ describe('the retirement playbook and the published skill catalog agree with thi
 
   it('the markdown judge is not vacuous — template and prose anchors each hold', () => {
     const judge = (flat: string): MarkdownSite[] => judgeMarkdownSentences({ file: 'synthetic.md', flat });
-    const house = 'Run `os migrate meta --from <N-1>` to list the mechanical edits for existing sources; apply them by hand.';
-    const mixed = 'Run `os migrate meta --from 16` to list the mechanical edits for the `1y` case; the rest are reported.';
+    const house = 'Run `os migrate meta --from <N-1>` to list the mechanical edits for existing sources; '
+      + '`--write` applies the ones it can prove, and you apply the rest by hand.';
+    const mixed = 'Run `os migrate meta --from 16` to list the mechanical edits for the `1y` case; '
+      + '`--write` applies the ones it can prove, and the rest are reported.';
     // A taught template must close its code span, in both legal shapes.
     expect(judge(`5. \`\`${house}\`\``).map((s) => [s.template, s.ok])).toEqual([[true, true]]);
     expect(judge(`\`\`${mixed}\`\``).map((s) => [s.template, s.ok])).toEqual([[true, true]]);
@@ -579,6 +654,10 @@ describe('the retirement playbook and the published skill catalog agree with thi
     expect(judge(`error text … ${house} expected: never`).map((s) => [s.template, s.ok])).toEqual([[false, true]]);
     expect(judge('Run `os migrate meta --from 16` to rewrite it automatically.').map((s) => s.ok)).toEqual([false]);
     expect(judge('Run `os migrate meta --from 16` to remove it.').map((s) => s.ok)).toEqual([false]);
+    // #9591: the #9529 template, silent on `--write`, is no longer taught.
+    expect(judge(
+      '``Run `os migrate meta --from <N-1>` to list the mechanical edits for existing sources; apply them by hand.``',
+    ).map((s) => [s.template, s.ok])).toEqual([[true, false]]);
     // Naming the command mid-prose without the leading `Run` is not a sentence.
     expect(judge('Stored flows convert with `os migrate meta --from 16`.')).toEqual([]);
     // The withdrawn claim trips wherever it appears, fence or prose.

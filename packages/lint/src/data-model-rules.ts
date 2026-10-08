@@ -456,8 +456,12 @@ export function lintUnscopedDeclaredIndexes(objects: any[]): LocatedLintIssue[] 
         fix:
           `State the scope: \`unique: 'global'\` (installation-wide — the exact index bare \`true\` built) or ` +
           `\`unique: 'organization'\` (one holder per organization — the driver prepends the NULL-safe ` +
-          `organization key part at registration). Run \`os migrate meta --from 17\` to list the mechanical ` +
-          `edits for existing sources; apply them by hand.`,
+          `organization key part at registration). ` +
+          // The house sentence, plain-quoted (not a template literal) so this site
+          // is judged by `retired-key-migrate-sentence.test.ts`'s scan of this
+          // package: escaped template backticks hide it from that scan.
+          'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; '
+          + '`--write` applies the ones it can prove, and you apply the rest by hand.',
       });
     }
   }

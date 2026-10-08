@@ -1189,7 +1189,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
               `Delete the key: \`chartConfig.xAxis\` is refused on a dataset-bound widget ` +
               `(ADR-0021) and the x-axis binding comes from this widget's \`dimensions\`. ` +
               `Run \`os migrate meta --from 17\` to list the mechanical edits for existing ` +
-              `sources; apply them by hand.` +
+              `sources; \`--write\` applies the ones it can prove, and you apply the rest by hand.` +
               `${suggestName(xAxis.field, dimensionNames)} ${suppressHint}`,
           });
         }

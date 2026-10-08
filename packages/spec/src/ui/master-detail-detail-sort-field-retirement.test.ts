@@ -59,7 +59,7 @@ const REGISTERED_KEY = 'ui/ObjectMasterDetailFormProps:details.sortField';
 // Unanchored, because a thrown `ZodError`'s message is the JSON of its issues;
 // the key-first house convention is asserted on the issue message itself.
 const PRESCRIPTION =
-  /`object-master-detail-form` property `details\[\]\.sortField` was removed in @objectstack\/spec 17 \(ADR-0087 D2\) — the console reads no authored value.*Delete the key\..*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand\./s;
+  /`object-master-detail-form` property `details\[\]\.sortField` was removed in @objectstack\/spec 17 \(ADR-0087 D2\) — the console reads no authored value.*Delete the key\..*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./s;
 
 /** A detail entry's live keys — the showcase project workspace's entry shape. */
 const ENTRY = { title: 'Lines', childObject: 'crm_invoice_line', addLabel: 'Add line' } as const;

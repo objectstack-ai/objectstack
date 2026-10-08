@@ -136,7 +136,7 @@ describe('§1 reach — every branch of the view union surfaces its own prescrip
     // its `os migrate meta` sentence is pinned class-wide by
     // `../shared/retired-key-migrate-sentence.test.ts`. A message this code
     // composed would be a second spelling of a pinned string.
-    expect(message).toContain('to list the mechanical edits for existing sources; apply them by hand.');
+    expect(message).toContain('to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.');
   });
 
   it('the lifted string is byte-identical to the nested issue it came from', () => {

@@ -560,7 +560,7 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
       + "form view, a share link, or `book.audience: 'public'`. A stack that mounts no auth at all now "
       + 'fails at boot rather than silently serving object data to anonymous callers. '
       + 'Run `os migrate meta --from 16` to list the mechanical edits for existing '
-      + 'sources; apply them by hand.',
+      + 'sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
     ),
     /** Enable environment-scoped routing for data/meta/AI APIs. */
     enableProjectScoping: z.boolean().optional(),

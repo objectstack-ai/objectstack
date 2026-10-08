@@ -52,36 +52,41 @@
  * A prescription whose surface an ADR-0087 conversion covers closes with
  * exactly this sentence, whether the conversion STRIPS the key or REWRITES
  * its value (#6856, maintainer-ruled 2026-08-09; reworded #9529,
- * maintainer-ruled 2026-08-18):
+ * maintainer-ruled 2026-08-18; `--write` named #9591):
  *
  *     Run `os migrate meta --from <N>` to list the mechanical edits for
- *     existing sources; apply them by hand.
+ *     existing sources; `--write` applies the ones it can prove, and you
+ *     apply the rest by hand.
  *
  * The sentence states a property of the TOOL — what running it gets you —
  * never the fate of the key. Two rulings shaped it, and both still bind:
  *
- *   - **It must be TRUE of the tool.** The sentence used to promise
- *     "rewrite existing sources automatically", and `os migrate meta` has
- *     never written an authored source file: it replays the conversion
- *     chain over the loaded stack in memory, prints the attributed
- *     mechanical change list (`Applied N mechanical change(s)`, one line per
- *     site), and writes exactly one file — the `--out` JSON snapshot, when
- *     you ask for it. Porting the listed edits into the project's own `.ts`
- *     sources is the author's work, which is why the sentence says so
- *     (#9529; the in-place AST codemod is commissioned separately as #9591,
- *     and the automatic-rewrite claim may return with it).
+ *   - **It must be TRUE of the tool.** The default run writes no authored
+ *     source file: it replays the conversion chain over the loaded stack in
+ *     memory, prints the attributed mechanical change list (`Applied N
+ *     mechanical change(s)`, one line per site), and writes only the `--out`
+ *     JSON snapshot, when you ask for it. `--write` rewrites in place only
+ *     the edits it can prove — each traced to one literal in one project
+ *     file, held to a re-run of the chain — and lists every other with the
+ *     reason it was not written. So the sentence names `--write` (the
+ *     default run still only lists), and it never says "rewrite existing
+ *     sources automatically" unqualified: the edits `--write` cannot prove
+ *     are the author's work, which is why the sentence says so. The
+ *     unqualified claim stays a hard RED in the class pin.
  *   - **One antecedent.** The retired "rewrite it" spelling was misread over
  *     strip conversions because "it" names either the key or your sources;
- *     "existing sources" names one thing. The KEY's fate belongs in the body
+ *     "existing sources" names one thing, and "the ones" can only be edits
+ *     (an edit is what gets applied). The KEY's fate belongs in the body
  *     prose ("Delete the key…", "Rename the key to…"), which every
  *     prescription already carries — the sentence never restates it.
  *
  * ONE exception: a conversion that covers only PART of the value keeps the
  * two-clause form naming which part — "… to list the mechanical edits for
- * the <X> case; <what the tool does with the rest>." (model:
- * `ui/dashboard.zod.ts` `compareTo.offset`). Both shapes are pinned
- * class-wide by `retired-key-migrate-sentence.test.ts`; a new spelling
- * fails the pin, not code review.
+ * the <X> case; `--write` applies the ones it can prove, and <what the tool
+ * does with the rest>." (model: `ui/dashboard.zod.ts` `compareTo.offset`).
+ * Both shapes are pinned class-wide by
+ * `retired-key-migrate-sentence.test.ts`; a new spelling fails the pin, not
+ * code review.
  *
  * Tombstones age out, exactly like the `UNKNOWN_KEY_GUIDANCE` entries in
  * `data/object.zod.ts`: drop one ~two majors after the removal, by which point
@@ -172,7 +177,8 @@ type Tombstone<Mark> = z.ZodOptional<z.ZodType<Mark, Mark>>;
  * conditionalRequired: retiredKey(
  *   '`conditionalRequired` was removed in @objectstack/spec 17.0.0 (#3855). ' +
  *   'Rename the key to `requiredWhen` — the value (a CEL predicate) is unchanged. ' +
- *   'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+ *   'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; ' +
+ *   '`--write` applies the ones it can prove, and you apply the rest by hand.',
  * ),
  * ```
  */

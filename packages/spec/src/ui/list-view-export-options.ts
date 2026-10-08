@@ -39,7 +39,7 @@ export const LIST_VIEW_EXPORT_PDF_RETIRED =
   + 'export: ObjectGrid dropped the declared format from the export menu with only a runtime '
   + "console.warn, so authoring it was a parse-clean no-op. Delete the value; the surviving "
   + "formats are 'csv', 'xlsx' and 'json'. "
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * Export formats the platform actually delivers (#8010): `csv`/`json` on both
