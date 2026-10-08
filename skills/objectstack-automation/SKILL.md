@@ -204,14 +204,14 @@ a query instead of narrowing it.
   one it does **not** resolve that IS a recognised filter placeholder
   (`{current_user_id}`, `{current_year_start}`) passes through **verbatim** for
   the query engine to expand. So a flow variable named after a placeholder
-  **shadows** it. Only `filter` gets this hand-off — in `title`, `message`,
-  `fields` and `url` a bare `{current_year_start}` is a nonsense reference.
+  **shadows** it. Only `filter` gets this hand-off — in `title`, `message`
+  and `url` a bare `{current_year_start}` is a nonsense reference.
 - **Static checkability splits by position.** A `{record.…}` token **inside a
   filter** naming an unknown field, or hopping a relation the start node does not
   list in `config.expand`, is an **ERROR** at `objectstack validate`: it resolves
   to nothing, the condition is DROPPED, and the node refuses to execute. The
-  *same* reference **outside** a filter (message body, `http` url, write payload)
-  only renders an empty string — a **warning**. A `{var}` naming a flow variable
+  *same* reference **outside** a filter (message body, `http` url) only
+  renders an empty string — a **warning**. A `{var}` naming a flow variable
   or node output is **not statically checkable at all**.
 
 ---
@@ -221,29 +221,32 @@ a query instead of narrowing it.
 Legal metadata that authors — AI especially — get wrong; most are caught by
 `objectstack build`, but write them right the first time:
 
-1. **Flow node VALUE interpolation uses SINGLE braces.** Value fields on a node's
-   `config` (`fields`, `inputs`, notify `message`/`title`, …) interpolate
-   `{token}`:
-   - `{var}` / `{record.title}` — variable / record field
-   - `{record.tags.0}` — **array index** (e.g. a `multiple: true` lookup, stored as an array)
-   - `{$User.Id}` / `{NOW()}` / `{TODAY() + 30}` — current user / date macros
-   - `{round(x)}` `{floor(x)}` `{ceil(x)}` `{abs(x)}` `{min(a,b)}` `{max(a,b)}` —
-     mirror the CEL stdlib 1:1. `round` is **integer-only** (no `round(x, 2)`);
-     for N decimals write `{round(x * 100) / 100}` (scale 2)
-   - anything without `{…}` is a **literal**
+1. **A `fields` / `assignment` VALUE is a literal or a CEL envelope.** In
+   `create_record` / `update_record` `fields.*` and an `assignment` value (its
+   two legacy shapes too) a string is the literal text it spells, and a `{…}`
+   token is **refused** — at `objectstack validate` (`expression-invalid`),
+   `registerFlow` and the executor — naming its CEL spelling. Compute with
+   `{ dialect: 'cel', source: '…' }`:
+   - `'{record.owner}'` → `source: 'has(record.owner) ? record.owner : null'` —
+     CEL refuses an absent key where the template wrote nothing, so nothing /
+     `null` / a default is now YOUR call; `'{record.tags.0}'` → `'record.tags[0]'`
+   - money: `source: 'round(x * 100) / 100.0'` — CEL divides two integers as
+     integers, so `/ 100` turns `123.46` into `123`
+   - still accepted there until CEL can write them: `{NOW()}` / `{TODAY() ± N}`
+     and `{$User.<path>}`
 
-   ❌ `body: '{{ai_reply}}'` — double-brace is the *formula / template-field* dialect, **not** flow values
-   ❌ `ticket: '$source.id'` — a bare `$ref` is a literal string, not interpolated
-   ✅ `body: '{ai_reply}'`, `ticket: '{source.id}'`
-   ❌ `'{ROUND(x, 2)}'` / `'{Math.round(x)}'` / `'{(x).toFixed(2)}'` — any other
-   name in call position **fails the node** with a named error naming the
-   supported set. The build does **not** catch these (conditions are checked,
-   call-position names are not) and a `fault` edge cannot route it.
+   Text slots (notify `title` / `message`, `inputs`, `http` `url` / `body`, …)
+   and `filter` keep the SINGLE-brace template — `{var}` / `{record.title}`,
+   `{record.tags.0}` (array index), `{$User.Id}`, `{NOW()}`, `{TODAY() + 30}`,
+   `{round(x)}`-style arithmetic; no `{…}` ⇒ literal; `{{x}}` is the
+   template-field dialect. ❌ `'{ROUND(x, 2)}'` — an unknown name in call
+   position **fails the node** at run time, unchecked at build, not
+   `fault`-routable.
 
 2. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
    Reference a field explicitly.
-   ❌ `update_record … fields: { ref: '{newRec}' }` → yields the whole record object
-   ✅ `fields: { ref: '{newRec.id}' }`
+   ❌ `fields: { ref: { dialect: 'cel', source: 'newRec' } }` → writes the whole record object
+   ✅ `source: 'newRec.id'`
 
 3. **`script` nodes call a registered function — that is all they do.** Set
    `config.function` to a function registered via
@@ -260,8 +263,7 @@ Legal metadata that authors — AI especially — get wrong; most are caught by
    it. Keep data effects on the flow graph (visible, governed, build-checkable):
 
    ```ts
-   // ❌ DON'T: expect the function to update the record itself (it has no data API)
-   // ✅ DO: function returns values → outputVariable → update_record persists
+   // ✅ function returns values → outputVariable → update_record persists
    { id: 'ai', type: 'script', config: {
        function: 'helpdesk.aiTriageStub',     // returns { ai_category, ai_sentiment, … }
        inputs: { ticketId: '{record.id}' },   // inputs are interpolated
@@ -270,11 +272,10 @@ Legal metadata that authors — AI especially — get wrong; most are caught by
    { id: 'apply', type: 'update_record', config: {
        objectName: 'helpdesk_ticket',
        filter: { id: '{record.id}' },
-       fields: { ai_category: '{ai.ai_category}', ai_sentiment: '{ai.ai_sentiment}' },
+       fields: { ai_category: { dialect: 'cel', source: 'ai.ai_category' } },
    } },
    ```
 
-   `defineStack({ functions: { 'helpdesk.aiTriageStub': (ctx) => ({ ai_category: 'other', … }) } })`.
    If you genuinely need data-lifecycle **side effects** (read/write other records),
    that's an L2 **hook** (objectstack-data) — hooks get `ctx.api`; flow functions don't.
 
