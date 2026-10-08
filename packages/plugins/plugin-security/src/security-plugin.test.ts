@@ -1596,13 +1596,13 @@ describe('SecurityPlugin', () => {
       expect(filter).toBeUndefined();
     });
 
-    it('anonymous (no userId/roles/permissions) → undefined (authn gated elsewhere)', async () => {
+    it('[#21908] principal-less (no userId/positions/permissions, not system) → the deny sentinel (ADR-0096 D5)', async () => {
       const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
       const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet], orgScoping: true });
       await plugin.init(harness.ctx);
       await plugin.start(harness.ctx);
       const filter = await plugin.getReadFilter('task', { positions: [], permissions: [] });
-      expect(filter).toBeUndefined();
+      expect(filter).toEqual({ ...RLS_DENY_FILTER });
     });
 
     it('fail-closed: a permission-resolution throw yields the deny sentinel (never allow-all)', async () => {

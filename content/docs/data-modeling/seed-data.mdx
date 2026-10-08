@@ -4,9 +4,11 @@ navTitle: Seed Data & Fixtures
 description: Populate ObjectStack objects with bootstrap data, reference records, and demo fixtures using defineSeed()
 ---
 
-`defineSeed()` is the canonical way to define seed data in ObjectStack. It provides
-compile-time type safety by inferring valid field keys directly from your object
-definition, so typos in record field names are caught before the code runs.
+`defineSeed()` is the canonical way to define seed data in ObjectStack. It checks
+every record key against your object definition, so a typo in a record field name
+is caught before any row is loaded: by TypeScript for a record you write inline,
+and by `defineSeed()` itself, for every record, when the config is loaded
+(`objectstack validate`, `objectstack build`, boot).
 
 Use seed data for:
 
@@ -44,8 +46,9 @@ export const accountsSeed = defineSeed(Account, {
 ```
 
 The first argument is the **object definition** (the exported constant from your
-object file), not a string. This lets TypeScript validate every field name in
-`records` against the object's `fields` map at compile time.
+object file), not a string. This lets `defineSeed()` check every field name in
+`records` against the object's `fields` map. See [Type Safety](#type-safety) for
+which half TypeScript checks and which half the call checks.
 
 <Callout type="warn">
   Import `defineSeed` from `@objectstack/spec/data`. Do not confuse it with
@@ -255,9 +258,14 @@ operator's job — to switch locales cleanly, start from a fresh database.
 
 ## Type Safety
 
-`defineSeed()` infers valid field keys from the object definition you pass as the
-first argument. If you reference a field that does not exist on the object, TypeScript
-reports an error immediately.
+A record key must name a column of the object: a field it declares, or a system
+column the platform injects on it (`id`, `organization_id`, `created_at`,
+`created_by`, `updated_at`, `updated_by`, `owner_id`, `owning_business_unit_id`,
+unless the object opts out of them with `systemFields`, `tenancy`, `ownership` or
+`managedBy`). `defineSeed()` checks this twice.
+
+**At compile time**, for a record written as an object literal directly in
+`records`, TypeScript reports an unknown key immediately:
 
 ```typescript
 import { Account } from './objects/account.object';
@@ -269,14 +277,30 @@ defineSeed(Account, {
       typo_fild: 'value',
       //  ^^^^^^^^^
       //  TS Error: Object literal may only specify known properties,
-      //  and 'typo_fild' does not exist in type 'Partial<Record<keyof ...>>'
+      //  and 'typo_fild' does not exist in type 'SeedRecord<...>'
     },
   ],
 });
 ```
 
+This is TypeScript's excess-property check, so it does not see a record that is
+not a fresh literal in the call: one from a variable or a `.map()`, any inline
+record in an array that also spreads a `Record<string, unknown>[]`, or a record
+for an object typed `ServiceObject`. It admits every system column name, because
+a type cannot evaluate the object's opt-outs.
+
+**When the call runs** (when `objectstack validate`, `objectstack build` or boot
+loads your config), `defineSeed()` checks every record, whatever its shape,
+against the object's declared fields and the system columns injected on that
+object, and refuses the seed naming each unknown key:
+
+```text
+defineSeed('crm_account'): unknown field(s) in records — typo_fild.
+  • records[0]: `typo_fild` is not a field of `crm_account`.
+```
+
 This is a major advantage over writing plain JSON — always use `defineSeed()`
-over the raw `SeedSchema.parse()` call.
+over the raw `SeedSchema.parse()` call, which checks no record key.
 
 ---
 
@@ -565,10 +589,14 @@ function defineSeed<
     mode?: 'insert' | 'update' | 'upsert' | 'replace' | 'ignore'; // default: 'upsert'
     env?: Array<'prod' | 'dev' | 'test'>;  // default: ['prod','dev','test']
     locale?: string[];                      // BCP-47 tags; omitted = every locale
-    records: Array<Partial<Record<keyof TObj['fields'], unknown>>>;
+    records: Array<SeedRecord<TObj['fields']>>;  // declared fields + injectable system columns
   }
 ): Seed
 ```
+
+`SeedRecord` keys are the object's declared fields (a `lookup` / `master_detail`
+field takes its target's natural-key string) plus the injectable system column
+names. Every record key is checked again when the call runs.
 
 The returned `Seed` object is a plain serialisable value — pass it to your
 stack's seed runner or store it in an export array.

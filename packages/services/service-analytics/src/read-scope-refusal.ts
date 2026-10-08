@@ -92,11 +92,13 @@ const READ_SCOPE_COMPILE_FAILED: RegisteredErrorCode = 'READ_SCOPE_COMPILE_FAILE
  * `READ_SCOPE_COMPILE_FAILED` / 500.
  *
  * Use it where a wired row-scope provider could not be asked or could not
- * answer, and the query is therefore refused fail-closed. ⛔ Not for a caller's
- * mistake (that is `dataset-refusal.ts`) and ⛔ not for an ABSENT provider,
- * which is a different state entirely: a deployment with no security service is
- * one where `/data` has no row-level policy either, it is reported loudly at
- * init, and it must keep running unscoped exactly as before.
+ * answer, and the query is therefore refused fail-closed — which, on the
+ * in-repo kernels, includes a deployment that registers no security service:
+ * their lookup throws on the never-registered name, so the bridge is UNUSABLE
+ * (`plugin.ts`). ⛔ Not for a caller's mistake (that is `dataset-refusal.ts`)
+ * and ⛔ not for an ABSENT provider — no row-scope provider at all, or a
+ * context that answers the `security` lookup with nothing — for which the
+ * row-scope stage applies no scope, as it always has.
  *
  * The message stays whatever the refusing site says — it is for the operator's
  * log, which after this change is its only destination.

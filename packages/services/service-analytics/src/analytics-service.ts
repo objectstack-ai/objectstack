@@ -841,8 +841,11 @@ export interface AnalyticsServiceConfig {
    *
    * MAY be async. `false` refuses the query with `PERMISSION_DENIED` / 403; a
    * THROW also refuses (fail-closed). When the hook is absent entirely no
-   * object-level gate applies — the deployment has no security service, which
-   * is the same deployment in which `/data` has no object-level gate either.
+   * object-level gate applies — a host that constructs the service without
+   * one. That is not a deployment with no security service: the plugin always
+   * wires this hook, and on the in-repo kernels its bridge DENIES when no
+   * `security` service was ever registered, because the lookup throws
+   * (`plugin.ts`).
    */
   admitObjectRead?: ObjectReadAdmissionProvider;
   /**
@@ -861,9 +864,11 @@ export interface AnalyticsServiceConfig {
    * `getReadableFields`, so the answer is the one the engine middleware
    * enforces with. MAY be async. `undefined` for an object is "no answer" and
    * judges none of its fields; a THROW refuses the query (fail-closed). When
-   * the hook is absent entirely no field-level gate applies — the deployment
-   * has no security service, which is the one in which `/data` has no
-   * field-level security either.
+   * the hook is absent entirely no field-level gate applies — a host that
+   * constructs the service without one. That is not a deployment with no
+   * security service: the plugin always wires this hook, and on the in-repo
+   * kernels its bridge THROWS when no `security` service was ever registered,
+   * so the query is refused (`plugin.ts`).
    */
   getReadableFields?: ReadableFieldsProvider;
   /**
@@ -1896,9 +1901,11 @@ export class AnalyticsService implements IAnalyticsService {
    * carrying its own copy of the check, which is the arrangement that produced
    * the divergence in the first place.
    *
-   * A no-op when no provider is wired: that is a deployment with no security
-   * service, where `/data` has no object-level gate either, so the doors still
-   * agree. `AnalyticsServicePlugin` reports that state at init.
+   * A no-op when no provider is wired — a host that constructs this service
+   * without `admitObjectRead`. `AnalyticsServicePlugin` always wires one, so a
+   * deployment with no security service is NOT this case: on the in-repo
+   * kernels the bridge's lookup throws and the provider denies, fail-closed
+   * (`plugin.ts`, `admission-bridge-resolution.test.ts`).
    */
   private async assertReadAdmitted(
     objects: Iterable<string>,
@@ -1919,7 +1926,8 @@ export class AnalyticsService implements IAnalyticsService {
    * here too, `PERMISSION_DENIED` / 403, ahead of the field verdicts on its
    * object ({@link namedQueryFields}).
    *
-   * A no-op when no provider is wired (no security service) or when the query
+   * A no-op when no provider is wired (a host that constructs this service
+   * without `getReadableFields`; the plugin always wires one) or when the query
    * names no field.
    */
   /**
@@ -1932,7 +1940,7 @@ export class AnalyticsService implements IAnalyticsService {
    * tier.
    *
    * It is the tier-independent complement of {@link assertFieldsReadable}: that
-   * gate is a no-op with no security service and stands down on an object its
+   * gate is a no-op with no field reader wired and stands down on an object its
    * reader answers `undefined` for, which is exactly where caller-supplied text
    * that is not a column reference reached `NativeSQLStrategy`'s statement as
    * written. See `field-read-admission.ts`.
@@ -2058,9 +2066,9 @@ export class AnalyticsService implements IAnalyticsService {
    * DECLARED, so a dimension/measure whose `field` is a raw expression resolves to
    * a declared cube member whose `sql` is that expression — and #21156's
    * {@link assertCallerMembersResolvable} leaves a DECLARED expression member to
-   * the field-level gate (#20965), which stands down with no security service and
-   * on an object its reader answers `undefined` for. In those tiers the
-   * expression reached `NativeSQLStrategy`'s statement as written.
+   * the field-level gate (#20965), which stands down with no field reader
+   * wired and on an object its reader answers `undefined` for. In those tiers
+   * the expression reached `NativeSQLStrategy`'s statement as written.
    *
    * ## Every branch that supplies the dataset
    *
