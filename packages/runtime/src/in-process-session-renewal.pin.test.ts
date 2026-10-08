@@ -220,7 +220,8 @@ describe('[#22258] each door of this lane leaves cookie and session expiry align
       const res = await req(door.path, { headers: asBearer() });
       expect(res.status, `${door.label} answered ${res.status}`).toBeLessThan(500);
       const after = await storedExpiry();
-      expect(Math.abs(after - (Date.now() + expiresInSec * 1000)), `${door.label}: a bearer-only read no longer renews`)
+      expect(after, `${door.label}: a bearer-only read no longer renews`).toBeGreaterThan(aged);
+      expect(Math.abs(after - (Date.now() + expiresInSec * 1000)), `${door.label}: the renewal is not to now + expiresIn`)
         .toBeLessThan(SLACK_MS);
       expect(sessionCookieOf(res), `${door.label}: a cookie was set on a response to a request that sent none`).toBeNull();
     });
