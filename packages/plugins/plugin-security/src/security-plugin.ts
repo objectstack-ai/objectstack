@@ -35,6 +35,7 @@ import {
   createInvitationPlacementService,
 } from './invitation-placement.js';
 import { POSITION_ASSIGNMENT_OBJECT, createPositionCatalogRefusal } from './position-catalog-refusal.js';
+import { registerGrantHolderMembershipRefusal } from './grant-holder-membership-refusal.js';
 import {
   registerGrantPermissionSetNameHooks,
   unregisterGrantPermissionSetNameHooks,
@@ -4386,6 +4387,8 @@ export class SecurityPlugin implements Plugin {
       createPositionCatalogRefusal({ ql, logger: ctx.logger }),
       { object: POSITION_ASSIGNMENT_OBJECT },
     );
+    // A user-bound grant scoped to an organization names a member of it: `grant-holder-membership-refusal.ts`.
+    registerGrantHolderMembershipRefusal(ql, ctx.logger);
 
     // [ADR-0131 D4] `sys_user_permission_set.permission_set` names the grant's
     // set beside `permission_set_id`, and the two never disagree: engine
