@@ -19,6 +19,7 @@ import { PROTOCOL_MAJOR, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import { FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, STRUCTURED_JSON_TYPES } from '@objectstack/spec/data';
 import { FILE_REFERENCES_MIGRATION_ID, VALUE_SHAPES_MIGRATION_ID } from '@objectstack/spec/system';
 import { loadConfig } from '../../utils/config.js';
+import { authoringRuleUnionStack } from '../../utils/stack-collections.js';
 import {
   printHeader,
   printSuccess,
@@ -1065,7 +1066,13 @@ export default class MigrateMeta extends Command {
       // diff" the consumer agent reviews (ADR-0087 D3/D5).
       const parsed = ObjectStackDefinitionSchema.safeParse(result.stack);
       const specChanges = composeSpecChanges(fromMajor, toMajor);
-      const dataMigrations = pendingDataMigrations(result.stack, result.fromMajor, result.toMajor);
+      // [#22288] Asked of the folded stack: the advice is about field classes
+      // the author's objects declare, and a multi-package `preserve` stack
+      // carries its objects in its package bodies, none at its top level, so
+      // the advice was never listed for such an app. A stack with no
+      // `packages[]` comes back by identity.
+      const dataMigrations = pendingDataMigrations(
+        authoringRuleUnionStack(result.stack as Record<string, unknown>), result.fromMajor, result.toMajor);
 
       // The declared protocol range the load would still refuse after this
       // run (#22219): `--write` rewrites it, a dry run names the edit.

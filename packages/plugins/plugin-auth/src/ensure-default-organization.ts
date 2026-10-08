@@ -61,13 +61,22 @@
  *   1. Find the platform admin (two anchors, above). If none, no-op.
  *   2. If that user already has any `sys_member` row, no-op (they either
  *      created their own org or were invited into one — we respect that and
- *      never auto-create a "Default Organization" behind their back).
+ *      never auto-create a "Default Organization" behind their back) — except
+ *      the reconciler's own `member` row on the Default Organization, which is
+ *      promoted to `owner` while the bind is undecided (ADR-0131 D3: that
+ *      organization now exists before the admin does).
  *   3. Re-use a pre-existing `slug='default'` org if present; otherwise
  *      create one. Stable slug keeps human-readable URLs predictable across
  *      cold-boots.
  *   4. Insert a `sys_member { role: 'owner' }` linking the admin to the
  *      default org.
  *   5. (optional, injected) hand the org's seeded rows to the admin.
+ *
+ * Under the `single` posture the organization itself no longer waits for the
+ * admin: `AuthPlugin.start()` creates it at boot (`ensureDefaultOrganizationExists`
+ * in `default-organization-invariant.ts`; ADR-0131 D3, a boot invariant whose
+ * failure stops the boot), so step 3 finds it and this helper's job there is
+ * the owner bind.
  */
 
 import { matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from '@objectstack/core';
@@ -297,10 +306,111 @@ export interface EnsureDefaultOrganizationResult {
   defaultOrgId?: string;
   /** Whether a sys_member row was inserted binding the admin to the default org. */
   memberCreated: boolean;
+  /**
+   * [ADR-0131 D3 / ADR-0093 D7] Whether the admin's OWN `member` row on the
+   * Default Organization — the one the membership reconciler wrote when the
+   * admin was created, because the organization already existed — was promoted
+   * to `owner` instead of a new row being inserted. Only while the owner bind
+   * is undecided, and only when that organization has no owner.
+   */
+  ownerPromoted?: boolean;
   /** Human-readable reason when the helper short-circuited. */
-  reason?: 'no_admin' | 'admin_already_in_org' | 'org_insert_failed' | 'member_insert_failed' | 'owner_bind_decided';
+  reason?:
+    | 'no_admin'
+    | 'admin_already_in_org'
+    | 'org_insert_failed'
+    | 'member_insert_failed'
+    | 'owner_promotion_failed'
+    | 'owner_bind_decided';
   /** Count of the default org's seeded rows re-owned to the platform admin. */
   ownershipClaimed?: number;
+}
+
+/**
+ * The Default Organization the way the `tenancy` service resolves it
+ * (`resolveDefaultOrgId`): the stable `slug='default'` organization, else the
+ * install's sole organization. `undefined` when there is neither — none, or
+ * several with no `default` among them. Reads through {@link tryFind}, so an
+ * unreadable store answers `undefined` and nothing is promoted on it.
+ */
+async function findDefaultOrganizationId(ql: any): Promise<string | undefined> {
+  const bySlug = await tryFind(ql, 'sys_organization', { slug: 'default' }, 1);
+  if (bySlug[0]?.id) return String(bySlug[0].id);
+  const any = await tryFind(ql, 'sys_organization', {}, 2);
+  return any.length === 1 && any[0]?.id ? String(any[0].id) : undefined;
+}
+
+/**
+ * [ADR-0131 D3 / ADR-0093 D7] Promote the platform admin's reconciler-written
+ * `member` row on the Default Organization to `owner` — or `null` when that is
+ * not the situation, and the caller's yield (`admin_already_in_org`) stands.
+ *
+ * Every condition is required, and each one is what keeps this from being a
+ * second, unaudited elevation path:
+ *  - the owner bind is UNDECIDED: neither `bindOwner: false` (decided, ADR-0093
+ *    D7) nor `bindOnlyOnCreate` (no readable ledger, so a decision may exist);
+ *  - the admin holds exactly ONE membership, on the Default Organization, with
+ *    role `member` — the shape the reconciler (`reconcile-membership.ts`)
+ *    writes, and nothing an operator or an invitation produced elsewhere;
+ *  - the Default Organization has NO owner yet.
+ *
+ * A failed promotion is a durability failure (the admin stays `member` and
+ * nothing else fails), logged at `error`; the bind stays undecided, so the
+ * next bootstrap trigger tries again.
+ */
+async function promoteReconciledMemberToOwner(
+  ql: any,
+  adminUserId: string,
+  memberships: any[],
+  options: EnsureDefaultOrganizationOptions,
+): Promise<EnsureDefaultOrganizationResult | null> {
+  if (options.bindOwner === false || options.bindOnlyOnCreate) return null;
+  if (memberships.length !== 1 || typeof ql?.update !== 'function') return null;
+  const membership = memberships[0];
+  if (!membership?.id) return null;
+  if (String(membership.role ?? '').trim().toLowerCase() !== 'member') return null;
+  const defaultOrgId = await findDefaultOrganizationId(ql);
+  if (!defaultOrgId || String(membership.organization_id ?? '') !== defaultOrgId) return null;
+  const owners = await tryFind(ql, 'sys_member', { organization_id: defaultOrgId, role: 'owner' }, 1);
+  if (owners.length > 0) return null;
+
+  const logger = options.logger;
+  try {
+    await ql.update('sys_member', { id: membership.id, role: 'owner' }, { context: SYSTEM_CTX });
+  } catch (e) {
+    logDurabilityFailure(
+      logger,
+      '[default-org] the platform admin was NOT promoted to owner of the Default Organization — their '
+        + 'sys_member row stays `member`, so they hold no organization ownership although nothing else '
+        + 'fails, and this line is the only notice. Remedy: make the sys_member update land — check the '
+        + 'write permission and driver connectivity; the owner bind is still undecided, so the next '
+        + 'bootstrap trigger (kernel:ready, a sys_user insert or email/email_verified update, or a legacy '
+        + 'sys_user_permission_set insert) promotes it.',
+      {
+        object: 'sys_member',
+        organization: defaultOrgId,
+        user: adminUserId,
+        error: (e as Error)?.message ?? String(e),
+      },
+    );
+    return { defaultOrgCreated: false, defaultOrgId, memberCreated: false, reason: 'owner_promotion_failed' };
+  }
+  logger?.info?.(
+    `[default-org] promoted the platform admin to owner of the default organization (${defaultOrgId})`,
+    { userId: adminUserId, defaultOrgId },
+  );
+
+  // The same optional seed-ownership handoff a fresh bind runs (step 6 below).
+  let ownershipClaimed = 0;
+  if (options.claimSeedOwnership) {
+    try {
+      const claims = await options.claimSeedOwnership(ql, defaultOrgId, adminUserId, { logger });
+      ownershipClaimed = claims.reduce((s, c) => s + c.count, 0);
+    } catch (e) {
+      logger?.warn?.('[default-org] seed ownership handoff failed', { error: (e as Error).message });
+    }
+  }
+  return { defaultOrgCreated: false, defaultOrgId, memberCreated: false, ownerPromoted: true, ownershipClaimed };
 }
 
 /**
@@ -374,8 +484,19 @@ export async function ensureDefaultOrganization(
 
   // 3. Respect existing membership — never auto-create a default org
   //    behind an admin who already belongs somewhere.
-  const memberships = await tryFind(ql, 'sys_member', { user_id: adminUserId }, 1);
+  //
+  //    [ADR-0131 D3 / ADR-0093 D7] With ONE exception, which is not a choice
+  //    the admin made: the reconciler's own `member` row on the Default
+  //    Organization. That organization now exists before the first sign-up
+  //    (a boot invariant under `single`), so the reconciler binds the first
+  //    admin as `member` the moment they are created — before this helper
+  //    learns who they are. ADR-0093 D7 rules the sequence "safe in either
+  //    order"; promoting that one row while the bind is undecided is what keeps
+  //    it so. See {@link promoteReconciledMemberToOwner} for the conditions.
+  const memberships = await tryFind(ql, 'sys_member', { user_id: adminUserId }, 2);
   if (memberships.length > 0) {
+    const promotion = await promoteReconciledMemberToOwner(ql, adminUserId, memberships, options);
+    if (promotion) return promotion;
     return {
       defaultOrgCreated: false,
       memberCreated: false,

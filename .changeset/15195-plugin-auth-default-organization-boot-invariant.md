@@ -1,0 +1,20 @@
+---
+'@objectstack/plugin-auth': minor
+---
+
+Under the `single` tenancy posture the Default Organization is created at boot, before the application seeds and before the server accepts a request, and the first admin of a fresh deployment is its owner
+
+Clause-②: yes (narrowing)
+
+<!-- adr-0087: not-required (no-migration-prescription) A boot-order and accept-set change in the auth plugin's runtime: no key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. The `autoDefaultOrganization` constructor option keeps its name and type; what narrows is the state it can produce, described below. The TypeScript surface only grows: an optional `organizationCreatedByThisProcess` on `EnsureDefaultOrganizationOnceOptions`, an optional `ownerPromoted` and the `owner_promotion_failed` reason on `EnsureDefaultOrganizationResult`. The package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered). -->
+
+**BREAKING** boot and accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D3).
+
+- **A boot invariant.** Under the `single` posture (the posture in force, so a degraded walled request counts), the auth plugin's `start()` finds or creates the Default Organization (`slug: 'default'`), with or without a platform admin. Every application plugin starts after it. Before this change the organization was created on `kernel:ready` only once a platform admin existed, so on a fresh deployment it arrived with the first sign-up, after the seeds had loaded with no owner.
+- **A failure stops the boot.** If the organization cannot be created, or the store cannot be read, `start()` throws and the deployment does not boot. Before, the bootstrap logged a warning and the deployment served anyway. An install holding several organizations and none with `slug: 'default'` gets no new organization; the boot logs it and continues.
+- **`autoDefaultOrganization: false` no longer means "no organization".** It now turns off only the platform admin's owner bind. A host that set it to keep an organization-less `single` deployment gets the Default Organization anyway: under `single` no row is organization-less.
+- **Every user belongs to it from the first boot.** Because the organization exists before anyone signs up, the membership reconciler binds every new user (under the `auto` membership policy) to it as `member` the moment they are created, so every session carries it as the active organization. Before, a user created before the first admin carried none. The one-time membership backfill likewise has its target at the first `kernel:ready`.
+- **The first admin is the owner.** That includes the first admin, whom the reconciler binds as `member` before the owner bind learns they are the platform admin. While the one-time owner bind is undecided and the Default Organization has no owner, the bootstrap promotes that `member` row to `owner` in place and records the decision as `promoted`. A decided bind, an existing owner, or a membership elsewhere is never touched.
+- **The in-memory driver answers `503` until C8.** `@objectstack/driver-memory` refuses tenant-scoped reads, and every session now carries the Default Organization, so under `single` its signed-in reads answer `503` until ADR-0131 C8 (#15212, D8) gives `single` no read predicate. The platform admin met the same refusal before this change, once the Default Organization existed. A SQL driver (`connection: { filename: ':memory:' }` for an in-process store) serves the deployment meanwhile.
+
+**The remedy.** If the boot stops on the Default Organization, make the `sys_organization` insert land: check the datasource's write permission and connectivity, and whether a legacy unique index on `slug` refuses `default`. A host relying on `autoDefaultOrganization: false` for an organization-less `single` deployment has no such deployment any more; run a walled posture if organizations are meant to be absent until created.

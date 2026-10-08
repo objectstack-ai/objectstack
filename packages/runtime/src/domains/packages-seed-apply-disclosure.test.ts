@@ -175,7 +175,10 @@ function makeDoor(opts: {
     const insert = vi.fn().mockImplementation(async (_object: string, rec: any) => (
         Array.isArray(rec) ? rec.map((r: any) => ({ id: `id_${r.name}` })) : { id: `id_${rec.name}` }
     ));
-    const find = vi.fn().mockResolvedValue([]);
+    // [ADR-0131 D3] The install holds its Default Organization from boot; the
+    // un-pinned publish stamps every seed row with it (D9 refuses an unowned row).
+    const find = vi.fn().mockImplementation(async (object: string) =>
+        (object === 'sys_organization' ? [{ id: 'org_default' }] : []));
     const getObject = opts.failGetObject
         ? vi.fn().mockImplementation(async () => { throw new Error(DRIVER_TEXT); })
         : vi.fn().mockResolvedValue({

@@ -52,7 +52,18 @@ import { applyProtection } from '@objectstack/spec/shared';
 // (`id || name`). The install gate's co-ownership set must name packages by the
 // same string the artifact loader ordered them by, or a co-owner would be
 // admitted — or refused — under a key nothing else in the path uses.
-import { artifactPackageId } from '@objectstack/core';
+import { artifactPackageId, type SecurityCatalogType } from '@objectstack/core';
+// One name, one holder for positions, permission sets and capabilities — the
+// rule, the holders and the one place a declaration is read from (module doc).
+import {
+  BUILT_IN_SECURITY_CATALOG_NAMES,
+  declaredSecurityCatalogNames,
+  describeSecurityCatalogHolder,
+  isSecurityCatalogType,
+  securityCatalogHolderKey,
+  securityCatalogTypeLabel,
+  type SecurityCatalogHolder,
+} from './security-catalog-namespace.js';
 // [#14553] The ONE resolution of "does this nav group id exist?" and the ONE
 // wording of the diagnostic when it does not. `os build` calls the same two
 // (`checkNavContributionGroups`), so the compile-time door and this read-time
@@ -360,7 +371,10 @@ export interface SchemaRegistryOptions {
    * explicitly. Same-package reinstall and shareable platform namespaces
    * (`base`/`system`/`sys`) are never treated as conflicts. (The per-item
    * cross-package collision throw was retired in ADR-0048 §3.4 — distinct
-   * package ids are always disambiguable by package-scoped resolution.)
+   * package ids are always disambiguable by package-scoped resolution — except
+   * for positions, permission sets and capabilities, whose second-holder
+   * refusal ({@link SecurityCatalogNameConflictError}) this policy does NOT
+   * downgrade: no ruling extends `warn` to it.)
    */
   collisionPolicy?: 'error' | 'warn';
 
@@ -1555,6 +1569,82 @@ export class NamespaceConflictError extends Error {
   }
 }
 
+/** One second holder {@link SecurityCatalogNameConflictError} refused. */
+export interface SecurityCatalogNameConflict {
+  /** The catalog type, as the registry keys it. */
+  readonly catalogType: SecurityCatalogType;
+  /** The name both holders claim. */
+  readonly name: string;
+  /** The package whose registration this refusal stopped. */
+  readonly incomingPackageId: string;
+  /** Who already holds the name. */
+  readonly existingHolder: SecurityCatalogHolder;
+}
+
+/**
+ * Raised when a package registers a position, permission set or capability
+ * whose name another holder already holds — an installed package, the
+ * environment catalog or a built-in (`security-catalog-namespace.ts` states the
+ * rule, the holders, and what it deliberately does not judge).
+ *
+ * The namespace gate's sibling, in its shape: the ADR-0112 envelope (`code` +
+ * `status: 422`) so a wire door answers `422`, never the `500` fallback, and
+ * the code the namespace gate already registers — the condition is the same
+ * one, "a name in a deployment-wide namespace is already taken", and so is the
+ * caller's remedy: rename, or uninstall the other holder. ⛔ Not the namespace
+ * gate's class: that one names a `manifest.namespace` and offers the
+ * `OS_METADATA_COLLISION=warn` downgrade, neither of which is true here.
+ *
+ * Every conflict the registration carries is listed — `conflicts` — so one boot
+ * reports all of them; the top-level fields repeat the first.
+ */
+export class SecurityCatalogNameConflictError extends Error {
+  readonly code = NAMESPACE_CONFLICT_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
+  /** Every second holder this registration would have created, in declaration order. */
+  readonly conflicts: readonly SecurityCatalogNameConflict[];
+  /** The first conflict's catalog type. */
+  readonly catalogType: SecurityCatalogType;
+  /** The first conflict's name. */
+  readonly catalogName: string;
+  /** The package whose registration this refusal stopped. */
+  readonly incomingPackageId: string;
+  /** The first conflict's existing holder. */
+  readonly existingHolder: SecurityCatalogHolder;
+
+  constructor(conflicts: readonly SecurityCatalogNameConflict[]) {
+    const [first] = conflicts;
+    const lines = conflicts.map(
+      (c) =>
+        `${securityCatalogTypeLabel(c.catalogType)} "${c.name}" is already held by ` +
+        describeSecurityCatalogHolder(c.existingHolder),
+    );
+    super(
+      `Security catalog name conflict: package "${first.incomingPackageId}" cannot register ` +
+        `${conflicts.length === 1 ? 'a name' : `${conflicts.length} names`} another holder ` +
+        `already holds — ${lines.join('; ')}. Positions, permission sets and capabilities each ` +
+        `hold one name per deployment: an assignment names a position or a permission set by ` +
+        `its bare name, with no package to tell two definitions apart, so with two holders ` +
+        `which definition grants would depend on registration order. Rename the item in ` +
+        `"${first.incomingPackageId}"${
+          first.existingHolder.kind === 'package'
+            ? `, rename it in "${first.existingHolder.packageId}", or uninstall one of the two packages`
+            : first.existingHolder.kind === 'environment'
+              ? ', or rename or delete the environment\'s item first'
+              : ' — a built-in name is never available to a package'
+        }. See ADR-0048.`,
+    );
+    this.name = 'SecurityCatalogNameConflictError';
+    this.conflicts = conflicts;
+    this.catalogType = first.catalogType;
+    this.catalogName = first.name;
+    this.incomingPackageId = first.incomingPackageId;
+    this.existingHolder = first.existingHolder;
+  }
+}
+
 /**
  * [ADR-0130 D1] What the install gate is told about the artifact now installing.
  *
@@ -2152,6 +2242,127 @@ export class SchemaRegistry {
   getNamespaceOwners(namespace: string): string[] {
     const owners = this.namespaceRegistry.get(namespace);
     return owners ? Array.from(owners) : [];
+  }
+
+  // ==========================================
+  // Security catalog namespace — one name, one holder
+  // ==========================================
+
+  /**
+   * Catalog type → name → the installed package that declared it, recorded by
+   * {@link installPackage} once its declarations pass
+   * {@link refuseSecurityCatalogNameConflicts}, forgotten by
+   * {@link uninstallPackage}.
+   *
+   * The registry's item store answers who holds a name only for items
+   * something registered into it, and `installPackage` registers none: a
+   * package's collections reach the item store through `ObjectQL.registerApp`'s
+   * collection loop (positions only where that loop carries them), never
+   * through a bare `installPackage`. The claim is how the package door
+   * remembers every name a package declared, so a second package declaring one
+   * of them is refused like any other second holder.
+   */
+  private securityCatalogClaims = new Map<SecurityCatalogType, Map<string, string>>();
+
+  /**
+   * Every holder of `(type, name)` other than `exceptPackageId` — the ONE
+   * predicate both refusals ({@link refuseSecurityCatalogNameConflicts} at the
+   * package door, the item seam in {@link registerItem}) ask.
+   *
+   * Read, in this order: a built-in (only when `builtIns` — see
+   * {@link BUILT_IN_SECURITY_CATALOG_NAMES} for why the item seam does not ask);
+   * the bare slot (an override a package bound to itself, else an
+   * environment-authored item — the latter only when `environment`); every
+   * composite `<packageId>:<name>` slot; the package claims. A package that
+   * holds the name more than one way is one holder. A disabled package is still
+   * installed, and still holds its names.
+   */
+  private securityCatalogHoldersOtherThan(
+    type: SecurityCatalogType,
+    name: string,
+    exceptPackageId: string | undefined,
+    opts: { builtIns: boolean; environment: boolean },
+  ): SecurityCatalogHolder[] {
+    const found = new Map<string, SecurityCatalogHolder>();
+    const add = (holder: SecurityCatalogHolder) => {
+      if (holder.kind === 'package' && holder.packageId === exceptPackageId) return;
+      found.set(securityCatalogHolderKey(holder), holder);
+    };
+    if (opts.builtIns && BUILT_IN_SECURITY_CATALOG_NAMES[type].has(name)) add({ kind: 'built-in' });
+    const suffix = `:${name}`;
+    for (const [key, item] of this.metadata.get(type) ?? []) {
+      const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+      if (key === name) {
+        if (typeof stamped === 'string' && stamped !== '') add({ kind: 'package', packageId: stamped });
+        else if (opts.environment) add({ kind: 'environment' });
+      } else if (key.endsWith(suffix)) {
+        add({
+          kind: 'package',
+          packageId: typeof stamped === 'string' && stamped !== '' ? stamped : key.slice(0, -suffix.length),
+        });
+      }
+    }
+    const claimant = this.securityCatalogClaims.get(type)?.get(name);
+    if (claimant !== undefined) add({ kind: 'package', packageId: claimant });
+    return [...found.values()];
+  }
+
+  /**
+   * The package door's half of the rule: refuse a package whose declared
+   * positions, permission sets or capabilities name something another holder
+   * already holds — built-ins included — ahead of every mutation
+   * {@link installPackage} makes, so a refused package leaves no record, no
+   * namespace ownership and no claim behind (the namespace gate's disposition).
+   *
+   * Every conflict is collected, so one refusal reports all of them. A package
+   * with no identity (`artifactPackageId` answers nothing) registers under no
+   * package at all and has nothing to hold; it is not judged here.
+   *
+   * @throws {SecurityCatalogNameConflictError} ADR-0112 envelope, naming both
+   *   holders of each conflicting name.
+   */
+  private refuseSecurityCatalogNameConflicts(manifest: ObjectStackManifest, selfId: string | undefined): void {
+    if (selfId === undefined) return;
+    const conflicts: SecurityCatalogNameConflict[] = [];
+    const seen = new Set<string>();
+    for (const { type, name } of declaredSecurityCatalogNames(manifest)) {
+      // One package declaring one name twice is one holder (an in-package
+      // repeat is the package's own business, and not this rule's).
+      const key = `${type}|${name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      for (const existingHolder of this.securityCatalogHoldersOtherThan(type, name, selfId, { builtIns: true, environment: true })) {
+        conflicts.push({ catalogType: type, name, incomingPackageId: selfId, existingHolder });
+      }
+    }
+    if (conflicts.length > 0) throw new SecurityCatalogNameConflictError(conflicts);
+  }
+
+  /**
+   * Record `packageId`'s claims. Additive, like the item store beside it: a
+   * re-install does not unregister the items an earlier install of the same
+   * package registered, so it does not release their names either — and a
+   * re-install whose manifest carries no collections at all (`POST
+   * /api/v1/packages` stores the manifest alone) must not strip the names the
+   * package's code still declares. {@link uninstallPackage} is what releases
+   * them.
+   */
+  private recordSecurityCatalogClaims(packageId: string, manifest: ObjectStackManifest): void {
+    for (const { type, name } of declaredSecurityCatalogNames(manifest)) {
+      let byName = this.securityCatalogClaims.get(type);
+      if (!byName) {
+        byName = new Map();
+        this.securityCatalogClaims.set(type, byName);
+      }
+      byName.set(name, packageId);
+    }
+  }
+
+  /** Drop every claim `packageId` holds. */
+  private forgetSecurityCatalogClaims(packageId: string): void {
+    for (const byName of this.securityCatalogClaims.values()) {
+      for (const [name, claimant] of byName) if (claimant === packageId) byName.delete(name);
+    }
   }
 
   // ==========================================
@@ -3533,6 +3744,46 @@ export class SchemaRegistry {
     const collection = this.metadata.get(type)!;
     const baseName = String(item[keyField]);
 
+    // The security catalog's item seam: a package registering a position,
+    // permission set or capability under a name another holder holds is
+    // refused BEFORE anything below stamps or stores it — the per-item
+    // cross-package throw ADR-0048 §3.4 retired, kept for these three types
+    // (maintainer ruling Q4 = A on #15196; `security-catalog-namespace.ts`).
+    // The package door ({@link installPackage}) has already refused a package's
+    // declared names, built-ins included; this is the seam every OTHER
+    // package-bound registration reaches (a plugin declaring items through
+    // the registry directly), so it asks the registered holders only — the
+    // platform registers its own built-ins here, under its own package id.
+    // ⛔ A registration with no `packageId` is the bare slot — `sys_metadata`
+    // hydration, the metadata write-through — and is never judged here: an
+    // environment save over a package-held name is outside the ruling.
+    //
+    // A BUILT-IN name is held by the platform, and the registration of one
+    // here is the platform declaring its own name (`plugin-security`'s
+    // `registerBuiltinPositions`, in its `start()`) — the holder's own
+    // registration, never a second holder. Packages are refused built-in names
+    // at the package door, and a second package registering one here is still
+    // refused below (in either order: the other package's slot is a holder).
+    // What is NOT asked for a built-in name is the environment catalog: an
+    // environment item under a built-in name exists only because an
+    // environment save went over the platform's name — outside the ruling — and
+    // it is hydrated (`ObjectQLPlugin.start`, which every `start()` depending on
+    // the engine follows) BEFORE the platform declares, so asking it would
+    // refuse the platform's own declaration and with it the boot. The stored
+    // definition keeps answering first from the bare slot (ADR-0005); the
+    // declaration sits beside it.
+    if (packageId && isSecurityCatalogType(type)) {
+      const holders = this.securityCatalogHoldersOtherThan(type, baseName, packageId, {
+        builtIns: false,
+        environment: !BUILT_IN_SECURITY_CATALOG_NAMES[type].has(baseName),
+      });
+      if (holders.length > 0) {
+        throw new SecurityCatalogNameConflictError(
+          holders.map((existingHolder) => ({ catalogType: type, name: baseName, incomingPackageId: packageId, existingHolder })),
+        );
+      }
+    }
+
     // ADR-0010 §3.7 — translate the author-facing `protection` block
     // into the private `_lock` envelope and stamp package provenance.
     // Centralised with the artifact loader path in metadata/plugin.ts
@@ -3606,6 +3857,10 @@ export class SchemaRegistry {
     // same bare name (e.g. `page/home`) legitimately COEXIST under distinct
     // composite keys and each caller resolves to its own. What the original
     // guard flagged as a collision is now the supported marketplace case.
+    // ⚠️ Except for the three security catalog types, refused at the top of this
+    // method: an assignment names a position or a permission set with no
+    // package context, so there a second holder is an ambiguity no caller can
+    // resolve (maintainer ruling Q4 = A on #15196).
     //
     // Same-package re-registration still overwrites (idempotent reload), and a
     // runtime/DB overlay over a packaged item is the sanctioned ADR-0005 path,
@@ -4316,6 +4571,14 @@ export class SchemaRegistry {
     // behind — the same disposition the namespace gate above has.
     this.refuseCoOwnedObjectNameCollision(manifest, selfId, coOwners);
 
+    // The security catalog's one-name-one-holder rule (ADR-0048 §3.4 narrowed
+    // for positions, permission sets and capabilities; maintainer ruling Q4 = A
+    // on #15196) — also ahead of every mutation, for the same reason. No
+    // co-owner exemption: two packages of one artifact sharing a catalog name
+    // are as ambiguous to a bare-name assignment as two strangers are, and no
+    // `collisionPolicy` downgrade (`security-catalog-namespace.ts`).
+    this.refuseSecurityCatalogNameConflicts(manifest, selfId);
+
     const now = new Date().toISOString();
 
     // [#18877] 「缺省 = 保持，有旗 = 设置」 — an install that was not asked to move
@@ -4390,6 +4653,9 @@ export class SchemaRegistry {
       this.debug(`[Registry] Overwriting package: ${manifest.id}`);
     }
     collection.set(manifest.id, pkg);
+    // The names this package now holds, recorded whether or not an item store
+    // entry will carry them (see `securityCatalogClaims`).
+    if (selfId !== undefined) this.recordSecurityCatalogClaims(selfId, manifest);
     this.log(`[Registry] Installed package: ${manifest.id} (${manifest.name})`);
     return pkg;
   }
@@ -4485,6 +4751,9 @@ export class SchemaRegistry {
     // process. Runs AFTER the object verb because that one can refuse
     // (ADR-0029 extenders): a refused uninstall must remove nothing at all.
     this.unregisterItemsByPackage(id);
+    // …and the security catalog names it held, so an uninstalled package's
+    // names are free for the next package to declare.
+    this.forgetSecurityCatalogClaims(id);
 
     // [#18877] The boot seed forgets the id together with the row. A package
     // that no longer exists has no lifecycle state to preserve, so the next
