@@ -1,5 +1,48 @@
 # @objectstack/core
 
+## 17.8.0
+
+### Minor Changes
+
+- c28f317: feat(core): one by-name read of the security catalog (`createSecurityCatalogReader`)
+  
+  Clause-②: yes (widening)
+  
+  - **What is new.** `createSecurityCatalogReader({ registry, metadata })` returns a reader with two members: `resolve(type, name)`, the definition a position, permission set or capability name resolves to (or `undefined`), and `list(type)`, one entry per name. `type` is `'position' | 'permission' | 'capability'`. Each entry is `{ type, name, definition, source, packageId? }`. The types `SecurityCatalogType`, `SecurityCatalogSourceName`, `SecurityCatalogRegistry`, `SecurityCatalogMetadataService`, `SecurityCatalogSources`, `SecurityCatalogEntry` and `SecurityCatalogReader` are exported with it.
+  - **Where it reads.** ObjectQL's `SchemaRegistry` (`engine.registry`) first, then the kernel `metadata` service for the names the registry does not hold. Neither holds the whole catalog: the engine registry carries the platform's own permission sets and every package manifest's catalog items but no stack-declared position, and the metadata service carries the stack-declared positions but not the platform's permission sets. Both are required; construction refuses a missing one.
+  - **A name two packages ship** resolves the way the registry's by-name read does today: a stored override first, else the first-registered package's body.
+  - **What it does not answer.** Whether an item is in effect: the row `active` flag stays the authority, and no definition carries it. The position → permission-set binding. Organization scope: the catalog is environment-level.
+  - **Failures are loud.** A reader that throws, or a metadata read that lost a loader and found nothing, raises `AuthzStoreUnavailableError` (`SERVICE_UNAVAILABLE`, 503) instead of answering "no such item". A definition owned by a disabled package answers neither member.
+  - Nothing calls the reader yet; no grant changes.
+
+### Patch Changes
+
+- Updated dependencies [fec87e7]
+- Updated dependencies [1920cf3]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [8f2e808]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [299a2c6]
+  - @objectstack/spec@17.8.0
+  - @objectstack/types@17.8.0
+
 ## 17.7.0
 
 ### Minor Changes

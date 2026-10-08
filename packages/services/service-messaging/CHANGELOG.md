@@ -1,5 +1,115 @@
 # @objectstack/service-messaging
 
+## 17.8.0
+
+### Minor Changes
+
+- 0db5ad5: fix(service-messaging)!: mark-read writes a read receipt only for a notification delivered to that user
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime narrowing on the inbox mark-read path, not a metadata change: no spec key, export, option, response field or stored shape is removed, renamed or re-shaped, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which ids produce a receipt row: an id never delivered to the caller now writes none and is not counted, while every delivered id behaves as before. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this path and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention: `MessagingService.markRead` — the method behind the notifications mark-read door, and behind `markReadAsCaller` — writes a `read` receipt only for a notification that was delivered to that user. A read receipt belongs to a recipient (ADR-0030 keys it by recipient).
+  
+  - **Delivered** means a receipt keyed on that user already exists (it is flipped to `read` in place, as before), or the user's inbox holds a message for that notification. The inbox message is enough on its own, because the inbox channel's `delivered` receipt is best-effort.
+  - **Any other id** writes no receipt, is not counted in `readCount`, and its notification's organization is not read. The response shape `{ success, readCount }` is unchanged.
+  - **`markAllRead`** is unchanged: every id it sweeps comes from the user's own inbox.
+  
+  What changes for you: nothing in what you write. A `readCount` lower than the number of ids sent means some of them were not notifications delivered to that user, and nothing was written for those.
+
+### Patch Changes
+
+- a7a48b7: The storage store's by-id methods and the HTTP outbox's `redeliver` now pass the explicit system opt-in (`{ isSystem: true }`) on their data-engine calls. Until now they reached the engine with no principal and no opt-in, and the security middleware let that through only because of its principal-less hand-off.
+  
+  Clause-②: no
+  
+  - **service-storage.** `StorageMetadataStore.getFile`, `updateFile`, `deleteFile`, `getSession`, `updateSession` and `deleteSession` take the opt-in inside the store. Access stays by id, and the reads stay unscoped by organization, as before. On update and delete the acting organization still reaches the driver beside the opt-in, so a row stamped for another organization is still out of reach of these doors. The doors keep the authorization they already ran.
+  - **service-storage, the update payload.** `updateFile` and `updateSession` now send the caller's patch alone, where they used to send the whole row read back merged with it. The engine's read-only strip, which does not run for a system write, used to take `organization_id` and the four audit columns out of that row; now the store never sends them. The stored row is the same as before, and a column another writer changed between the read and the write is no longer reverted by it.
+  - **service-messaging.** `SqlHttpOutbox.redeliver` takes the opt-in on both of its reads and on its reset write. The caller's `tenantId` stays on every call as the driver-level scope, so a delivery in another organization is still not found. The reset write states `bypassTenantAudit: false`, so a redelivery from a caller with no organization is still reported by the driver's tenant audit.
+  - None of the gates the security middleware runs before its hand-off applies to these calls. ⛔ No new export on either package entry, and no new elevation API.
+- b88c356: The remaining platform producers in these four packages now pass the explicit system opt-in (`{ isSystem: true }`) on their data-engine calls. Until now they reached the engine with no principal and no opt-in, and the security middleware let that through only because of its principal-less hand-off.
+  
+  Clause-②: no
+  
+  - **service-messaging, the inbox read state.** `listInbox` (and its unread total), the receipt read behind it, and mark-read / mark-all-read take the opt-in inside the service. Their scope is unchanged: every read of a user's rows is keyed on the user id the door derived from the session, the receipt a mark-read inserts is stamped with it, and the receipt it updates is one a user-keyed read returned.
+  - **service-messaging, `owner_of:` audiences.** The record read takes the opt-in, the same posture as the email lookup beside it. It reads only `id` and the owner fields, and only the owner id leaves the resolver. An `owner_of:` audience on an object whose sharing model is `private` now resolves its owner; before, it resolved to nobody.
+  - **service-messaging, the rest of the fan-out and the outboxes.** The `role:` and `team:` membership reads, the email and SMS recipient reads, the notification template read, the dedup lookup in `emit()`, and both outboxes' enqueue, ack and list.
+  - **service-storage.** `StorageMetadataStore.createFile` and `createSession` insert under the opt-in. The organization still reaches the driver beside it, so the stored organization is unchanged, and the file's `owner_id` is still the uploading user.
+  - **service-settings.** The `sys_secret` store the plugin builds (insert, get, update), and the read that verifies a rotation before the old secret is reaped. A store `update` now writes the `ciphertext` it is given; without a context the engine's read-only strip dropped it. No caller in this repository uses `update`.
+  - **metadata-protocol.** `SysMetadataRepository.getByHash`, `list`, `history` and the history replay of `watch()`.
+  - None of the gates the middleware runs before its hand-off applies to these calls. ⛔ No new export on any package entry, and no new elevation API.
+- ef1fcb2: A declared index states its uniqueness scope: bare `unique: true` on `indexes[]` is refused (protocol 18, ADR-0120 D1/D7), stored metadata converts it to `unique: 'global'` with zero drift, and `VISIBILITY_STRICT_OPTIONS` leaves `@objectstack/spec`'s public surface.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered declared-index-bare-unique-true-retired, visibility-strict-options-unexported -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface and one export removal, shipped as `minor` under the launch-window convention for accept-set narrowings (Changesets pre mode is not in on `main`).
+  
+  **Why.** On a declared index, bare `unique: true` was the one `unique` spelling whose scope was positional. It built the index over exactly `fields`, one holder across the whole installation, while reading like "unique per organization" to an author who knew the field-level meaning. 17.x warned (lint `unique/unscoped-declared-index`). Protocol 18 refuses it, so the scope is always stated.
+  
+  **What is refused.** A declared index (`objects[].indexes[]`, `objectExtensions[].indexes[]`) whose `unique` is bare `true`. The refusal names both replacements, and says which one keeps the index bare `true` built. It is raised by:
+  
+  - the schema (`IndexSchema.unique`, now `false | 'global' | 'organization'`), at every door that parses: `ObjectSchema.create()` and `ObjectSchema.parse()`, `defineStack`, `os validate`, `os build`, and the runtime save door (`422 INVALID_METADATA`). `tsc` refuses it too, because the input type no longer admits `true`;
+  - lint `unique/unscoped-declared-index`, now an `error` and a gating rule on all three commands. It is what refuses the spelling under `os lint`, which never parses.
+  
+  **What converts.** The protocol-18 ADR-0087 conversion `declared-index-unique-scope` rewrites a declared index's bare `true` to `'global'` on every data-at-rest seam: stored `sys_metadata` rows (`applyConversionsToStoredItem`), built artifacts inside their declared-floor window, and `os migrate meta --from 17`. `'global'` is exactly the index bare `true` built, so the physical index is byte-identical and the drift plan is empty. It is retired from the authoring funnel, so a live author is refused and taught instead of converted silently.
+  
+  **What stays accepted.** Field-level `unique: true` still means one holder per organization and stays valid indefinitely. On a declared index, `unique: false` or omitted, `'global'` and `'organization'` parse exactly as before.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `indexes: [{ fields: [...], unique: true }]` | `indexes: [{ fields: [...], unique: 'global' }]`: the same index, nothing on disk changes |
+  | …the same, when you meant one holder per organization | `unique: 'organization'`: the driver prepends the NULL-safe organization key part at registration, and `os migrate plan` shows the index change |
+  | `import { VISIBILITY_STRICT_OPTIONS } from '@objectstack/spec/shared'` (or the root entry) | delete the import: it was an internal option bag for the spec's own visibility-carrying schemas, and those schemas are unchanged |
+  
+  **The one-line fix: on every declared index, write `unique: 'global'` where you wrote `unique: true`.** Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.
+  
+  **Who is affected, measured.** At `e67ba80049`, an AST census found 48 declared indexes with bare `unique: true` in 39 source files of this repository, all platform and plugin objects. Every one is respelled `'global'` in this change, and the nine-key S5 corpus is pinned to build byte-identical indexes before and after (`driver-sql`'s `sql-driver-unique-tenancy.test.ts`). `examples/**` and `apps/**` carry none. Deployed metadata and other repositories were not measured.
+  
+  ### The kit
+  
+  - **The refusal.** `IndexSchema.unique` in `data/object.zod.ts`, with its own prescription. The lint rule moved from `warning` to `error` and from advisory to gating.
+  - **The conversion.** `declared-index-unique-scope` (`toMajor: 18`, retired from the load path, `retiredAfter: '17.7.0'`), with its S4/S5 fixture.
+  - **The ledger.** The D3 semantic entries `declared-index-bare-unique-true-retired` (the scope each respelled index really meant is the author's call) and `visibility-strict-options-unexported`, plus a step-18 rationale fragment.
+  - **The export.** `VISIBILITY_STRICT_OPTIONS` moved to the unbarrelled `shared/visibility-strict-options.ts`, beside its type `StrictObjectOptions`. `check:api-surface` counts the removal.
+  - **The pins.** The "`'global'` is a synonym of `true`" driver pin retired with the bare spelling. The verbatim pin is stated in `'global'`.
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [1920cf3]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [77a94d8]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [879bd38]
+- Updated dependencies [04e776b]
+- Updated dependencies [1c563af]
+- Updated dependencies [a7df552]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [8f2e808]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [299a2c6]
+  - @objectstack/spec@17.8.0
+  - @objectstack/core@17.8.0
+  - @objectstack/platform-objects@17.8.0
+  - @objectstack/types@17.8.0
+
 ## 17.7.0
 
 ### Patch Changes

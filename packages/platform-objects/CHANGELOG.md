@@ -1,5 +1,172 @@
 # @objectstack/platform-objects
 
+## 17.8.0
+
+### Minor Changes
+
+- 1920cf3: feat(platform-objects,service-automation,service-realtime)!: seven deployment-level platform tables lose their injected organization column, and reading them needs `manage_platform_settings` (ADR-0131 D7)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered sys-flow-dispatch-organization-column-retired, sys-job-organization-column-retired, sys-job-queue-organization-column-retired, sys-job-run-organization-column-retired, sys-migration-journal-organization-column-retired, sys-migration-organization-column-retired, sys-presence-organization-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes (Changesets pre mode is not on yet).
+  
+  `sys_job`, `sys_job_run`, `sys_job_queue`, `sys_flow_dispatch`, `sys_migration`, `sys_migration_journal` and `sys_presence` hold deployment-level state. No writer attributes a row of any of them to an organization: every write is a system-context write whose row names none, and nothing writes `sys_presence` through ObjectQL at all. So the injected `organization_id` column only ever held NULL. ADR-0131 D7 takes it off: each object now declares `systemFields: { tenant: false }`.
+  
+  With no column there is no tenant wall, so these tables are governed by object permission. Each also declares `requiredPermissions: ['manage_platform_settings']`. Without that gate, a walled deployment's `organization_admin`, whose grant carries the superuser bits on every object, would read every other organization's job errors, queued payloads, dispatch keys and migration traces.
+  
+  **What moves for consumers.**
+  
+  - **The column.** `organization_id` is no longer a field of these seven objects. A filter, list-view column, report grouping, formula or seed key naming it on one of them is now an unknown field. Delete the reference: no organization owns a row of these tables.
+  - **Who reads, on a walled posture** (`group` or `isolated`). Before: the wall compared the NULL column to the caller's organization, so every reader got zero rows, platform administrators included (unless the deployment declared the table platform-global, which stood the wall down). Now: a principal holding `manage_platform_settings` (platform administrators hold it) lists every row; anyone else is refused `403 PERMISSION_DENIED`.
+  - **Who reads, on the `single` posture.** Before: any principal with a read grant on the object read every row, an organization administrator included. Now: only a principal holding `manage_platform_settings` reads; an organization administrator who is not a platform administrator is refused `403 PERMISSION_DENIED`. Grant the capability to an operator who needs these tables.
+  
+  **Unchanged.** Every platform writer and reader of these tables uses a system context, which no capability gate applies to, so job scheduling, the queue, flow dispatch, migration flags and the migration journal behave as before. The physical unique indexes are unchanged: none of these objects declares an organization-scoped one.
+  
+  **Existing databases.** Schema sync only adds, so the physical `organization_id` column stays on each existing table (with its index, where the deployment indexed it), and the boot drift report names it orphaned. By the writer census it holds only NULL, so dropping it loses nothing: `os migrate apply --allow-destructive` drops it, the remedy the drift report names.
+
+### Patch Changes
+
+- 8c5aa50: feat(plugin-email,plugin-auth)!: an organization can no longer create or edit an email template row; the template provenance stamp and the auth SMS template seed retire
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime write door (an organization's create and update of a sys_email_template row are refused) and a boot seed (no sys_notification_template row is written). The three retired names are runtime functions and a string constant of @objectstack/plugin-email with no metadata surface and no replacement: a direct caller meets the compiler's missing-export error and deletes the call. Measured consumers in this repository outside the package: one audit script, updated here. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered / already-registered); and the retired names are functions and a constant, not a type surface (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing and three retired exports), shipped as `minor` under the launch-window convention for breaking changes. It carries ADR-0131 D6 and the maintainer's ruling C on ADR-0131 §6 Q1: email templates are not overridden per organization.
+  
+  **What stops being accepted.**
+  
+  - **The `sys_email_template` organization door is closed.** An organization's create and update of a template row are refused with `403 PERMISSION_DENIED`, and the message names the closed door: every engine `insert` / `update` whose context names a caller and is not system-elevated. That covers `POST` / `PATCH /api/v1/data/sys_email_template`, the Studio record editor, batch and import routes, and scripts and flows that run as a user or a service principal. System-context writes still pass: the built-in seed, the declared-template boot sweep, the live projection of a Studio `email_template` save into its row, and the v18 migration ceremony's promotion. Delete is not part of this door.
+  - **The template provenance stamp is retired.** It marked a package- or platform-seeded row `customized: true` when a non-system caller updated it. With the door closed no such update reaches the engine's write, so nothing marks a row any more. Rows already marked keep their mark and are still never overwritten by the boot seeders; they are the population the v18 migration ceremony promotes to environment-level Studio templates.
+  - **Retired exports of `@objectstack/plugin-email`:** `bindEmailTemplateProvenanceStamp`, `unbindEmailTemplateProvenanceStamp` and `EMAIL_TEMPLATE_PROVENANCE_PACKAGE`. They have no replacement. `EmailServicePlugin` closes the door itself, and there is no stamp left to bind, so a direct call is deleted, not rewritten.
+  - **The auth SMS template seed is retired.** A boot with phone sign-in on no longer writes the built-in OTP and invitation texts into `sys_notification_template` as rows. It was internal to `@objectstack/plugin-auth` and exported nothing.
+  
+  **What renders unchanged.**
+  
+  - Every email template renders as before: the template loader still reads `sys_email_template`, and a Studio edit of an `email_template` still reaches the mail at once and survives a restart.
+  - Every auth SMS text renders byte for byte as the seeded store rendered it, for every built-in text and every recipient locale. Each locale rung renders an operator's active row when one exists, and the built-in text where no row exists at that locale. A deactivated or blank row passes its rung on, as it did before.
+  - A `sys_notification_template` row an operator already has still wins, and no existing row is touched.
+  
+  **What changes for you.** To change what an email template sends, edit the `email_template` in Studio. A script or integration that wrote `sys_email_template` rows through the data API now receives `403 PERMISSION_DENIED`. `@objectstack/platform-objects` corrects the `is_system` and `customized` field help on `sys_email_template`, which said an organization may edit a row.
+- 77a94d8: "Add Member" is offered only to a platform administrator, the one standing its endpoint admits.
+  
+  Clause-②: no
+  
+  - `sys_member`'s `add_member` toolbar action now declares `visible: 'current_user.isPlatformAdmin == true'`. `requiresFeature: 'organization'` composes onto it at parse time, so the served predicate reads `(current_user.isPlatformAdmin == true) && features.organization != false`.
+  - Its endpoint, `POST /api/v1/auth/organization/add-member`, has always admitted a platform administrator alone (ADR-0068) and answered every other caller, org owners and admins included, with 403 `PERMISSION_DENIED`. Before this change the button was still shown to every member of the organization.
+  - ⛔ Nothing you author changes. The endpoint and the callers it admits are unchanged, and no key, export or parameter is added. The action's label is unchanged.
+- 879bd38: The user, OAuth-application and SSO-provider actions whose endpoint admits only a platform administrator are now offered only to a platform administrator.
+  
+  Clause-②: no
+  
+  - These thirteen actions now declare `visible: 'current_user.isPlatformAdmin == true'`, composed with their existing terms:
+    - `sys_user`: `ban_user`, `unban_user`, `unlock_user`, `create_user`, `set_user_password`, `impersonate_user` and `set_user_manager`;
+    - `sys_oauth_application`: `disable_oauth_application` and `enable_oauth_application`;
+    - `sys_sso_provider`: `register_sso_provider`, `register_saml_provider`, `request_domain_verification` and `verify_domain`.
+  - Where an action also carries `requiresFeature`, the feature gate composes onto it at parse time. For example, `ban_user` now serves `(current_user.isPlatformAdmin == true) && features.admin == true`.
+  - Each endpoint (`/api/v1/auth/admin/*`) has always admitted a platform administrator alone (ADR-0068) and answered every other caller, org owners and admins included, with 403 `PERMISSION_DENIED`. Before this change the buttons were still shown to those callers.
+  - `create_oauth_application`, `rotate_client_secret`, `delete_oauth_application` and `delete_sso_provider` are unchanged: their endpoints authorize the signed-in user or the record's owner, not the platform administrator.
+  - ⛔ Nothing you author changes. The endpoints and the callers they admit are unchanged, and no key, export or parameter is added. The actions' labels are unchanged.
+- 1c563af: Setup's identity pages open on the tenant-wide list, not on the administrator's own rows. Before this, Setup → API Keys, Sessions, OAuth Applications, Identity Links and User Preferences opened each object's first declared list view, which was the caller-scoped "My …" view (`user_id = {current_user_id}`), so an administrator saw only their own keys, sessions, applications, links and preferences.
+  
+  Clause-②: no
+  
+  - On `sys_api_key`, `sys_session`, `sys_oauth_application`, `sys_account`, `sys_user_preference` and `sys_user`, the unscoped "All" view (`all_keys`, `all_sessions`, `all_apps`, `all_links`, `all_preferences`, `all_users`) is now declared first, and the caller-scoped view (`mine`, `me`) second. A route that names no view, such as a record page's object breadcrumb or the object switcher, now opens the "All" view. No view is added, removed or changed.
+  - The Setup entries `nav_api_keys`, `nav_sessions`, `nav_oauth_apps`, `nav_accounts` and `nav_user_preferences` now name that view with `viewName`, as `nav_users` already did. The Account app's Linked Accounts entry (`nav_account_linked`) now names `mine`, like the other Account entries, so neither app depends on the declared order.
+  - The "My …" views are still tabs on each page. The declared order decides which view opens, not which rows a caller may read: row-level security still scopes a member's rows.
+  - The generated translation bundles follow the new view order. No translated text changed.
+  - ⛔ No schema, parse, export or accept-set change.
+- 51290bc: Form help and refusals an author reads no longer carry service-interface names, ruling dates or another product's ids
+  
+  Clause-②: no
+  
+  Wording only: no schema, key, type, export or error-code change.
+  
+  - The notify node's Template help (the `NotifyConfigSchema.template` describe and the Studio
+    inspector's copy in `@objectstack/service-automation`) names the deployment's default locale in
+    product words instead of `II18nService.getDefaultLocale()`, and drops its ruling date.
+  - `MANIFEST_ID_EXAMPLES` is now `com.acme.crm` and `org.example.help-desk` (was `com.steedos.crm`
+    and `org.apache.superset`). The package-id refusal opens with the headline
+    "Invalid package id 'VALUE'." and names the key in the sentence after it, so the headline alone
+    carries no JSON path; the rule, the examples and the suggestion follow unchanged in substance. A
+    caller that matched the old "on KEY. Expected reverse-domain notation" wording matches the
+    headline, or compares against `manifestIdRefusal()` by reference, instead.
+  - Ruling dates leave the describes Studio renders as form help: field `required` and `multiple`,
+    form-view field and section `visibleWhen`, section `collapsible` / `collapsed`, the redirect
+    arm's `submitBehavior.url`, and page `kind` / `source` (the ADR citations stay). They also
+    leave the refusals for padded grouping field names, `submitBehavior.url`, `features.*` in a
+    form-view predicate, and the four filter comparand refusals (null ordering comparand,
+    `{ $field }` in a list position, null list member, blank `$between` bound). Each sentence still
+    states the rule, why it exists and the repair.
+  - The email-template form's Identity section help says how senders address a template instead of
+    naming `IEmailService.sendTemplate`, in all four shipped locales.
+  - The action `description` help no longer ends in a dangling dash left behind by an earlier
+    strip: "(one dialog, not two —)" now reads "(one dialog, not two)".
+- ef1fcb2: A declared index states its uniqueness scope: bare `unique: true` on `indexes[]` is refused (protocol 18, ADR-0120 D1/D7), stored metadata converts it to `unique: 'global'` with zero drift, and `VISIBILITY_STRICT_OPTIONS` leaves `@objectstack/spec`'s public surface.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered declared-index-bare-unique-true-retired, visibility-strict-options-unexported -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface and one export removal, shipped as `minor` under the launch-window convention for accept-set narrowings (Changesets pre mode is not in on `main`).
+  
+  **Why.** On a declared index, bare `unique: true` was the one `unique` spelling whose scope was positional. It built the index over exactly `fields`, one holder across the whole installation, while reading like "unique per organization" to an author who knew the field-level meaning. 17.x warned (lint `unique/unscoped-declared-index`). Protocol 18 refuses it, so the scope is always stated.
+  
+  **What is refused.** A declared index (`objects[].indexes[]`, `objectExtensions[].indexes[]`) whose `unique` is bare `true`. The refusal names both replacements, and says which one keeps the index bare `true` built. It is raised by:
+  
+  - the schema (`IndexSchema.unique`, now `false | 'global' | 'organization'`), at every door that parses: `ObjectSchema.create()` and `ObjectSchema.parse()`, `defineStack`, `os validate`, `os build`, and the runtime save door (`422 INVALID_METADATA`). `tsc` refuses it too, because the input type no longer admits `true`;
+  - lint `unique/unscoped-declared-index`, now an `error` and a gating rule on all three commands. It is what refuses the spelling under `os lint`, which never parses.
+  
+  **What converts.** The protocol-18 ADR-0087 conversion `declared-index-unique-scope` rewrites a declared index's bare `true` to `'global'` on every data-at-rest seam: stored `sys_metadata` rows (`applyConversionsToStoredItem`), built artifacts inside their declared-floor window, and `os migrate meta --from 17`. `'global'` is exactly the index bare `true` built, so the physical index is byte-identical and the drift plan is empty. It is retired from the authoring funnel, so a live author is refused and taught instead of converted silently.
+  
+  **What stays accepted.** Field-level `unique: true` still means one holder per organization and stays valid indefinitely. On a declared index, `unique: false` or omitted, `'global'` and `'organization'` parse exactly as before.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `indexes: [{ fields: [...], unique: true }]` | `indexes: [{ fields: [...], unique: 'global' }]`: the same index, nothing on disk changes |
+  | …the same, when you meant one holder per organization | `unique: 'organization'`: the driver prepends the NULL-safe organization key part at registration, and `os migrate plan` shows the index change |
+  | `import { VISIBILITY_STRICT_OPTIONS } from '@objectstack/spec/shared'` (or the root entry) | delete the import: it was an internal option bag for the spec's own visibility-carrying schemas, and those schemas are unchanged |
+  
+  **The one-line fix: on every declared index, write `unique: 'global'` where you wrote `unique: true`.** Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.
+  
+  **Who is affected, measured.** At `e67ba80049`, an AST census found 48 declared indexes with bare `unique: true` in 39 source files of this repository, all platform and plugin objects. Every one is respelled `'global'` in this change, and the nine-key S5 corpus is pinned to build byte-identical indexes before and after (`driver-sql`'s `sql-driver-unique-tenancy.test.ts`). `examples/**` and `apps/**` carry none. Deployed metadata and other repositories were not measured.
+  
+  ### The kit
+  
+  - **The refusal.** `IndexSchema.unique` in `data/object.zod.ts`, with its own prescription. The lint rule moved from `warning` to `error` and from advisory to gating.
+  - **The conversion.** `declared-index-unique-scope` (`toMajor: 18`, retired from the load path, `retiredAfter: '17.7.0'`), with its S4/S5 fixture.
+  - **The ledger.** The D3 semantic entries `declared-index-bare-unique-true-retired` (the scope each respelled index really meant is the author's call) and `visibility-strict-options-unexported`, plus a step-18 rationale fragment.
+  - **The export.** `VISIBILITY_STRICT_OPTIONS` moved to the unbarrelled `shared/visibility-strict-options.ts`, beside its type `StrictObjectOptions`. `check:api-surface` counts the removal.
+  - **The pins.** The "`'global'` is a synonym of `true`" driver pin retired with the bare spelling. The verbatim pin is stated in `'global'`.
+- Updated dependencies [fec87e7]
+- Updated dependencies [1920cf3]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [8f2e808]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [299a2c6]
+  - @objectstack/spec@17.8.0
+  - @objectstack/metadata-core@17.8.0
+
 ## 17.7.0
 
 ### Minor Changes

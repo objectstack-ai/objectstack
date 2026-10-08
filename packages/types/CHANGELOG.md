@@ -1,5 +1,60 @@
 # @objectstack/types
 
+## 17.8.0
+
+### Minor Changes
+
+- 5cfd866: feat(sharing): a share-link password can be sent in the `X-Share-Password` header whatever its characters, under a declared encoding (`X-Share-Password-Encoding: utf-8`)
+  
+  Clause-②: yes (widening)
+  
+  - **What was missing.** A browser cannot put a character above U+00FF in a request header (`Headers` throws a `TypeError` before the request leaves), and it strips leading and trailing spaces. `createLink` accepts any password, so a link whose password has a CJK character or an emoji could not be opened through the header.
+  - **What is now accepted.** A new companion request header, `X-Share-Password-Encoding`, declares how `X-Share-Password` is encoded. Its one value is `utf-8`, compared case-insensitively. Under it, `X-Share-Password` carries the password's UTF-8 bytes percent-encoded, as `encodeURIComponent(password)` produces them, and both public routes (`GET /api/v1/share-links/:token/resolve` and `/:token/messages`) decode it on both mounts: the sharing plugin's routes and the runtime dispatcher's `/share-links` domain. Both read the pair through one helper, `readSharePasswordHeader`, exported from `@objectstack/types` with the header-name constants.
+  - **Unchanged.** Without `X-Share-Password-Encoding`, `X-Share-Password` is read raw, exactly as before, so every value a client sends today resolves as it did. That includes a Latin-1 password and a raw password containing `%`; the server never percent-decodes a value nobody declared encoded. The `?password=` query parameter is still read first, and when it is present the header pair is not read.
+  - **What is refused.** `X-Share-Password-Encoding` naming any other value, or a password header that is not percent-encoded UTF-8 under `utf-8` (a `%` without two hex digits, octets that are not well-formed UTF-8, a character outside visible ASCII), answers `400 VALIDATION_FAILED` before the token is looked up. It is never compared raw instead. The message names the headers and the rule, never the presented value.
+  - **Response headers.** Both public routes now answer `Vary: X-Share-Password, X-Share-Password-Encoding`, still beside `Cache-Control: no-store`.
+  - **Cross-origin clients.** `X-Share-Password-Encoding` is in the default CORS preflight allow-list (`DEFAULT_CORS_ALLOW_HEADERS` in `@objectstack/plugin-hono-server`, which the `@objectstack/hono` adapter also applies). A deployment that passes its own `allowHeaders` must add `X-Share-Password-Encoding` beside `X-Share-Password` to let a cross-origin client send an encoded password.
+- 8f2e808: feat(meta): the `/meta` item read serves the ADR-0008 version token, `If-None-Match: *` pins a save that expects no row, and the 409 `METADATA_CONFLICT` body carries the current version as data
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING** for two request shapes on `PUT /api/v1/meta/:type/:name` that were answered `200` before this release and are now refused `400 VALIDATION_ERROR`, with nothing written: an `If-None-Match` header whose value is anything but `*` (an entity-tag, a list, a weak `W/"*"`, an empty value), and an `If-None-Match` header sent beside `If-Match`. Before, the door did not read `If-None-Match` at all and wrote the body, unguarded or under the `If-Match` alone. The remedy: send `If-None-Match: *` alone to save only where no row exists, or `If-Match` with the version you read alone to save only over that version. No first-party client sends `If-None-Match` on a `PUT`: the SDK sends it only on its cached `GET`, and objectui's ETag hook has no caller.
+  
+  ADR-0008's optimistic lock on `PUT /api/v1/meta/:type/:name` takes the version a client read as `If-Match`, but a client can only send a token it was served, and only a save receipt served one. So the first save after a load could not be pinned: two editors who each loaded an item and saved once overwrote each other. Three additions close that.
+  
+  - **The read serves the token.** `GET /meta/:type/:name` now carries `version` (declared on `GetMetaItemResponseSchema`): the keyed token of the stored row a save to this item would compare against, at the read's scope (the caller's organization partition and `?package=`) and lifecycle (`?state=draft` for the draft row, the plain read for the active row). It is the same producer and the same row as the save receipt's `version`, so a read after a save serves the receipt's token byte for byte. Send it back as `If-Match`. `null` means no stored row is there (an item served from code or a package artifact, or from a row in a scope the save does not write), so the next save is a create. The cached published-value branch (the default plain read) and `?preview=draft` publish no `version`, as they publish no `lock`; their `ETag` stays the cache validator and is not the token.
+  - **"Expect no row" can be said.** `If-None-Match: *` on `PUT /meta/:type/:name` (with `?mode=draft` for a draft) saves only where no row of that lifecycle exists, and is refused `409 METADATA_CONFLICT` once one does. This is the `parentVersion: null` pin `SaveMetaItemRequestSchema` already declared, now reachable over HTTP. The header takes `*` alone: any other value, or `If-None-Match` beside `If-Match`, is refused `400 VALIDATION_ERROR` and nothing is written. No first-party client sends `If-None-Match` on a `PUT`. A save with neither header is last-writer-wins, as before.
+  - **The conflict body names the current version as data.** The 409 of the `/meta` item write doors (save, publish, rollback, reset) now carries `currentVersion` beside the unchanged `error` sentence: the token the sentence names, or `null` when no row of the target lifecycle exists (declared as `MetadataConflictErrorSchema`). On the save door it equals the token the next read at the same address serves, so a client offering "reload" or "overwrite" re-pins without parsing prose. The SDK already exposes it as `err.details.currentVersion`.
+  - **The receipts' `version` describes are corrected.** `SaveMetaItemResponseSchema.version`, `PublishMetaItemResponseSchema.version` and the package publish door's `published[].version` said "Content hash … currently emitted as `sha256:`" and "409 `metadata_conflict`". The token has been the keyed `hmac-sha256:` digest of the stored content hash since the doors stopped serving the raw hash, and the conflict code on the wire is `METADATA_CONFLICT`. Only the description text moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A refusal at one runtime write door of two request-header shapes that door never read, not a metadata change: no spec key, export, response field or stored shape is removed, renamed or re-shaped, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which `PUT /meta/:type/:name` requests the door answers: a request carrying an `If-None-Match` value other than `*`, or `If-None-Match` beside `If-Match`, is refused before any write, where it was written unguarded. The remedy is a choice of precondition only the client can make (which of the two it meant), so no conversion entry can derive it. Census: measured on this repo at the merge base, no first-party sender puts `If-None-Match` on a `PUT` (`@objectstack/client` sends it only from `meta.getCached`, a `GET`); on the objectui checkout, `useETagCache` sets it and has zero in-repo callers. Not measured: third-party and hosted-tenant HTTP clients. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers this door and this diff adds none (not registered / already-registered); and the change is a door verdict over request headers, not a published runtime interface or a type surface alone (not runtime-interface-only / type-surface-only). -->
+
+### Patch Changes
+
+- Updated dependencies [fec87e7]
+- Updated dependencies [1920cf3]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [8f2e808]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [299a2c6]
+  - @objectstack/spec@17.8.0
+
 ## 17.7.0
 
 ### Minor Changes
