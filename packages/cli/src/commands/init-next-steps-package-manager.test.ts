@@ -18,7 +18,9 @@
  * read as "never npm".
  *
  * In-process (`Init.run` against the package root, the `doctor-*.test.ts`
- * pattern) and `--no-install`, so nothing is spawned and nothing is installed.
+ * pattern, with its 60 s budget: the first oclif load in a busy worker took
+ * longer than vitest's 5 s default) and `--no-install`, so nothing is spawned
+ * and nothing is installed.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -79,17 +81,17 @@ describe('os init --no-install: the Next steps name the resolved package manager
     // Word boundary: the text `pnpm install` itself contains the substring `npm install`.
     expect(steps).not.toMatch(/\bnpm install\b/);
     expect(steps).not.toMatch(/\bnpx objectstack\b/);
-  });
+  }, 60_000);
 
   it('no flag, invoked through pnpm: the invoking package manager', async () => {
     const steps = await nextSteps(['probe-app', '--no-install'], PNPM_UA);
     expect(steps).toMatch(/^\s*pnpm install\s+# Install dependencies$/m);
     expect(steps).not.toMatch(/\bnpm install\b/);
-  });
+  }, 60_000);
 
   it('no flag, invoked through npm: still npm (control)', async () => {
     const steps = await nextSteps(['probe-app', '--no-install'], NPM_UA);
     expect(steps).toMatch(/^\s*npm install\s+# Install dependencies$/m);
     expect(steps).toMatch(/^\s*npx objectstack validate\b/m);
-  });
+  }, 60_000);
 });
