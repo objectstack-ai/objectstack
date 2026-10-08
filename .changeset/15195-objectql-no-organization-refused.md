@@ -4,7 +4,7 @@
 
 A system-context insert under the `single` tenancy posture is refused when the install holds no organization, instead of landing with no owner
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) A validity narrowing at the engine's system-insert door: no key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. The runtime TypeScript surface moves with it, and is described below rather than prescribed: `resolveSystemWriteOrganization` takes a required `organizationObjectRegistered`, its `no-organization-yet` answer is gone and `no-organization-object` answers the composition with no organization object, and `SystemWriteOrganizationRequiredError.reason` gains `no-organization`. The package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered). -->
 
