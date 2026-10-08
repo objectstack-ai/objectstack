@@ -127,9 +127,7 @@ const CALL_BODY = `{
 // Terminal lines the boot frame shows, matched against this run's output in
 // order. `through` extends a match to the line that satisfies it.
 const BOOT_LINES = [
-  { re: /^◆ Development Mode$/ },
-  { re: /Fresh OS_HOME: / },
-  { re: /Database: file:/ },
+  { re: /Fresh OS_HOME: /, through: /Database: file:/ },
   { re: /✓ Server is ready$/, through: /➜\s+MCP:\s+http/ },
   { re: /^Plugins:\s+\d+ loaded$/ },
   { re: /^Seeds:\s+\S+ \d+ rows$/ },
@@ -355,7 +353,7 @@ const CSS = `
   .cap .dots { margin-left: auto; display: flex; gap: 8px; }
   .cap .dot { width: 30px; height: 6px; border-radius: 3px; background: #262735; }
   .cap .dot.on { background: var(--indigo); }
-  .close { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 34px;
+  .close { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 34px;
     background: radial-gradient(900px 520px at 50% 30%, rgba(99, 102, 241, 0.22), transparent 70%); }
   .brand { display: flex; align-items: center; gap: 14px; font: 700 30px var(--font-sans); letter-spacing: -0.02em; }
   .brand svg { width: 40px; height: 40px; }
@@ -415,9 +413,12 @@ function termScene(command, words, picked, shown) {
 
 function browserScene(shot, ring) {
   const url = shot.url.replace(/^https?:\/\//, '');
-  const r = ring && shot.box
-    ? `<div class="ring" style="left:${shot.box.x - 6}px;top:${34 + shot.box.y - 5}px;width:${shot.box.w + 12}px;height:${shot.box.h + 10}px"></div>`
-    : '';
+  let r = '';
+  if (ring && shot.box) {
+    const x0 = Math.max(3, shot.box.x - 6);
+    const x1 = Math.min(SHOT.width - 3, shot.box.x + shot.box.w + 6);
+    r = `<div class="ring" style="left:${x0}px;top:${34 + shot.box.y - 5}px;width:${x1 - x0}px;height:${shot.box.h + 10}px"></div>`;
+  }
   return win(`<span class="title">Console</span><span class="url">${esc(url)}</span>`, `<img class="shot" src="${shot.src}">${r}`);
 }
 
@@ -457,7 +458,7 @@ function responseLines(call) {
 function mcpScene({ identity, prefix, readOnly, reqShown, call, resShown }) {
   const req = requestLines(prefix).slice(0, reqShown).join('\n');
   const res = call && resShown ? responseLines(call).slice(0, resShown).join('\n') : '';
-  const verdict = call && resShown
+  const verdict = call && resShown >= responseLines(call).length
     ? (call.rpc?.result?.isError ? '<span class="badge no">isError: true</span>' : '<span class="badge ok">record created</span>')
     : '';
   return win(`<span class="title">any MCP client → ${esc(call?.endpoint ?? '')}</span>`,
@@ -546,10 +547,17 @@ async function main() {
     log(`  server stopped; ${OBJECT}: ${before} → ${afterCreate} (create) → ${afterRefusal} (refused)`);
 
     // ── render ──
-    const page2 = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
+    // The proxy (when one is configured) is how the web fonts arrive; a TLS-intercepting proxy is why
+    // its certificate errors are ignored on this page, which loads nothing but the fonts.
+    const page2 = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1, ignoreHTTPSErrors: Boolean(proxy) });
     await page2.setContent(`<!doctype html><html lang="en"><head><meta charset="utf-8">
       <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=block" rel="stylesheet">
       <style>${CSS}</style></head><body><div id="stage"></div><div id="cap"></div></body></html>`, { waitUntil: 'networkidle' }).catch(() => {});
+    // A face is only fetched once something asks for it, so ask for every weight the frames use.
+    await page2.evaluate(() => Promise.all([
+      '400 10px Inter', '500 10px Inter', '600 10px Inter', '700 10px Inter', '800 10px Inter',
+      '400 10px "IBM Plex Mono"', '500 10px "IBM Plex Mono"', '600 10px "IBM Plex Mono"',
+    ].map((f) => document.fonts.load(f).catch(() => []))));
     await page2.evaluate(() => document.fonts.ready);
     const fonts = await page2.evaluate(() => ({
       inter: document.fonts.check('800 10px Inter') && document.fonts.check('400 10px Inter'),
@@ -597,7 +605,8 @@ async function main() {
       await page2.evaluate(([stage, cap]) => {
         document.getElementById('stage').innerHTML = stage;
         document.getElementById('cap').innerHTML = cap;
-        return Promise.all([...document.images].map((img) => img.decode().catch(() => {})));
+        // a glyph outside the subsets loaded so far (an arrow, an ellipsis) fetches one more
+        return Promise.all([...document.images].map((img) => img.decode().catch(() => {}))).then(() => document.fonts.ready);
       }, [f.stage, f.cap]);
       const file = join(framesDir, `f${String(i).padStart(4, '0')}.png`);
       await page2.screenshot({ path: file, clip: { x: 0, y: 0, width: W, height: H } });
