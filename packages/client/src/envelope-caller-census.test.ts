@@ -125,7 +125,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // The `.mjs` specifier is deliberate; `scripts/js-comment-mask.d.mts` beside it
@@ -163,8 +164,19 @@ const METHODS: ReadonlyArray<readonly [namespace: string, method: string]> = [
     ['automation', 'trigger'],
 ];
 
+/**
+ * Directory NAMES the walk never enters, at any depth.
+ *
+ * [#22153] `.cache` is here because `pnpm objectui:build` (`scripts/build-console.sh`)
+ * shallow-clones the whole objectui source tree into `.cache/objectui-<sha>/` when
+ * there is no `../objectui` sibling, and that tree carries objectui's own SDK
+ * call site. Walked, it is counted as a site of THIS repo and §3 reds on an
+ * untouched `main` for anyone who followed the Console build. `.cache/` is
+ * gitignored and no tracked path has a `.cache` segment, so skipping it drops
+ * nothing this census is about. §1 pins it on a planted checkout.
+ */
 const SKIP_DIRS = new Set([
-    'node_modules', 'dist', 'build', 'coverage', '.git', '.next', '.turbo', 'out',
+    'node_modules', 'dist', 'build', 'coverage', '.git', '.next', '.turbo', 'out', '.cache',
 ]);
 const CODE_EXT = /\.(ts|tsx|js|mjs|cjs)$/;
 
@@ -656,6 +668,43 @@ describe('#13079 §1 — the population actually swept', () => {
         expect(tops.has('packages')).toBe(true);
         expect(tops.has('examples')).toBe(true);
         expect(tops.has('apps')).toBe(true);
+    });
+
+    it('[#22153] never enters `.cache/` — an objectui checkout left by `pnpm objectui:build` moves no count', () => {
+        // Assembled from parts for the reason §6 gives: this file is inside the
+        // walked tree, so a call shape spelled whole here would BE a counted site.
+        const NS = 'analytics';
+        const OWN = `export const rows = async (client: any) => (await client.${NS}.query({ cube: 'orders' })).rows;\n`;
+        const CHECKOUT = `export class Adapter {\n  client: any;\n  async aggregate(q: unknown) {\n    return this.client.${NS}.query(q);\n  }\n}\n`;
+        const shape = (c: Census) => c.sites.map((s) => [s.file, s.method, s.receiver]);
+
+        // A throwaway root under the system temp directory, never this repo's own
+        // `.cache/`: planting there would race every other walker in a parallel run.
+        const root = mkdtempSync(join(tmpdir(), 'os-census-cache-'));
+        try {
+            mkdirSync(join(root, 'packages', 'client', 'src'), { recursive: true });
+            writeFileSync(join(root, 'packages', 'client', 'src', 'own.test.ts'), OWN);
+            const before = scanCallSites(root);
+            expect(shape(before)).toEqual([['packages/client/src/own.test.ts', 'analytics.query', 'sdk']]);
+
+            // `build-console.sh` names its clone `.cache/objectui-<12-hex sha>`.
+            const checkout = join(root, '.cache', 'objectui-0123456789ab');
+            mkdirSync(join(checkout, 'packages', 'data-objectstack', 'src'), { recursive: true });
+            writeFileSync(join(checkout, 'packages', 'data-objectstack', 'src', 'index.ts'), CHECKOUT);
+
+            // Positive control: the same walk and matcher DO count the planted
+            // site once they are handed it, so the equality below is the skip at
+            // work and not a fixture the census could never have read.
+            expect(shape(scanCallSites(checkout))).toEqual([
+                ['packages/data-objectstack/src/index.ts', 'analytics.query', 'sdk'],
+            ]);
+
+            // THE PIN: sites, their receiver split and the files scanned are all
+            // unchanged with the checkout present.
+            expect(scanCallSites(root)).toEqual(before);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
     });
 });
 

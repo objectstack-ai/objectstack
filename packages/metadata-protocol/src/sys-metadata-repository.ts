@@ -555,6 +555,121 @@ export class SysMetadataRepository implements MetadataRepository {
   }
 
   /**
+   * [#22128] The stored HEAD of one write address: the row a {@link put} with
+   * the same `state` and `packageId` upserts — and so the row its optimistic
+   * lock judges a parent against — served as {@link get} serves a row (its
+   * version is the one {@link lockAccepts} accepts), or `null` when that put
+   * would create; and the package binding that put writes under (`packageId`
+   * here: the named package, the one a package-less draft inherits, or `null`
+   * for the package-unbound row).
+   *
+   * Ask this, never {@link get}, for anything a write at an address compares
+   * against — its parent, or the stored body it carries a withheld credential
+   * forward from. `get` reads a row at the key it is handed; a write's key is
+   * not always the key its caller named. A `draft` put that names no package
+   * inherits the package of the item's active row (#11087), so
+   * `get(ref, { state: 'draft', packageId: null })` reads the package-UNBOUND
+   * row while the put upserts, and locks against, the inherited one. A parent
+   * taken from that read is `null` for a draft that exists, and an unpinned
+   * (ADR-0008 last-writer-wins) save was refused 409 by its own lock.
+   *
+   * Every answer comes from ONE resolution, {@link resolveWriteHead}.
+   */
+  async headAt(
+    ref: MetaRef,
+    opts: { state?: OverlayState; packageId?: string | null },
+  ): Promise<{ head: MetadataItem | null; packageId: string | null }> {
+    this.assertOpen();
+    const { row, targetPackageId } = await this.resolveWriteHead(ref, opts.state ?? 'active', opts.packageId);
+    return { head: row ? this.rowToItem(ref, row) : null, packageId: targetPackageId };
+  }
+
+  /**
+   * [#22128] THE write-address resolution: for a write of `state` that names
+   * `packageId`, the row it upserts (`row`, `null` for a create) and the
+   * binding it stamps on a create (`targetPackageId`). {@link put} runs it
+   * inside its transaction for its lock and its stamp; {@link headAt} runs it
+   * for a caller that needs the parent the lock will judge.
+   *
+   * ADR-0048 — a write is not a search: it upserts exactly one
+   * `(org, type, name, package_id)` row, so its scope is always a concrete
+   * package or the unbound row — never {@link get}'s "any package" match.
+   * #6215 was a caller (`restoreVersion`) whose silence about the binding was
+   * resolved to `null` here, so the lock looked up a row that does not exist
+   * for every package-bound overlay. Callers state their scope; nothing here
+   * decides it but the documented `PutOptions.packageId` default
+   * (omitted/undefined = the env-local, unbound row) and the draft
+   * inheritance below. A row for package B is never found for a save naming
+   * package A.
+   *
+   * [#11087] Draft-save package inheritance. A `state='draft'` save is a
+   * pending change OVER the published row, and every package-scoped consumer
+   * — `listDrafts({ packageId })`, the console's pending-changes surfaces,
+   * `publishPackageDrafts` — keys drafts by `package_id`. A caller that names
+   * no base (the console's plain `?mode=draft` save) used to stamp NULL even
+   * when the row it overlays is package-bound, producing an "orphan draft"
+   * that no package view counts and no per-package publish can ever promote
+   * (measured live: `_drafts` lists it, `_drafts?packageId=` does not).
+   * Inherit the overlaid ACTIVE row's binding instead. An explicit
+   * `packageId` is untouched (a caller that states its base keeps it,
+   * ADR-0048), and with no active row — a brand-new item drafted first —
+   * there is nothing to inherit and the package-less semantics stand.
+   *
+   * @param ctx - The transaction handle when the caller holds one.
+   */
+  private async resolveWriteHead(
+    ref: Pick<MetaRef, 'type' | 'name'>,
+    state: OverlayState,
+    packageId: string | null | undefined,
+    ctx?: Record<string, unknown>,
+  ): Promise<{ row: any | null; targetPackageId: string | null }> {
+    const context = { ...ctx, isSystem: true };
+    let targetPackageId: string | null = packageId ?? null;
+    if (state === 'draft' && packageId == null) {
+      // The overlaid base is resolved with the SAME two-scope reach the draft
+      // list applies (`listDrafts`' $or contract): an org-scoped caller's
+      // active row usually lives ENV-WIDE (`organization_id IS NULL`) — the
+      // ADR-0005 overlay order — so a same-org-only lookup here found nothing
+      // for exactly the console-session saves this inheritance exists for
+      // (measured live: an org-scoped view draft stayed `package_id NULL`
+      // over an env-wide active row bound to `app.k9qk`).
+      const activeWhere: Record<string, unknown> = {
+        type: ref.type,
+        name: ref.name,
+        state: 'active',
+      };
+      if (this.organizationId != null) {
+        activeWhere.$or = [
+          { organization_id: this.organizationId },
+          { organization_id: null },
+        ];
+      } else {
+        activeWhere.organization_id = null;
+      }
+      const activeRow = await this.engine.findOne('sys_metadata', { where: activeWhere, context });
+      const activePkg = (activeRow as { package_id?: string | null } | null)?.package_id ?? null;
+      if (activePkg) targetPackageId = activePkg;
+    }
+    let row = await this.engine.findOne('sys_metadata', {
+      where: this.whereFor(ref, state, targetPackageId),
+      context,
+    });
+    // [#11087] Orphan-draft adoption: when the package binding above was
+    // INHERITED (caller named none), a pre-fix draft for the same
+    // (org, type, name) sits at `package_id NULL` and the scoped lookup
+    // misses it — creating a second draft row would fork the pending change.
+    // That package-less row is the one the write updates; `put`'s stamp
+    // (`existingPkg ?? targetPackageId`) then adopts it into the package.
+    if (!row && state === 'draft' && packageId == null && targetPackageId !== null) {
+      row = await this.engine.findOne('sys_metadata', {
+        where: this.whereFor(ref, state, null),
+        context,
+      });
+    }
+    return { row: row ?? null, targetPackageId };
+  }
+
+  /**
    * Resolve a historical version by content hash (ADR-0009).
    *
    * Looks up `sys_metadata_history` by `(organization_id, type, name,
@@ -620,79 +735,14 @@ export class SysMetadataRepository implements MetadataRepository {
     // object's `fields`) keeps its key order, so a pure reorder is a change.
     const hash = hashSpec(body, ref.type);
 
-    // ADR-0048 — the ONE row this write targets. A write is not a search: it
-    // upserts exactly one `(org, type, name, package_id)` row, so its scope is
-    // always a concrete package or the unbound row — never `get`'s "any
-    // package" match. That asymmetry with the sibling read at {@link get} is
-    // deliberate, and it is why this value is named here rather than inlined:
-    // `put` reads it TWICE (the optimistic-lock lookup below and the
-    // `package_id` stamp), and #6215 was a caller — `restoreVersion` — whose
-    // silence about the binding was resolved to `null` by this expression, so
-    // the lock looked up a row that does not exist for every package-bound
-    // overlay. Callers state their scope; this line no longer decides it
-    // anywhere but for the documented `PutOptions.packageId` default
-    // (omitted/undefined = the env-local, unbound row).
-    let targetPackageId: string | null = opts.packageId ?? null;
-    // [#11087] Draft-save package inheritance. A `state='draft'` save is a
-    // pending change OVER the published row, and every package-scoped consumer
-    // — `listDrafts({ packageId })`, the console's pending-changes surfaces,
-    // `publishPackageDrafts` — keys drafts by `package_id`. A caller that names
-    // no base (the console's plain `?mode=draft` save) used to stamp NULL even
-    // when the row it overlays is package-bound, producing an "orphan draft"
-    // that no package view counts and no per-package publish can ever promote
-    // (measured live: `_drafts` lists it, `_drafts?packageId=` does not).
-    // Inherit the overlaid ACTIVE row's binding instead. Explicit
-    // `opts.packageId` is untouched (a caller that states its base keeps it,
-    // ADR-0048), and with no active row — a brand-new item drafted first —
-    // there is nothing to inherit and the package-less semantics stand.
-    if (state === 'draft' && opts.packageId == null) {
-      // The overlaid base is resolved with the SAME two-scope reach the draft
-      // list applies (`listDrafts`' $or contract): an org-scoped caller's
-      // active row usually lives ENV-WIDE (`organization_id IS NULL`) — the
-      // ADR-0005 overlay order — so a same-org-only lookup here found nothing
-      // for exactly the console-session saves this inheritance exists for
-      // (measured live: an org-scoped view draft stayed `package_id NULL`
-      // over an env-wide active row bound to `app.k9qk`).
-      const activeWhere: Record<string, unknown> = {
-        type: ref.type,
-        name: ref.name,
-        state: 'active',
-      };
-      if (this.organizationId != null) {
-        activeWhere.$or = [
-          { organization_id: this.organizationId },
-          { organization_id: null },
-        ];
-      } else {
-        activeWhere.organization_id = null;
-      }
-      const activeRow = await this.engine.findOne('sys_metadata', { where: activeWhere, context: { isSystem: true } });
-      const activePkg = (activeRow as { package_id?: string | null } | null)?.package_id ?? null;
-      if (activePkg) targetPackageId = activePkg;
-    }
-
     // Run all reads + writes inside one transaction so the optimistic
     // lock, the parent-row mutation, and the history append are atomic.
     const result = await this.withTxn(async (ctx) => {
-      // ADR-0048 — scope the existing-row lookup to the requested package so a
-      // save for package B does not find (and overwrite) package A's same-name
-      // overlay. A package-less save (packageId null) targets the global row.
-      let existing = await this.engine.findOne('sys_metadata', {
-        where: this.whereFor(ref, state, targetPackageId),
-        context: { ...ctx, isSystem: true },
-      });
-      // [#11087] Orphan-draft adoption: when the package binding above was
-      // INHERITED (caller named none), a pre-fix draft for the same
-      // (org, type, name) sits at `package_id NULL` and the scoped lookup
-      // misses it — creating a second draft row would fork the pending change.
-      // Re-read the package-less row and update THAT one; the stamp below
-      // (`existingPkg ?? targetPackageId`) then adopts it into the package.
-      if (!existing && state === 'draft' && opts.packageId == null && targetPackageId !== null) {
-        existing = await this.engine.findOne('sys_metadata', {
-          where: this.whereFor(ref, state, null),
-          context: { ...ctx, isSystem: true },
-        });
-      }
+      // [#22128] The row this write upserts and the binding it stamps on a
+      // create, from THE write-address resolution ({@link resolveWriteHead}):
+      // the one {@link headAt} answers too, so the head a caller was served
+      // for this address is the head this lock judges.
+      const { row: existing, targetPackageId } = await this.resolveWriteHead(ref, state, opts.packageId, ctx);
       // The row's stored stamp, as written: the parent link this write records
       // (`previous_checksum`, the event's `parentHash`) and the no-op check's
       // input. `null` for a row stored without one.
