@@ -113,5 +113,11 @@ export default defineConfig({
     disableConsoleIntercept: true,
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // #13517: quiet the registry's per-item registration chatter — the
+    // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
+    // default. Enforced by scripts/check-registry-log-declared.mjs, since
+    // `storage-upload-door-ownership.wall.test.ts` boots a stack through
+    // `@objectstack/verify`'s `bootStack`.
+    env: { OS_REGISTRY_LOG: 'warn' },
   },
 });
