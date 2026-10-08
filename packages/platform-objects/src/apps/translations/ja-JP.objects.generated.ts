@@ -141,7 +141,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       invite_user: {
         label: "ユーザーを招待",
-        successMessage: "招待を送信しました"
+        description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
+        successMessage: "${result.email} に招待を送信しました"
       },
       ban_user: {
         label: "利用停止",
@@ -633,7 +634,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       invite_user: {
         label: "ユーザーを招待",
-        successMessage: "招待を送信しました"
+        description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
+        successMessage: "${result.email} に招待を送信しました"
       },
       add_member: {
         label: "メンバーを追加",
@@ -734,7 +736,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       invite_user: {
         label: "ユーザーを招待",
-        successMessage: "招待を送信しました"
+        description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
+        successMessage: "${result.email} に招待を送信しました"
       },
       cancel_invitation: {
         label: "招待をキャンセル",

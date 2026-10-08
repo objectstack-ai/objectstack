@@ -141,7 +141,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       invite_user: {
         label: "邀请用户",
-        successMessage: "邀请已发送"
+        description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
+        successMessage: "已向 ${result.email} 发送邀请"
       },
       ban_user: {
         label: "封禁用户",
@@ -633,7 +634,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       invite_user: {
         label: "邀请用户",
-        successMessage: "邀请已发送"
+        description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
+        successMessage: "已向 ${result.email} 发送邀请"
       },
       add_member: {
         label: "添加成员",
@@ -734,7 +736,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       invite_user: {
         label: "邀请用户",
-        successMessage: "邀请已发送"
+        description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
+        successMessage: "已向 ${result.email} 发送邀请"
       },
       cancel_invitation: {
         label: "取消邀请",

@@ -124,6 +124,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       approval_approve: {
         label: "通过",
+        description: "通过该请求？你的审批将被记录，此步骤获得所需的审批后，请求即继续流转。",
         successMessage: "已通过。",
         params: {
           comment: {
