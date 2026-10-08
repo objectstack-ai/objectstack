@@ -21,7 +21,7 @@ The runtime publish gate now runs the build's own formula check on an object wri
 **Unchanged.**
 
 - Stored rows are not migrated, and they are not refused on read. An object stored before this change keeps reading, with the formula still `null`, until it is next saved. At that save the gate judges it, because the differential compares the write against the stored universe without its own stored row.
-- The other expressions an object carries are still not judged at this door: validation-rule predicates, the field-rule slots (`requiredWhen`, `readonlyWhen`, `conditionalRequired`, `visibleWhen`), option `visibleWhen`, and the object's own action predicates. `os build` judges them, and the door does not, as before. Each needs its own crossing, measured over the stored corpus first.
+- This entry's crossing covers formula fields alone. The other expressions an object carries (validation-rule predicates, the field-rule slots `requiredWhen`, `readonlyWhen` and `visibleWhen`, option `visibleWhen`, and the object's own action predicates) are judged at this door through their own #22032 entries, each its own crossing, measured over the stored corpus first.
 - `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still turns a refusal into a logged write.
 - Measured before crossing: every formula field this repository ships has 0 refusals and 0 advisories at the door. That is 29 fields on 28 objects: examples 7 on 6, and the platform `display_title` formulas 22 on 22.
 - No public export or signature moves. `validateStackExpressions(stack)` keeps its signature. The registry entry reaches the passes through an internal function that is not on the package's entry. The built entry declarations differ only in one doc comment, on `AuthoringRuleContext.runtimeWriteType`.
