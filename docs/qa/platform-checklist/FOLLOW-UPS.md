@@ -659,3 +659,53 @@ is the first FOLLOW-UPS section to carry symbol anchors, so
 `scripts/checklist-symbol-anchor-baseline.json` gains a `FOLLOW-UPS.md` floor at the
 count `--anchor-census` measured. Adding a floor for a newly-anchored file is not
 lowering one — that stays maintainer-only.)
+
+## 11. Scoped authoring 2026-10-08 — cross-cutting UX conventions (maintainer-directed)
+
+**Not a sweep.** The maintainer directed three conventions onto the ledger so that every
+run checks them, verbatim: 「写进测试清单：把这些原则加到 docs/qa/platform-checklist/，例如"每个写操作都有反馈""每个禁用控件都说明原因""不对用户显示机器名"。这样以后每轮测试都会检查。」
+They live in one new area, `areas/ux-conventions.json`:
+
+- `ux-conventions.write-feedback` — every user-initiated write answers visibly; success
+  names what changed, a refusal says why, a no-op claims nothing; Undo restores where offered.
+- `ux-conventions.disabled-control-reason` — every disabled control shows its reason on
+  hover and on keyboard focus, and exposes it as an accessible description.
+- `ux-conventions.labels-over-machine-names` — where a label exists users see it; machine
+  names, raw ids and spec paths appear only as secondary text.
+
+Ledger **276 → 279 items**; `coverage.json` untouched (a convention belongs to no
+metadata kind). ⚠️ **Executed by one reader, sequentially**, grounded in a source reading
+on `main` and the 2026-10-07 browser QA pass on the showcase boot (objectstack
+`879bd38c`, objectui `179f6fe9`). No hunter angle was run, so this section supports
+**no** claim about what else is missing.
+
+### 11a. Expected-fail rows on stock — already carded: score FAIL, cite the card, never re-file
+
+| # | item · variant | observed 2026-10-07 | card |
+|---|---|---|---|
+| F1 | write-feedback · Invite User | the action declares successMessage 'Invitation sent'; nothing was shown while the sys_invitation and sys_email rows were written | objectstack-ai/objectui#11817 |
+| F2 | write-feedback · Studio publish | no success confirmation; only the header flips to "No drafts pending publish" | objectstack-ai/objectui#11807 |
+| F3 | write-feedback · inline edit no-op | "1 row modified · Save All (1)" after a click with no value change | objectstack-ai/objectui#11816 |
+| F4 | disabled-control-reason · Archive | disabled in both placements with no title, tooltip or aria-describedby | objectstack-ai/objectui#11811 |
+| F5 | labels · Explain access, permission-set list, nav editor, Changes panel | raw user id as the principal; machine names where labels exist | objectstack-ai/objectui#11862 |
+| F6 | labels · Profile | the auth library's raw user.role ("user") for the platform admin | objectstack-ai/objectui#11866 |
+| F7 | labels · flow Node Type select | raw snake_case node types | objectstack-ai/objectui#11778 |
+| F8 | labels · banners | raw Zod paths, class names and tracker ids in author-facing refusals | objectstack-ai/objectui#11785 |
+
+### 11b. Decisions for the maintainer
+
+- **Priority.** The three items are authored **P1**. A release sweep selects
+  `since == vN` ∪ every `P0` ∪ the items whose `source` cites a release PR ("How a release
+  sweep works" in README.md), so a P1 item runs when a run selects `area:ux-conventions`
+  or `priority:P1` — not automatically in every release sweep. Raising them to **P0**
+  makes them release-gating smoke, which is the literal reading of 「以后每轮测试都会检查」;
+  that is the maintainer's call, not an author's.
+- **Undo.** Scored only where a surface already offers it (record edit). Which other
+  writes should offer Undo is a product decision with no card yet.
+- **Direct manipulation.** A kanban card landing in its new column is accepted as its own
+  success feedback; no toast is required. Say so if a toast is wanted there too.
+
+### 11c. Note on `since`
+
+`since: "v17.7"` records the release in which the ledger began checking these
+conventions; the surfaces they sample predate it.

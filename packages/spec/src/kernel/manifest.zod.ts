@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { CORE_PLUGIN_TYPES } from './plugin.zod';
 import { SEMVER_2_0_0_VERSION_PATTERN } from './version-grammar';
 import { retiredKey } from '../shared/retired-key';
-import { strictObject } from '../shared/strict-object';
+import { closedObject, strictObject, strictObjectError } from '../shared/strict-object';
 import { formatSuggestion } from '../shared/suggestions.zod';
 import { SeedSchema } from '../data/seed.zod';
 import { NavigationContributionSchema } from '../ui/app.zod';
@@ -20,35 +20,48 @@ import { NavigationContributionSchema } from '../ui/app.zod';
 // ─────────────────────────────────────────────────────────────────────
 
 /**
- * Structured permission grants requested by a plugin (ADR-0025 §3.2).
- * Each list scopes one capability surface the plugin may touch. The
- * install-time consent flow (ADR §3.5 step 2) turns this declaration into
- * the persisted `granted_permissions` set, which the loader REGISTERS on the
- * PluginPermissionEnforcer at load (#13457).
+ * The block's own answer to a flat LIST — the one `invalid_type` it names,
+ * carried on the block's error map because that is the only map a type
+ * failure at this position consults (a map on the enclosing manifest is never
+ * reached, and a manifest-level refinement never runs once a property has
+ * failed its type). Same shape as `ListViewExportOptionsSchema`'s bare-array
+ * answer (`ui/list-view-export-options.ts`).
  *
- * ⚠️ **Registered is not enforced.** Nothing queries that registry: the
- * enforcer's gates are reachable only through `SecurePluginContext`, which
- * has no production construction site, and its fs/network gates are called
- * by nothing at all. A grant declared here records which surfaces were
- * consented to and REFUSES NOTHING today — authoring this block does not
- * confine the plugin. The per-plugin context that would make it refuse is
- * the ADR-0025 materialize seam (measured and recorded in commit aaacf1d5c).
- *
- * The consented set reaches the runtime on the environment artifact
- * envelope — `EnvironmentArtifactSchema.grantedPermissions`
- * (`system/environment-artifact.zod.ts`, #14865): a map keyed by this
- * manifest's `id` whose values are this very schema. The loader reads it
- * from the environment-local carrier at materialize time, never from
- * `sys_package_installation` directly (ADR-0003 / cloud ADR-0007). Absent
- * there = no consent record; `{}` = consented to nothing.
- *
- * @example
- * ```jsonc
- * { "services": ["object", "http"], "hooks": ["record.beforeInsert"],
- *   "network": ["api.acme.com"], "fs": [] }
- * ```
+ * Worded to be true on BOTH carriers, because both read this one declaration:
+ * a package manifest's `permissions`, where a list was the retired legacy
+ * form and the ADR-0087 conversion strips it from existing sources, and
+ * `EnvironmentArtifactSchema.grantedPermissions`, whose values are this very
+ * schema and where a list was never legal — hence the two-clause
+ * `os migrate meta` sentence naming the case the conversion covers.
  */
-export const PluginPermissionsSchema = strictObject({
+const PLUGIN_PERMISSIONS_LIST_FORM =
+  'Expected the plugin permission block `{ services?, hooks?, network?, fs? }`, received a flat list. '
+  + 'A list of permission strings was the legacy form of a package manifest\'s `permissions`, removed in '
+  + '@objectstack/spec 17 (ADR-0049 enforce-or-remove) — no loader ever read it: what a package is '
+  + 'granted at load is the consented grant set, never the manifest\'s list. Name what the plugin may touch '
+  + 'in the four lists instead — platform services, lifecycle hooks, network hosts and filesystem paths, '
+  + 'e.g. `{ services: [\'object\'], network: [\'api.acme.com\'] }`. A permission string has no mechanical '
+  + 'mapping onto them, so translate each one by hand, or delete `permissions` when the plugin needs none. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for the package manifest case; a granted-permission record is not a source it reads.';
+
+const PLUGIN_PERMISSIONS_SHAPE = {
+  services: z.array(z.string()).optional()
+    .describe('Platform services the plugin may resolve (e.g. "object", "http")'),
+  hooks: z.array(z.string()).optional()
+    .describe('Lifecycle hooks the plugin may register (e.g. "record.beforeInsert")'),
+  network: z.array(z.string()).optional()
+    .describe('Network hosts the plugin may reach (e.g. "api.acme.com")'),
+  fs: z.array(z.string()).optional()
+    .describe('Filesystem paths the plugin may access'),
+};
+
+/**
+ * The unknown-key map `strictObject()` would build for this block. Spelled out
+ * rather than through `strictObject()` only so the list answer above can sit
+ * in front of it; the surface, the history, the aliases and the registered
+ * declaration are the ones the block has always had.
+ */
+const pluginPermissionsUnknownKeyError = strictObjectError({
   surface: 'the `permissions` block of this package manifest',
   history:
     'This block has refused unknown keys since it was introduced, but through zod\'s own '
@@ -73,28 +86,76 @@ export const PluginPermissionsSchema = strictObject({
     // filling a silent gap, and `manifest-unknown-keys.test.ts` pins that.
     hosts: 'network',
   },
-}, {
-  services: z.array(z.string()).optional()
-    .describe('Platform services the plugin may resolve (e.g. "object", "http")'),
-  hooks: z.array(z.string()).optional()
-    .describe('Lifecycle hooks the plugin may register (e.g. "record.beforeInsert")'),
-  network: z.array(z.string()).optional()
-    .describe('Network hosts the plugin may reach (e.g. "api.acme.com")'),
-  fs: z.array(z.string()).optional()
-    .describe('Filesystem paths the plugin may access'),
-}).describe('Structured plugin permission grants (ADR-0025 §3.2)');
+}, PLUGIN_PERMISSIONS_SHAPE);
+
+/**
+ * Structured permission grants requested by a plugin (ADR-0025 §3.2).
+ * Each list scopes one capability surface the plugin may touch. The
+ * install-time consent flow (ADR §3.5 step 2) turns this declaration into
+ * the persisted `granted_permissions` set, which the loader REGISTERS on the
+ * PluginPermissionEnforcer at load (#13457).
+ *
+ * ⚠️ **Registered is not enforced.** Nothing queries that registry: the
+ * enforcer's gates are reachable only through `SecurePluginContext`, which
+ * has no production construction site, and its fs/network gates are called
+ * by nothing at all. A grant declared here records which surfaces were
+ * consented to and REFUSES NOTHING today — authoring this block does not
+ * confine the plugin. The per-plugin context that would make it refuse is
+ * the ADR-0025 materialize seam (measured and recorded in commit aaacf1d5c).
+ *
+ * The consented set reaches the runtime on the environment artifact
+ * envelope — `EnvironmentArtifactSchema.grantedPermissions`
+ * (`system/environment-artifact.zod.ts`, #14865): a map keyed by this
+ * manifest's `id` whose values are this very schema. The loader reads it
+ * from the environment-local carrier at materialize time, never from
+ * `sys_package_installation` directly (ADR-0003 / cloud ADR-0007). Absent
+ * there = no consent record; `{}` = consented to nothing.
+ *
+ * This block is the ONLY form a manifest's `permissions` takes. The flat
+ * `string[]` it used to be unioned with was retired (ADR-0049
+ * enforce-or-remove, ADR-0087 conversion `manifest-permissions-string-list-removed`):
+ * no reader in this repository ever acted on that list — the loader registers
+ * the consented grant set, never the manifest's request — and a list has no
+ * mechanical mapping onto the four surfaces below, so the conversion strips it
+ * and the author translates. A list reaching this block is answered by
+ * {@link PLUGIN_PERMISSIONS_LIST_FORM} rather than by zod's bare type error.
+ *
+ * Closed exactly as `strictObject()` closes a shape; the `prime` handle is
+ * forwarded so the unknown-key map is still built on the refusal path
+ * (`closedObject`'s contract). The accept set is the block's own — the list
+ * answer only rewords the type error a non-object already raised.
+ *
+ * @example
+ * ```jsonc
+ * { "services": ["object", "http"], "hooks": ["record.beforeInsert"],
+ *   "network": ["api.acme.com"], "fs": [] }
+ * ```
+ */
+export const PluginPermissionsSchema = closedObject(z.object(PLUGIN_PERMISSIONS_SHAPE, {
+  error: Object.assign(
+    (issue: Parameters<z.core.$ZodErrorMap>[0]) => (
+      issue.code === 'invalid_type' && Array.isArray(issue.input)
+        ? PLUGIN_PERMISSIONS_LIST_FORM
+        : pluginPermissionsUnknownKeyError(issue)
+    ),
+    { prime: () => (pluginPermissionsUnknownKeyError as { prime?: () => void }).prime?.() },
+  ),
+}).strict()).describe('Structured plugin permission grants (ADR-0025 §3.2)');
 
 export type PluginPermissions = z.input<typeof PluginPermissionsSchema>;
 
 /**
- * Backward-compatible manifest `permissions` value: either the legacy flat
- * list of permission strings (apps / older packages) or the structured
- * plugin permission block above. New code should prefer the structured form.
+ * A manifest's `permissions` value — the structured plugin permission block
+ * above, and nothing else.
+ *
+ * It used to be a union of that block and a legacy flat list of permission
+ * strings; the list arm was retired (ADR-0049 enforce-or-remove, ADR-0087
+ * conversion `manifest-permissions-string-list-removed`), so this is the block
+ * itself, by identity. The name survives as the manifest slot's declaration:
+ * `ManifestSchema.permissions` reads it, and a consumer holding the manifest
+ * reading imports it under the name it always had.
  */
-export const ManifestPermissionsSchema = z.union([
-  z.array(z.string()),
-  PluginPermissionsSchema,
-]);
+export const ManifestPermissionsSchema = PluginPermissionsSchema;
 
 export type ManifestPermissions = z.input<typeof ManifestPermissionsSchema>;
 
@@ -236,9 +297,6 @@ export type PluginIntegrity = z.input<typeof PluginIntegritySchema>;
  * type: app
  * name: Acme CRM
  * description: Customer Relationship Management system
- * permissions:
- *   - system.user.read
- *   - system.object.create
  * objects:
  *   - "./src/objects/*.object.yml"
  * ```
@@ -506,9 +564,14 @@ export const ManifestSchema = strictObject({
   /**
    * Permissions the package requires — the "Scope" requested at installation.
    *
-   * Accepts either the legacy flat list of permission strings, or the
-   * structured plugin permission block ({@link PluginPermissionsSchema},
-   * ADR-0025 §3.2) that maps to service / hook / network / fs capabilities.
+   * Takes the structured plugin permission block ({@link PluginPermissionsSchema},
+   * ADR-0025 §3.2) that maps to service / hook / network / fs capabilities —
+   * and only that block. The legacy flat list of permission strings is retired
+   * (ADR-0049 enforce-or-remove): a list is refused at parse with its
+   * prescription, and the ADR-0087 conversion
+   * `manifest-permissions-string-list-removed` strips it from existing sources,
+   * stored artifacts and `os migrate meta` output, because no capability
+   * string maps mechanically onto the four lists.
    *
    * ⚠️ **This key carries a DIFFERENT declaration one stage along, and the two
    * are not compatible.** At this AUTHORING stage `permissions` is the
@@ -527,16 +590,15 @@ export const ManifestSchema = strictObject({
    * reader today is `collectDeclaredSuggestions` in
    * `@objectstack/plugin-security` (`suggested-audience-bindings.ts`), which
    * wants the assembled reading and now names the authoring one when it meets
-   * it. ⛔ The fix for that collision is never to widen this union with the
+   * it. ⛔ The fix for that collision is never to widen this key with the
    * set shape: a union at the key would make neither stage checkable, which is
    * the road `AssembledPackageBodySchema` records as REJECTED by name
    * (Prime Directive #12).
    *
-   * @example ["system.user.read", "system.data.write"]
    * @example { "services": ["object", "http"], "hooks": ["record.beforeInsert"] }
    */
   permissions: ManifestPermissionsSchema.optional()
-    .describe('Required permissions at the AUTHORING stage: legacy string[] or structured plugin block (ADR-0025 §3.2) — at the assembled stage the same key is the ADR-0090 `PermissionSet[]` collection instead (`AssembledPackageBodySchema`)'),
+    .describe('Required permissions at the AUTHORING stage: the structured plugin block { services, hooks, network, fs } (ADR-0025 §3.2) — the legacy flat string list is retired — and at the assembled stage the same key is the ADR-0090 `PermissionSet[]` collection instead (`AssembledPackageBodySchema`)'),
   
   /** 
    * Glob patterns specifying ObjectQL schemas files.

@@ -213,12 +213,12 @@ export const SysScimUser = ObjectSchema.create({
 
   indexes: [
     // UNIQUE mirrors @better-auth/scim's own declarations.
-    { fields: ['connection_user_key'], unique: true },
-    { fields: ['user_name_key'], unique: true },
+    { fields: ['connection_user_key'], unique: 'global' },
+    { fields: ['user_name_key'], unique: 'global' },
     // Nullable — repeated NULLs are admitted on sqlite / postgres / mysql when
     // the IdP sends no externalId.
-    { fields: ['external_id_key'], unique: true },
-    { fields: ['order_key'], unique: true },
+    { fields: ['external_id_key'], unique: 'global' },
+    { fields: ['order_key'], unique: 'global' },
     { fields: ['connection_id'] },
     { fields: ['user_id'] },
   ],

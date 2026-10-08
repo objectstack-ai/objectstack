@@ -161,7 +161,7 @@ export const SysScimConnectionBinding = ObjectSchema.create({
 
   indexes: [
     // UNIQUE mirrors @better-auth/scim's own declaration on connectionKey.
-    { fields: ['connection_key'], unique: true },
+    { fields: ['connection_key'], unique: 'global' },
     { fields: ['connection_id'] },
     { fields: ['provisioning_domain_id'] },
   ],

@@ -275,7 +275,7 @@ export const SysShareLink = ObjectSchema.create({
 
   indexes: [
     // Hot path: resolveToken — one row lookup per public request.
-    { fields: ['token'], unique: true },
+    { fields: ['token'], unique: 'global' },
     // Management UI: "all links for this record".
     { fields: ['object_name', 'record_id'] },
     // "Active links I issued".

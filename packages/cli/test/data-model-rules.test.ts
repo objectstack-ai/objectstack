@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lintDataModel, lintUniqueDeclarations, lintUnscopedDeclaredIndexes, lintLegacyOrganizationComposites } from '@objectstack/lint';
+import { authoringRulesFor, lintDataModel, lintUniqueDeclarations, lintUnscopedDeclaredIndexes, lintLegacyOrganizationComposites } from '@objectstack/lint';
 import { FieldSchema } from '@objectstack/spec/data';
 import { lintConfig } from '../src/commands/lint';
 
@@ -337,7 +337,7 @@ describe('lintUnscopedDeclaredIndexes — bare unique: true on a declared index 
     expect(lintUnscopedDeclaredIndexes(undefined as any)).toEqual([]);
   });
 
-  it('warns on a bare declared unique, whatever the column count, and prescribes both words', () => {
+  it('refuses a bare declared unique (error), whatever the column count, and prescribes both words', () => {
     const issues = lintUnscopedDeclaredIndexes([
       {
         name: 'crm_case',
@@ -351,11 +351,11 @@ describe('lintUnscopedDeclaredIndexes — bare unique: true on a declared index 
     expect(issues).toHaveLength(2);
     for (const issue of issues) {
       expect(issue.rule).toBe(RULE);
-      expect(issue.severity).toBe('warning'); // 17.x warns; protocol 18 rejects the spelling (#5082)
-      // D5a: the fix names both words, and identifies 'global' as today's behavior.
+      expect(issue.severity).toBe('error'); // 17.x warned; protocol 18 refuses the spelling (#5082)
+      // D5a: the fix names both words, and identifies 'global' as the index bare `true` built.
       expect(issue.fix).toContain("unique: 'global'");
       expect(issue.fix).toContain("unique: 'organization'");
-      expect(issue.fix).toMatch(/today's behavior/);
+      expect(issue.fix).toMatch(/the exact index bare `true` built/);
       expect(issue.message).toContain('ADR-0120');
     }
     expect(issues[0].path).toBe('objects[0].indexes[0]');
@@ -395,15 +395,21 @@ describe('lintUnscopedDeclaredIndexes — bare unique: true on a declared index 
     expect(issues[0].rule).toBe(RULE);
   });
 
-  it('surfaces through lintDataModel (os lint) but NOT through lintUniqueDeclarations — one report per command', () => {
-    // `os validate`/`os build` run R11 via its own AUTHORING_RULES entry and
-    // R10 via lintUniqueDeclarations; `os lint` runs both via lintDataModel.
-    // If lintUniqueDeclarations also emitted R11, validate/build would report
-    // every finding twice.
+  it('surfaces through its own registry entry on all three commands, and NOT through lintDataModel or lintUniqueDeclarations — one report per command', () => {
+    // Protocol 18 (#5082): R11 is an error, so it is a GATING registry entry,
+    // and a gating rule runs on all three commands — `os lint` included. That
+    // is why `lintDataModel` stopped calling it: `os lint` runs both the
+    // registry and `lintDataModel`, and a second call there would report every
+    // finding twice. If lintUniqueDeclarations emitted R11, validate/build
+    // would report it twice the same way.
     const objs = [{ name: 'a', fields: {}, indexes: [{ fields: ['x'], unique: true }] }];
-    expect(has(lintDataModel(objs), RULE)).toBe(true);
+    expect(has(lintDataModel(objs), RULE)).toBe(false);
     expect(has(lintUniqueDeclarations(objs), RULE)).toBe(false);
-    expect(lintDataModel(objs).filter((i) => i.rule === RULE)).toHaveLength(1);
+    for (const command of ['validate', 'build', 'lint'] as const) {
+      const entries = authoringRulesFor(command).filter((r) => r.name === 'lintUnscopedDeclaredIndexes');
+      expect(entries, `R11 runs once under os ${command}`).toHaveLength(1);
+      expect(entries[0]!.tier).toBe('gating');
+    }
   });
 });
 
@@ -699,10 +705,13 @@ describe('lintLegacyOrganizationComposites — S6 respelling nudge (ADR-0120 D5c
     }];
     expect(has(lintDataModel(objs), RULE)).toBe(true);
     expect(lintDataModel(objs).filter((i) => i.rule === RULE)).toHaveLength(1);
-    // R11 fires on the same index for the OTHER reason (unstated scope) — the
+    // R11 refuses the same index for the OTHER reason (unstated scope) — the
     // two rules are complementary, not duplicates: R11 says "say which scope",
-    // R12 says "the shape tells me which one you meant".
-    expect(has(lintDataModel(objs), 'unique/unscoped-declared-index')).toBe(true);
+    // R12 says "the shape tells me which one you meant". R11 reaches `os lint`
+    // through its own gating registry entry since #5082, not through
+    // lintDataModel — so here it is absent, and it fires on its own.
+    expect(has(lintDataModel(objs), 'unique/unscoped-declared-index')).toBe(false);
+    expect(has(lintUnscopedDeclaredIndexes(objs), 'unique/unscoped-declared-index')).toBe(true);
   });
 });
 

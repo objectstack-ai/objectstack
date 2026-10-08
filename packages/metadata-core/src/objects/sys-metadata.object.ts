@@ -226,7 +226,7 @@ export const SysMetadataObject = ObjectSchema.create({
     {
       name: 'idx_sys_metadata_overlay_active',
       fields: ['type', 'name', 'organization_id', 'package_id'],
-      unique: true,
+      unique: 'global',
     },
     { name: 'idx_sys_metadata_org_type', fields: ['organization_id', 'type'] },
     { fields: ['type', 'scope'] },

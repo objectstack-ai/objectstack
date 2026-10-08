@@ -1796,6 +1796,47 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
+   * [#22113] The registry items that belong to `packageId`, for the two
+   * package-wide writes ({@link publishPackage}, {@link revertPackage}).
+   *
+   * An item belongs to a package when any of three keys names it:
+   *
+   *  - `packageId` — the publish envelope's own key, and what a caller that
+   *    registers an item for a package writes;
+   *  - `package` — the legacy package stamp;
+   *  - `_packageId` — the private provenance stamp. `applyProtection`
+   *    (`@objectstack/spec/shared`, ADR-0010 §3.7) writes it on every item a
+   *    code-shipped artifact registers here, and the ObjectQL object bridge
+   *    copies it onto every object it registers here. A code-shipped item
+   *    carries ONLY this key, and it is the key the metadata protocol scopes
+   *    this registry's items by when it serves a package's reads.
+   *
+   * Reading the first two alone made a package's publish and revert miss
+   * every item that carries only the stamp ("No metadata items found" while
+   * every read served them).
+   *
+   * ⛔ Not a writability check. This class has no package-kind concept, so it
+   * cannot tell a read-only code package (ADR-0070 D2) from a writable one,
+   * and with the stamp read it would publish a code package's items like any
+   * other. The refusal belongs to the caller that holds the predicate: the
+   * `POST /packages/:id/publish` and `/revert` doors (`@objectstack/runtime`)
+   * refuse a non-writable package with `422 WRITABLE_PACKAGE_REQUIRED` before
+   * calling either method.
+   */
+  private collectPackageMembers(packageId: string): Array<{ type: string; name: string; data: any }> {
+    const members: Array<{ type: string; name: string; data: any }> = [];
+    for (const [type, typeStore] of this.registry) {
+      for (const [name, data] of typeStore) {
+        const meta = data as any;
+        if (meta?.packageId === packageId || meta?.package === packageId || meta?._packageId === packageId) {
+          members.push({ type, name, data: meta });
+        }
+      }
+    }
+    return members;
+  }
+
+  /**
    * Publish an entire package:
    * 1. Validate all draft items
    * 2. Snapshot all items in the package (publishedDefinition = clone(metadata))
@@ -1832,16 +1873,10 @@ export class MetadataManager implements IMetadataService {
     const shouldValidate = options?.validate !== false;
     const publishedBy = options?.publishedBy;
 
-    // Collect all items belonging to this package
-    const packageItems: Array<{ type: string; name: string; data: any }> = [];
-    for (const [type, typeStore] of this.registry) {
-      for (const [name, data] of typeStore) {
-        const meta = data as any;
-        if (meta?.packageId === packageId || meta?.package === packageId) {
-          packageItems.push({ type, name, data: meta });
-        }
-      }
-    }
+    // Collect all items belonging to this package — the same membership
+    // `revertPackage` reads. A read-only code package never gets here through
+    // the publish door, which refuses it first (see `collectPackageMembers`).
+    const packageItems = this.collectPackageMembers(packageId);
 
     if (packageItems.length === 0) {
       return {
@@ -2060,15 +2095,7 @@ export class MetadataManager implements IMetadataService {
    * Restores all metadata definitions from their published snapshots.
    */
   async revertPackage(packageId: string): Promise<void> {
-    const packageItems: Array<{ type: string; name: string; data: any }> = [];
-    for (const [type, typeStore] of this.registry) {
-      for (const [name, data] of typeStore) {
-        const meta = data as any;
-        if (meta?.packageId === packageId || meta?.package === packageId) {
-          packageItems.push({ type, name, data: meta });
-        }
-      }
-    }
+    const packageItems = this.collectPackageMembers(packageId);
 
     // [#7559] ADR-0112 — both refusals below carry a DECLARED `code` + `status`.
     // They are the ordinary answers to an ordinary request (revert a package id

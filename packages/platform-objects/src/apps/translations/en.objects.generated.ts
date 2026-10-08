@@ -2602,7 +2602,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       is_system: {
         label: "System Template",
-        help: "Provided by a plugin / platform; tenants may edit but should not delete"
+        help: "Provided by a plugin / platform"
       },
       variables_json: {
         label: "Variables (JSON)",
@@ -2619,7 +2619,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       customized: {
         label: "Customized",
-        help: "Set when an admin edits a package-declared template; boot seeding will no longer overwrite the row (a reworded password-reset mail survives redeploys). Meaningless on admin rows."
+        help: "Set on a package-declared template an admin edited before organization-level template editing closed; boot seeding never overwrites such a row. Nothing sets it any more. Meaningless on admin rows."
       },
       created_at: {
         label: "Created At"

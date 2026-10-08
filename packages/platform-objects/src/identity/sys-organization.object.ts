@@ -368,7 +368,7 @@ export const SysOrganization = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['slug'], unique: true },
+    { fields: ['slug'], unique: 'global' },
     { fields: ['name'] },
   ],
 

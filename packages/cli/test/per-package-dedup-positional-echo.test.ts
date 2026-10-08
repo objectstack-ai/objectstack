@@ -37,9 +37,11 @@
  *   - a union twin differing in `where` — a different entity;
  *   - a union twin differing in `rule`.
  *
- * ⚠️ The first control is built on `unique/unscoped-declared-index`, ⛔ not on
- * the `field-no-consumers` finding the echo cases use, and the fixture carries
- * a bare `unique: true` index for no other reason. Measured, ⛔ not reasoned:
+ * ⚠️ The first control is built on `unique/legacy-organization-composite`, ⛔ not
+ * on the `field-no-consumers` finding the echo cases use, and the fixture
+ * carries a hand-written organization composite index for no other reason. (It
+ * was built on `unique/unscoped-declared-index` and a bare `unique: true` until
+ * protocol 18 refused that spelling at the parse this fixture goes through.) Measured, ⛔ not reasoned:
  * an ablation that widens the rewrite from the top-level index to EVERY index
  * left all six cases green while that control was written against a
  * `field-no-consumers` twin, because such a path ends in a field NAME and the
@@ -127,8 +129,8 @@ const ORDERS_OBJECTS = [
       name: { name: 'name', type: 'text', label: 'Order Number', required: true },
       account: { name: 'account', type: 'lookup', label: 'Account', reference: 'pp_account' },
     },
-    // ⛔ Not decoration. A bare `unique: true` trips
-    // `unique/unscoped-declared-index`, whose path carries a NESTED index
+    // ⛔ Not decoration. A unique index LISTING the organization column trips
+    // `unique/legacy-organization-composite`, whose path carries a NESTED index
     // (`objects[0].indexes[0]`) — and a finding with a nested index is the ONLY
     // thing the NESTED control below can discriminate on. Every other rule this
     // fixture raises produces `objects[N].fields.<name>`, where the sole index
@@ -136,7 +138,7 @@ const ORDERS_OBJECTS = [
     // of those cannot fail and is not a control. Measured: without this, an
     // ablation that rewrites EVERY index instead of the top-level one keeps all
     // six cases green.
-    indexes: [{ name: 'pp_order_name_uq', fields: ['name'], unique: true }],
+    indexes: [{ name: 'pp_order_name_uq', fields: ['name', 'organization_id'], unique: 'global' }],
   },
 ];
 
@@ -225,14 +227,14 @@ describe('#18779 — the per-package de-duplication key is position-insensitive'
     // case is what goes red if someone does.
     //
     // ⚠️ It has to be built on a finding whose path ACTUALLY carries a nested
-    // index. `unique/unscoped-declared-index` is that finding here
+    // index. `unique/legacy-organization-composite` is that finding here
     // (`objects[0].indexes[0]`); `field-no-consumers` is not — its path ends in
     // a field NAME, so a twin built from it differs in a name rather than in a
     // position and stays distinct under any index rewrite at all. Measured: the
     // over-wide ablation keeps a `field-no-consumers` twin green and turns this
     // one red, which is the whole difference between a control and a decoration.
     const parsed = parsedArtifact();
-    const target = rawSurvivors(parsed).find((f) => f.rule === 'unique/unscoped-declared-index');
+    const target = rawSurvivors(parsed).find((f) => f.rule === 'unique/legacy-organization-composite');
     expect(target, 'fixture no longer raises a finding with a NESTED index in its path').toBeTruthy();
     const local = unprefixed(target!);
     expect(local.path).toMatch(/^objects\[\d+\]\.indexes\[\d+\]$/);

@@ -14,7 +14,10 @@
  * `ApprovalNodeConfigSchema` with no plugin loaded. And (#21898) **a value a
  * builtin node's executor contract refuses**, where the build can know what
  * the run will parse — see {@link flowNodeConfigRefusals}' first arm for what
- * that excludes, and why.
+ * that excludes, and why. And (#21982) **a key a builtin's executor contract
+ * does not declare, where no other door judges it** — `script` and `subflow`,
+ * whose descriptors publish no `configSchema` for registration's key check to
+ * read ({@link builtinKeysJudged}).
  *
  * Its refusal codes join the closed flow slot table
  * (`FLOW_SLOT_REFUSAL_CODES`, `flow-node-expression-paths.ts`); the
@@ -44,7 +47,10 @@ import {
   UpdateRecordConfigSchema,
 } from './builtin-node-config.zod';
 import { HttpConfigSchema, NotifyConfigSchema } from './io-node-config.zod';
-import { ScriptConfigSchema, SubflowConfigSchema } from './schemaless-node-config.zod';
+// [#21982] `SCHEMALESS_NODE_CONFIG_SCHEMAS` is the spec's own record of the
+// node types that publish no descriptor `configSchema`; read only inside
+// `builtinKeysJudged`, like the contracts beside it.
+import { SCHEMALESS_NODE_CONFIG_SCHEMAS, ScriptConfigSchema, SubflowConfigSchema } from './schemaless-node-config.zod';
 // [#21850] The one plugin node contract the spec declares. Read only inside
 // `getDeclaredPluginNodeConfigContracts`, like the executor contracts above.
 // `approval.zod.ts` imports nothing from `automation/` (zod, the membership-role
@@ -331,9 +337,11 @@ interface ContractIssue {
  * another judge owns the finding:
  *
  *  - key membership — an undeclared key (`unrecognized_keys`) and a tombstoned
- *    one (a `retiredKey()`, an `invalid_type` expecting `never`): registration
- *    refuses an undeclared key against the descriptor with its own
- *    prescriptions, the lint names the retired script keys, and the conversion
+ *    one (a `retiredKey()`, an `invalid_type` expecting `never`): an undeclared
+ *    key is the key arm's where no descriptor publishes a `configSchema`
+ *    ({@link builtinKeysJudged}: `script`, `subflow`), and registration's
+ *    everywhere else — it refuses one against the descriptor with its own
+ *    prescriptions; the lint names the retired script keys, and the conversion
  *    layer rewrites a retired spelling before the two doors that convert first;
  *  - an ADR-0031 region slot, the slot itself included (`try: 5`): a region's
  *    shape is `validateControlFlow`'s, and its nodes are the region walk's;
@@ -360,6 +368,30 @@ function builtinValueJudged(
   if (carriesInterpolationToken(authoredAt(authored, issue.path))) return false;
   if (PARSED_AFTER_INTERPOLATION.has(nodeType) && issue.code === 'custom' && carriesInterpolationToken(authored)) return false;
   return true;
+}
+
+// ─── The builtin KEY arm (#21982) ─────────────────────────────────────
+
+/**
+ * [#21982] Does the build judge KEY MEMBERSHIP on this builtin's executor
+ * contract? Only where no door before the run does: a builtin whose descriptor
+ * publishes no `configSchema`, the spec's own schemaless class
+ * ({@link SCHEMALESS_NODE_CONFIG_SCHEMAS}). `registerFlow`'s undeclared-key
+ * walk (`validateNodeConfigKeys`) derives the declared set from that
+ * descriptor schema, so it skips these types, while their executors parse the
+ * strict contract and refuse the node on an undeclared key at every run.
+ *
+ * Today `script` and `subflow`. `decision` is in the schemaless class but has
+ * no builtin contract: its executor parses nothing, so an undeclared key fails
+ * no run. Every other builtin's undeclared key stays registration's, judged
+ * against its descriptor with that walk's own prescriptions — the spec arm
+ * does not shadow it, because `registerFlow` parses `FlowSchema` first.
+ *
+ * Asked only for a type in {@link getBuiltinNodeConfigContracts}; read on
+ * first use, like the contracts.
+ */
+function builtinKeysJudged(nodeType: string): boolean {
+  return Object.prototype.hasOwnProperty.call(SCHEMALESS_NODE_CONFIG_SCHEMAS, nodeType);
 }
 
 /**
@@ -421,7 +453,9 @@ function nodeConfigKeyMissingMessage(nodeType: string, key: string): string {
 
 /**
  * [#21850] The refusal for a key a WHOLE-judged contract does not declare, or a
- * value it refuses, where the author wrote it — the contract's own sentence,
+ * value it refuses — and (#21898) a value a builtin contract refuses, and
+ * (#21982) a key a key-judged builtin contract does not declare — where the
+ * author wrote it: the contract's own sentence,
  * inside one that names the node type and the key. `prescribe` adds the closing
  * instruction for a plain value finding; an unknown key's text (with its
  * did-you-mean) and a rule's text already say what to write.
@@ -480,10 +514,21 @@ function unrecognizedKeysOf(issue: { readonly code: string }): readonly string[]
  *    (`outputVariable` for a `create_record` `42`; `fields[0].min` for a
  *    screen field's `'1'`), the same code and message the declared plugin
  *    contract below uses. Kept only where {@link builtinValueJudged} holds —
- *    key MEMBERSHIP is not judged here (an undeclared key, a tombstoned one),
- *    nor a region slot, a `predicate` / `value` ledger slot, a run-resolved
- *    key, or any value carrying a `{token}`: never refused for its
- *    pre-interpolation type.
+ *    key MEMBERSHIP is not judged by this bullet (an undeclared key is the
+ *    next one's, a tombstoned key nobody's here), nor a region slot, a
+ *    `predicate` / `value` ledger slot, a run-resolved key, or any value
+ *    carrying a `{token}`: never refused for its pre-interpolation type.
+ *  - (#21982) A key the contract does not declare, on a builtin whose
+ *    descriptor publishes no `configSchema` ({@link builtinKeysJudged}:
+ *    `script`, `subflow`) → `node-config-refused-by-contract`, anchored at the
+ *    key, one refusal per undeclared key (`bogusKey` on a `script`), in the
+ *    contract's own words — its prescription for a known slip included
+ *    (`subflow` `timeoutMs` belongs on the node). Registration's undeclared-key
+ *    walk reads the descriptor schema these types do not publish, and their
+ *    executors parse the strict contract before anything else, so this is the
+ *    one door before the run that refuses them. Every other builtin's
+ *    undeclared key stays registration's, and a tombstoned key (a
+ *    `retiredKey()`) keeps the path it had.
  *
  * Where the build cannot read the config whole, it reads only what is sound,
  * and each such type is named here, not skipped in silence:
@@ -576,6 +621,9 @@ export function flowNodeConfigRefusals(nodeType: string, config: unknown): FlowN
   const contract = builtin ?? declared;
   if (!contract) return out;
   const whole = declared !== undefined;
+  // [#21982] Key membership: a declared plugin contract's always, a builtin's
+  // only where no descriptor `configSchema` lets registration judge it.
+  const keysJudged = whole || builtinKeysJudged(nodeType);
   const authored = config ?? {};
   if (!isRecord(authored)) return out;
   if (contract.parsedWhen && !contract.parsedWhen(authored)) return out;
@@ -583,7 +631,7 @@ export function flowNodeConfigRefusals(nodeType: string, config: unknown): FlowN
   if (result.success) return out;
   const seen = new Set<string>();
   for (const issue of result.error?.issues ?? []) {
-    if (whole) {
+    if (keysJudged) {
       // An unknown key's issue sits on the object that holds it (the config
       // itself for a top-level key, so its `path` is empty): anchor one
       // refusal at each key the author wrote, with the contract's sentence.

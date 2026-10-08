@@ -4535,6 +4535,21 @@ describe('node config an executor requires (#20316)', () => {
     expect(found.map((i) => i.where)).toEqual(["flow 'config_flow' · node 'n' (script) callable"]);
     expect(errorsOf(stackWith({ type: 'script', config: { functionName: 'recalc_totals' } }))).toHaveLength(0);
   });
+
+  it('a `script` key its contract does not declare is still refused — only the `functionName` alias is the callable check\'s', () => {
+    const config = { function: 'recalc_totals', bogusKey: 1 };
+    expect(errorsOf(stackWith({ type: 'script', config })).map((i) => [i.where, i.message, i.source])).toEqual([
+      ["flow 'config_flow' · node 'n' (script) config.bogusKey", flowNodeConfigRefusals('script', config)[0].message, ''],
+    ]);
+    // On a raw alias source the judge names `function`, `functionName` and
+    // `bogusKey`; the pass hands the first two to the callable check and
+    // keeps the third.
+    const aliased = { functionName: 'recalc_totals', bogusKey: 1 };
+    expect(flowNodeConfigRefusals('script', aliased).map((r) => r.path).sort()).toEqual(['bogusKey', 'function', 'functionName']);
+    expect(errorsOf(stackWith({ type: 'script', config: aliased })).map((i) => i.where)).toEqual([
+      "flow 'config_flow' · node 'n' (script) config.bogusKey",
+    ]);
+  });
 });
 
 /**

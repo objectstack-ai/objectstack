@@ -60,7 +60,7 @@
 
 import type { StrictObjectOptions } from './strict-object';
 import type { KeySetGuidance } from './suggestions.zod';
-import { VISIBILITY_STRICT_OPTIONS } from './visibility';
+import { VISIBILITY_STRICT_OPTIONS } from './visibility-strict-options';
 
 /**
  * The editability vocabulary an author reaches for on a shape that gates
