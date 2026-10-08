@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 233 |
+| Write call sites | 235 |
 | Object name statically decidable | 155 |
-| Object name chosen at run time | 78 |
+| Object name chosen at run time | 80 |
 | Against a tenancy-enabled object | 154 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 171 |
+| Threading a tenant context | 173 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 54 |
 | …and decidably tenancy-enabled | 31 |
-| Threading a decidably elevated context | 123 |
+| Threading a decidably elevated context | 124 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 102 |
+| Threading a context of undecidable elevation | 103 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,12 +90,12 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-07 at `e1171ca48`.
+Measured on 2026-10-08 at `6eabe4b41`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 612 |
-| engine-shaped types recognised | 70 |
+| tracked non-test sources scanned | 614 |
+| engine-shaped types recognised | 71 |
 | declared objects in the registry | 116 |
 | same-named calls subtracted as non-engine | 160 |
 
@@ -168,6 +168,8 @@ Measured on 2026-10-07 at `e1171ca48`.
 | `packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/claim-seed-ownership.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/cleanup-package-permissions.ts` | `delete` | `object` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-security/src/grant-permission-set-name-backfill.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-security/src/grant-permission-set-name-backfill.ts` | `update` | `GRANT_OBJECT` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/invitation-placement.ts` | `insert` | `sys_user_position` | enabled | elevated | 1 |
 | `packages/plugins/plugin-security/src/normalize-managed-by.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/permission-set-overlay-discard.ts` | `delete` | `sys_metadata` | enabled | context, elevation undecidable | 1 |
