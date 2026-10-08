@@ -66,10 +66,10 @@
  * Hooks that plugins register in code carry no metadata binding and still run
  * on every claimed row: plugin-audit's writer, capability gates and
  * plugin-sharing's rule projection. The opt-out can never bypass audit or
- * sharing (#2922). ObjectQL's own `sys_stamp_audit_*` builtins are bound
- * through the hook binder, so they carry metadata and are skipped as well; for
- * this write that changes nothing — the claim has no user to stamp into
- * `updated_by`, and the drivers stamp `updated_at` themselves.
+ * sharing (#2922). ObjectQL's own `sys_stamp_audit_*` builtins are registered
+ * in code too (#22070), so they also run on every claimed row; for this write
+ * they stamp `updated_at` only, because the claim has no user to stamp into
+ * `updated_by`.
  *
  * Measured before this on hotcrm `56d98f7e` (17.7.0, a 354-row seed): the
  * first sign-up waited ~45 s while the claim fired 1 254 app hooks, ran 8 flows,

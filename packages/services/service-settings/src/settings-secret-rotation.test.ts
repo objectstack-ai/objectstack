@@ -77,7 +77,7 @@ import { describe, expect, it, vi } from 'vitest';
 // the #8262 doubles below stay pinned to the real dispatch contract without
 // adding a dependency or an alias.
 import { assertEngineUpdateDispatch, ObjectQL } from '@objectstack/objectql';
-import { SysSecret, SysSetting } from '@objectstack/platform-objects/system';
+import { SysPlatformSetting, SysSecret, SysSetting } from '@objectstack/platform-objects/system';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { SettingsService } from './settings-service.js';
 import { wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
@@ -124,6 +124,9 @@ function makeMemoryDriver() {
   const matches = (row: Record<string, unknown>, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
     return Object.entries(where).every(([k, v]) => {
+      // `$or` is the one combinator the settings reads emit (ADR-0131 D7: every
+      // `sys_setting` read names its rungs); anything else still refuses.
+      if (k === '$or') return (v as any[]).some((b) => matches(row, b));
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       return (row[k] ?? null) === (v ?? null);
     });
@@ -274,7 +277,7 @@ async function boot(opts: {
   const { driver, rowsOf } = makeMemoryDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  for (const o of [SysSetting, SysSecret]) {
+  for (const o of [SysSetting, SysPlatformSetting, SysSecret]) {
     engine.registry.registerObject(o as any, OWNER_PACKAGE);
   }
 

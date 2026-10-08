@@ -40,7 +40,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
-import { SysSetting } from '@objectstack/platform-objects/system';
+import { SysPlatformSetting, SysSetting } from '@objectstack/platform-objects/system';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { SettingsService } from './settings-service.js';
@@ -94,6 +94,9 @@ function makeMemoryDriver() {
   const matches = (row: Record<string, unknown>, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
     return Object.entries(where).every(([k, v]) => {
+      // `$or` is the one combinator the settings reads emit (ADR-0131 D7: every
+      // `sys_setting` read names its rungs); anything else still refuses.
+      if (k === '$or') return (v as any[]).some((b) => matches(row, b));
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       return (row[k] ?? null) === (v ?? null);
     });
@@ -166,6 +169,7 @@ async function bootProviderless(opts: { crypto?: CryptoAdapter } = {}) {
   engine.registerDriver(driver, true);
   await engine.init();
   engine.registry.registerObject(SysSetting as any, OWNER_PACKAGE);
+  engine.registry.registerObject(SysPlatformSetting as any, OWNER_PACKAGE);
 
   const logged: string[] = [];
   const svc = new SettingsService({
@@ -176,7 +180,9 @@ async function bootProviderless(opts: { crypto?: CryptoAdapter } = {}) {
   });
   svc.registerManifest(manifest);
 
-  const settingRows = () => [...rowsOf('sys_setting').values()];
+  // `crypto_ns` is `scope: 'global'`: its rows are the global rung's, stored in
+  // `sys_platform_setting` (ADR-0131 D7).
+  const settingRows = () => [...rowsOf('sys_platform_setting').values()];
   const rowFor = (key: string) => settingRows().find((r) => r.key === key);
   return { svc, settingRows, rowFor, logged };
 }

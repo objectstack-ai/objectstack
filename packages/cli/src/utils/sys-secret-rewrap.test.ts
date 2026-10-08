@@ -160,6 +160,8 @@ const sysSecretObject = objectOf('sys_secret', ['id', 'namespace', 'key', 'kms_k
   version: { name: 'version', label: 'version', type: 'number' as const },
 });
 const sysSettingObject = objectOf('sys_setting', ['id', 'namespace', 'key', 'scope', 'user_id', 'value', 'value_enc']);
+// [ADR-0131 D7] The global rung's store, the settings family's second holder.
+const sysPlatformSettingObject = objectOf('sys_platform_setting', ['id', 'namespace', 'key', 'value', 'value_enc']);
 const sysMetadataObject = objectOf('sys_metadata', ['id', 'name', 'type', 'scope', 'metadata', 'state']);
 /** A business object with a `secret` field: family 2's holder. */
 const vaultObject = objectOf('vault_entry', ['id', 'label'], {
@@ -203,7 +205,7 @@ async function buildRuntime(opts: BuildOptions = {}) {
   const engine = new ObjectQL();
   engine.registerDriver(store.driver as never, true);
   await engine.init();
-  for (const object of [sysSecretObject, sysSettingObject, sysMetadataObject, vaultObject]) {
+  for (const object of [sysSecretObject, sysSettingObject, sysPlatformSettingObject, sysMetadataObject, vaultObject]) {
     engine.registry.registerObject(object as never, TEST_PACKAGE_ID);
   }
   const provider = new LocalCryptoProvider({ key: KEY });

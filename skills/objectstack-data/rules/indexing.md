@@ -28,8 +28,9 @@ and it is the whole surface *because* it is all the driver materializes:
 > selected no access method, and an authored `partial` produced a **full**
 > index with the predicate silently discarded. Writing either is now a `tsc`
 > error and a parse error carrying the migration prescription; run
-> `os migrate meta --from 16` to strip them automatically. What to do instead
-> is the subject of "Access methods and partial indexes" below.
+> `os migrate meta --from 16` to list the mechanical edits; `--write` applies
+> the ones it can prove, and you apply the rest by hand. What to do instead is
+> the subject of "Access methods and partial indexes" below.
 
 ## Syntax
 
