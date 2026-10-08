@@ -77,8 +77,9 @@ function makeDriver() {
     rowsOf: (o: string): Row[] => Array.from(storeFor(o).values()),
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async syncSchema() {},
-    async find(o: string, ast: { where?: unknown } | undefined) {
-      return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
+    async find(o: string, ast: { where?: unknown; limit?: unknown } | undefined) {
+      const rows = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
+      return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
     },
     async findOne(o: string, ast: { where?: unknown } | undefined) {
       for (const r of storeFor(o).values()) if (matches(r, ast?.where)) return r;
