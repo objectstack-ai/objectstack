@@ -124,7 +124,8 @@ async function boot(provider?: Plugin) {
   await kernel.use(new SecurityPlugin({ fallbackPermissionSet: 'member_default' }));
   await kernel.bootstrap();
   const ql = kernel.getService<ObjectQL>('objectql');
-  const security = kernel.getService<any>('security');
+  // The one member of the `security` service these pins read.
+  const security = kernel.getService<{ getReadFilter(object: string, context: unknown): Promise<unknown> }>('security');
   return { ql, security };
 }
 
