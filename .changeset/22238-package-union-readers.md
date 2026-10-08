@@ -15,4 +15,4 @@ An app composed with `composeStacks([a, b], { manifest: 'preserve' })` carries i
 
 A `packages` value that is present but is not an array is now refused by `os validate`, `os i18n check` and `os i18n extract` with `INVALID_ARTIFACT_PACKAGES`, as the other readers already refuse it. `os i18n check` and `os i18n extract` used to accept such a config with exit 0 and zero keys; `os validate` refused it from the schema parse instead.
 
-No accepted input, exported symbol or `--json` field changes. A single-package app's output is unchanged.
+Apart from that refusal, no accepted input, exported symbol or `--json` field changes. A single-package app's output is unchanged.
