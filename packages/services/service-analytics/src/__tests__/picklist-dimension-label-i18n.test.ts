@@ -45,7 +45,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { DatasetSchema } from '@objectstack/spec/data';
+import { DatasetSchema } from '@objectstack/spec/ui';
 import { translateObject, type TranslationBundle } from '@objectstack/spec/system';
 import type { AnalyticsService } from '../analytics-service.js';
 import { AnalyticsServicePlugin } from '../plugin.js';
@@ -146,7 +146,7 @@ const DATASET = DatasetSchema.parse({
     { name: 'industry', field: 'industry', type: 'string' },
     { name: 'type', field: 'type', type: 'string' },
   ],
-  measures: [{ name: 'n', aggregate: 'count' }],
+  measures: [{ name: 'account_count', aggregate: 'count' }],
 });
 
 const FACES = ['native', 'objectql'] as const;
@@ -162,11 +162,11 @@ describe('[#22178] a picklist-bound select dimension renders its labels in the r
   const labelsOf = async (face: Face, dimension: 'industry' | 'type', locale?: string) => {
     const res = await services[face]!.queryDataset(
       DATASET,
-      { dimensions: [dimension], measures: ['n'] },
+      { dimensions: [dimension], measures: ['account_count'] },
       (locale ? { locale } : {}) as never,
     );
     const out: Record<string, number> = {};
-    for (const row of res.rows) out[String(row[dimension])] = Number(row.n);
+    for (const row of res.rows) out[String(row[dimension])] = Number(row.account_count);
     return out;
   };
 
