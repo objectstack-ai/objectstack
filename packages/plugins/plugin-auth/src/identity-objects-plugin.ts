@@ -50,9 +50,6 @@ import { authIdentityManifest } from './manifest.js';
 /** The kernel plugin name of {@link IdentityObjectsPlugin}. */
 export const IDENTITY_OBJECTS_PLUGIN_NAME = 'com.objectstack.auth.identity-objects';
 
-/** `AuthPlugin`'s kernel plugin name; its `init()` registers the `auth` service. */
-const AUTH_KERNEL_PLUGIN_NAME = 'com.objectstack.auth';
-
 export interface IdentityObjectsPluginOptions {
   /**
    * The datasource that owns the identity tables, with the same meaning as
@@ -72,8 +69,12 @@ export class IdentityObjectsPlugin implements Plugin {
   version = '1.0.0';
   /** ObjectQL registers the `manifest` service this plugin registers through. */
   dependencies: string[] = ['com.objectstack.engine.objectql'];
-  /** Ordered ahead when composed, so `init()` can refuse the pair. */
-  optionalDependencies: string[] = [AUTH_KERNEL_PLUGIN_NAME];
+  /**
+   * `AuthPlugin`'s kernel plugin name: ordered ahead when composed, so its
+   * `auth` service is registered by the time `init()` asks, and the pair is
+   * refused there.
+   */
+  optionalDependencies: string[] = ['com.objectstack.auth'];
   requiresServices: string[] = ['manifest'];
 
   private readonly options: IdentityObjectsPluginOptions;
