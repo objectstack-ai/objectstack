@@ -289,6 +289,17 @@ for (const [doorName, boot] of DOORS) {
             expect(served(await door.read('/meta/view/case_grid', { package: 'all' })).item).toEqual(plain.item);
         }, 60_000);
 
+        it('the draft read: ?state=draft&package=all serves the draft ?state=draft serves', async () => {
+            const door = await boot();
+            // A draft saved naming no package inherits the package of the
+            // item's active row (#11087): the draft the Studio editor reads
+            // back with its raw router `?package=`.
+            served(await door.put('/meta/view/case_grid', view('case_grid', 'staged'), { mode: 'draft' }));
+            const plain = served(await door.read('/meta/view/case_grid', { state: 'draft' }));
+            expect(plain.item?.label).toBe('staged');
+            expect(served(await door.read('/meta/view/case_grid', { state: 'draft', package: 'all' })).item).toEqual(plain.item);
+        }, 60_000);
+
         it('the save: PUT ?package=all writes the env-local row, as a save naming no package does; a real package id still binds', async () => {
             const door = await boot();
             served(await door.put('/meta/view/fresh_grid', view('fresh_grid', 'unscoped'), { package: 'all' }));
