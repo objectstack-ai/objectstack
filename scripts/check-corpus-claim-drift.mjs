@@ -8,6 +8,8 @@
 //   node scripts/check-corpus-claim-drift.mjs --list        # every claim site it can see
 //   node scripts/check-corpus-claim-drift.mjs --update      # ⛔ MAINTAINER-ONLY, see below
 //   node scripts/check-corpus-claim-drift.mjs --self-test   # verify the checker's own rules
+//   node scripts/check-corpus-claim-drift.mjs --probe-examples [--json F]
+//                                                     # #22059 step ①: REPORT-ONLY probe, below
 //
 // ## The defect class, and the half of it that IS mechanical
 //
@@ -123,6 +125,21 @@
 // `skills/**`, a `domain:skills` surface; ownership of THIS gate stays
 // `domain:devx` per the #13582 triage ruling, because its subject is the factual
 // correctness of teaching text, not the governance of an agent instruction face.
+
+//
+// ## `--probe-examples` — a MEASUREMENT riding along, not a row and not a gate
+//
+// #22059 (ruling B, step ①) asks whether a SCHEMA check over the published
+// skills' example blocks would have caught the teaching errors found by hand.
+// `--probe-examples` answers with readings — fence census, transform coverage,
+// a control over today's catalog and a replay of the fix commits — and exits 0
+// on any of them; nothing in this gate's verdict, table or baseline reads it.
+// The instrument is `scripts/skill-example-probe.mjs` (its header is the
+// authority); it is imported only by this mode and by `--self-test`, whose four
+// `Probe …` batteries pin its pure halves over synthetic schemas, so neither the
+// self-test nor the ratchet needs a build. Joining this step for real is the
+// ruling's step ②, conditional on the hit rate — ⛔ not something a later edit
+// slips in here.
 
 import { spawnSync } from 'node:child_process';
 import {
@@ -657,18 +674,24 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'A missing ROOT is REFUSED, per root (#9932)': 4,
   'The dispatch-gates declaration (#9964\'s pattern)': 4,
   'At the PROGRAM level': 10,
+  // #22059 step ①: cases registered by scripts/skill-example-probe.mjs
+  // (`registerProbeSelfTest`), named by its PROBE_SELF_TEST_BATTERIES.
+  'Probe extractor: fences, languages, markers, census (#22059)': 14,
+  'Probe transform: the supported shapes and the coverage miss (#22059)': 18,
+  'Probe mapping and judge, over synthetic schemas (#22059)': 21,
+  'Probe replay: the hit and every miss class (#22059)': 12,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 17;
+const SELF_TEST_BATTERY_FLOOR = 21;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
 // inflating whichever battery happened to run last.
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
-function selfTest() {
+function selfTest(probe) {
   // The battery ledger this self-test's floor is evaluated against (#13489).
   // `battery()` opens a battery; every assertion below is attributed to the one
   // most recently opened, so a section that stops running stops registering and
@@ -1373,6 +1396,13 @@ function selfTest() {
     rmSync(sandbox, { recursive: true, force: true });
   }
 
+  // ── The #22059 probe's pure halves (its own module registers the cases) ──
+  //
+  // Loaded by the dispatch below and handed in, so this function stays
+  // synchronous. A probe that failed to load registers nothing, and its four
+  // batteries then name themselves at the floor.
+  if (probe) probe.module.registerProbeSelfTest({ battery, expect }, { ts: probe.ts, yaml: probe.yaml });
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -1456,14 +1486,42 @@ function selfTest() {
     + 'nowhere is REFUSED rather than silently green, both refusals precede the `--update` write '
     + '(pinned as byte-identity), the baseline-expanding remedy is marked maintainer-only while '
     + 'the ratchet-DOWN one is not, and the success body reports what was READ per root and what '
-    + 'each ROW reached — all of it also driven through a real child process.',
+    + 'each ROW reached — all of it also driven through a real child process. '
+    + 'The #22059 probe that rides in `--probe-examples` has its pure halves pinned over synthetic '
+    + 'schemas: the fence extractor (nested illustrations, list indentation, adjacent markers only), '
+    + 'every supported transform shape and both coverage-miss reasons, the two-tier key ownership and '
+    + 'the opaque-aware judge, and the replay classifier\'s HIT and each miss class.',
   );
   selfTestReachedVerdict = true;
   process.exit(0);
 }
 
+if (process.argv.includes('--probe-examples')) {
+  const { runProbe } = await import('./skill-example-probe.mjs');
+  const at = process.argv.indexOf('--json');
+  process.exit(await runProbe({
+    repoRoot: fileURLToPath(new URL('..', import.meta.url)),
+    jsonOut: at > 0 ? process.argv[at + 1] ?? null : null,
+  }));
+}
+
+/* The probe's cases need the TypeScript parser and `yaml` — root dev
+ * dependencies — but no build. A load failure is reported, never swallowed:
+ * the probe batteries then fail the floor by name. */
+async function loadProbeForSelfTest() {
+  try {
+    const module = await import('./skill-example-probe.mjs');
+    const { default: ts } = await import('typescript');
+    const yaml = await import('yaml');
+    return { module, ts, yaml };
+  } catch (err) {
+    console.error(`  x self-test: the #22059 probe module did not load: ${err.message}`);
+    return null;
+  }
+}
+
 if (process.argv.includes('--self-test')) {
-  selfTest();
+  selfTest(await loadProbeForSelfTest());
   if (!selfTestReachedVerdict) {
     console.error(
       '\n✗ check-corpus-claim-drift self-test: selfTest() returned without reaching its verdict,\n'
