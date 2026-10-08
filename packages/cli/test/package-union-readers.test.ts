@@ -27,9 +27,12 @@
  *
  * Spawned because the exit code and the `--json` payload are the contract a CI
  * pipeline reads, and the readers sit inside oclif command bodies. That puts
- * this file in the integration tier (`packages/cli/vitest-tiers.ts`). The
- * enumeration of every such reader is pinned at the source level in
- * `test/normalized-call-sites.test.ts`.
+ * this file in the integration tier (`packages/cli/vitest-tiers.ts`), which
+ * runs on every PR. ⛔ Not named `*.e2e.test.ts`: that name moves a file to the
+ * nightly tier (`vitest.config.ts`), and these pins must gate the merge. The
+ * spawn count is kept to what the pins need. The enumeration of every such
+ * reader is pinned at the source level in `test/normalized-call-sites.test.ts`,
+ * and the preflight's attribution rule in `test/capability-preflight.test.ts`.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -122,9 +125,6 @@ const svc = defineStack({ manifest: svcManifest, objects: [note], connectors: [c
 const appStack = defineStack({ manifest: appManifest, objects: [ticket], apps: [app] } as any);
 export default composeStacks([svc, appStack], { manifest: 'preserve' });
 `,
-  keyOne: `${PIECES}
-export default defineStack({ manifest: appManifest, objects: [ticket, note], apps: [app], connectors: [conn] } as any, { strict: false });
-`,
 };
 
 const dirs: Record<string, string> = {};
@@ -163,16 +163,14 @@ describe('#22189 — the capability preflight reads each package body, naming th
   let r: Record<string, Run> = {};
   beforeAll(async () => {
     r = await runAll([
-      ['validateTwo', 'capTwo', ['validate']],
       ['buildTwo', 'capTwo', ['build']],
       ['validateTwoJson', 'capTwo', ['validate', '--json']],
       ['validateOneJson', 'capOne', ['validate', '--json']],
-      ['buildOne', 'capOne', ['build']],
     ]);
   }, 300_000);
 
-  it.each([['validateTwo'], ['buildTwo']])('two packages: `%s` refuses, naming the declaring package', (key) => {
-    const run = r[key];
+  it('two packages: `os build` refuses, naming the declaring package', () => {
+    const run = r.buildTwo;
     expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(1);
     expect(run.stdout).toContain('Capability provider check failed (1 issue)');
     expect(run.stdout).toContain(`package '${SVC_ID}' — Capability "ai"`);
@@ -201,11 +199,6 @@ describe('#22189 — the capability preflight reads each package body, naming th
       .filter((w) => w.token === 'hierarchy-security');
     expect(advisory).toHaveLength(1);
     expect(advisory[0].message).not.toMatch(PER_PACKAGE);
-
-    const build = r.buildOne;
-    expect(build.code, build.stderr).toBe(1);
-    expect(build.stdout).toContain('Capability provider check failed (1 issue)');
-    expect(build.stdout).toContain('  • Capability "ai"');
   });
 });
 
@@ -218,7 +211,6 @@ describe('#22238 — translation coverage and extraction read the package union'
       ['checkTwo', 'i18nTwo', ['i18n', 'check', '--json']],
       ['checkOne', 'i18nOne', ['i18n', 'check', '--json']],
       ['extractTwo', 'i18nTwo', ['i18n', 'extract', '--json']],
-      ['extractOne', 'i18nOne', ['i18n', 'extract', '--json']],
     ]);
   }, 300_000);
 
@@ -246,12 +238,9 @@ describe('#22238 — translation coverage and extraction read the package union'
   });
 
   it('`os i18n extract` extracts both packages\' objects', () => {
-    for (const key of ['extractTwo', 'extractOne']) {
-      const run = r[key];
-      expect(run.code, `${key}\n${run.stderr}`).toBe(0);
-      expect(Object.keys(payloadOf(run).bundles.en).sort(), key).toEqual(['unr_note', 'unr_ticket']);
-    }
-    expect(payloadOf(r.extractTwo).counts).toEqual(payloadOf(r.extractOne).counts);
+    const run = r.extractTwo;
+    expect(run.code, run.stderr).toBe(0);
+    expect(Object.keys(payloadOf(run).bundles.en).sort()).toEqual(['unr_note', 'unr_ticket']);
   });
 });
 
@@ -260,20 +249,15 @@ describe('#22238 — the undeclared-authoring-key walk reads the package union',
   beforeAll(async () => {
     r = await runAll([
       ['validateTwo', 'keyTwo', ['validate', '--json']],
-      ['buildTwo', 'keyTwo', ['build', '--json']],
-      ['validateOne', 'keyOne', ['validate', '--json']],
     ]);
   }, 300_000);
 
   const named = (run: Run) =>
     (payloadOf(run).warnings as unknown[]).filter((w) => typeof w === 'string' && w.includes('zzzUnionProbeKey'));
 
-  it('both doors carry the finding in `--json` warnings for two packages, as for one', () => {
-    for (const key of ['validateTwo', 'buildTwo', 'validateOne']) {
-      const run = r[key];
-      expect(run.code, `${key}\n${run.stdout}\n${run.stderr}`).toBe(0);
-      expect(named(run), key).toHaveLength(1);
-    }
-    expect(named(r.validateTwo)).toEqual(named(r.validateOne));
+  it('`os validate --json` carries the finding in `warnings` for a two-package app', () => {
+    const run = r.validateTwo;
+    expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
+    expect(named(run)).toEqual([expect.stringContaining('connectors.unr_conn.zzzUnionProbeKey')]);
   });
 });

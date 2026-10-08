@@ -33,7 +33,7 @@
  * The capability preflight (#22189) is a sibling of this family that reads
  * `config.requires` rather than `normalized`, so it is not a row here; its
  * per-package reading is pinned in `capability-preflight.test.ts` and
- * `package-union-readers.e2e.test.ts`.
+ * `package-union-readers.test.ts`.
  *
  * ## How a site is named
  *
