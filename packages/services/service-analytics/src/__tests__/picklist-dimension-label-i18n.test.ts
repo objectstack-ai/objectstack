@@ -33,6 +33,11 @@
  * - **The control.** The inline-options dimension renders its field-level
  *   translations, exactly as before; with no locale both dimensions render
  *   their authored labels.
+ * - **The sort-key pass.** Once the picklist-bound dimension renders
+ *   translated labels, an ascending `order` on it must sort, and a `limit`
+ *   window it, by those labels rather than the authored ones it sorted by
+ *   before; the same holds for the inline dimension, whose sort keys were
+ *   never translated either. With no locale the order is the authored one.
  *
  * `AnalyticsService.queryDataset` is what `POST /api/v1/analytics/dataset/query`
  * calls, with the request's ExecutionContext (its `locale` read from
@@ -138,6 +143,27 @@ const AUTHORED = {
   type: { Customer: 3, Partner: 1 },
 };
 
+/**
+ * Each dimension's rendered labels in ascending order of the rendered label
+ * (the executor compares sort labels with `localeCompare`), and — the vacuity
+ * guard — the same labels in ascending order of their AUTHORED labels, which
+ * is what an `order` on a select dimension sorted by before. The two differ
+ * for every locale and dimension here, so a sort-key pass that still read the
+ * authored label cannot satisfy a pin on the first.
+ */
+const ORDERED = {
+  'zh-CN': {
+    industry: { byRendered: ['教育', '物流运输', '能源公用事业'], byAuthored: ['教育', '能源公用事业', '物流运输'] },
+    type: { byRendered: ['合作伙伴', '正式客户'], byAuthored: ['正式客户', '合作伙伴'] },
+  },
+  'ja-JP': {
+    industry: { byRendered: ['エネルギー・公益', 'ロジスティクス', '教育・学術'], byAuthored: ['教育・学術', 'エネルギー・公益', 'ロジスティクス'] },
+    type: { byRendered: ['パートナー', '顧客'], byAuthored: ['顧客', 'パートナー'] },
+  },
+} as const;
+
+const AUTHORED_ORDER = { industry: ['Education', 'Energy & Utilities', 'Logistics'], type: ['Customer', 'Partner'] } as const;
+
 const DATASET = DatasetSchema.parse({
   name: 'os22178_account_metrics',
   label: 'Account metrics',
@@ -168,6 +194,16 @@ describe('[#22178] a picklist-bound select dimension renders its labels in the r
     const out: Record<string, number> = {};
     for (const row of res.rows) out[String(row[dimension])] = Number(row.account_count);
     return out;
+  };
+
+  /** The rendered labels in the order the service answered an ascending `order` on the dimension. */
+  const orderedLabelsOf = async (face: Face, dimension: 'industry' | 'type', locale?: string, limit?: number) => {
+    const res = await services[face]!.queryDataset(
+      DATASET,
+      { dimensions: [dimension], measures: ['account_count'], order: { [dimension]: 'asc' as const }, ...(limit ? { limit } : {}) },
+      (locale ? { locale } : {}) as never,
+    );
+    return res.rows.map((row) => String(row[dimension]));
   };
 
   beforeAll(async () => {
@@ -207,6 +243,17 @@ describe('[#22178] a picklist-bound select dimension renders its labels in the r
     expect(fields.type.options!.map((o) => o.value)).toEqual(['customer', 'partner']);
   });
 
+  it('the ordering fixture discriminates: rendered-label order is the comparator\'s order and differs from authored-label order', () => {
+    for (const locale of ['zh-CN', 'ja-JP'] as const) {
+      for (const dimension of ['industry', 'type'] as const) {
+        const { byRendered, byAuthored } = ORDERED[locale][dimension];
+        expect([...byRendered].sort((a, b) => a.localeCompare(b)), `${locale} ${dimension}`).toEqual(byRendered);
+        expect(byAuthored, `${locale} ${dimension}`).not.toEqual(byRendered);
+        expect([...byAuthored].sort(), `${locale} ${dimension}`).toEqual([...byRendered].sort());
+      }
+    }
+  });
+
   for (const face of FACES) {
     describe(`${face} strategy`, () => {
       for (const locale of ['zh-CN', 'ja-JP'] as const) {
@@ -235,6 +282,24 @@ describe('[#22178] a picklist-bound select dimension renders its labels in the r
       it('control — with no locale, both dimensions render their authored labels', async () => {
         expect(await labelsOf(face, 'industry')).toEqual(AUTHORED.industry);
         expect(await labelsOf(face, 'type')).toEqual(AUTHORED.type);
+      });
+
+      // The sort-key pass reads the same translated options as the display
+      // pass, so an `order` sorts, and a `limit` windows, by the label the
+      // row renders — for the picklist-bound and the inline dimension alike.
+      for (const locale of ['zh-CN', 'ja-JP'] as const) {
+        for (const dimension of ['industry', 'type'] as const) {
+          it(`${locale}: an ascending order on ${dimension} sorts and windows by the rendered label`, async () => {
+            const { byRendered } = ORDERED[locale][dimension];
+            expect(await orderedLabelsOf(face, dimension, locale)).toEqual(byRendered);
+            expect(await orderedLabelsOf(face, dimension, locale, 1)).toEqual([byRendered[0]]);
+          });
+        }
+      }
+
+      it('control — with no locale, an ascending order sorts by the authored label', async () => {
+        expect(await orderedLabelsOf(face, 'industry')).toEqual(AUTHORED_ORDER.industry);
+        expect(await orderedLabelsOf(face, 'type')).toEqual(AUTHORED_ORDER.type);
       });
     });
   }
