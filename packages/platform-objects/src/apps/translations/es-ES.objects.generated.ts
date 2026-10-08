@@ -3257,7 +3257,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Ámbito",
         help: "Capa de la jerarquía de resolución de configuración a la que pertenece esta fila.",
         options: {
-          global: "Global",
           tenant: "Inquilino",
           user: "Usuario"
         }
@@ -3276,7 +3275,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       locked: {
         label: "Bloqueado",
-        help: "Si es verdadero, las filas de ámbitos inferiores no pueden sobrescribir este valor; las escrituras contra ámbitos inferiores devuelven 409. Lo utilizan los administradores de la plataforma para fijar un valor global para todos los tenants (cascada Fase 2)."
+        help: "Si es verdadero, las filas de ámbitos inferiores no pueden sobrescribir este valor; las escrituras contra ámbitos inferiores devuelven 409. Una fila de tenant fija su valor para los usuarios de ese tenant (cascada Fase 2)."
       },
       locked_reason: {
         label: "Motivo del bloqueo",

@@ -3257,7 +3257,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "范围",
         help: "该记录所属的配置解析层级。",
         options: {
-          global: "全局",
           tenant: "租户",
           user: "用户"
         }
@@ -3276,7 +3275,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       locked: {
         label: "已锁定",
-        help: "为 true 时，较低范围的记录无法覆盖该值；对较低范围的写入会返回 409。平台管理员可借此为所有租户固定全局值（Phase 2 级联）。"
+        help: "为 true 时，较低范围的记录无法覆盖该值；对较低范围的写入会返回 409。租户行借此为该租户的用户固定其值（Phase 2 级联）。"
       },
       locked_reason: {
         label: "锁定原因",
