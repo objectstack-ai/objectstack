@@ -220,16 +220,19 @@ describe('what stays accepted (lit controls)', () => {
 
   it('CONTROL: key membership is not this arm\'s — an undeclared key and a tombstoned one', () => {
     // [#21982] An undeclared key on these builtins draws the KEY arm's one
-    // refusal at its location; this arm adds nothing beside it.
+    // refusal at its location; this arm adds nothing beside it. [#22343] So
+    // does a tombstoned key on a type the key arm judges it for — `try_catch`'s
+    // `retry.retryDelayMs` — while a retired `script` key keeps the scope it
+    // had (the lint names it): neither draws a second refusal from this arm.
     for (const [type, config, key] of [
       ['http', { ...VALID.http, bogusKey: 1 }, 'bogusKey'],
       ['screen', { fields: [{ name: 'qty', visible: 'x' }] }, 'fields[0].visible'],
+      ['try_catch', { ...VALID.try_catch, retry: { retryDelayMs: 500 } }, 'retry.retryDelayMs'],
     ] as const) {
       expect(flowNodeConfigRefusals(type, config).map(({ code, path }) => ({ code, path })), type)
         .toEqual([{ code: 'node-config-refused-by-contract', path: key }]);
     }
     expect(flowNodeConfigRefusals('script', { ...VALID.script, actionType: 'email' })).toEqual([]);
-    expect(flowNodeConfigRefusals('try_catch', { ...VALID.try_catch, retry: { retryDelayMs: 500 } })).toEqual([]);
     // CONTROL: the contracts refuse all four — the arm holds back, the contract does not.
     for (const [type, config] of [
       ['http', { ...VALID.http, bogusKey: 1 }],
