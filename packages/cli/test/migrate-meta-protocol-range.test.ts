@@ -190,15 +190,20 @@ type LoadVerdict = { refused: any } | { loaded: unknown };
 
 /**
  * Load a project through the door `os serve` boots through: the CLI's config
- * loader, then `AppPlugin.init`, whose protocol handshake runs before the
- * manifest is registered. The context double carries the one service that
- * registration needs.
+ * loader (whose `define*` calls run the schema), then `AppPlugin.init`, whose
+ * protocol handshake runs before the manifest is registered. Either one may
+ * refuse. The context double carries the one service registration needs.
  */
 async function load(dir: string): Promise<LoadVerdict> {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   try {
-    const { config } = await loadConfig(join(dir, 'objectstack.config.ts'));
+    let config: Awaited<ReturnType<typeof loadConfig>>['config'];
+    try {
+      ({ config } = await loadConfig(join(dir, 'objectstack.config.ts')));
+    } catch (refused) {
+      return { refused };
+    }
     const registered: unknown[] = [];
     const ctx = {
       logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
