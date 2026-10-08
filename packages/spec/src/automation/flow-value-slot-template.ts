@@ -219,18 +219,34 @@ export interface ValueSlotTemplateRefusal {
   readonly source: string;
 }
 
+/** How {@link valueSlotTemplateRefusals} reads its value. */
+export interface ValueSlotTemplateOptions {
+  /**
+   * The position is one of the two legacy `assignment` shapes, where an
+   * envelope-shaped object is a LITERAL (the ledger does not declare them, so
+   * nothing evaluates it) and its strings were interpolated like any other.
+   * Default `false`: in a declared value slot a top-level envelope is an
+   * expression, judged by the envelope rule and not here.
+   */
+  readonly envelopeIsLiteral?: boolean;
+}
+
 /**
  * Every string inside a value-slot value that carries the retired `{…}`
  * template dialect — the value itself when it is a string, and every string at
  * any depth of an array or a plain object (a literal's strings were
- * interpolated too). An envelope-shaped value is not judged here: it is an
- * expression, and `FlowValueSlotSchema`'s envelope rule owns it. A string whose
- * tokens include a kept spelling (a date macro, a `$User` path) is not refused
- * — see the module docblock. Cycle-safe: a flow built in code may hold a
+ * interpolated too). A top-level envelope-shaped value is not judged here: it
+ * is an expression, and `FlowValueSlotSchema`'s envelope rule owns it — unless
+ * {@link ValueSlotTemplateOptions.envelopeIsLiteral}. A string whose tokens
+ * include a kept spelling (a date macro, a `$User` path) is not refused — see
+ * the module docblock. Cycle-safe: a flow built in code may hold a
  * self-reference.
  */
-export function valueSlotTemplateRefusals(value: unknown): ValueSlotTemplateRefusal[] {
-  if (isExpressionEnvelopeShaped(value)) return [];
+export function valueSlotTemplateRefusals(
+  value: unknown,
+  options: ValueSlotTemplateOptions = {},
+): ValueSlotTemplateRefusal[] {
+  if (!options.envelopeIsLiteral && isExpressionEnvelopeShaped(value)) return [];
   const out: ValueSlotTemplateRefusal[] = [];
   const seen = new Set<object>();
   const visit = (node: unknown, path: (string | number)[]): void => {
@@ -278,13 +294,14 @@ function joinPath(prefix: string, inner: readonly (string | number)[]): string {
  * ARRAY (`[{ variable, value }]` — each element's `value`), and, when
  * `assignments` is neither an array nor an object, the bare config whose
  * top-level keys are the variables. An envelope there is a literal, as it
- * always was; a `{…}` token there is refused like anywhere else, so the legacy
- * shapes are no way around the retirement.
+ * always was, so its strings are judged like any literal's; a `{…}` token
+ * there is refused like anywhere else, so the legacy shapes are no way around
+ * the retirement.
  */
 export function flowNodeValueTemplateRefusals(nodeType: string, config: unknown): FlowNodeValueTemplateRefusal[] {
   const out: FlowNodeValueTemplateRefusal[] = [];
-  const judge = (path: string, label: string, value: unknown): void => {
-    for (const refusal of valueSlotTemplateRefusals(value)) {
+  const judge = (path: string, label: string, value: unknown, envelopeIsLiteral = false): void => {
+    for (const refusal of valueSlotTemplateRefusals(value, { envelopeIsLiteral })) {
       out.push({ path: joinPath(path, refusal.path), label, message: refusal.message, source: refusal.source });
     }
   };
@@ -294,11 +311,11 @@ export function flowNodeValueTemplateRefusals(nodeType: string, config: unknown)
     if (Array.isArray(raw)) {
       raw.forEach((item, index) => {
         if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
-          judge(`assignments[${index}].value`, 'assignment value', (item as Record<string, unknown>).value);
+          judge(`assignments[${index}].value`, 'assignment value', (item as Record<string, unknown>).value, true);
         }
       });
     } else if (!(raw !== null && typeof raw === 'object')) {
-      for (const [key, value] of Object.entries(config as Record<string, unknown>)) judge(key, 'assignment value', value);
+      for (const [key, value] of Object.entries(config as Record<string, unknown>)) judge(key, 'assignment value', value, true);
     }
   }
   return out;

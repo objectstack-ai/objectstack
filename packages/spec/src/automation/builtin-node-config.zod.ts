@@ -990,6 +990,17 @@ export const AssignmentValueSchema = celValueSlotSchema(
 export type AssignmentValue = z.input<typeof AssignmentValueSchema>;
 export type AssignmentValueParsed = z.infer<typeof AssignmentValueSchema>;
 
+/**
+ * A value of the bare legacy `assignment` config (#19939) — a literal, whose
+ * strings are judged by {@link valueSlotTemplateRefusals} with an
+ * envelope-shaped object read as the literal it is in that shape.
+ */
+const LEGACY_ASSIGNMENT_VALUE = z.unknown().superRefine((value, ctx) => {
+  for (const refusal of valueSlotTemplateRefusals(value, { envelopeIsLiteral: true })) {
+    ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
+  }
+});
+
 /** What the refusal of the legacy `assignments: [{ variable, value }]` array says. */
 export const ASSIGNMENT_ARRAY_FORM_PRESCRIPTION =
   '`assignments` is a map of variable name → value (`{ assignments: { total: { dialect: \'cel\', source: \'amount\' } } }`). The array form '
@@ -1049,8 +1060,11 @@ export const AssignmentConfigSchema = lazySchema(() => refuseCatchallProtoKey(z.
     .describe('Variables to set: each key is a variable name, each value a CEL value envelope or a literal'),
 })
   // Open by design: the bare legacy `{ <variable>: <value> }` config and any
-  // top-level key an author names live here.
-  .catchall(z.unknown()),
+  // top-level key an author names live here. [#19939] Each such value is a
+  // literal (an envelope-shaped object included — nothing evaluates it here),
+  // and one still spelling the retired `{…}` template dialect is refused like
+  // in the map, so the bare shape is no way around the retirement.
+  .catchall(LEGACY_ASSIGNMENT_VALUE),
   // [#19151] `__proto__` ONLY, and for the same structural reason
   // the `assignments` slot above refuses it: `handleCatchall`'s
   // `if (key === "__proto__") continue;` runs above `_catchall.run`, so no

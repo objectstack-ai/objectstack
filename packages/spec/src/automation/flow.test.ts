@@ -186,8 +186,10 @@ describe('FlowNodeSchema', () => {
       // canonical key the executor actually reads.
       config: {
         objectName: 'account',
+        // #19939 — a computed field value is a CEL value envelope; the `{…}`
+        // template dialect is retired from value slots.
         fields: {
-          name: '{input.companyName}',
+          name: { dialect: 'cel', source: 'input.companyName' },
           status: 'active',
         },
       },
@@ -570,14 +572,15 @@ describe('FlowSchema', () => {
             type: 'create_record',
             label: 'Create Contact',
             // #5500 — `object:` → `objectName:` (see `should accept node with
-            // config`). The `{firstName}` &c. tokens are declared INPUT
-            // variables, which the engine binds by name, so they resolve.
+            // config`). `firstName` &c. are declared INPUT variables, which
+            // the engine binds by name, so the CEL value envelopes (#19939 —
+            // the `{…}` template dialect is retired from value slots) resolve.
             config: {
               objectName: 'contact',
               fields: {
-                first_name: '{firstName}',
-                last_name: '{lastName}',
-                email: '{email}',
+                first_name: { dialect: 'cel', source: 'firstName' },
+                last_name: { dialect: 'cel', source: 'lastName' },
+                email: { dialect: 'cel', source: 'email' },
               },
             },
           },
@@ -594,12 +597,13 @@ describe('FlowSchema', () => {
             // never written. Measured: with the old shape the run ends with
             // `variable='contactId'`, `value='<the new id>'`, `contactId=undefined`.
             //
-            // The VALUE token was fine and is kept verbatim: the engine binds
-            // every node's `result.output` under `<nodeId>.<key>` and the
-            // template resolver reads that flat key, so `{create_contact.id}`
-            // resolves to the created row's id (`create_record` outputs `id`).
+            // The VALUE was fine: the engine binds every node's
+            // `result.output` under `<nodeId>.<key>`, and the CEL scope reads
+            // that flat key as a path, so `create_contact.id` resolves to the
+            // created row's id (`create_record` outputs `id`). Written as a CEL
+            // value envelope since #19939 retired `{create_contact.id}` here.
             config: {
-              assignments: { contactId: '{create_contact.id}' },
+              assignments: { contactId: { dialect: 'cel', source: 'create_contact.id' } },
             },
           },
           { id: 'end', type: 'end', label: 'End' },
