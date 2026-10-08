@@ -74,6 +74,10 @@ describe('a value-slot string in the retired `{…}` dialect is refused, with th
     expect(message).toContain('CEL divides two integers as integers');
   });
 
+  it('a name the dialect does not know is still an expression — CEL\'s own check refuses it, with a did-you-mean', () => {
+    expect(refusalOf('{ROUND(price)}')).toContain("{ dialect: 'cel', source: 'ROUND(price)' }");
+  });
+
   it('a divisor already written as a double is left as authored', () => {
     expect(refusalOf('{price / 100.0}')).toContain("source: 'price / 100.0'");
   });
@@ -85,9 +89,9 @@ describe('a value-slot string in the retired `{…}` dialect is refused, with th
     expect(message).toContain('`string(…)`');
   });
 
-  it('a token that resolves to nothing: the literal-text escape, as a CEL string literal', () => {
+  it('a token that is neither a path nor an expression: the literal-text escape, as a CEL string literal', () => {
     const message = refusalOf('{"a": 1}');
-    expect(message).toContain('resolves to nothing in the template dialect');
+    expect(message).toContain('is neither a variable path nor an expression');
     expect(message).toContain(`{ dialect: 'cel', source: "'{\\"a\\": 1}'" }`);
   });
 

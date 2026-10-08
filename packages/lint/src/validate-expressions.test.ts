@@ -3857,7 +3857,9 @@ describe('assignment value envelope — located findings (#15137)', () => {
   it('passes a well-formed envelope, and every shape that is not an envelope', () => {
     expect(valueIssues({
       digest: { dialect: 'cel', source: 'joinNonEmpty(rows.map(r, r.subject), "\\n")' },
-      greeting: 'Hello {name}',
+      // A literal — the `{…}` template dialect is retired from value slots
+      // (#19939), so text with holes is pinned by its own refusal suite.
+      greeting: 'Hello',
       count: 3,
       flags: { enabled: true },
       // Envelope-SHAPED only by a non-string dialect — data, not an expression.

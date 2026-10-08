@@ -96,8 +96,14 @@ const VARIABLE_PATH = /^[A-Za-z_$][\w$]*(?:\.(?:[A-Za-z_$][\w$]*|\d+))*$/;
 /** `resolveToken`'s arithmetic character set, verbatim — outside it a token resolves to nothing. */
 const ARITHMETIC_CHARSET = /^[\w\s+\-*/%().,?:<>=!&|"'$]+$/;
 
-/** An operator, or a call to one of the six functions the dialect mirrors from the CEL stdlib. */
-const EXPRESSION_SHAPE = /[+\-*/%<>=!&|?]|\b(?:round|floor|ceil|abs|min|max)\s*\(/;
+/**
+ * An operator, or a call — any name in call position. The dialect resolves
+ * only its six CEL-mirrored functions and refuses every other name at run
+ * time, but either way the token is an expression, and its CEL spelling is
+ * the same text: an unknown name is then refused by the envelope's own CEL
+ * check, with a did-you-mean.
+ */
+const EXPRESSION_SHAPE = /[+\-*/%<>=!&|?]|[A-Za-z_$][\w$.]*\s*\(/;
 
 /** What the interpolator does with one token — the dispatch order of `resolveToken`. */
 type TokenKind = 'date-macro' | 'user' | 'path' | 'expression' | 'unresolvable';
@@ -172,8 +178,8 @@ function remedyFor(value: string, tokens: readonly Token[]): string {
   if (tokens.some((t) => t.kind === 'unresolvable')) {
     const junk = tokens.find((t) => t.kind === 'unresolvable')!;
     return (
-      `\`${junk.text}\` resolves to nothing in the template dialect, which wrote nothing for it. If the braces are `
-      + `literal text, write the value as a CEL string literal: ${envelopeOf(celString(value))}.`
+      `\`${junk.text}\` is neither a variable path nor an expression. If the braces are literal text, write the `
+      + `value as a CEL string literal, ${envelopeOf(celString(value))}; otherwise compute it in a CEL envelope.`
     );
   }
   if (whole?.kind === 'path') {
