@@ -43,6 +43,8 @@ export type FileReadVerdict = 'allow' | 'deny' | 'unauthenticated';
  * [#22175] The answer the commit and chunked-completion doors give an uploader
  * whose active organization is no longer the one the upload was started in —
  * see `requireStartingOrganization` inside {@link registerStorageRoutes}.
+ * [#22218] The chunk door gives it too, and so does the progress door when the
+ * session's expiry stamp is due.
  *
  * `409` / `RESOURCE_CONFLICT`, the standard-catalog member HTTP 409 derives
  * (ADR-0112; no storage extension code is registered for this): the request
@@ -368,20 +370,25 @@ export function registerStorageRoutes(
     return false;
   };
 
-  // ── Starting-organization gate (#22175) ──────────────────────────────
-  // The commit and chunked-completion doors write by id under the ACTING
-  // organization (`StorageWriteContext`), and on an engine-backed store that
-  // write is SCOPED to it: the driver's statement reaches a row stamped for
-  // the acting organization or for none, and no other. An uploader who
-  // switched their active organization after starting an upload therefore
-  // names a row the write cannot reach, and that scoped miss used to surface
-  // as `500 INTERNAL` carrying the store's outage text ("Restore the data
-  // engine…") — an organization change diagnosed, to the caller and to the
-  // operator, as a data-engine fault.
+  // ── Starting-organization gate (#22175, #22218) ──────────────────────
+  // The commit, chunked-completion and chunk doors write by id under the
+  // ACTING organization (`StorageWriteContext`), and so does the progress
+  // door's expiry stamp. On an engine-backed store that write is SCOPED to
+  // it: the driver's statement reaches a row stamped for the acting
+  // organization or for none, and no other. An uploader who switched their
+  // active organization after starting an upload therefore names a row the
+  // write cannot reach, and that scoped miss used to surface as `500
+  // INTERNAL` carrying the store's outage text ("Restore the data engine…") —
+  // an organization change diagnosed, to the caller and to the operator, as a
+  // data-engine fault.
   //
-  // Each door now asks this right after the ownership rule (so only the
-  // uploader ever learns of it) and BEFORE any write, the expiry stamp
-  // included. `false` ⇒ the 409 was already sent and the handler must stop.
+  // Each door asks this right after the check that proves the caller may act
+  // on the upload — the ownership rule, or on the chunk door the resume token
+  // — so only that caller ever learns of it, and BEFORE its first write: the
+  // expiry stamp, and on the chunk door the backend chunk as well. The
+  // progress door asks only when the stamp is due, because a progress read
+  // writes nothing else and has no reach to miss. `false` ⇒ the 409 was
+  // already sent and the handler must stop.
   //
   // The question is the write's own reach and nothing wider, and the store
   // answers it (`organizationOutOfWriteReach`) for the write context the door
@@ -450,26 +457,43 @@ export function registerStorageRoutes(
   const TERMINAL_SESSION_STATUSES = new Set(['completed', 'failed', 'expired']);
 
   /**
-   * Status an in-flight session `expired` once it is past its own `expires_at`,
-   * and hand back the row as it now stands.
+   * Whether an in-flight session is past its own `expires_at`, so that the
+   * `expired` stamp is due.
    *
    * A row with no `expires_at` (or an unparseable one) has no declared deadline
    * and is left alone: this enforces the deadline the session itself carries,
-   * it does not invent one. Terminal rows are returned untouched — a
-   * `completed` upload does not become `expired` by sitting around.
+   * it does not invent one. Terminal rows are never due — a `completed` upload
+   * does not become `expired` by sitting around.
    */
-  const expireIfPastDeadline = async (
+  const expiryStampDue = (session: UploadSessionRecord): boolean => {
+    if (TERMINAL_SESSION_STATUSES.has(session.status)) return false;
+    const deadline = session.expires_at ? Date.parse(session.expires_at) : NaN;
+    return Number.isFinite(deadline) && deadline <= Date.now();
+  };
+
+  /**
+   * Status the session `expired` — the write {@link expiryStampDue} says is
+   * due — and hand back the row as it now stands.
+   */
+  const stampExpired = async (
     session: UploadSessionRecord,
     context?: StorageWriteContext,
   ): Promise<UploadSessionRecord> => {
-    if (TERMINAL_SESSION_STATUSES.has(session.status)) return session;
-    const deadline = session.expires_at ? Date.parse(session.expires_at) : NaN;
-    if (!Number.isFinite(deadline) || deadline > Date.now()) return session;
     const updated = await store.updateSession(session.id, { status: 'expired' }, context);
     // `updateSession` answers null only when the row went away under us (the
     // TTL sweep, most likely) — the caller is refused either way.
     return updated ?? { ...session, status: 'expired' };
   };
+
+  /**
+   * Status an in-flight session `expired` once it is past its own `expires_at`,
+   * and hand back the row as it now stands.
+   */
+  const expireIfPastDeadline = async (
+    session: UploadSessionRecord,
+    context?: StorageWriteContext,
+  ): Promise<UploadSessionRecord> =>
+    expiryStampDue(session) ? stampExpired(session, context) : session;
 
   /**
    * Best-effort `failed` stamp for a completion that threw.
@@ -742,6 +766,13 @@ export function registerStorageRoutes(
         return;
       }
 
+      // [#22218] This door writes the session row — the expiry stamp below,
+      // then the progress after the chunk — so that row must be in the scoped
+      // writes' reach. Asked after the resume token, for the same reason the
+      // expiry check is, and before the expiry stamp and the backend chunk, so
+      // a refused chunk lands nowhere.
+      if (!requireStartingOrganization(writeContext, [session], 'chunk', uploadId, res)) return;
+
       // Expiry is checked AFTER the resume token: a caller who cannot prove it
       // owns the session learns nothing about its state (#7667).
       const live = await expireIfPastDeadline(session, writeContext);
@@ -898,11 +929,19 @@ export function registerStorageRoutes(
       // expiry write below and before the progress answer discloses the row.
       if (!requireUploader(authSession, await store.getFile(stored.file_id), res)) return;
 
+      // [#22218] The expiry stamp is this door's only write, so the session
+      // row must be in its reach only when the stamp is due. A read with
+      // nothing to stamp has no reach to miss, and keeps answering the
+      // uploader from any organization. Decided ONCE, so the question and the
+      // stamp cannot disagree about the deadline.
+      const due = expiryStampDue(stored);
+      if (due && !requireStartingOrganization(writeContext, [stored], 'progress', uploadId, res)) return;
+
       // Progress REPORTS the expiry rather than refusing it: `expired` is a
       // declared member of `UploadProgressSchema.status`, and a resuming client
       // (the SDK's `resumeUpload` polls this first) needs to be told the
       // session is gone, not handed a 410 it has to interpret (#7667).
-      const session = await expireIfPastDeadline(stored, writeContext);
+      const session = due ? await stampExpired(stored, writeContext) : stored;
 
       const uploadedChunks = session.uploaded_chunks ?? 0;
       const uploadedSize = session.uploaded_size ?? 0;

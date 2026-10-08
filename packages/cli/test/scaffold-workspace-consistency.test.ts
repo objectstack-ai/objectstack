@@ -69,9 +69,27 @@
 // What is compared is the rendered `allowedVersions` MAP — the keys each file
 // widens and the version each key is widened to — for the same reason the
 // build limb compares rendered grants: no expected value is restated here, so
-// each producer's expectation is the other producer. The prose above each
-// block is NOT compared: the two files explain these skews in their own words
-// on purpose, and the measurement they describe is the same either way.
+// each producer's expectation is the other producer.
+//
+// ── One file, one comment line per block (#22162) ───────────────────────────
+//
+// The two files used to explain these settings in their own words, 57 and 66
+// comment lines of measurements and version history, and the prose was not
+// compared. That left a retired entry's explanation shipping in one of them
+// with nothing to fail on it (#17093). The maintainer then asked for
+// the file to stay minimal, with the rationale in the scaffolder source, and
+// triage ruled that both scaffold paths render the same file. So two more
+// limbs now hold it:
+//
+//   * the two producers render the SAME BYTES — comments included, which is
+//     what closes the drift above: there is one text left to keep true;
+//   * each file stays a settings file — at most one comment line per block,
+//     directly above its key, inside 80 columns. The measurements live in the
+//     docblocks of `renderPnpmWorkspaceYaml`, `SCAFFOLD_BUILT_DEPENDENCIES`
+//     and `SCAFFOLD_ALLOWED_PEER_VERSIONS` in `src/commands/init.ts`.
+//
+// The limbs above stay as they were: when the bytes do differ, they say WHICH
+// declaration or version claim differs, which a byte comparison cannot.
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -141,31 +159,52 @@ function grantedBuilds(yaml: string): Record<(typeof APPROVAL_KEYS)[number], str
 /**
  * The prose each file attaches to each approval key, as one string per key.
  *
- * Both files write it as a definition list inside the header comment — the key
- * at the start of a comment line, its explanation column-aligned after it, and
- * continuation lines indented under that. The two wordings differ and are meant
- * to; only the VERSION CLAIMS inside them are compared.
+ * Each file writes it as the one comment line directly above the key (the
+ * budget the last limb below holds). Only the VERSION CLAIMS inside it are
+ * compared, so the limb still says which boundary differs when the bytes do.
  */
 function keyProse(yaml: string): Map<string, string> {
   const prose = new Map<string, string>();
-  let current: string | null = null;
-  for (const line of yaml.split('\n')) {
-    const definition = /^#[ \t]{2,}(allowBuilds|onlyBuiltDependencies)[ \t]{2,}(\S.*)$/.exec(line);
-    if (definition) {
-      current = definition[1];
-      prose.set(current, definition[2].trim());
-      continue;
-    }
-    // A continuation is an indented comment line that starts no new key; a bare
-    // `#` (or anything that is not an indented comment) closes the entry.
-    const continuation = current === null ? null : /^#[ \t]{2,}(\S.*)$/.exec(line);
-    if (continuation) {
-      prose.set(current!, `${prose.get(current!)} ${continuation[1].trim()}`);
-      continue;
-    }
-    current = null;
-  }
+  const lines = yaml.split('\n');
+  lines.forEach((line, i) => {
+    const key = /^(allowBuilds|onlyBuiltDependencies):/.exec(line)?.[1];
+    const above = i > 0 ? /^#[ \t]*(\S.*)$/.exec(lines[i - 1]) : null;
+    if (key && above) prose.set(key, above[1].trim());
+  });
   return prose;
+}
+
+/** The widest comment line the rendered file may carry. */
+const MAX_COMMENT_COLUMNS = 80;
+
+/**
+ * Every way a file breaks its comment budget, one entry per offending line.
+ *
+ * The budget is at most one comment line per top-level block: a full-line
+ * comment, directly above its key, inside {@link MAX_COMMENT_COLUMNS}. A line
+ * count alone would let one block take every line the others save, and a line
+ * rule without a width would let one line hold a paragraph; this is the
+ * smallest rule that bounds both, and it adds up to a few hundred bytes of
+ * comment however the file grows. No value in this file can contain `#` (they
+ * are package names, versions and `true`), so any `#` is a comment.
+ */
+function commentBudgetBreaches(yaml: string): string[] {
+  const lines = yaml.split('\n');
+  const breaches: string[] = [];
+  lines.forEach((line, i) => {
+    if (!line.includes('#')) return;
+    const where = `line ${i + 1} ${JSON.stringify(line)}`;
+    if (!line.startsWith('#')) {
+      breaches.push(`${where} puts a comment inside or after a setting`);
+    } else if (!/^[A-Za-z][\w-]*:/.test(lines[i + 1] ?? '')) {
+      breaches.push(`${where} is not the one comment line directly above a top-level key`);
+    }
+    const columns = [...line].length;
+    if (columns > MAX_COMMENT_COLUMNS) {
+      breaches.push(`${where} is ${columns} columns wide, over ${MAX_COMMENT_COLUMNS}`);
+    }
+  });
+  return breaches;
 }
 
 /**
@@ -273,4 +312,33 @@ describe('the two scaffold paths render the same pnpm build approvals (#10499)',
         'either file; never copy a value across just to make this pass.',
     ).toEqual(template);
   });
+});
+
+describe('the two scaffold paths render one minimal file (#22162)', () => {
+  it('renders the same bytes in both scaffold paths', () => {
+    expect(
+      RENDERED[CLI],
+      `${CLI} and ${TEMPLATE} write different pnpm-workspace.yaml files. Both scaffold ` +
+        'paths ship ONE file: make the same edit to renderPnpmWorkspaceYaml() and to the ' +
+        "template, and put any new reasoning in init.ts's docblocks rather than the file.",
+    ).toBe(RENDERED[TEMPLATE]);
+  });
+
+  it.each(Object.keys(RENDERED) as Producer[])(
+    '%s carries at most one short comment line per block',
+    (producer) => {
+      const yaml = RENDERED[producer];
+      // Non-vacuity: a file with no top-level key has no block to comment, and
+      // an empty breach list over it would read as a file within budget.
+      expect(yaml).toMatch(/^[A-Za-z][\w-]*:/m);
+      expect(
+        commentBudgetBreaches(yaml),
+        `${producer} writes more comment than its settings need. A scaffolded project ` +
+          'opens with this file, and the measurements behind each block belong in the ' +
+          "docblocks of renderPnpmWorkspaceYaml, SCAFFOLD_BUILT_DEPENDENCIES and " +
+          'SCAFFOLD_ALLOWED_PEER_VERSIONS in src/commands/init.ts: one comment line per ' +
+          `block, directly above its key, at most ${MAX_COMMENT_COLUMNS} columns.`,
+      ).toEqual([]);
+    },
+  );
 });

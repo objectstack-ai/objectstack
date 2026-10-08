@@ -10,8 +10,9 @@
 // Boots AutomationServicePlugin on a LiteKernel with a fake objectql that
 // records the `context` + `expand` each findOne receives and returns a
 // pre-expanded lead row (standing in for ObjectQL's own expand). A downstream
-// update_record interpolates `{record.account.name}`, so the fake's captured
-// update fields prove the record was enriched and the template resolved.
+// update_record reads `record.account.name` (a CEL value envelope since
+// #19939 retired the `{…}` template dialect from value slots), so the fake's
+// captured update fields prove the record was enriched and the path resolved.
 
 import { describe, it, expect } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
@@ -80,7 +81,7 @@ describe('record-change lookup expansion (#3475)', () => {
     const { engine: ql, crud } = fakeObjectQl();
     const kernel = await boot(ql);
     const automation = kernel.getService<AutomationEngine>('automation');
-    automation.registerFlow('u', expandFlow('u', 'user', ['account'], { note: '{record.account.name}' }) as never);
+    automation.registerFlow('u', expandFlow('u', 'user', ['account'], { note: { dialect: 'cel', source: 'record.account.name' } }) as never);
 
     const res = await automation.execute('u', {
       object: 'lead', record: { ...SEED }, userId: 'u1', params: { noteId: 'n1' },
@@ -105,7 +106,7 @@ describe('record-change lookup expansion (#3475)', () => {
     const { engine: ql, crud } = fakeObjectQl();
     const kernel = await boot(ql);
     const automation = kernel.getService<AutomationEngine>('automation');
-    automation.registerFlow('s', expandFlow('s', 'system', ['account'], { note: '{record.account.name}' }) as never);
+    automation.registerFlow('s', expandFlow('s', 'system', ['account'], { note: { dialect: 'cel', source: 'record.account.name' } }) as never);
 
     await automation.execute('s', { object: 'lead', record: { ...SEED }, userId: 'u1', params: { noteId: 'n1' } });
 
@@ -125,7 +126,7 @@ describe('record-change lookup expansion (#3475)', () => {
     const automation = kernel.getService<AutomationEngine>('automation');
     // Declare only `account`; `owner` is left un-expanded.
     automation.registerFlow('sel', expandFlow('sel', 'user', ['account'], {
-      acc: '{record.account.name}', own: '{record.owner}',
+      acc: { dialect: 'cel', source: 'record.account.name' }, own: { dialect: 'cel', source: 'record.owner' },
     }) as never);
 
     await automation.execute('sel', { object: 'lead', record: { ...SEED }, userId: 'u1', params: { noteId: 'n1' } });
@@ -141,17 +142,17 @@ describe('record-change lookup expansion (#3475)', () => {
     const { engine: ql, crud } = fakeObjectQl({ throwOnFindOne: true });
     const kernel = await boot(ql);
     const automation = kernel.getService<AutomationEngine>('automation');
-    automation.registerFlow('fs', expandFlow('fs', 'user', ['account'], { note: '{record.account.name}' }) as never);
+    // The probe reads the lookup AS STORED: unexpanded, it is the scalar id.
+    automation.registerFlow('fs', expandFlow('fs', 'user', ['account'], { note: { dialect: 'cel', source: 'string(record.account)' } }) as never);
 
     const res = await automation.execute('fs', { object: 'lead', record: { ...SEED }, userId: 'u1', params: { noteId: 'n1' } });
     expect(res.success, `run failed: ${JSON.stringify(res)}`).toBe(true);
 
-    // account stayed the scalar id 'acc1', so the single-token `{record.account.name}`
-    // could not resolve (undefined — the interpolator's unresolved single-token value)
-    // — but the run completed rather than throwing.
+    // account stayed the scalar id 'acc1' — the record was not enriched — and
+    // the run completed rather than throwing.
     const upd = crud.find((c) => c.op === 'update' && c.obj === 'audit');
     expect(upd).toBeTruthy();
-    expect(upd!.fields.note).toBeUndefined();
+    expect(upd!.fields.note).toBe('acc1');
 
     await kernel.shutdown();
   });

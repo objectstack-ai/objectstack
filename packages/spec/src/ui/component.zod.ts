@@ -628,7 +628,7 @@ export const PageHeaderProps = strictObject({
     + 'input, so an authored value was accepted and dropped. Delete the key. The header\'s own '
     + 'identity is drawn by the record chrome (`recordChrome`, on by default) and each action '
     + 'carries its own `icon`. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   /**
    * REMOVED (#20758, ADR-0049 enforce-or-remove through the ADR-0087 D2 route,
@@ -652,7 +652,7 @@ export const PageHeaderProps = strictObject({
     + 'no renderer ever drew a trail for it: objectui drew an empty slot and nothing filled it, '
     + 'and the navigation trail is drawn once, by the app shell\'s header. Delete the key, whether '
     + 'it was `true` or `false`; the shell\'s trail is unchanged. '
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   actions: z.array(z.string()).optional().describe('Action IDs to show in header'),
   /**
@@ -761,7 +761,7 @@ export const PageTabsProps = strictObject({
     + 'a props key named `type` collides with the page component\'s own dispatch key, so it is '
     + 'unauthorable in the flat and JSX carriers and was never validated in them. Rename the key '
     + 'to `tabStyle`; the value (`line` | `card` | `pill`) is unchanged. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   position: z.enum(['top', 'left']).default('top'),
   /**
@@ -1000,7 +1000,7 @@ export const PageCardProps = strictObject({
     + 'never published it as an input, so an authored value was accepted and dropped. Delete the '
     + 'key and author the buttons as components in the card\'s `children` or `footer` '
     + '(`element:button`, `record:quick_actions`), which is what actually renders. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   /**
    * Card content, in order — the canonical composition slot, matching every
@@ -1028,7 +1028,7 @@ export const PageCardProps = strictObject({
     + 'it was a second spelling of the composition slot every other container calls `children`, '
     + 'and the renderer reads both. Rename the key to `children`; the value (an array of child '
     + 'components) is unchanged. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   )),
   /**
    * Slot for footer content — a declared, rendered slot distinct from
@@ -1194,7 +1194,7 @@ export const RecordDetailsProps = strictObject({
     + 'values took the same branch and the key selected nothing. Delete the key — the body is '
     + 'already chosen by what you author: `sections` renders the explicit groups (the old '
     + '`custom`), and omitting it falls back to the object\'s `highlightFields` (the old `auto`). '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   /**
    * Field groups rendered as the detail body, IN ORDER.
@@ -1643,7 +1643,7 @@ export const RecordHighlightsField = z.union([
         + 'the field list as plain strings), so an authored value was accepted and drawn by '
         + 'nothing. Delete the key — no replacement: the renderer never drew it, and the chip '
         + 'renders label and value only. '
-        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
     },
   }, {
     name: z.string().describe('Field name on the record'),
@@ -1778,7 +1778,9 @@ export const RecordActivityProps = strictObject({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
 
-// `position` old-spelling prescriptions (#8762). Declared with `//` on purpose —
+// `position` old-spelling prescriptions (#8762). Each names `--from 17`: the
+// conversion is registered `toMajor: 18`, and a bare `os migrate meta` is
+// refused for a missing `--from`. Declared with `//` on purpose —
 // the `LIST_VIEW_EXPORT_PDF_RETIRED` placement note applies here too: build-docs
 // takes a file's first JSDoc per exported symbol, and these need no doc page.
 // This is an enum-VALUE narrowing, so there is no `retiredKey()` tombstone to
@@ -1790,18 +1792,18 @@ const CHATTER_POSITION_RETIRED: ReadonlyMap<string, string> = new Map([
     + 'no renderer branch ever compared the old vocabulary: `RecordChatterPanel` docks on '
     + "'right'/'left' and renders in flow on 'bottom', so a spec-valid 'sidebar' silently fell "
     + "through to the in-flow render. Write 'right' — the docked side panel 'sidebar' meant. "
-    + 'Run `os migrate meta` to list the mechanical edits for existing sources '
-    + '(registered under protocol major 18); apply them by hand.'],
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; '
+    + '`--write` applies the ones it can prove, and you apply the rest by hand.'],
   ['inline', "'inline' was removed from `record:chatter` / `record:discussion` `position` — "
     + 'no renderer branch ever compared the old vocabulary. Write \'bottom\' — the renderer\'s '
-    + "in-flow branch, which is where 'inline' already rendered. Run `os migrate meta` to "
-    + 'list the mechanical edits for existing sources (registered under protocol major 18); '
-    + 'apply them by hand.'],
+    + "in-flow branch, which is where 'inline' already rendered. Run `os migrate meta --from 17` to "
+    + 'list the mechanical edits for existing sources; '
+    + '`--write` applies the ones it can prove, and you apply the rest by hand.'],
   ['drawer', "'drawer' was removed from `record:chatter` / `record:discussion` `position` "
     + 'with no successor: no renderer branch ever implemented an overlay drawer — the value fell '
     + "through to the in-flow render. Write 'right' — the docked side panel is the nearest "
-    + 'surviving shape of a side drawer. Run `os migrate meta` to list the mechanical edits '
-    + 'for existing sources (registered under protocol major 18); apply them by hand.'],
+    + 'surviving shape of a side drawer. Run `os migrate meta --from 17` to list the mechanical edits '
+    + 'for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.'],
 ]);
 
 /**
@@ -2507,12 +2509,12 @@ const ELEMENT_TEXT_VARIANT_RETIRED = {
     '`heading` was removed from `element:text` `variant` (`ElementTextPropsSchema.variant`) in '
     + `@objectstack/spec 17.7.0 — ${ELEMENT_TEXT_VARIANT_VOCABULARY} Write \`h2\` — the heading element `
     + '`heading` always rendered, now drawn in the `h2` style — or the level the page outline means. '
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   subheading:
     '`subheading` was removed from `element:text` `variant` (`ElementTextPropsSchema.variant`) in '
     + `@objectstack/spec 17.7.0 — ${ELEMENT_TEXT_VARIANT_VOCABULARY} Write \`h3\` — the heading element `
     + '`subheading` always rendered, now drawn in the `h3` style — or the level the page outline means. '
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
 } as const;
 
 export const ElementTextPropsSchema = lazySchema(() => strictObject({
@@ -2861,7 +2863,7 @@ const elementFilterRetired = (key: string): string =>
   + 'no-renderer exclusion), so every key on this element was a capability claim nothing '
   + 'kept. Delete the `element:filter` component; list surfaces own their filtering — use a '
   + "view's `userFilters` quick-filter bar or the list toolbar's filter builder. "
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * RETIRED at element grain (#9220, ADR-0049 enforce-or-remove). `element:filter`
@@ -2912,7 +2914,7 @@ const elementFormRetired = (key: string): string =>
   + 'and use the object-bound `object-form` block instead — it is rendered, '
   + 'designer-publishable, and carries the same intent (`objectName`, `fields`, `mode`, '
   + '`submitText`). '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * RETIRED at element grain (#9249, ADR-0049 enforce-or-remove). `element:form`
@@ -3095,7 +3097,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
     + "component's `id`, so authoring only `targetVariable` bound nothing while reporting "
     + 'success. Delete the key; to bind the picked record id, declare it on the variable — '
     + "`variables: [{ name: '<var>', type: 'record_id', source: '<this component id>' }]`. "
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   placeholder: I18nLabelSchema.optional().describe('Placeholder text'),
   /** Shown in place of the row list when the query returns nothing. */
@@ -3109,7 +3111,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
     + '(ADR-0087 D2) — it was a required declaration no renderer ever read, while the '
     + 'renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key '
     + 'to `labelField`; the value (a field name) is unchanged. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   /**
    * REMOVED (#5775). ADR-0049 enforce-or-remove: the control has no search
@@ -3121,7 +3123,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
     + 'renderer ever read it and it narrowed nothing. Delete the key. To restrict which records '
     + 'the picker offers, use `filter` (or the component-level `dataSource.filter`), which the '
     + 'query path does apply. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   /**
    * REMOVED (#5775). ADR-0049 enforce-or-remove: the control is a single-select
@@ -3132,7 +3134,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
     + '(ADR-0049) — the picker is a single-select `Select` and the bound page variable '
     + 'holds one record id, so `multiple: true` selected nothing extra and reported success. '
     + 'Delete the key; multi-record selection is not implemented on this element. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
@@ -3188,7 +3190,7 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
     + "component's `id`, so authoring only `targetVariable` bound nothing while reporting "
     + 'success. Delete the key; to bind the typed value, declare it on the variable — '
     + "`variables: [{ name: '<var>', type: 'string', source: '<this component id>' }]`. "
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
@@ -4632,7 +4634,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
     + '`sort` was absent, so one intent had two spellings and a grid authoring both silently ignored '
     + 'this one. Rename the key to `sort` and wrap the value in an array (`defaultSort: { field, order }` '
     + 'becomes `sort: [{ field, order }]`); the pair itself is unchanged. '
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   /**
    * Pagination config — the two members whose value is a PAGE SIZE bounded to
@@ -4874,7 +4876,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
     + 'it was the legacy second spelling of `resizable`, read only when `resizable` was absent, so one '
     + 'switch had two spellings and a grid authoring both silently ignored this one. Use `resizable`. '
     + 'Rename the key; the value (a boolean) is unchanged. '
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   reorderableColumns: z.boolean().optional().describe('Allow column drag-reorder'),
   frozenColumns: z.number().optional().describe('How many leading columns stay frozen (default 1)'),
@@ -5959,7 +5961,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
     + '`onQuickAdd`, and `onQuickAdd` is a host-supplied function JSON cannot carry and no '
     + 'producer ever put on an `object-kanban` node, so authoring it was a parse-clean no-op. '
     + 'Delete the key; `object-kanban` offers no quick-add control. '
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   coverImageField: z.string().optional().describe('Image field rendered as the card cover'),
   /**
@@ -6350,13 +6352,13 @@ const OBJECT_FORM_LAYOUT_RETIRED: ReadonlyMap<string, string> = new Map([
     + "`object-form` presentation folds it to 'vertical'. Write 'vertical', or omit `layout` "
     + "('vertical' is the renderer default); for a multi-column form set `columns` (e.g. "
     + '`columns: 2`), which the renderer honours under either layout. '
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.'],
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.'],
   ['inline', "'inline' was removed from the `object-form` `layout` enum in @objectstack/spec 17.5.0 "
     + '(ADR-0049 enforce-or-remove) — no renderer ever gave it a behaviour of its own: every '
     + "`object-form` presentation folds it to 'vertical', and a row of inline inputs is a "
     + "toolbar / filter-row pattern, not a record-form layout. Write 'vertical', or omit "
     + "`layout` ('vertical' is the renderer default). "
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.'],
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.'],
 ]);
 
 /**
@@ -7279,7 +7281,7 @@ const MASTER_DETAIL_DETAIL_SORT_FIELD_RETIRED =
   + 'of those names — except on an entry that names `relationshipField` and at least one column and '
   + 'gives every column a `type`, which the renderer keeps exactly as authored and stamps no line '
   + 'position on. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 function masterDetailDetailEntry() {
   return strictObject({

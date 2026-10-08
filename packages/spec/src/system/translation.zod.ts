@@ -552,7 +552,7 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
     + 'evaluates and returns on every rejected write, and translate it under the object-scoped '
     + "group 'objects.<object_name>._validations.<rule_name>.message', which the write "
     + 'path resolves. Delete this key. Run '
-    + '`os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + '`os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   o: "`o` is the retired object-first dialect, which no resolver reads — use 'objects.<object_name>'",
   app: "`app` is the retired object-first dialect, which no resolver reads — use 'apps.<app_name>'",
   nav: "`nav` is the retired object-first dialect, which no resolver reads — use 'apps.<app_name>.navigation.<node_id>.label'",
@@ -601,8 +601,8 @@ const PER_APP_SETTINGS_PLATFORM_ONLY =
   + 'on this face, so the Settings UI shell strings an application may translate (the source '
   + 'badges, under `settingsCommon.sourceLabels`) are NOT what is being refused here — only the '
   + "per-namespace manifest copy under 'settings' is. "
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply '
-  + 'them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies '
+  + 'the ones it can prove, and you apply the rest by hand.';
 
 /** The per-app door's guidance: the shared table plus the platform-only `settings`. */
 const APP_TRANSLATION_KEY_GUIDANCE: Record<string, string> = {
@@ -642,8 +642,8 @@ const ITEM_SETTINGS_PLATFORM_ONLY =
   + "bundle declares, 'settingsCommon' among them: the Settings UI shell strings an application "
   + 'may translate (the source badges, under `settingsCommon.sourceLabels`) are NOT what is being '
   + "refused here — only the per-namespace manifest copy under 'settings' is. "
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply '
-  + 'them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies '
+  + 'the ones it can prove, and you apply the rest by hand.';
 
 /** The item door's guidance: the shared table plus the platform-only `settings`. */
 const ITEM_TRANSLATION_KEY_GUIDANCE: Record<string, string> = {
@@ -754,7 +754,7 @@ const WIDGET_SUB_CAPTION_RETIRED =
   + 'wrote, so it translated a string that existed only when this entry put it there. Delete the '
   + 'entry. A widget has one authored description, `widget.description`, which renders as the '
   + "card-header subtitle; translate it through this widget's `description` entry. "
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * The former `subtitle → subCaption` alias, re-homed as `guidance` when
@@ -1162,7 +1162,7 @@ const appTranslationDataShape = () => ({
           + '`ComponentPropsMap` declares it and the resolver no longer overlays it. The live form '
           + "surface's submit copy is `object-form`'s `submitText` (`I18nLabelSchema`), localizable "
           + 'at its own authoring site. Delete the key. '
-          + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+          + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
         submit:
           '`submit` was the alias spelling of `submitLabel`, which was removed in '
           + '@objectstack/spec 17 (ADR-0049) — no component in `ComponentPropsMap` '

@@ -19,8 +19,10 @@
  * No registry change: the entry already declares `object`. The option loop's
  * guard is gone, so on an object write it runs at the build's own position in
  * the field walk, and the door's finding IS the build's finding — rule,
- * location, message and hint. The object's own action predicates (pass 4)
- * stay fenced; that pin is in `runtime-gate.object-formula-writes.test.ts`.
+ * location, message and hint. The object's own action predicates joined the
+ * door in pass 4 (`runtime-gate.object-action-predicate-writes.test.ts`); the
+ * pin that every object-borne pass judges here is in
+ * `runtime-gate.object-formula-writes.test.ts`.
  *
  * ## What still publishes
  *

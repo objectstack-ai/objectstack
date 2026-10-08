@@ -64,7 +64,7 @@ const CUBE = {
 // The four clauses the ruling set: nothing read it, no cache exists, delete it,
 // and a cadence is declared again when a cache exists.
 const PRESCRIPTION =
-  /`analytics_cube\.refreshKey` was removed in @objectstack\/spec 17 \(ADR-0049 enforce-or-remove\) — nothing read it: no analytics result is cached.*Delete the key; every analytics query is computed when it is asked\. A refresh cadence is declared again when a result cache exists\. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand\./s;
+  /`analytics_cube\.refreshKey` was removed in @objectstack\/spec 17 \(ADR-0049 enforce-or-remove\) — nothing read it: no analytics result is cached.*Delete the key; every analytics query is computed when it is asked\. A refresh cadence is declared again when a result cache exists\. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./s;
 
 /** What an author could write under `refreshKey` before the removal. */
 const AUTHORED = [

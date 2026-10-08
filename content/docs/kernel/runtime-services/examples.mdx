@@ -93,7 +93,12 @@ export const RollUpOrderTotals = defineFlow({
       config: {
         objectName: 'sales_order',
         filter: { id: '{record.id}' },
-        fields: { line_count: '{totals.line_count}', amount_total: '{totals.total}' },
+        // A value slot computes with a CEL value envelope; the script's
+        // output `totals` is bound by the node before this one.
+        fields: {
+          line_count: { dialect: 'cel', source: 'totals.line_count' },
+          amount_total: { dialect: 'cel', source: 'totals.total' },
+        },
       },
     },
     { id: 'end', type: 'end', label: 'End' },

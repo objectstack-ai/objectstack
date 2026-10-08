@@ -167,11 +167,11 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
     // the retired key's fate. This branch can DELETE the key outright
     // (`template`/`recipients`/`variables`/`script`), so "rewrite it" read two
     // ways ("it" = the key vs. "it" = your sources); #9529 then withdrew the
-    // automatic-rewrite claim outright — the tool lists the edits and never
-    // writes a source file. Pinned here AND class-wide in
+    // automatic-rewrite claim outright, and #9591 names `--write`, which writes
+    // only the edits it can prove — never the unqualified claim. Pinned here AND class-wide in
     // `retired-key-migrate-sentence.test.ts` (widened to `packages/lint/src`).
     expect(issues[0].message).toMatch(
-      /Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand\.$/,
+      /Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\.$/,
     );
     expect(issues[0].message).not.toMatch(/rewrite it automatically/);
     expect(issues[0].message).not.toMatch(/rewrite existing sources automatically/);
@@ -3026,10 +3026,13 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // this file is a local named `scope`; `graph.scope` is a KEY read off the
       // tabled `graph` receiver, so the metadata guard loses no coverage here.
       'scope',
-      // [#19938] The same import-specifier artefact, of
-      // `'./flow-template-grammar.js'` (`grammar.j…`): nothing in this file is
-      // a local named `grammar`.
-      'grammar',
+      // [#19939] The spec's value-slot template judge, one refusal at a time.
+      // Its keys are that helper's own `{ path, label, message, source }` —
+      // never metadata keys — and it is named to stay clear of the `message` /
+      // `source` receivers for the reason the entries above record. (The
+      // `grammar` excuse #19938 added here left with the import it excused:
+      // this file no longer imports `'./flow-template-grammar.js'`.)
+      'templateRefusal',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
@@ -3854,7 +3857,9 @@ describe('assignment value envelope — located findings (#15137)', () => {
   it('passes a well-formed envelope, and every shape that is not an envelope', () => {
     expect(valueIssues({
       digest: { dialect: 'cel', source: 'joinNonEmpty(rows.map(r, r.subject), "\\n")' },
-      greeting: 'Hello {name}',
+      // A literal — the `{…}` template dialect is retired from value slots
+      // (#19939), so text with holes is pinned by its own refusal suite.
+      greeting: 'Hello',
       count: 3,
       flags: { enabled: true },
       // Envelope-SHAPED only by a non-string dialect — data, not an expression.

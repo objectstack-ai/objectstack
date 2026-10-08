@@ -274,7 +274,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 772 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 773 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1547,6 +1547,9 @@ export type Iso_ui_notification__NotificationTypeSchema = Assert<Eq< z.input< ty
 // is normalized on parse), so `ElementDataSourceParsed` is declared and this
 // pin deleted.
 export type Iso_ui_page__PageComponentType = Assert<Eq< z.input< typeof M163.PageComponentType >, z.infer< typeof M163.PageComponentType > >>;
+// `PagePrintSchema` (#22158) joins the family the day it lands: no defaults,
+// no transforms, so `PagePrint` is the only name it carries.
+export type Iso_ui_page__PagePrintSchema = Assert<Eq< z.input< typeof M163.PagePrintSchema >, z.infer< typeof M163.PagePrintSchema > >>;
 export type Iso_ui_page__PageTypeSchema = Assert<Eq< z.input< typeof M163.PageTypeSchema >, z.infer< typeof M163.PageTypeSchema > >>;
 
 // ui/report.zod.ts
@@ -1668,7 +1671,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 772 isomorphic pins', () => {
+  it('still declares all 773 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2421,7 +2424,16 @@ describe('ADR-0122 type-alias convention', () => {
     // `ObjectFormPropsSchema` left the isomorphic family for an
     // `ObjectFormPropsParsed` alias, the route the object-* family note above
     // prescribes. -1 removed.
-    expect(pins).toHaveLength(772);
+    //
+    // 772 -> 773 is #22158: the page `print` declaration's new exported
+    // `PagePrintSchema` has no default and no transform in its tree, so it is
+    // pinned here (Iso_ui_page__PagePrintSchema) rather than given a
+    // `PagePrintParsed` synonym. +1 added. ⚠️ The first commit carrying that pin
+    // read 772 here and stayed green by ACCIDENT: the same edit dropped the space
+    // in the untouched `Iso_ui_page__PageTypeSchema = Assert<` line, which this
+    // case's `= Assert<` pattern then no longer matched — one pin added, one
+    // pin silently uncounted. Restoring the space is what made the count honest.
+    expect(pins).toHaveLength(773);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

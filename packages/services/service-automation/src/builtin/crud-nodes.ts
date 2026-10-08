@@ -181,11 +181,16 @@ function writtenRowCount(result: unknown): number {
  *    `registerFlow` makes). A malformed envelope throws rather than degrading
  *    to a literal; a value that faults on the live variables throws with its
  *    source (ADR-0032 §1c/§1d). Neither is written.
- *  - every other value goes through `interpolate()` exactly as the whole map
- *    used to: a `{token}` string keeps its 17.x meaning byte-for-byte (ruling
- *    D: no spelling changes meaning), and a literal — an array, a plain
- *    object, an envelope-shaped object NESTED inside either — is data, with
- *    its strings interpolated as before.
+ *  - every other value is a literal — a string, an array, a plain object, an
+ *    envelope-shaped object NESTED inside either — and is written as it is.
+ *    Since #19939 (the C half of #11182 ruling D) a `{token}` of the retired
+ *    template dialect never reaches this point: the executor's
+ *    `parseNodeConfig` refuses it through `FlowValueSlotSchema` (the same
+ *    judge `registerFlow` and `objectstack validate` call), so a literal here
+ *    carries no token — or only the two spellings CEL cannot write yet and
+ *    the retirement keeps, the date macros (`{NOW()}`, `{TODAY() + 7}`) and
+ *    `{$User.*}`, which `interpolate()` still resolves. On every other
+ *    literal `interpolate()` is the identity.
  *
  * Before this, the executor handed the whole map to `interpolate()`, which
  * recursed into an envelope as plain data: a text or JSON column received the
@@ -384,9 +389,10 @@ function storedMetadataWriteRefusal(
  *
  * Each executor:
  *  1. Interpolates `{var}` / `{var.path}` / `{$User.*}` / `{NOW()}` tokens in
- *     `node.config` against the running flow's variable context — and, in the
- *     `create_record` / `update_record` `fields` map, evaluates a CEL value
- *     envelope to the value written ({@link resolveFieldValues}).
+ *     `node.config` against the running flow's variable context — except in
+ *     the `create_record` / `update_record` `fields` map, a value slot, where
+ *     a CEL value envelope is evaluated to the value written and the `{…}`
+ *     dialect is retired (#19939; {@link resolveFieldValues}).
  *  2. Calls the resolved data engine via `ctx.getService('data')`.
  *  3. Writes the result back to the variable context under `outputVariable`
  *     (or under `<nodeId>.id` / `<nodeId>.records` by default), so downstream
@@ -537,7 +543,8 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 if (familyRefusal) return familyRefusal;
 
                 // #19938 / #11182 ruling D — a CEL value envelope in `fields.*` is
-                // evaluated; every other value interpolates exactly as before.
+                // evaluated; every other value is a literal (#19939 retired the
+                // `{…}` dialect there — `parseNodeConfig` above refused it).
                 const fields = resolveFieldValues(engine, cfg.fields, variables, context);
                 const outputVariable = cfg.outputVariable;
 
@@ -699,7 +706,8 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 // `fields` is the single canonical write-map key — no alias (the wrong key
                 // `fieldValues` is corrected at the authoring source + rejected by graph-lint).
                 // #19938 / #11182 ruling D — a CEL value envelope in `fields.*` is
-                // evaluated; every other value interpolates exactly as before.
+                // evaluated; every other value is a literal (#19939 retired the
+                // `{…}` dialect there — `parseNodeConfig` above refused it).
                 const fields = resolveFieldValues(engine, cfg.fields, variables, context);
 
                 const data = getData();

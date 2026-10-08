@@ -1,0 +1,125 @@
+---
+title: How ObjectStack compares — ontologies, semantic layers, low-code
+navTitle: How It Compares
+description: "ObjectStack beside knowledge ontologies, semantic layers, operational ontologies, metadata platforms and AI codegen: what each does well, where it differs."
+---
+
+The word *ontology* covers several different kinds of thing in 2026, and the products
+that use it solve different problems. This page sets ObjectStack beside the five kinds
+of thing a reader is most likely to weigh it against — three that use the word and two
+that answer the same question without it. For each: what it is, what it is good at, and
+the one difference that matters. ObjectStack is none of the five; what it is instead,
+an executable business ontology, is defined on [Business Ontology](/docs/concepts/ontology).
+
+## Knowledge ontologies
+
+**What it is.** RDF and OWL, the W3C standards for describing a domain as statements,
+classes, properties and axioms, and the tools built on them, such as the Protégé editor. A
+reasoner infers facts nobody stored and checks that the whole description is
+consistent.
+
+**What it is good at.** Shared vocabularies across organisations, integrating data that
+was never designed to fit together, and answering questions by inference.
+
+**The difference.** A knowledge ontology describes a domain; nothing runs it as an
+application. ObjectStack's ontology has no axioms and no reasoner. It is validated, then
+run.
+
+## Semantic and context layers over existing data
+
+**What it is.** A layer that makes data living elsewhere legible to agents and
+analysts: business names, metrics, relationships and context over warehouses,
+lakehouses and operational databases. As of late 2026 the category includes the ontology
+item in Microsoft Fabric IQ (in preview), Databricks Genie with Unity Catalog metric
+views, Snowflake semantic views, AWS Context and Google Cloud Knowledge Catalog; in open
+source, metric semantic layers and agent memory graphs.
+
+**What it is good at.** Consistent meaning over a large existing data estate, without
+moving the data. These layers are read-mostly; some add rules and actions on top.
+
+**The difference.** The system of record stays where it was. ObjectStack's ontology is
+the system: the database, API, UI and agent tools are derived from it.
+
+## Operational ontologies over existing systems
+
+**What it is.** Objects, links, actions and permissions defined over data integrated
+from other systems, with edits written back. The Palantir Ontology is the reference: an
+action type packages edits to objects and links with its validation and side effects,
+and writeback keeps those edits in sync with the underlying data.
+
+**What it is good at.** One governed model of objects and actions across many large
+systems that stay where they are, so people and agents can act on operational decisions
+in one place.
+
+**The difference.** It is still a layer over systems that live elsewhere and, in
+Palantir's case, a proprietary platform. ObjectStack derives the database schema, API,
+UI and MCP tools from the definition, and it is Apache-2.0.
+
+## Metadata-driven application platforms
+
+**What it is.** Platforms where metadata generates tables, APIs and UI — the closest
+relatives. Salesforce's metadata is the ancestor; open-source cousins include Frappe
+Framework with ERPNext, Odoo, NocoBase, Payload and Twenty. Several of them now offer MCP
+servers, so agents can reach them too.
+
+**What it is good at.** Building business applications quickly on a proven runtime, with
+packaged apps, modules and integrations to start from.
+
+**The difference.** Where the definition lives, and who it is written for. In most of
+these platforms metadata is configuration stored in the platform's database and edited
+through its UI; where it is code, as with the Payload Config or Odoo's modules, it is
+framework code. ObjectStack's definition is typed, declarative TypeScript in your
+repository — versioned and reviewed as a diff, checked by `os validate` before it runs,
+and shaped for an AI to write.
+
+## AI code generation
+
+**What it is.** An agent writes a conventional codebase from a prompt: a schema,
+handlers, components, the glue between them.
+
+**What it is good at.** It has no runtime ceiling. Anything code can do, it can produce.
+
+**The difference.** The output is still code. It grows, its layers drift apart, and
+past a certain size no agent can hold it whole. Tests and type-checkers check the code
+against itself; nothing checks it against a definition of the business, because there is
+none. ObjectStack keeps the definition and moves the code into the runtime, and its gate
+rejects a wrong definition when it is written, not when it fails in production.
+
+## Side by side
+
+Each cell reads a category as a whole; individual products vary.
+
+| | Executable | AI-writable | Agent-operable | You own it | Is the system itself |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Knowledge ontologies** | No — reasoned over | Possible | Query only | Yes — open standards | No |
+| **Semantic and context layers** | No — queried | Possible | Read-mostly | Varies | No — a layer |
+| **Operational ontologies** | Actions only | Possible | Yes | Mostly vendor-held | No — a layer |
+| **Metadata-driven platforms** | Yes | Varies | Often, via MCP | Varies | Yes |
+| **AI code generation** | Yes | Yes | If you build it | Yes | Yes |
+| **ObjectStack** | Yes | Yes — gated | Yes — by default | Yes — Apache-2.0 | Yes |
+
+## Where the others are stronger
+
+- **Existing data and legacy systems — semantic and context layers, operational
+  ontologies.** When the data already lives in a warehouse, a lakehouse and a dozen
+  operational systems, these start where you are. ObjectStack's
+  [federation](/docs/data-modeling/external-datasources) is early and read-only by
+  default; it is not a way to put one model over an existing estate.
+- **Reasoning over heterogeneous data — knowledge ontologies.** Inferring facts nobody
+  stored, classifying by axioms, checking consistency, aligning vocabularies across
+  organisations: a reasoner does this, and ObjectStack has none.
+- **Algorithm-heavy work and unusual interfaces — code.** An optimiser, a simulation, a
+  canvas editor, a game: write code. ObjectStack can wrap an algorithm as an
+  [action](/docs/ai/actions-as-tools), but its interface is server-driven from metadata,
+  and an interface unlike any business app is easier to build directly.
+- **Ecosystem maturity and integrations — the metadata platforms.** Salesforce, Odoo and
+  ERPNext bring years of production use, packaged applications, app marketplaces and
+  implementation partners. ObjectStack is younger; expect to build more of it yourself.
+
+## In one sentence
+
+**One executable business ontology. AI writes it, the runtime runs it, agents operate
+it, you own it.** What that means, and what it does not, is on
+[Business Ontology](/docs/concepts/ontology); the argument is the essay
+[The Ontology Is the Software](/blog/the-ontology-is-the-software). Whether it fits your
+case is on [When to use ObjectStack](/docs/concepts/when-to-use).

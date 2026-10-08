@@ -35,7 +35,9 @@
  * type and `required` violations refuse the node as a guard. All of these
  * parse the RAW stored config — their typed slots are strings (or `unknown`
  * where values interpolate), so `{token}` templates pass and resolve at the
- * executor's existing interpolation points.
+ * executor's existing interpolation points. The value slots are the exception
+ * since #19939: the `{token}` dialect is retired there (the "value slots"
+ * section below).
  *
  * ## Unknown keys — closed here too, as of #4001 批 9
  *
@@ -69,8 +71,9 @@
  *
  * The `create_record` / `update_record` `fields` map carries the same value
  * contract since #19938 (`FlowValueSlotSchema`, the "value slots" section):
- * a field value may be a CEL value envelope beside a `{token}` template or a
- * literal, and the three maps are the expression ledger's `value`-role slots.
+ * a field value is a CEL value envelope or a literal — a `{token}` template is
+ * refused there since #19939 — and the three maps are the expression ledger's
+ * `value`-role slots.
  *
  * Deliberately absent:
  *  - `decision` / `script` / `subflow` / `wait` / `connector_action` — the
@@ -89,6 +92,10 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { refuseCatchallProtoKey, refuseRecordProtoKey } from '../shared/record-proto-key-guard';
 import { isExpressionEnvelopeShaped } from './flow-node-expression-paths';
+// [#19939] The retirement of the `{…}` template dialect from value slots — the
+// one judge, composed into every value slot's contract below rather than
+// re-spelled here.
+import { valueSlotTemplateRefusals } from './flow-value-slot-template';
 
 /** What a rejected key on these contracts silently did before #4001 批 9. */
 const BUILTIN_NODE_CONFIG_HISTORY =
@@ -282,17 +289,20 @@ export const ASSIGNMENT_VALUE_ENVELOPE_REFUSAL = VALUE_ENVELOPE_REFUSAL;
  *
  * A bare string is deliberately NOT accepted as CEL shorthand the way
  * `ExpressionInputSchema` accepts it elsewhere: in a value slot a plain
- * string has always meant `{token}` flow interpolation, and that meaning is
- * kept. The envelope is the only CEL spelling in this slot — which is exactly
- * what lets the two forms coexist without a mode switch.
+ * string is the literal text it spells (#19939 retired the `{token}`
+ * interpolation it used to mean — {@link valueSlotTemplateRefusals}), so
+ * reading it as CEL source would silently change what every literal writes.
+ * The envelope is the only CEL spelling in this slot — which is exactly what
+ * lets literals and expressions coexist without a mode switch.
  */
 export const AssignmentExpressionValueSchema = EvaluatedExpressionSchema
   .safeExtend({
     dialect: z.literal('cel', {
       error: () =>
         'A value envelope is evaluated by the expression engine to a value, which only the `cel` dialect does — '
-        + '`template` and `cron` envelopes have no meaning here. For text with holes write a plain string '
-        + '(`{token}` flow interpolation); for a computed value write `{ dialect: \'cel\', source: \'…\' }`.',
+        + '`template` and `cron` envelopes have no meaning here. For text with holes write one CEL concatenation '
+        + '(`{ dialect: \'cel\', source: "\'Hello \' + name" }`); for any computed value write '
+        + '`{ dialect: \'cel\', source: \'…\' }`.',
     }),
   })
   .meta({
@@ -312,9 +322,12 @@ export type AssignmentExpressionValueParsed = z.infer<typeof AssignmentExpressio
  * it (#19938); only the description differs.
  *
  * The rule: an object that names a `dialect` ({@link isExpressionEnvelopeShaped})
- * is an envelope and must be a valid one ({@link AssignmentExpressionValueSchema});
- * every other value passes untouched. Each issue leads with
- * {@link VALUE_ENVELOPE_REFUSAL}.
+ * is an envelope and must be a valid one ({@link AssignmentExpressionValueSchema}),
+ * each issue led by {@link VALUE_ENVELOPE_REFUSAL}; every other value is a
+ * literal, and a string anywhere in it that carries a `{…}` token of the
+ * retired template dialect is refused (#19939, {@link valueSlotTemplateRefusals}),
+ * each issue led by `VALUE_SLOT_TEMPLATE_REFUSAL` and naming the token's CEL
+ * spelling. Nothing else is judged.
  *
  * Built eagerly, not through `lazySchema`: `.meta()` registers by schema
  * IDENTITY, and the lazy Proxy is not the identity the registry holds, so a
@@ -328,7 +341,14 @@ export type AssignmentExpressionValueParsed = z.infer<typeof AssignmentExpressio
 function celValueSlotSchema(description: string) {
   return z.unknown()
     .superRefine((value, ctx) => {
-      if (!isExpressionEnvelopeShaped(value)) return;
+      if (!isExpressionEnvelopeShaped(value)) {
+        // [#19939] A literal: refused only where it still spells the retired
+        // `{…}` dialect, at the string's own path inside the value.
+        for (const refusal of valueSlotTemplateRefusals(value)) {
+          ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
+        }
+        return;
+      }
       const result = AssignmentExpressionValueSchema.safeParse(value);
       if (result.success) return;
       for (const issue of result.error.issues) {
@@ -344,29 +364,33 @@ function celValueSlotSchema(description: string) {
 }
 
 /**
- * What a value in a `value`-role slot may be (#14149, generalised in #19938) —
- * the two authoring forms, plus literals:
+ * What a value in a `value`-role slot may be (#14149, generalised in #19938,
+ * narrowed in #19939) — an expression, or a literal:
  *
- *  - a **string** — `{token}` flow interpolation, resolved by `interpolate()`
- *    against the live variables (a sole token keeps the token's type:
- *    `'{rows}'` yields the array); text with no tokens is the literal text;
  *  - a **CEL value envelope** — {@link AssignmentExpressionValueSchema},
  *    evaluated by the expression engine to a value, so the declared stdlib is
  *    authorable from metadata: `joinNonEmpty(rows.map(r, r.subject), "\n")`
  *    builds a digest body from a list, `round(price * 100) / 100.0` a money
- *    value (`100.0`: CEL divides two integers as integers);
- *  - any other JSON value — a number, boolean, `null`, array or plain object
- *    — used as a literal (strings inside it still interpolate).
+ *    value (`100.0`: CEL divides two integers as integers), `record.owner`
+ *    copies a value with its type;
+ *  - any other JSON value — a string, number, boolean, `null`, array or plain
+ *    object — used as the literal it spells.
  *
  * The forms are told apart by SHAPE, never by a mode key: an object that names
  * a `dialect` is an envelope ({@link isExpressionEnvelopeShaped}) and must be a
- * valid one, everything else is what it always was. That is the preservation
- * half of the contract — every value that parsed before a slot joined the
- * `value` role still parses, and the only newly refused shape is a malformed
- * envelope (no `source` — `{ dialect: 'cel' }` and an `ast`-only envelope
- * alike — a blank `source`, a non-`cel` dialect), which used to be stored
- * verbatim as a literal object. Only the TOP-LEVEL value of a slot is judged:
- * an envelope-shaped object nested inside an array or a plain object is data.
+ * valid one — a malformed envelope (no `source` — `{ dialect: 'cel' }` and an
+ * `ast`-only envelope alike — a blank `source`, a non-`cel` dialect) is
+ * refused rather than stored verbatim as a literal object. Only the TOP-LEVEL
+ * value of a slot is an expression: an envelope-shaped object nested inside an
+ * array or a plain object is data.
+ *
+ * **The `{token}` template dialect is retired from these slots** (#19939, the
+ * C half of #11182 ruling D): a string anywhere in a literal that carries a
+ * `{…}` token the interpolator would resolve is refused, with the token's CEL
+ * spelling ({@link valueSlotTemplateRefusals} — every token measured lossy
+ * under conversion, so none is rewritten, ADR-0087 D2). Two spellings CEL
+ * cannot write yet keep their 17.x meaning until it can: the date macros
+ * (`{NOW()}`, `{TODAY() + 7}`) and the run user (`{$User.Id}`).
  *
  * The slot-neutral contract. The CRUD `fields` map's values take it
  * (`CreateRecordConfigSchema` / `UpdateRecordConfigSchema`, #19938), and it is
@@ -376,9 +400,9 @@ function celValueSlotSchema(description: string) {
  * variable-worded description.
  */
 export const FlowValueSlotSchema = celValueSlotSchema(
-  'A value: a string (`{token}` flow interpolation — a sole token keeps its type), a CEL value envelope '
-  + '`{ dialect: \'cel\', source }` evaluated by the expression engine (the CEL stdlib such as `joinNonEmpty` is '
-  + 'reachable), or any other literal',
+  'A value: a CEL value envelope `{ dialect: \'cel\', source }` evaluated by the expression engine (the CEL stdlib '
+  + 'such as `joinNonEmpty` is reachable), or a literal written as it is — a `{…}` template token in a string is '
+  + 'refused (the template dialect is retired from value slots; the date macros and `$User` paths are kept for now)',
 );
 
 export type FlowValueSlot = z.input<typeof FlowValueSlotSchema>;
@@ -431,12 +455,12 @@ export const CreateRecordConfigSchema = lazySchema(() => strictObject({
   objectName: z.string().describe('Object to insert into'),
   /**
    * Field values to write on the new record — a `value`-role slot of the
-   * expression ledger (`create_record.fields.*`, #19938): each value is a
-   * `{token}` template, a CEL value envelope, or a literal
-   * ({@link FlowValueSlotSchema}).
+   * expression ledger (`create_record.fields.*`, #19938): each value is a CEL
+   * value envelope or a literal ({@link FlowValueSlotSchema}); a `{token}`
+   * template is refused there since #19939.
    */
   fields: z.record(z.string(), FlowValueSlotSchema).optional()
-    .describe('Field values to write on the new record: each key is a field name, each value a `{token}` template, a CEL value envelope, or a literal'),
+    .describe('Field values to write on the new record: each key is a field name, each value a CEL value envelope or a literal'),
   /** Flow variable bound to the created record (`{var.id}` works even when the driver returns a bare id). */
   outputVariable: z.string().optional()
     .describe('Flow variable bound to the created record'),
@@ -467,11 +491,12 @@ export const UpdateRecordConfigSchema = lazySchema(() => strictObject({
     .describe('Field/value pairs identifying the record(s) to update'),
   /**
    * Field values to write — a `value`-role slot of the expression ledger
-   * (`update_record.fields.*`, #19938): each value is a `{token}` template, a
-   * CEL value envelope, or a literal ({@link FlowValueSlotSchema}).
+   * (`update_record.fields.*`, #19938): each value is a CEL value envelope or
+   * a literal ({@link FlowValueSlotSchema}); a `{token}` template is refused
+   * there since #19939.
    */
   fields: z.record(z.string(), FlowValueSlotSchema).optional()
-    .describe('Field values to write: each key is a field name, each value a `{token}` template, a CEL value envelope, or a literal'),
+    .describe('Field values to write: each key is a field name, each value a CEL value envelope or a literal'),
   /**
    * Declare BULK intent — this node may update EVERY row `filter` matches.
    *
@@ -956,17 +981,29 @@ export type MapConfigParsed = z.infer<typeof MapConfigSchema>;
  * the value cell.
  */
 export const AssignmentValueSchema = celValueSlotSchema(
-  'Value the variable takes: a string (`{token}` flow interpolation — a sole token keeps its type), a CEL value '
-  + 'envelope `{ dialect: \'cel\', source }` evaluated by the expression engine (the CEL stdlib such as '
-  + '`joinNonEmpty` is reachable), or any other literal',
+  'Value the variable takes: a CEL value envelope `{ dialect: \'cel\', source }` evaluated by the expression engine '
+  + '(the CEL stdlib such as `joinNonEmpty` is reachable), or a literal written as it is — a `{…}` template token in '
+  + 'a string is refused (the template dialect is retired from value slots; the date macros and `$User` paths are '
+  + 'kept for now)',
 );
 
 export type AssignmentValue = z.input<typeof AssignmentValueSchema>;
 export type AssignmentValueParsed = z.infer<typeof AssignmentValueSchema>;
 
+/**
+ * A value of the bare legacy `assignment` config (#19939) — a literal, whose
+ * strings are judged by {@link valueSlotTemplateRefusals} with an
+ * envelope-shaped object read as the literal it is in that shape.
+ */
+const LEGACY_ASSIGNMENT_VALUE = z.unknown().superRefine((value, ctx) => {
+  for (const refusal of valueSlotTemplateRefusals(value, { envelopeIsLiteral: true })) {
+    ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
+  }
+});
+
 /** What the refusal of the legacy `assignments: [{ variable, value }]` array says. */
 export const ASSIGNMENT_ARRAY_FORM_PRESCRIPTION =
-  '`assignments` is a map of variable name → value (`{ assignments: { total: \'{amount}\' } }`). The array form '
+  '`assignments` is a map of variable name → value (`{ assignments: { total: { dialect: \'cel\', source: \'amount\' } } }`). The array form '
   + '`[{ variable, value }]` is a legacy shape the executor still reads but this contract does not describe — '
   + 'write the map, which is also the only shape that accepts a CEL value envelope.';
 
@@ -1020,11 +1057,14 @@ export const AssignmentConfigSchema = lazySchema(() => refuseCatchallProtoKey(z.
     // `refuseRecordProtoKey`'s docblock), so it alone is refused here.
     'assignments',
   ).optional()
-    .describe('Variables to set: each key is a variable name, each value a `{token}` template, a CEL value envelope, or a literal'),
+    .describe('Variables to set: each key is a variable name, each value a CEL value envelope or a literal'),
 })
   // Open by design: the bare legacy `{ <variable>: <value> }` config and any
-  // top-level key an author names live here.
-  .catchall(z.unknown()),
+  // top-level key an author names live here. [#19939] Each such value is a
+  // literal (an envelope-shaped object included — nothing evaluates it here),
+  // and one still spelling the retired `{…}` template dialect is refused like
+  // in the map, so the bare shape is no way around the retirement.
+  .catchall(LEGACY_ASSIGNMENT_VALUE),
   // [#19151] `__proto__` ONLY, and for the same structural reason
   // the `assignments` slot above refuses it: `handleCatchall`'s
   // `if (key === "__proto__") continue;` runs above `_catchall.run`, so no

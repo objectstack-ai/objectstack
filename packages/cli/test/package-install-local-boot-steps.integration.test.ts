@@ -106,7 +106,9 @@ const ARTIFACT = {
         id: 'note',
         type: 'create_record',
         label: 'Write Note',
-        config: { objectName: NOTE, fields: { name: 'Completed: {record.name}' } },
+        // A CEL value envelope — the `{…}` template dialect is retired from
+        // value slots (#19939).
+        config: { objectName: NOTE, fields: { name: { dialect: 'cel', source: "'Completed: ' + record.name" } } },
       },
       { id: 'end', type: 'end', label: 'End' },
     ],

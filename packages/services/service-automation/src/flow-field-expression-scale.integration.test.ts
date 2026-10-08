@@ -18,16 +18,23 @@
  * pass, and every assertion below reads the PERSISTED row, never the
  * expression result.
  *
+ * Since #19939 retired the `{…}` template dialect from the value slots (the C
+ * half of #11182 ruling D), every value here is a CEL value envelope — the one
+ * value dialect left:
+ *
  *  - negative control: the raw product is refused (`max_scale`) — proves the
  *    oracle's gate is live in this harness, not assumed;
- *  - oracle: `round(x * 100) / 100` (the CEL-identical authoring pattern)
- *    lands `126000` in the field;
+ *  - oracle: `round(x * 100.0) / 100.0` lands `126000` in the field. The
+ *    decimal points are load-bearing: CEL's `round()` returns an int and
+ *    `int / int` is INTEGER division, so `round(x * 100) / 100` would drop
+ *    the cents of any value that has them;
  *  - the same pattern through the `assignment` surface
  *    (`config.assignments`) — the third value-producing surface the issue
  *    names — persists identically;
- *  - the LOUD half: an unknown function (`ROUND`) fails the run with a named
- *    error INSTEAD of writing `undefined`, and a `fault` edge cannot swallow
- *    it (#3863 guard refusal).
+ *  - the LOUD half: an unknown function (`ROUND`) never reaches a run — the
+ *    envelope is refused at registration with a did-you-mean, and so is the
+ *    retired template spelling of the same value — so nothing is written as
+ *    `undefined`.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -36,6 +43,7 @@ import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AutomationServicePlugin } from './plugin.js';
 import type { AutomationEngine } from './engine.js';
+import { VALUE_SLOT_TEMPLATE_REFUSAL } from '@objectstack/spec/automation';
 
 function makeSqliteDriver() {
     return new SqlDriver({
@@ -56,7 +64,7 @@ const quote = {
 };
 
 /** start → create_record(quote) → end, computing `total` from flow inputs. */
-const quoteFlow = (name: string, totalExpr: string, extraNodes: any[] = [], extraEdges: any[] = []) => ({
+const quoteFlow = (name: string, total: unknown, extraNodes: any[] = [], extraEdges: any[] = []) => ({
     name,
     label: name,
     type: 'autolaunched',
@@ -67,7 +75,7 @@ const quoteFlow = (name: string, totalExpr: string, extraNodes: any[] = [], extr
     ],
     nodes: [
         { id: 'start', type: 'start', label: 'Start' },
-        { id: 'mk', type: 'create_record', label: 'Create', config: { objectName: 'quote', fields: { title: name, total: totalExpr } } },
+        { id: 'mk', type: 'create_record', label: 'Create', config: { objectName: 'quote', fields: { title: name, total } } },
         { id: 'end', type: 'end', label: 'End' },
         ...extraNodes,
     ],
@@ -79,6 +87,9 @@ const quoteFlow = (name: string, totalExpr: string, extraNodes: any[] = [], extr
 });
 
 const INPUTS = { amount: 180000, discount: 30 };
+
+/** A CEL value envelope — the value dialect of `fields.*` / `assignments.*` since #19939. */
+const cel = (source: string) => ({ dialect: 'cel', source });
 
 describe('flow-computed money lands within its declared scale (#11060, oracle for hotcrm#1206)', () => {
     let kernel: ObjectKernel;
@@ -110,7 +121,7 @@ describe('flow-computed money lands within its declared scale (#11060, oracle fo
 
     it('NEGATIVE CONTROL: the raw product is refused by scale enforcement — the gate is live in this harness', async () => {
         await boot();
-        automation.registerFlow('raw', quoteFlow('raw', '{amount * (1 - discount / 100)}') as any);
+        automation.registerFlow('raw', quoteFlow('raw', cel('amount * (1.0 - discount / 100.0)')) as any);
 
         const res = await automation.execute('raw', { userId: 'u1', params: { ...INPUTS } });
         expect(res.success, `the unrounded 125999.99999999999 must be refused: ${JSON.stringify(res)}`).toBe(false);
@@ -120,11 +131,11 @@ describe('flow-computed money lands within its declared scale (#11060, oracle fo
         expect(await quoteByTitle('raw'), 'no row may persist from the refused write').toBeFalsy();
     });
 
-    it('ORACLE: round(x * 100) / 100 writes 126000 into the scale-2 total field, end to end', async () => {
+    it('ORACLE: round(x * 100.0) / 100.0 writes 126000 into the scale-2 total field, end to end', async () => {
         await boot();
         automation.registerFlow(
             'rounded',
-            quoteFlow('rounded', '{round(amount * (1 - discount / 100) * 100) / 100}') as any,
+            quoteFlow('rounded', cel('round(amount * (1.0 - discount / 100.0) * 100.0) / 100.0')) as any,
         );
 
         const res = await automation.execute('rounded', { userId: 'u1', params: { ...INPUTS } });
@@ -136,7 +147,7 @@ describe('flow-computed money lands within its declared scale (#11060, oracle fo
         expect(row!.total).toBe(126000);
     });
 
-    it('the assignment surface computes the same rounded value (config.assignments → interpolate)', async () => {
+    it('the assignment surface computes the same rounded value (config.assignments → the CEL envelope)', async () => {
         await boot();
         const flow = {
             name: 'via_assignment',
@@ -149,8 +160,8 @@ describe('flow-computed money lands within its declared scale (#11060, oracle fo
             ],
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'calc', type: 'assignment', label: 'Calc', config: { assignments: { discounted: '{round(amount * (1 - discount / 100) * 100) / 100}' } } },
-                { id: 'mk', type: 'create_record', label: 'Create', config: { objectName: 'quote', fields: { title: 'via_assignment', total: '{discounted}' } } },
+                { id: 'calc', type: 'assignment', label: 'Calc', config: { assignments: { discounted: cel('round(amount * (1.0 - discount / 100.0) * 100.0) / 100.0') } } },
+                { id: 'mk', type: 'create_record', label: 'Create', config: { objectName: 'quote', fields: { title: 'via_assignment', total: cel('discounted') } } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -166,27 +177,21 @@ describe('flow-computed money lands within its declared scale (#11060, oracle fo
         expect((await quoteByTitle('via_assignment'))?.total).toBe(126000);
     });
 
-    it('LOUD half: an unknown function fails the run with a NAMED error — and a fault edge cannot swallow it', async () => {
+    it('LOUD half: an unknown function never reaches a run — refused at registration, with the name it meant', async () => {
         await boot();
-        // The fault edge routes ordinary runtime failures; #3863 guard
-        // refusals — metadata defects like this one — must NOT route, or one
-        // edge would turn the diagnostic back into the silence it replaces.
-        automation.registerFlow(
+        // The CEL spelling: the envelope's own CEL check names the function.
+        // (Before commit 815585513 the template spelling wrote the field as
+        // `undefined`; then it failed the run by name; now nothing registers.)
+        expect(() => automation.registerFlow(
             'shouty',
-            quoteFlow(
-                'shouty',
-                '{ROUND(amount * (1 - discount / 100), 2)}',
-                [{ id: 'recover', type: 'assignment', label: 'Recover', config: { assignments: { swallowed: 'yes' } } }],
-                [{ id: 'f1', source: 'mk', target: 'recover', type: 'fault' }],
-            ) as any,
-        );
-
-        const res = await automation.execute('shouty', { userId: 'u1', params: { ...INPUTS } });
-        expect(res.success, `the run must FAIL loudly, not route or succeed: ${JSON.stringify(res)}`).toBe(false);
-        const dump = JSON.stringify(res);
-        expect(dump).toContain("unknown function 'ROUND'");
-        expect(dump).toContain('round'); // the did-you-mean prescription travels with the failure
-        // Nothing persisted — before commit 815585513 this wrote the field as undefined.
+            quoteFlow('shouty', cel('ROUND(amount * (1.0 - discount / 100.0), 2)')) as any,
+        )).toThrow(/ROUND/);
+        // The retired template spelling of the same value is refused too, with
+        // the CEL spelling to write instead.
+        expect(() => automation.registerFlow(
+            'shouty_template',
+            quoteFlow('shouty_template', '{ROUND(amount * (1 - discount / 100), 2)}') as any,
+        )).toThrow(VALUE_SLOT_TEMPLATE_REFUSAL);
         expect(await quoteByTitle('shouty')).toBeFalsy();
     });
 });

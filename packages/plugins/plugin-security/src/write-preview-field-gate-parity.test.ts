@@ -142,6 +142,11 @@ const USER_POSITION = {
   fields: {
     user: { type: 'text' },
     position: { type: 'text' },
+    // Declared as the shipped object declares it: the DelegatedAdminGate stamps
+    // the writer into `granted_by` on every insert it admits, a tenant-level
+    // admin's included, so an object without the column refuses that insert as
+    // an unknown field before the rule this suite is about is ever reached.
+    granted_by: { type: 'text' },
     amount: { type: 'number' },
     account: { type: 'lookup', reference: 'crm_account' },
   },

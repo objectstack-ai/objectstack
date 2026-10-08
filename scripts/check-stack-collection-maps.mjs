@@ -612,13 +612,9 @@ const SITES = [
           + 'SeedLoaderService. This row is why the gate reconciles both directions with reasons instead of '
           + 'demanding equality.',
       },
-      {
-        direction: 'missing',
-        keys: ['positions'],
-        reason:
-          'ADR-0090 D3 positions reach the registry through the security bootstrap, which reads them off the '
-          + 'stack directly; the loop\'s sibling `permissions` entry is what makes the absence look like a gap.',
-      },
+      // `positions` left this table at #22203: its waiver said positions reach "the registry" through the
+      // security bootstrap, but that is the metadata service's registry, not the SchemaRegistry this loop
+      // stamps provenance into — and the metadata save door reads the latter, so the absence WAS the gap.
     ],
   },
   {

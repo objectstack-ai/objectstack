@@ -413,7 +413,7 @@ export const HookSchema = lazySchema(() => strictObject(
     'only in the description, beside a body-level `timeoutMs` and a `retryPolicy.backoffMs` that ' +
     'spell theirs, so the same number read as two conventions on one surface. ' +
     'Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. ' +
-    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   /**

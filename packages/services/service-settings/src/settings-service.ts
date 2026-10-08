@@ -107,6 +107,21 @@ const PLATFORM_SETTING_OBJECT = 'sys_platform_setting';
 const SETTINGS_SYSTEM_CONTEXT = Object.freeze({ isSystem: true as const });
 
 /**
+ * The caller's user id, or `null` when the context names no user.
+ *
+ * The user rung is per owner: a `scope: 'user'` row belongs to the user its
+ * `user_id` names. So the rung answers a resolve only for that same user
+ * ({@link SettingsService.resolveKeyFromRows}), and a write of a user-scoped
+ * key needs a user to pin the row to ({@link SettingsService.setMany} refuses
+ * one without). An absent or empty id names nobody, and both read as "no user"
+ * here: the read falls through to the tenant rung, then global, then the
+ * default, and the write is refused.
+ */
+function callerUserIdOf(ctx: SettingsContext): string | null {
+  return typeof ctx.userId === 'string' && ctx.userId !== '' ? ctx.userId : null;
+}
+
+/**
  * Value-bearing specifier types — drives which entries we expect to
  * find in the K/V store. Keeps the resolver in sync with the spec
  * without importing the (large) Zod enum at runtime.
@@ -1283,8 +1298,10 @@ export class SettingsService {
     const scope = reg.scopes.get(key)!;
     // For 'user' scope we pre-filter by user_id; for 'tenant' and 'global'
     // we load everything for the namespace and pick the right row below.
-    const rows = await this.loadRows(namespace, scope === 'user' ? ctx.userId ?? null : null);
-    return this.resolveKeyFromRows<T>(reg, key, scope, rows);
+    // The user rung's pick compares the owner too (see `resolveKeyFromRows`).
+    const userId = scope === 'user' ? callerUserIdOf(ctx) : null;
+    const rows = await this.loadRows(namespace, userId);
+    return this.resolveKeyFromRows<T>(reg, key, scope, rows, userId);
   }
 
   /**
@@ -1379,18 +1396,19 @@ export class SettingsService {
       // [ADR-0131 D7] One load per required `loadRows` argument, as before —
       // and the global rung, which no argument changes, is read ONCE for both
       // (see `loadRowSets`).
+      const userId = callerUserIdOf(ctx);
       const groups: Array<string | null> = [
-        ...(userKeys.length > 0 ? [ctx.userId ?? null] : []),
+        ...(userKeys.length > 0 ? [userId] : []),
         ...(otherKeys.length > 0 ? [null] : []),
       ];
       const sets = await this.loadRowSets(namespace, groups);
       const userRows = userKeys.length > 0 ? sets[0] : [];
       const otherRows = otherKeys.length > 0 ? sets[sets.length - 1] : [];
       for (const { key, scope } of userKeys) {
-        out[key] = await this.resolveKeyFromRows(reg, key, scope, userRows);
+        out[key] = await this.resolveKeyFromRows(reg, key, scope, userRows, userId);
       }
       for (const { key, scope } of otherKeys) {
-        out[key] = await this.resolveKeyFromRows(reg, key, scope, otherRows);
+        out[key] = await this.resolveKeyFromRows(reg, key, scope, otherRows, null);
       }
     }
     return out;
@@ -1401,12 +1419,18 @@ export class SettingsService {
    * verbatim from {@link get} for #10826 so `get`, `getMany` and
    * `getNamespace` share ONE implementation of the resolution order
    * (env is handled by the callers BEFORE the row load, exactly as before).
+   *
+   * `userId` is the caller's ({@link callerUserIdOf}), or `null` for a caller
+   * that names no user and for every key not declared `scope: 'user'`. The user
+   * rung answers only a row whose `user_id` equals it; with `null` there is no
+   * user rung at all.
    */
   private async resolveKeyFromRows<T = unknown>(
     reg: RegisteredManifest,
     key: string,
     scope: SpecifierScope,
     rows: SettingsRow[],
+    userId: string | null,
   ): Promise<ResolvedSettingValue<T>> {
     // 2. cascade walk — OS_* env (handled by callers) > global > tenant > user > default
     //
@@ -1438,8 +1462,12 @@ export class SettingsService {
       }
     }
 
-    if (scope === 'user') {
-      const userRow = rows.find((r) => r.key === key && r.scope === 'user');
+    // The user rung answers its OWNER only. The pick compares `user_id` itself
+    // rather than trusting the row set to be the caller's alone, and a caller
+    // that names no user gets no user rung: the walk falls through to tenant,
+    // global, then the default, exactly as if no user row existed.
+    if (scope === 'user' && userId !== null) {
+      const userRow = rows.find((r) => r.key === key && r.scope === 'user' && r.user_id === userId);
       if (userRow) {
         chain.push({
           scope: 'user',
@@ -1674,6 +1702,30 @@ export class SettingsService {
     return null;
   }
 
+  /**
+   * The per-key entry {@link setMany} refuses a user-scoped key with when the
+   * caller names no user. `invalid_value` is ADR-0114's declared slot for
+   * "rejected for a reason no other member names" (the closed catalog has no
+   * member for a missing owner, and a service does not invent one); the
+   * constraint carries the declared scope, spelled as the specifier property
+   * it comes from.
+   */
+  private ownerlessUserKeyError(reg: RegisteredManifest, key: string): FieldError {
+    const spec = ((reg.manifest.specifiers ?? []) as Array<Record<string, unknown>>)
+      .find((s) => s.key === key);
+    const label = typeof spec?.label === 'string' ? spec.label : key;
+    return {
+      field: key,
+      code: 'invalid_value',
+      message:
+        `${label} is a per-user setting, and this write names no user to store it for. ` +
+        'Pass the user id of the person the value belongs to (`SettingsContext.userId`); ' +
+        "a value meant for everyone belongs on a key declared at scope 'tenant' or 'global'.",
+      label,
+      constraint: { scope: 'user' },
+    };
+  }
+
   /** Persist a single key. Throws SettingsLockedError when env-locked. */
   async set(
     namespace: string,
@@ -1684,7 +1736,16 @@ export class SettingsService {
     return (await this.setMany(namespace, { [key]: value }, ctx))[key];
   }
 
-  /** Persist multiple keys atomically (best-effort). */
+  /**
+   * Persist multiple keys atomically (best-effort).
+   *
+   * A key declared `scope: 'user'` is written for one user, the caller
+   * ({@link callerUserIdOf}). A batch that writes one with no user id is
+   * refused WHOLE, before any write, with a {@link SettingsValidationError}
+   * naming each such key (`invalid_value`, `constraint: { scope: 'user' }`):
+   * the row it would store names no owner, and the user rung answers only its
+   * owner, so no reader would ever see it while the write reported success.
+   */
   async setMany(
     namespace: string,
     patch: Record<string, unknown>,
@@ -1701,7 +1762,10 @@ export class SettingsService {
     // missing — the write path previously trusted a spoofable header identity).
     this.assertPermitted(reg.manifest, 'write', ctx);
 
-    // Pre-flight: reject the whole batch if any key is locked or unknown.
+    // Pre-flight: reject the whole batch if any key is locked or unknown, or
+    // is user-scoped while the caller names no user (collected, refused below).
+    const callerUserId = callerUserIdOf(ctx);
+    const ownerless: FieldError[] = [];
     for (const key of Object.keys(patch)) {
       if (!reg.scopes.has(key)) throw new UnknownKeyError(namespace, key);
       // An env override pins the key against writes — but only one that is IN
@@ -1720,7 +1784,11 @@ export class SettingsService {
       // scope as the lock is still permitted (i.e. a platform admin
       // can edit a globally-locked value; a tenant admin cannot).
       const scope = reg.scopes.get(key)!;
-      const rows = await this.loadRows(namespace, scope === 'user' ? ctx.userId ?? null : null);
+      if (scope === 'user' && callerUserId === null) {
+        ownerless.push(this.ownerlessUserKeyError(reg, key));
+        continue;
+      }
+      const rows = await this.loadRows(namespace, scope === 'user' ? callerUserId : null);
       const upper = rows.find(
         (r) =>
           r.key === key &&
@@ -1730,6 +1798,9 @@ export class SettingsService {
       if (upper) {
         throw new SettingsLockedError(namespace, key, `locked-by-${upper.scope}`);
       }
+    }
+    if (ownerless.length > 0) {
+      throw new SettingsValidationError(namespace, ownerless);
     }
 
     // Reject writes that would leave the namespace in a known-broken
@@ -1761,9 +1832,10 @@ export class SettingsService {
       const scope = reg.scopes.get(key)!;
       // global rows are deployment-wide and land in `sys_platform_setting`,
       // which has no organization and no user column (ADR-0131 D7, see
-      // `rowIdentity`); user rows pin to ctx.userId; tenant rows leave user_id
+      // `rowIdentity`); user rows pin to the caller's user id, which the
+      // pre-flight above guarantees is present; tenant rows leave user_id
       // null and let the engine's tenant scoping fill in tenant_id from ctx.
-      const userId = scope === 'user' ? ctx.userId ?? null : null;
+      const userId = scope === 'user' ? callerUserId : null;
       const isEncrypted = reg.encryptedKeys.has(key);
       const isNull = rawValue === null || typeof rawValue === 'undefined';
 

@@ -137,6 +137,9 @@ const ARTIFACT = {
     },
   ],
   capabilities: [{ name: 'probe.export', label: 'Export probe data' }],
+  // [#22203] One declared position, so the registry-copy case below measures a
+  // stack declaration rather than an empty collection.
+  positions: [{ name: 'probe_lead', label: 'Probe Lead' }],
   sharingRules: [
     {
       name: 'share_legacy_deals',
@@ -283,15 +286,23 @@ describe('#14491 — the third copy exists, and both seeder spellings read it', 
     expect(doorCopy.sharing_rule).toHaveLength(3);
   });
 
-  it('`positions` is absent from METADATA_ARRAY_KEYS, so no stack-declared `position` has a registry copy and each comes from the door', async () => {
-    // The card's asymmetry, re-measured. `roles:` is not in
-    // `PLURAL_TO_SINGULAR` either, so nothing lands under `roles` in the
-    // registry: both reads are empty from both spellings.
+  it('[#22203] a stack-declared `position` has a registry copy under the artifact\'s package, beside the six built-ins', async () => {
+    // Re-measured after `positions` joined METADATA_ARRAY_KEYS. It used to be
+    // absent, so this read held the six built-ins and none of the stack's —
+    // and the metadata save door decides "a code package ships this" from
+    // this registry, so a save over a package's position was accepted.
+    // `roles:` is not in `PLURAL_TO_SINGULAR`, so nothing lands under `roles`
+    // from either spelling.
     const ql = kernel.getService<ObjectQlRegistrySlot>('objectql');
-    // [ADR-0131 D2] The registry's positions are exactly the six built-ins
-    // `SecurityPlugin` declares under its own package id — none of the stack's.
-    expect((ql.registry.listItems('position') ?? []).filter(Boolean).map((i: any) => i.name).sort())
-      .toEqual([...BUILTIN_IDENTITY_NAMES, ...AUDIENCE_ANCHOR_POSITIONS].sort());
+    const positions = (ql.registry.listItems('position') ?? []).filter(Boolean);
+    // [ADR-0131 D2] The six built-ins `SecurityPlugin` declares under its own
+    // package id, plus the stack's one under the artifact's.
+    expect(positions.map((i: any) => i.name).sort())
+      .toEqual([...BUILTIN_IDENTITY_NAMES, ...AUDIENCE_ANCHOR_POSITIONS, 'probe_lead'].sort());
+    expect(byName(positions, 'probe_lead')).toMatchObject({
+      _packageId: ARTIFACT.manifest.id,
+      _provenance: 'package',
+    });
     expect((ql.registry.listItems('roles') ?? []).filter(Boolean)).toEqual([]);
   });
 });

@@ -55,7 +55,7 @@ import {
   ObjectListViewSchema,
   checkListViewCalendarVisualization,
 } from './view.zod';
-import { PageSchema, checkPageSourceCompleteness, checkPageRequiresKind } from './page.zod';
+import { PageSchema, checkPageSourceCompleteness, checkPageRequiresKind, checkPagePrintComposition } from './page.zod';
 import {
   GlobalFilterSchema,
   checkGlobalFilterDateDefaultValue,
@@ -235,6 +235,25 @@ const pageRequiresFixtures: Fixture[] = [
   { label: '`requires` on an `html` page', value: { ...PAGE_BASE, kind: 'html', source: 'Card', requires: ['ui'] }, refusesAt: [] },
   { label: '`requires` on a `jsx` page (the deprecated `html` alias)', value: { ...PAGE_BASE, kind: 'jsx', source: 'Card', requires: ['ui'] }, refusesAt: [] },
   { label: 'a `react` page with no `requires`', value: { ...PAGE_BASE, kind: 'react', source: 'Card' }, refusesAt: [] },
+];
+
+// A print page prints exactly the blocks it authors (#22158, ruling B′ on
+// #8346): `print` is refused on the kinds and types that draw blocks nobody
+// authored or are no document (`list`, `utility`), and a running header or
+// footer needs the region it repeats.
+const PRINT_REGIONS = [
+  { name: 'header', components: [{ type: 'element:text' }] },
+  { name: 'main', components: [{ type: 'record:details' }] },
+];
+const pagePrintFixtures: Fixture[] = [
+  { label: '`print` on a `slotted` page', value: { ...PAGE_BASE, kind: 'slotted', regions: PRINT_REGIONS, print: {} }, refusesAt: ['print'] },
+  { label: '`print` on an `html` page with a `source`', value: { ...PAGE_BASE, kind: 'html', source: 'Card', regions: PRINT_REGIONS, print: {} }, refusesAt: ['print'] },
+  { label: '`print` on a `list` page', value: { ...PAGE_BASE, type: 'list', regions: PRINT_REGIONS, print: {} }, refusesAt: ['print'] },
+  { label: '`print` on a `utility` page', value: { ...PAGE_BASE, type: 'utility', regions: PRINT_REGIONS, print: {} }, refusesAt: ['print'] },
+  { label: '`print` on a `full` page with no `regions`', value: { ...PAGE_BASE, print: {} }, refusesAt: ['print'] },
+  { label: '`print.repeatFooter` with no `footer` region', value: { ...PAGE_BASE, regions: PRINT_REGIONS, print: { repeatHeader: true, repeatFooter: true } }, refusesAt: ['print.repeatFooter'] },
+  { label: '`print` on a `full` page with `regions` and its `header` region', value: { ...PAGE_BASE, regions: PRINT_REGIONS, print: { repeatHeader: true } }, refusesAt: [] },
+  { label: 'a `slotted` page with no `print`', value: { ...PAGE_BASE, kind: 'slotted' }, refusesAt: [] },
 ];
 
 const DATE_FILTER = { field: 'created_at', type: 'date' } as const;
@@ -449,6 +468,7 @@ const MIRRORED: MirroredSchema[] = [
     exports: [
       { name: 'checkPageSourceCompleteness', check: checkPageSourceCompleteness, fixtures: pageSourceFixtures },
       { name: 'checkPageRequiresKind', check: checkPageRequiresKind, fixtures: pageRequiresFixtures },
+      { name: 'checkPagePrintComposition', check: checkPagePrintComposition, fixtures: pagePrintFixtures },
     ],
     cleanFixtures: [{ ...PAGE_BASE }],
   },
@@ -596,9 +616,9 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
     expect(attachments(src, 'checkListViewPageMount')).toBe(0);
   });
 
-  it('page.zod.ts declares both exports and attaches each to PageSchema', () => {
+  it('page.zod.ts declares all three exports and attaches each to PageSchema', () => {
     const src = read('page.zod.ts');
-    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind']) {
+    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition']) {
       expect(src).toContain(`export function ${name}(`);
       expect(declarations(src, name)).toBe(1);
       expect(attachments(src, name)).toBe(1);
@@ -630,6 +650,7 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
     ['checkListViewCalendarVisualization', checkListViewCalendarVisualization],
     ['checkPageSourceCompleteness', checkPageSourceCompleteness],
     ['checkPageRequiresKind', checkPageRequiresKind],
+    ['checkPagePrintComposition', checkPagePrintComposition],
     ['checkGlobalFilterDateDefaultValue', checkGlobalFilterDateDefaultValue],
   ] as const)('%s — reference identity, and the `(value, ctx)` arity', (name, fn) => {
     expect((ui as Record<string, unknown>)[name]).toBe(fn);

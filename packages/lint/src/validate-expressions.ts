@@ -90,7 +90,7 @@ import {
   flowNodeConfigRefusals,
   predicateSlotRefusal,
   resolveFlowNodeExpressions,
-  resolveFlowNodeValueSlots,
+  flowNodeValueTemplateRefusals,
   structuralConditionRefusal,
 } from '@objectstack/spec/automation';
 // [#15137] The `value`-role half. Same two published primitives the engine
@@ -117,69 +117,6 @@ import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fi
 import { findUnguardedNullableOperands, nullGuardMessage } from './validate-null-guards.js';
 import type { NullGuardOutcome } from './validate-null-guards.js';
 import { recordsOf } from './object-graph.js';
-import { classifyFlowTemplateToken, FLOW_TEMPLATE_VALUE_FUNCTIONS, SAFE_EXPRESSION_RE } from './flow-template-grammar.js';
-
-/**
- * The author-time hint of #11182 ruling D: a `value` slot (`assignments.*`,
- * `create_record` / `update_record` `fields.*`) accepts a CEL value envelope,
- * so a `{…}` template EXPRESSION authored there is pointed at it — at
- * `warning`, never more: the template dialect keeps its 17.x meaning and no
- * spelling is refused or rewritten.
- *
- * Which tokens, and why only those — the hint must never steer an author
- * toward metadata the runtime honours but that makes the value worse:
- *
- *  - a template EXPRESSION — arithmetic, a comparison, or a call to one of the
- *    CEL-mirrored six (`round` / `floor` / `ceil` / `abs` / `min` / `max`) —
- *    is where the two vocabularies overlap and CEL is a strict superset (the
- *    whole stdlib). The one conversion trap is stated in the hint itself: CEL
- *    divides two integers as integers, so `/ 100` must become `/ 100.0`.
- *  - ⛔ NOT a plain `{var}` / `{var.path}` reference: CEL adds nothing to it,
- *    and an absent key flips from `undefined` to a fault — a behaviour change
- *    the hint would be recommending in the dark.
- *  - ⛔ NOT `{NOW()}` / `{TODAY() ± N}`: CEL's `now()` / `today()` are
- *    Timestamps, not the ISO strings the macros produce, and CEL has no
- *    `string(timestamp)` to recover them — the string form is the v18
- *    carrier's to add.
- *  - ⛔ NOT `{$User.*}`: the flow CEL scope binds no user.
- *
- * The token grammar is the lint package's MIRROR of the template evaluator
- * (`flow-template-grammar.ts`, drift-pinned against `template.ts`), consulted
- * in the evaluator's own dispatch order — never a second reading of it.
- */
-const TEMPLATE_TOKEN_RE = /\{([^{}]+)\}/g;
-const TEMPLATE_EXPRESSION_OPERATOR_RE = /[+\-*/%<>=!&|?]/;
-const TEMPLATE_VALUE_CALL_RE = new RegExp(`\\b(?:${FLOW_TEMPLATE_VALUE_FUNCTIONS.join('|')})\\s*\\(`);
-
-/** The first `{…}` token in `value` that is a template EXPRESSION (see above), or `undefined`. */
-function templateExpressionToken(value: string): string | undefined {
-  // A global regex carries `lastIndex` between calls, so the scan starts from
-  // zero every time; the loop is synchronous, so nothing interleaves.
-  TEMPLATE_TOKEN_RE.lastIndex = 0;
-  for (let match = TEMPLATE_TOKEN_RE.exec(value); match !== null; match = TEMPLATE_TOKEN_RE.exec(value)) {
-    const inner = match[1]!.trim();
-    // A date macro, a `$User` path, a variable path or an unknown call is
-    // classified away here, in the evaluator's own order.
-    if (classifyFlowTemplateToken(inner).kind !== 'unresolvable-shape') continue;
-    // Outside the evaluator's arithmetic character set the token resolves to
-    // nothing at all — junk, not an expression to move.
-    if (!SAFE_EXPRESSION_RE.test(inner)) continue;
-    if (TEMPLATE_EXPRESSION_OPERATOR_RE.test(inner) || TEMPLATE_VALUE_CALL_RE.test(inner)) return match[0];
-  }
-  return undefined;
-}
-
-/** The hint's text — the conversion trap stated where the author reads it. */
-function templateExpressionEnvelopeHint(token: string): string {
-  return (
-    `\`${token}\` is a \`{…}\` template-dialect expression. This slot also accepts a CEL value envelope — `
-    + "`{ dialect: 'cel', source: '…' }` — evaluated by the engine flow conditions use, with the whole CEL stdlib; "
-    + 'the template form keeps working unchanged. When moving arithmetic to CEL, give a division a decimal operand: '
-    + 'CEL divides two integers as integers, so `round(x * 100) / 100` drops the decimals there — write '
-    + '`round(x * 100) / 100.0`.'
-  );
-}
-
 export interface ExprIssue {
   where: string;
   message: string;
@@ -1194,8 +1131,9 @@ export interface StackExpressionOptions {
    * through by this rule's registry entry). ABSENT on `os build`, `os lint`
    * and `os validate`, which run every pass below.
    *
-   * On an `object` write exactly FOUR passes judge, each the build's own call
-   * at the build's own position in the walk:
+   * On an `object` write exactly FIVE passes judge — every pass over the
+   * object's own body — each the build's own call at the build's own position
+   * in the walk:
    *
    *  - the field-formula pass over `fields[].expression` — the build's
    *    `validateExpression('value', …)` call, with its warnings and the
@@ -1231,13 +1169,24 @@ export interface StackExpressionOptions {
    *    `formulas.mdx` covers it, and the door gave none of it either: an
    *    option whose `visibleWhen` read a bare `amount` saved with a 200, and
    *    the server's option check cannot evaluate it and fails open (logged,
-   *    allowed through), so the gate it declares is never enforced.
+   *    allowed through), so the gate it declares is never enforced;
+   *  - [#22032, pass 4] the object's own `actions[]` pass — each action's
+   *    `visible`, and its `disabled` unless that is a boolean literal, as a
+   *    `record`-scoped predicate (`checkAction` below). The same sentence of
+   *    `formulas.mdx` covers it, and the door gave none of it either: an
+   *    action whose `visible` read a bare `amount` saved with a 200, and the
+   *    action runtime's fail-closed evaluation then hides the action on every
+   *    record. One location differs from the build, never the verdict: an
+   *    action ALSO declared in the stack's top-level `actions` is located by
+   *    the build at `stack · action …` (the de-duplication in `checkAction`),
+   *    while an object write carries no top-level actions, so the door locates
+   *    the same predicate at `object '…' · action …`.
    *
-   * Every other pass is fenced off an object write, deliberately and by name:
-   * the object's own `actions[]` predicates. That is a build verdict the save
-   * door still does not give, and it would narrow the accept set further than
-   * the crossings above — a crossing of its own, measured over the stored
-   * corpus first, not a rider on any of them.
+   * The passes over the stack's OTHER collections — flows, the top-level
+   * `actions`, sharing rules and hooks — read an empty list on an object
+   * write. None of them is the object's own body, the object write's snapshot
+   * does not carry them, and each is judged at its own type's door; the claim
+   * holds by construction rather than by the snapshot's shape.
    */
   runtimeWriteType?: string;
 }
@@ -1262,12 +1211,12 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
 export function runStackExpressionPasses(stack: AnyRec, options: StackExpressionOptions): ExprIssue[] {
   const issues: ExprIssue[] = [];
   // [#22019] See {@link StackExpressionOptions.runtimeWriteType}: on an object
-  // write only the field-formula pass and (#22032) the validation-rule,
-  // field-rule-slot and per-option `visibleWhen` passes judge — the whole
-  // field walk. Every other loop below — the object's own `actions[]` loop
-  // included — reads an empty list under it, so the claim holds by
-  // construction rather than by the shape of the snapshot the gate happens to
-  // build today.
+  // write only the passes over the object's own body judge: the field-formula
+  // pass and (#22032) the validation-rule, field-rule-slot, per-option
+  // `visibleWhen` and object-action passes. Every loop below over another
+  // collection — flows, the top-level `actions`, sharing rules, hooks — reads
+  // an empty list under it, so the claim holds by construction rather than by
+  // the shape of the snapshot the gate happens to build today.
   const objectWrite = options.runtimeWriteType === 'object';
   const objects = recordsOf(stack.objects);
   const fieldIndex = buildFieldIndex(objects);
@@ -1786,23 +1735,20 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           // (the 2026-09-01 option-C ruling's letter).
           warnShadowedFieldReads(slotWhere, found.value);
         }
-        // [#11182 ruling D] The author-time hint: a `{…}` template EXPRESSION in
-        // a `value` slot is pointed at the CEL value envelope that slot also
-        // accepts — `warning` only, the template form keeps its meaning. The
-        // slots come from the ledger's own walk (`resolveFlowNodeValueSlots`),
-        // never from a path list re-spelled here; which tokens qualify, and
-        // why only those, is `templateExpressionToken`'s docblock.
-        // `found` — the same resolver-result shape the declared-slot loop above
-        // reads (`entry` / `path` / `value`, the resolver's own keys).
-        for (const found of resolveFlowNodeValueSlots(nodeType, cfg)) {
-          if (typeof found.value !== 'string') continue;
-          const token = templateExpressionToken(found.value);
-          if (token === undefined) continue;
+        // [#19939] The `{…}` template dialect is retired from the value slots
+        // (the C half of #11182 ruling D, which this replaced: until then a
+        // template EXPRESSION here drew a `warning` pointing at the CEL value
+        // envelope). A literal that still spells it is refused at `error` —
+        // the one judge `registerFlow` calls on the same config
+        // (`flowNodeValueTemplateRefusals`), walking the ledger's `value` slots
+        // and the two legacy `assignment` shapes, so build and registration
+        // give one verdict, and each refusal names the token's CEL spelling.
+        for (const templateRefusal of flowNodeValueTemplateRefusals(nodeType, cfg)) {
           issues.push({
-            where: `${at} · node '${node.id}' (${nodeType}) ${found.entry.label} at config.${found.path}`,
-            message: templateExpressionEnvelopeHint(token),
-            source: found.value,
-            severity: 'warning',
+            where: `${at} · node '${node.id}' (${nodeType}) ${templateRefusal.label} at config.${templateRefusal.path}`,
+            message: templateRefusal.message,
+            source: templateRefusal.source,
+            severity: 'error',
           });
         }
         // #1870 — a `script` node must name a callable, and since #4343 that is
@@ -1837,16 +1783,17 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
                   ? `\`actionType: '${action}'\` named a registered function — move it to \`function: '${action}'\`. `
                   : `Use a \`notify\` node for mail, a \`connector_action\` (Slack connector) or \`http\` node ` +
                     `for Slack, and a registered function for logic. `) +
-                // #6856 route D (maintainer-ruled), reworded under #9529: the house
-                // sentence names the TOOL's behaviour, never the retired key's fate —
-                // "rewrite it" read two ways over a branch that DELETES the key
-                // (template/recipients/variables/script), and the tool never rewrote a
-                // source file at all. Plain-quoted (not a template literal)
+                // #6856 route D (maintainer-ruled), reworded under #9529 and #9591: the
+                // house sentence names the TOOL's behaviour, never the retired key's
+                // fate — "rewrite it" read two ways over a branch that DELETES the key
+                // (template/recipients/variables/script) — and claims no more than the
+                // tool does: the default run lists, `--write` writes only the edits it
+                // can prove. Plain-quoted (not a template literal)
                 // so this site is a member of `retired-key-migrate-sentence.test.ts`'s
                 // widened scan (#7030) on the same textual shape as the spec corpus — no
                 // interpolation lives in this clause, so nothing is lost switching quote style.
                 'Run `os migrate meta --from 16` to list the mechanical edits for existing '
-                  + 'sources; apply them by hand.',
+                  + 'sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
               source: JSON.stringify({ id: node.id, type: node.type, config: cfg }),
             });
           } else if (!fn) {
@@ -2079,7 +2026,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // D1), so it passes here — options resolve through
       // `resolveCascadingOptions` against the host's predicate scope, which
       // binds it (ADR-0068 / objectui#2284), and the showcase's
-      // `'admin' in current_user.positions` is the pinned legal usage — while
+      // `'org_admin' in current_user.positions` is the pinned legal usage — while
       // `checkFieldRuleRoot` above rejects it one level up, where nothing
       // binds it. Same helper, two verdicts, because the two surfaces have two
       // evaluators; neither verdict is a side effect of a shared root list.
@@ -2245,10 +2192,19 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // `$select` projection (and, through `&&` short-circuiting, on row data),
     // neither of which this pass can see. Full reasoning in the ledger.
   };
+  // The stack's top-level `actions` are not an object's own body: an object
+  // write reads an empty list here (they are judged at the `action` door). See
+  // {@link StackExpressionOptions.runtimeWriteType}.
   for (const action of objectWrite ? [] : recordsOf(stack.actions)) {
     checkAction('stack', action);
   }
-  for (const obj of objectWrite ? [] : objects) {
+  // [#22032, pass 4] NOT fenced on an object write: an object's own
+  // `actions[]` predicates are the pass the object save door runs, so the
+  // door's findings and their order are the build's for an object body. The
+  // one difference is a location, never a verdict: an action also declared
+  // top-level was claimed by the loop above in the build (`stack · action …`),
+  // and is located here on an object write.
+  for (const obj of objects) {
     const objectName = typeof obj.name === 'string' ? obj.name : undefined;
     for (const action of recordsOf(obj.actions)) {
       checkAction(`object '${objectName}'`, action, objectName);

@@ -59,7 +59,7 @@ const legal = () => ({
  * two-clause `os migrate meta` sentence naming the case the conversion covers.
  */
 const PRESCRIPTION =
-  /^Expected the plugin permission block `\{ services\?, hooks\?, network\?, fs\? \}`, received a flat list\..*removed in @objectstack\/spec 17 \(ADR-0049 enforce-or-remove\).*translate each one by hand, or delete `permissions` when the plugin needs none\. Run `os migrate meta --from 17` to list the mechanical edits for the package manifest case; a granted-permission record is not a source it reads\.$/s;
+  /^Expected the plugin permission block `\{ services\?, hooks\?, network\?, fs\? \}`, received a flat list\..*removed in @objectstack\/spec 17 \(ADR-0049 enforce-or-remove\).*translate each one by hand, or delete `permissions` when the plugin needs none\. Run `os migrate meta --from 17` to list the mechanical edits for the package manifest case; `--write` applies the ones it can prove, and a granted-permission record is not a source it reads\.$/s;
 
 const permissionsIssue = (input: unknown) => {
   const result = ManifestSchema.safeParse(input);

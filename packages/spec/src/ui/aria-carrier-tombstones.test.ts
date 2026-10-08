@@ -110,7 +110,7 @@ describe('the `aria` tombstones name only live `AriaProps` carriers', () => {
     // site that already flipped once.
     expect(message).toContain('Delete the key.');
     expect(message).toContain('os migrate meta --from 16');
-    expect(message).toMatch(/to list the mechanical edits for existing sources; apply them by hand\.$/);
+    expect(message).toMatch(/to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\.$/);
   });
 
   it('the App.aria tombstone points at a page component, not at the retired widget surface', () => {
@@ -220,7 +220,7 @@ describe('the `aria` tombstones name only live `AriaProps` carriers', () => {
     // None of the above bought by weakening the prescription itself.
     expect(message).toContain('Delete the key.');
     expect(message).toContain('os migrate meta --from 17');
-    expect(message).toMatch(/to list the mechanical edits for existing sources; apply them by hand\.$/);
+    expect(message).toMatch(/to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\.$/);
   });
 
   it('the tombstone rides the `.extend()` onto ReportChart', () => {
@@ -294,7 +294,7 @@ describe('the `aria` tombstones name only live `AriaProps` carriers', () => {
     // None of the above bought by weakening the prescription itself.
     expect(message).toContain('Delete the key.');
     expect(message).toContain('os migrate meta --from 17');
-    expect(message).toMatch(/to list the mechanical edits for existing sources; apply them by hand\.$/);
+    expect(message).toMatch(/to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\.$/);
   });
 
   it('the action tombstone refuses on the object-nested coordinate too', () => {

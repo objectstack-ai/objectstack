@@ -138,6 +138,7 @@
     "FlowNodeExpressionRole": "src/automation/flow-node-expression-paths.ts#FlowNodeExpressionRole (type)",
     "FlowNodeParsed": "src/automation/flow.zod.ts#FlowNodeParsed (type)",
     "FlowNodeSchema": "src/automation/flow.zod.ts#FlowNodeSchema (const)",
+    "FlowNodeValueTemplateRefusal": "src/automation/flow-value-slot-template.ts#FlowNodeValueTemplateRefusal (interface)",
     "FlowParsed": "src/automation/flow.zod.ts#FlowParsed (type)",
     "FlowRegion": "src/automation/control-flow.zod.ts#FlowRegion (type)",
     "FlowRegionArity": "src/automation/region-slots.ts#FlowRegionArity (type)",
@@ -243,6 +244,9 @@
     "UpdateRecordConfigParsed": "src/automation/builtin-node-config.zod.ts#UpdateRecordConfigParsed (type)",
     "UpdateRecordConfigSchema": "src/automation/builtin-node-config.zod.ts#UpdateRecordConfigSchema (const)",
     "VALUE_ENVELOPE_REFUSAL": "src/automation/builtin-node-config.zod.ts#VALUE_ENVELOPE_REFUSAL (const)",
+    "VALUE_SLOT_TEMPLATE_REFUSAL": "src/automation/flow-value-slot-template.ts#VALUE_SLOT_TEMPLATE_REFUSAL (const)",
+    "ValueSlotTemplateOptions": "src/automation/flow-value-slot-template.ts#ValueSlotTemplateOptions (interface)",
+    "ValueSlotTemplateRefusal": "src/automation/flow-value-slot-template.ts#ValueSlotTemplateRefusal (interface)",
     "WAIT_EXECUTOR_DESCRIPTOR": "src/automation/node-executor.zod.ts#WAIT_EXECUTOR_DESCRIPTOR (const)",
     "WaitEventType": "src/automation/node-executor.zod.ts#WaitEventType (type)",
     "WaitEventTypeSchema": "src/automation/node-executor.zod.ts#WaitEventTypeSchema (const)",
@@ -269,6 +273,7 @@
     "findRegionEntry": "src/automation/control-flow.zod.ts#findRegionEntry (function)",
     "flowForm": "src/automation/flow.form.ts#flowForm (const)",
     "flowNodeConfigRefusals": "src/automation/flow-node-config-refusals.ts#flowNodeConfigRefusals (function)",
+    "flowNodeValueTemplateRefusals": "src/automation/flow-value-slot-template.ts#flowNodeValueTemplateRefusals (function)",
     "getApprovalNodeConfigJsonSchema": "src/automation/approval.zod.ts#getApprovalNodeConfigJsonSchema (function)",
     "getBuiltinNodeConfigContracts": "src/automation/flow-node-config-refusals.ts#getBuiltinNodeConfigContracts (function)",
     "getSchemalessNodeConfigJsonSchemas": "src/automation/schemaless-node-config.zod.ts#getSchemalessNodeConfigJsonSchemas (function)",
@@ -284,6 +289,7 @@
     "resolveFlowTriggerKind": "src/automation/flow-trigger-kind.ts#resolveFlowTriggerKind (function)",
     "resolveScheduleOrganization": "src/automation/schedule-organization.zod.ts#resolveScheduleOrganization (function)",
     "structuralConditionRefusal": "src/automation/flow-node-expression-paths.ts#structuralConditionRefusal (function)",
-    "validateControlFlow": "src/automation/control-flow.zod.ts#validateControlFlow (function)"
+    "validateControlFlow": "src/automation/control-flow.zod.ts#validateControlFlow (function)",
+    "valueSlotTemplateRefusals": "src/automation/flow-value-slot-template.ts#valueSlotTemplateRefusals (function)"
   }
 }

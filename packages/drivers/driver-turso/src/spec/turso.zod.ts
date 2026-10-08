@@ -60,7 +60,7 @@ const TIMEOUT_RETIRED =
   '`turso config.timeout` was renamed to `timeoutMs` in @objectstack/driver-turso 17 — the unit of a '
   + 'duration-shaped number lives in the key name, not only in the describe prose. Rename the key to '
   + '`timeoutMs`; the value (milliseconds) is unchanged. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * The prescriptions the two REMOVED keys raise (ADR-0049 enforce-or-remove).
@@ -72,14 +72,14 @@ const LOCAL_PATH_RETIRED =
   + 'effect: no code read it, and the embedded replica\'s local file has always been named by `url` '
   + '(`file:./replica.db`, with `syncUrl` pointing at the remote primary). Delete the key; a path it '
   + 'named that differs from `url` belongs in `url`. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 const WASM_RETIRED =
   '`turso config.wasm` was removed in @objectstack/driver-turso 17 (ADR-0049) — it never had an '
   + 'effect: nothing selects a WASM build of libSQL, and the driver loads whatever `@libsql/client` '
   + 'resolves to on the host runtime. Delete the key; a runtime that cannot load native bindings uses '
   + 'the remote arm (`libsql://` / `https://`), which needs none. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 // ==========================================================================
 // 2a. Transport coherence — what `new TursoDriver` refuses

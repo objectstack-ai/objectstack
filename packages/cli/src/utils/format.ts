@@ -1278,6 +1278,159 @@ export interface BootDiagnosticsReplayOptions {
 }
 
 /**
+ * One class of boot diagnostic that needs the AUTHOR's hand (#22160) — a
+ * record whose producer names a fix the author applies in their own project.
+ */
+interface ActionableBootClass {
+  /**
+   * The identifying text of the producer's record, matched the way
+   * {@link BootDiagnosticsReplayOptions.restatedAbove} matches: a substring of
+   * the record, ANSI stripped.
+   */
+  record: string;
+  /** The key the producer lists the record's subjects under, in its structured tail. */
+  subjectsKey: string;
+}
+
+/**
+ * The CLOSED set of boot diagnostics *Boot diagnostics* highlights as needing
+ * the author's attention (#22160), each printed once with its one-line fix.
+ * Every other record is informational: printed once, dim, as before.
+ *
+ * Closed on purpose, the same way {@link printAutomationSummary}'s class
+ * table is: a free-text guess at which warning "sounds actionable" would
+ * promote whatever a producer happened to phrase as advice, and a new logger
+ * metadata key every producer adopts is a cross-package contract this printer
+ * does not own. A class joins by a row here, with a pin that boots its REAL
+ * producer (`format.boot-warning-classes.test.ts`).
+ *
+ * The fix is DERIVED, never hand-copied, as `leadSentence` derives a flow
+ * reason's short form: each producer listed here writes its record as
+ * `STATEMENT; FIX`, so the banner prints the statement with its subjects on
+ * one highlighted line and the producer's own fix under it. A producer that
+ * stops writing a `;` still prints highlighted, whole, with no separate fix
+ * line — never dropped, never demoted to informational by a rewording that
+ * keeps the identifying text.
+ */
+const ACTIONABLE_BOOT_CLASSES: readonly ActionableBootClass[] = [
+  {
+    // `@objectstack/objectql` `runActionGovernanceInventory` (ADR-0110 D5): a
+    // declared `script` action that no handler serves — a dead button.
+    record: '[action-governance] declared script actions with NO handler',
+    subjectsKey: 'actions',
+  },
+];
+
+/**
+ * The structured tail `ObjectLogger` appends to a record — `JSON.stringify` of
+ * its context — located and parsed, or `undefined` when the record carries
+ * none.
+ *
+ * Every rendering ends with it: pretty `… message {"ctx":1}`, text
+ * `… | message | {"ctx":1}`, and a JSON-format record IS one object, so its
+ * tail starts at 0 and spans the whole record. Located as the LEFTMOST `{` at
+ * the start of the line or after a space from which the rest of the line
+ * parses as ONE JSON object. A brace inside the message cannot win that race
+ * while a tail follows it (`{…} more {…}` is not one object); a message that
+ * itself ends in a JSON object and carries no tail is read as that object,
+ * which is the record's structured content either way.
+ */
+function structuredTail(text: string): { start: number; value: Record<string, unknown> } | undefined {
+  for (let i = text.indexOf('{'); i !== -1; i = text.indexOf('{', i + 1)) {
+    if (i > 0 && text[i - 1] !== ' ') continue;
+    try {
+      const value: unknown = JSON.parse(text.slice(i));
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        return { start: i, value: value as Record<string, unknown> };
+      }
+    } catch {
+      // Not the tail — a brace inside the message. Keep looking.
+    }
+  }
+  return undefined;
+}
+
+/** A V8 stack trace: a first line, then `at` frames on lines of their own. */
+const STACK_TRACE = /\n\s*at\s/;
+
+/**
+ * `value` with every `stack` property that holds a stack trace removed, at any
+ * depth, and how many were removed (#22160).
+ *
+ * `ObjectLogger` serializes a logged error as `error: { message, stack }`, and
+ * the engine's write doors rebuild the same pair for `warn`
+ * (`writeFailureLogMeta`), so a failed insert reaches the banner carrying ten
+ * knex frames. Only a `stack` whose value IS a trace goes: a `stack` key that
+ * names something (a stack id, a config name) stays, and `message` always
+ * stays.
+ */
+function withoutStackTraces(value: unknown): { value: unknown; removed: number } {
+  if (Array.isArray(value)) {
+    let removed = 0;
+    const items = value.map((item) => {
+      const r = withoutStackTraces(item);
+      removed += r.removed;
+      return r.value;
+    });
+    return { value: items, removed };
+  }
+  if (value !== null && typeof value === 'object') {
+    let removed = 0;
+    // Null prototype: a parsed `__proto__` key stays an own property.
+    const kept: Record<string, unknown> = Object.create(null);
+    for (const [key, item] of Object.entries(value)) {
+      if (key === 'stack' && typeof item === 'string' && STACK_TRACE.test(item)) {
+        removed += 1;
+        continue;
+      }
+      const r = withoutStackTraces(item);
+      removed += r.removed;
+      kept[key] = r.value;
+    }
+    return { value: kept, removed };
+  }
+  return { value, removed: 0 };
+}
+
+/**
+ * One captured record as the default banner prints it: its structured tail
+ * re-serialized without its stack traces (#22160). A record that carries none
+ * comes back byte-identical.
+ */
+function recordWithoutStacks(line: string): { line: string; removed: number } {
+  const tail = structuredTail(line);
+  if (!tail) return { line, removed: 0 };
+  const stripped = withoutStackTraces(tail.value);
+  if (stripped.removed === 0) return { line, removed: 0 };
+  return { line: line.slice(0, tail.start) + JSON.stringify(stripped.value), removed: stripped.removed };
+}
+
+/**
+ * The highlighted form of a record in {@link ACTIONABLE_BOOT_CLASSES}, or
+ * `undefined` when the record is in no class (#22160).
+ */
+function actionableRecord(line: string): { statement: string; fix?: string } | undefined {
+  const text = stripAnsi(line);
+  const cls = ACTIONABLE_BOOT_CLASSES.find((c) => text.includes(c.record));
+  if (!cls) return undefined;
+  const tail = structuredTail(text);
+  const message =
+    tail && tail.start === 0 && typeof tail.value.msg === 'string'
+      ? tail.value.msg // a JSON-format record: the message is a field
+      : text.slice(text.indexOf(cls.record), tail ? tail.start : text.length).replace(/\s*\|?\s*$/, '');
+  const raw = tail?.value[cls.subjectsKey];
+  const subjects = Array.isArray(raw) ? raw.filter((s): s is string => typeof s === 'string') : [];
+  const at = message.indexOf('; ');
+  const head = at === -1 ? message : message.slice(0, at);
+  // Parsed out of JSON, these are unescaped again — and the subjects are names
+  // an author wrote — so they pass through the banner's control-byte scrub.
+  return {
+    statement: bannerSafe(subjects.length > 0 ? `${head}: ${subjects.join(', ')}` : head),
+    ...(at === -1 ? {} : { fix: bannerSafe(message.slice(at + 2).trim()) }),
+  };
+}
+
+/**
  * Replay what the boot-quiet stdout window held back (#4012).
  *
  * `serve` blanks stdout while the kernel boots so the banner is readable, and
@@ -1294,6 +1447,24 @@ export interface BootDiagnosticsReplayOptions {
  * section already restated (`options.restatedAbove`), and its header counts
  * them separately, so no warning appears in both places.
  *
+ * [#22160] The dev-mode noise budget, the printer's half of it:
+ *   - a record in {@link ACTIONABLE_BOOT_CLASSES} prints FIRST, once,
+ *     highlighted, with its one-line fix under it — the line the author must
+ *     act on no longer looks like the ones they may ignore;
+ *   - the header counts the two apart: `1 needs your attention · 3
+ *     informational`. With nothing actionable it says only how many are
+ *     informational, under an `ℹ`, not an alarm — unless the capture buffer
+ *     dropped records, which this printer has not read and so cannot call
+ *     informational;
+ *   - a record's stack trace is withheld and counted. It is not lost: at
+ *     `--log-level debug` (and `info`) `serve` never opens the quiet window
+ *     (`isVerboseBootLevel`), so the same record streams live as the logger
+ *     rendered it, stack included — which is where the hint line sends the
+ *     reader.
+ * The LEVEL each producer logs at is the producer's own; this printer
+ * relabels nothing it captured, and an informational record still prints with
+ * the level its producer gave it.
+ *
  * Replayed to **stderr** (#7915) — these are the kernel's own diagnostics, held
  * back and re-emitted, so they land where every other `serve` diagnostic does.
  */
@@ -1309,18 +1480,45 @@ export function printBootDiagnostics(diagnostics: BootDiagnostics, options: Boot
   const listedAbove = lines.length - shown.length;
   if (shown.length === 0 && dropped === 0) return;
 
+  const actionable: Array<{ statement: string; fix?: string }> = [];
+  const informational: string[] = [];
+  let stacksWithheld = 0;
+  for (const line of shown) {
+    const highlighted = actionableRecord(line);
+    if (highlighted) {
+      actionable.push(highlighted);
+      continue;
+    }
+    const printed = recordWithoutStacks(line);
+    stacksWithheld += printed.removed;
+    informational.push(printed.line);
+  }
+
+  const needs = actionable.length;
+  const counts = [
+    ...(needs > 0 ? [`${needs} need${needs === 1 ? 's' : ''} your attention`] : []),
+    ...(informational.length > 0 || needs === 0 ? [`${informational.length} informational`] : []),
+  ].join(' · ');
+  const header =
+    `Boot diagnostics — ${counts}` + `${listedAbove > 0 ? ` (${listedAbove} more already listed above)` : ''}:`;
   console.error('');
-  console.error(
-    chalk.yellow(
-      `  ⚠ Boot diagnostics — ${shown.length} warning${shown.length === 1 ? '' : 's'} logged during startup` +
-        `${listedAbove > 0 ? ` (${listedAbove} more already listed above)` : ''}:`,
-    ),
-  );
-  for (const line of shown) console.error(chalk.dim(`    ${line}`));
+  console.error(needs > 0 || dropped > 0 ? chalk.yellow(`  ⚠ ${header}`) : chalk.blue(`  ℹ ${header}`));
+  for (const record of actionable) {
+    console.error(chalk.bold.yellow(`    ⚠ ${record.statement}`));
+    if (record.fix) console.error(chalk.cyan(`      fix: ${record.fix}`));
+  }
+  for (const line of informational) console.error(chalk.dim(`    ${line}`));
   if (dropped > 0) {
     console.error(chalk.dim(`    …and ${dropped} more (capture buffer full)`));
   }
-  console.error(chalk.dim('    run with --log-level debug to watch the boot stream live'));
+  console.error(
+    chalk.dim(
+      stacksWithheld > 0
+        ? `    ${stacksWithheld} stack trace${stacksWithheld === 1 ? '' : 's'} withheld — ` +
+            'run with --log-level debug to watch the boot stream live, stacks included'
+        : '    run with --log-level debug to watch the boot stream live',
+    ),
+  );
 }
 
 /**

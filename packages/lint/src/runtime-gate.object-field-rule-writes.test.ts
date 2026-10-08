@@ -25,9 +25,10 @@
  * at the build's own position in the field walk, so the door's finding IS the
  * build's finding — rule, location, message and hint. The per-option
  * `visibleWhen` joined the door in pass 3
- * (`runtime-gate.object-option-visibility-writes.test.ts`); the object's own
- * action predicates (pass 4) stay fenced, and that pin is in
- * `runtime-gate.object-formula-writes.test.ts`.
+ * (`runtime-gate.object-option-visibility-writes.test.ts`) and the object's own
+ * action predicates in pass 4
+ * (`runtime-gate.object-action-predicate-writes.test.ts`); the pin that every
+ * object-borne pass judges here is in `runtime-gate.object-formula-writes.test.ts`.
  *
  * The protocol-level half — the same verdict through the real `saveMetaItem`,
  * `publishMetaItem` and `publishPackageDrafts` — is the #22032 pass 2 block of

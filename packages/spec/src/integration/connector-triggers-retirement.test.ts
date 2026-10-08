@@ -81,7 +81,7 @@ const PRESCRIPTION = /^`connector\.triggers` was removed in @objectstack\/spec 1
 const POINTS_AT = ['`connector_action` node', 'an `api` flow', '`schedule` flow', 'Delete the key'] as const;
 
 const MIGRATE_SENTENCE =
-  /Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand\.$/;
+  /Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\.$/;
 
 /** The provider-bound refusal's reason, which was untrue and must not survive anywhere. */
 const OLD_REASON = 'derives them from the upstream';

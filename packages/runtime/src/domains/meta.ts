@@ -59,6 +59,10 @@ import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-pr
 // [#20478] …and the layered view, on both of its spellings: its post-read
 // chain, the deprecated `?layers=` flag's parse and the headers that flag is
 // served under.
+// [#22141] …and the save door's precondition and lifecycle
+// (`metaSaveRequestOptions`): `If-Match` / `If-None-Match: *` and `?mode=draft`.
+// [#22188] …and the one reading of `?package=` (`metaItemPackageBinding`),
+// under which `all` names no package, on every branch here that reads it.
 // Imported, never restated — AGENTS.md 〈Route & surface ownership〉 rule 1.
 import {
     createMetaBookTreeAnswer,
@@ -69,8 +73,10 @@ import {
     isPublicAudienceRead,
     metaCallerOrganizationId,
     metaItemLayersDeprecationHeaders,
+    metaItemPackageBinding,
     metaReadOrganizationId,
     metaRequestLocale,
+    metaSaveRequestOptions,
     metaTypeReadRefusal,
     metaTypeWriteRefusal,
     projectMetaObjectSchema,
@@ -1028,7 +1034,8 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         if (!protocol || typeof protocol.getMetaItems !== 'function') {
             return { handled: true, response: deps.error('Not found', 404) };
         }
-        const packageId = typeof query?.package === 'string' && query.package.length > 0 ? query.package : undefined;
+        // [#22188] `RestServer`'s reading: `all` names no package.
+        const packageId = metaItemPackageBinding(query?.package);
         try {
             const answer = await createMetaBookTreeAnswer(
                 {
@@ -1082,7 +1089,8 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 response: deps.error('Layered metadata view not supported by protocol implementation', 501),
             };
         }
-        const packageId = query?.package || undefined;
+        // [#22188] `RestServer`'s reading: `all` names no package.
+        const packageId = metaItemPackageBinding(query?.package);
         return answerMetaLayered(
             deps, _context, protocol as MetaLayeredProtocol,
             { type, name, packageId, maskPosture }, saveVerdict,
@@ -1248,8 +1256,12 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     if (parts.length === 2) {
         const type = parts[0];
         const name = decodeMetaNameSegment(parts[1]);
-        // Extract optional package filter from query string
-        const packageId = query?.package || undefined;
+        // Extract optional package filter from query string.
+        // [#22188] `RestServer`'s reading, for the read and the save alike:
+        // `all` names no package. It forwarded the literal, so a
+        // `PUT ?package=all` stored the row bound to a package called `all`
+        // where `RestServer` stores it env-local.
+        const packageId = metaItemPackageBinding(query?.package);
 
         // PUT /metadata/:type/:name (Save)
         //
@@ -1332,6 +1344,27 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     handled: true,
                     response: deps.error(verdict.message, 403),
                 };
+            }
+
+            // [#22141] The ADR-0008 precondition and the ADR-0033 lifecycle,
+            // read off THIS request through the one mapping `RestServer`'s
+            // `PUT` door reads them through (`metaSaveRequestOptions`,
+            // `@objectstack/rest`). This branch read neither: it handed
+            // `saveMetaItem` no `parentVersion` and no `mode`, so through the
+            // `@objectstack/hono` catch-all a stale `If-Match` wrote (200, not
+            // 409), `If-None-Match: *` over an existing row wrote, and a
+            // `?mode=draft` save landed ACTIVE — a draft live without a publish.
+            //
+            // The headers are the request's own: the catch-all hands
+            // `dispatch()` the raw Fetch `Request` (`Headers.get`), a Node host
+            // its header record, and the mapping reads both. Asked after the
+            // capability gate, so a refused caller learns nothing from a pin's
+            // shape. A pin that cannot be honoured is a `400` whose code
+            // `deps.error` derives from the status — `VALIDATION_ERROR`, the
+            // code `RestServer` answers it with.
+            const saveOptions = metaSaveRequestOptions({ headers: _context.request?.headers, query });
+            if (!saveOptions.ok) {
+                return { handled: true, response: deps.error(saveOptions.message, 400) };
             }
 
             // [#8842] Fold a nullish body to `{}` and let the per-type schema
@@ -1431,6 +1464,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                         type, name, item, organizationId,
                         writeFace: 'meta-dispatch',
                         ...(packageId ? { packageId } : {}),
+                        // [#22141] `parentVersion` and `mode`, each present
+                        // only when the caller asked — read off the headers and
+                        // the query above, never off `item`.
+                        ...saveOptions.request,
                     });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
@@ -1439,6 +1476,23 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // generic banner (the old path hardcoded 400 + dropped them).
                     return { handled: true, response: deps.errorFromThrown(e, 400) };
                 }
+            }
+
+            // [#22141] The fallback below writes `(type, name, item)` and
+            // nothing else, so it can honour neither a precondition nor a
+            // draft. A caller who asked for one is refused — `501`, the answer
+            // `RestServer` gives any save its protocol cannot take — rather than
+            // written unguarded or ACTIVE, the very drop just closed above.
+            if (saveOptions.request.parentVersion !== undefined || saveOptions.request.mode !== undefined) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        'This host has no protocol saveMetaItem, so it cannot honour If-Match, If-None-Match '
+                            + 'or ?mode=draft on a save. Send the save without them, or save through a host whose '
+                            + 'protocol implements saveMetaItem.',
+                        501,
+                    ),
+                };
             }
 
             // Fallback: try MetadataService directly
@@ -1870,8 +1924,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // GET /metadata/:type (List items of type) OR /metadata/:objectName (Legacy)
     if (parts.length === 1) {
         const typeOrName = parts[0];
-        // Extract optional package filter from query string
-        const packageId = query?.package || undefined;
+        // Extract optional package filter from query string.
+        // [#22188] `RestServer`'s reading: `all`, the list's "show everything"
+        // scope, names no package.
+        const packageId = metaItemPackageBinding(query?.package);
 
         // Try protocol service first for any type
         const protocol = await resolveProtocol(deps, _context);

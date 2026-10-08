@@ -5483,6 +5483,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'drops it. The D3 records are the seven `sys-*-organization-column-retired` semantic entries.',
   },
   {
+    id: 'document-schemas-retired',
+    order: 88,
+    text:
+      'It also retires the document family WHOLE (ADR-0049 enforce-or-remove; the ruling of record on '
+      + 'PDF and print documents, letter B′, 2026-10-08: "A document is a page with a print '
+      + 'declaration; no new template type"): the four defs of `data/document.zod.ts` — '
+      + '`data/DocumentTemplate` (a docx template with placeholders), `data/Document`, '
+      + '`data/ESignatureConfig` and the orphaned `data/DocumentVersion` — exported from '
+      + '`@objectstack/spec/data`, mounted by no stack key, registered as no metadata type and read by '
+      + 'nothing in this repository, objectui or hotcrm, leave via RETIRED_DEFS_BY_MAJOR with one D3 '
+      + 'semantic entry, so that "template" means one thing: a printable document is a page that '
+      + 'declares `print`. The `ESignatureConfig` deadline-key tombstones leave with their def\'s source '
+      + 'and their RETIRED_KEYS_BY_MAJOR[18] entries stay as history.',
+  },
+  {
     id: 'duration-keys-unit-in-key',
     order: 24,
     text:
@@ -5700,6 +5715,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'removed, so there is no tombstone, and no D2 conversion exists: the platform cannot know what '
       + 'an undeclared key was meant to be. Its D3 record is the semantic entry '
       + '`flow-script-subflow-config-undeclared-keys-refused`.',
+  },
+  {
+    id: 'flow-value-slot-template-dialect-refused',
+    order: 88,
+    text:
+      'It retires the single-brace `{…}` template dialect from the flow VALUE slots (the C half of the '
+      + 'maintainer\'s ruling D on the flow expression dialects): the `assignment` node\'s values, in all '
+      + 'three shapes, and the `fields` map of `create_record` and `update_record`, where a CEL value '
+      + 'envelope is already the expression form. A string there is now the literal '
+      + 'text it spells, and one carrying a `{…}` token is refused — by `FlowValueSlotSchema`, '
+      + '`registerFlow`, `objectstack validate` and the executor alike — with the CEL spelling of each token. '
+      + 'No D2 conversion exists: every authored spelling was measured lossy (an absent key writes nothing '
+      + 'under the template and fails under CEL; CEL divides two integers as integers), so which value an '
+      + 'absent key should write is the author\'s judgment. The date macros and the `$User` paths keep their '
+      + 'meaning until CEL can spell them. Its D3 record is the semantic entry '
+      + '`flow-value-slot-template-dialect-refused`.',
   },
   {
     id: 'flow-write-node-stored-metadata-target-refused',
@@ -9659,7 +9690,7 @@ const step18: MigrationStep = {
         + 'its amounts exactly as before the upgrade, because the key never changed a rendered '
         + 'amount. `os migrate meta --stored --apply` rewrites stored rows so the per-row notice '
         + 'stops. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; '
-        + 'apply them by hand.',
+        + '`--write` applies the ones it can prove, and you apply the rest by hand.',
     },
     {
       id: 'dashboard-header-modal-target-page-only',
@@ -10807,6 +10838,64 @@ const step18: MigrationStep = {
         + 'rename prescription. Concretely: a CLI or client polling the device-token endpoint reads '
         + '`intervalSeconds` off the request response and waits that many seconds between polls, '
         + 'exactly as `interval` did — the value and its unit are unchanged, only the key name moves.',
+    },
+    {
+      id: 'document-schemas-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'the document family, retired whole: the four defs data/DocumentTemplate, data/Document, '
+        + 'data/ESignatureConfig and data/DocumentVersion, and every name data/document.zod.ts '
+        + 'exported from @objectstack/spec/data (DocumentTemplateSchema, DocumentSchema, '
+        + 'ESignatureConfigSchema, DocumentVersionSchema, their z.input aliases and their Parsed '
+        + 'aliases)',
+      replacement:
+        'a printable document is a PAGE that declares `print` — no separate template type. Author '
+        + 'the document (an invoice, a delivery order, a letter, a report) as an ordinary `page` '
+        + 'with `kind: \'full\'`, its blocks in `regions` drawn from the printable block subset '
+        + '(`record:details`, `record:highlights`, `record:line_items`, `element:text`, '
+        + '`element:image` and the rest of PRINTABLE_PAGE_COMPONENT_TYPES), and a `print` block for '
+        + 'the paper, margins, running header and footer, page numbers and page-break hints. A '
+        + 'docx-with-placeholders template, a stored document with versions, and an e-signature '
+        + 'workflow have no replacement, because nothing on the platform ever merged, stored or '
+        + 'sent any of them; a document record the organisation keeps is ordinary object data, and '
+        + 'its files are `sys_file` attachments',
+      reason:
+        'ADR-0049 enforce-or-remove, by the ruling of record on the PDF / print document card '
+        + '(letter B′, 2026-10-08): "A document is a page with a print declaration; no new template '
+        + 'type", and "The zero-reader DocumentTemplateSchema, DocumentSchema and '
+        + 'ESignatureConfigSchema retire in v18 under ADR-0049 with ADR-0087 entries, so that '
+        + '\'template\' means one thing." Four defs sat on the exported surface and in the generated '
+        + 'reference docs — a docx template with typed placeholders, a document with versioning, '
+        + 'access control and an e-signature block, and the signer workflow — and were read by '
+        + 'NOTHING: they were exported from `@objectstack/spec/data`, mounted by no `stack.zod.ts` '
+        + 'key, registered as no metadata type and absent from every liveness ledger, and the '
+        + 'reader census over every package, app and example outside `packages/spec` (generated '
+        + 'reference docs, release notes and changelogs aside), over objectui at its pin and its '
+        + 'main, and over hotcrm returned zero hits for every exported name, against lit controls. '
+        + 'Keeping them would have given an author two meanings of "template" — the dead docx one '
+        + 'and the print page — and an AI that imports DocumentTemplateSchema a schema no runtime '
+        + 'reads. DocumentVersionSchema had one carrier, DocumentSchema.versioning, and leaves with '
+        + 'it. The ESignatureConfig deadline-key tombstones (RETIRED_KEYS_BY_MAJOR[18], D3 '
+        + '`esignature-config-deadline-keys-retired`) leave with their def\'s source; their registry '
+        + 'entries stay as history. Why D3 semantic and not a D2 conversion: the chain walks a '
+        + 'normalized STACK and `applyConversionsToStoredItem` maps a metadata type onto one of its '
+        + 'collections; none of these schemas is either, so a conversion would be a transform with no '
+        + 'seam that ever runs (the `kernel/MetadataPluginConfig:additionalTypes` precedent), and '
+        + 'with no carrier key there is no shape on which a tombstone could sit. `cloud` and real '
+        + 'customer code are UNMEASURED.',
+      acceptanceCriteria:
+        'No code imports DocumentTemplateSchema, DocumentSchema, ESignatureConfigSchema or '
+        + 'DocumentVersionSchema — or any of their type aliases — from @objectstack/spec or '
+        + '@objectstack/spec/data: every such import is TS2305 after upgrade. A printable document '
+        + 'is authored as a page with a `print` block, which `os validate` checks: the parse refuses '
+        + '`print` on a page that does not print its own authored blocks, and the printable block '
+        + 'subset refuses any other block inside it. `data/DocumentSchemaValidation` (the NoSQL '
+        + 'driver\'s schema-validation block, a different declaration) is unaffected. The four defs '
+        + 'are absent from `json-schema.manifest/data.json`, the api-surface / declaration-map / '
+        + 'export-origins shards and the generated reference docs. ⚠️ Runtime behaviour is '
+        + 'deliberately UNCHANGED and must be verified as such: nothing ever parsed or read these '
+        + 'shapes, so removing them removes no behaviour.',
     },
     {
       id: 'driver-options-timeout-to-timeout-ms',
@@ -13553,7 +13642,7 @@ const step18: MigrationStep = {
         + '`mode` beside a non-empty `conditions` list, or with a `mode` outside '
         + '`\'exclusive\' | \'inclusive\'`, is refused at registration and by `os validate` with the '
         + 'schema\'s own sentence; nothing else about `conditions`-list decisions changes. '
-        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
       // The edits this entry judges: every `mode: 'inclusive'` that conversion
       // writes is one decision to keep, delete or narrow, per the criteria above.
       conversionIds: ['flow-decision-mode-inclusive-explicit'],
@@ -13967,6 +14056,42 @@ const step18: MigrationStep = {
         + 'expecting the stored value; a flow that needs a credential obtains it through a privileged '
         + 'binder; a start or edge condition that compared such a field against a literal is rewritten to '
         + 'test whether it is set (not null).',
+    },
+    // The template dialect leaves the flow value slots: one dialect for a computed
+    // value, CEL. Semantic-only — every token spelling authored in flows was
+    // measured lossy under conversion, so no D2 conversion rewrites any of them,
+    // and the date macros and run-user paths CEL cannot write yet are kept.
+    {
+      id: 'flow-value-slot-template-dialect-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'flows[].nodes[].config of an assignment node (the assignments map, the legacy assignments array and the '
+        + 'legacy bare config) and of create_record and update_record nodes (the fields map) — a string value, or a '
+        + 'string anywhere inside an array or object value, carrying a single-brace template token',
+      replacement:
+        'a CEL value envelope, { dialect: "cel", source: "…" }, evaluated to the value: a path is the same path '
+        + '(record.owner; a numeric segment becomes an index, list[0]; a variable whose name starts with $ is read '
+        + 'through vars, vars["$error"].message), arithmetic is the same arithmetic with every integer divisor written '
+        + 'as a double (round(x * 100) / 100.0), and text with holes is one concatenation (\'Hello \' + o.name). A '
+        + 'string with no token is the literal text it spells, and braces meant literally are a CEL string literal',
+      reason:
+        'The interpolator and the CEL engine answer differently for every token spelling authored in flows, so no '
+        + 'conversion is lossless (ADR-0087 D2) and none is applied. A path, an absent variable, key or list index '
+        + 'wrote nothing under the template and fails the run under CEL; text with a null hole rendered nothing and '
+        + 'CEL refuses + null; CEL divides two integers as integers, so round(x * 100) / 100 truncates 123.46 to 123. '
+        + 'Where a value may be absent, which of nothing, null or a default the field should take is the author\'s '
+        + 'decision — the template decided it silently. Two spellings are kept with their old meaning, because CEL '
+        + 'cannot write them yet: the date macros NOW() and TODAY() with a day offset (CEL yields a Timestamp, not the '
+        + 'ISO text, and has no string form for one) and the run-user paths beginning $User. (the flow CEL scope binds '
+        + 'no user). A flow carrying a refused value is refused at registration, by objectstack validate and by the '
+        + 'executor; a stored flow carrying one is skipped at boot with a warn naming it.',
+      acceptanceCriteria:
+        'Run objectstack validate: it reports each refused value as expression-invalid at the node and the value\'s '
+        + 'path, with the CEL spelling of its tokens. Rewrite each as that envelope; where a variable or key may be '
+        + 'absent, guard it (has(record.owner) ? record.owner : null, has(vars.x) ? vars.x : null for a variable) or '
+        + 'route around the node. Re-run the flow paths that write those fields and compare the stored values with '
+        + 'the ones the template wrote.',
     },
     // #21654 — the D3 entry for `FlowSchema`'s refusal of a write node aimed at a
     // stored-metadata table: the save-time half of #21624, which applies #21520's
@@ -22210,7 +22335,7 @@ const step18: MigrationStep = {
         + 'Census at the time of the change: zero joined reports with a chart in this repo\'s '
         + 'example apps and in the hotcrm reference app, against a lit control (non-joined reports '
         + 'carrying a chart: one and five). '
-        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
     },
     {
       id: 'ui-report-joined-container-selection-refused',
@@ -28008,6 +28133,87 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // the cloud repo's own declarations, not an open-source protocol). Prescription: the
     // `cloud-subpath-retired` semantic entry of this major.
     'cloud/VersionRelease',
+    // #22158 — `data/Document` — a stored document with versioning, a template,
+    // an e-signature block and access control, which no document store ever kept —
+    // leaves whole with the document family under ADR-0049 enforce-or-remove, by
+    // the ruling of record on #8346 (letter B′, maintainer 「8346 B′」 2026-10-08):
+    // "The zero-reader `DocumentTemplateSchema`, `DocumentSchema` and
+    // `ESignatureConfigSchema` retire in v18 under ADR-0049 with ADR-0087 entries,
+    // so that 'template' means one thing" — a printable document is a page that
+    // declares `print`. It was exported from `@objectstack/spec/data`
+    // (`data/document.zod.ts`), mounted by no `stack.zod.ts` key, registered as no
+    // metadata type, absent from every liveness ledger, and read by NOTHING: on
+    // objectstack `fec87e7e0` every hit for the family's exported names outside
+    // `packages/spec` was generated reference docs, release notes or a changelog;
+    // objectui (the `.objectui-sha` pin `a58626c88` and main `cef0eee`) and hotcrm
+    // (`1e88edc`) returned zero, against lit controls on the same pattern. No carrier
+    // key, so no `retiredKey()` tombstone and no D2 conversion (none of these
+    // schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning): RETIRED_DEFS_BY_MAJOR
+    // plus the D3 semantic entry `document-schemas-retired` ARE the declaration.
+    'data/Document',
+    // #22158 — `data/DocumentTemplate` — a docx template URL with typed
+    // placeholders (`fileUrl` / `fileType` / `placeholders[]`), which no template
+    // engine ever merged —
+    // leaves whole with the document family under ADR-0049 enforce-or-remove, by
+    // the ruling of record on #8346 (letter B′, maintainer 「8346 B′」 2026-10-08):
+    // "The zero-reader `DocumentTemplateSchema`, `DocumentSchema` and
+    // `ESignatureConfigSchema` retire in v18 under ADR-0049 with ADR-0087 entries,
+    // so that 'template' means one thing" — a printable document is a page that
+    // declares `print`. It was exported from `@objectstack/spec/data`
+    // (`data/document.zod.ts`), mounted by no `stack.zod.ts` key, registered as no
+    // metadata type, absent from every liveness ledger, and read by NOTHING: on
+    // objectstack `fec87e7e0` every hit for the family's exported names outside
+    // `packages/spec` was generated reference docs, release notes or a changelog;
+    // objectui (the `.objectui-sha` pin `a58626c88` and main `cef0eee`) and hotcrm
+    // (`1e88edc`) returned zero, against lit controls on the same pattern. No carrier
+    // key, so no `retiredKey()` tombstone and no D2 conversion (none of these
+    // schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning): RETIRED_DEFS_BY_MAJOR
+    // plus the D3 semantic entry `document-schemas-retired` ARE the declaration.
+    'data/DocumentTemplate',
+    // #22158 — `data/DocumentVersion` — one immutable version of a stored
+    // document, whose only carrier was `DocumentSchema.versioning.versions` (the
+    // orphan-value-schema rule takes it with its carrier) —
+    // leaves whole with the document family under ADR-0049 enforce-or-remove, by
+    // the ruling of record on #8346 (letter B′, maintainer 「8346 B′」 2026-10-08):
+    // "The zero-reader `DocumentTemplateSchema`, `DocumentSchema` and
+    // `ESignatureConfigSchema` retire in v18 under ADR-0049 with ADR-0087 entries,
+    // so that 'template' means one thing" — a printable document is a page that
+    // declares `print`. It was exported from `@objectstack/spec/data`
+    // (`data/document.zod.ts`), mounted by no `stack.zod.ts` key, registered as no
+    // metadata type, absent from every liveness ledger, and read by NOTHING: on
+    // objectstack `fec87e7e0` every hit for the family's exported names outside
+    // `packages/spec` was generated reference docs, release notes or a changelog;
+    // objectui (the `.objectui-sha` pin `a58626c88` and main `cef0eee`) and hotcrm
+    // (`1e88edc`) returned zero, against lit controls on the same pattern. No carrier
+    // key, so no `retiredKey()` tombstone and no D2 conversion (none of these
+    // schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning): RETIRED_DEFS_BY_MAJOR
+    // plus the D3 semantic entry `document-schemas-retired` ARE the declaration.
+    'data/DocumentVersion',
+    // #22158 — `data/ESignatureConfig` — an e-signature workflow (`provider` /
+    // `enabled` / `signers[]`), which no e-signature integration ever sent. Its
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries (`expirationDays` /
+    // `reminderDays`, the #14477 tombstones) stay as history — gate (b2) of
+    // build-schemas.ts accepts an entry naming a key the build no longer emits —
+    // leaves whole with the document family under ADR-0049 enforce-or-remove, by
+    // the ruling of record on #8346 (letter B′, maintainer 「8346 B′」 2026-10-08):
+    // "The zero-reader `DocumentTemplateSchema`, `DocumentSchema` and
+    // `ESignatureConfigSchema` retire in v18 under ADR-0049 with ADR-0087 entries,
+    // so that 'template' means one thing" — a printable document is a page that
+    // declares `print`. It was exported from `@objectstack/spec/data`
+    // (`data/document.zod.ts`), mounted by no `stack.zod.ts` key, registered as no
+    // metadata type, absent from every liveness ledger, and read by NOTHING: on
+    // objectstack `fec87e7e0` every hit for the family's exported names outside
+    // `packages/spec` was generated reference docs, release notes or a changelog;
+    // objectui (the `.objectui-sha` pin `a58626c88` and main `cef0eee`) and hotcrm
+    // (`1e88edc`) returned zero, against lit controls on the same pattern. No carrier
+    // key, so no `retiredKey()` tombstone and no D2 conversion (none of these
+    // schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning): RETIRED_DEFS_BY_MAJOR
+    // plus the D3 semantic entry `document-schemas-retired` ARE the declaration.
+    'data/ESignatureConfig',
     // Commit 2c86fe3ea — identity/identity.zod.ts `ApiKeySchema`, retired whole (ADR-0049
     // enforce-or-remove; maintainer ruling 2026-08-15, disposition B: delete).
     // The schema documented better-auth's `apiKey` PLUGIN shape — a plugin this

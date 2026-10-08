@@ -10,6 +10,7 @@ import { normalizeStackInput } from '@objectstack/spec';
 import { referenceCarrierOf } from '@objectstack/spec/data';
 import { printHeader, printSuccess, printWarning, printError, printStep, printInfo } from '../utils/format.js';
 import { loadConfig, configExists } from '../utils/config.js';
+import { cwdConfigJoinsBoot, resolveArtifactBootSource } from '../utils/artifact-precedence.js';
 import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
 // #5644 — "the optional package is not installed" and "it is installed and
 // will not load" are two facts, and one `catch` around `import()` cannot tell
@@ -164,8 +165,10 @@ export function doctorNodeEnv(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
- * Say out loud that `NODE_ENV` is unset — and that the whole stack is therefore
- * treating this environment as **production** (#5673).
+ * Say out loud that `NODE_ENV` is unset, and what that means where doctor
+ * stands: a deployment is being treated as **production** (#5673); the source
+ * checkout `os dev` serves runs as development under `os dev` and as production
+ * under `os start` (#22163).
  *
  * `undefined` when the variable is set, so a configured environment gets no row
  * at all. That is the same shape the tenancy-posture finding has: a value doctor
@@ -192,6 +195,32 @@ export function doctorNodeEnv(env: NodeJS.ProcessEnv = process.env): string {
  * it starts in the mode this row names. `error` is what turns doctor's summary
  * into `process.exit(1)`, and an unset `NODE_ENV` must not fail a health check.
  *
+ * ── Except in the source checkout `os dev` serves (#22163) ───────────────
+ *
+ * The argument above is about a DEPLOYMENT that forgot the variable, and it
+ * stands everywhere but one place. Beside an `objectstack.config.ts` that boots
+ * as itself, with no artifact from anywhere else ({@link nodeEnvSourcePosture}),
+ * the maintainer's direction on #22163 is that an unset `NODE_ENV` reads as
+ * development. That directory is a project, not a deployment: the command it
+ * is run with is `os dev`, which runs it as development whatever the shell says
+ * (its `serve --dev` child sets the variable before any runtime module loads),
+ * and the only way it becomes production is `os start`, which forces it. A
+ * newcomer thirty seconds after scaffolding was told they were running
+ * production — and, under `--verbose`, to set what `os dev` already sets — by
+ * a row about a posture their project is not in.
+ *
+ * So there the row is `ok` (this file's only informational status — see
+ * {@link scheduledWorkCheck} for why the union is not widened for one row),
+ * names the two commands and what each does, and carries no `fix`: nothing
+ * needs fixing. In every other posture it is #5673's `warning` and `fix`, byte
+ * for byte — including a config beside a NAMED artifact, where a production
+ * deployment that forgot the variable is exactly what #5673 must still catch.
+ *
+ * What the posture does NOT change: {@link doctorNodeEnv} and the `.env*`
+ * cascade doctor resolves (still `production`, which the `Environment files`
+ * row keeps saying), the `/discovery` default, and how `os serve`, `os start`
+ * and `os dev` resolve the mode. Only what this row says, and when.
+ *
  * ── Deliberately NOT in `DOCTOR_ENV_INPUTS`, and not read through the overlay ─
  *
  * That list is for variables whose value doctor resolves through the `.env*`
@@ -203,10 +232,26 @@ export function doctorNodeEnv(env: NodeJS.ProcessEnv = process.env): string {
  *
  * "Unset" here is `!env.NODE_ENV`, character for character the condition under
  * which {@link doctorNodeEnv} falls back to its default. The row therefore
- * appears exactly when the default was taken, which is the only claim it makes.
+ * appears exactly when the default was taken, in either posture; the posture
+ * decides only which of the two rows that is.
+ *
+ * @param opts.sourcePosture {@link nodeEnvSourcePosture}'s answer for the
+ *   directory doctor runs in. Defaults to `false` — the #5673 row — so a caller
+ *   that has not asked gets the conservative answer.
  */
-export function nodeEnvCheck(env: NodeJS.ProcessEnv = process.env): HealthCheckResult | undefined {
+export function nodeEnvCheck(
+  env: NodeJS.ProcessEnv = process.env,
+  opts: { sourcePosture?: boolean } = {},
+): HealthCheckResult | undefined {
   if (env.NODE_ENV) return undefined;
+
+  if (opts.sourcePosture) {
+    return {
+      name: 'NODE_ENV',
+      status: 'ok',
+      message: 'Not set — os dev runs this project as development; os start forces production',
+    };
+  }
 
   return {
     name: 'NODE_ENV',
@@ -225,6 +270,60 @@ export function nodeEnvCheck(env: NodeJS.ProcessEnv = process.env): HealthCheckR
       + '      NODE_ENV cannot be supplied by a `.env*` file: it SELECTS which of those files\n'
       + '      load, so it is read from the process before any of them.',
   };
+}
+
+/**
+ * [#22163] Is `cwd` the source checkout `os dev` serves — a cwd
+ * `objectstack.config.ts` that boots as itself, with no artifact from anywhere
+ * else? The posture {@link nodeEnvCheck} reads an unset `NODE_ENV` as
+ * development in.
+ *
+ * Answered by THE precedence (`utils/artifact-precedence.ts`), never by a copy
+ * of it: {@link resolveArtifactBootSource} for the artifact rungs, then
+ * {@link cwdConfigJoinsBoot} for whether the cwd config takes part — the two
+ * questions `os dev` asks before it prints its `Config:` row (`dev.ts`), asked
+ * the way it asks them, with three deliberate details:
+ *
+ *   • The config is a FILE TEST — `objectstack.config.ts` in `cwd`, the one
+ *     file `os dev` tests for — never a load. A config that cannot load here
+ *     (dependencies not installed yet, a top-level throw) is still the project
+ *     `os dev` would compile, and the load failure already has its own row
+ *     further down the report.
+ *   • The environment is the one `os dev` resolves those rungs in: this process
+ *     over the `.env*` cascade for node_env=development, which `os dev` loads
+ *     before it asks, the shell winning as dotenv-flow has it. That is a second,
+ *     private read of the files: the `Environment files` row still reports the
+ *     cascade doctor resolves for {@link doctorNodeEnv}, which is unchanged.
+ *   • No `homeDir` (the `home-dist` rung is `os start`'s alone; `os dev` passes
+ *     none) and no `configCompiledTo`. `os dev` compiles a config INTO a local
+ *     OS_ARTIFACT_PATH and so counts that file as the config's own; this
+ *     posture does not, because #22163 keeps #5673's row wherever an artifact
+ *     is named. The one artifact it forgives is the config's own compiled
+ *     output at the conventional `dist/objectstack.json` — the file the first
+ *     `os dev` writes, so without it the very project #22163 is about would
+ *     fall back to the production row after its first `os dev`.
+ *
+ * So a config alone, or beside its own `dist/objectstack.json`, is the source
+ * posture; a config beside OS_ARTIFACT_URL or beside an OS_ARTIFACT_PATH naming
+ * any other artifact, an artifact with no config, and a directory with neither
+ * are not.
+ *
+ * The answer moves in one direction only: setting either variable can take
+ * the posture AWAY from source and never toward it (unset already answers
+ * source wherever the conventional path would), so whatever the `.env*` read
+ * supplies can only put the row back to its #5673 text.
+ */
+export function nodeEnvSourcePosture(cwd: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const configPath = path.resolve(cwd, 'objectstack.config.ts');
+  const devEnv: NodeJS.ProcessEnv = { ...env, ...dotenvOverlay(readDotenvFiles(cwd, 'development'), env) };
+  const bootSource = resolveArtifactBootSource({ env: devEnv, cwd });
+  return cwdConfigJoinsBoot({
+    configExists: fs.existsSync(configPath),
+    configPath,
+    artifact: bootSource.kind === 'reference' ? { kind: 'reference' }
+      : bootSource.kind === 'resolved' ? { kind: 'path', path: bootSource.path }
+        : { kind: 'none' },
+  });
 }
 
 /**
@@ -2083,12 +2182,17 @@ export default class Doctor extends Command {
     // change every such verdict has four possible sources.
     results.push(environmentSourcesCheck(dotenvReading));
 
-    // #5673 — the mode the row above was resolved FOR, when nobody chose it.
-    // Placed immediately after the sources row because it answers the question
-    // that row raises: `node_env=production` appears there whether the operator
-    // set NODE_ENV or not, and only this row tells the two apart. Only the unset
-    // case produces a row; a configured environment's report is unchanged.
-    const nodeEnvFinding = nodeEnvCheck();
+    // #5673 / #22163 — what an unset NODE_ENV means here. Placed immediately
+    // after the sources row because it answers the question that row raises:
+    // `node_env=production` appears there whether the operator set NODE_ENV or
+    // not, and only this row tells the two apart. In a deployment it says the
+    // production default was taken; in the source checkout `os dev` serves it
+    // says that project runs as development under `os dev` and as production
+    // under `os start` — and the sources row above still says
+    // `node_env=production` there, because that is the cascade doctor resolved
+    // and #22163 changes only this row. Only the unset case produces a row; a
+    // configured environment's report is unchanged.
+    const nodeEnvFinding = nodeEnvCheck(process.env, { sourcePosture: nodeEnvSourcePosture(cwd) });
     if (nodeEnvFinding) {
       results.push(nodeEnvFinding);
     }

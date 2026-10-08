@@ -138,7 +138,7 @@ describe('list-view tabs retirement — the tombstone, at every list-view door',
     const r = ListViewSchema.safeParse({ ...LIST, tabs: TABS });
     const message = (r.error?.issues ?? []).map((i) => i.message).join('\n');
     expect(message).toContain("the tab's `name` becomes the entry's key");
-    expect(message).toContain('Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.');
+    expect(message).toContain('Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.');
     expect(message).not.toMatch(/#\d/);
   });
 

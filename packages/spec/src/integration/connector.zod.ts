@@ -230,7 +230,7 @@ const SYNC_CONFIG_RETIRED =
   + 'names the `rest` or `openapi` connector it pulls from, the read action and an optional '
   + 'timestamp `watermark`, with a `job` for the cadence. Its pull runs when a `job` drives it — '
   + 'a `job` whose `pull: { mapping }` names that mapping; the binding alone moves no rows. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * The prescription an author meets when they write `fieldMappings` on a
@@ -244,7 +244,7 @@ const FIELD_MAPPINGS_RETIRED =
   + '`ConnectorFieldMapping` shape leaves with it. Map fields on the sync\'s TARGET instead: a '
   + '`mapping`\'s `fieldMapping` (`source` → `target`, with a `transform` the import path '
   + 'executes), which its `connectorSource` pulls through. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 // ============================================================================
 // REMOVED: the connector-nested webhook shape (ADR-0049 enforce-or-remove)
 // ============================================================================
@@ -413,7 +413,7 @@ const ERROR_MAPPING_RETIRED =
   + '`ErrorMappingRule` and the `ConnectorErrorCategory` enum). There is no replacement, '
   + "because no error-mapping engine exists: a connector's failures reach callers as the "
   + "provider's own errors (ADR-0097). "
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 // ============================================================================
 // REMOVED: `connectionTimeoutMs` — the connect-phase deadline (ADR-0049)
@@ -491,7 +491,7 @@ const CONNECTION_TIMEOUT_MS_RETIRED =
   + 'Use `requestTimeoutMs` for the deadline the platform does keep — it is applied as '
   + "`resilientFetch`'s per-attempt timeout — and bound the connect phase at a connector "
   + 'provider or upstream gateway on a transport that can separate the phases. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * The retired default the published 17.x toolchain MATERIALIZED, captured as a
@@ -622,7 +622,7 @@ const HEALTH_RETIRED =
   + 'computed, not authored: `GET /api/v1/automation/connectors` reports each connector\'s '
   + '`state` (`ready` or `degraded`). Put health probes and circuit breaking in the connector '
   + 'provider or an upstream gateway. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * The prescription an author meets when they write `status` — in `tsc` and at
@@ -638,7 +638,7 @@ const STATUS_RETIRED =
   + 'withdraws a materialized instance or marks a catalog-only descriptor, and whether a '
   + 'registered connector can be dispatched is computed by the runtime and reported as `state` '
   + '(`ready` or `degraded`) on `GET /api/v1/automation/connectors` — no authored value sets it. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * The prescription an author meets when they write `webhooks` on a connector —
@@ -653,7 +653,7 @@ const WEBHOOKS_RETIRED =
   + '`WebhookSignatureAlgorithm`). To have a webhook actually sent, declare it in the stack\'s '
   + 'top-level `webhooks:` collection, which is materialized into `sys_webhook` and delivered on '
   + 'record events — note that doing so STARTS deliveries this connector never made. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 // ============================================================================
 // REMOVED: `triggers` (ADR-0049)
@@ -720,7 +720,7 @@ const TRIGGERS_RETIRED =
   + 'system, write a flow that calls the connector\'s action in a `connector_action` node: for '
   + 'an external event, an `api` flow that the event\'s sender calls; for a scheduled pull, a '
   + '`schedule` flow. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 // ============================================================================
 // Base Connector Schema
@@ -967,7 +967,7 @@ const ConnectorBaseSchema = lazySchema(() => z.object({
     'here was inert while reading like a configured cap. Delete the key. Do NOT substitute ' +
     '`shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; ' +
     'until an outbound throttle exists, rate-limit at the connector provider or upstream gateway. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   /**

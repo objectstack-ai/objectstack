@@ -21,12 +21,15 @@
  * field-formula pass — and, since #22032's pass 1, the validation-rule pass
  * (its pins: `runtime-gate.object-validation-writes.test.ts`), since its
  * pass 2 the field-rule slots (`runtime-gate.object-field-rule-writes.test.ts`),
- * and since its pass 3 the per-option `visibleWhen`
- * (`runtime-gate.object-option-visibility-writes.test.ts`). The one other
- * object-borne pass the build runs — the object's own action predicates — is
- * FENCED off this door by name, and the fence is pinned below with the build
- * still flagging the same body, so a later widening moves that line
- * consciously rather than by drift.
+ * since its pass 3 the per-option `visibleWhen`
+ * (`runtime-gate.object-option-visibility-writes.test.ts`), and since its
+ * pass 4 the object's own action predicates
+ * (`runtime-gate.object-action-predicate-writes.test.ts`). Every pass over the
+ * object's own body now judges here; the passes over the stack's OTHER
+ * collections (flows, top-level actions, sharing rules, hooks) do not. Both
+ * halves are pinned below with the build still flagging the same body, so a
+ * fence re-added on any object-borne pass, or a pass over another collection
+ * reaching this door, moves that line consciously rather than by drift.
  *
  * The protocol-level half — the same verdict through the real `saveMetaItem`
  * and `publishMetaItem`, and the door/build equality of the finding — is
@@ -114,77 +117,105 @@ describe('#22019 — the object door dispatches the build\'s expression rule', (
   });
 });
 
-describe('#22019 — the fence: every other object-borne expression pass stays off this door', () => {
+describe('#22019 / #22032 — every pass over the object\'s body judges on this door, and no pass over another collection', () => {
   /**
-   * One body carrying a fault in the FENCED pass — #22032's pass 4, one site:
-   * an object action's `visible` — beside a fault in each LIFTED pass, the
+   * One body carrying a fault in EVERY pass over the object's own body — the
    * validation-rule pass (#22032 pass 1), a field-rule slot (`requiredWhen`,
-   * #22032 pass 2) and an option's `visibleWhen` (#22032 pass 3), and a CLEAN
-   * formula. The build flags every fault; the object door flags the lifted
-   * passes' alone. Each fault is one the build refuses at `error`, so "the
-   * door is silent on a fenced site" cannot be read as "there was nothing to
-   * say".
+   * pass 2), an option's `visibleWhen` (pass 3) and an object action's
+   * `visible` and `disabled` (pass 4) — beside a CLEAN formula. Since pass 4 no
+   * object-borne site is fenced: the build and the object door flag the same
+   * sites in the same order. Each fault is one the build refuses at `error`,
+   * so a fence put back on any of these passes drops its site from the door's
+   * list and turns the pins below red.
    */
-  const fenced = () => fxSqrt('floor(record.amount)', {
+  const withEverySite = () => fxSqrt('floor(record.amount)', {
     validations: [
       { name: 'amount_root', type: 'script', condition: 'sqrt(record.amount) > 1', message: 'x', severity: 'error' },
     ],
+    fields: {
+      name: { type: 'text', label: 'Name', requiredWhen: 'amount > 1' },
+      amount: { type: 'number', label: 'Amount' },
+      score: { type: 'formula', label: 'Score', expression: 'floor(record.amount)' },
+      tier: {
+        type: 'select',
+        label: 'Tier',
+        options: [{ label: 'Gold', value: 'gold', visibleWhen: 'amount > 1' }],
+      },
+    },
     actions: [
-      { name: 'fx_close', label: 'Close', type: 'script', target: 'close', visible: 'record.status ==' },
+      { name: 'fx_close', label: 'Close', type: 'script', target: 'close', visible: 'record.status ==', disabled: 'amount > 1' },
     ],
   });
-  const withFieldRule = () => {
-    const body = fenced();
-    const fields = body.fields as Record<string, unknown>;
-    fields.name = { type: 'text', label: 'Name', requiredWhen: 'amount > 1' };
-    fields.tier = {
-      type: 'select',
-      label: 'Tier',
-      options: [{ label: 'Gold', value: 'gold', visibleWhen: 'amount > 1' }],
-    };
-    return body;
-  };
-  /** The fenced site (pass 4) and the lifted ones (passes 1–3), by the build's `where`, in the build's order. */
-  const FENCED_SITES = [
-    "object 'fx_sqrt' · action 'fx_close' visible",
-  ];
+  /** Every object-borne site of the body (passes 1–4), by the build's `where`, in the build's order. */
   const LIFTED_SITES = [
     "object 'fx_sqrt' · validation 'amount_root'",
     "object 'fx_sqrt' · field 'name' requiredWhen",
     "object 'fx_sqrt' · field 'tier' option 'gold' visibleWhen",
+    "object 'fx_sqrt' · action 'fx_close' visible",
+    "object 'fx_sqrt' · action 'fx_close' disabled",
+  ];
+  /**
+   * A fault in each pass over ANOTHER collection of the stack — a top-level
+   * action, a flow, a sharing rule, a hook — each bound to the same object. The
+   * build flags each; an object write never judges them (they are not the
+   * object's body, and each is judged at its own type's door).
+   */
+  const otherCollections = {
+    actions: [{ name: 'fx_top', label: 'Top', type: 'script', target: 't', objectName: 'fx_sqrt', visible: 'record.status ==' }],
+    flows: [{
+      name: 'fx_flow',
+      label: 'Flow',
+      type: 'autolaunched',
+      nodes: [{ id: 'start', type: 'start', config: { objectName: 'fx_sqrt' } }, { id: 'end', type: 'end' }],
+      edges: [{ id: 'e1', source: 'start', target: 'end', condition: 'record.status ==' }],
+    }],
+    sharingRules: [{ name: 'fx_share', object: 'fx_sqrt', type: 'criteria', condition: 'amount > 1' }],
+    hooks: [{ name: 'fx_hook', object: 'fx_sqrt', events: ['beforeInsert'], condition: 'amount > 1' }],
+  };
+  const OTHER_SITES = [
+    "flow 'fx_flow' · edge 'e1' (start→end) condition",
+    "stack · action 'fx_top' visible",
+    "sharingRule 'fx_share' (fx_sqrt) condition",
+    "hook 'fx_hook' (fx_sqrt) condition",
   ];
 
-  it('the build (no `runtimeWriteType`) still flags each fenced site, and the lifted ones', () => {
-    const wheres = validateStackExpressions({ objects: [withFieldRule()] })
+  it('the build (no `runtimeWriteType`) flags each object-borne site, and nothing at the clean formula', () => {
+    const wheres = validateStackExpressions({ objects: [withEverySite()] })
       .filter((i) => (i.severity ?? 'error') === 'error')
       .map((i) => i.where);
 
-    for (const site of [...FENCED_SITES, ...LIFTED_SITES]) {
-      expect(wheres.includes(site), `${site}\n${dump(wheres)}`).toBe(true);
-    }
+    expect(wheres, dump(wheres)).toEqual(LIFTED_SITES);
     expect(wheres.some((w) => w === WHERE), 'the clean formula must not be flagged').toBe(false);
   });
 
-  it('the object door flags none of the fenced sites — only the formula, validation-rule, field-rule-slot and option passes judge there', () => {
-    const result = gateObject(withFieldRule());
+  it('the object door flags every object-borne site — no pass over the object\'s body is fenced', () => {
+    const result = gateObject(withEverySite());
 
     expect(result.rulesRun).toContain('validateStackExpressions');
-    // [#22032 passes 1–3] The lifted passes' findings, and nothing else.
+    // [#22032 passes 1–4] Every lifted pass's finding, in the build's order, and nothing else.
     expect(expressionFindings(result.errors).map((f) => f.where), dump(result)).toEqual(LIFTED_SITES);
     expect(expressionFindings(result.advisories), dump(result)).toEqual([]);
   });
 
-  it('the narrowing is the rule\'s, keyed on the write type — a flow write still runs every pass it ran', () => {
-    // `runtimeWriteType: 'flow'` is what the gate passes on a flow write; the
-    // option narrows ONLY on `object`, so nothing about the three existing
-    // doors moves.
-    const stack = { objects: [withFieldRule()] };
+  it('the narrowing is the rule\'s, keyed on the write type — an object write never runs a pass over another collection', () => {
+    const stack = { objects: [withEverySite()], ...otherCollections };
     const all = validateStackExpressions(stack);
+    // Non-vacuous: the build flags every site, the other collections' included,
+    // in its own walk order (flows, the object's body, actions, sharing rules, hooks).
+    expect(all.map((i) => i.where), dump(all)).toEqual([
+      OTHER_SITES[0],
+      ...LIFTED_SITES.slice(0, 3),
+      OTHER_SITES[1],
+      ...LIFTED_SITES.slice(3),
+      OTHER_SITES[2],
+      OTHER_SITES[3],
+    ]);
+    // A flow write still runs every pass it ran: the option narrows ONLY on `object`.
     expect(runStackExpressionPasses(stack, { runtimeWriteType: 'flow' })).toEqual(all);
-    // And the object pass set is the build's own findings on the admitted
-    // passes — a strict subset, in the build's order, none from a fenced site.
+    // The object pass set is the build's own findings on the object's body —
+    // a strict subset, in the build's order, none from another collection.
     const onObjectWrite = runStackExpressionPasses(stack, { runtimeWriteType: 'object' });
     expect(onObjectWrite.map((i) => i.where)).toEqual(LIFTED_SITES);
-    expect(onObjectWrite).toEqual(all.filter((i) => LIFTED_SITES.includes(i.where) || i.where === WHERE));
+    expect(onObjectWrite).toEqual(all.filter((i) => LIFTED_SITES.includes(i.where)));
   });
 });

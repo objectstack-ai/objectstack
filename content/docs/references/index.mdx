@@ -1,7 +1,7 @@
 ---
 title: Protocol reference — every schema by module
 navTitle: Protocol Reference
-description: Every schema published by @objectstack/spec — 1517 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1514 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -23,7 +23,7 @@ counts are sums of the rows they head. Regenerate with
 | [AI Protocol](/docs/references/ai) | 12 | 68 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
 | [API Protocol](/docs/references/api) | 32 | 431 | REST contracts, endpoints, routing, realtime, batch, discovery. |
 | [Automation Protocol](/docs/references/automation) | 13 | 70 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
-| [Data Protocol](/docs/references/data) | 30 | 178 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
+| [Data Protocol](/docs/references/data) | 29 | 174 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 27 | Users and accounts, organizations, positions, SCIM provisioning. |
 | [Integration Protocol](/docs/references/integration) | 1 | 12 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
 | [Kernel Protocol](/docs/references/kernel) | 30 | 157 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
@@ -33,8 +33,8 @@ counts are sums of the rows they head. Regenerate with
 | [Shared Protocol](/docs/references/shared) | 10 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 34 | 275 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
-| [UI Protocol](/docs/references/ui) | 16 | 165 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **196** | **1517** | 14 protocol modules |
+| [UI Protocol](/docs/references/ui) | 16 | 166 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
+| **Total** | **195** | **1514** | 14 protocol modules |
 
 ---
 
@@ -130,7 +130,7 @@ Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execu
 
 ## Data Protocol
 
-**Source:** `packages/spec/src/data/` · **Import:** `@objectstack/spec/data` · **30 pages, 178 schemas**
+**Source:** `packages/spec/src/data/` · **Import:** `@objectstack/spec/data` · **29 pages, 174 schemas**
 
 Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer.
 
@@ -141,7 +141,6 @@ Objects, fields, queries, filters, datasources and drivers — the ObjectQL laye
 | [`data-engine.zod.ts`](/docs/references/data/data-engine) | `BaseEngineOptions`, `DataEngineAggregateOptions`, `DataEngineAggregateRequest`, `DataEngineCountOptions`, `DataEngineCountRequest`, `DataEngineDeleteOptions`, `DataEngineDeleteRequest`, `DataEngineExecuteRequest`, `DataEngineFilter`, `DataEngineFindOneRequest`, `DataEngineFindRequest`, `DataEngineInsertOptions`, `DataEngineInsertRequest`, `DataEngineQueryOptions`, `DataEngineRequest`, `DataEngineSort`, `DataEngineUpdateOptions`, `DataEngineUpdateRequest`, `DataEngineVectorFindRequest`, `DroppedFieldsEvent`, `EngineAggregateOptions`, `EngineCountOptions`, `EngineDeleteOptions`, `EngineQueryOptions`, `EngineUpdateOptions`, `QueryTransportParams`, `QueryWithTransport` |
 | [`datasource.zod.ts`](/docs/references/data/datasource) | `Datasource`, `DriverDefinition`, `DriverType`, `ExternalDatasourceSettings`, `SchemaMode` |
 | [`date-macros.zod.ts`](/docs/references/data/date-macros) | `DateMacroPlaceholder`, `DateMacroToken` |
-| [`document.zod.ts`](/docs/references/data/document) | `Document`, `DocumentTemplate`, `DocumentVersion`, `ESignatureConfig` |
 | [`driver.zod.ts`](/docs/references/data/driver) | `DriverCapabilities`, `DriverConfig`, `DriverOptions`, `PoolConfig` |
 | [`driver/common.zod.ts`](/docs/references/data/driver-common) | `DriverSslToggle`, `SqlAutoMigrate` |
 | [`driver/memory.zod.ts`](/docs/references/data/driver-memory) | `AutoPersistenceConfig`, `FilePersistenceConfig`, `LocalStoragePersistenceConfig`, `PersistenceType` |
@@ -363,7 +362,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 
 ## UI Protocol
 
-**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 165 schemas**
+**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 166 schemas**
 
 Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer.
 
@@ -380,7 +379,7 @@ Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI lay
 | [`expression-bindable-text-keys.zod.ts`](/docs/references/ui/expression-bindable-text-keys) | `ExpressionBindableTextKey` |
 | [`i18n.zod.ts`](/docs/references/ui/i18n) | `AriaProps`, `I18nLabel`, `InlineLocaleMap` |
 | [`notification.zod.ts`](/docs/references/ui/notification) | `NotificationPosition`, `NotificationSeverity`, `NotificationType` |
-| [`page.zod.ts`](/docs/references/ui/page) | `ElementDataSource`, `InterfacePageConfig`, `Page`, `PageComponent`, `PageComponentType`, `PageRegion`, `PageType`, `PageVariable` |
+| [`page.zod.ts`](/docs/references/ui/page) | `ElementDataSource`, `InterfacePageConfig`, `Page`, `PageComponent`, `PageComponentType`, `PagePrint`, `PageRegion`, `PageType`, `PageVariable` |
 | [`report.zod.ts`](/docs/references/ui/report) | `JoinedReportBlock`, `Report`, `ReportChart`, `ReportSort`, `ReportType` |
 | [`responsive.zod.ts`](/docs/references/ui/responsive) | `ResponsiveStyles`, `StyleMap` |
 | [`sharing.zod.ts`](/docs/references/ui/sharing) | `SharingConfig` |

@@ -42,7 +42,8 @@ const PLUGIN_PERMISSIONS_LIST_FORM =
   + 'in the four lists instead — platform services, lifecycle hooks, network hosts and filesystem paths, '
   + 'e.g. `{ services: [\'object\'], network: [\'api.acme.com\'] }`. A permission string has no mechanical '
   + 'mapping onto them, so translate each one by hand, or delete `permissions` when the plugin needs none. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for the package manifest case; a granted-permission record is not a source it reads.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for the package manifest case; '
+  + '`--write` applies the ones it can prove, and a granted-permission record is not a source it reads.';
 
 const PLUGIN_PERMISSIONS_SHAPE = {
   services: z.array(z.string()).optional()
