@@ -47,9 +47,12 @@ import { join } from 'node:path';
 import { randomPort, runServe } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
 
+/** The ready line. The banner it opens (`Plugins: N loaded`, `Flows:`) prints AFTER it. */
 const READY = /Server is ready/;
-/** A boot that ends either way: the banner, or a fatal `✗` line before the child exits. */
-const READY_OR_FATAL = /Server is ready|✗ [^\n]+\n/;
+/** The banner's LAST line: wait for it, or the plugin list and the flow line are not printed yet. */
+const BANNER_END = /Press Ctrl\+C to stop/;
+/** A boot that ends either way: the whole banner, or a fatal `✗` line before the child exits. */
+const BANNER_END_OR_FATAL = /Press Ctrl\+C to stop|✗ [^\n]+\n/;
 
 /** The definitions every fixture shares, as module source. */
 const PIECES = `
@@ -117,19 +120,19 @@ const boot = async (name: string, waitFor: RegExp, extra: string[] = []) => {
 
 describe('#22288 — `requires` a package declares mounts its provider at boot', () => {
   it('two packages: the service package\'s `automation` is mounted', async () => {
-    const out = await boot('automationTwo', READY);
+    const out = await boot('automationTwo', BANNER_END);
     expect(out).toMatch(READY);
     expect(bannerPlugins(out)).toContain('AutomationServicePlugin');
   }, 180_000);
 
   it('control, one package: the same `requires` mounts the same provider', async () => {
-    const out = await boot('automationOne', READY);
+    const out = await boot('automationOne', BANNER_END);
     expect(out).toMatch(READY);
     expect(bannerPlugins(out)).toContain('AutomationServicePlugin');
   }, 180_000);
 
   it('two packages, a declared capability with no provider: the boot refuses, as one package always has', async () => {
-    const out = await boot('aiTwo', READY_OR_FATAL);
+    const out = await boot('aiTwo', BANNER_END_OR_FATAL);
     expect(out).not.toMatch(READY);
     expect(out).toMatch(/✗ Capability "ai"/);
   }, 180_000);
@@ -137,7 +140,7 @@ describe('#22288 — `requires` a package declares mounts its provider at boot',
 
 describe('#22288 — the other package-owned keys `os serve` reads', () => {
   it('two packages: a package\'s cubes reach the analytics provider, and its flow is counted', async () => {
-    const out = await boot('cubesAndFlowTwo', READY, ['--log-level', 'info']);
+    const out = await boot('cubesAndFlowTwo', BANNER_END, ['--log-level', 'info']);
     expect(out).toMatch(READY);
     const started = out.split('\n').find((line) => line.includes('[Analytics] Service started'));
     expect(started, out).toBeDefined();
@@ -146,7 +149,7 @@ describe('#22288 — the other package-owned keys `os serve` reads', () => {
   }, 180_000);
 
   it('two packages: a package\'s `tiers` are honoured, so a stack without `auth` is refused', async () => {
-    const out = await boot('tiersTwo', READY_OR_FATAL);
+    const out = await boot('tiersTwo', BANNER_END_OR_FATAL);
     expect(out).not.toMatch(READY);
     expect(out).toMatch(/✗ [^\n]*mounts no auth/);
   }, 180_000);
