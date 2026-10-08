@@ -40,7 +40,7 @@
 // stop, so the files live in this test file's own working directory, which the
 // dogfood run removes at its end, rather than being removed here.
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { composeStacks, defineStack } from '@objectstack/spec';
@@ -110,6 +110,23 @@ describe('ADR-0048 N.3: a package-held position or permission-set name the envir
   afterEach(async () => {
     await stack?.stop();
     stack = undefined;
+  });
+
+  // The built-in control saves under two built-in position names, which the
+  // platform's package registers, so the save needs the documented hatch. The
+  // protocol reads `OS_METADATA_WRITABLE` ONCE per process and memoises it, so
+  // it is set for the whole file, before the first boot: set inside the one
+  // case, a save in an earlier case would already have memoised it closed. No
+  // other case depends on it: a new position name saves without it, and the
+  // packaged permission-set lock refuses its save with or without it.
+  let previousWritable: string | undefined;
+  beforeAll(() => {
+    previousWritable = process.env.OS_METADATA_WRITABLE;
+    process.env.OS_METADATA_WRITABLE = 'position';
+  });
+  afterAll(() => {
+    if (previousWritable === undefined) delete process.env.OS_METADATA_WRITABLE;
+    else process.env.OS_METADATA_WRITABLE = previousWritable;
   });
 
   it('environment-saved names, then a package declaring both: the hot install is refused, and so is the cold boot, naming both holders', async () => {
@@ -183,21 +200,14 @@ describe('ADR-0048 N.3: a package-held position or permission-set name the envir
 
   it('CONTROL — stored definitions under built-in position names: the restart boots, and the stored definition answers', async () => {
     const db = databaseFile();
-    const previous = process.env.OS_METADATA_WRITABLE;
-    process.env.OS_METADATA_WRITABLE = 'position';
-    try {
-      stack = await bootStack(baseApp, { databaseFile: db });
-      const token = await stack.signIn();
-      for (const name of ['org_admin', 'everyone']) {
-        const saved = await stack.apiAs(token, 'PUT', `/meta/position/${name}`, { name, label: `Repurposed ${name}` });
-        expect(saved.status, JSON.stringify(await saved.clone().json().catch(() => ({})))).toBe(200);
-      }
-      await stack.stop();
-      stack = undefined;
-    } finally {
-      if (previous === undefined) delete process.env.OS_METADATA_WRITABLE;
-      else process.env.OS_METADATA_WRITABLE = previous;
+    stack = await bootStack(baseApp, { databaseFile: db });
+    const saveToken = await stack.signIn();
+    for (const name of ['org_admin', 'everyone']) {
+      const saved = await stack.apiAs(saveToken, 'PUT', `/meta/position/${name}`, { name, label: `Repurposed ${name}` });
+      expect(saved.status, JSON.stringify(await saved.clone().json().catch(() => ({})))).toBe(200);
     }
+    await stack.stop();
+    stack = undefined;
 
     const { refusal, stack: booted } = await bootOrRefusal(baseApp, db);
     stack = booted;
