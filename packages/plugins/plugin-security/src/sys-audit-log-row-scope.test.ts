@@ -60,6 +60,7 @@ const LEDGER_NOW = {
   systemFields: { tenant: false },
   fields: {
     action: { name: 'action', type: 'text' },
+    object_name: { name: 'object_name', type: 'text' },
     tenant_id: { name: 'tenant_id', type: 'lookup', reference: 'sys_organization' },
   },
 };
