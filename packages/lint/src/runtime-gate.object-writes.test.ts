@@ -120,11 +120,11 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
     expect(runtimeAuthoringRulesFor('object').map((r) => r.name)).toEqual([
       // [#22019] The build's expression rule joins, for some of its passes: a
       // formula field's `expression` — the `validateExpression` verdict the
-      // docs say backs metadata registration — and (#22032 passes 1 and 2) the
-      // validation-rule predicates and the field-rule slots. Its other
-      // object-borne passes (option `visibleWhen`, action predicates) are fenced
-      // off this door inside the rule (`StackExpressionOptions`), and that
-      // fence is pinned in `runtime-gate.object-formula-writes.test.ts`.
+      // docs say backs metadata registration — and (#22032 passes 1 to 3) the
+      // validation-rule predicates, the field-rule slots and option
+      // `visibleWhen`. Its one other object-borne pass (action predicates) is
+      // fenced off this door inside the rule (`StackExpressionOptions`), and
+      // that fence is pinned in `runtime-gate.object-formula-writes.test.ts`.
       'validateStackExpressions',
       'validateFunctionalCompleteness',
       'validateManagedApiMethods',

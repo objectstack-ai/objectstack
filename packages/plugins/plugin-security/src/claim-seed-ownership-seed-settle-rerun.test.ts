@@ -94,7 +94,11 @@ function makeEngine(tables: Record<string, any[]>, schemas: any[]) {
     middlewares,
     registry: { getAllObjects: () => schemas },
     registerMiddleware: (mw: any) => middlewares.push(mw),
-    getSchema: (name: string) => schemas.find((s) => s.name === name),
+    // Plus the identity objects the plugin's boot gate requires: a kernel that
+    // boots it registers them (`authz-identity-objects-boot-refusal.test.ts`).
+    getSchema: (name: string) =>
+      schemas.find((s) => s.name === name)
+      ?? (name === 'sys_user' || name === 'sys_member' ? { name, fields: {} } : undefined),
     async find(object: string, query: any = {}) {
       const all = tables[object] ?? [];
       let hits = all.filter((r) => rowMatches(r, query?.where ?? {}));

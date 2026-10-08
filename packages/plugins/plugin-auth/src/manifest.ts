@@ -133,3 +133,22 @@ export const authPluginManifestHeader = {
   name: 'Authentication & Identity Plugin',
   description: 'Core authentication objects for ObjectStack (User, Session, Account, Verification)',
 };
+
+/**
+ * The identity-object half of plugin-auth's runtime manifest: the header, the
+ * objects and the fields plugin-auth adds to them. `AuthPlugin` spreads it into
+ * the one manifest it registers, and `IdentityObjectsPlugin` registers it on its
+ * own, so a reduced kernel and a full one register the same list under the same
+ * package id.
+ *
+ * `datasource` overrides the header's `defaultDatasource`, as
+ * `AuthPluginOptions.manifestDatasource` does.
+ */
+export function authIdentityManifest(options: { datasource?: string } = {}) {
+  return {
+    ...authPluginManifestHeader,
+    ...(options.datasource ? { defaultDatasource: options.datasource } : {}),
+    objects: authIdentityObjects,
+    objectExtensions: authObjectExtensions,
+  };
+}
