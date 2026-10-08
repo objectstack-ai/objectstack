@@ -1069,6 +1069,59 @@ function readSeedSettlementSnapshot(ctx: PluginContext): SeedSettlementSnapshot 
   }
 }
 
+/**
+ * The identity objects this plugin's authorization store READS — declared here,
+ * enforced at boot by {@link refuseMissingAuthzIdentityObjects}, and ⛔ never
+ * registered by this plugin: they belong to `@objectstack/plugin-auth`.
+ *
+ * Measured from the reads, not guessed: permission resolution runs through
+ * `@objectstack/core`'s `resolveUserAuthzGrants` (per request, and for this
+ * plugin's explain engine and scoped-invitation placement). Its reads are
+ * `sys_user` and `sys_member`, which plugin-auth registers, plus
+ * `sys_user_position`, `sys_user_permission_set`, `sys_position`,
+ * `sys_position_permission_set` and `sys_permission_set`, which are this
+ * plugin's own `securityObjects`, registered in `init()`. The engine refuses a
+ * read of a name its registry does not hold (`OBJECT_NOT_FOUND`), and that
+ * resolver reports the refusal as `AuthzStoreUnavailableError` (503) on every
+ * authenticated request: a missing dependency that reads as an outage.
+ */
+const AUTHZ_STORE_IDENTITY_OBJECTS: readonly string[] = ['sys_user', 'sys_member'];
+
+/**
+ * The boot refusal for a kernel that mounts this plugin without the identity
+ * objects its authorization store reads. `missingObjects` names exactly the
+ * ones absent from the engine's registry.
+ */
+export class AuthzIdentityObjectsMissingError extends Error {
+  readonly missingObjects: readonly string[];
+
+  constructor(missingObjects: readonly string[]) {
+    super(
+      `SecurityPlugin cannot boot: its authorization store reads ${AUTHZ_STORE_IDENTITY_OBJECTS.join(', ')}, `
+        + `and this kernel does not register ${missingObjects.join(', ')}. Without them every `
+        + 'authenticated request fails its permission read with AuthzStoreUnavailableError (503), '
+        + 'which reads as an outage. @objectstack/plugin-auth registers these objects: mount '
+        + 'AuthPlugin, or, on a kernel without authentication such as a test kit, mount '
+        + 'createIdentityObjectsPlugin() from @objectstack/plugin-auth.',
+    );
+    this.name = 'AuthzIdentityObjectsMissingError';
+    this.missingObjects = [...missingObjects];
+  }
+}
+
+/**
+ * Run from a `kernel:ready` handler: every plugin's `init()` and `start()` has
+ * registered its manifests by then, and a throw there fails `bootstrap()` on
+ * both kernels. That is the boot-gate moment the kernel documents; during
+ * `init()` the registry is still filling. The question asked is the one the
+ * read itself will ask: does the engine's registry resolve the name.
+ */
+function refuseMissingAuthzIdentityObjects(ctx: PluginContext): void {
+  const ql = ctx.getService<IObjectQLEngine>('objectql');
+  const missing = AUTHZ_STORE_IDENTITY_OBJECTS.filter((name) => !ql.getSchema(name));
+  if (missing.length > 0) throw new AuthzIdentityObjectsMissingError(missing);
+}
+
 export class SecurityPlugin implements Plugin {
   name = 'com.objectstack.security';
   /**
@@ -1404,6 +1457,15 @@ export class SecurityPlugin implements Plugin {
 
   async init(ctx: PluginContext): Promise<void> {
     ctx.logger.info('Initializing Security Plugin...');
+
+    // The identity objects the authorization store reads must be registered by
+    // the time the boot completes; a kernel without them is refused here, by
+    // name, instead of at its first permission read. Subscribed in `init()` so
+    // it runs ahead of every `kernel:ready` handler registered in `start()`,
+    // this plugin's own bootstraps included.
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('kernel:ready', () => refuseMissingAuthzIdentityObjects(ctx));
+    }
 
     // Register security services
     ctx.registerService('security.permissions', this.permissionEvaluator);
