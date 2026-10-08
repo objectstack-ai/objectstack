@@ -49,6 +49,13 @@
  * `?mode=draft` (any case) is `mode: 'draft'`: the save stages a draft row and
  * leaves the active row alone. Any other value is an active save, as it has
  * always been on `RestServer`.
+ *
+ * `query.mode` is read as the string a door has already judged for
+ * multiplicity. `RestServer` calls this AFTER `refuseRepeatedQueryParams`,
+ * which refuses a repeated `mode` and unwraps one occurrence encoded as an
+ * array; the `@objectstack/hono` catch-all flattens its query from the URL, one
+ * string per name. ⛔ So call it after your own multiplicity gate, never
+ * before: an array reaching here is not read as a draft.
  */
 
 import type { SaveMetaItemRequest } from '@objectstack/spec/api';

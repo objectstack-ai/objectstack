@@ -273,10 +273,11 @@ for (const [doorName, boot] of DOORS) {
 
         it('a pin that can never be honoured is refused 400 VALIDATION_ERROR and writes nothing', async () => {
             const door = await boot();
-            for (const headers of [
+            const unhonourable: Array<Record<string, string>> = [
                 { 'If-Match': 'any-token', 'If-None-Match': '*' },
                 { 'If-None-Match': 'W/"an-entity-tag"' },
-            ]) {
+            ];
+            for (const headers of unhonourable) {
                 const refused = await door.save('case_grid', 'never', { headers });
                 expect({ status: refused.status, code: refused.code }, JSON.stringify(headers)).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
             }

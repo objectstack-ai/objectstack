@@ -7094,6 +7094,13 @@ export class RestServer {
                     // `@objectstack/hono` catch-all cannot answer this request
                     // differently. Its `request` members are spread into the
                     // save below, each present only when the caller asked.
+                    //
+                    // The multiplicity guard runs FIRST: it refuses a repeated
+                    // `force`, `package` or `mode` (see the `force` read below
+                    // for why that one is sharp) and UNWRAPS one occurrence
+                    // encoded as an array, so `?mode=` reaches the mapping as
+                    // the string it reads.
+                    if (refuseRepeatedQueryParams(req, res, ['force', 'package', 'mode'])) return;
                     const saveOptions = metaSaveRequestOptions({ headers: req.headers, query: req.query });
                     if (!saveOptions.ok) {
                         res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: saveOptions.message } });
@@ -7112,8 +7119,8 @@ export class RestServer {
                     // string, and a non-empty array is truthy — so
                     // `?force=false&force=false`, a caller repeating an explicit
                     // OPT-OUT, turned the destructive-change guard ON. An
-                    // inversion, on a destructive verb, reported as 200.
-                    if (refuseRepeatedQueryParams(req, res, ['force', 'package', 'mode'])) return;
+                    // inversion, on a destructive verb, reported as 200. The
+                    // multiplicity guard above refuses it before this read.
                     const forceRaw = req.query?.force;
                     const force = typeof forceRaw === 'string'
                         ? ['true', '1', 'yes', 'on'].includes(forceRaw.toLowerCase())
