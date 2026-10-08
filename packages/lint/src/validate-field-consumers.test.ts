@@ -11,6 +11,7 @@ import {
   validateFieldConsumers,
 } from './validate-field-consumers.js';
 import { AUTHORING_COMMANDS, AUTHORING_RULES, runAuthoringRules } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -149,8 +150,7 @@ describe('validateFieldConsumers (#15922)', () => {
     expect(product.object).toBe('inv_product');
     expect(product.field).toBe('tax_rate');
     expect(product.verdict).toBe('carrier-only');
-    expect(product.message).toContain('"inv_line"');
-    expect(product.message).toContain('verdicts are per object');
+    expect(product.message).toContain('a consumer of the same name on "inv_line" does not count');
     expect(f['objects[1].fields.tax_rate']).toBeUndefined();
   });
 
@@ -170,17 +170,61 @@ describe('validateFieldConsumers (#15922)', () => {
     const inert = f['objects[0].fields.is_taxable'];
     expect(inert.verdict).toBe('inert');
     expect(inert.carriers).toEqual([]);
-    expect(inert.message).toContain('Verdict: inert');
-    expect(inert.message).not.toContain('The same name');
+    expect(inert.message).toBe('declared, but nothing in this stack displays or reads it (inert)');
+    expect(inert.message).not.toContain('same name');
   });
 
-  it('names the roots it scanned on every finding and in the hint', () => {
+  // [#22161] The finding is printed on every validate / build / dev run, so it
+  // carries ONE verdict sentence and ONE fix; the long reasoning lives in the
+  // rule's explanation (`os explain field-no-consumers`), and the CLI's `rule:`
+  // line names that command (pinned in packages/cli, where the line is drawn).
+  describe('the printed shape: a verdict line, a fix line, the reasoning in the explanation', () => {
+    it('inert: the verdict and the fix, each one line, neither restating the location', () => {
+      const inert = byPath(validateFieldConsumers(corpus()))['objects[0].fields.is_taxable'];
+      expect(inert.where).toBe('object "inv_product" · field "is_taxable"');
+      expect(inert.message).toBe('declared, but nothing in this stack displays or reads it (inert)');
+      expect(inert.hint).toBe('add it to a view column or a form section, or remove the declaration');
+      for (const line of [inert.message, inert.hint]) {
+        expect(line).not.toContain('\n');
+        expect(line).not.toContain('inv_product');
+      }
+    });
+
+    it('carrier-only: the verdict counts the carriers, the fix names each one a removal must clean', () => {
+      const color = byPath(validateFieldConsumers(corpus()))['objects[0].fields.color'];
+      expect(color.message).toBe(
+        'declared, but nothing in this stack displays or reads it ' +
+          '(carrier-only: 1 site(s) name it without reading it)',
+      );
+      expect(color.hint).toBe(
+        'add it to a view column or a form section, or remove the declaration together with its ' +
+          '1 carrier site(s): permissions[0].objects.inv_product.fields.color',
+      );
+    });
+
+    it('the reasoning is in the explanation, not on the finding', () => {
+      const findings = validateFieldConsumers(corpus());
+      const explanation = explainRule(FIELD_NO_CONSUMERS);
+      expect(explanation?.rule).toBe(FIELD_NO_CONSUMERS);
+      expect(explanation?.covers).toBe('what counts as a consumer');
+      const text = explanation!.paragraphs.join('\n');
+      // What the message used to enumerate inline now lives here, once.
+      expect(text).toContain('A CARRIER names a field without reading it');
+      expect(text).toContain('Verdicts are per object');
+      expect(text).toContain('Test fixtures are never scanned');
+      for (const finding of findings) {
+        expect(finding.message).not.toContain('carrier, not a consumer');
+        expect(finding.hint).not.toContain('Roots scanned');
+      }
+    });
+  });
+
+  it('names the roots it scanned on every finding and in the explanation', () => {
     const [first] = validateFieldConsumers(corpus());
     expect(first.rootsScanned).toEqual([...CONSUMER_ROOTS, ...CARRIER_ROOTS]);
-    expect(first.hint).toContain('test fixtures are never scanned');
-    for (const root of ['views', 'pages', 'flows', 'translations', 'data', 'mappings']) {
-      expect(first.hint).toContain(root);
-    }
+    // Interpolated from the rule's own constants, never retyped.
+    const text = explainRule(FIELD_NO_CONSUMERS)!.paragraphs.join('\n');
+    expect(text).toContain(`Roots scanned: ${CONSUMER_ROOTS.join(', ')} (consumers) · ${CARRIER_ROOTS.join(', ')}`);
   });
 
   it('carries the positional path on the array-shaped field map', () => {

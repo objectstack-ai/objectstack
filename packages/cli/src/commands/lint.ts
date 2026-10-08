@@ -37,6 +37,7 @@ import {
   isExitSignal,
   errorCodeFields,
   isReportedError,
+  explainPointer,
 } from '../utils/format.js';
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -1122,7 +1123,10 @@ export default class Lint extends Command {
           'ℹ';
 
         console.log(`  ${color(icon)} ${color(issue.message)}`);
-        console.log(chalk.dim(`    ${issue.rule}  at ${issue.path}`));
+        // [#22161] The same `os explain <rule-id>` pointer `os validate` and
+        // `os build` print, from the same one spelling, for the rules that have
+        // a long-form explanation.
+        console.log(chalk.dim(`    ${issue.rule}  at ${issue.path}${explainPointer(issue.rule)}`));
         if (flags.fix && issue.fix) {
           console.log(chalk.green(`    → fix: ${issue.fix}`));
         }
