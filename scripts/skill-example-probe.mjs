@@ -94,6 +94,8 @@ import { join, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
+import { parseSourceFile, parseDerivedText } from './ts-parse.mjs';
+
 // ── Population ─────────────────────────────────────────────────────────────
 
 export const PROBE_ROOT = 'skills';
@@ -505,10 +507,19 @@ function candidateOf(ts, node) {
   return null;
 }
 
+/**
+ * Parse a fence body (or a wrapper synthesised around one) through
+ * `scripts/ts-parse.mjs` — the one sanctioned door (`check:parse-guard`). A
+ * fence is not a file on disk: its text is DERIVED from a markdown host, so it
+ * takes the returnable door, `parseDerivedText`, whose origin is a certified
+ * carrier module holding that same text as a string literal. A body that does
+ * not parse comes back as data and is reported as a COVERAGE MISS of reason
+ * `syntax` — never a recovered tree walked as if it were clean.
+ */
 function parseTs(ts, text, tsx) {
-  const sf = ts.createSourceFile(tsx ? 'fence.tsx' : 'fence.ts', text, ts.ScriptTarget.Latest, true,
-    tsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
-  return { sf, diagnostics: sf.parseDiagnostics ?? [] };
+  const origin = parseSourceFile('skill-fence.carrier.ts', `export const fence = ${JSON.stringify(text)};\n`);
+  const r = parseDerivedText(origin, tsx ? 'skill-fence.tsx' : 'skill-fence.ts', text);
+  return r.failure ? { sf: null, diagnostics: r.failure.rows } : { sf: r.sourceFile, diagnostics: [] };
 }
 
 function collectBindings(ts, sf) {
@@ -692,8 +703,7 @@ export function transformFence(fence, deps) {
   if (items.length) return { status: 'partial', reason: whole.diagnostics.length ? 'syntax' : 'no-candidate', items };
   if (whole.diagnostics.length) {
     const d = whole.diagnostics[0];
-    const msg = typeof d.messageText === 'string' ? d.messageText : d.messageText?.messageText;
-    return { status: 'miss', reason: 'syntax', detail: `TS${d.code} ${msg}`, items: [] };
+    return { status: 'miss', reason: 'syntax', detail: `${d.line}:${d.column} ${d.message}`, items: [] };
   }
   return { status: 'miss', reason: 'no-candidate', detail: 'parses, but carries no metadata literal', items: [] };
 }
