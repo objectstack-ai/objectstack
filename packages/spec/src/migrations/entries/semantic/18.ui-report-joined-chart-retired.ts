@@ -63,5 +63,5 @@ export const entry: SemanticMigration = {
     + 'Census at the time of the change: zero joined reports with a chart in this repo\'s '
     + 'example apps and in the hotcrm reference app, against a lit control (non-joined reports '
     + 'carrying a chart: one and five). '
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
 };

@@ -11,8 +11,9 @@
  *   - the `security` service is ABSENT — this deployment has no object-level
  *     gate anywhere, `GET /data/<object>` included, because that gate IS the
  *     absent middleware. The two doors agree, which is the equivalence property
- *     the card asks for, so the query is ADMITTED and the state is reported at
- *     init;
+ *     the card asks for, so the query is ADMITTED and the state is reported
+ *     once, by the first query that finds it (`admission-absence-report.test.ts`
+ *     pins when, and at what level);
  *   - resolving the service THREW — a security service exists on this
  *     deployment and could not be reached;
  *   - the service resolved but exposes NEITHER `canReadObject` NOR `explain` —

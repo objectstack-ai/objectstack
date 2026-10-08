@@ -21,7 +21,7 @@ The runtime publish gate now runs the build's validation-rule check on an object
 **Unchanged.**
 
 - Stored rows are not migrated, and they are not refused on read. An object stored before this change keeps loading until it is next saved. At that save the gate judges it, because the differential compares the write against the stored universe without its own stored row.
-- The other expressions an object carries are still not judged at this door: the field-rule slots (`requiredWhen`, `readonlyWhen`, `conditionalRequired`, `visibleWhen`), option `visibleWhen`, and the object's own action predicates. `os build` judges them, and the door does not, as before.
+- This entry's crossing covers validation-rule predicates. The field-rule slots (`requiredWhen`, `readonlyWhen`, `visibleWhen`), option `visibleWhen` and the object's own action predicates are judged at this door through their own #22032 entries, each its own crossing.
 - `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still turns a refusal into a logged write.
 - Measured before crossing: every validation rule this repository ships has 0 refusals and 0 advisories, at the build and at the door. That is 21 rules carrying 13 predicates on 10 objects: examples 11 predicates on 7 objects, and the platform objects 2 on 3 (one rule on `sys_user` carries no predicate).
 - No public export or signature moves. `validateStackExpressions(stack)` keeps its signature, and no registry entry changes: the expression rule already declared `object`.

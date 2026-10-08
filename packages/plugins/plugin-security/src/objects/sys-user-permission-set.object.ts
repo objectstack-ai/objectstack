@@ -102,9 +102,18 @@ export const SysUserPermissionSet = ObjectSchema.create({
       description: 'Optional organization scope. NULL = applies in every org context.',
     }),
 
+    // Provenance, not a business link: the platform writes it, a caller does
+    // not. A non-system insert is stamped with its writer by the
+    // DelegatedAdminGate whatever the payload carried, and a system writer
+    // (the organization-admin reconcile, the platform-admin promotion) keeps
+    // the id or null it wrote (ADR-0118 D1 — never a sentinel). `readonly`
+    // makes the update strip drop a non-system caller's value, and it is what
+    // files a granter that no longer resolves under the integrity audit's
+    // `provenance` bucket rather than as a broken business reference.
     granted_by: Field.lookup('sys_user', {
       label: 'Granted By',
       required: false,
+      readonly: true,
       description: 'User who granted this permission set.',
     }),
 

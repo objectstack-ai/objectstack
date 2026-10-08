@@ -167,7 +167,7 @@ const JOB_ID_RETIRED =
   + 'key, the `sys_job` row key, and the `JobExecution.jobId` stamp. Two jobs differing only '
   + 'in `id` were the same job. Delete the key; rename the job via `name` if you need a '
   + 'different identity. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * `job.timeout` → `job.timeoutMs` (#14478). The unit lived only in the
@@ -180,7 +180,7 @@ const JOB_TIMEOUT_RETIRED =
   + 'in the description while the sibling `retryPolicy.backoffMs` spells its own, so the same number '
   + 'read as two conventions on one surface. Rename the key to `timeoutMs`; the value (milliseconds) '
   + 'is unchanged. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * A job with nothing to run. Before `body` existed `handler` was required, so

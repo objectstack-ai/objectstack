@@ -374,8 +374,8 @@ indexes: [
 > **`type` and `partial` were retired at protocol 17**: no driver
 > ever read either, so an authored `type` chose no access method and an authored
 > `partial` produced a full index with the predicate discarded. Both are now a
-> `tsc` error and a parse error; `os migrate meta --from 16` strips them. Access
-> methods and partial predicates are database-layer migrations.
+> `tsc` error and a parse error; `os migrate meta --from 16` lists the edits;
+> `--write` applies the ones it can prove, the rest by hand.
 
 > **A unique index must state its scope** — `'organization'` (one holder per
 > organization, NULL-safe) or `'global'` (one holder across the installation).

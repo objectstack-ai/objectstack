@@ -2408,7 +2408,7 @@ const LIST_VIEW_TYPE_PAGE_RETIRED =
   + 'that draws rows (`grid` and its siblings); to put a published page in front of users, give the '
   + "app a navigation item instead — `{ type: 'page', pageName: '<page_name>' }` under the app's "
   + '`navigation`, which is the page mount that has always rendered. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 const LIST_VIEW_PAGE_NAME_RETIRED =
   '`view.pageName` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named '
@@ -2417,7 +2417,7 @@ const LIST_VIEW_PAGE_NAME_RETIRED =
   + "to put a published page in front of users, give the app a navigation item — `{ type: 'page', "
   + "pageName: '<page_name>' }` under the app's `navigation` — which is a different key on a "
   + 'different surface and is the page mount that has always rendered. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * [#17053] Prescription for the retired bare-string `sort` clause on the
@@ -2457,7 +2457,7 @@ const LIST_VIEW_SORT_STRING_RETIRED =
   + '`sort: [{ field: \'created_at\', order: \'asc\' }]` — `order` is required on the entry and '
   + 'is written out rather than omitted; a comma-separated clause becomes one array entry per '
   + 'key, in the same order. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 const VIEW_CALENDAR_ALLOWED_NEEDS_START_DATE =
   "`appearance.allowedVisualizations` includes 'calendar', so end users can switch this view to a "
@@ -2920,7 +2920,7 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
     + "the entry's `label`, and its `filter` rules join the view's own `filter` on that entry (copy the "
     + "view's `columns` too); a tab whose `view` already named a list view needs nothing more. Every "
     + '`listViews` entry renders as a tab in the switcher. '
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   /** Add Record (Airtable Interface parity) */
@@ -2947,13 +2947,13 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   responsive: retiredKey(
     '`view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
     'no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   performance: retiredKey(
     '`view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
     'no renderer or runtime read it; list-view performance tuning was never implemented. ' +
     'Delete the key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   // `striped` / `bordered` / `virtualScroll` REMOVED (#7176, ADR-0049
@@ -2967,19 +2967,19 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
     '`view.striped` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — ' +
     'every measured reader only copied it forward and no renderer ever applied it, so authoring ' +
     'it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   bordered: retiredKey(
     '`view.bordered` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — ' +
     'every measured reader only copied it forward and no renderer ever applied it (the grid frame ' +
     "is the renderer's own constant, not authorable). Delete the key. " +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   virtualScroll: retiredKey(
     '`view.virtualScroll` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — ' +
     'every measured reader only copied it forward and no grid ever virtualized off it; authoring ' +
     'it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 }));
 
@@ -3059,7 +3059,7 @@ export const FormSelectOptionSchema = lazySchema(() => {
         + 'instead — field-level `defaultValue`, or `default: true` on that field\'s own '
         + '`options` entry (both enforced there, with `defaultValue` winning when both are '
         + 'declared). Run `os migrate meta --from 17` to list the mechanical edits for existing '
-        + 'sources; apply them by hand.',
+        + 'sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
       isDefault:
         '`isDefault` is an object-field spelling: an OBJECT field\'s option list answers it with '
         + 'a rename to `default`, which is enforced there. Form-view options accept neither '
@@ -3162,7 +3162,7 @@ const FORM_FIELD_PUBLIC_PICKER_RETIRED =
   + '(`GET /forms/:slug/lookup/:field`) no longer exists. Delete the key (the whole `publicPicker` '
   + 'block). To let a visitor choose from a fixed list, use a `select` field with static `options`; '
   + 'to let them pick an existing record, put the form behind sign-in. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 const FormFieldBaseSchema = lazySchema(() => {
   const shape = {
@@ -4181,13 +4181,13 @@ const FORM_VIEW_LAYOUT_RETIRED: ReadonlyMap<string, string> = new Map([
     + "form presentation folds it to 'vertical'. Write 'vertical', or omit `layout` ('vertical' "
     + 'is the renderer default); for a multi-column form set `columns` (e.g. `columns: 2`), which '
     + 'the renderer honours under either layout. '
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.'],
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.'],
   ['inline', "'inline' was removed from the form view `layout` enum in @objectstack/spec 17.5.0 "
     + '(ADR-0049 enforce-or-remove) — no renderer ever gave it a behaviour of its own: every '
     + "form presentation folds it to 'vertical', and a row of inline inputs is a toolbar / "
     + "filter-row pattern, not a record-form layout. Write 'vertical', or omit `layout` "
     + "('vertical' is the renderer default). "
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.'],
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.'],
 ]);
 
 /**
@@ -4379,7 +4379,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
     '`form.defaultSort` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
     'nothing read it: a related list inside a form sorts by its own list view\'s `sort`. ' +
     'Delete the key and set the sort on the related list view instead. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   /** Public form sharing configuration */
@@ -4519,7 +4519,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
     'renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. ' +
     'Delete the key. The form renderer emits its own semantic markup; report gaps as ' +
     'renderer issues rather than per-view attribute overrides. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 }).superRefine((view, ctx) => {
   // `section.pane` is split-only vocabulary. On any other form type it would
@@ -4978,14 +4978,14 @@ const VIEW_ITEM_OWNER_RETIRED =
   + 'view marked as one user\'s was listed for every user who can read the object. Delete the key. '
   + 'Nothing restricts a view item to one user today — per-user view scoping is a parked direction '
   + '(ADR-0017), not a shipped mechanism — so a view item is visible to everyone who can read its object. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 const VIEW_ITEM_HIDDEN_RETIRED =
   '`view.hidden` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it promised to '
   + 'hide a view item from the switcher, and nothing ever read it: `GET /meta/view?object=` and the '
   + 'console\'s view switcher list every item bound to the object, `hidden: true` included. Delete the key; '
   + 'to take a view out of the switcher, delete the view item itself (or stop shipping it from source). '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * Fields shared by every independent view item, regardless of kind. Returned

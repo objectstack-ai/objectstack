@@ -704,7 +704,7 @@ function flowNodeObject() { return strictObject(
     'close-out) — it was never validated: the engine does not check node outputs against ' +
     'it, so it documented a contract nothing enforced. Delete the key. Downstream nodes ' +
     "read prior outputs via expressions ({{nodeId.field}}) regardless of any declaration. " +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   /**
@@ -778,7 +778,7 @@ function flowNodeObject() { return strictObject(
       + "(`timerDuration: 'PT1M'` is the ISO 8601 spelling of that same 60s). Stored flows are "
       + 'converted automatically — the conversion does the quoting for you. '
       + 'Run `os migrate meta --from 16` to list the mechanical edits for existing '
-      + 'sources; apply them by hand.',
+      + 'sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
     ),
     onTimeout: retiredKey(
       '`waitEventConfig.onTimeout` was removed in @objectstack/spec 17. It had no readers at '
@@ -786,7 +786,7 @@ function flowNodeObject() { return strictObject(
       + 'the key. There is no replacement: `wait` has no timeout, and a wait node resumes only when '
       + 'its timer elapses or its signal arrives. '
       + 'Run `os migrate meta --from 16` to list the mechanical edits for existing '
-      + 'sources; apply them by hand.',
+      + 'sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
     ),
   }).superRefine((wec, ctx) => {
     // A timer with nothing to count is the forever-hang in its second
@@ -1062,7 +1062,7 @@ export const FlowSchema = lazySchema(() => strictObject(
     'no designer or engine path ever read it, so flagging a flow as a template/subflow did ' +
     'nothing. Delete the key. Shared logic is invoked via a subflow NODE referencing the ' +
     'flow by name. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   /** Trigger Type */
@@ -1086,7 +1086,7 @@ export const FlowSchema = lazySchema(() => strictObject(
     'stop a flow (worse, the default read as disabled while the engine treated unset as ' +
     "enabled). Delete the key. Use `status: 'obsolete'` (or 'invalid') to unbind and " +
     "disable a flow, `status: 'active'` to arm it. " +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   // ADR-0049 / #1888 — ENFORCED. The service-automation engine establishes the
   // declared identity for the run's data operations and restores the caller's
@@ -1244,7 +1244,7 @@ export const FlowSchema = lazySchema(() => strictObject(
       "edges (an edge with type: 'fault'), and never read this key: a fallback " +
       'configured here silently did not exist. Delete the key and draw a fault edge from ' +
       'the failing node to the handler node instead. ' +
-      'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+      'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
     ),
   }).superRefine((eh, ctx) => {
     // `strategy: 'retry'` with 0 attempts is `strategy: 'fail'` wearing a

@@ -151,12 +151,12 @@ ratchet(#2978)会先开火,要求你**有意删除**对应的 manifest key;删�
 3. 一个破折号从句讲**它为何惰性或错误** —— "it never had an effect"、"no renderer ever read it"。
 4. 祈使句修复:改名写 "use `<replacement>`" + "Rename the key; the value (…) is unchanged.";删除写 "Delete
    the key." + **真正生效的机制是什么**。
-5. ``Run `os migrate meta --from <N-1>` to list the mechanical edits for existing sources; apply them by hand.``
-   —— 命令重放链、打印机械修改清单,从不写 source 文件(#9591 的 in-place codemod 落地前恒
-   真)。
+5. ``Run `os migrate meta --from <N-1>` to list the mechanical edits for existing sources;
+   `--write` applies the ones it can prove, and you apply the rest by hand.``
    消息不点名 conversion id;conversion 由 CLI 命令引用。唯一允许的变体(按形状、不按站点):
    conversion 只覆盖值的一部分时,两从句形点名覆盖的部分 —— ``Run `os migrate meta --from <N-1>`
-   to list the mechanical edits for the <X> case; <what the tool does with the rest>.``
+   to list the mechanical edits for the <X> case; `--write` applies the ones it can prove, and
+   <what the tool does with the rest>.``
    (样板:`ui/dashboard.zod.ts` `compareTo.offset`)。守这两个形状的 pin 人群含本文件:
    `packages/spec/src/shared/retired-key-migrate-sentence.test.ts`。
 

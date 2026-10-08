@@ -126,7 +126,7 @@ export const FilePersistenceConfigSchema = lazySchema(() => strictObject(
       + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not '
       + 'only in the describe prose. Rename the key to `autoSaveIntervalMs`; the value '
       + '(milliseconds) and the 2000 default are unchanged. '
-      + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+      + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
     ),
   },
 ).describe('File-system persistence configuration'));
@@ -223,7 +223,7 @@ export const AutoPersistenceConfigSchema = lazySchema(() => strictObject(
       + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not '
       + 'only in the describe prose. Rename the key to `autoSaveIntervalMs`; the value '
       + '(milliseconds) is unchanged. '
-      + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+      + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
     ),
     /**
      * localStorage key override when running in a browser.

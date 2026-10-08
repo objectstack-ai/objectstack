@@ -113,6 +113,7 @@ import { validateEmptyCombinators } from './validate-empty-combinators.js';
 import { validateReferenceIntegrity } from './reference-integrity-suite.js';
 import { validateComponentProps } from './validate-component-props.js';
 import { validateComponentTypes } from './validate-component-types.js';
+import { validatePrintPageBlocks } from './validate-print-page-blocks.js';
 import { validateResponsiveStyles } from './validate-responsive-styles.js';
 import { validateJsxPages } from './validate-jsx-pages.js';
 import { validateReactPages } from './validate-react-pages.js';
@@ -308,9 +309,10 @@ export interface AuthoringRuleContext {
    * argument.
    *
    * [#22019] One other rule reads it, on that argument: `validateStackExpressions`
-   * is one entry over several PASSES, and an `object` write is admitted for its
-   * field-formula pass and (#22032) its validation-rule, field-rule-slot and
-   * per-option `visibleWhen` passes alone (`runStackExpressionPasses`, `StackExpressionOptions`). The entry-level
+   * is one entry over several PASSES, and an `object` write is admitted for the
+   * passes over the object's own body alone — its field-formula pass and (#22032)
+   * its validation-rule, field-rule-slot, per-option `visibleWhen` and
+   * object-action passes (`runStackExpressionPasses`, `StackExpressionOptions`). The entry-level
    * `runtimeTypes` can say that an object write reaches the rule; it cannot say
    * which of the rule's passes judge that write.
    */
@@ -607,9 +609,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // NARROW by construction, not by snapshot shape: `ctx.runtimeWriteType`
     // reaches `runStackExpressionPasses` — the body `validateStackExpressions`
     // runs, whose public signature is unchanged — which on an object write runs
-    // the passes admitted there and fences every other object-borne expression
-    // pass off by name (`StackExpressionOptions.runtimeWriteType`) — each of
-    // those is a crossing of its own, not a rider on another.
+    // the passes over the object's own body, each admitted by a crossing of its
+    // own (#22032 passes 1–4, below), and reads an empty list for the passes
+    // over the stack's other collections (`StackExpressionOptions.runtimeWriteType`).
     //
     // MEASURED over the stored corpus at the door's own snapshot shape before
     // crossing: every formula field the repository ships — 29 fields on 28
@@ -658,6 +660,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // → 0 build errors and 0 warnings for the pass, and 0 door errors and 0
     // advisories at the door's own snapshot shape, against a refusal at each
     // for a bare `amount > 1` option in the same harness.
+    //
+    // [#22032, pass 4] The object's own `actions[]` pass joins the object door:
+    // every action's `visible`, and its `disabled` unless that is a boolean
+    // literal. No pass over the object's own body is fenced any more; the
+    // passes over the stack's other collections never ran on an object write.
+    // No entry-level change. MEASURED first, at both the raw and the parsed
+    // shape: every `*.object.ts` the repository ships (118 objects) carries 58
+    // action predicates on 16 objects, and the example stacks as `defineStack`
+    // composes them (33 objects, standalone actions merged in) carry 59 on 5
+    // → the build refuses 8, all `visible` on the platform's
+    // `sys_approval_request` (they read `record.viewer`, a block the approvals
+    // service attaches on read and the object does not declare; the producer
+    // fix is #22211), and the door refuses the same 8 after the lift and none
+    // before it. 0 other refusals and 0 advisories, against a refusal at each
+    // for a bare `amount > 1` action in the same harness.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object'],
     run: (stack, ctx) =>
@@ -1203,6 +1220,26 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       '0-finding measurement covers ' +
       'authored config-file metadata only). Crossing is its own rollout card.',
     run: (stack) => validateComponentTypes(stack),
+  },
+  // #22158, card ① of the ruling of record on #8346 (letter B′): a page that
+  // declares `print` is a document, and every block in it must come from the
+  // spec's printable block subset (`PRINTABLE_PAGE_COMPONENT_TYPES`). Gating,
+  // and on the runtime door from birth — the rule's header says why the
+  // false-refusal budget `validateComponentTypes` is held on is zero here by
+  // construction: no page could carry `print` before this rule landed.
+  {
+    name: 'validatePrintPageBlocks',
+    tier: 'gating',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-print-page-blocks.ts',
+    // Page-local: a `page` write's per-write snapshot holds exactly one page,
+    // its own (`runtime-gate.ts`), and that page is the whole input. The
+    // population it can refuse at the door is the pages that declare `print`,
+    // which was empty on every tenant the day the key was declared.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['page'],
+    run: (stack) => validatePrintPageBlocks(stack),
   },
   // ADR-0065 — a styled node's responsiveStyles must be scopable (needs an
   // `id`), name real CSS properties + design tokens, and carry a `large` base.

@@ -410,9 +410,14 @@ describe('templates survive npm packing', () => {
 // of every AI-written app on the platform, so a line that reads as "add member
 // packages here" is the expensive half of that choice.
 //
-// `objectstack init` renders the second copy of this rule
+// `objectstack init` renders the second copy of this file
 // (`renderPnpmWorkspaceYaml` in packages/cli/src/commands/init.ts) and is
-// ratcheted there; both paths carry it until the two renderers are unified.
+// ratcheted there. The two are one file (#22162): the same bytes, one comment
+// line per block, held by packages/cli/test/scaffold-workspace-consistency.test.ts.
+// So the measurements behind every block of this file — the pnpm version table,
+// why each build is approved, each peer skew and when it retires — live in
+// init.ts's docblocks (`renderPnpmWorkspaceYaml`, `SCAFFOLD_BUILT_DEPENDENCIES`,
+// `SCAFFOLD_ALLOWED_PEER_VERSIONS`), not in the file a new project opens.
 describe('blank template explicit empty workspace', () => {
   const wsPath = path.join(pkgRoot, 'src', 'templates', 'blank', 'pnpm-workspace.yaml');
   // Same comment-stripping as the blocks below: the prose above the key names

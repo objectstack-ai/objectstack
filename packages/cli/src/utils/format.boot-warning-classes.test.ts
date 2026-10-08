@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LiteKernel, type Plugin, type PluginContext } from '@objectstack/core';
+import { LiteKernel, ObjectLogger, type Plugin, type PluginContext } from '@objectstack/core';
+import { runActionGovernanceInventory } from '@objectstack/objectql';
 import { AutomationServicePlugin } from '@objectstack/service-automation';
 import { SCHEDULED_WORK_DISABLED_REASON, SCHEDULED_WORK_ENV } from '@objectstack/types';
 import {
@@ -10,7 +11,7 @@ import {
   type AutomationReadySummary,
   type ServerReadyOptions,
 } from './format.js';
-import { BootLogCapture } from './boot-log-capture.js';
+import { BootLogCapture, isVerboseBootLevel } from './boot-log-capture.js';
 import { collectAutomationSummary } from '../commands/serve.js';
 
 /**
@@ -45,8 +46,28 @@ import { collectAutomationSummary } from '../commands/serve.js';
  * `collectAutomationSummary`, and holds both pins against ONE transcript. The
  * formatter legs after it cover the shapes a real boot does not reach cheaply.
  *
- * ⚠️ The two `@objectstack/*` package imports resolve to their built `dist`
- * (both are already in `KNOWN_UNALIASED_TEST_IMPORTS['@objectstack/cli']`;
+ * ## #22160 — the dev-mode noise budget, the printer's half
+ *
+ * A blank project carrying the Build-with-Claude-Code tutorial's files as they
+ * stood on `main` 7d7943dd booted (`os dev --ui --fresh`) with three WARN
+ * records under *Boot diagnostics*, one of which needs the author: its
+ * `resolve_ticket` action was `type: 'script'` with a `target` nothing
+ * registers — a button wired to nothing. It looked exactly like the other
+ * two, and one of those carried a ten-frame knex stack. (The tutorial has
+ * since made Resolve a declarative update; a script action whose handler
+ * never registers is still what this record names.)
+ * The pins (the seat's scope cut on #22160):
+ *
+ *   - a record carrying a stack prints WITHOUT it at the default level, and
+ *     WITH it at `--log-level debug`, where the boot streams live;
+ *   - the dead-button class prints once, highlighted, with its fix line, and
+ *     the header counts it apart from the informational records;
+ *   - #22073's class pins above stay green.
+ * The level each OTHER line is logged at belongs to its producer and is not
+ * pinned here; nor is any informational count a sibling lane can move.
+ *
+ * ⚠️ The `@objectstack/*` package imports resolve to their built `dist` (all
+ * are already in `KNOWN_UNALIASED_TEST_IMPORTS['@objectstack/cli']`;
  * `turbo.json` builds dependencies before `@objectstack/cli#test`).
  */
 
@@ -303,8 +324,10 @@ describe('print-once: Boot diagnostics withholds what the banner restated (forma
     // dropped.
     expect(linesWith('Branding asset not served')).toHaveLength(1);
     expect(linesWith('/runtime/assets/icon.svg')).toHaveLength(1);
+    // [#22160] Nothing here is in an actionable class, so the header counts
+    // one informational record under an `ℹ`; the withheld count is unchanged.
     expect(linesWith('Boot diagnostics')).toEqual([
-      '  ⚠ Boot diagnostics — 1 warning logged during startup (3 more already listed above):',
+      '  ℹ Boot diagnostics — 1 informational (3 more already listed above):',
     ]);
   });
 
@@ -364,13 +387,173 @@ describe('print-once: Boot diagnostics withholds what the banner restated (forma
     expect(linesWith('is ARMED')).toHaveLength(1); // the banner's line
     expect(linesWith('Flow name collision')).toHaveLength(1);
     expect(linesWith('Boot diagnostics')).toEqual([
-      '  ⚠ Boot diagnostics — 1 warning logged during startup (1 more already listed above):',
+      '  ℹ Boot diagnostics — 1 informational (1 more already listed above):',
     ]);
   });
 
   it('with no banner (the failed-boot path) replays every record', () => {
     printBootDiagnostics({ lines: [auditRecord('a_flow'), unrelated] });
     expect(linesWith('a_flow')).toHaveLength(1);
-    expect(linesWith('Boot diagnostics')).toEqual(['  ⚠ Boot diagnostics — 2 warnings logged during startup:']);
+    expect(linesWith('Boot diagnostics')).toEqual(['  ℹ Boot diagnostics — 2 informational:']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #22160 — the dev-mode noise budget
+// ---------------------------------------------------------------------------
+
+/**
+ * A ticket object as the inventory reads it, with a Resolve action that is
+ * `type: 'script'` with a `target` and no `body`, and no handler registered —
+ * the dead button the measured boot carried.
+ */
+const DEAD_BUTTON_TICKET = {
+  name: 'support_desk_ticket',
+  actions: [{ name: 'resolve_ticket', label: 'Resolve', type: 'script', target: 'resolveTicket' }],
+};
+const DEAD_BUTTON = 'support_desk_ticket:resolve_ticket';
+const DEAD_BUTTON_CLASS = 'declared script actions with NO handler';
+
+/** Route stdout into `capture` for the length of `fn`, exactly as `serve`'s boot-quiet window does. */
+async function underQuietWindow(capture: BootLogCapture, fn: () => Promise<unknown> | unknown): Promise<void> {
+  const outSpy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: unknown, encoding?: unknown) => {
+    capture.write(chunk as string | Uint8Array, typeof encoding === 'string' ? encoding : undefined);
+    return true;
+  }) as never);
+  try {
+    await fn();
+  } finally {
+    outSpy.mockRestore();
+  }
+}
+
+/**
+ * A failed insert, logged the way the engine's write doors log one: `warn`
+ * with `{ object, error: { message, stack } }` (`writeFailureLogMeta` in
+ * `@objectstack/objectql`'s engine), from a REAL thrown error, so the stack
+ * is V8's own frames.
+ */
+function logFailedInsert(logger: ObjectLogger): void {
+  const err = new Error('UNIQUE constraint failed: sys_migration.id [statement and bound values redacted]');
+  logger.warn('Insert operation failed', { object: 'sys_migration', error: { message: err.message, stack: err.stack } });
+}
+
+/** A V8 frame as it reads inside a JSON-escaped `stack`. */
+const ESCAPED_FRAME = /\\n\s+at /;
+
+describe('the noise budget over real producers (#22160)', () => {
+  /**
+   * One boot's worth of boot-phase records through the REAL `ObjectLogger`
+   * and `BootLogCapture`: an expected degradation, the REAL
+   * `@objectstack/objectql` action inventory over that ticket, and a
+   * failed insert carrying a stack. Returns the captured records and the
+   * inventory's own message, read off the producer as it logged it.
+   */
+  async function boot(format: 'pretty' | 'text' | 'json'): Promise<{ captured: string[]; inventoryMessage: string }> {
+    const capture = new BootLogCapture();
+    const logger = new ObjectLogger({ level: 'warn', format });
+    const messages: string[] = [];
+    const inventoryLogger = {
+      warn: (message: string, meta?: Record<string, unknown>) => {
+        messages.push(message);
+        logger.warn(message, meta);
+      },
+    };
+    await underQuietWindow(capture, async () => {
+      logger.warn('[Analytics] No admitObjectRead configured at init — the bridge resolves per query');
+      await runActionGovernanceInventory({ registered: [], objects: [DEAD_BUTTON_TICKET], logger: inventoryLogger });
+      logFailedInsert(logger);
+    });
+    const captured = capture.diagnostics();
+    printBootDiagnostics({ lines: captured, dropped: capture.droppedCount });
+    expect(messages, 'the real inventory logged nothing for the ticket').toHaveLength(1);
+    return { captured, inventoryMessage: messages[0] };
+  }
+
+  it.each(['pretty', 'text', 'json'] as const)(
+    '%s: the dead button prints once, first, highlighted, with the producer\'s own fix, counted apart',
+    async (format) => {
+      const { captured, inventoryMessage } = await boot(format);
+
+      // The premise: the producer's record reached the capture, naming the action.
+      expect(captured.filter((record) => record.includes(DEAD_BUTTON)), captured.join('\n')).toHaveLength(1);
+
+      const highlighted = linesWith(DEAD_BUTTON_CLASS);
+      expect(highlighted, transcript.join('\n')).toHaveLength(1);
+      expect(linesWith(DEAD_BUTTON)).toEqual(highlighted);
+      // Highlighted: its own glyph line, the statement with its subject.
+      expect(highlighted[0]).toMatch(/^ {4}⚠ \[action-governance\] declared script actions with NO handler/);
+      expect(highlighted[0].endsWith(`: ${DEAD_BUTTON}`)).toBe(true);
+      // The fix is the producer's own sentence after its `; `, on the next line.
+      const at = transcript.indexOf(highlighted[0]);
+      expect(transcript[at + 1]).toBe(`      fix: ${inventoryMessage.slice(inventoryMessage.indexOf('; ') + 2)}`);
+      // First: above every informational record.
+      expect(at).toBeLessThan(transcript.findIndex((line) => line.includes('[Analytics]')));
+      expect(at).toBeLessThan(transcript.findIndex((line) => line.includes('Insert operation failed')));
+      // Counted apart.
+      const header = linesWith('Boot diagnostics');
+      expect(header).toHaveLength(1);
+      expect(header[0]).toContain('1 needs your attention · 2 informational');
+      expect(header[0]).toMatch(/^ {2}⚠ /);
+    },
+  );
+
+  it('withholds a record\'s stack at the default level, keeps its message, and says where the stack is', async () => {
+    const { captured } = await boot('pretty');
+
+    // The premise: the captured record really carries the stack, JSON-escaped.
+    const failed = captured.filter((record) => record.includes('Insert operation failed'));
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toContain('"stack":"Error: UNIQUE constraint failed');
+    expect(failed[0]).toMatch(ESCAPED_FRAME);
+
+    const printed = linesWith('Insert operation failed');
+    expect(printed).toHaveLength(1);
+    expect(printed[0]).toContain('"object":"sys_migration"');
+    expect(printed[0]).toContain('"error":{"message":"UNIQUE constraint failed: sys_migration.id');
+    expect(printed[0]).not.toContain('"stack"');
+    expect(transcript.join('\n')).not.toMatch(ESCAPED_FRAME);
+
+    const hint = linesWith('stack trace');
+    expect(hint).toHaveLength(1);
+    expect(hint[0]).toContain('1 stack trace');
+    expect(hint[0]).toContain('--log-level debug');
+  });
+
+  it('at --log-level debug the same record reaches the terminal live, stack included', () => {
+    // `serve` never opens the quiet window at a verbose level, so nothing is
+    // captured or replayed: the record goes out exactly as the logger renders it.
+    expect(isVerboseBootLevel('debug')).toBe(true);
+    const written: string[] = [];
+    const outSpy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    }) as never);
+    try {
+      logFailedInsert(new ObjectLogger({ level: 'debug' }));
+    } finally {
+      outSpy.mockRestore();
+    }
+    const live = written.join('').split('\n').filter((line) => line.includes('Insert operation failed'));
+    expect(live).toHaveLength(1);
+    expect(live[0]).toContain('"stack":"Error: UNIQUE constraint failed');
+    expect(live[0]).toMatch(ESCAPED_FRAME);
+  });
+});
+
+describe('the noise budget (formatter, #22160)', () => {
+  it('withholds only stack TRACES — a `stack` key that names something prints as it was', () => {
+    const named = record('Stack loaded {"stack":"support-desk","objects":2}');
+    printBootDiagnostics({ lines: [named] });
+    expect(linesWith('Stack loaded')).toEqual([`    ${named}`]);
+    expect(linesWith('stack trace')).toEqual([]);
+  });
+
+  it('keeps the alarm when the capture dropped records — unread records are not called informational', () => {
+    printBootDiagnostics({ lines: [record('Service not provided — using in-memory fallback')], dropped: 3 });
+    const header = linesWith('Boot diagnostics');
+    expect(header).toHaveLength(1);
+    expect(header[0]).toMatch(/^ {2}⚠ /);
+    expect(header[0]).not.toContain('needs your attention');
   });
 });

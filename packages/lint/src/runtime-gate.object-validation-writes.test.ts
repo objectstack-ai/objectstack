@@ -24,8 +24,8 @@
  * build's own position in the walk, so the door's finding IS the build's
  * finding — rule, location, message and hint. The other object-borne passes
  * joined later (the field-rule slots in pass 2, option `visibleWhen` in pass
- * 3) or stay fenced (the object's own action predicates); that pin is in
- * `runtime-gate.object-formula-writes.test.ts`.
+ * 3, the object's own action predicates in pass 4); the pin that every one of
+ * them judges here is in `runtime-gate.object-formula-writes.test.ts`.
  *
  * The protocol-level half — the same verdict through the real `saveMetaItem`
  * and `publishMetaItem` — is the #22032 block of

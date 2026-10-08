@@ -331,6 +331,19 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'requires',
     why: "platform-written, never authored — the schema's own words: `derived from the source at save — omit it`. The key exists only on an `html` / `jsx` page, where, on a server with the deployment's SDUI manifest, the save door stamps the compiled list and refuses a written list that disagrees (`page-requires-disagrees-with-source`); on every other kind the parse refuses it; and the Studio page editor drops the key on every save. A control would invite the list the describe tells every author to omit",
   },
+  // #22158 — the print declaration (ruling B′ on #8346) lands spec-first:
+  // `planned` in the liveness ledger, read by no renderer until card ② (the
+  // console's print rendering), which is also where the ruling puts its
+  // authoring UI — "Studio's page designer is the designer, the print
+  // declaration is a few fields on it". Offering the keys in this form before
+  // anything applies them would be the UI half of declared-not-enforced.
+  {
+    kind: 'omit',
+    type: 'page',
+    path: ROOT_PATH,
+    key: 'print',
+    why: "planned, not yet rendered — the print declaration's keys (paper, margins, running header and footer, page numbers, page-break hints) are validated at parse and its printable block subset is enforced at the authoring doors, but no renderer applies them until the console's print rendering lands, and the ruling places the authoring UI in the Studio page designer with it. A form control offered today would let an author set a layout nothing prints",
+  },
   {
     kind: 'omit',
     type: 'view',

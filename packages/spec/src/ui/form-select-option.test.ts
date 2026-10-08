@@ -66,7 +66,7 @@ describe('form-view options refuse the per-option `default` key', () => {
     expect(m).toContain('`default: true`');
     expect(m).toMatch(/`defaultValue` winning when both are declared/);
     // House migrate sentence (route D wording — a property of the tool).
-    expect(m).toContain('Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.');
+    expect(m).toContain('Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.');
     // No rename suggestion toward a key this shape refuses.
     expect(m).not.toContain('Did you mean');
   });

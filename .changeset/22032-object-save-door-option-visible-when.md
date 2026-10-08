@@ -9,7 +9,7 @@ Clause-②: no (narrowing)
 
 `formulas.mdx` says the same `validateExpression` validator backs `os build` and metadata registration. For a field option's `visibleWhen` it did not, at the object save door. An option whose `visibleWhen` read a bare field, such as `amount > 1`, or called an unregistered function, such as `sqrt(record.amount) > 1`, was refused by `os build` at error, but `PUT /api/v1/meta/object/:name` answered 200 and stored it. The server's option check cannot evaluate such a predicate and lets the value through, so the gate it declares is never enforced.
 
-The runtime publish gate now runs the build's option check on an object write. The build's expression rule (`validateStackExpressions`) was already on the object door for formula fields, validation-rule predicates and the field-rule slots. On an object write it now also judges each `fields[].options[].visibleWhen` the way the build does: as a predicate over `record` and `previous`, and with the build's refusal of a read through a reference field. The door's verdict is the build's finding: the same rule id (`expression-invalid`), location (`object 'NAME' · field 'FIELD' option 'VALUE' visibleWhen`), message and hint. This supersedes the earlier #22032 entries' line that option `visibleWhen` is not judged at this door.
+The runtime publish gate now runs the build's option check on an object write. The build's expression rule (`validateStackExpressions`) was already on the object door for formula fields, validation-rule predicates and the field-rule slots. On an object write it now also judges each `fields[].options[].visibleWhen` the way the build does: as a predicate over `record` and `previous`, and with the build's refusal of a read through a reference field. The door's verdict is the build's finding: the same rule id (`expression-invalid`), location (`object 'NAME' · field 'FIELD' option 'VALUE' visibleWhen`), message and hint.
 
 **BREAKING — what moves for consumers.**
 
@@ -22,7 +22,7 @@ The runtime publish gate now runs the build's option check on an object write. T
 
 - `current_user` is still accepted in an option's `visibleWhen`, as the build accepts it: the option evaluator binds the acting user (ADR-0068 D1). A role gate such as `'org_admin' in current_user.positions`, or a grant check such as `current_user.can('OBJECT', 'edit')`, still saves. On a field's own `requiredWhen`, `readonlyWhen` or `visibleWhen` it is still refused, as before.
 - Stored rows are not migrated, and they are not refused on read. An object stored before this change keeps loading until it is next saved, and that save is judged.
-- The object's own action predicates (`actions[].visible`, `actions[].disabled`) are still not judged at this door. `os build` judges them, and the door does not, as before.
+- The object's own action predicates (`actions[].visible`, `actions[].disabled`) are judged at this door through their own #22032 entry, its own crossing, not through this one.
 - `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still turns a refusal into a logged write.
 - Measured before crossing: this repository ships 5 option predicates, all on `showcase_cascade` (four `record.country` cascades and one `current_user.positions` role gate), among the 118 objects it ships. They have 0 refusals and 0 advisories, at the build and at the door.
 - No public export or signature moves. `validateStackExpressions(stack)` keeps its signature, and no registry entry changes: the expression rule already declared `object`.
