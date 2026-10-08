@@ -100,15 +100,16 @@ one installed. Three sources, in order of authority:
    default to the lower one: a default flip ([3.3](#33-validate)) stamps its
    constraint onto a source already past that major.
 
-Arriving several majors late is the designed-for case. `os migrate meta --from 10`
-replays every step in order; there is no penalty for lateness and no requirement
-to upgrade one major at a time.
+Arriving several majors late is the designed-for case: `os migrate meta --from 16`
+replays every step in order, with no requirement to upgrade one major at a time —
+down to the chain's support floor, 16 today. Below the floor, upgrade to it by
+the older route first, then run the chain.
 
 ### Make the work reviewable before you change anything
 
 ```bash
 git checkout -b upgrade/protocol-17
-mkdir -p .upgrade         # every artifact this skill produces lands here
+mkdir -p .upgrade
 ```
 
 The `.upgrade/` directory is the deliverable's workspace: the machine outputs
@@ -244,7 +245,7 @@ upgrade and again in the report.
 > `src/migrations/registry.ts`) and the platform repo's generated upgrade guide
 > are **not** in the published package — only `src/**/*.zod.ts` is. Their
 > consumer-facing projection is `spec-changes.json` and the chain's own `--json`
-> output, which is exactly what the table above points at.
+> output.
 
 ### 2.2 The three residue classes
 

@@ -937,6 +937,13 @@ export const ERROR_CODE_LEDGER = {
     // runner adopts its verdict for each failed row.
     'CONCURRENT_UPDATE',
     'ERR_DATASOURCE_UNAVAILABLE',
+    // [#22114] The `/meta` item write doors' optimistic-lock refusal, carrying
+    // `currentVersion`: the arm `structuredCodeAnswer` stamps for a
+    // `METADATA_CONFLICT` whose producer (metadata-protocol's conflict builder)
+    // stated one. Wire path: the `/meta` save, publish, rollback and reset
+    // routes answer through `handleRouteError`, which resolves the thrown
+    // refusal through this table. The code itself is metadata-protocol's.
+    'METADATA_CONFLICT',
     'UNIQUE_VIOLATION',
   ],
   '@objectstack/hono': [

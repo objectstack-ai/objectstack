@@ -72,7 +72,9 @@ import { join } from 'node:path';
 import { ObjectKernel } from '@objectstack/core';
 import { Runtime } from './runtime.js';
 import { createStandaloneStack } from './standalone-stack.js';
+import { createIdentityObjectsPlugin } from '@objectstack/plugin-auth';
 import { SecurityPlugin } from '@objectstack/plugin-security';
+import { AUDIENCE_ANCHOR_POSITIONS, BUILTIN_IDENTITY_NAMES } from '@objectstack/spec';
 import { SharingServicePlugin } from '@objectstack/plugin-sharing';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at
@@ -222,6 +224,10 @@ beforeAll(async () => {
   // `org-scoping` installed. Without it the sharing seeder runs zero passes and
   // this file would measure the tenancy default instead of the seeder's read.
   kernel.registerService('tenancy', { posture: 'single' } as any);
+  // No auth plugin here, so plugin-auth's identity objects come from its
+  // preset: `SecurityPlugin` refuses a boot without the `sys_user` /
+  // `sys_member` its authorization store reads.
+  await kernel.use(createIdentityObjectsPlugin() as any);
   await kernel.use(new SecurityPlugin() as any);
   await kernel.use(new SharingServicePlugin() as any);
   await kernel.bootstrap();
@@ -277,12 +283,15 @@ describe('#14491 — the third copy exists, and both seeder spellings read it', 
     expect(doorCopy.sharing_rule).toHaveLength(3);
   });
 
-  it('`positions` is absent from METADATA_ARRAY_KEYS, so `position` has no registry copy and always comes from the door', async () => {
+  it('`positions` is absent from METADATA_ARRAY_KEYS, so no stack-declared `position` has a registry copy and each comes from the door', async () => {
     // The card's asymmetry, re-measured. `roles:` is not in
     // `PLURAL_TO_SINGULAR` either, so nothing lands under `roles` in the
     // registry: both reads are empty from both spellings.
     const ql = kernel.getService<ObjectQlRegistrySlot>('objectql');
-    expect((ql.registry.listItems('position') ?? []).filter(Boolean)).toEqual([]);
+    // [ADR-0131 D2] The registry's positions are exactly the six built-ins
+    // `SecurityPlugin` declares under its own package id — none of the stack's.
+    expect((ql.registry.listItems('position') ?? []).filter(Boolean).map((i: any) => i.name).sort())
+      .toEqual([...BUILTIN_IDENTITY_NAMES, ...AUDIENCE_ANCHOR_POSITIONS].sort());
     expect((ql.registry.listItems('roles') ?? []).filter(Boolean)).toEqual([]);
   });
 });

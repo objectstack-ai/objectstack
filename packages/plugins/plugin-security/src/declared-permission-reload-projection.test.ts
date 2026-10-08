@@ -65,7 +65,10 @@ async function boot() {
   const declaredPermissions: any[] = [];
   const ql: any = {
     registerMiddleware: () => {},
-    getSchema: () => undefined,
+    // Only the identity objects the plugin's boot gate requires: a kernel that
+    // boots it registers them (`authz-identity-objects-boot-refusal.test.ts`).
+    getSchema: (name: string) =>
+      name === 'sys_user' || name === 'sys_member' ? { name, fields: {} } : undefined,
     registry: {
       listItems: (type: string) => (type === 'permission' ? [...declaredPermissions] : []),
     },

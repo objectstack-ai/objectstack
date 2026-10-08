@@ -1022,6 +1022,29 @@ function structuredCodeAnswer(
             },
         };
     }
+    // [#22114] The metadata twin of the arm above: the `/meta` item doors'
+    // optimistic-lock refusal → 409 with the current head AS DATA
+    // (`MetadataConflictErrorSchema` in `@objectstack/spec`). The producer is
+    // `metadata-protocol`'s one conflict builder, which states `currentVersion`
+    // (the keyed head its sentence names, or `null` for no row) on every
+    // refusal it composes; the arm keys on that statement as well as the code,
+    // so a `METADATA_CONFLICT` that carries none keeps the passthrough's body
+    // byte for byte. `null` is relayed — it is the answer "no row", not an
+    // absence — which is why this reads presence, not truthiness.
+    if (error?.code === 'METADATA_CONFLICT'
+        && error !== null && typeof error === 'object'
+        && Object.prototype.hasOwnProperty.call(error, 'currentVersion')
+        && (typeof error.currentVersion === 'string' || error.currentVersion === null)) {
+        return {
+            status: 409,
+            body: {
+                error: armSentence(error) ?? 'Metadata item was modified by another author',
+                code: 'METADATA_CONFLICT',
+                currentVersion: error.currentVersion,
+                ...(object ? { object } : {}),
+            },
+        };
+    }
     // [commit 10220a7bf] The engine's insert-conflict envelope → 409 `UNIQUE_VIOLATION`,
     // with the structured `field` restored.
     //

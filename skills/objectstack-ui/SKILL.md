@@ -209,7 +209,7 @@ Use this CRM-style structure as the canonical UI assembly reference:
 | Dashboards | `src/dashboards/*.dashboard.ts` | Combine KPI + chart + table widgets with shared `dateRange` and `globalFilters` |
 | Reports | `src/reports/*.report.ts` | Select `rows` (dimensions) + `values` (measures) from that dataset; tabular/summary/matrix/joined |
 | Record pages | `src/pages/*.page.ts` | Compose `regions` + components (`page:header`, `record:highlights`, related lists, tabs) |
-| User actions | `src/actions/*.actions.ts` | Use `flow` for orchestration and `modal` for parameterized bulk mutations |
+| User actions | `src/actions/*.actions.ts` | Use `flow` for orchestration and `script` for parameterized bulk mutations |
 
 This blueprint is the default for “build a complete metadata app UI” tasks.
 
@@ -249,7 +249,7 @@ Register them under `defineStack({ actions: [...] })`.
 |:---------|:-------------------------------------------------------------------|:---------------|
 | `script` | Run an inline L2 hook body (sandboxed JS) on the server            | `body` (or `target` = registered function name) |
 | `url`    | Navigate to an internal route or external URL                      | `target`       |
-| `modal`  | Open a dialog (typically collecting `params`, then executing `body`) | `target`     |
+| `modal`  | Open the page named by `target`; a `body` runs only on `script`    | `target`       |
 | `flow`   | Launch a screen/auto-launched flow by name                         | `target`       |
 | `api`    | Call a registered API endpoint                                     | `target`       |
 | `form`   | Open a FormView by name (routed to `/_console/forms/:name`)        | `target`       |

@@ -10298,6 +10298,9 @@ export class ObjectStackProtocolImplementation implements
                 type: request.type,
                 name: request.name,
                 item: decorateMetadataItem(request.type, this.governServedObject(request.type, item)),
+                // [#22114] The draft row's version token — the one a draft save
+                // (`?mode=draft`) at this address accepts as `If-Match`.
+                version: await this.readVersionToken(request, orgId, 'draft'),
             };
         }
 
@@ -10556,6 +10559,16 @@ export class ObjectStackProtocolImplementation implements
             editable: lockState.editable,
             deletable: lockState.deletable,
             resettable: lockState.resettable,
+            // [#22114] The active row's version token ({@link readVersionToken}).
+            // No row was found at any candidate this read consults — which
+            // include the save's own address — so `null` needs no second read.
+            // ABSENT on a `previewDrafts` read: it serves a pending draft where
+            // one exists and the active item where none does, so no single
+            // lifecycle's token describes it, and it is a render path — an
+            // editor reads `state: 'draft'` or the plain read.
+            ...(request.previewDrafts
+                ? {}
+                : { version: storedRowServed ? await this.readVersionToken(request, orgId, 'active') : null }),
         };
     }
 
@@ -18024,6 +18037,63 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#22114] The stored head a `/meta` save at one address compares a
+     * caller's version token against: the `state` row at `ref`'s organization
+     * partition, bound to `packageId` (`null` = the package-unbound row), as
+     * the repository reads and serves it ({@link SysMetadataRepository.get}).
+     * `null` when no such row exists.
+     *
+     * The ONE head read both halves of the ADR-0008 chain make. The save door
+     * judges an inbound token against it ({@link storedParentForToken}), and
+     * the item read serves its keyed form as `version`
+     * ({@link readVersionToken}). So the token a read hands out is the token a
+     * save at the same address accepts, and the one a receipt serves for that
+     * row — ⛔ never a second derivation of either.
+     */
+    private async storedHeadAt(
+        repo: SysMetadataRepository,
+        ref: Parameters<SysMetadataRepository['get']>[0],
+        state: 'active' | 'draft',
+        packageId: string | null,
+    ): Promise<string | null> {
+        return (await repo.get(ref, { state, packageId }))?.hash ?? null;
+    }
+
+    /**
+     * [#22114] The item read's `version`: the keyed form
+     * ({@link receiptVersion}) of the stored head a save to this item compares
+     * against ({@link storedHeadAt}), at the read's own scope — its
+     * organization partition and `packageId` — and its lifecycle, or `null`
+     * when no stored row is there. The `/meta` save door builds its address
+     * from the same three facts (`organizationIdForMetaWrite` has the body of
+     * `organizationIdForMetaRead`, and `?package=` names the binding on both),
+     * so a read followed by a save with the served token is accepted, and a
+     * `null` says that save is a create: the state `If-None-Match: *` asserts.
+     *
+     * ⚠️ The address of the SAVE, not of the served content. A read falls back
+     * from the caller's organization to the environment-wide row (ADR-0005)
+     * and from a package's own row to the package-less one (ADR-0048); a save
+     * does not, it writes its own partition. A token of a row the save would
+     * not overwrite would be refused by that save every time, so such a read
+     * serves `null` rather than the served row's token.
+     */
+    private async readVersionToken(
+        request: { type: string; name: string; packageId?: string },
+        orgId: string | undefined,
+        state: 'active' | 'draft',
+    ): Promise<string | null> {
+        const organizationId = orgId ?? null;
+        const repo = this.getOverlayRepo(organizationId);
+        const ref = {
+            type: PLURAL_TO_SINGULAR[request.type] ?? request.type,
+            name: request.name,
+            org: organizationId ?? 'env',
+        } as Parameters<typeof repo.get>[0];
+        const stored = await this.storedHeadAt(repo, ref, state, request.packageId ?? null);
+        return stored === null ? null : this.receiptVersion(stored);
+    }
+
+    /**
      * Resolve a caller's version token to the STORED head it names, for a write
      * whose current stored head is `currentStored`: the token must equal the
      * keyed digest of that head, and the stored value is what the repository's
@@ -18057,6 +18127,14 @@ export class ObjectStackProtocolImplementation implements
      *  - a caller's token naming no current head: the keyed current head.
      *
      * A side with no served form is `(withheld)`; an absent side is `null`.
+     *
+     * [#22114] The current side also rides as DATA, `currentVersion`: the
+     * value the sentence names (the keyed head, or `null` when no row is
+     * there), which the REST door serializes beside the sentence
+     * (`MetadataConflictErrorSchema` in `@objectstack/spec`). For the save
+     * door it is the version the next item read at the same address serves
+     * ({@link readVersionToken}), so a client re-pins from the refusal without
+     * parsing prose. A head with no served form sets neither attribute.
      */
     private async metadataConflictRefusal(err: ConflictError, subject: string, prefix: string): Promise<Error> {
         const conflict: any = new Error(subject);
@@ -18065,7 +18143,10 @@ export class ObjectStackProtocolImplementation implements
         const digest = this.storedHashDigest();
         const show = (served: string | null | undefined) => (served === undefined ? '(withheld)' : served ?? 'null');
         const current = await servedContentHash(err.actualHead, digest);
-        if (current !== undefined) conflict.actualHead = current;
+        if (current !== undefined) {
+            conflict.actualHead = current;
+            conflict.currentVersion = current;
+        }
         if (err instanceof InboundVersionConflictError) {
             conflict.message = `${prefix} The version token sent is not the current version (current is ${show(current)}).`;
             return conflict;
@@ -20850,11 +20931,11 @@ export class ObjectStackProtocolImplementation implements
             // current published hash. ADR-0048 — scope to the same
             // package the upsert targets so a collision's other-package
             // row is never read as this item's parent.
-            const current = await repo.get(ref, {
-                state: mode === 'draft' ? 'draft' : 'active',
-                packageId: request.packageId ?? null,
-            });
-            const currentStored = current?.hash ?? null;
+            // [#22114] The head the item read's `version` is the keyed form of
+            // — one read for both halves ({@link storedHeadAt}).
+            const currentStored = await this.storedHeadAt(
+                repo, ref, mode === 'draft' ? 'draft' : 'active', request.packageId ?? null,
+            );
             if (request.parentVersion === undefined) {
                 parentVersion = currentStored;
             } else {

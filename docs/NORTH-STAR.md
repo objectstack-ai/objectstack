@@ -1,14 +1,14 @@
 # ObjectStack 北极星
 
-**我们是什么**:一个应用开发平台;创业阶段。
+**我们是什么**:本体即软件——一个可执行的业务本体(对象与字段、关系、动作、权限、流程、Agent 与工具定义),AI 写、运行时跑、人与 Agent 用、你拥有;创业阶段。视图、仪表盘、应用、翻译是本体的投影,是今天人用它、看它、验它的面。
 
 **给谁**:第三方开发者,AI 代理为主、人验收——AI 进入我们的元数据协议写应用,人看结果、拍板。应用的终端用户是企业里的业务人员,他们通过 Agent 和界面使用应用。
 
-**做出来的是什么**:**AI 原生的企业管理应用**——业务对象与记录、看数据的视图、能用的表单、真挡得住的权限、审批与自动化、经营报表、登录与身份、可对外的 API、文件、客户的语言,以及不写代码在运行中改应用。AI 原生的意思:应用自带一个能替用户操作它的 Agent——本仓(社区版)通过 MCP 把对象与动作暴露出去,用户接入自己的 Agent;企业版把 Agent 内置在用户界面里,那一半住 cloud 仓。缺任何一样就不是这个应用。这一行是定义,不是清单;每一项做到什么、怎么验证,在 `docs/qa/platform-checklist/`。参考实现 hotcrm。
+**做出来的是什么**:**AI 原生的企业管理应用**——业务对象与记录、看数据的视图、能用的表单、真挡得住的权限、审批与自动化、经营报表、登录与身份、可对外的 API、文件、客户的语言,以及不写代码在运行中改应用。AI 原生的意思:应用自带一个能替用户操作它的 Agent——本仓(社区版)通过 MCP 把对象与动作暴露出去,用户接入自己的 Agent;企业版把 Agent 内置在用户界面里,那一半住 cloud 仓。缺任何一样就不是这个应用。这一行是定义,不是清单;每一项做到什么、怎么验证,在 `docs/qa/platform-checklist/`。参考实现 hotcrm。两类用户:今天的业务人员经界面、验收者经控制台;明天的 Agent 经 MCP。路的每一步都要对两类用户成立。
 
 **什么算做好**:一个建在协议上的应用,过了验证才算做好——它的元数据对应的清单项在一次 run 里通过,`objectstack verify` 在它上面是绿的。没过验证的交付不算 done。
 
-**唯一的度量,那条路**:一个新的 AI 开发者(人在旁验收)从 `npm create objectstack` 出发:写元数据 → 本地跑起来、看到 → 验证响亮拒绝错的、放行对的 → 发布并装进一个环境 → 接一个 Agent(社区版走 MCP),让它在应用里完成一次真实业务操作 → 按客户一句话需求迭代一次。每周真走一遍,结果落一张 run record。第一个断掉的步骤就是当前的 P0;跑得通但结果错的是 P2。
+**唯一的度量,那条路**:一个新的 AI 开发者(人在旁验收)从 `npm create objectstack` 出发:写元数据 → 本地跑起来、看到 → 验证响亮拒绝错的、放行对的 → 发布并装进一个环境 → 接一个 Agent(社区版走 MCP),让它在应用里完成一次真实业务操作 → 按客户一句话需求迭代一次。每周真走一遍,结果落一张 run record。第一个断掉的步骤就是当前的 P0;跑得通但结果错的是 P2。四个承诺各由一步兑现:① AI 可写 · ②③ 可执行 · ④ 你拥有 · ⑤ Agent 可操作 · ⑥ 是闭环。
 
 **路上的功能点**:平台要做出来的功能点,一行一个,按那条路的步骤排;自上而下就是顺序 —— 这张表就是路线图,改它即改优先级。每行 `轴 · 功能点(业务语言) · 清单区 · 项 id`,一个功能点从协议到运行时到前端是一整条;`docs/qa/platform-checklist/` 里的每一项都恰好属于这里的一行(未写的项标「清单项待写」)。id 不带前缀时属于它前面那个清单区,跨区的写全名。
 
@@ -93,6 +93,7 @@
 - workflow · 随包发的流程与动作:停用要持久、被依赖时拒绝、可克隆、两道门一样严 · automation + api-backend + access-security · packaged-flow-disable-durable, packaged-flow-subflow-disable-refusal, packaged-flow-clone-contract, setup-packaged-automation-board, api-backend.packaged-action-disabled-dispatch, api-backend.action-activation-door-contract, access-security.packaged-flow-write-door-parity
 - access · 装进来的包带着它声明的能力与权限集,只读的包锁住 Studio · access-security + studio-authoring · capability-declaration-lifecycle, packaged-permission-set-lifecycle, readonly-package-locks-studio, studio-authoring.packaged-automation-studio-lock
 - studio · 随包发来的视图与仪表盘,是可以直接改的那一类 · studio-authoring · packaged-display-class-direct-edit
+- devpath · 你拥有:定义在你的仓库里可 diff,整个本体可导出、可在没有我们的情况下自托管跑起来 · platform-core + cli · ontology-export-roundtrip, artifact-reproducible-build, standalone-boot-no-cloud(清单项待写)
 
 **⑤ 接一个 Agent(社区版走 MCP),让它完成一次真实业务操作**
 
@@ -113,7 +114,7 @@
 1. 安全与数据完整性永远最高,不等路。
 2. 路断了、或清单上的能力断了 ⇒ P0/P1;能跑但出错 ⇒ P2;不在路上、不在清单上 ⇒ p3 或不做。定级读「路上的功能点」:改那张表即改优先级,⛔ 不逐卡改档。
 3. 本车道队列还有开放的 P0/P1 时,该车道不派 p2/p3 的工具卡、契约卫生卡;解锁产品 P0/P1 的仪器卡沿链继承其优先级。
-4. 因为写的是 AI、用的也是 AI:元数据既要 AI 能写——错的必须被响亮拒绝并给处方,永不静默落库;也要 AI 能用——声明了的对象、动作、agent / tool / skill 元数据在运行时兑现,MCP 面暴露的就是应用真能做的。写给 AI 的文档与 skills 说错一句,等于产品缺陷。
+4. 因为写的是 AI、用的也是 AI:本体既要 AI 能写——错的必须被响亮拒绝并给处方,永不静默落库;也要人与 Agent 能用——声明了的对象、动作、agent / tool / skill 元数据在运行时兑现,MCP 面暴露的就是应用真能做的,Agent 越权时被权限挡住并留痕。写给 AI 的文档与 skills 说错一句,等于产品缺陷。
 
 **阶段姿态**:速度优先于兼容。用的人少:退役立即生效,无过渡窗口、无别名双拼;兼容层、迁移窗口一类的工作默认 p3;声明了但不兑现的键按发布批量退役,不一键一卡。
 

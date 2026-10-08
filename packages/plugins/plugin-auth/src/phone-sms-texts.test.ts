@@ -2,13 +2,11 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import {
-  BUILTIN_PHONE_SMS_TEMPLATES,
   PHONE_SMS_TOPICS,
   builtinPhoneSmsBody,
   interpolatePhoneSms,
-  loadPhoneSmsTemplateBody,
   phoneSmsLocaleChain,
-  seedPhoneSmsTemplates,
+  resolvePhoneSmsTemplateBody,
 } from './phone-sms-texts.js';
 
 describe('phoneSmsLocaleChain', () => {
@@ -52,70 +50,59 @@ describe('interpolatePhoneSms', () => {
   });
 });
 
-describe('loadPhoneSmsTemplateBody', () => {
+describe('resolvePhoneSmsTemplateBody', () => {
+  /**
+   * Rows answered as the engine answers `find`: by every key in `where`, plain
+   * equality only. A combinator is REFUSED, never read as a field name
+   * (`check:where-matcher`).
+   */
   const engineWith = (rows: Array<Record<string, unknown>>) => ({
     find: vi.fn(async (_obj: string, q: any) =>
-      rows.filter(
-        (r) =>
-          r.topic === q.where.topic &&
-          r.channel === q.where.channel &&
-          r.locale === q.where.locale &&
-          r.is_active === true,
-      ),
+      rows.filter((r) => Object.entries(q.where).every(([k, v]) => {
+        if (k.startsWith('$') || (v !== null && typeof v === 'object')) {
+          throw new Error(`engineWith(): unsupported where clause on '${k}'`);
+        }
+        return r[k] === v;
+      })).slice(0, q.limit ?? Infinity),
     ),
-    insert: vi.fn(),
   });
 
   it('returns the tenant row for the exact locale', async () => {
     const engine = engineWith([
       { topic: 'auth.phone_otp', channel: 'sms', locale: 'zh-CN', is_active: true, body: '自定义 {{code}}' },
     ]);
-    await expect(loadPhoneSmsTemplateBody(engine, 'auth.phone_otp', 'zh-CN')).resolves.toBe('自定义 {{code}}');
+    await expect(resolvePhoneSmsTemplateBody(engine, 'auth.phone_otp', 'zh-CN')).resolves.toBe('自定义 {{code}}');
   });
 
-  it('walks the locale chain (zh-CN → zh)', async () => {
+  it('walks the locale chain (zh-CN → zh) to a row', async () => {
     const engine = engineWith([
       { topic: 'auth.phone_otp', channel: 'sms', locale: 'zh', is_active: true, body: 'zh 行 {{code}}' },
     ]);
-    await expect(loadPhoneSmsTemplateBody(engine, 'auth.phone_otp', 'zh-CN')).resolves.toBe('zh 行 {{code}}');
+    await expect(resolvePhoneSmsTemplateBody(engine, 'auth.phone_otp', 'zh-CN')).resolves.toBe('zh 行 {{code}}');
   });
 
-  it('yields null with no matching row, no engine, or a broken lookup', async () => {
-    await expect(loadPhoneSmsTemplateBody(engineWith([]), 'auth.phone_otp', 'zh')).resolves.toBeNull();
-    await expect(loadPhoneSmsTemplateBody(undefined, 'auth.phone_otp', 'zh')).resolves.toBeNull();
-    const broken = { find: vi.fn(async () => { throw new Error('no such table'); }), insert: vi.fn() };
-    await expect(loadPhoneSmsTemplateBody(broken, 'auth.phone_otp', 'zh')).resolves.toBeNull();
-  });
-});
-
-describe('seedPhoneSmsTemplates', () => {
-  it('inserts missing rows and never overwrites existing ones', async () => {
-    const existing = [
-      { topic: 'auth.phone_otp', channel: 'sms', locale: 'zh', body: '租户定制', is_active: false },
-    ];
-    const inserted: Array<Record<string, unknown>> = [];
-    const engine = {
-      find: vi.fn(async (_obj: string, q: any) =>
-        existing.filter(
-          (r) => r.topic === q.where.topic && r.channel === q.where.channel && r.locale === q.where.locale,
-        ),
-      ),
-      insert: vi.fn(async (_obj: string, row: any) => { inserted.push(row); return row; }),
-    };
-    await seedPhoneSmsTemplates(engine);
-    // 4 built-ins, 1 already present (even deactivated!) → 3 inserts.
-    expect(inserted).toHaveLength(BUILTIN_PHONE_SMS_TEMPLATES.length - 1);
-    expect(inserted.some((r) => r.topic === 'auth.phone_otp' && r.locale === 'zh')).toBe(false);
+  it('renders the built-in text at the first rung that has one and no row', async () => {
+    const zh = builtinPhoneSmsBody(PHONE_SMS_TOPICS.otp, 'zh');
+    // An `en` row is NOT reached for a zh-CN recipient: the `zh` rung has a
+    // built-in text and no row, which is what the retired seed's `zh` row was.
+    const engine = engineWith([
+      { topic: 'auth.phone_otp', channel: 'sms', locale: 'en', is_active: true, body: 'en row {{code}}' },
+    ]);
+    await expect(resolvePhoneSmsTemplateBody(engine, 'auth.phone_otp', 'zh-CN')).resolves.toBe(zh);
   });
 
-  it('isolates per-row failures (missing table) via the logger', async () => {
-    const warn = vi.fn();
-    const engine = {
-      find: vi.fn(async () => { throw new Error('no such table'); }),
-      insert: vi.fn(),
-    };
-    await seedPhoneSmsTemplates(engine, { warn });
-    expect(warn).toHaveBeenCalledTimes(BUILTIN_PHONE_SMS_TEMPLATES.length);
-    expect(engine.insert).not.toHaveBeenCalled();
+  it('passes a deactivated row\'s rung on, as the seeded store did', async () => {
+    const engine = engineWith([
+      { topic: 'auth.phone_otp', channel: 'sms', locale: 'zh', is_active: false, body: '停用 {{code}}' },
+      { topic: 'auth.phone_otp', channel: 'sms', locale: 'en', is_active: true, body: 'en row {{code}}' },
+    ]);
+    await expect(resolvePhoneSmsTemplateBody(engine, 'auth.phone_otp', 'zh-CN')).resolves.toBe('en row {{code}}');
+  });
+
+  it('falls back to the built-in walk with no engine, or a broken lookup', async () => {
+    const zh = builtinPhoneSmsBody(PHONE_SMS_TOPICS.otp, 'zh');
+    await expect(resolvePhoneSmsTemplateBody(undefined, 'auth.phone_otp', 'zh')).resolves.toBe(zh);
+    const broken = { find: vi.fn(async () => { throw new Error('no such table'); }) };
+    await expect(resolvePhoneSmsTemplateBody(broken, 'auth.phone_otp', 'zh')).resolves.toBe(zh);
   });
 });

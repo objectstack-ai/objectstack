@@ -141,6 +141,15 @@ const ARMS: readonly Arm[] = [
         keeps: { currentVersion: 7, object: 'account' },
     },
     {
+        // [#22114] The metadata twin of `CONCURRENT_UPDATE`, keyed on the code
+        // AND the producer's stated `currentVersion`.
+        arm: 'METADATA_CONFLICT',
+        declares: { code: 'METADATA_CONFLICT', status: 409, currentVersion: `hmac-sha256:${'c'.repeat(64)}` },
+        status: 409,
+        code: 'METADATA_CONFLICT',
+        keeps: { currentVersion: `hmac-sha256:${'c'.repeat(64)}`, object: 'account' },
+    },
+    {
         arm: 'ERR_DATASOURCE_UNAVAILABLE',
         declares: { code: 'ERR_DATASOURCE_UNAVAILABLE', datasource: 'warehouse', kind: 'blocked' },
         status: 503,
@@ -345,10 +354,11 @@ describe('#14704 · the single `/data` door never ships the QuickJS wrapper out 
          * mechanically, so the next arm added to the shared classification is
          * either covered above or excused here BY NAME.
          *
-         * Measured re-derivation on this tree: thirteen declared-code literals
-         * sit above the unwrap door — ten reachable by a sandboxed producer
-         * (the {@link ARMS} rows) and three that are not, each for a reason the
-         * source states in the arm itself.
+         * Measured re-derivation on this tree: fourteen declared-code literals
+         * sit above the unwrap door — eleven reachable by a sandboxed producer
+         * (the {@link ARMS} rows; `METADATA_CONFLICT` joined in #22114) and
+         * three that are not, each for a reason the source states in the arm
+         * itself.
          */
         describe('§4-derivation — the arm list is DERIVED from the tree, not copied', () => {
             /** Code literals a sandboxed producer provably cannot reach. */

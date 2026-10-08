@@ -123,6 +123,9 @@ interface Case {
     readonly expect: Wire;
 }
 
+/** [#22114] A keyed version token, the shape the `/meta` doors serve. */
+const META_TOKEN = `hmac-sha256:${'b'.repeat(64)}`;
+
 const DELETE_RESTRICTED_DEV =
     "Cannot delete account (a1): 3 dependent contact record(s) reference it via account_id. "
     + "Delete or reassign them first, or set deleteBehavior:'cascade' on contact.account_id.";
@@ -316,6 +319,76 @@ const CASES: readonly Case[] = [
                 field: 'emial',
                 object: 'account',
             },
+        },
+    },
+    {
+        // [#22114] The metadata twin of `CONCURRENT_UPDATE`: the `/meta` item
+        // doors' optimistic-lock refusal, as `metadata-protocol`'s one conflict
+        // builder (`metadataConflictRefusal`) composes it — the keyed head as
+        // `currentVersion` beside the sentence that names it.
+        covers: ['METADATA_CONFLICT'],
+        what: "metadata-protocol's metadataConflictRefusal (`code`/`status = 409`/`actualHead`/`currentVersion`)",
+        error: () => {
+            const err: any = new Error('view/case_grid has been modified since you loaded it. The version token '
+                + `sent is not the current version (current is ${META_TOKEN}).`);
+            err.code = 'METADATA_CONFLICT';
+            err.status = 409;
+            err.actualHead = META_TOKEN;
+            err.currentVersion = META_TOKEN;
+            return err;
+        },
+        restored: ['currentVersion'],
+        expect: {
+            status: 409,
+            body: {
+                error: 'view/case_grid has been modified since you loaded it. The version token '
+                    + `sent is not the current version (current is ${META_TOKEN}).`,
+                code: 'METADATA_CONFLICT',
+                currentVersion: META_TOKEN,
+            },
+        },
+    },
+    {
+        // [#22114] …and `null` — "no row of this lifecycle is there" — is an
+        // answer the arm relays, not an absence it drops.
+        covers: ['METADATA_CONFLICT'],
+        what: "metadataConflictRefusal with no current row (`currentVersion: null`)",
+        error: () => {
+            const err: any = new Error('view/case_grid has been modified since you loaded it. The version token '
+                + 'sent is not the current version (current is null).');
+            err.code = 'METADATA_CONFLICT';
+            err.status = 409;
+            err.actualHead = null;
+            err.currentVersion = null;
+            return err;
+        },
+        restored: ['currentVersion'],
+        expect: {
+            status: 409,
+            body: {
+                error: 'view/case_grid has been modified since you loaded it. The version token '
+                    + 'sent is not the current version (current is null).',
+                code: 'METADATA_CONFLICT',
+                currentVersion: null,
+            },
+        },
+    },
+    {
+        // [#22114] The control: a `METADATA_CONFLICT` that states no
+        // `currentVersion` (a raw repository refusal shape) is not the arm's —
+        // its body is the passthrough's, byte for byte, on both doors.
+        covers: ['METADATA_CONFLICT'],
+        what: 'a METADATA_CONFLICT that states no `currentVersion` (control)',
+        error: () => {
+            const err: any = new Error('view/case_grid has been modified since you loaded it.');
+            err.code = 'METADATA_CONFLICT';
+            err.status = 409;
+            return err;
+        },
+        restored: [],
+        expect: {
+            status: 409,
+            body: { error: 'view/case_grid has been modified since you loaded it.', code: 'METADATA_CONFLICT' },
         },
     },
     {

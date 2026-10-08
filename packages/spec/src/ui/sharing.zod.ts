@@ -95,7 +95,13 @@ export const SharingConfigSchema = lazySchema(() => strictObject({
   },
 }, {
   enabled: z.boolean().default(false).describe('Enable public sharing'),
-  publicLink: z.string().optional().describe('Generated public share URL'),
+  publicLink: z.string().optional().describe(
+    'Public slug of the form, chosen by the author: not a URL, and never generated. '
+    + '`/forms/x`, `forms/x` and `x` name one slug, `x`. It is served to anonymous visitors only while '
+    + '`enabled` and `allowAnonymous` are both true: the REST form door answers `GET /api/v1/forms/:slug` '
+    + '(default API base), and a host that serves the console shows the form at `/_console/f/:slug` and '
+    + 'redirects `/forms/:slug` there, query string carried.',
+  ),
   password: z.string().optional().describe('Password required to access shared link'),
   allowedDomains: z.array(z.string()).optional()
     .describe('Restrict access to specific email domains (e.g. ["example.com"])'),

@@ -296,7 +296,7 @@ export const jaJP: PlatformTranslationData = {
         finance: { title: '財務' },
       },
       keys: {
-        timezone: { label: '既定のタイムゾーン', help: 'today()/daysFromNow の解決、分析の日付バケット、日時レンダリングに使う IANA タイムゾーン。' },
+        timezone: { label: '既定のタイムゾーン', help: '数式での「今日」がどの日か、レポートでの日付のまとめ方、日付と時刻の表示方法を決めます。任意の IANA タイムゾーン名（例:Asia/Tokyo）を指定できます。' },
         locale: { label: '既定の言語', help: 'メッセージカタログと数値/日付フォーマットに使う BCP-47 ロケール。' },
         default_country: { label: '既定の国', help: 'ISO 3166-1 alpha-2 コード（例:US、GB、CN）。住所と電話の既定に使用します。' },
         currency: { label: '既定の通貨', help: '通貨フィールドが独自の通貨を指定しない場合に適用される ISO 4217 コード。' },

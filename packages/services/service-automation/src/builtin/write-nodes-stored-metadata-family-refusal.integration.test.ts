@@ -52,6 +52,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { createIdentityObjectsPlugin } from '@objectstack/plugin-auth';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { STORED_METADATA_BODY_PRESCRIPTION } from '@objectstack/spec/kernel';
@@ -162,7 +163,13 @@ async function boot(secured: boolean) {
   const kernel = new ObjectKernel({ logger: { level: 'fatal' } });
   await kernel.use(new ObjectQLPlugin());
   await kernel.use(new AutomationServicePlugin({ suspendedRunStore: 'memory' }));
-  if (secured) await kernel.use(new SecurityPlugin({ defaultPermissionSets: [...securityDefaultPermissionSets] }));
+  if (secured) {
+    // SecurityPlugin refuses a kernel without the identity objects its
+    // authorization store reads; with no auth plugin here, plugin-auth's preset
+    // registers them.
+    await kernel.use(createIdentityObjectsPlugin());
+    await kernel.use(new SecurityPlugin({ defaultPermissionSets: [...securityDefaultPermissionSets] }));
+  }
   await kernel.bootstrap();
   const ql = kernel.getService<ObjectQL>('objectql');
   const automation = kernel.getService<AutomationEngine>('automation');
