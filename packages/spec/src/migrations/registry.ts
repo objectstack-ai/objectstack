@@ -28026,8 +28026,8 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // metadata type, absent from every liveness ledger, and read by NOTHING: on
     // objectstack `fec87e7e0` every hit for the family's exported names outside
     // `packages/spec` was generated reference docs, release notes or a changelog;
-    // objectui (the `.objectui-sha` pin a58626c88 and main cef0eee) and hotcrm
-    // (1e88edc) returned zero, against lit controls on the same pattern. No carrier
+    // objectui (the `.objectui-sha` pin `a58626c88` and main `cef0eee`) and hotcrm
+    // (`1e88edc`) returned zero, against lit controls on the same pattern. No carrier
     // key, so no `retiredKey()` tombstone and no D2 conversion (none of these
     // schemas is a stack collection member — the
     // `kernel/MetadataPluginConfig:additionalTypes` reasoning): RETIRED_DEFS_BY_MAJOR
@@ -28046,8 +28046,8 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // metadata type, absent from every liveness ledger, and read by NOTHING: on
     // objectstack `fec87e7e0` every hit for the family's exported names outside
     // `packages/spec` was generated reference docs, release notes or a changelog;
-    // objectui (the `.objectui-sha` pin a58626c88 and main cef0eee) and hotcrm
-    // (1e88edc) returned zero, against lit controls on the same pattern. No carrier
+    // objectui (the `.objectui-sha` pin `a58626c88` and main `cef0eee`) and hotcrm
+    // (`1e88edc`) returned zero, against lit controls on the same pattern. No carrier
     // key, so no `retiredKey()` tombstone and no D2 conversion (none of these
     // schemas is a stack collection member — the
     // `kernel/MetadataPluginConfig:additionalTypes` reasoning): RETIRED_DEFS_BY_MAJOR
@@ -28066,8 +28066,8 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // metadata type, absent from every liveness ledger, and read by NOTHING: on
     // objectstack `fec87e7e0` every hit for the family's exported names outside
     // `packages/spec` was generated reference docs, release notes or a changelog;
-    // objectui (the `.objectui-sha` pin a58626c88 and main cef0eee) and hotcrm
-    // (1e88edc) returned zero, against lit controls on the same pattern. No carrier
+    // objectui (the `.objectui-sha` pin `a58626c88` and main `cef0eee`) and hotcrm
+    // (`1e88edc`) returned zero, against lit controls on the same pattern. No carrier
     // key, so no `retiredKey()` tombstone and no D2 conversion (none of these
     // schemas is a stack collection member — the
     // `kernel/MetadataPluginConfig:additionalTypes` reasoning): RETIRED_DEFS_BY_MAJOR
@@ -28088,8 +28088,8 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // metadata type, absent from every liveness ledger, and read by NOTHING: on
     // objectstack `fec87e7e0` every hit for the family's exported names outside
     // `packages/spec` was generated reference docs, release notes or a changelog;
-    // objectui (the `.objectui-sha` pin a58626c88 and main cef0eee) and hotcrm
-    // (1e88edc) returned zero, against lit controls on the same pattern. No carrier
+    // objectui (the `.objectui-sha` pin `a58626c88` and main `cef0eee`) and hotcrm
+    // (`1e88edc`) returned zero, against lit controls on the same pattern. No carrier
     // key, so no `retiredKey()` tombstone and no D2 conversion (none of these
     // schemas is a stack collection member — the
     // `kernel/MetadataPluginConfig:additionalTypes` reasoning): RETIRED_DEFS_BY_MAJOR

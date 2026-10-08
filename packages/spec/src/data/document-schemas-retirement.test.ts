@@ -15,8 +15,8 @@
  * taken against): objectstack `fec87e7e0` — every hit for the family's names
  * outside `packages/spec` was generated reference docs, release notes or a
  * changelog (control: 148 files outside spec name `FieldSchema`); objectui at
- * the `.objectui-sha` pin a58626c88 and at main cef0eee — 0 (control: 55 files
- * name `PageSchema`); hotcrm 1e88edc — 0 (control: 77 files name
+ * the `.objectui-sha` pin `a58626c88` and at main `cef0eee` — 0 (control: 55 files
+ * name `PageSchema`); hotcrm `1e88edc` — 0 (control: 77 files name
  * `defineStack` / `ObjectSchema`).
  *
  * Bookkeeping shapes, pinned below:
