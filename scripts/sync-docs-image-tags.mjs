@@ -2,8 +2,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // sync-docs-image-tags (#9064) -- rewrite every CONCRETE version a doc surface pins
-// for the runtime image or the CLI to `packages/cli/package.json`'s version, at
-// VERSION TIME.
+// for the runtime image or the CLI to `packages/cli/package.json`'s version -- or, in
+// Changesets pre mode, to the newest GA release (#22131) -- at VERSION TIME.
 //
 //   node scripts/sync-docs-image-tags.mjs
 //   node scripts/sync-docs-image-tags.mjs --self-test   # verify the rewriter itself
@@ -58,6 +58,15 @@
 // layer up: the rewriter would fix a set of surfaces while the gate judged a different
 // set, and the gap would be invisible until a release. One list, two consumers.
 //
+// So does the TARGET itself (#22131). `expectedVersion()` decides it -- packages/cli's
+// version outside pre mode, the newest GA in Changesets pre mode (maintainer ruling on
+// #22085, Q3 -> B: during a prerelease line the documented image and install versions
+// follow the newest GA, never `X.Y.Z-next.N`) -- and `syncRepo()`, which `main()` runs,
+// takes the target from it and nowhere else. The gate's `main()` calls the same
+// function, so what this file writes and what the gate expects are one value. The
+// gate's header carries the pre-mode reasoning (why mode `exit` counts, why the newest
+// GA overall, why every unreadable state is a refusal); it is not restated here.
+//
 // The rewrite is therefore defined as "make the gate's own findings go away", and the
 // verdict at the end is literally `checkSurfaces()` -- the gate's function, not an
 // imitation of it. If this file leaves anything the gate would still flag, it fails
@@ -78,7 +87,8 @@
 // ## The dispatch-gates population, read rather than assumed
 //
 // This file is a REWRITER, and in rewrite mode it opens the three doc surfaces
-// plus `packages/cli/package.json` -- all of them inherited from
+// plus `packages/cli/package.json` -- and, in pre mode, `.changeset/pre.json` and
+// `packages/spec/CHANGELOG.md` -- all of them inherited from
 // `check-docs-image-tag.mjs`, which declares them and is judged on them. But the
 // family CI schedules is `check:docs-image-tag-sync`, and both of its call sites
 // (lint.yml and release.yml) run `--self-test`, which works entirely inside a
@@ -101,9 +111,11 @@ import {
   SURFACES,
   VERSION_SOURCE,
   checkSurfaces,
+  expectedVersion,
   extractOccurrences,
   isConcreteVersion,
   loadExpectedVersion,
+  preModeNote,
 } from './check-docs-image-tag.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
@@ -218,9 +230,12 @@ export function rewriteText(text, expected) {
  * bytes. Leaving mtime untouched keeps a no-op release from showing three "modified"
  * files that a reviewer then has to diff to discover are empty.
  *
- * @param {{ surfaces: { file: string, why: string }[], expected: string, root: string }} options
+ * `source` names where `expected` was read and is handed to the gate's verdict, so a
+ * finding left after the rewrite names the same source the rewrite used.
+ *
+ * @param {{ surfaces: { file: string, why: string }[], expected: string, root: string, source?: string }} options
  */
-export function syncSurfaces({ surfaces, expected, root }) {
+export function syncSurfaces({ surfaces, expected, root, source = VERSION_SOURCE }) {
   /** @type {FileResult[]} */
   const changed = [];
   let read = 0;
@@ -242,22 +257,35 @@ export function syncSurfaces({ surfaces, expected, root }) {
   // "the rewriter and the gate cannot drift apart" a mechanical fact rather than an
   // intention: anything this file failed to bring into line is reported by the very
   // code that would have reddened CI, in the same words.
-  const { findings, stats } = checkSurfaces({ surfaces, expected, root });
+  const { findings, stats } = checkSurfaces({ surfaces, expected, root, source });
   return { changed, read, findings, stats };
+}
+
+/**
+ * The whole version-time sync of one repository tree: the target from the gate's
+ * `expectedVersion()`, then `syncSurfaces()` over it. `main()` is this plus
+ * printing, and the self-test runs this very function over fixture trees, so the
+ * pre-mode branch is exercised on the path the `version` script takes.
+ *
+ * @param {{ root: string, surfaces?: { file: string, why: string }[] }} options
+ */
+export function syncRepo({ root, surfaces = SURFACES }) {
+  const expectation = expectedVersion(root);
+  const result = syncSurfaces({ surfaces, expected: expectation.version, source: expectation.source, root });
+  return { expectation, ...result };
 }
 
 // ---------------------------------------------------------------------------
 
 function main() {
-  const root = scriptRepoRoot();
-  const expected = loadExpectedVersion(join(root, VERSION_SOURCE));
-  const { changed, findings, stats } = syncSurfaces({ surfaces: SURFACES, expected, root });
+  const { expectation, changed, findings, stats } = syncRepo({ root: scriptRepoRoot() });
+  const expected = expectation.version;
 
   const total = changed.reduce((sum, file) => sum + file.rewrites.length, 0);
   if (total === 0) {
     console.log(
       `✓ sync-docs-image-tags: all ${stats.compared} concrete pin(s) across ${stats.read} surface(s) `
-      + `already at ${VERSION_SOURCE} ${expected} — nothing rewritten.`,
+      + `already at ${expectation.source} ${expected} — nothing rewritten.`,
     );
   } else {
     for (const file of changed) {
@@ -268,9 +296,14 @@ function main() {
     }
     console.log(
       `✓ sync-docs-image-tags: ${total} pin(s) across ${changed.length} surface(s) → ${expected} `
-      + `(lockstep with ${VERSION_SOURCE}).`,
+      + `(lockstep with ${expectation.source}).`,
     );
   }
+  // In pre mode a version pass that leaves the docs where they are is the point,
+  // not an inert rewriter, and the log says so rather than leaving a reviewer to
+  // wonder why packages/cli moved and the docs did not.
+  const note = preModeNote(expectation);
+  if (note !== null) console.log(`  ${note}`);
 
   if (findings.length > 0) {
     // Reached only when the rewrite could not make the gate green -- an enumerated
@@ -333,11 +366,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Control F: the expectation refuses to be unusable': 1,
   'Control G: the suffix invariant on the SHARED pattern list': 10,
   'Control H: the shared surface list is the gate\'s, not a copy': 3,
+  'Control I: in pre mode the target is the newest GA, from the gate\'s one function': 10,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 9;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -643,6 +677,130 @@ function selfTest() {
       `VERSION_SOURCE is imported from the gate — got ${JSON.stringify(VERSION_SOURCE)}`,
     );
     assert(isConcreteVersion('17.0.0') && !isConcreteVersion('latest'), 'the concreteness classifier is the gate\'s own');
+
+    // ── Control I: in pre mode the target is the newest GA (#22131) ─────────
+    //
+    // Run through `syncRepo()`, the function `main()` runs, over trees that carry the
+    // three files `expectedVersion()` reads. Each case carries its positive control:
+    // the same tree read the old way, or without pre.json, gives a different answer,
+    // so a green here cannot come from a rewriter that ignores pre mode.
+    battery('Control I: in pre mode the target is the newest GA, from the gate\'s one function');
+    // The spec CHANGELOG as the first `next` cut leaves it: a prerelease heading on
+    // top, which is never a GA, and the GA history below it.
+    const preChangelog = [
+      '# @objectstack/spec',
+      '',
+      '## 18.0.0-next.0',
+      '',
+      '### Major Changes',
+      '',
+      '- The v18 line opens.',
+      '',
+      '## 17.7.0',
+      '',
+      '## 17.6.0',
+      '',
+    ].join('\n');
+    const pinsAt = (version) => [
+      '```bash',
+      `docker run ghcr.io/objectstack-ai/objectstack:${version}`,
+      `docker build --build-arg OS_CLI_VERSION=${version} docker/`,
+      `npm install -g @objectstack/cli@${version}`,
+      '```',
+      '',
+    ].join('\n');
+    const preTree = (name, { pre = '{"mode":"pre","tag":"next"}', docs }) => {
+      write(`${name}/${VERSION_SOURCE}`, `${JSON.stringify({ name: '@objectstack/cli', version: '18.0.0-next.0' })}\n`);
+      write(`${name}/packages/spec/CHANGELOG.md`, preChangelog);
+      if (pre !== null) write(`${name}/.changeset/pre.json`, pre);
+      write(`${name}/docs.md`, docs);
+      return join(dir, name);
+    };
+    const docsSurface = [{ file: 'docs.md', why: 'fixture' }];
+
+    // 1 -- pre mode, CLI 18.0.0-next.0, newest GA 17.7.0: the docs go to 17.7.0. The
+    // docs start on the prerelease, i.e. where the pre-#22131 rewriter puts them.
+    const nextRoot = preTree('pre-next', { docs: pinsAt('18.0.0-next.0') });
+    const nextBefore = checkSurfaces({ surfaces: docsSurface, expected: '17.7.0', root: nextRoot });
+    assert(
+      nextBefore.findings.filter((finding) => finding.kind === 'STALE').length === 3,
+      'control: the prerelease pins start STALE against the GA, so the rewrite below has something real to do -- '
+        + `got ${JSON.stringify(nextBefore.findings.map((f) => f.kind))}`,
+    );
+    const inPre = syncRepo({ root: nextRoot, surfaces: docsSurface });
+    assert(
+      inPre.expectation.version === '17.7.0' && inPre.changed[0]?.rewrites.length === 3
+        && inPre.findings.length === 0 && readFileSync(join(nextRoot, 'docs.md'), 'utf8') === pinsAt('17.7.0'),
+      'a pre-mode tree whose CLI is 18.0.0-next.0 and whose newest GA is 17.7.0 is synced to 17.7.0, all 3 pins, '
+        + `and the gate's verdict over the result is green -- got ${JSON.stringify({ expectation: inPre.expectation, changed: inPre.changed, findings: inPre.findings })}`,
+    );
+    // The target is the gate's answer, from the gate's function -- not a copy of it.
+    assert(
+      JSON.stringify(inPre.expectation) === JSON.stringify(expectedVersion(nextRoot)),
+      'syncRepo\'s target is exactly what the gate\'s expectedVersion() answers for the same tree',
+    );
+    assert(
+      preModeNote(inPre.expectation)?.includes('18.0.0-next.0') === true,
+      'the pre-mode run explains why packages/cli moved and the docs did not follow it',
+    );
+
+    // 2 -- the same tree without pre.json: the docs go to the CLI's version, as today.
+    const plainRoot = preTree('pre-absent', { pre: null, docs: pinsAt('17.7.0') });
+    const plain = syncRepo({ root: plainRoot, surfaces: docsSurface });
+    assert(
+      plain.expectation.version === '18.0.0-next.0' && plain.expectation.source === VERSION_SOURCE
+        && readFileSync(join(plainRoot, 'docs.md'), 'utf8') === pinsAt('18.0.0-next.0') && plain.findings.length === 0,
+      `the same tree without pre.json syncs to the CLI's version, read from ${VERSION_SOURCE} -- got `
+        + JSON.stringify({ expectation: plain.expectation, changed: plain.changed }),
+    );
+    // Its positive control is case 1: one file apart, two different targets.
+    assert(
+      plain.expectation.version !== inPre.expectation.version,
+      'control: pre.json is the only difference between the two trees, and it changes the target',
+    );
+
+    // 3 -- a pre-mode tree whose docs already read the newest GA rewrites NOTHING.
+    const gaRoot = preTree('pre-at-ga', { docs: pinsAt('17.7.0') });
+    const gaPath = join(gaRoot, 'docs.md');
+    const gaMtime = statSync(gaPath).mtimeMs;
+    const atGa = syncRepo({ root: gaRoot, surfaces: docsSurface });
+    assert(
+      atGa.changed.length === 0 && atGa.findings.length === 0 && atGa.stats.compared === 3
+        && readFileSync(gaPath, 'utf8') === pinsAt('17.7.0') && statSync(gaPath).mtimeMs === gaMtime,
+      'a pre-mode tree already at the newest GA is left BYTE-IDENTICAL and unwritten, having compared all 3 pins -- '
+        + `got ${JSON.stringify({ changed: atGa.changed, findings: atGa.findings, stats: atGa.stats })}`,
+    );
+    // Its positive control: the same text against the CLI's version WOULD be
+    // rewritten, so "nothing" above is the pre-mode decision, not an inert rewriter.
+    assert(
+      rewriteText(pinsAt('17.7.0'), '18.0.0-next.0').rewrites.length === 3,
+      'control: the same docs synced against packages/cli\'s 18.0.0-next.0 are 3 rewrites -- what the old target '
+        + 'would have done to them on every prerelease cut',
+    );
+
+    // 4 -- mode "exit" (after `changeset pre exit`, before the pass that deletes
+    // pre.json) is still the prerelease line.
+    const exitRoot = preTree('pre-exit', { pre: '{"mode":"exit","tag":"next"}', docs: pinsAt('18.0.0-next.0') });
+    const inExit = syncRepo({ root: exitRoot, surfaces: docsSurface });
+    assert(
+      inExit.expectation.version === '17.7.0' && readFileSync(join(exitRoot, 'docs.md'), 'utf8') === pinsAt('17.7.0'),
+      `mode "exit" syncs to the newest GA too -- got ${JSON.stringify(inExit.expectation)}`,
+    );
+
+    // 5 -- an unreadable pre.json refuses BEFORE anything is written. Positive
+    // control: case 1, same docs, did write.
+    const garbledRoot = preTree('pre-garbled', { pre: '{ not json', docs: pinsAt('18.0.0-next.0') });
+    let garbledError = null;
+    try {
+      syncRepo({ root: garbledRoot, surfaces: docsSurface });
+    } catch (error) {
+      garbledError = error.message;
+    }
+    assert(
+      garbledError !== null && readFileSync(join(garbledRoot, 'docs.md'), 'utf8') === pinsAt('18.0.0-next.0'),
+      'a present but unparsable pre.json stops the sync before any surface is written, rather than guessing a '
+        + `target -- got ${JSON.stringify(garbledError)}`,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -701,7 +859,9 @@ function selfTest() {
     `✓ sync-docs-image-tags --self-test: ${checked} assertions over temp fixtures (real syncSurfaces path). `
     + 'A stale corpus is observed going GREEN through the gate\'s own checkSurfaces; a clean corpus is observed '
     + 'BYTE-IDENTICAL and unwritten; rolling tags, the X.Y.Z metavariable, placeholders, interpolations and '
-    + 'version-shaped prose are observed UNMOVED.',
+    + 'version-shaped prose are observed UNMOVED. In pre mode (modes pre and exit) the target is observed to be the '
+    + 'newest GA from the gate\'s expectedVersion(), the same tree without pre.json observed to sync to the CLI, a '
+    + 'tree already at the GA observed UNWRITTEN, and an unreadable pre.json observed to stop the sync before any write.',
   );
 
   return SELF_TEST_VERDICT;
