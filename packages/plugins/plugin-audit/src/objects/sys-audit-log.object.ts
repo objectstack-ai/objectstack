@@ -20,6 +20,15 @@ export const SysAuditLog = ObjectSchema.create({
   icon: 'scroll-text',
   isSystem: true,
   managedBy: 'append-only',
+  // [ADR-0131 D7] Deployment-level ledger: NO injected organization column.
+  // Some rows are about actions no organization owns (`config_change` on the
+  // settings global rung, `platform_admin_standing_change` at boot,
+  // plugin-auth's run-level `import`), so the tenancy anchor cannot be this
+  // object's. The organization a row is ABOUT is the plain attribution field
+  // `tenant_id` below, which the tenant-field resolver does not claim: Layer 0
+  // is inert here, and the read scope is object permission plus the platform
+  // row policy `sys_audit_log_org` in plugin-security's default sets.
+  systemFields: { tenant: false },
   // ADR-0057: compliance ledger — retain hot 90d, then archive-then-delete.
   // The LifecycleService NEVER hot-deletes rows with `archive` declared until
   // the archive copy succeeded; deployments without an 'archive' datasource
@@ -347,11 +356,15 @@ export const SysAuditLog = ObjectSchema.create({
     }),
 
     // ── Context ──────────────────────────────────────────────────
+    // [ADR-0131 D7] The attribution field, never the tenancy anchor: every
+    // writer stamps the organization the row is about here, and NULL means a
+    // deployment-level action. Organization readers are scoped on it by the
+    // `sys_audit_log_org` row policy; per-tenant retention partitions on it.
     tenant_id: Field.lookup('sys_organization', {
       label: 'Tenant',
       required: false,
       readonly: true,
-      description: 'Tenant context for multi-tenant isolation',
+      description: 'Organization this event is about; empty for a deployment-level action',
       group: 'Context',
     }),
 

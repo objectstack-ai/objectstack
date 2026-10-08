@@ -18,7 +18,7 @@
  * Every door onto the ledger reads it through the engine — the Setup "Audit
  * Logs" object view, the console's audit-log browser and a record page's
  * history tab all list `sys_audit_log` through the generic data API — under the
- * LEDGER's own object grant and tenant wall. A reader whose sets grant the
+ * LEDGER's own object grant and organization row scope. A reader whose sets grant the
  * ledger read was therefore served every snapshot key, including a parent field
  * the data plane serves the same reader masked, gated off by
  * `requiredPermissions`, or not at all because a set it holds withholds it.

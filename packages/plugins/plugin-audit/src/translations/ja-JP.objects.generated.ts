@@ -70,7 +70,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       tenant_id: {
         label: "テナント",
-        help: "マルチテナント分離のためのテナントコンテキスト"
+        help: "このイベントの対象となる組織。デプロイメントレベルの操作では空です"
       },
       metadata: {
         label: "メタデータ",

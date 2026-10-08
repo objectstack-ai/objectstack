@@ -7,7 +7,7 @@
  *
  *  - the ROW SHAPE, tested through the writer's own builder rather than a
  *    hand-written copy of it — including the one property a later author is
- *    most likely to "repair": `organization_id` is NULL, by maintainer ruling
+ *    most likely to "repair": `tenant_id` is NULL, by maintainer ruling
  *    (director batch #153 item 2, 2026-09-18) and by ADR-0131 §1.5, which
  *    rejects inventing a platform organization in its own words. A pin is the
  *    only thing that can notice that exception being undone, because every
@@ -34,7 +34,10 @@ import type { PlatformAdminStandingEntry } from './platform-admin-service.js';
 
 const LEDGER = PLATFORM_ADMIN_STANDING_LEDGER;
 
-/** The `sys_audit_log` field set a multi-tenant deployment declares. */
+/**
+ * The `sys_audit_log` field set a deployment registers — with no organization
+ * column on any posture since ADR-0131 D7 (`tenant_id` is the attribution field).
+ */
 const TENANTED_LEDGER_FIELDS = [
   'created_at',
   'action',
@@ -46,7 +49,6 @@ const TENANTED_LEDGER_FIELDS = [
   'new_value',
   'tenant_id',
   'metadata',
-  'organization_id',
   'id',
 ];
 
@@ -187,7 +189,6 @@ describe('the platform-admin standing row (#18412)', () => {
     const row = buildPlatformAdminStandingRow({
       snapshot,
       previousSerialized: null,
-      declaresOrganizationId: true,
       declaresActor: true,
     });
     expect(row.action).toBe('platform_admin_standing_change');
@@ -220,7 +221,6 @@ describe('the platform-admin standing row (#18412)', () => {
     const row = buildPlatformAdminStandingRow({
       snapshot: platformAdminStandingSnapshot([entry()]),
       previousSerialized: previous,
-      declaresOrganizationId: true,
       declaresActor: true,
     });
     expect(row.old_value).toBe(previous);
@@ -240,32 +240,30 @@ describe('the platform-admin standing row (#18412)', () => {
    * … exists only to give NULL a new name」); the maintainer ruled this exact
    * shape on 2026-09-18.
    */
-  it('⛔ organization_id and tenant_id are NULL — the ruled deployment-level shape, not an oversight', () => {
+  it('⛔ tenant_id is NULL and no organization column is stamped — the ruled deployment-level shape, not an oversight', () => {
     const row = buildPlatformAdminStandingRow({
       snapshot: platformAdminStandingSnapshot([entry()]),
       previousSerialized: null,
-      declaresOrganizationId: true,
       declaresActor: true,
     });
     expect(
-      row.organization_id,
+      row.tenant_id,
       'the boot-time platform-admin standing row is DEPLOYMENT-LEVEL: there is no platform '
         + 'organization on this tree (ADR-0131 §1.5 rejects inventing one), a tenant id would '
-        + 'file a whole-deployment fact behind one tenant, and the first-boot baseline is '
+        + 'serve a whole-deployment fact to one tenant, and the first-boot baseline is '
         + 'written before any sys_organization row exists at all. NULL is the ruled shape '
-        + '(#18412, director batch #153 item 2) and the shape ADR-0131 D7 will later make '
-        + 'structural by dropping the column.',
+        + '(#18412, director batch #153 item 2).',
     ).toBeNull();
-    expect(row.tenant_id).toBeNull();
+    // ADR-0131 D7: the ledger has no organization column, so none is stamped.
+    expect(Object.keys(row)).not.toContain('organization_id');
     // ADR-0118 D1/D5 keeps `actor` two-valued; the boot is the system.
     expect(row.actor).toBeNull();
   });
 
-  it('omits both conditional columns on a deployment whose ledger does not declare them', () => {
+  it('omits the conditional actor column on a ledger that does not declare it', () => {
     const row = buildPlatformAdminStandingRow({
       snapshot: platformAdminStandingSnapshot([entry()]),
       previousSerialized: null,
-      declaresOrganizationId: false,
       declaresActor: false,
     });
     // Stamping a column the table lacks fails the INSERT outright — the
@@ -313,7 +311,8 @@ describe('boot records a CHANGE of standing, and only a change (#18412)', () => 
     const rows = ql.auditRows();
     expect(rows).toHaveLength(1);
     expect(rows[0].old_value).toBeNull();
-    expect(rows[0].organization_id).toBeNull();
+    expect(rows[0].tenant_id).toBeNull();
+    expect(rows[0]).not.toHaveProperty('organization_id');
     expect(JSON.parse(rows[0].new_value)[0]).toMatchObject({
       email: 'operator@corp.example',
       verified: true,
@@ -429,7 +428,8 @@ describe('boot records a CHANGE of standing, and only a change (#18412)', () => 
     await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: log });
     const rows = ql.auditRows();
     expect(rows).toHaveLength(1);
-    // Nothing could be probed, so neither conditional column is stamped.
+    // Nothing could be probed, so the conditional actor column is not stamped;
+    // the ledger has no organization column to stamp at all (ADR-0131 D7).
     expect(rows[0]).not.toHaveProperty('organization_id');
     expect(rows[0]).not.toHaveProperty('actor');
   });
