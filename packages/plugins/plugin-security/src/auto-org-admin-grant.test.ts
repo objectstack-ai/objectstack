@@ -1047,18 +1047,28 @@ describe('[#11670] `single` posture is carved out', () => {
     });
   });
 
-  it('the read ORDER and the objects read are unchanged under `single`', async () => {
-    // The rest of the multiset: same objects, same order, same predicates —
-    // only the two reads named in the deviation above differ, and only in
-    // `limit`/`$in`.
+  it('the read ORDER and the objects read under `single`', async () => {
+    // The rest of the multiset: same objects, same order — only the two reads
+    // named in the deviation above differ, and only in `limit`/`$in`.
+    //
+    // [ADR-0131 D4] Each grant question is now asked BY NAME, plus one read by
+    // id that reaches only the pair's grants that name nothing yet (written
+    // before the name column, not yet backfilled) — for the restriction alone.
     const stub = seedSingle();
     await reconcileOrgAdminGrant(stub, 'u1', 'o1', { posture: 'single' });
     expect(stub.findCalls.map((c) => c.object)).toEqual([
       'sys_permission_set', // grant-target resolution (limit 1, unchanged)
       'sys_member', // does the pair qualify
       'sys_permission_set', // superseded-variant ids (widened — see above)
-      'sys_user_permission_set', // superseded grants for the pair (widened)
-      'sys_user_permission_set', // does the grant already exist (scalar, unchanged)
+      'sys_user_permission_set', // superseded grants for the pair, by name
+      'sys_user_permission_set', // …and the pair's unnamed ones, by every copy's id
+      'sys_user_permission_set', // does the grant already exist, by name
+      'sys_user_permission_set', // …or an unnamed one carrying the id it would write
     ]);
+    const grantReads = stub.findCalls.filter((c) => c.object === 'sys_user_permission_set');
+    expect(grantReads.map((c) => c.where?.permission_set ?? null)).toEqual([
+      'organization_admin', null, 'organization_admin_no_bypass', null,
+    ]);
+    expect(grantReads[3].where.permission_set_id).toEqual({ $in: ['ps_org_admin_nb'] });
   });
 });

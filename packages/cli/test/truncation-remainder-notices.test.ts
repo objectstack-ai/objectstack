@@ -174,7 +174,8 @@ describe('[#11642] printAuthoringRuleErrors — the gating rule failures', () =>
   it('CONTROL — the rows are unchanged: the notice adds, it does not replace', () => {
     const out = capture(() => printAuthoringRuleErrors(many(80, finding), { remedy: JSON_FULL_LIST_REMEDY }));
     expect(out).toContain('  • object "obj_0": message 0');
-    expect(out).toContain('      hint 0');
+    // [#22161] The hint renders as the finding's `fix:` line.
+    expect(out).toContain('      fix: hint 0');
     expect(out).toContain('      rule: rule-0  at objects[0].sharingModel');
     // The cap still caps: the 50th row is there and the 51st is not.
     expect(out).toContain('at objects[49].sharingModel');

@@ -10,6 +10,7 @@ import type { TenancyPosture } from '@objectstack/spec/security';
 // through the contract is that the two sides cannot disagree.
 import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
 import type { DevLogin } from '@objectstack/spec/system';
+import { explainRule } from '@objectstack/lint/rule-explanations';
 import { writeStdoutDirect } from './json-stdout.js';
 import { authoringRuleUnionStack } from './stack-collections.js';
 import { stripAnsi } from './boot-log-capture.js';
@@ -1950,6 +1951,40 @@ export interface AuthoringAdvisory {
 }
 
 /**
+ * [#22161] The pointer the `rule:` line carries for a rule with a long-form
+ * explanation — an em dash, then `os explain <rule-id>` in backticks, then
+ * "for <what it covers>" — or `''` for a rule without one, so the line never
+ * names a command that has nothing to show.
+ *
+ * ⛔ The ONE place the pointer is spelled. A finding carries one verdict and
+ * one fix; what the rule counts and why it exists is its explanation, which
+ * `@objectstack/lint` keys by rule id and `os explain <rule-id>` prints. The
+ * table is read from the `rule-explanations` entry, which imports nothing, so
+ * this formatter stays free of the rule engine (see {@link AuthoringAdvisory}).
+ */
+export function explainPointer(rule: string): string {
+  const explanation = explainRule(rule);
+  return explanation ? ` — \`os explain ${rule}\` for ${explanation.covers}` : '';
+}
+
+/**
+ * [#22161] The lines printed under an author-time finding's verdict line, in
+ * order: `fix: <hint>` (when the finding has one) and
+ * `rule: <id>  at <path>` with the {@link explainPointer}. Every text face that
+ * prints a registry finding renders these through this function — the build
+ * and validate advisory lists and every gating-error list — so the three
+ * commands cannot print one finding three ways.
+ */
+export function authoringFindingDetailLines(
+  f: Pick<AuthoringAdvisory, 'rule' | 'path' | 'hint'>,
+): string[] {
+  const lines: string[] = [];
+  if (f.hint) lines.push(`fix: ${f.hint}`);
+  lines.push(`rule: ${f.rule}  at ${f.path}${explainPointer(f.rule)}`);
+  return lines;
+}
+
+/**
  * The pointer a truncation notice offers when — and ONLY when — the command's
  * own `--json` payload really does carry the list that was cut.
  *
@@ -2053,8 +2088,7 @@ export function printAuthoringAdvisories(
 
   for (const f of advisories.slice(0, limit)) {
     printWarning(`${f.where}: ${f.message}`);
-    if (f.hint) console.log(chalk.dim(`    ${f.hint}`));
-    console.log(chalk.dim(`    rule: ${f.rule}  at ${f.path}`));
+    for (const line of authoringFindingDetailLines(f)) console.log(chalk.dim(`    ${line}`));
   }
 
   // [#11642] The notice sentence now lives in ONE place. Rendering here is
@@ -2094,9 +2128,10 @@ export type AuthoringRuleFinding = AuthoringAdvisory;
  *
  * The `hint` line is conditional, which is how `printAuthoringAdvisories` and
  * `init` already rendered it; `compile`/`validate` printed it unconditionally.
- * `AuthoringFinding.hint` is a required non-empty string in every rule the
- * registry ships (checked: no rule emits an empty one), so the two forms
- * differ on no finding this CLI can actually produce.
+ * [#22161] The condition is now load-bearing: `hint` prints as the `fix:`
+ * line, and `expression-invalid` emits an empty one — its finding carries no
+ * fix of its own, and the authored source it used to put there is a quote,
+ * which rides the message instead.
  */
 export function printAuthoringRuleErrors(
   errors: readonly AuthoringRuleFinding[],
@@ -2105,8 +2140,7 @@ export function printAuthoringRuleErrors(
   const limit = options.limit ?? DIAGNOSTIC_PRINT_LIMIT;
   for (const f of errors.slice(0, limit)) {
     console.log(`  • ${f.where}: ${f.message}`);
-    if (f.hint) console.log(chalk.dim(`      ${f.hint}`));
-    console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
+    for (const line of authoringFindingDetailLines(f)) console.log(chalk.dim(`      ${line}`));
   }
   printTruncationNotice({
     total: errors.length,

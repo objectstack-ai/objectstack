@@ -33,6 +33,8 @@ import {
   printStep,
   formatConversionNotice,
   printAuthoringRuleErrors,
+  authoringFindingDetailLines,
+  type AuthoringRuleFinding,
   printDocIssueErrors,
   JSON_FULL_LIST_REMEDY,
   createTimer,
@@ -846,7 +848,14 @@ export default class Validate extends Command {
       // before, roughly half were printed inline and invisible to it, so
       // `--strict` failed or passed depending on which gate happened to raise
       // the finding — a second, quieter version of the same coverage drift.
+      //
+      // [#22161] Each one also remembers its finding, so the text face below
+      // prints its `fix:` and `rule:` lines (with the `os explain` pointer) the
+      // way `os build` does — the warning line itself is one verdict sentence
+      // now, and the rule id is how an author reaches the rest.
+      const registryFindingAt = new Map<number, AuthoringRuleFinding>();
       for (const f of ruleAdvisories) {
+        registryFindingAt.set(warnings.length, f);
         warnings.push(`${f.where}: ${f.message}`);
       }
       for (const w of docWarnings) {
@@ -949,8 +958,12 @@ export default class Validate extends Command {
 
       if (warnings.length > 0) {
         console.log('');
-        for (const w of warnings) {
+        for (const [i, w] of warnings.entries()) {
           console.log(chalk.yellow(`  ⚠ ${w}`));
+          const finding = registryFindingAt.get(i);
+          if (finding) {
+            for (const line of authoringFindingDetailLines(finding)) console.log(chalk.dim(`    ${line}`));
+          }
         }
         // The text face's half of the `--strict` gate. Its JSON counterpart is
         // the `CliExitCode` argument at the `emitJson` call above, reading this

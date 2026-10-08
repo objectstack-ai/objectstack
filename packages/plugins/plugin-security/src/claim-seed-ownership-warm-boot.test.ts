@@ -309,8 +309,8 @@ describe('the claim target is the existing platform admin, by the bootstrap rule
       await engine.insert('sys_user', { id, email: `${id}@example.test`, name: id, created_at: createdAt }, SYS);
       await engine.insert('sys_account', { id: `acc_${id}`, user_id: id, account_id: id, provider_id: 'credential' }, SYS);
     }
-    await engine.insert('sys_user_permission_set', { id: 'ups_1', user_id: 'usr_zed', permission_set_id: 'ps_admin', organization_id: null }, SYS);
-    await engine.insert('sys_user_permission_set', { id: 'ups_2', user_id: 'usr_amy', permission_set_id: 'ps_admin', organization_id: null }, SYS);
+    await engine.insert('sys_user_permission_set', { id: 'ups_1', user_id: 'usr_zed', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null }, SYS);
+    await engine.insert('sys_user_permission_set', { id: 'ups_2', user_id: 'usr_amy', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null }, SYS);
     return engine;
   }
 

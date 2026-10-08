@@ -1163,9 +1163,15 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
                   : `<${tag}> is missing the required prop "${req}".`,
                 // The contract's own description of the binding says how to
                 // write it — the author gets the spelling, not a pointer.
+                // [#22161] `hint` is the CLI's `fix:` line, and a description
+                // alone ("The registered component type to render.") is not a
+                // fix: the instruction leads, the description follows it.
                 hint: dep
                   ? dep.note
-                  : block.requiredDescriptions.get(req) ?? `Pass ${req}={…}. See the react-tier component contract.`,
+                  : `Pass ${req}={…}` +
+                    (block.requiredDescriptions.has(req)
+                      ? `: ${block.requiredDescriptions.get(req)}`
+                      : '. See the react-tier component contract.'),
               });
             }
           }

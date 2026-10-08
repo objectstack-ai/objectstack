@@ -124,6 +124,8 @@ const sysUserPermissionSet = {
     id: { name: 'id', type: 'text' as const, primaryKey: true },
     user_id: { name: 'user_id', type: 'text' as const },
     permission_set_id: { name: 'permission_set_id', type: 'text' as const },
+    // [ADR-0131 D4] The grant's set BY NAME — the column the guard reads.
+    permission_set: { name: 'permission_set', type: 'text' as const },
     organization_id: { name: 'organization_id', type: 'text' as const },
     valid_from: { name: 'valid_from', type: 'datetime' as const },
     valid_until: { name: 'valid_until', type: 'datetime' as const },
@@ -349,7 +351,7 @@ async function makePlatformAdmin(h: Harness, userId: string): Promise<void> {
   }
   await h.engine.insert(
     'sys_user_permission_set',
-    { id: `ups_${userId}`, user_id: userId, permission_set_id: PS_ADMIN },
+    { id: `ups_${userId}`, user_id: userId, permission_set_id: PS_ADMIN, permission_set: ADMIN_FULL_ACCESS },
     SYSTEM,
   );
 }
