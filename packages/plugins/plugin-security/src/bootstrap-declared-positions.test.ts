@@ -238,13 +238,16 @@ describe('bootstrapDeclaredPositions — one catalog read, both sources (ADR-013
   // hydrated into the bare slot and shadows the declaration at read. Positive
   // control first: the registry really answers the stored body for the name.
   it('a stored definition shadowing a built-in name is neither seeded nor restamped', async () => {
+    // Both hydration shapes: stated tenant-authored only (hydrated before the
+    // six were registered), and with the declaration's envelope grafted on
+    // (hydrated after) — which names THIS plugin's package.
     const shadows = [
-      { name: 'org_admin', label: 'Repurposed Org Admin', description: 'Saved at the door' },
-      { name: 'everyone', label: 'Repurposed Everyone', description: 'Saved at the door' },
+      { name: 'org_admin', label: 'Repurposed Org Admin', description: 'Saved at the door', _provenance: 'org' },
+      { name: 'everyone', label: 'Repurposed Everyone', description: 'Saved at the door', _provenance: 'org', _packageId: SECURITY_PLUGIN_ID },
     ];
     const registry = declaredRegistry(...shadows);
     expect((registry.getItem('position', 'org_admin') as any)?.label).toBe('Repurposed Org Admin');
-    expect((registry.getItem('position', 'org_admin') as any)?._packageId).toBeUndefined();
+    expect((registry.getItem('position', 'everyone') as any)?.label).toBe('Repurposed Everyone');
 
     const seeded = securityBuiltinPositions.map((p, i) => ({
       id: `pos_builtin_${i}`, name: p.name, label: p.label, description: p.description,
