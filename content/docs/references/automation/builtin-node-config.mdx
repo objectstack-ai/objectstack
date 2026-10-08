@@ -38,7 +38,9 @@ its schema before running (`service-automation`'s `parse-config.ts`), so
 type and `required` violations refuse the node as a guard. All of these
 parse the RAW stored config — their typed slots are strings (or `unknown`
 where values interpolate), so `{token}` templates pass and resolve at the
-executor's existing interpolation points.
+executor's existing interpolation points. The value slots are the exception
+since #19939: the `{token}` dialect is retired there (the "value slots"
+section below).
 
 ## Unknown keys — closed here too, as of #4001 批 9
 
@@ -72,8 +74,9 @@ this contract describe the same surface from the two sides.
 
 The `create_record` / `update_record` `fields` map carries the same value
 contract since #19938 (`FlowValueSlotSchema`, the "value slots" section):
-a field value may be a CEL value envelope beside a `{token}` template or a
-literal, and the three maps are the expression ledger's `value`-role slots.
+a field value is a CEL value envelope or a literal — a `{token}` template is
+refused there since #19939 — and the three maps are the expression ledger's
+`value`-role slots.
 
 Deliberately absent:
  - `decision` / `script` / `subflow` / `wait` / `connector_action` — the
@@ -107,7 +110,7 @@ const result = AssignmentConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **assignments** | `Record<string, any>` | optional | Variables to set: each key is a variable name, each value a `{token}` template, a CEL value envelope, or a literal |
+| **assignments** | `Record<string, any>` | optional | Variables to set: each key is a variable name, each value a CEL value envelope or a literal |
 
 
 ---
@@ -130,7 +133,7 @@ CEL value envelope `{ dialect: 'cel', source }` — evaluated by the expression 
 
 ## AssignmentValue
 
-Value the variable takes: a string (`{token}` flow interpolation — a sole token keeps its type), a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expression engine (the CEL stdlib such as `joinNonEmpty` is reachable), or any other literal
+Value the variable takes: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expression engine (the CEL stdlib such as `joinNonEmpty` is reachable), or a literal written as it is — a `{…}` template token in a string is refused (the template dialect is retired from value slots; the date macros and `$User` paths are kept for now)
 
 
 ---
@@ -142,7 +145,7 @@ Value the variable takes: a string (`{token}` flow interpolation — a sole toke
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | ✅ | Object to insert into |
-| **fields** | `Record<string, any>` | optional | Field values to write on the new record: each key is a field name, each value a `{token}` template, a CEL value envelope, or a literal |
+| **fields** | `Record<string, any>` | optional | Field values to write on the new record: each key is a field name, each value a CEL value envelope or a literal |
 | **outputVariable** | `string` | optional | Flow variable bound to the created record |
 
 
@@ -175,7 +178,7 @@ Value the variable takes: a string (`{token}` flow interpolation — a sole toke
 
 ## FlowValueSlot
 
-A value: a string (`{token}` flow interpolation — a sole token keeps its type), a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expression engine (the CEL stdlib such as `joinNonEmpty` is reachable), or any other literal
+A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expression engine (the CEL stdlib such as `joinNonEmpty` is reachable), or a literal written as it is — a `{…}` template token in a string is refused (the template dialect is retired from value slots; the date macros and `$User` paths are kept for now)
 
 
 ---
@@ -285,7 +288,7 @@ A value: a string (`{token}` flow interpolation — a sole token keeps its type)
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | ✅ | Object to update |
 | **filter** | `Record<string, any>` | optional | Field/value pairs identifying the record(s) to update |
-| **fields** | `Record<string, any>` | optional | Field values to write: each key is a field name, each value a `{token}` template, a CEL value envelope, or a literal |
+| **fields** | `Record<string, any>` | optional | Field values to write: each key is a field name, each value a CEL value envelope or a literal |
 | **multi** | `boolean` | optional | Declare bulk intent: update every row the filter matches (default false — a predicate update without it is refused by the engine) |
 
 
