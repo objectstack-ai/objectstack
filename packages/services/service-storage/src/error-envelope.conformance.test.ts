@@ -203,6 +203,26 @@ describe('storage error envelope (#3675)', () => {
       },
     },
     {
+      // #22046: the upload ownership rule's one refusal.
+      name: 'committing an upload the caller did not start',
+      status: 403,
+      code: 'PERMISSION_DENIED',
+      run: async () => {
+        const store = new StorageMetadataStore(null);
+        await store.createFile({
+          id: 'f-owned',
+          key: 'user/f-owned.bin',
+          name: 'f.bin',
+          status: 'pending',
+          owner_id: 'u-uploader',
+        });
+        const routes = mount(await tmpAdapter(), store, {
+          resolveSession: async () => ({ userId: 'u-someone-else' }),
+        });
+        return drive(routes, 'POST', `${BASE}/upload/complete`, { body: { fileId: 'f-owned' } });
+      },
+    },
+    {
       name: 'anonymous upload when a session resolver is wired',
       status: 401,
       code: 'AUTH_REQUIRED',
