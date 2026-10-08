@@ -1,15 +1,19 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The canon a `TemplateExpressionInputSchema` hover shows (ADR-0032 Decision 4:
- * fix the canon first — the model emits what it is shown).
+ * The canon this file's template docblocks show (ADR-0032 Decision 4: fix the
+ * canon first — the model emits what it is shown).
  *
- * The schema's docblock ships as the `.d.ts` hover text of the spec tarball,
- * and it is where an author (or an agent) reads which placeholder spelling a
- * template slot takes. Since protocol 18 a notify node's `title` / `message`
- * read `{{var}}` only (#22110), so no sentence of that docblock may still
- * prescribe the single-brace `{var}` for a notify slot. The one sentence that
- * may name `{var}` there is the one saying it is REFUSED.
+ * Three exported symbols of `expression.zod.ts` tell an author (or an agent)
+ * which placeholder spelling a template slot takes, and each docblock ships as
+ * the `.d.ts` hover text of the spec tarball: `TemplateExpressionInputSchema`,
+ * the `tmpl` helper the notify `title` / `message` `.describe()` names as the
+ * way to write the envelope, and `TYPED_EXPRESSION_SOURCE_REQUIRED`. Since
+ * protocol 18 a notify node's `title` / `message` read `{{var}}` only (#22110),
+ * so no sentence of those docblocks may still prescribe a single-brace
+ * placeholder (`{var}`, `{record.x}`, `{record.name}`) for a notify slot. The
+ * one sentence that may name one there is the one saying it is REFUSED. The
+ * three are held as one set: the canon in this file is one canon.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -25,20 +29,31 @@ function docblockAbove(source: string, marker: string): string {
   return source.slice(start + 3, end).replace(/\n\s*\* ?/g, ' ');
 }
 
-/** A single-brace `{var}` — not the inside of `{{var}}`. */
-const SINGLE_BRACE_VAR = /(^|[^{])`?\{var\}`?(?!\})/;
+/** A single-brace placeholder — `{var}`, `{record.x}` — not the inside of a `{{ }}` hole. */
+const SINGLE_BRACE_PLACEHOLDER = /(^|[^{])\{[A-Za-z_$][\w.$]*\}(?!\})/;
 
-describe('TemplateExpressionInputSchema docblock — the canon on a notify slot', () => {
-  const doc = docblockAbove(SOURCE, 'export const TemplateExpressionInputSchema');
-  const sentences = doc.split(/(?<=\.)\s+/);
+/** The docblocks held as one canon, each with a sentence that proves the read reached it. */
+const DOCBLOCKS: ReadonlyArray<{ marker: string; reached: RegExp }> = [
+  { marker: 'export const TemplateExpressionInputSchema', reached: /So write the spelling the slot's renderer reads/ },
+  { marker: 'export function tmpl', reached: /Write the spelling the slot's renderer reads/ },
+  { marker: 'export const TYPED_EXPRESSION_SOURCE_REQUIRED', reached: /The `template` sentence prescribes/ },
+];
 
-  it('reads the docblock it means to — the notify bullet and the closing prescription are there', () => {
-    expect(sentences.some((s) => /notify/i.test(s) && s.includes('{{var}}'))).toBe(true);
-    expect(sentences.some((s) => s.includes('So write the spelling the slot\'s renderer reads'))).toBe(true);
-  });
+describe('expression.zod.ts template docblocks — the canon on a notify slot', () => {
+  for (const { marker, reached } of DOCBLOCKS) {
+    const doc = docblockAbove(SOURCE, marker);
+    const sentences = doc.split(/(?<=\.)\s+/);
 
-  it('prescribes no single-brace `{var}` for a notify slot — only the sentence that refuses it names one', () => {
-    const offending = sentences.filter((s) => /notify/i.test(s) && SINGLE_BRACE_VAR.test(s) && !/refused/.test(s));
-    expect(offending).toEqual([]);
-  });
+    describe(marker, () => {
+      it('reads the docblock it means to — it names a notify slot, and its prescription sentence is there', () => {
+        expect(sentences.some((s) => /notify/i.test(s))).toBe(true);
+        expect(reached.test(doc)).toBe(true);
+      });
+
+      it('prescribes no single-brace placeholder for a notify slot — only a sentence that refuses one names it', () => {
+        const offending = sentences.filter((s) => /notify/i.test(s) && SINGLE_BRACE_PLACEHOLDER.test(s) && !/refused/.test(s));
+        expect(offending).toEqual([]);
+      });
+    });
+  }
 });

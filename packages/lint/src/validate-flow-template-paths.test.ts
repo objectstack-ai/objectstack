@@ -926,6 +926,21 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
     ).toEqual([]);
   });
 
+  // …and so is a bracket-indexed path in a hole (`{{ rows[0].subject }}` is a
+  // spelling this card's own docs teach): `[i]` reads as `.i`, the way the
+  // engine resolves it, so an index does not hide a misspelt field either.
+  it('judges a bracket-indexed path in a `{{ }}` hole like its dotted form', () => {
+    const withTags = (title: string): AnyRec => ({
+      ...scheduleFlow([FETCH_ONE, { id: 'note', type: 'notify', config: { title } }]),
+      objects: [{ ...CASE_OBJECT, fields: { ...CASE_OBJECT.fields, tags: { name: 'tags', type: 'multiselect' } } }],
+    });
+    const findings = validateFlowTemplatePaths(withTags('First tag: {{ caseRecord.tagz[0] }}'));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
+    expect(findings[0].message).toContain('tagz');
+    expect(validateFlowTemplatePaths(withTags('First tag: {{ caseRecord.tags[0] | upper }}'))).toEqual([]);
+  });
+
   it('resolves the declared-variable + loop shape examples/app-todo ships', () => {
     const findings = validateFlowTemplatePaths(
       scheduleFlow(

@@ -291,12 +291,12 @@ export type TypedExpressionDialect = Extract<ExpressionDialect, 'cron' | 'templa
  *
  * The `template` sentence prescribes `{{record.name}}`: it is the sentence of
  * {@link TemplateExpressionInputSchema}, whose slots' renderers read `{{var}}`
- * (or, for `titleFormat`, either spelling). A template slot whose renderer
- * reads another spelling does not answer with it: it takes the same input
- * from the package-internal constructor (`./typed-expression-input.ts`) with
- * sentences prescribing its own renderer's spelling. The notify node's
- * `title` / `message`, rendered by the flow interpolator, prescribe
- * `{record.name}` (`automation/io-node-config.zod.ts`).
+ * (or, for `titleFormat`, either spelling). A template slot that must name
+ * itself in the refusal does not answer with it: it takes the same input from
+ * the package-internal constructor (`./typed-expression-input.ts`) with its
+ * own sentences. The notify node's `title` / `message` do, so their refusals
+ * can name the key (`automation/io-node-config.zod.ts`); since protocol 18
+ * they prescribe the same `{{ }}` hole, `{{ record.name }}`.
  */
 export const TYPED_EXPRESSION_SOURCE_REQUIRED: Readonly<Record<TypedExpressionDialect, string>> = {
   cron:
@@ -508,11 +508,10 @@ export const P = cel;
  *
  * - `{{record.x}}` — the `@objectstack/formula` template engine and the
  *   messaging, email and i18n renderers read double braces only, and leave a
- *   `{record.x}` in their output verbatim;
- * - `{record.x}` — a notify flow node's `title` / `message` are rendered by the
- *   flow interpolator, which reads single braces only: a `{{record.x}}` keeps
- *   its outer braces in the sent text, and the build's
- *   `flow-double-brace-interpolation` rule flags it;
+ *   `{record.x}` in their output verbatim. Since protocol 18 a notify flow
+ *   node's `title` / `message` read `{{record.x}}` too — the formula template
+ *   engine renders them — and a single-brace token there is refused at every
+ *   door (`automation/flow-text-slot-template.ts`);
  * - either — `titleFormat`'s renderers normalize `{{record.x}}` to `{record.x}`.
  */
 export function tmpl(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression {
