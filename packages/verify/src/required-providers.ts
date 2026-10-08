@@ -22,10 +22,11 @@
 //     `extras`.
 //   · WHEN NOT: `providesCapability`'s exact identity match against what this
 //     boot already holds — the harness's own settings / analytics / sharing
-//     services, `opts.automation`, and every `opts.extraPlugins` entry. A
-//     provider already held skips its whole token, extras included: `serve`'s
-//     "an explicit instance wins" rule, so a suite that passes its own
-//     instance keeps it.
+//     services, `opts.automation`, every `opts.extraPlugins` entry, and every
+//     plugin of the app's own `plugins` array. A provider already held skips
+//     its whole token, extras included: `serve`'s "an explicit instance wins"
+//     rule, so an app that wires a provider itself, or a suite that passes its
+//     own instance, keeps it.
 //   · A token with no row — a tier token (`auth`, `ui`, `i18n`, `ai`) or a
 //     known token no open package provides (`hierarchy-security`) — mounts
 //     nothing here, as it mounts nothing in `serve`'s resolver.
@@ -42,8 +43,9 @@
 //     slate (`queue`, `job`, `messaging`, …) on every boot, and some providers
 //     hard-depend on one of them: `triggers`' schedule extras on `job`, its API
 //     trigger on `queue`, `webhooks` on `messaging`. This boot does not mount
-//     the slate, so it mounts exactly the slate providers a mounted provider
-//     hard-depends on — found in the same table, among the tokens a served boot
+//     the slate, so it mounts exactly the slate providers a mounted plugin
+//     hard-depends on — a provider it constructs, or a plugin of the app's own
+//     `plugins` array — found in the same table, among the tokens a served boot
 //     of this app would have mounted (its `requires` and the slate). A
 //     dependency no such token supplies is left to the kernel, whose refusal
 //     names it, as `serve`'s would.
@@ -97,7 +99,12 @@ async function constructProvider(
  * caller registers them in its own slot.
  *
  * @param held - Every plugin instance this boot mounts on its own or was handed
- *   (`opts.extraPlugins`, `opts.automation`'s instance, the harness's services).
+ *   (`opts.extraPlugins`, `opts.automation`'s instance, the harness's services,
+ *   the app's own `plugins`).
+ * @param dependents - The other plugins this boot mounts that are not providers
+ *   it constructs — the app's own `plugins` array. Their hard dependencies are
+ *   searched like a mounted provider's, as `serve`'s always-on slate would
+ *   supply them.
  * @param isRegistered - Whether a plugin of that name is already registered on
  *   the kernel (a dependency the boot itself satisfies).
  * @param packageRoot - The app's root, handed to `automation` as `serve` does.
@@ -105,6 +112,7 @@ async function constructProvider(
 export async function constructRequiredProviders(opts: {
   config: unknown;
   held: readonly unknown[];
+  dependents?: readonly unknown[];
   isRegistered: (name: string) => boolean;
   packageRoot: string;
 }): Promise<unknown[]> {
@@ -132,7 +140,7 @@ export async function constructRequiredProviders(opts: {
   for (;;) {
     const present = new Set(all().map(pluginName).filter((n): n is string => n !== undefined));
     let next: string | undefined;
-    for (const plugin of [...named, ...dependencies]) {
+    for (const plugin of [...(opts.dependents ?? []), ...named, ...dependencies]) {
       for (const dependency of hardDependencies(plugin)) {
         if (present.has(dependency) || opts.isRegistered(dependency)) continue;
         next = searched.find((t) => {

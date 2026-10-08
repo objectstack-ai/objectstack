@@ -25,6 +25,9 @@ export * from './artifact-packages.js';
 // both already depend on this package.
 export * from './stack-collections.js';
 export * from './capability-providers.js';
+// [#22301] And the rule for the app's own `plugins` array, which both boots
+// mount: what a string, bundle or instance entry becomes. Same reason.
+export * from './stack-plugins.js';
 export * from './lite-kernel.js';
 export * from './types.js';
 export * from './logger.js';

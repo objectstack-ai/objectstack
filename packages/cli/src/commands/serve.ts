@@ -30,7 +30,7 @@ import { readEnvWithDeprecation, resolveTenancyPosture, resolveAllowDegradedTena
 import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from '@objectstack/spec/kernel';
 // [#22301] The `requires` token → provider table and its exact identity match,
 // shared with `@objectstack/verify`'s `bootStack` — see `Serve.CAPABILITY_PROVIDERS`.
-import { CAPABILITY_PROVIDERS, providesCapability, type CapabilitySpec } from '@objectstack/core';
+import { CAPABILITY_PROVIDERS, providesCapability, materializeStackPlugin, type CapabilitySpec } from '@objectstack/core';
 // The posture vocabulary, read from the package that DEFINES it (#5359) — the
 // boot gate's fix list enumerates the accepted values, and a second literal
 // list would be free to drift the day a posture is added.
@@ -4221,27 +4221,26 @@ export default class Serve extends Command {
       if (plugins.length > 0) {
         for (const plugin of plugins) {
           try {
-            let pluginToLoad = plugin;
-
-            // Resolve string references (package names)
-            if (typeof plugin === 'string') {
+            // [#22301] What an entry becomes — a string is a package specifier,
+            // a plain bundle (no `init`) is wrapped into `AppPlugin`, an instance
+            // is itself — is ONE rule, `materializeStackPlugin` (`@objectstack/
+            // core`), which `@objectstack/verify`'s `bootStack` mounts the same
+            // array by. Only the loading is this boot's own:
+            const pluginToLoad: any = await materializeStackPlugin(plugin, {
               // Host-anchored, NOT a bare `import()`: this specifier comes from
               // the served app's own config, so what the app DECLARES about it is
               // the contract (commit 9cc6777d3). The helper carries the failure wrapper too.
-              const imported = await Serve.importConfigPlugin(plugin, hostRoot);
-              pluginToLoad = imported.default || imported;
-            }
-
-            // Wrap raw config objects (no init/start) into AppPlugin
-            // This handles plugins defined as plain { name, objects, ... } bundles
-            if (pluginToLoad && typeof pluginToLoad === 'object' && !pluginToLoad.init) {
-              try {
-                const { AppPlugin } = await import('@objectstack/runtime');
-                pluginToLoad = new AppPlugin(pluginToLoad);
-              } catch (e: any) {
-                // Fall through to kernel.use which will report the error
-              }
-            }
+              importSpecifier: (specifier) => Serve.importConfigPlugin(specifier, hostRoot),
+              wrapBundle: async (bundle) => {
+                try {
+                  const { AppPlugin } = await import('@objectstack/runtime');
+                  return new AppPlugin(bundle);
+                } catch {
+                  // Fall through to kernel.use which will report the error
+                  return bundle;
+                }
+              },
+            });
 
             // [#9863 / #9864] The superseding half of the pair documented at
             // the `AuditPlugin` auto-registration above: a stack plugin whose
