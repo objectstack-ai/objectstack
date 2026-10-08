@@ -122,7 +122,7 @@ const ordersStack = () => defineStack({ manifest: ordersManifest, objects: [orde
 
 // ─── 1. The key set is derived ──────────────────────────────────────
 
-describe('#14242 B — the assembled body carries the stack schema\'s collections, derived', () => {
+describe('the assembled body, declared apart from the authoring manifest, carries the stack schema\'s collections, derived', () => {
   it('lacks exactly the artifact-envelope keys, and nothing else', () => {
     const stackKeys = shapeKeys(ObjectStackDefinitionSchema);
     const bodyKeys = shapeKeys(AssembledPackageBodySchema);
@@ -156,7 +156,7 @@ describe('#14242 B — the assembled body carries the stack schema\'s collection
 
 // ─── 2. Each stage refuses the other's spelling ─────────────────────
 
-describe('#14242 B — two stages, two declarations, neither tolerant of the other', () => {
+describe('two stages, two declarations, neither tolerant of the other', () => {
   const assembledBody = { ...coreManifest, objects: [accountObject] };
   const globBody = { ...coreManifest, objects: ['./src/objects/*.object.ts'] };
 
@@ -165,7 +165,7 @@ describe('#14242 B — two stages, two declarations, neither tolerant of the oth
     expect(verdict.success).toBe(true);
   });
 
-  it('the AUTHORING entry still refuses that same body — the mismatch #14242 measured', () => {
+  it('the AUTHORING entry still refuses that same body — the mismatch that is the reason two declarations exist', () => {
     // Kept as a live measurement rather than prose: it is the reason two
     // declarations exist, and a widened authoring schema (road C) would turn
     // this green without anyone noticing the stages had merged.
@@ -281,7 +281,7 @@ describe("ADR-0130 D4 — `manifest: 'preserve'` assembles each input stack", ()
 
 // ─── 4. `plugins` / `devPlugins` are envelope keys (#15219) ──────────
 
-describe('#15219 A — `plugins` / `devPlugins` are envelope keys: top level only, never inside `packages[]`', () => {
+describe('`plugins` / `devPlugins` are envelope keys: top level only, never inside `packages[]`', () => {
   /** What a host hands to `kernel.use()` — a live instance, not metadata. */
   const livePlugin = { name: 'plugin.example', init: () => undefined };
 

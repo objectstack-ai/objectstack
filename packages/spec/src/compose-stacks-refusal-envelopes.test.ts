@@ -202,7 +202,7 @@ const rows: Array<{
   },
 ];
 
-describe('#16348 — every composeStacks conflict refusal carries an ADR-0112 envelope', () => {
+describe('every composeStacks conflict refusal carries an ADR-0112 envelope', () => {
   for (const row of rows) {
     describe(row.site, () => {
       it(`refuses with code ${row.code} and status 422`, () => {

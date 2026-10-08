@@ -98,7 +98,7 @@ afterEach(() => {
 
 // ─── 1. Key-set parity with the schema, both directions ─────────────
 
-describe('#14877 pin 1 — the exported key set equals the schema\'s declared top-level key set', () => {
+describe('compose-key dispositions export, pin 1 — the exported key set equals the schema\'s declared top-level key set', () => {
   it('COMPOSE_KEY_DISPOSITIONS names every key the schema declares, and no other', () => {
     const schemaKeys = schemaTopLevelKeys();
     // Non-vacuity: the schema really is the 40+-key envelope, not an empty shape agreeing with anything.
@@ -135,7 +135,7 @@ describe('#14877 pin 1 — the exported key set equals the schema\'s declared to
 
 // ─── 2. Frozen ──────────────────────────────────────────────────────
 
-describe('#14877 pin 2 — the view is frozen', () => {
+describe('compose-key dispositions export, pin 2 — the view is frozen', () => {
   it('COMPOSE_KEY_DISPOSITIONS is frozen and refuses assignment to an existing key', () => {
     expect(Object.isFrozen(COMPOSE_KEY_DISPOSITIONS)).toBe(true);
     const mutable = COMPOSE_KEY_DISPOSITIONS as unknown as Record<string, string>;
@@ -163,7 +163,7 @@ describe('#14877 pin 2 — the view is frozen', () => {
 
 // ─── 3. Every value is a declared disposition ───────────────────────
 
-describe('#14877 pin 3 — every value is one of the declared dispositions', () => {
+describe('compose-key dispositions export, pin 3 — every value is one of the declared dispositions', () => {
   it('no key carries a disposition outside the ComposeDisposition vocabulary', () => {
     const vocabulary = new Set(Object.keys(DECLARED_DISPOSITIONS));
     for (const [key, disposition] of Object.entries(COMPOSE_KEY_DISPOSITIONS)) {
@@ -189,7 +189,7 @@ describe('#14877 pin 3 — every value is one of the declared dispositions', () 
 
 // ─── 4. The dispositions are the composer's rules ───────────────────
 
-describe('#14877 pin 4 — each disposition is what composeStacks actually does', () => {
+describe('compose-key dispositions export, pin 4 — each disposition is what composeStacks actually does', () => {
   it("every 'concat' key concatenates in stack order — the export's concat subset IS the composer's", () => {
     const concatKeys = keysWith('concat');
     // Non-vacuity: the concat family is the bulk of the table.
@@ -264,7 +264,7 @@ describe('#14877 pin 4 — each disposition is what composeStacks actually does'
 
 // ─── 5. Derived, and reaching the surface as the same objects ───────
 
-describe('#14877 pin 5 — STACK_DEFINITION_KEYS is derived, and both symbols reach the package surface', () => {
+describe('compose-key dispositions export, pin 5 — STACK_DEFINITION_KEYS is derived, and both symbols reach the package surface', () => {
   it('STACK_DEFINITION_KEYS is Object.keys of the table — same members, same order, no second literal', () => {
     expect([...STACK_DEFINITION_KEYS]).toEqual(Object.keys(COMPOSE_KEY_DISPOSITIONS));
   });
