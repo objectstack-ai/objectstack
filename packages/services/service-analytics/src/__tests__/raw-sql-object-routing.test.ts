@@ -258,9 +258,9 @@ describe('executeRawSql auto-bridge routes by object (#5033)', () => {
       { stage: 'lost', deal_count: 1 },
     ]);
     // The blanket `expect(warn).not.toHaveBeenCalled()` this replaces could no
-    // longer hold: the plugin reports at init when no `security` service is
-    // registered to answer the OBJECT-LEVEL read grant, and this fixture
-    // deliberately registers none.
+    // longer hold: the object-level bridge reports, once, at the first query
+    // that finds no `security` service to answer the OBJECT-LEVEL read grant,
+    // and this fixture deliberately registers none.
     //
     // ⛔ But the replacement is not "anything except the routing phrase"
     // either — that admits every OTHER new warning into a case whose whole job
@@ -270,7 +270,7 @@ describe('executeRawSql auto-bridge routes by object (#5033)', () => {
     const warnings = warn.mock.calls.map((c) => String(c[0]));
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatch(
-      /No admitObjectRead configured and no "security" service registered at init/,
+      /No admitObjectRead configured and no "security" service registered when an analytics query needed one/,
     );
     // …and it is emphatically not the degradation this case is about.
     expect(warnings[0]).not.toMatch(/is unavailable/);
