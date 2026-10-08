@@ -107,12 +107,14 @@ const flow: Flow = {
       label: 'Echo what the record reads',
       config: {
         objectName: ECHO,
+        // CEL value envelopes — the `{…}` template dialect is retired from
+        // value slots (#19939).
         fields: {
-          name: '{note}',
-          seen_name: '{record.name}',
-          seen_password: `{record.${PW}}`,
-          seen_token: `{record.${TOKEN}}`,
-          seen_previous_password: `{previous.${PW}}`,
+          name: { dialect: 'cel', source: 'note' },
+          seen_name: { dialect: 'cel', source: 'record.name' },
+          seen_password: { dialect: 'cel', source: `record.${PW}` },
+          seen_token: { dialect: 'cel', source: `record.${TOKEN}` },
+          seen_previous_password: { dialect: 'cel', source: `previous.${PW}` },
         },
       },
     },

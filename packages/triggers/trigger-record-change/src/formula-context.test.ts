@@ -103,7 +103,7 @@ describe('record-change context hydrates read-time formula fields (#3426)', () =
       name: 'lead_greeting', label: 'Greeting', type: 'autolaunched',
       nodes: [
         { id: 'start', type: 'start', label: 'Start', config: { objectName: 'crm_lead', triggerType: 'record-after-create' } },
-        { id: 'stamp', type: 'update_record', label: 'Stamp', config: { objectName: 'crm_lead', filter: { id: '{record.id}' }, fields: { greeting: 'Hello, {record.full_name}!' } } },
+        { id: 'stamp', type: 'update_record', label: 'Stamp', config: { objectName: 'crm_lead', filter: { id: '{record.id}' }, fields: { greeting: { dialect: 'cel', source: "'Hello, ' + record.full_name + '!'" } } } },
         { id: 'end', type: 'end', label: 'End' },
       ],
       edges: [ { id: 'e1', source: 'start', target: 'stamp' }, { id: 'e2', source: 'stamp', target: 'end' } ],

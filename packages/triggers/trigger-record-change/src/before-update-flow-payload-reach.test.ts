@@ -431,7 +431,9 @@ function probeFlow(
         id: 'log', type: 'create_record', label: 'Log',
         config: {
           objectName: `${object}_audit`,
-          fields: { seen: '{previous.title}', note: '{previous.status}' },
+          // CEL value envelopes — the `{…}` template dialect is retired from
+          // value slots (#19939).
+          fields: { seen: { dialect: 'cel', source: 'previous.title' }, note: { dialect: 'cel', source: 'previous.status' } },
         },
       },
       { id: 'end', type: 'end', label: 'End' },
@@ -523,7 +525,7 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
     await seedTwoRows(stack.data, object);
     stack.automation.registerFlow('s1_flow', probeFlow('s1_flow', object, {
       id: 'probe', type: 'assignment', label: 'Assign',
-      config: { assignments: { residue: 'REACHED-{previous.title}' } },
+      config: { assignments: { residue: { dialect: 'cel', source: "'REACHED-' + previous.title" } } },
     }) as any);
 
     const wrote = await batchUpdate(stack.data, object, { status: 'done' });
@@ -754,7 +756,7 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
       config: {
         objectName: object,
         filter: { id: '{record.id}' },
-        fields: { residue: 'REACHED-{previous.title}' },
+        fields: { residue: { dialect: 'cel', source: "'REACHED-' + previous.title" } },
       },
     }) as any);
 
@@ -782,9 +784,9 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
       config: {
         objectName: object,
         filter: { id: '{record.id}' },
-        // The object token resolves to the array itself; the question is
-        // whether the second write's own passes mutate the shared array.
-        fields: { tags: '{record.tags}', residue: 'copied' },
+        // The path resolves to the array itself; the question is whether the
+        // second write's own passes mutate the shared array.
+        fields: { tags: { dialect: 'cel', source: 'record.tags' }, residue: 'copied' },
       },
     }) as any);
 
