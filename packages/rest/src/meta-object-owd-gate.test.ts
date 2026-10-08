@@ -163,10 +163,11 @@ const probeObject = (over: Record<string, unknown> = {}) => ({
  * which is the shape the lightweight assembler produces and the one under
  * test. Passing `'package-author'` exercises the #6710 carve-out explicitly.
  * @param opts.envWritableObject set `OS_METADATA_WRITABLE=object`. R1's own
- * docblock names this as the path it judges — without it,
- * `SysMetadataRepository.assertAllowed()` refuses an `object` overlay of a
- * PACKAGED item outright (`NOT_OVERRIDABLE`), so an R1-legal overlay could
- * never land and "R1 permits tightening" would be unobservable.
+ * docblock names this as the path it judges — without it, `saveMetaItem`'s
+ * package door refuses an `object` overlay of a PACKAGED item outright
+ * (`NOT_OVERRIDABLE`), on this topology as on an environment kernel, before
+ * the lint door or R1 is asked; so every case that drives a packaged overlay
+ * through those doors opens it.
  */
 async function boot(opts: { channel?: MetadataAuthoringChannel; envWritableObject?: boolean } = {}) {
     const { channel } = opts;
@@ -348,8 +349,10 @@ describe('[#8310] the 422 lint door through PUT /api/v1/meta/object/:name', () =
         // baseline (R1: external `public_read` > declared external `private`).
         // The ruling fixes the order: the lint table answers first
         // (`saveMetaItem` runs it before `runAuthoringGate`), so the author
-        // sees the 422 vocabulary, never a coin-flip between two doors.
-        const { put, storedRows } = await boot();
+        // sees the 422 vocabulary, never a coin-flip between two doors. The
+        // hatch is open because, shut, the package door answers ahead of both
+        // (`NOT_OVERRIDABLE`) — see `boot`.
+        const { put, storedRows } = await boot({ envWritableObject: true });
 
         const res = await put('qa_packaged_account', packagedOverlay({
             sharingModel: 'private',
@@ -370,12 +373,14 @@ describe('[#8310] the 422 lint door through PUT /api/v1/meta/object/:name', () =
 
 describe('[#7674] R1 `owd_widening_forbidden` through PUT /api/v1/meta/object/:name', () => {
     /**
-     * On a host config R1 is the ONLY guard, which is why it belongs here and
-     * not only in the unit suite. The ADR-0005 two-tier authorization that
-     * would normally refuse an overlay of a packaged `object` with
-     * `not_overridable` is ITSELF scoped to `environmentId !== undefined`, so on
-     * this topology the write sails past it and arrives at the posture gate
-     * with nothing else in front of it.
+     * R1 judges the overlay writes that reach it: with `OS_METADATA_WRITABLE`
+     * shut, `saveMetaItem`'s package door refuses an overlay of a packaged
+     * `object` (`NOT_OVERRIDABLE`) ahead of every gate, on this topology as on
+     * an environment kernel. That door used to be scoped to
+     * `environmentId !== undefined`, so on a host config the write sailed past
+     * it to the posture gate; it is asked on every topology now, so these
+     * cases open the hatch — the path R1's own docblock names — and R1 is the
+     * door in front of the write.
      *
      * ## [#9232] Why the wire `code` is `PERMISSION_DENIED` and the gate's own
      * ## spelling now rides `declaredCode`
@@ -405,7 +410,7 @@ describe('[#7674] R1 `owd_widening_forbidden` through PUT /api/v1/meta/object/:n
         // Declared baseline: `public_read`. The overlay asks for
         // `public_read_write`, and leaves the external side unset so R2 has
         // nothing to compare — only R1 can produce this refusal.
-        const { put, storedRows } = await boot();
+        const { put, storedRows } = await boot({ envWritableObject: true });
 
         const res = await put('qa_packaged_account', packagedOverlay({
             sharingModel: 'public_read_write',
@@ -428,7 +433,7 @@ describe('[#7674] R1 `owd_widening_forbidden` through PUT /api/v1/meta/object/:n
         // why R1 SURVIVES the #8310 retirement while R2 did not. A suite that
         // only ever sent an external-wider pair could not tell the doors
         // apart.
-        const { put, storedRows } = await boot();
+        const { put, storedRows } = await boot({ envWritableObject: true });
 
         const res = await put('qa_packaged_account', packagedOverlay({
             sharingModel: 'public_read',
@@ -474,11 +479,10 @@ describe('[#7674] what the gate must still let through', () => {
 
     it('an env overlay that TIGHTENS a packaged object is allowed (R1 is directional)', async () => {
         // `OS_METADATA_WRITABLE=object` is the escape hatch R1's own docblock
-        // names as the path it judges. Without it the overlay is refused a
-        // layer later by `SysMetadataRepository.assertAllowed()`
-        // (`NOT_OVERRIDABLE`) — a DIFFERENT door, measured on this harness —
-        // and this case would then pass for a reason that has nothing to do
-        // with the posture gate.
+        // names as the path it judges. Without it the overlay is refused by
+        // `saveMetaItem`'s package door (`NOT_OVERRIDABLE`) — a DIFFERENT
+        // door, ahead of the posture gate — and this case would then pass for
+        // a reason that has nothing to do with the posture gate.
         const { put, storedRows } = await boot({ envWritableObject: true });
 
         // The packaged baseline is `public_read` / `private`; the overlay

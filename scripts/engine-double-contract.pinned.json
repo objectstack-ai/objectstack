@@ -1097,6 +1097,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.package-door-before-gates.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.package-publish-audit-rows.test.ts",
       "verb": "delete",
       "pinned": 1
