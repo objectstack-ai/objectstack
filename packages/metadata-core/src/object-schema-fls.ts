@@ -51,6 +51,15 @@
  * | `getReadableFields` throws | throws {@link ObjectSchemaMaskEvaluationError} | the exit answers 5xx — never the unmasked body, never an empty-fields 200 |
  * | otherwise | `project` | fields ∉ readable are deleted whole, references included |
  *
+ * ## D4 exempts the definition, not the runtime projections (#22250)
+ *
+ * An exempt caller is served the schema whole because authoring (Studio,
+ * Setup) needs the full definition. Their field permission still binds the
+ * data route, so the projections a runtime client builds affordances from —
+ * the `sortability` key served beside the schema — are derived from
+ * {@link resolveObjectSchemaRuntimeView}: the served document for every other
+ * caller, and for an exempt one the fields their own permission reads.
+ *
  * ## D3 — mask AFTER the cache, fingerprint the ETag
  *
  * The shared metadata cache keeps storing ONE full schema per
@@ -148,17 +157,52 @@ export type ObjectSchemaMaskPassthroughReason =
     | 'disabled'
     /** ADR-0106 D6 tier 1 — no `security` service at all; the deployment has no FLS posture. */
     | 'no-service'
-    /** ADR-0106 D4 — `isSystem` or a platform-admin caller. */
+    /**
+     * ADR-0106 D4 — `isSystem` or a platform-admin caller: the DEFINITION is
+     * served whole, for authoring. [#22250] The runtime projections beside it
+     * are not exempt — see {@link resolveObjectSchemaRuntimeView}.
+     */
     | 'exempt'
     /** Not an object schema (no `fields` map to project). */
     | 'not-applicable';
+
+/**
+ * [#22250] What a D4-exempt caller's OWN field permission says about one
+ * object — the answer the RUNTIME projections served beside the schema read
+ * (the `sortability` envelope key), never the schema itself.
+ *
+ *  - `project` — the caller's readable fields: a runtime projection offers
+ *    none outside them, because the data route refuses each one to this caller
+ *    (a filter or sort on it answers `403`);
+ *  - `undetermined` — the security service could not answer (`undefined`) or
+ *    threw. The runtime projections are derived from the served document as it
+ *    is, which D4 already serves whole to this caller; said once, at `warn`.
+ */
+export type ObjectSchemaRuntimeFieldPosture =
+    | { kind: 'project'; readable: ReadonlySet<string> }
+    | { kind: 'undetermined' };
 
 /**
  * The decision {@link resolveObjectSchemaMaskPosture} reaches for one caller ×
  * one object, BEFORE the document is fetched.
  */
 export type ObjectSchemaMaskPosture =
-    | { kind: 'passthrough'; reason: ObjectSchemaMaskPassthroughReason }
+    | {
+        kind: 'passthrough';
+        reason: ObjectSchemaMaskPassthroughReason;
+        /**
+         * [#22250] Set on an `exempt` posture only, for a caller exempt by
+         * CAPABILITY ({@link OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES}; never
+         * `isSystem`, whom field-level security does not restrict at all) in a
+         * deployment with a `security` service: asks that caller's own field
+         * permission, for the runtime projections beside the schema. LAZY and
+         * asked at most once, so an exit that serves no such projection (the
+         * list read, the layered view) never pays for it, and it NEVER
+         * rejects: D4's "a sick security service cannot fault an exempt caller"
+         * holds. Read through {@link resolveObjectSchemaRuntimeView}.
+         */
+        runtime?: () => Promise<ObjectSchemaRuntimeFieldPosture>;
+    }
     /** ADR-0106 D6 tier 2 — `getReadableFields` could not answer. */
     | { kind: 'undetermined' }
     | {
@@ -256,8 +300,19 @@ export function isObjectSchemaMaskExempt(context: unknown): boolean {
     if (!context || typeof context !== 'object') return false;
     const ctx = context as { isSystem?: unknown; systemPermissions?: unknown };
     if (ctx.isSystem === true) return true;
-    if (!Array.isArray(ctx.systemPermissions)) return false;
-    return ctx.systemPermissions.some(
+    return holdsObjectSchemaMaskExemptCapability(ctx);
+}
+
+/**
+ * The capability half of {@link isObjectSchemaMaskExempt} — the one reading of
+ * `systemPermissions` against {@link OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES}.
+ * [#22250] {@link resolveObjectSchemaMaskPosture} asks it alone to decide
+ * whether an exempt caller's field permission is worth asking: a caller exempt
+ * only as `isSystem` is one field-level security never restricts.
+ */
+function holdsObjectSchemaMaskExemptCapability(context: { systemPermissions?: unknown }): boolean {
+    if (!Array.isArray(context.systemPermissions)) return false;
+    return context.systemPermissions.some(
         (p) => typeof p === 'string' && OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES.includes(p),
     );
 }
@@ -317,14 +372,23 @@ export async function resolveObjectSchemaMaskPosture(input: {
 }): Promise<ObjectSchemaMaskPosture> {
     const { objectName, context, security, enabled, telemetry } = input;
     if (!enabled) return { kind: 'passthrough', reason: 'disabled' };
-    // D4 — a caller property. Checked before the service call so an exempt
-    // caller costs nothing and cannot be turned into an error by a sick
-    // security service.
-    if (isObjectSchemaMaskExempt(context)) return { kind: 'passthrough', reason: 'exempt' };
 
     const ask = typeof security?.getMetadataReadableFields === 'function'
         ? security.getMetadataReadableFields.bind(security)
         : (typeof security?.getReadableFields === 'function' ? security.getReadableFields.bind(security) : undefined);
+
+    // D4 — a caller property. Checked before the service call so an exempt
+    // caller costs nothing and cannot be turned into an error by a sick
+    // security service.
+    if (isObjectSchemaMaskExempt(context)) {
+        // [#22250] The exemption is the DEFINITION's (Studio/Setup authoring
+        // needs the whole schema, and a projected one PUT back deletes what it
+        // withheld). It is not the runtime projections': they keep this
+        // caller's own field permission, asked lazily — see `runtime`.
+        return ask && holdsObjectSchemaMaskExemptCapability(context as { systemPermissions?: unknown })
+            ? { kind: 'passthrough', reason: 'exempt', runtime: runtimeFieldPostureAsker(objectName, context, ask, telemetry) }
+            : { kind: 'passthrough', reason: 'exempt' };
+    }
     // D6 tier 1 — no FLS posture in this deployment at all. The data plane does
     // not mask either, so tightening the metadata plane alone would be theater.
     if (!ask) return { kind: 'passthrough', reason: 'no-service' };
@@ -416,6 +480,132 @@ export async function relateObjectSchemaMaskPosture(
         related.set(object, posture.relate ? await posture.relate(object) : undefined);
     }
     return { ...posture, related };
+}
+
+/**
+ * [#22250] The lazy, memoised question an `exempt` posture's `runtime` asks:
+ * the same `ask` the mask asks a non-exempt caller (so one field permission
+ * yields one runtime answer whatever the caller's class), settled into
+ * {@link ObjectSchemaRuntimeFieldPosture}. It never rejects — an `undefined`
+ * answer and a throw both settle `undetermined`, warned once — because the
+ * exempt caller's DEFINITION read must not become a fault (D4).
+ */
+function runtimeFieldPostureAsker(
+    objectName: string,
+    context: unknown,
+    ask: (object: string, context?: unknown) => Promise<string[] | undefined> | string[] | undefined,
+    telemetry: ObjectSchemaMaskTelemetry | undefined,
+): () => Promise<ObjectSchemaRuntimeFieldPosture> {
+    let settled: Promise<ObjectSchemaRuntimeFieldPosture> | undefined;
+    const settle = async (): Promise<ObjectSchemaRuntimeFieldPosture> => {
+        let readable: string[] | undefined;
+        try {
+            readable = await ask(objectName, context);
+        } catch (error) {
+            telemetry?.warn?.(
+                '[ADR-0106] field visibility for a D4-exempt caller could not be evaluated — the schema is '
+                + 'served whole as D4 rules, and the runtime projections beside it are derived from it unprojected',
+                { object: objectName, decision: 'runtime-projections-unprojected', error: String(error) },
+            );
+            return { kind: 'undetermined' };
+        }
+        if (!Array.isArray(readable)) {
+            telemetry?.warn?.(
+                '[ADR-0106] field visibility for a D4-exempt caller undetermined — the schema is served whole '
+                + 'as D4 rules, and the runtime projections beside it are derived from it unprojected',
+                { object: objectName, decision: 'runtime-projections-unprojected' },
+            );
+            telemetry?.counter?.(OBJECT_SCHEMA_MASK_UNDETERMINED_METRIC, { object: objectName });
+            return { kind: 'undetermined' };
+        }
+        return { kind: 'project', readable: new Set(readable) };
+    };
+    return () => (settled ??= settle());
+}
+
+/**
+ * Qualifies a field withheld from the runtime view ONLY in
+ * {@link ObjectSchemaRuntimeView.fingerprint}. `@` occurs in no field or object
+ * machine name, so the entry can never hash equal to a field the DEFINITION
+ * mask withheld (a bare name) or an `objectOverride` read (`object.field`):
+ * an exempt caller and a projected caller denied the same field are served
+ * different bodies, and so must never share a validator.
+ */
+const RUNTIME_VIEW_FINGERPRINT_QUALIFIER = '@runtime:';
+
+/** The view {@link resolveObjectSchemaRuntimeView} answers. */
+export interface ObjectSchemaRuntimeView<T> {
+    /**
+     * The document the runtime projections derive from — the served one itself
+     * (same reference) unless this caller is D4-exempt and their own field
+     * permission withholds some of its fields, then a copy without those
+     * `fields` entries. ⛔ Never a served body: only `fields` is narrowed.
+     */
+    document: T;
+    /** The fields withheld from the runtime view only, sorted. Empty for every caller the definition mask projects. */
+    withheld: readonly string[];
+    /**
+     * {@link objectFieldVisibilityFingerprint} over {@link withheld}, each entry
+     * qualified so it cannot collide with the definition mask's own; `''` when
+     * nothing is withheld. An exit that validates the served body folds it into
+     * the ETag beside the definition's ({@link foldVisibilityFingerprintIntoEtag}),
+     * because the runtime projections are part of that body.
+     */
+    fingerprint: string;
+}
+
+/**
+ * [#22250] The view of a served object schema that the RUNTIME projections
+ * beside it — today the `sortability` envelope key — are derived from.
+ *
+ * For every caller the definition mask projects, and for every posture that
+ * serves the schema unmasked for a DEPLOYMENT reason (D6 tiers 1–2, D8), that
+ * view is the served document itself: what the caller is served IS what their
+ * field permission admits, or the deployment has no answer to give.
+ *
+ * A D4-exempt caller is served the definition whole, for authoring — and that
+ * is all D4 exempts. Their field permission still binds the data route (a
+ * filter or sort on an unreadable field answers `403`), so a projection a
+ * runtime client builds affordances from must not offer what that route
+ * refuses them. For such a caller this asks the posture's `runtime` and keeps
+ * only the `fields` their permission reads, exactly the field set a non-exempt
+ * caller holding the same permission is served — one field permission, one
+ * runtime projection, whatever the caller's class.
+ *
+ * Asks the security service only for an exempt posture carrying `runtime` and a
+ * document that has a `fields` record; never rejects.
+ */
+export async function resolveObjectSchemaRuntimeView<T>(
+    document: T,
+    posture: ObjectSchemaMaskPosture,
+): Promise<ObjectSchemaRuntimeView<T>> {
+    const unchanged: ObjectSchemaRuntimeView<T> = { document, withheld: [], fingerprint: '' };
+    if (posture.kind !== 'passthrough' || !posture.runtime) return unchanged;
+    if (!document || typeof document !== 'object' || Array.isArray(document)) return unchanged;
+    const rec = document as unknown as Record<string, unknown>;
+    const fields = rec.fields;
+    // The one `fields` shape `packages/spec` declares — the same reading as
+    // {@link applyObjectSchemaMask}, and nothing to ask about without it.
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return unchanged;
+
+    const runtime = await posture.runtime();
+    if (runtime.kind !== 'project') return unchanged;
+
+    const kept: Record<string, unknown> = {};
+    const withheld: string[] = [];
+    for (const [name, def] of Object.entries(fields as Record<string, unknown>)) {
+        if (runtime.readable.has(name)) kept[name] = def;
+        else withheld.push(name);
+    }
+    if (withheld.length === 0) return unchanged;
+    withheld.sort();
+    return {
+        document: { ...rec, fields: kept } as unknown as T,
+        withheld,
+        fingerprint: objectFieldVisibilityFingerprint(
+            withheld.map((name) => `${RUNTIME_VIEW_FINGERPRINT_QUALIFIER}${name}`),
+        ),
+    };
 }
 
 /** The result of projecting one document. */
