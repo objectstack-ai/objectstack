@@ -618,7 +618,8 @@ function preBindReads(unit, src, hookNames = new Set([READY_HOOK, ...Object.keys
           if (PROMISE_CONTINUATIONS.has(callee.name.text)) {
             for (const arg of node.arguments) {
               const continuation = resolveCallable(arg);
-              if (continuation) walk(continuation, origin, visited, onHook);
+              // A closure sees its enclosing frame, parameters included.
+              if (continuation) walk(continuation, origin, visited, onHook, bindings);
             }
           }
           // `this.m(...)` → same-class method or function-valued property.
@@ -1453,6 +1454,9 @@ function selfTest() {
           const trigger = (ctx as any).trigger;
           trigger.call(ctx, event, { sys });
         }
+        private emitWhenSettled(ctx: PluginContext, event: string): void {
+          settled.then(() => ctx.trigger(event));
+        }
         async init(ctx: PluginContext) { await ctx.trigger('x:init', {}); }
         async start(ctx: PluginContext) {
           await ctx.trigger('x:direct', this.service);
@@ -1462,6 +1466,7 @@ function selfTest() {
           };
           emitSettled(false);
           this.emitCatalogEvent(ctx, 'x:param', {});
+          this.emitWhenSettled(ctx, 'x:then-param');
           seedPromise.then(() => ctx.trigger('x:then'));
           setTimeout(() => ctx.trigger('x:timer'), 10);
           ctx.hook('kernel:bootstrapped', async () => { await ctx.trigger('x:late'); });
@@ -1471,7 +1476,7 @@ function selfTest() {
     `);
     const derived = derivePreBindHooks(units);
     const names = [...derived.fired.keys()].sort();
-    assert(JSON.stringify(names) === JSON.stringify(['x:call', 'x:direct', 'x:init', 'x:param', 'x:then']),
+    assert(JSON.stringify(names) === JSON.stringify(['x:call', 'x:direct', 'x:init', 'x:param', 'x:then', 'x:then-param']),
       `the derivation reads every shipped fire-site spelling and nothing deferred (got ${names.join(', ')})`);
     assert(derived.fired.get('x:init')[0].origin === 'init-body', 'an init() fire site is recorded as init-body');
     assert(derived.unresolved.length === 1 && derived.unresolved[0].text === 'eventName',
