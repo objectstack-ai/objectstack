@@ -78,7 +78,7 @@ const ORGANIZATION_CHANGED_MESSAGE =
  * `413` because that is the condition (RFC 9110, content too large).
  * `PAYLOAD_TOO_LARGE` because it is the one registered code for that condition
  * (ADR-0112 ledger, listed under this package's owner key beside
- * `@objectstack/rest`, which answers it for its import row limit): a client
+ * `@objectstack/rest`, which answers it for its import row ceilings): a client
  * branches on "too large" by the code alone, at every door that refuses it.
  * Not `VALIDATION_ERROR`, the bucket `standardErrorCodeForHttpStatus` derives
  * for a `413`: the standard catalog names no `413` member, so that code would
