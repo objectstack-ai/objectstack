@@ -30,12 +30,19 @@
  *   object; and an empty organization written by a `beforeUpdate` hook (the
  *   stored-row half);
  * - the controls: the same caller's update that does not touch the column is
- *   admitted and keeps the row's organization; the same update as a system
- *   write lands; a platform administrator on a posture-permitting object is
- *   exempt as before; an explicit foreign organization is refused as before;
- *   the `single` posture is unchanged; and an INSERT that sends an empty
- *   organization keeps today's rule (it is the stamp's to fill) and lands in
- *   the caller's organization.
+ *   admitted and keeps the row's organization, on both grant tables and on an
+ *   ordinary tenant object; the same update as a system write lands; a
+ *   platform administrator on a posture-permitting object is exempt as before,
+ *   the stored-row half included; an explicit foreign organization is refused
+ *   as before; the `single` posture is unchanged; and an INSERT that sends an
+ *   empty organization keeps today's rule (it is the stamp's to fill) and
+ *   lands in the caller's organization.
+ *
+ * The controls read each store as the engine writes it: on an ordinary tenant
+ * object `organization_id` is the registry's injected `readonly` column, whose
+ * caller-sent value the engine's static-readonly strip drops for a non-system
+ * writer (a hook's value it keeps); the grant tables declare the column
+ * writable, so a sent value is stored as sent.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
