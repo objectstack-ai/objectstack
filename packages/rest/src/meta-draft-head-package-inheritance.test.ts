@@ -17,7 +17,9 @@
  *
  * `?package=all` is the second member of that class. The save door folds it
  * to the env-local overlay; the read door forwarded the literal `all`, so its
- * `version` was resolved at a package address no save writes.
+ * `version` was resolved at a package address no save writes. The credential
+ * carry-forward (#8154) is the third: it compared the served body against the
+ * row at the named key, not the row the draft save overwrites.
  *
  * Driven at the HTTP door on the real stack: a better-sqlite3 `:memory:`
  * engine, the real `sys_metadata*` objects, a real
@@ -38,6 +40,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject } from '@objectstack/platform-objects/metadata';
+import { hashSpec } from '@objectstack/metadata-core';
 import { RestServer } from './rest-server.js';
 
 /** `registry.registerObject` requires a package id (see the sibling real-stack tests). */
@@ -92,8 +95,11 @@ function makeRes() {
 /**
  * Boot the real stack with the cache off: the default cached arm of the plain
  * read publishes no OCC carriers, so the active-row pins read the uncached arm.
+ * `item` names the one item the helpers address; `permissions` the caller's
+ * system capabilities (a `datasource` is read and written under
+ * `manage_platform_settings`).
  */
-async function boot() {
+async function boot(opts: { item?: { type: string; name: string }; permissions?: string[] } = {}) {
     const engine = new ObjectQL();
     liveEngines.push(engine);
     engine.registerDriver(new SqlDriver({
@@ -112,7 +118,8 @@ async function boot() {
     const config = { api: { requireAuth: false }, metadata: { enableCache: false } };
     const rest: any = new RestServer(createMockServer() as any, protocol as any, config as any);
     // An author: `manage_metadata` saves and reads drafts.
-    rest.resolveExecCtx = async () => ({ userId: 'u_author', systemPermissions: ['manage_metadata'] });
+    const systemPermissions = opts.permissions ?? ['manage_metadata'];
+    rest.resolveExecCtx = async () => ({ userId: 'u_author', systemPermissions });
     rest.registerRoutes();
 
     const route = (method: string, path: string) => {
@@ -125,8 +132,8 @@ async function boot() {
         await route(method, routePath).handler({ method, headers: {}, query: {}, params: {}, ...req }, res);
         return res;
     };
-    const item = { type: 'view', name: 'case_grid' };
-    const path = `${META}/view/case_grid`;
+    const item = opts.item ?? { type: 'view', name: 'case_grid' };
+    const path = `${META}/${item.type}/${item.name}`;
 
     /** `GET /meta/view/case_grid`. */
     const read = (query: Record<string, string> = {}) =>
@@ -136,15 +143,31 @@ async function boot() {
         call('PUT', `${META}/:type/:name`, { path, params: item, query, headers, body });
 
     /** The stored rows of the item at one lifecycle, with their binding — the store, not the door's word for it. */
-    const stored = async (state: 'active' | 'draft') => {
-        const rows = await engine.find('sys_metadata', { where: { type: 'view', name: 'case_grid', state } });
+    const storedBodies = async (state: 'active' | 'draft') => {
+        const rows = await engine.find('sys_metadata', { where: { type: item.type, name: item.name, state } });
         return (rows ?? []).map((r: any) => ({
-            label: JSON.parse(String(r.metadata)).label as string,
+            body: JSON.parse(String(r.metadata)) as Record<string, any>,
             packageId: (r.package_id ?? null) as string | null,
         }));
     };
+    const stored = async (state: 'active' | 'draft') =>
+        (await storedBodies(state)).map(({ body, packageId }) => ({ label: body.label as string, packageId }));
 
-    return { read, save, stored };
+    /**
+     * A row as it exists at rest from before the write gates — the only way a
+     * stored credential is still at rest today, since the save door refuses
+     * one — written straight to the store, stamped as `put` stamps a row.
+     */
+    const seed = async (state: 'active' | 'draft', packageId: string | null, body: Record<string, unknown>) => {
+        const now = new Date().toISOString();
+        await engine.insert('sys_metadata', {
+            id: `seed_${state}_${packageId ?? 'unbound'}`, type: item.type, name: item.name, organization_id: null,
+            package_id: packageId, state, metadata: JSON.stringify(body), checksum: hashSpec(body, item.type),
+            version: 1, created_at: now, updated_at: now,
+        }, { context: { isSystem: true } } as any);
+    };
+
+    return { read, save, stored, storedBodies, seed };
 }
 
 const ok = (res: any) => {
@@ -265,5 +288,65 @@ describe('[#22128] `?package=all`: the read resolves `all` the way the save does
 
         ok(await h.save(view('draft 2'), { mode: 'draft', package: 'all' }, { 'if-match': body.version }));
         expect(await h.stored('draft')).toEqual([{ label: 'draft 2', packageId: PKG }]);
+    }, 60_000);
+});
+
+/**
+ * [#22128] The credential carry-forward (#8154) compares the served body
+ * against the row the save OVERWRITES. It read at the key the caller named, so
+ * a package-less draft save of a package-owned item found neither the
+ * inherited draft nor the package-bound active row, compared against the code
+ * layer, and persisted the stored credential away. Measured on the real route
+ * before the fix: the stored draft's `config.url` no longer held it.
+ */
+describe('[#22128] the credential carry-forward reads the row the draft save overwrites', () => {
+    /** A fixture value standing in for the userinfo password a legacy row holds. */
+    const URL_CREDENTIAL = 'fixture-not-a-credential';
+    const DATASOURCE = { type: 'datasource', name: 'warehouse' };
+    const legacyDatasource = (label: string) => ({
+        name: 'warehouse',
+        label,
+        driver: 'postgres',
+        config: {
+            host: 'db.internal',
+            port: 5432,
+            database: 'warehouse',
+            username: 'reporting',
+            url: `postgresql://reporting:${URL_CREDENTIAL}@db.internal:5432/warehouse`,
+        },
+    });
+    const holdsCredential = (body: Record<string, any>) => String(body?.config?.url ?? '').includes(URL_CREDENTIAL);
+    const bootDatasource = () => boot({ item: DATASOURCE, permissions: ['manage_metadata', 'manage_platform_settings'] });
+
+    it('package-owned: the redacted read saved back as a package-less draft, twice, keeps the stored credential', async () => {
+        const h = await bootDatasource();
+        await h.seed('active', PKG, legacyDatasource('live'));
+
+        const served = ok(await h.read()).item;
+        expect(holdsCredential(served)).toBe(false);
+        ok(await h.save({ ...served, label: 'draft 1' }, { mode: 'draft' }));
+        const first = await h.storedBodies('draft');
+        expect(first.map((r) => r.packageId)).toEqual([PKG]);
+        expect(first.map((r) => holdsCredential(r.body))).toEqual([true]);
+
+        const servedDraft = ok(await h.read({ state: 'draft' })).item;
+        expect(holdsCredential(servedDraft)).toBe(false);
+        ok(await h.save({ ...servedDraft, label: 'draft 2' }, { mode: 'draft' }));
+        const second = await h.storedBodies('draft');
+        expect(second.map((r) => [r.body.label, r.packageId, holdsCredential(r.body)])).toEqual([['draft 2', PKG, true]]);
+        // The active row is untouched.
+        expect((await h.storedBodies('active')).map((r) => holdsCredential(r.body))).toEqual([true]);
+    }, 60_000);
+
+    it('control: env-local, the same round trip keeps the stored credential, as before', async () => {
+        const h = await bootDatasource();
+        await h.seed('active', null, legacyDatasource('live'));
+
+        const served = ok(await h.read()).item;
+        ok(await h.save({ ...served, label: 'draft 1' }, { mode: 'draft' }));
+        const servedDraft = ok(await h.read({ state: 'draft' })).item;
+        ok(await h.save({ ...servedDraft, label: 'draft 2' }, { mode: 'draft' }));
+        const drafts = await h.storedBodies('draft');
+        expect(drafts.map((r) => [r.body.label, r.packageId, holdsCredential(r.body)])).toEqual([['draft 2', null, true]]);
     }, 60_000);
 });

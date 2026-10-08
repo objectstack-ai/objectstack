@@ -558,28 +558,30 @@ export class SysMetadataRepository implements MetadataRepository {
    * [#22128] The stored HEAD of one write address: the row a {@link put} with
    * the same `state` and `packageId` upserts — and so the row its optimistic
    * lock judges a parent against — served as {@link get} serves a row (its
-   * version is the one {@link lockAccepts} accepts). `null` when that put
-   * would create.
+   * version is the one {@link lockAccepts} accepts), or `null` when that put
+   * would create; and the package binding that put writes under (`packageId`
+   * here: the named package, the one a package-less draft inherits, or `null`
+   * for the package-unbound row).
    *
-   * Ask this, never {@link get}, for the parent of a write. `get` reads a row
-   * at the key it is handed; a write's key is not always the key its caller
-   * named. A `draft` put that names no package inherits the package of the
-   * item's active row (#11087), so `get(ref, { state: 'draft', packageId:
-   * null })` reads the package-UNBOUND row while the put upserts, and locks
-   * against, the inherited one. A parent taken from that read is `null` for a
-   * draft that exists, and an unpinned (ADR-0008 last-writer-wins) save was
-   * refused 409 by its own lock.
+   * Ask this, never {@link get}, for anything a write at an address compares
+   * against — its parent, or the stored body it carries a withheld credential
+   * forward from. `get` reads a row at the key it is handed; a write's key is
+   * not always the key its caller named. A `draft` put that names no package
+   * inherits the package of the item's active row (#11087), so
+   * `get(ref, { state: 'draft', packageId: null })` reads the package-UNBOUND
+   * row while the put upserts, and locks against, the inherited one. A parent
+   * taken from that read is `null` for a draft that exists, and an unpinned
+   * (ADR-0008 last-writer-wins) save was refused 409 by its own lock.
    *
-   * Both answers come from ONE resolution, {@link resolveWriteHead}.
+   * Every answer comes from ONE resolution, {@link resolveWriteHead}.
    */
   async headAt(
     ref: MetaRef,
     opts: { state?: OverlayState; packageId?: string | null },
-  ): Promise<MetadataItem | null> {
+  ): Promise<{ head: MetadataItem | null; packageId: string | null }> {
     this.assertOpen();
-    const { row } = await this.resolveWriteHead(ref, opts.state ?? 'active', opts.packageId);
-    if (!row) return null;
-    return this.rowToItem(ref, row);
+    const { row, targetPackageId } = await this.resolveWriteHead(ref, opts.state ?? 'active', opts.packageId);
+    return { head: row ? this.rowToItem(ref, row) : null, packageId: targetPackageId };
   }
 
   /**

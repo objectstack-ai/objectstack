@@ -8586,11 +8586,19 @@ export class ObjectStackProtocolImplementation implements
      * back. Here the stakes are higher than a phantom customization — the
      * subtracted material is a credential nobody can retype from the wire.
      *
-     * Reads the row at rest through the overlay repository, whose `get()` is
-     * documented VERBATIM (no ADR-0087 conversion): the comparison must be
+     * Reads the row at rest through the overlay repository, whose rows are
+     * served VERBATIM (no ADR-0087 conversion): the comparison must be
      * against the bytes that were written, because those are the bytes the read
      * exit redacted. {@link carryForwardRedactedValues} then decides per
      * redacted path — see its docblock for the three outcomes.
+     *
+     * [#22128] The row is the one THIS save overwrites, from the repository's
+     * write-address resolution ({@link SysMetadataRepository.headAt}) — ⛔ never
+     * a read at the key the caller named. A draft save that names no package is
+     * stored in the package of the item's active row (#11087); read at the
+     * package-unbound key, neither that draft nor that active row was found,
+     * the comparison fell to the code layer, and the first package-less draft
+     * save of a package-owned datasource persisted its stored credential away.
      *
      * ⚠️ THE DRAFT FALLBACK IS LOAD-BEARING, not defensive. A `?mode=draft`
      * save of an item with no draft row yet has nothing at its own state to
@@ -8621,8 +8629,9 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * The body a carry-forward compares against: the overlay row at the write's
-     * own state, the ACTIVE row for a draft save with no draft row yet (see
+     * The body a carry-forward compares against: the row the write overwrites
+     * at its own state ({@link SysMetadataRepository.headAt}), the ACTIVE row
+     * the draft overlays for a draft save with no draft row yet (see
      * {@link carryForwardRedactedCredentials} for why that fallback is
      * load-bearing), else the CODE layer. RAW in every case — the bytes the
      * read exits redacted — and read with no `try`/`catch`, for the reason the
@@ -8635,15 +8644,19 @@ export class ObjectStackProtocolImplementation implements
         state: 'draft' | 'active';
         packageId: string | null;
     }): Promise<unknown> {
-        let stored = await args.repo.get(args.ref, {
+        // [#22128] The row this save overwrites, and with no draft row yet the
+        // active row the draft overlays: the one in the package the draft is
+        // stamped into (`packageId`, the inherited binding included).
+        const target = await args.repo.headAt(args.ref, {
             state: args.state,
             packageId: args.packageId,
         });
+        let stored = target.head;
         if (!stored && args.state === 'draft') {
-            stored = await args.repo.get(args.ref, {
+            stored = (await args.repo.headAt(args.ref, {
                 state: 'active',
-                packageId: args.packageId,
-            });
+                packageId: target.packageId,
+            })).head;
         }
         // [#20552] NO overlay row at either state: the body the read served is
         // the CODE layer, so that is what the incoming body is compared with.
@@ -18065,7 +18078,7 @@ export class ObjectStackProtocolImplementation implements
         state: 'active' | 'draft',
         packageId: string | null,
     ): Promise<string | null> {
-        return (await repo.headAt(ref, { state, packageId }))?.hash ?? null;
+        return (await repo.headAt(ref, { state, packageId })).head?.hash ?? null;
     }
 
     /**

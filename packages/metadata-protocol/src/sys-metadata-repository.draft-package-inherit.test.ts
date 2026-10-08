@@ -195,15 +195,17 @@ describe('SysMetadataRepository.headAt — the row put locks against (#22128)', 
     const repo = makeRepo(engine);
     const first = await repo.put(REF, { label: 'draft 1' }, { parentVersion: null, actor: 't', state: 'draft' as const });
 
-    const head = await repo.headAt(REF, { state: 'draft', packageId: null });
+    const { head, packageId } = await repo.headAt(REF, { state: 'draft', packageId: null });
     expect(head?.hash).toBe(first.version);
+    // The binding the put writes under: the inherited package.
+    expect(packageId).toBe('app.k9qk');
     // The key the caller named holds no draft: that read is not the parent.
     expect(await repo.get(REF, { state: 'draft', packageId: null })).toBeNull();
 
     await expect(repo.put(REF, { label: 'from null' }, { parentVersion: null, actor: 't', state: 'draft' as const }))
       .rejects.toBeInstanceOf(ConflictError);
     const second = await repo.put(REF, { label: 'draft 2' }, { parentVersion: head!.hash, actor: 't', state: 'draft' as const });
-    expect((await repo.headAt(REF, { state: 'draft' }))?.hash).toBe(second.version);
+    expect((await repo.headAt(REF, { state: 'draft' })).head?.hash).toBe(second.version);
     expect(engine.rows.filter((r) => r.state === 'draft').map((r) => r.package_id)).toEqual(['app.k9qk']);
   });
 
@@ -216,7 +218,10 @@ describe('SysMetadataRepository.headAt — the row put locks against (#22128)', 
       },
     ]);
     const repo = makeRepo(engine);
-    expect((await repo.headAt(REF, { state: 'draft', packageId: null }))?.hash).toBe('sha-orphan');
+    const adopted = await repo.headAt(REF, { state: 'draft', packageId: null });
+    expect(adopted.head?.hash).toBe('sha-orphan');
+    // The orphan is updated INTO the package: the put's binding is the inherited one.
+    expect(adopted.packageId).toBe('app.k9qk');
   });
 
   it('an explicit package is its own address: never another package\'s row', async () => {
@@ -224,15 +229,15 @@ describe('SysMetadataRepository.headAt — the row put locks against (#22128)', 
     const repo = makeRepo(engine);
     await repo.put(REF, { label: 'draft' }, { parentVersion: null, actor: 't', state: 'draft' as const });
 
-    expect(await repo.headAt(REF, { state: 'draft', packageId: 'app.other' })).toBeNull();
-    expect((await repo.headAt(REF, { state: 'draft', packageId: 'app.k9qk' }))?.hash).toBeDefined();
+    expect(await repo.headAt(REF, { state: 'draft', packageId: 'app.other' })).toEqual({ head: null, packageId: 'app.other' });
+    expect((await repo.headAt(REF, { state: 'draft', packageId: 'app.k9qk' })).head?.hash).toBeDefined();
   });
 
   it('an active address inherits nothing: the unbound key is the head, as put writes it', async () => {
     const engine = makeFakeEngine([seededActive('app.k9qk')]);
     const repo = makeRepo(engine);
-    expect(await repo.headAt(REF, { state: 'active' })).toBeNull();
-    expect((await repo.headAt(REF, { state: 'active', packageId: 'app.k9qk' }))?.hash).toBe('sha-active');
+    expect(await repo.headAt(REF, { state: 'active' })).toEqual({ head: null, packageId: null });
+    expect((await repo.headAt(REF, { state: 'active', packageId: 'app.k9qk' })).head?.hash).toBe('sha-active');
   });
 
   it('an org-scoped draft address resolves across the ADR-0005 reach, as the inheriting put does', async () => {
@@ -243,6 +248,11 @@ describe('SysMetadataRepository.headAt — the row put locks against (#22128)', 
       orgLabel: 'org_1',
     } as never);
     const first = await repo.put(REF, { label: 'org draft' }, { parentVersion: null, actor: 't', state: 'draft' as const });
-    expect((await repo.headAt(REF, { state: 'draft' }))?.hash).toBe(first.version);
+    expect((await repo.headAt(REF, { state: 'draft' })).head?.hash).toBe(first.version);
+  });
+
+  it('a brand-new item drafted first: no head, and the package-less binding (nothing to inherit)', async () => {
+    const repo = makeRepo(makeFakeEngine());
+    expect(await repo.headAt(REF, { state: 'draft' })).toEqual({ head: null, packageId: null });
   });
 });
