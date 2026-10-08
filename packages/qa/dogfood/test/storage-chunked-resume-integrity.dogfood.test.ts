@@ -42,7 +42,7 @@ describe('[#22313] a chunked upload completes with the file it was sent, over a 
     return ((await res.json()) as any).data as { uploadId: string; resumeToken: string; fileId: string; totalChunks: number };
   };
 
-  const putChunk = async (uploadId: string, resumeToken: string, chunkIndex: number, bytes: Uint8Array) => {
+  const putChunk = async (uploadId: string, resumeToken: string, chunkIndex: number, bytes: Uint8Array<ArrayBuffer>) => {
     const res = await stack.api(`/storage/upload/chunked/${uploadId}/chunk/${chunkIndex}`, {
       method: 'PUT',
       headers: { ...auth(), 'Content-Type': 'application/octet-stream', 'x-resume-token': resumeToken },
