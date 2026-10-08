@@ -90,7 +90,7 @@ import {
   flowNodeConfigRefusals,
   predicateSlotRefusal,
   resolveFlowNodeExpressions,
-  resolveFlowNodeValueSlots,
+  flowNodeValueTemplateRefusals,
   structuralConditionRefusal,
 } from '@objectstack/spec/automation';
 // [#15137] The `value`-role half. Same two published primitives the engine
@@ -117,69 +117,6 @@ import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fi
 import { findUnguardedNullableOperands, nullGuardMessage } from './validate-null-guards.js';
 import type { NullGuardOutcome } from './validate-null-guards.js';
 import { recordsOf } from './object-graph.js';
-import { classifyFlowTemplateToken, FLOW_TEMPLATE_VALUE_FUNCTIONS, SAFE_EXPRESSION_RE } from './flow-template-grammar.js';
-
-/**
- * The author-time hint of #11182 ruling D: a `value` slot (`assignments.*`,
- * `create_record` / `update_record` `fields.*`) accepts a CEL value envelope,
- * so a `{…}` template EXPRESSION authored there is pointed at it — at
- * `warning`, never more: the template dialect keeps its 17.x meaning and no
- * spelling is refused or rewritten.
- *
- * Which tokens, and why only those — the hint must never steer an author
- * toward metadata the runtime honours but that makes the value worse:
- *
- *  - a template EXPRESSION — arithmetic, a comparison, or a call to one of the
- *    CEL-mirrored six (`round` / `floor` / `ceil` / `abs` / `min` / `max`) —
- *    is where the two vocabularies overlap and CEL is a strict superset (the
- *    whole stdlib). The one conversion trap is stated in the hint itself: CEL
- *    divides two integers as integers, so `/ 100` must become `/ 100.0`.
- *  - ⛔ NOT a plain `{var}` / `{var.path}` reference: CEL adds nothing to it,
- *    and an absent key flips from `undefined` to a fault — a behaviour change
- *    the hint would be recommending in the dark.
- *  - ⛔ NOT `{NOW()}` / `{TODAY() ± N}`: CEL's `now()` / `today()` are
- *    Timestamps, not the ISO strings the macros produce, and CEL has no
- *    `string(timestamp)` to recover them — the string form is the v18
- *    carrier's to add.
- *  - ⛔ NOT `{$User.*}`: the flow CEL scope binds no user.
- *
- * The token grammar is the lint package's MIRROR of the template evaluator
- * (`flow-template-grammar.ts`, drift-pinned against `template.ts`), consulted
- * in the evaluator's own dispatch order — never a second reading of it.
- */
-const TEMPLATE_TOKEN_RE = /\{([^{}]+)\}/g;
-const TEMPLATE_EXPRESSION_OPERATOR_RE = /[+\-*/%<>=!&|?]/;
-const TEMPLATE_VALUE_CALL_RE = new RegExp(`\\b(?:${FLOW_TEMPLATE_VALUE_FUNCTIONS.join('|')})\\s*\\(`);
-
-/** The first `{…}` token in `value` that is a template EXPRESSION (see above), or `undefined`. */
-function templateExpressionToken(value: string): string | undefined {
-  // A global regex carries `lastIndex` between calls, so the scan starts from
-  // zero every time; the loop is synchronous, so nothing interleaves.
-  TEMPLATE_TOKEN_RE.lastIndex = 0;
-  for (let match = TEMPLATE_TOKEN_RE.exec(value); match !== null; match = TEMPLATE_TOKEN_RE.exec(value)) {
-    const inner = match[1]!.trim();
-    // A date macro, a `$User` path, a variable path or an unknown call is
-    // classified away here, in the evaluator's own order.
-    if (classifyFlowTemplateToken(inner).kind !== 'unresolvable-shape') continue;
-    // Outside the evaluator's arithmetic character set the token resolves to
-    // nothing at all — junk, not an expression to move.
-    if (!SAFE_EXPRESSION_RE.test(inner)) continue;
-    if (TEMPLATE_EXPRESSION_OPERATOR_RE.test(inner) || TEMPLATE_VALUE_CALL_RE.test(inner)) return match[0];
-  }
-  return undefined;
-}
-
-/** The hint's text — the conversion trap stated where the author reads it. */
-function templateExpressionEnvelopeHint(token: string): string {
-  return (
-    `\`${token}\` is a \`{…}\` template-dialect expression. This slot also accepts a CEL value envelope — `
-    + "`{ dialect: 'cel', source: '…' }` — evaluated by the engine flow conditions use, with the whole CEL stdlib; "
-    + 'the template form keeps working unchanged. When moving arithmetic to CEL, give a division a decimal operand: '
-    + 'CEL divides two integers as integers, so `round(x * 100) / 100` drops the decimals there — write '
-    + '`round(x * 100) / 100.0`.'
-  );
-}
-
 export interface ExprIssue {
   where: string;
   message: string;
@@ -1798,23 +1735,20 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           // (the 2026-09-01 option-C ruling's letter).
           warnShadowedFieldReads(slotWhere, found.value);
         }
-        // [#11182 ruling D] The author-time hint: a `{…}` template EXPRESSION in
-        // a `value` slot is pointed at the CEL value envelope that slot also
-        // accepts — `warning` only, the template form keeps its meaning. The
-        // slots come from the ledger's own walk (`resolveFlowNodeValueSlots`),
-        // never from a path list re-spelled here; which tokens qualify, and
-        // why only those, is `templateExpressionToken`'s docblock.
-        // `found` — the same resolver-result shape the declared-slot loop above
-        // reads (`entry` / `path` / `value`, the resolver's own keys).
-        for (const found of resolveFlowNodeValueSlots(nodeType, cfg)) {
-          if (typeof found.value !== 'string') continue;
-          const token = templateExpressionToken(found.value);
-          if (token === undefined) continue;
+        // [#19939] The `{…}` template dialect is retired from the value slots
+        // (the C half of #11182 ruling D, which this replaced: until then a
+        // template EXPRESSION here drew a `warning` pointing at the CEL value
+        // envelope). A literal that still spells it is refused at `error` —
+        // the one judge `registerFlow` calls on the same config
+        // (`flowNodeValueTemplateRefusals`), walking the ledger's `value` slots
+        // and the two legacy `assignment` shapes, so build and registration
+        // give one verdict, and each refusal names the token's CEL spelling.
+        for (const templateRefusal of flowNodeValueTemplateRefusals(nodeType, cfg)) {
           issues.push({
-            where: `${at} · node '${node.id}' (${nodeType}) ${found.entry.label} at config.${found.path}`,
-            message: templateExpressionEnvelopeHint(token),
-            source: found.value,
-            severity: 'warning',
+            where: `${at} · node '${node.id}' (${nodeType}) ${templateRefusal.label} at config.${templateRefusal.path}`,
+            message: templateRefusal.message,
+            source: templateRefusal.source,
+            severity: 'error',
           });
         }
         // #1870 — a `script` node must name a callable, and since #4343 that is

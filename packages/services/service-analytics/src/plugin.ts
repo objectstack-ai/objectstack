@@ -553,21 +553,27 @@ export class AnalyticsServicePlugin implements Plugin {
      * of the read — the same three the OBJECT-LEVEL bridge below tells apart,
      * and for the same reason.
      *
-     *   ABSENT   — `getService('security')` returns nothing. No row-scope
-     *              provider on this deployment, which is a legitimate
-     *              configuration (a single-tenant kernel that ships no
-     *              `plugin-security`), reported loudly at init below. Today's
-     *              behaviour is kept EXACTLY: no scope, query runs.
-     *   UNUSABLE — a security service exists but cannot answer: resolving it
-     *              THREW, or the object it returned carries no
-     *              `getReadFilter`. A wired-but-broken provider, and the
-     *              answer here is NOT "no row restriction" — that value means
-     *              one thing only (`ISecurityService.getReadFilter`: "this
-     *              caller has no row restriction on this object"), and
-     *              spending it on a provider that never answered is how a
-     *              query ends up running with no row-level policy at all.
-     *              It REFUSES, and says why.
+     *   ABSENT   — the context answers `getService('security')` with
+     *              nothing. Only a context that answers a miss that way
+     *              reaches this branch: the package's test doubles do, and no
+     *              in-repo kernel does (see UNUSABLE). Kept as it was: no
+     *              scope, the query runs.
+     *   UNUSABLE — resolving it THREW, or the object it returned carries no
+     *              `getReadFilter`. A throw is UNUSABLE whatever caused it: a
+     *              wired-but-broken provider, or — on the in-repo kernels,
+     *              `ObjectKernel` and `LiteKernel` — a `security` service
+     *              nothing ever registered, because their synchronous
+     *              `getService` throws on a miss. Either way the answer here
+     *              is NOT "no row restriction" — that value means one thing
+     *              only (`ISecurityService.getReadFilter`: "this caller has no
+     *              row restriction on this object"), and spending it on a
+     *              provider that never answered is how a query ends up running
+     *              with no row-level policy at all. It REFUSES, and says why.
      *   USABLE   — ask it.
+     *
+     * [#22235] So a deployment that registers no security service is REFUSED
+     * here, fail-closed, by declaration — not by an accident of how the lookup
+     * fails. Its object-level sibling below refuses the same query first.
      *
      * ⛔ The refusal is a THROW, not a louder log over an `undefined`: a log is
      * not a refusal. `AnalyticsService.resolveReadScopes` is the fail-closed
@@ -599,10 +605,13 @@ export class AnalyticsServicePlugin implements Plugin {
         try {
           svc = ctx.getService<SecurityReadFilter>('security');
         } catch (e) {
-          // ⛔ Not `absent`. A throwing resolver is a service that exists and
-          // failed, and a failed security lookup is a refusal everywhere else
-          // in this stack — including the object-level bridge below, which
-          // used to be spelled exactly like this one and now denies.
+          // ⛔ Not `absent`. A throw is UNUSABLE whatever caused it: a
+          // registered service that failed, or — on the in-repo kernels — a
+          // name nothing ever registered, which their synchronous
+          // `getService` answers by throwing. A failed security lookup is a
+          // refusal everywhere else in this stack, including the object-level
+          // bridge below, which used to be spelled exactly like this one and
+          // now denies.
           return {
             kind: 'unusable',
             why:
@@ -637,8 +646,8 @@ export class AnalyticsServicePlugin implements Plugin {
       securityPresentAtInit = trySecurity().kind === 'usable';
       getReadScope = (object, context) => {
         const resolved = trySecurity();
-        // No security service resolved at call time → no row-scope provider on
-        // this deployment, the state reported at init. Unchanged.
+        // The context answered the lookup with nothing (ABSENT, above) → no
+        // row-scope provider. Unchanged. No in-repo kernel answers that way.
         if (resolved.kind === 'absent') return undefined;
         if (resolved.kind === 'unusable') {
           ctx.logger.error(
@@ -684,31 +693,42 @@ export class AnalyticsServicePlugin implements Plugin {
     //
     // ## The three resolutions, and why only ONE of them admits
     //
-    // "No security service" and "the security service could not be used" are
-    // different states and they get opposite answers. Collapsing them is the
-    // shape of the defect this whole change removes, one level up.
+    // "The lookup answered nothing" and "the security service could not be
+    // used" are different states and they get opposite answers. Collapsing
+    // them is the shape of the defect this whole change removes, one level up.
     //
-    //   ABSENT   — `getService('security')` returns nothing. There is no
-    //              object-level gate on this deployment at all, including on
-    //              `/data`, because that gate IS this plugin's absent
-    //              middleware. The two doors still agree, which is the
-    //              equivalence property the card asks for, so this ADMITS and
-    //              is reported loudly, once, by the first query that finds it
-    //              (below) — not at init, where the service is usually just
-    //              not registered YET.
-    //   UNUSABLE — a security service exists but cannot answer: resolving it
-    //              THREW, or the object it returned carries neither
-    //              `canReadObject` nor `explain`. This is a wired-but-broken
-    //              provider, and `/data`'s middleware does NOT fall open in
-    //              that state — so admitting here would reopen the exact
-    //              divergence between the two doors that this PR closes, and
-    //              it would do it silently. It DENIES, and says why.
+    //   ABSENT   — the context answers `getService('security')` with nothing.
+    //              Only a context that answers a miss that way reaches this
+    //              branch: the package's test doubles do, and no in-repo
+    //              kernel does (see UNUSABLE). It ADMITS, and the first query
+    //              that finds it reports it once (below) — not at init, where
+    //              the service is usually just not registered YET.
+    //   UNUSABLE — resolving it THREW, or the object it returned carries
+    //              neither `canReadObject` nor `explain`. A throw is UNUSABLE
+    //              whatever caused it: a wired-but-broken provider, or — on
+    //              the in-repo kernels, `ObjectKernel` and `LiteKernel` — a
+    //              `security` service nothing ever registered, because their
+    //              synchronous `getService` throws on a miss. For a
+    //              wired-but-broken provider `/data`'s middleware does NOT fall
+    //              open either, so admitting here would reopen the exact
+    //              divergence between the two doors that this gate closes, and
+    //              silently. It DENIES, fail-closed, and says why at `error`,
+    //              naming the object.
     //   USABLE   — ask it (below).
+    //
+    // [#22235] The declaration (the maintainer's ruling): a deployment that
+    // registers no security service is REFUSED at this door, fail-closed — the
+    // in-repo kernels throw on the miss, so it lands in UNUSABLE. `/data`
+    // carries no object-level gate on such a deployment, so the two doors do
+    // NOT agree there: a loud deny is preferred over a silent admit. A
+    // composition that wants analytics to answer registers a security service,
+    // or its host supplies its own `admitObjectRead`.
+    // `admission-bridge-resolution.test.ts` pins it on both in-repo kernels.
     //
     // The distinction is worth the type: both unusable corners used to be
     // spelled `return undefined` beside the absent one, and three lines later
-    // all three read `if (!svc) return true`. A deployment whose security
-    // service throws on resolution is not a deployment without security.
+    // all three read `if (!svc) return true`. A lookup that throws is never
+    // read as a lookup that answered nothing.
     interface SecurityReadAdmission {
       canReadObject?(object: string, context?: ExecutionContext): boolean | Promise<boolean>;
       explain?(
@@ -728,9 +748,11 @@ export class AnalyticsServicePlugin implements Plugin {
         try {
           svc = ctx.getService<SecurityReadAdmission>('security');
         } catch (e) {
-          // ⛔ Not `absent`. A throwing resolver is a service that exists and
-          // failed, and a failed security lookup is a refusal everywhere else
-          // in this stack.
+          // ⛔ Not `absent`. A throw is UNUSABLE whatever caused it: a
+          // registered service that failed, or — on the in-repo kernels — a
+          // name nothing ever registered, which their synchronous
+          // `getService` answers by throwing. A failed security lookup is a
+          // refusal everywhere else in this stack.
           return {
             kind: 'unusable',
             why:
@@ -759,20 +781,25 @@ export class AnalyticsServicePlugin implements Plugin {
       // ships plugin-security: that plugin registers it in its own start(),
       // after every init(). This bridge resolves per call, so plugin order is
       // not significant. A WARN at init asserted a verdict the same boot
-      // contradicts; init reports the absence at `info` (below), and the WARN
-      // waits for a query that needs the gate and finds no service.
+      // contradicts; init reports the absence at `info` (below), and the
+      // report waits for a query that needs the gate and finds no service. On
+      // the in-repo kernels that query's lookup THROWS, so it is the UNUSABLE
+      // branch's `error` and a refusal, on every query; only a context that
+      // answers the miss with nothing reaches the ABSENT branch's WARN.
       //
-      // Once per bridge, i.e. per plugin init: the state is the deployment's,
-      // every later query is admitted the same way, and repeating it per query
-      // buries it. Deliberately NOT a module binding — a second kernel in the
-      // same process (a test run, a `verify` harness) must get its own report.
+      // That WARN is once per bridge, i.e. per plugin init: the state is the
+      // context's, every later query is admitted the same way, and repeating it
+      // per query buries it. Deliberately NOT a module binding — a second
+      // kernel in the same process (a test run, a `verify` harness) must get
+      // its own report.
       // The flag records only that the report was made; it caches no verdict:
       // every query still resolves the service afresh.
       let admissionAbsenceReported = false;
       admitObjectRead = async (object, context) => {
         const resolved = trySecurityAdmission();
-        // No security service resolved at call time → no object-level gate on
-        // this deployment: ADMIT, exactly as before, and say so once.
+        // The context answered the lookup with nothing (ABSENT, above): ADMIT,
+        // exactly as before, and say so once. No in-repo kernel reaches this
+        // line — they throw on a miss, which is UNUSABLE below.
         if (resolved.kind === 'absent') {
           if (!admissionAbsenceReported) {
             admissionAbsenceReported = true;
@@ -816,15 +843,17 @@ export class AnalyticsServicePlugin implements Plugin {
     // the reader is the security service's, and a host that composes its own
     // reader constructs `AnalyticsService` with it.
     //
-    //   ABSENT   — no security service: no field-level security anywhere on
-    //              this deployment, `/data` included. The provider answers
-    //              `undefined` ("no answer"), which judges no field.
-    //   UNUSABLE — the service exists but cannot answer: resolving it threw,
-    //              or it carries no `getReadableFields` (a REQUIRED member of
-    //              `ISecurityService`, so a conforming provider never lands
-    //              here). The provider THROWS, and the service refuses the
-    //              query fail-closed: a reader that never answered must not be
-    //              read as "every field readable".
+    //   ABSENT   — the context answers the lookup with nothing; only a context
+    //              that answers a miss that way reaches this (no in-repo
+    //              kernel does). The provider answers `undefined` ("no
+    //              answer"), which judges no field.
+    //   UNUSABLE — resolving it threw — on the in-repo kernels that includes
+    //              a `security` service nothing ever registered, since they
+    //              throw on a miss — or it carries no `getReadableFields` (a
+    //              REQUIRED member of `ISecurityService`, so a conforming
+    //              provider never lands here). The provider THROWS, and the
+    //              service refuses the query fail-closed: a reader that never
+    //              answered must not be read as "every field readable".
     //   USABLE   — ask it.
     interface SecurityReadableFields {
       getReadableFields?(object: string, context?: ExecutionContext): Promise<string[] | undefined>;
@@ -854,8 +883,10 @@ export class AnalyticsServicePlugin implements Plugin {
     // queryable — the engine's two query guards refuse it — so the gate asks
     // both. Bridged the same way, with the same three resolutions:
     //
-    //   ABSENT   — no security service: `undefined`, no answer, as above.
-    //   UNUSABLE — resolving it threw: THROW, the query is refused.
+    //   ABSENT   — the lookup answered nothing: `undefined`, no answer, as
+    //              above.
+    //   UNUSABLE — resolving it threw (a never-registered service included,
+    //              on the in-repo kernels): THROW, the query is refused.
     //   USABLE   — ask its `getQueryableFields`.
     //
     // ⛔ And one more state the read half does not have: a USABLE service that
@@ -1474,8 +1505,10 @@ export class AnalyticsServicePlugin implements Plugin {
       ctx.logger.info('[Analytics] Auto-bridged getReadScope → "security" service (getReadFilter)');
     } else if (autoBridgedReadScope) {
       // The bridge IS wired and will resolve at call time — this is only a
-      // heads-up that security had not registered yet at our init. It becomes a
-      // real problem only if no security service ever appears.
+      // heads-up that security had not registered yet at our init. If no
+      // security service ever registers, the in-repo kernels throw on the
+      // per-query lookup and the query is REFUSED, fail-closed (UNUSABLE) —
+      // the declared answer for a deployment with no security service.
       ctx.logger.info(
         '[Analytics] getReadScope bridged to the "security" service; that service is not ' +
         'registered yet at init and will be resolved per query (plugin order is not significant).',
@@ -1498,8 +1531,10 @@ export class AnalyticsServicePlugin implements Plugin {
       // [#22154] A heads-up, not a verdict — the same situation the read-scope
       // sibling above logs at `info`. The bridge resolves per query, and
       // plugin-security registers the service in its start(), after this
-      // init; a query that needs the gate and finds no service WARNs then,
-      // once (see the bridge).
+      // init. A query that needs the gate and finds no service is REFUSED at
+      // `error` on the in-repo kernels (they throw on the miss: UNUSABLE); only
+      // a context that answers the miss with nothing admits it, with one WARN
+      // (ABSENT). See the bridge.
       ctx.logger.info(
         '[Analytics] admitObjectRead bridged to the "security" service; that service is not ' +
         'registered yet at init and will be resolved per query (plugin order is not significant).',

@@ -122,8 +122,8 @@ const escalateCase = {
       config: {
         objectName: 'crm_case',
         filter: { id: '{record.id}' },
-        // Field values interpolate — braces required.
-        fields: { escalated: true, escalation_note: 'Escalated to {owner.name}' },
+        // A computed field value is a CEL value envelope; a literal is written as it is.
+        fields: { escalated: true, escalation_note: { dialect: 'cel', source: "'Escalated to ' + owner.name" } },
       },
     },
     { id: 'end', type: 'end', label: 'End' },

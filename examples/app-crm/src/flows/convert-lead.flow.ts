@@ -143,10 +143,13 @@ export const ConvertLeadScreenFlow = defineFlow({
       config: {
         objectName: 'crm_lead',
         filter: { id: '{recordId}' },
+        // A value slot computes with a CEL value envelope — the `{…}` template
+        // dialect is retired there. Both ids are bound by the screens above
+        // (`idVariable`) before this node runs, so no `has()` guard is needed.
         fields: {
           status:                'converted',
-          account:               '{account_id}',
-          converted_opportunity: '{opportunity_id}',
+          account:               { dialect: 'cel', source: 'account_id' },
+          converted_opportunity: { dialect: 'cel', source: 'opportunity_id' },
         },
       },
     },

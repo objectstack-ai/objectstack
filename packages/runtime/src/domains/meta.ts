@@ -61,6 +61,8 @@ import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-pr
 // served under.
 // [#22141] …and the save door's precondition and lifecycle
 // (`metaSaveRequestOptions`): `If-Match` / `If-None-Match: *` and `?mode=draft`.
+// [#22188] …and the one reading of `?package=` (`metaItemPackageBinding`),
+// under which `all` names no package, on every branch here that reads it.
 // Imported, never restated — AGENTS.md 〈Route & surface ownership〉 rule 1.
 import {
     createMetaBookTreeAnswer,
@@ -71,6 +73,7 @@ import {
     isPublicAudienceRead,
     metaCallerOrganizationId,
     metaItemLayersDeprecationHeaders,
+    metaItemPackageBinding,
     metaReadOrganizationId,
     metaRequestLocale,
     metaSaveRequestOptions,
@@ -1031,7 +1034,8 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         if (!protocol || typeof protocol.getMetaItems !== 'function') {
             return { handled: true, response: deps.error('Not found', 404) };
         }
-        const packageId = typeof query?.package === 'string' && query.package.length > 0 ? query.package : undefined;
+        // [#22188] `RestServer`'s reading: `all` names no package.
+        const packageId = metaItemPackageBinding(query?.package);
         try {
             const answer = await createMetaBookTreeAnswer(
                 {
@@ -1085,7 +1089,8 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 response: deps.error('Layered metadata view not supported by protocol implementation', 501),
             };
         }
-        const packageId = query?.package || undefined;
+        // [#22188] `RestServer`'s reading: `all` names no package.
+        const packageId = metaItemPackageBinding(query?.package);
         return answerMetaLayered(
             deps, _context, protocol as MetaLayeredProtocol,
             { type, name, packageId, maskPosture }, saveVerdict,
@@ -1251,8 +1256,12 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     if (parts.length === 2) {
         const type = parts[0];
         const name = decodeMetaNameSegment(parts[1]);
-        // Extract optional package filter from query string
-        const packageId = query?.package || undefined;
+        // Extract optional package filter from query string.
+        // [#22188] `RestServer`'s reading, for the read and the save alike:
+        // `all` names no package. It forwarded the literal, so a
+        // `PUT ?package=all` stored the row bound to a package called `all`
+        // where `RestServer` stores it env-local.
+        const packageId = metaItemPackageBinding(query?.package);
 
         // PUT /metadata/:type/:name (Save)
         //
@@ -1915,8 +1924,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // GET /metadata/:type (List items of type) OR /metadata/:objectName (Legacy)
     if (parts.length === 1) {
         const typeOrName = parts[0];
-        // Extract optional package filter from query string
-        const packageId = query?.package || undefined;
+        // Extract optional package filter from query string.
+        // [#22188] `RestServer`'s reading: `all`, the list's "show everything"
+        // scope, names no package.
+        const packageId = metaItemPackageBinding(query?.package);
 
         // Try protocol service first for any type
         const protocol = await resolveProtocol(deps, _context);

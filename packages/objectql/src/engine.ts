@@ -3093,7 +3093,19 @@ const METADATA_ARRAY_KEYS = [
   // `readDeclared(ql, 'capability')` returned nothing, which made the
   // author-side `packageId` — documented as the FALLBACK — mandatory,
   // and its omission a silent, unenforced authorization declaration.
-  'roles', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
+  //
+  // [#22203] `positions` for the same reason, and with a write-door
+  // consequence: ADR-0090 D3 renamed `roles` to `positions`, and the rename
+  // reached the artifact door's map but never this list, so a stack-declared
+  // position had no registry entry under its package. The metadata save door
+  // decides "a code package ships this" from exactly that entry
+  // (`isArtifactBacked` → `getArtifactItem`), so a save over a package's
+  // position took the runtime-create tier and was accepted, although the type
+  // registry declares `position` `allowOrgOverride: false`. With the entry
+  // present the door's type-level refusal covers it like every other
+  // `security`-domain type (`engine-security-catalog-package-door.test.ts`).
+  // `roles` stays in the list as the inert retired spelling it already was.
+  'roles', 'positions', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
   // AI Protocol
   'agents', 'tools', 'skills', 'ragPipelines',
   // API Protocol

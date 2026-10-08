@@ -580,6 +580,14 @@ export {
 } from './validate-component-types.js';
 export type { ComponentTypeFinding } from './validate-component-types.js';
 
+// #22158 — the printable block subset inside a page that declares `print`
+// (ruling B′ on #8346); the subset itself is `@objectstack/spec/ui`'s.
+export {
+  validatePrintPageBlocks,
+  PRINT_PAGE_BLOCK_UNPRINTABLE,
+} from './validate-print-page-blocks.js';
+export type { PrintPageBlockFinding } from './validate-print-page-blocks.js';
+
 export {
   validateChartBindings,
   CHART_DIMENSION_UNKNOWN,

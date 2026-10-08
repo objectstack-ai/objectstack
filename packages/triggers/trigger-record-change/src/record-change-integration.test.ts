@@ -303,7 +303,7 @@ function mirrorWriteFlow(name: string, object: string) {
     type: 'record_change',
     nodes: [
       { id: 'start', type: 'start', label: 'Start', config: { objectName: object, triggerType: 'record-after-write' } },
-      { id: 'mirror', type: 'update_record', label: 'Mirror', config: { objectName: object, filter: { id: '{record.id}' }, fields: { mirror: '{record.status}' } } },
+      { id: 'mirror', type: 'update_record', label: 'Mirror', config: { objectName: object, filter: { id: '{record.id}' }, fields: { mirror: { dialect: 'cel', source: 'record.status' } } } },
       { id: 'end', type: 'end', label: 'End' },
     ],
     edges: [
@@ -682,7 +682,9 @@ describe('record-change trigger — end-to-end (#1491)', () => {
         },
         {
           id: 'log', type: 'create_record', label: 'Log',
-          config: { objectName: 'bfw_audit', fields: { seen_tag: '{record.tag}' } },
+          // A CEL value envelope — the `{…}` template dialect is retired from
+          // value slots (#19939).
+          config: { objectName: 'bfw_audit', fields: { seen_tag: { dialect: 'cel', source: 'record.tag' } } },
         },
         { id: 'end', type: 'end', label: 'End' },
       ],

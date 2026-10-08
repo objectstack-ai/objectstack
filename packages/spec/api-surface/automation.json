@@ -143,6 +143,7 @@
     "FlowNodeExpressionRole (type)",
     "FlowNodeParsed (type)",
     "FlowNodeSchema (const)",
+    "FlowNodeValueTemplateRefusal (interface)",
     "FlowParsed (type)",
     "FlowRegion (type)",
     "FlowRegionArity (type)",
@@ -248,6 +249,9 @@
     "UpdateRecordConfigParsed (type)",
     "UpdateRecordConfigSchema (const)",
     "VALUE_ENVELOPE_REFUSAL (const)",
+    "VALUE_SLOT_TEMPLATE_REFUSAL (const)",
+    "ValueSlotTemplateOptions (interface)",
+    "ValueSlotTemplateRefusal (interface)",
     "WAIT_EXECUTOR_DESCRIPTOR (const)",
     "WaitEventType (type)",
     "WaitEventTypeSchema (const)",
@@ -275,6 +279,7 @@
     "findRegionEntry (function)",
     "flowForm (const)",
     "flowNodeConfigRefusals (function)",
+    "flowNodeValueTemplateRefusals (function)",
     "getApprovalNodeConfigJsonSchema (function)",
     "getBuiltinNodeConfigContracts (function)",
     "getSchemalessNodeConfigJsonSchemas (function)",
@@ -290,6 +295,7 @@
     "resolveFlowTriggerKind (function)",
     "resolveScheduleOrganization (function)",
     "structuralConditionRefusal (function)",
-    "validateControlFlow (function)"
+    "validateControlFlow (function)",
+    "valueSlotTemplateRefusals (function)"
   ]
 }

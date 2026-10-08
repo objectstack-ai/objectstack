@@ -171,11 +171,13 @@ function registerTransitionFlow(automation: AutomationEngine, event = 'record-af
         id: 'log', type: 'create_record', label: 'Log',
         config: {
           objectName: 'task_audit',
+          // CEL value envelopes — the `{…}` template dialect is retired from
+          // value slots (#19939).
           fields: {
-            task_title: '{record.title}',
-            from_status: '{previous.status}',
-            to_status: '{record.status}',
-            task_owner: '{record.owner}',
+            task_title: { dialect: 'cel', source: 'record.title' },
+            from_status: { dialect: 'cel', source: 'previous.status' },
+            to_status: { dialect: 'cel', source: 'record.status' },
+            task_owner: { dialect: 'cel', source: 'record.owner' },
           },
         },
       },
@@ -268,7 +270,7 @@ describe('[#4862/#5038] a record-change trigger on a predicate bulk write', () =
         },
         {
           id: 'log', type: 'create_record', label: 'Log',
-          config: { objectName: 'task_audit', fields: { task_title: '{record.title}', to_status: 'deleted' } },
+          config: { objectName: 'task_audit', fields: { task_title: { dialect: 'cel', source: 'record.title' }, to_status: 'deleted' } },
         },
         { id: 'end', type: 'end', label: 'End' },
       ],

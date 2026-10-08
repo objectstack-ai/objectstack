@@ -166,7 +166,9 @@ describe('unknown node config keys are rejected (#4277)', () => {
 
     expect(() => engine.registerFlow('f', flowWith('assignment', {
       approvalStatus: 'pending',
-      anyVariableNameAtAll: '{record.owner}',
+      // A literal — the `{…}` template dialect is refused in an assignment
+      // value since #19939, a different rule from the key check pinned here.
+      anyVariableNameAtAll: 'owner',
     }))).not.toThrow();
     await expect(engine.getFlow('f')).resolves.toBeDefined();
   });

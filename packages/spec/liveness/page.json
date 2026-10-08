@@ -73,6 +73,77 @@
       "status": "live",
       "note": "ARIA attributes applied by objectui renderers."
     },
+    "print": {
+      "status": "planned",
+      "verifiedAt": "2026-10-08",
+      "authorWarn": true,
+      "authorHint": "Keep it: the print declaration is validated, and the printable block subset is enforced, but no renderer applies the paper, margins, running header and footer or page numbers yet — printing the page today prints the screen layout.",
+      "note": "PLANNED (#22158, card ① of the ruling of record 6051470224 on #8346, letter B′: \"A document is a page with a print declaration; no new template type\"). The declaration lands spec-first with its REFUSALS live — PageSchema's checkPagePrintComposition (packages/spec/src/ui/page.zod.ts#checkPagePrintComposition) refuses `print` on a page that does not print its own authored blocks, and @objectstack/lint's validatePrintPageBlocks (packages/lint/src/validate-print-page-blocks.ts#validatePrintPageBlocks) refuses a block outside PRINTABLE_PAGE_COMPONENT_TYPES inside a print page at os validate / os build / os lint and the page save door — while what the keys CONFIGURE (paper, margins, running header and footer, page numbers, page-break hints) has no reader anywhere yet. `authorWarn` per enforce-or-mark (the externalSharingModel shape): an author is told the layout is not yet applied, at every compile, until the console reads it. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit.",
+      "children": {
+        "paperSize": {
+          "status": "planned",
+          "verifiedAt": "2026-10-08",
+          "note": "PLANNED — maps to the size keyword of `@page { size }`. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+        },
+        "orientation": {
+          "status": "planned",
+          "verifiedAt": "2026-10-08",
+          "note": "PLANNED — maps to the orientation keyword of `@page { size }`. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+        },
+        "margins": {
+          "status": "planned",
+          "verifiedAt": "2026-10-08",
+          "note": "PLANNED — maps to `@page { margin }`, one side per key, in millimetres. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit.",
+          "children": {
+            "top": {
+              "status": "planned",
+              "verifiedAt": "2026-10-08",
+              "note": "PLANNED — maps to the top value of `@page { margin }`, in millimetres. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+            },
+            "right": {
+              "status": "planned",
+              "verifiedAt": "2026-10-08",
+              "note": "PLANNED — maps to the right value of `@page { margin }`, in millimetres. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+            },
+            "bottom": {
+              "status": "planned",
+              "verifiedAt": "2026-10-08",
+              "note": "PLANNED — maps to the bottom value of `@page { margin }`, in millimetres. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+            },
+            "left": {
+              "status": "planned",
+              "verifiedAt": "2026-10-08",
+              "note": "PLANNED — maps to the left value of `@page { margin }`, in millimetres. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+            }
+          }
+        },
+        "repeatHeader": {
+          "status": "planned",
+          "verifiedAt": "2026-10-08",
+          "note": "PLANNED — maps to a running header — the page's `header` region repeated on every sheet. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+        },
+        "repeatFooter": {
+          "status": "planned",
+          "verifiedAt": "2026-10-08",
+          "note": "PLANNED — maps to a running footer — the page's `footer` region repeated on every sheet. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+        },
+        "pageNumbers": {
+          "status": "planned",
+          "verifiedAt": "2026-10-08",
+          "note": "PLANNED — maps to an `@page` margin box with `counter(page)` and `counter(pages)`. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+        },
+        "repeatTableHeaders": {
+          "status": "planned",
+          "verifiedAt": "2026-10-08",
+          "note": "PLANNED — maps to `thead { display: table-header-group }`. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+        },
+        "avoidBreakInside": {
+          "status": "planned",
+          "verifiedAt": "2026-10-08",
+          "note": "PLANNED — maps to `break-inside: avoid` on every block. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+        }
+      }
+    },
     "kind": {
       "status": "live",
       "note": "full vs slotted record-page composition — objectui plugin-detail/src/index.tsx (buildDefaultPageSchema)."

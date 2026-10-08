@@ -113,6 +113,7 @@ import { validateEmptyCombinators } from './validate-empty-combinators.js';
 import { validateReferenceIntegrity } from './reference-integrity-suite.js';
 import { validateComponentProps } from './validate-component-props.js';
 import { validateComponentTypes } from './validate-component-types.js';
+import { validatePrintPageBlocks } from './validate-print-page-blocks.js';
 import { validateResponsiveStyles } from './validate-responsive-styles.js';
 import { validateJsxPages } from './validate-jsx-pages.js';
 import { validateReactPages } from './validate-react-pages.js';
@@ -1219,6 +1220,26 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       '0-finding measurement covers ' +
       'authored config-file metadata only). Crossing is its own rollout card.',
     run: (stack) => validateComponentTypes(stack),
+  },
+  // #22158, card ① of the ruling of record on #8346 (letter B′): a page that
+  // declares `print` is a document, and every block in it must come from the
+  // spec's printable block subset (`PRINTABLE_PAGE_COMPONENT_TYPES`). Gating,
+  // and on the runtime door from birth — the rule's header says why the
+  // false-refusal budget `validateComponentTypes` is held on is zero here by
+  // construction: no page could carry `print` before this rule landed.
+  {
+    name: 'validatePrintPageBlocks',
+    tier: 'gating',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-print-page-blocks.ts',
+    // Page-local: a `page` write's per-write snapshot holds exactly one page,
+    // its own (`runtime-gate.ts`), and that page is the whole input. The
+    // population it can refuse at the door is the pages that declare `print`,
+    // which was empty on every tenant the day the key was declared.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['page'],
+    run: (stack) => validatePrintPageBlocks(stack),
   },
   // ADR-0065 — a styled node's responsiveStyles must be scopable (needs an
   // `id`), name real CSS properties + design tokens, and carry a `large` base.

@@ -42,6 +42,7 @@ import {
   SCHEMALESS_NODE_CONFIG_SCHEMAS,
   getSchemalessNodeConfigJsonSchemas,
 } from './schemaless-node-config.zod.js';
+import { VALUE_SLOT_TEMPLATE_REFUSAL } from './flow-value-slot-template.js';
 
 interface Parseable { safeParse(v: unknown): { success: boolean; error?: { issues: ReadonlyArray<{ code: string; message: string }> } } }
 
@@ -430,7 +431,7 @@ describe('MapConfigSchema — an unknown key is refused, not stripped', () => {
 
 // ─── assignment (#14149) ─────────────────────────────────────────────
 
-describe('assignment value contract — a CEL envelope beside `{token}` interpolation', () => {
+describe('assignment value contract — a CEL envelope beside literals (#14149; the `{token}` dialect retired, #19939)', () => {
   const DIGEST_SOURCE = 'joinNonEmpty(overdue_tasks.map(t, t.subject), "\\n")';
   const DIGEST_ENVELOPE = { dialect: 'cel', source: DIGEST_SOURCE };
 
@@ -452,21 +453,22 @@ describe('assignment value contract — a CEL envelope beside `{token}` interpol
 
   it('accepts the two forms side by side in one node', () => {
     expect(AssignmentConfigSchema.safeParse({
-      assignments: { owner_name: '{manager.name}', digest: DIGEST_ENVELOPE },
+      assignments: { owner_name: 'Ada Lovelace', digest: DIGEST_ENVELOPE },
     }).success).toBe(true);
   });
 
-  it('PRESERVATION: every value that parsed before still parses — strings, scalars, arrays, plain objects', () => {
+  it('PRESERVATION: every literal still parses — strings, scalars, arrays, plain objects', () => {
     expect(AssignmentConfigSchema.safeParse({
       assignments: {
         decision: 'approved',                 // the showcase's own assignment
-        owner: '{record.owner}',              // sole-token interpolation
-        greeting: 'Hi {record.name}!',        // text with holes
         cel_looking_text: 'a + b',            // a STRING is never CEL here
         n: 3, ok: true, nothing: null,
-        list: ['{a}', 2],
-        obj: { nested: '{x}', source: 'not an envelope without a dialect' },
+        list: ['a', 2],
+        obj: { nested: 'x', source: 'not an envelope without a dialect' },
         empty: '',
+        // The two `{…}` spellings the retirement keeps until CEL can write them.
+        due: '{TODAY() + 7}',
+        by: '{$User.Id}',
       },
     }).success).toBe(true);
     // An envelope-shaped object with a non-string `dialect` is a literal, as it always was.
@@ -478,6 +480,29 @@ describe('assignment value contract — a CEL envelope beside `{token}` interpol
 
   it('bare legacy keys (no `assignments` wrapper) still parse, untouched — an envelope there is a literal', () => {
     expect(AssignmentConfigSchema.safeParse({ decision: 'approved', digest: { dialect: 'cel' } }).success).toBe(true);
+  });
+
+  it('[#19939] REFUSES the retired `{token}` dialect at the value\'s path — in the map, nested, and in a bare legacy key', () => {
+    const result = AssignmentConfigSchema.safeParse({
+      assignments: {
+        owner: '{record.owner}',              // sole token
+        greeting: 'Hi {record.name}!',        // text with holes
+        list: ['{a}', 2],
+        obj: { nested: '{x}' },
+      },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => [i.code, i.path.join('.')])).toEqual([
+      ['custom', 'assignments.owner'],
+      ['custom', 'assignments.greeting'],
+      ['custom', 'assignments.list.0'],
+      ['custom', 'assignments.obj.nested'],
+    ]);
+    for (const issue of result.error!.issues) expect(issue.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    // The bare legacy config is no way around it — an envelope-shaped literal there included.
+    const bare = AssignmentConfigSchema.safeParse({ total: '{amount}', lit: { dialect: 'cel', source: '{a}' } });
+    expect(bare.success).toBe(false);
+    expect(bare.error!.issues.map((i) => i.path.join('.'))).toEqual(['total', 'lit.source']);
   });
 
   it.each([
@@ -513,7 +538,7 @@ describe('assignment value contract — a CEL envelope beside `{token}` interpol
 
   it('a malformed envelope is refused wherever it sits in the map — the path names the variable', () => {
     const result = AssignmentConfigSchema.safeParse({
-      assignments: { fine: DIGEST_ENVELOPE, broken: { dialect: 'cel' }, alsoFine: '{x}' },
+      assignments: { fine: DIGEST_ENVELOPE, broken: { dialect: 'cel' }, alsoFine: 'x' },
     });
     expect(result.success).toBe(false);
     // `{ dialect: 'cel' }` is refused by the evaluated-slot rule at its `source`
@@ -654,10 +679,10 @@ describe('AssignmentConfigSchema.assignments — __proto__ pre-parse guard, cons
   it.each(['constructor', 'prototype'])(
     'PRESERVATION: `%s` remains a legal flow-variable name — no ruling narrowed this slot\'s accept set',
     (name) => {
-      const result = AssignmentConfigSchema.safeParse({ assignments: { [name]: '{x}' } });
+      const result = AssignmentConfigSchema.safeParse({ assignments: { [name]: 'x' } });
       expect(result.success).toBe(true);
       if (!result.success) return;
-      expect((result.data.assignments as Record<string, unknown> | undefined)?.[name]).toBe('{x}');
+      expect((result.data.assignments as Record<string, unknown> | undefined)?.[name]).toBe('x');
     },
   );
 
@@ -666,7 +691,7 @@ describe('AssignmentConfigSchema.assignments — __proto__ pre-parse guard, cons
   });
 
   it('an ordinary `assignments` map with no reserved names still parses', () => {
-    expect(AssignmentConfigSchema.safeParse({ assignments: { total: '{amount}' } }).success).toBe(true);
+    expect(AssignmentConfigSchema.safeParse({ assignments: { total: { dialect: 'cel', source: 'amount' } } }).success).toBe(true);
   });
 });
 
@@ -752,14 +777,14 @@ describe('AssignmentConfigSchema — top-level __proto__ refused at the catchall
       // These reach the catchall unskipped and round-trip intact, so no
       // ruling narrows them. The guard refusing them would be a narrowing
       // nobody ordered.
-      expect(classify(JSON.parse(JSON.stringify({ [name]: '{x}', keep: 1 })), name)).toBe('silently-kept');
+      expect(classify(JSON.parse(JSON.stringify({ [name]: 'x', keep: 1 })), name)).toBe('silently-kept');
     },
   );
 
   it('PRESERVATION: every previously accepted shape still parses', () => {
     expect(AssignmentConfigSchema.safeParse({}).success).toBe(true);
     expect(AssignmentConfigSchema.safeParse({ assignments: {} }).success).toBe(true);
-    expect(AssignmentConfigSchema.safeParse({ assignments: { total: '{amount}' } }).success).toBe(true);
+    expect(AssignmentConfigSchema.safeParse({ assignments: { total: { dialect: 'cel', source: 'amount' } } }).success).toBe(true);
     // The bare legacy config (no `assignments` wrapper) — the shape that makes
     // this top level an authoring surface in the first place.
     expect(AssignmentConfigSchema.safeParse({ decision: 'approved', digest: { dialect: 'cel' } }).success).toBe(true);
@@ -801,13 +826,13 @@ describe('AssignmentConfigSchema — top-level __proto__ refused at the catchall
 /**
  * #19938 (the contract half of #11182 ruling D) — the `create_record` /
  * `update_record` `fields` map carries the value contract `assignments` has:
- * a field value may be a CEL value envelope beside a `{token}` template or a
- * literal. The widening is the valid envelope; the one newly refused shape is a
- * malformed envelope (an object naming a string `dialect` that is not a valid
- * CEL value envelope), the edge #14149 accepted on `assignments.*`. Everything
- * else parses exactly as before.
+ * a field value may be a CEL value envelope beside a literal. The widening is
+ * the valid envelope; the one shape it newly refused is a malformed envelope
+ * (an object naming a string `dialect` that is not a valid CEL value
+ * envelope), the edge #14149 accepted on `assignments.*`. #19939 (the C half)
+ * then retired the `{token}` template dialect from the slot.
  */
-describe('CRUD `fields` value contract — the CEL value envelope beside `{token}` templates', () => {
+describe('CRUD `fields` value contract — the CEL value envelope beside literals', () => {
   const PRICE_ENVELOPE = { dialect: 'cel', source: 'round(price * 100) / 100.0' };
   const configs = [
     ['create_record', CreateRecordConfigSchema, (fields: unknown) => ({ objectName: 'quote', fields })],
@@ -821,15 +846,14 @@ describe('CRUD `fields` value contract — the CEL value envelope beside `{token
     expect((result.data as { fields: Record<string, unknown> }).fields.total).toEqual(PRICE_ENVELOPE);
   });
 
-  it.each(configs)('%s PRESERVATION: every field value that parsed before still parses, unchanged', (_type, schema, wrap) => {
+  it.each(configs)('%s PRESERVATION: every literal still parses, unchanged', (_type, schema, wrap) => {
     const fields = {
-      subject: 'Follow up on {record.name}',   // text with holes
-      owner: '{record.owner}',                 // sole token
-      due_date: '{TODAY() + 7}',               // date macro
-      amount: '{round(total * 100) / 100}',    // template expression
+      subject: 'Follow up',                    // text
+      due_date: '{TODAY() + 7}',               // a date macro — kept until CEL can write it
+      owner: '{$User.Id}',                     // the run user — kept until the flow CEL scope binds it
       cel_looking_text: 'a + b',               // a STRING is never CEL here
       n: 3, ok: true, nothing: null, empty: '',
-      tags: ['{a}', 2, { dialect: 'cel' }],    // arrays are data, envelope-shaped members included
+      tags: ['a', 2, { dialect: 'cel' }],      // arrays are data, envelope-shaped members included
       payload: { nested: { dialect: 'cel' }, source: 'not an envelope without a dialect' },
       weird: { dialect: 1 },                   // a non-string `dialect` is a literal
     };
@@ -845,7 +869,7 @@ describe('CRUD `fields` value contract — the CEL value envelope beside `{token
     [type, schema, wrap, 'a `template` dialect', { dialect: 'template', source: 'Hi {name}' }, 'fields.total.dialect'],
     [type, schema, wrap, 'an unknown dialect', { dialect: 'javascript', source: '1 + 1' }, 'fields.total.dialect'],
   ] as const))('%s REFUSES a malformed envelope with %s — code `custom`, at the field\'s path, led by the slot-neutral sentence', (_type, schema, wrap, _what, envelope, path) => {
-    const result = schema.safeParse(wrap({ subject: '{x}', total: envelope }));
+    const result = schema.safeParse(wrap({ subject: 'x', total: envelope }));
     expect(result.success).toBe(false);
     const issues = result.error!.issues.filter((i) => i.path[0] === 'fields');
     expect(issues.map((i) => i.path.join('.'))).toEqual([path]);

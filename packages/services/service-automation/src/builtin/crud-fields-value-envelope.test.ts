@@ -17,8 +17,10 @@
  *  1. **Evaluate** — a valid envelope in `fields.*` is evaluated by the same
  *     engine call the `assignment` executor makes, and its value is written,
  *     type kept.
- *  2. **Preserve** — every non-envelope value writes exactly what the old
- *     whole-map `interpolate()` wrote: ruling D, no spelling changes meaning.
+ *  2. **Preserve** — every literal writes exactly what the old whole-map
+ *     `interpolate()` wrote. (A `{…}` template no longer reaches a write:
+ *     #19939, ruling D's v18 half, refuses it — pinned below, with the CEL
+ *     spelling that writes the same value.)
  *  3. **Refuse at registration** — a malformed envelope stops the flow
  *     registering, located at `config.fields.<field>` and led by the
  *     slot-neutral sentence; the evaluator refuses the same set.
@@ -28,7 +30,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
-import { VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/automation';
+import { VALUE_ENVELOPE_REFUSAL, VALUE_SLOT_TEMPLATE_REFUSAL } from '@objectstack/spec/automation';
 import { AutomationEngine } from '../engine.js';
 import { registerCrudNodes } from './crud-nodes.js';
 import { interpolate } from './template.js';
@@ -77,6 +79,25 @@ async function makeStack() {
   const automation = new AutomationEngine(logger);
   registerCrudNodes(automation, { logger, getService: (n: string) => (n === 'data' ? ql : undefined) } as any);
   return { automation, writes };
+}
+
+/** The CRUD executors themselves, over the same recording store — for the run-time twin. */
+async function captureExecutors() {
+  const logger = makeLogger();
+  const ql = new ObjectQL({ logger });
+  const { driver, writes } = makeRecordingDriver();
+  ql.registerDriver(driver, true);
+  await ql.init();
+  const executors = new Map<string, { execute: (...args: any[]) => Promise<any> }>();
+  const engine = new AutomationEngine(logger);
+  const recorder = new Proxy(engine, {
+    get(target, key, receiver) {
+      if (key === 'registerNodeExecutor') return (e: any) => { executors.set(e.type, e); };
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  registerCrudNodes(recorder as AutomationEngine, { logger, getService: (n: string) => (n === 'data' ? ql : undefined) } as any);
+  return { writes, executors };
 }
 
 type WriteNode = 'create_record' | 'update_record';
@@ -155,15 +176,15 @@ describe.each(NODE_TYPES)('%s `fields.*` — a CEL value envelope is EVALUATED (
   });
 });
 
-describe.each(NODE_TYPES)('%s `fields.*` — every non-envelope value writes exactly what it wrote before', (nodeType) => {
-  it('templates, literals, arrays and nested envelope-shaped JSON: byte-identical to the whole-map `interpolate()`', async () => {
+describe.each(NODE_TYPES)('%s `fields.*` — every literal writes exactly what it wrote before', (nodeType) => {
+  it('literals, arrays, nested envelope-shaped JSON and the two kept `{…}` spellings: byte-identical to the whole-map `interpolate()`', async () => {
     const fields = {
-      total: '{price}',                                   // sole token keeps its type
-      subject: 'Quote for {name} at {price}',             // text with holes
+      subject: '{TODAY() + 7}',                           // a date macro — kept until CEL can write it
+      total: 42,
       payload: {
-        note: 'for {name}',                               // strings inside a literal still interpolate
+        note: 'for the record',
         inner: { dialect: 'cel', source: 'price * 2' },   // NESTED envelope shape — data, not evaluated
-        list: [{ dialect: 'cel', source: 'x' }, '{price}'],
+        list: [{ dialect: 'cel', source: 'x' }, 'plain'],
         weird: { dialect: 1 },
       },
     };
@@ -180,13 +201,70 @@ describe.each(NODE_TYPES)('%s `fields.*` — every non-envelope value writes exa
   });
 });
 
+/**
+ * [#19939] The `{…}` template dialect is retired from `fields.*` (the C half
+ * of #11182 ruling D) — refused at registration, and by the executor's own
+ * `parseNodeConfig` for a flow that never went through registration. Nothing
+ * is written either way: the template used to write what the CEL envelope
+ * named in the refusal now writes.
+ */
+describe.each(NODE_TYPES)('%s `fields.*` — the retired `{…}` template dialect is refused, and nothing is written', (nodeType) => {
+  const TEMPLATED: ReadonlyArray<[string, Record<string, unknown>, string, string]> = [
+    ['a sole token', { total: '{price}' }, 'config.fields.total', "source: 'price'"],
+    ['text with holes', { subject: 'Quote for {name} at {price}' }, 'config.fields.subject', `"'Quote for ' + name + ' at ' + price"`],
+    ['a string inside a literal', { payload: { note: 'for {name}' } }, 'config.fields.payload.note', `"'for ' + name"`],
+    ['a template expression', { total: '{round(price * 100) / 100}' }, 'config.fields.total', "source: 'round(price * 100) / 100.0'"],
+  ];
+
+  it.each(TEMPLATED)('%s: registerFlow refuses it, located, with the CEL spelling', (_what, fields, at, spelling) => {
+    const automation = new AutomationEngine(makeLogger());
+    registerCrudNodes(automation, { logger: makeLogger(), getService: () => undefined } as any);
+    let thrown: Error | undefined;
+    try {
+      automation.registerFlow('price_quote', writeFlow(nodeType, fields));
+    } catch (err) {
+      thrown = err as Error;
+    }
+    expect(thrown, 'a template in a value slot must not register').toBeDefined();
+    expect(thrown!.message).toContain(`node 'w' (${nodeType}) ${nodeType} field value at ${at}`);
+    expect(thrown!.message).toContain(VALUE_SLOT_TEMPLATE_REFUSAL);
+    expect(thrown!.message).toContain(spelling);
+  });
+
+  it('the run-time twin: the executor refuses the same value at its own contract parse, and writes nothing', async () => {
+    const { writes, executors } = await captureExecutors();
+    const variables = new Map<string, unknown>(Object.entries(PARAMS));
+    const config: Record<string, unknown> = { objectName: 'quote', fields: { subject: 'ok', total: '{price}' } };
+    if (nodeType === 'update_record') config.filter = { id: 'q1' };
+    const result = await executors.get(nodeType)!.execute({ id: 'w', type: nodeType, config } as any, variables, { userId: 'u1' } as any);
+    expect(result.success).toBe(false);
+    expect((result as { errorClass?: string }).errorClass).toBe('guard');
+    expect(String((result as { error?: string }).error)).toContain('config.fields.total');
+    expect(String((result as { error?: string }).error)).toContain(VALUE_SLOT_TEMPLATE_REFUSAL);
+    expect(writes).toEqual([]);
+  });
+
+  it('the CEL spelling the refusal names writes the value the template wrote', async () => {
+    const before = interpolate({ total: '{price}', subject: 'Quote for {name}' }, new Map(Object.entries(PARAMS)), {} as any);
+    const { automation, writes } = await makeStack();
+    automation.registerFlow('price_quote', writeFlow(nodeType, {
+      total: { dialect: 'cel', source: 'price' },
+      subject: { dialect: 'cel', source: "'Quote for ' + name" },
+    }));
+    const res = await run(automation);
+    expect(res.success, res.error).toBe(true);
+    expect(writes[0]!.data.total).toBe(before.total);
+    expect(writes[0]!.data.subject).toBe(before.subject);
+  });
+});
+
 describe.each(NODE_TYPES)('%s `fields.*` — a malformed envelope is refused at registration, and by the evaluator', (nodeType) => {
   it.each(MALFORMED)('$label: registerFlow refuses it, located at the field and led by the slot-neutral sentence', ({ envelope }) => {
     const { automation } = { automation: new AutomationEngine(makeLogger()) };
     registerCrudNodes(automation, { logger: makeLogger(), getService: () => undefined } as any);
     let thrown: Error | undefined;
     try {
-      automation.registerFlow('price_quote', writeFlow(nodeType, { subject: '{name}', total: envelope }));
+      automation.registerFlow('price_quote', writeFlow(nodeType, { subject: 'name', total: envelope }));
     } catch (err) {
       thrown = err as Error;
     }
@@ -207,7 +285,7 @@ describe.each(NODE_TYPES)('%s `fields.*` — a malformed envelope is refused at 
     registerCrudNodes(automation, { logger: makeLogger(), getService: () => undefined } as any);
     expect(() => automation.registerFlow('price_quote', writeFlow(nodeType, {
       total: { dialect: 'cel', source: 'price * 2' },
-      subject: '{name}', n: 3, ok: true, nothing: null, payload: { dialect: 1 }, list: [{ dialect: 'cel' }],
+      subject: 'name', due: '{TODAY()}', n: 3, ok: true, nothing: null, payload: { dialect: 1 }, list: [{ dialect: 'cel' }],
     }))).not.toThrow();
   });
 });

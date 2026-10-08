@@ -21,7 +21,6 @@
     "driver-sql",
     "external-catalog",
     "---Documents & Seed---",
-    "document",
     "feed",
     "seed",
     "seed-loader",

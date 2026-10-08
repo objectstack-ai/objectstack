@@ -85,7 +85,7 @@ describe('record-change context hydrates multi-lookup from input (#1872)', () =>
       name: 'cta_default', label: 'CTA', type: 'autolaunched',
       nodes: [
         { id: 'start', type: 'start', label: 'Start', config: { objectName: 'piece', triggerType: 'record-after-create', condition: 'record.target_channels != null' } },
-        { id: 'stamp', type: 'update_record', label: 'Stamp', config: { objectName: 'piece', filter: { id: '{record.id}' }, fields: { stamp: '{record.target_channels.0}' } } },
+        { id: 'stamp', type: 'update_record', label: 'Stamp', config: { objectName: 'piece', filter: { id: '{record.id}' }, fields: { stamp: { dialect: 'cel', source: 'record.target_channels[0]' } } } },
         { id: 'end', type: 'end', label: 'End' },
       ],
       edges: [ { id: 'e1', source: 'start', target: 'stamp' }, { id: 'e2', source: 'stamp', target: 'end' } ],
@@ -96,7 +96,8 @@ describe('record-change context hydrates multi-lookup from input (#1872)', () =>
     await sleep(200);
     const row = await data.findOne('piece', { where: { id } });
     console.log('[dbg] row=', JSON.stringify(row));
-    // Flow fired (condition saw target_channels) AND `{record.target_channels.0}` resolved.
+    // Flow fired (condition saw target_channels) AND `record.target_channels[0]` resolved
+    // (a CEL value envelope — the `{…}` template dialect is retired from value slots, #19939).
     expect(row?.stamp).toBe('ch_1');
   }, 15000);
 });
