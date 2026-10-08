@@ -300,8 +300,19 @@ export function isObjectSchemaMaskExempt(context: unknown): boolean {
     if (!context || typeof context !== 'object') return false;
     const ctx = context as { isSystem?: unknown; systemPermissions?: unknown };
     if (ctx.isSystem === true) return true;
-    if (!Array.isArray(ctx.systemPermissions)) return false;
-    return ctx.systemPermissions.some(
+    return holdsObjectSchemaMaskExemptCapability(ctx);
+}
+
+/**
+ * The capability half of {@link isObjectSchemaMaskExempt} — the one reading of
+ * `systemPermissions` against {@link OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES}.
+ * [#22250] {@link resolveObjectSchemaMaskPosture} asks it alone to decide
+ * whether an exempt caller's field permission is worth asking: a caller exempt
+ * only as `isSystem` is one field-level security never restricts.
+ */
+function holdsObjectSchemaMaskExemptCapability(context: { systemPermissions?: unknown }): boolean {
+    if (!Array.isArray(context.systemPermissions)) return false;
+    return context.systemPermissions.some(
         (p) => typeof p === 'string' && OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES.includes(p),
     );
 }
@@ -374,8 +385,7 @@ export async function resolveObjectSchemaMaskPosture(input: {
         // needs the whole schema, and a projected one PUT back deletes what it
         // withheld). It is not the runtime projections': they keep this
         // caller's own field permission, asked lazily — see `runtime`.
-        const isSystem = (context as { isSystem?: unknown }).isSystem === true;
-        return ask && !isSystem
+        return ask && holdsObjectSchemaMaskExemptCapability(context as { systemPermissions?: unknown })
             ? { kind: 'passthrough', reason: 'exempt', runtime: runtimeFieldPostureAsker(objectName, context, ask, telemetry) }
             : { kind: 'passthrough', reason: 'exempt' };
     }
