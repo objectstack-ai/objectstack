@@ -40,7 +40,9 @@ parse the RAW stored config — their typed slots are strings (or `unknown`
 where values interpolate), so `{token}` templates pass and resolve at the
 executor's existing interpolation points. The value slots are the exception
 since #19939: the `{token}` dialect is retired there (the "value slots"
-section below).
+section below). So are the text slots since #22110: a screen `title` /
+`description` and an `end` `message` render `{{ }}` holes, and a `{token}`
+there is refused (`flow-text-slot-template.ts`).
 
 ## Unknown keys — closed here too, as of #4001 批 9
 
