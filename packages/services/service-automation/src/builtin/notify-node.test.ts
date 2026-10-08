@@ -98,6 +98,11 @@ describe('notify (baseline node)', () => {
         expect(description).toMatch(/payload\.locale is not consulted/);
         expect(description).not.toMatch(/not one per recipient/);
         expect(description).not.toMatch(/ONE value for the whole notification/);
+        // Form help reads as product guidance (#22093): the deployment-default
+        // rung is named in product words, not as the service interface behind
+        // it, and the ruling's date stays in the code comment beside the key.
+        expect(description).not.toMatch(/\bI[A-Z]\w*Service\b/);
+        expect(description).not.toMatch(/\bruling\b|\b20\d\d-\d\d-\d\d\b/i);
     });
 
     describe('with a messaging service registered', () => {
@@ -271,11 +276,15 @@ describe('notify (baseline node)', () => {
         });
 
         it('refuses a node carrying BOTH template and inline title (the contract superRefine, at the parse seam)', async () => {
-            engine.registerFlow('notify_flow', notifyFlow({
+            // #21898 — refused at registration now, at the key the rule names…
+            expect(() => engine.registerFlow('notify_flow', notifyFlow({
                 recipients: ['user_1'],
                 title: 'Deal won',
                 template: 'crm.large_deal_won',
-            }));
+            }))).toThrow(/refused at `template`/);
+            // …and the executor still refuses one that reaches it past the doors.
+            const stored = engine.registerFlow('notify_flow', notifyFlow({ recipients: ['user_1'], title: 'Deal won' }));
+            (stored.nodes.find((n) => n.id === 'notify')!.config as Record<string, unknown>).template = 'crm.large_deal_won';
             const result = await engine.execute('notify_flow');
             expect(result.success).toBe(false);
             expect(result.error).toContain('`template`');

@@ -125,10 +125,17 @@ describe('what stays accepted at save (lit controls)', () => {
   });
 
   it.each(WRITE_NODES)('CONTROL: %s with a dynamic objectName — a {token} template or an expression envelope — is not judged at save', (nodeType) => {
-    for (const objectName of ['{record.target}', '{target}', { dialect: 'cel', source: "'sys_metadata'" }]) {
+    for (const objectName of ['{record.target}', '{target}']) {
       expect(issuesOf(flowWith({ type: nodeType, config: configFor(nodeType, objectName) })), JSON.stringify(objectName)).toEqual([]);
       expect(flowNodeConfigRefusals(nodeType, configFor(nodeType, objectName))).toEqual([]);
     }
+    // #21898: an envelope is no name this arm can read, and no value the node's
+    // contract accepts (`objectName` is a string): the value arm refuses it,
+    // and this arm still says nothing.
+    const envelope = { dialect: 'cel', source: "'sys_metadata'" };
+    expect(flowNodeConfigRefusals(nodeType, configFor(nodeType, envelope)).map(({ code, path }) => ({ code, path }))).toEqual([
+      { code: 'node-config-refused-by-contract', path: 'objectName' },
+    ]);
   });
 
   it.each(FAMILY)('CONTROL: a get_record node on \'%s\' is not judged by this arm — a read is not a write', (table) => {

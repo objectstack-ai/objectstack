@@ -357,7 +357,7 @@ describe('the accept side does not move, and `main` is declared', () => {
   });
 });
 
-describe('the `permissions` union door names the surface and the rename, like every other door', () => {
+describe('the `permissions` door names the surface and the rename, like every other door', () => {
   // ## What #16328 reported, and what was actually wrong
   //
   // The card measured `{ services: ['object'], hoooks: ['x'] }` refused with a
@@ -381,27 +381,32 @@ describe('the `permissions` union door names the surface and the rename, like ev
   // sibling doors (`ManifestSchema` through `devPlugins[]`, and
   // `ActionRef` / `GuardRef`) carry all three.
   //
-  // So this pins the CONTENT of the nested line, not the union's shape. The
-  // union is deliberately untouched: reshaping it costs either the accept set
-  // or the published JSON Schema, which is the standing finding recorded on
-  // the `devPlugins[]` guard above.
+  // So this pins the CONTENT of the line, not the slot's shape.
+  //
+  // ## Since the flat-list arm retired, there is no union to descend
+  //
+  // `ManifestPermissionsSchema` WAS `z.union([z.array(z.string()), block])`;
+  // the list arm retired (ADR-0049, ADR-0087 conversion
+  // `manifest-permissions-string-list-removed`), so the slot is the block
+  // itself and the block's own `unrecognized_keys` issue sits at
+  // `['permissions']` directly, with no `invalid_union` envelope around it.
+  // The CONTENT pinned below is unchanged — the same surface, the same rename,
+  // the same curated aliases — which is the point: the retirement moved the
+  // envelope, never the words. The list's own refusal is pinned in
+  // `manifest-permissions-string-list.test.ts`.
   const near = () => ({ ...legal(), permissions: { services: ['object'], hoooks: ['x'] } });
 
   /**
-   * The object arm's own `unrecognized_keys` issue, carried inside the union
-   * issue at `['permissions']` — the shape the first pin below measures raw.
+   * The block's own `unrecognized_keys` issue at `['permissions']` — the shape
+   * the first pin below measures raw.
    */
   const permissionsRefusal = (result: ReturnType<typeof ManifestSchema.safeParse>) => {
     if (result.success) throw new Error('expected the manifest to be refused');
-    const union = result.error.issues.find((i) => i.code === 'invalid_union') as
-      | { path: (string | number)[]; errors: Array<Array<{ code: string; keys?: string[] }>> }
+    const nested = result.error.issues.find((i) => i.code === 'unrecognized_keys') as
+      | { code: string; path: (string | number)[]; keys: string[] }
       | undefined;
-    expect(union, 'the refusal is a union issue at `permissions`').toBeDefined();
-    expect(union!.path).toEqual(['permissions']);
-    const nested = union!.errors.flat().find((i) => i.code === 'unrecognized_keys') as
-      | { code: string; keys: string[] }
-      | undefined;
-    expect(nested, 'the named refusal is carried inside the union issue').toBeDefined();
+    expect(nested, 'the named refusal is the block\'s own issue').toBeDefined();
+    expect(nested!.path).toEqual(['permissions']);
     return nested!;
   };
 
@@ -416,31 +421,27 @@ describe('the `permissions` union door names the surface and the rename, like ev
     expect(rendered, 'the rename is offered').toContain('Did you mean `hoooks` → `hooks`?');
   });
 
-  it('the named refusal is the object arm\'s own issue, carried inside the union issue', () => {
-    // The raw shape, stated because it is the half the card measured: the
-    // top-level issue IS a keyless `invalid_union` and that is not the defect.
+  it('the named refusal is the block\'s own issue at `permissions` — no union envelope since the list arm retired', () => {
+    // The raw shape: one `unrecognized_keys` issue, and no keyless
+    // `invalid_union` above it any more.
     const result = ManifestSchema.safeParse(near());
     expect(result.success).toBe(false);
     if (result.success) return;
-    const union = result.error.issues.find((i) => i.code === 'invalid_union') as
-      | { path: (string | number)[]; errors: Array<Array<{ code: string; keys?: string[]; message?: string }>> }
-      | undefined;
-    expect(union).toBeDefined();
-    expect(union!.path).toEqual(['permissions']);
-    const nested = union!.errors.flat().find((i) => i.code === 'unrecognized_keys');
-    expect(nested, 'the named refusal is carried inside the union issue').toBeDefined();
-    expect(nested!.keys).toEqual(['hoooks']);
-    expect(nested!.message).toContain('Did you mean `hoooks` → `hooks`?');
+    expect(result.error.issues.some((i) => i.code === 'invalid_union'), 'no union envelope').toBe(false);
+    const nested = permissionsRefusal(result) as { keys: string[]; message?: string };
+    expect(nested.keys).toEqual(['hoooks']);
+    expect(nested.message).toContain('Did you mean `hoooks` → `hooks`?');
   });
 
-  it('the accept set does not move — both arms of the union still parse', () => {
+  it('the structured block\'s accept set does not move', () => {
     // #16328's negative control, and the reason a "fix" here could be worse
-    // than the defect. `strictObject` is `z.object(shape, { error }).strict()`:
+    // than the defect. The block is `z.object(shape, { error }).strict()`:
     // the shape and the strictness are unchanged, and an error map is consulted
-    // only once an issue is already being raised.
+    // only once an issue is already being raised. The retirement removed the
+    // OTHER arm; nothing the block accepted is refused, nothing it refused is
+    // accepted (the list's refusal is `manifest-permissions-string-list.test.ts`).
     expect(ManifestSchema.safeParse({ ...legal(), permissions: { services: ['object'] } }).success).toBe(true);
-    expect(ManifestSchema.safeParse({ ...legal(), permissions: ['read', 'write'] }).success).toBe(true);
-    expect(ManifestSchema.safeParse({ ...legal(), permissions: [] }).success).toBe(true);
+    expect(ManifestSchema.safeParse({ ...legal(), permissions: {} }).success).toBe(true);
     expect(ManifestSchema.safeParse({
       ...legal(),
       permissions: { services: ['object'], hooks: ['record.beforeInsert'], network: ['api.acme.com'], fs: [] },

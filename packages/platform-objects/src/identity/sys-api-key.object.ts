@@ -332,7 +332,7 @@ export const SysApiKey = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['key'], unique: true },
+    { fields: ['key'], unique: 'global' },
     { fields: ['user_id'] },
     { fields: ['prefix'] },
     { fields: ['revoked'] },

@@ -60,4 +60,5 @@ export const entry: SemanticMigration = {
     + '`inputMapping` on find/get/delete, or two endpoints claiming one METHOD + path); and '
     + '(4) after publishing, each endpoint answers as you expect — an anonymous request to '
     + 'a session-only endpoint returns 401 rather than data.',
+  relevantWhen: { kind: 'stack-declares', keys: ['apis'] },
 };

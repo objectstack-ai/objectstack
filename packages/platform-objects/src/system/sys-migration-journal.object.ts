@@ -69,6 +69,14 @@ export const SysMigrationJournal = ObjectSchema.create({
   icon: 'clipboard-list',
   isSystem: true,
   managedBy: 'engine-owned',
+  // [ADR-0131 D7] Deployment-level state: NO tenant column. The sole writer,
+  // `@objectstack/core`'s migration runner, appends under a system context —
+  // or under the transaction it opened with one — and the row contract
+  // (`MigrationJournalEventSchema`) has no organization field to carry. Who
+  // may read is object permission (D7): the platform-only capability below,
+  // since a failure `detail` is error text about rows of any organization.
+  systemFields: { tenant: false },
+  requiredPermissions: ['manage_platform_settings'],
   description:
     'Append-only trace of migration runs: which chunks committed, which were compensated, and where a killed run stopped.',
   nameField: 'run_id', // [ADR-0079] canonical primary-title pointer
@@ -168,7 +176,7 @@ export const SysMigrationJournal = ObjectSchema.create({
     // ERROR rather than a silently double-recorded event. A resumed run that
     // miscomputed its next sequence must fail loudly — a journal that quietly
     // accepts two "chunk 7 done" rows cannot be trusted to say what committed.
-    { fields: ['run_id', 'seq'], unique: true },
+    { fields: ['run_id', 'seq'], unique: 'global' },
     // The recovery scan's access path: all events for a run, and the
     // open-run sweep that looks for run_started without run_done.
     { fields: ['run_id', 'kind'], unique: false },

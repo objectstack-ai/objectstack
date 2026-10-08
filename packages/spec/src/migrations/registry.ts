@@ -2044,6 +2044,7 @@ const step17: MigrationStep = {
         + "(or `'previousYear'`), and `dimension` is named wherever the selection dates more than one "
         + 'time dimension. `objectstack validate` passes, and each affected widget renders a '
         + '`<measure>__compare` column over the window its author intended.',
+      relevantWhen: { kind: 'stack-declares', keys: ['dashboards'] },
     },
     {
       id: 'data-driver-find-stream-retired',
@@ -2356,6 +2357,7 @@ const step17: MigrationStep = {
         + '`inputMapping` on find/get/delete, or two endpoints claiming one METHOD + path); and '
         + '(4) after publishing, each endpoint answers as you expect — an anonymous request to '
         + 'a session-only endpoint returns 401 rather than data.',
+      relevantWhen: { kind: 'stack-declares', keys: ['apis'] },
     },
     {
       id: 'delete-by-id-before-hook-repoint-retired',
@@ -3549,6 +3551,7 @@ const step17: MigrationStep = {
         + '`backoffMultiplier` below 1 remain, and each adjusted value was re-chosen knowing a '
         + 'retry re-runs the handler with its writes and callouts. No job fails to register '
         + 'with the retry-policy bound prescription.',
+      relevantWhen: { kind: 'stack-declares', keys: ['jobs'] },
     },
     {
       id: 'notification-list-cursor-retired',
@@ -4275,6 +4278,7 @@ const step17: MigrationStep = {
         + 'rule needs a `criteria` predicate that names the same population, checked against a '
         + 'representative record. Where a single business unit was meant, use `business_unit`; '
         + '`unit_and_subordinates` is the subtree and grants strictly more.',
+      relevantWhen: { kind: 'stack-declares', keys: ['sharingRules'] },
     },
     {
       id: 'sort-node-direction-rejected',
@@ -4514,6 +4518,7 @@ const step17: MigrationStep = {
         + 'Deleting it without that decision leaves exactly the state the retirement exists to '
         + 'end: a destructive tool nobody is approving, now without even the false flag to show '
         + 'that somebody once meant to.',
+      relevantWhen: { kind: 'stack-declares', keys: ['tools'] },
     },
     {
       id: 'ui-interaction-config-family-retired',
@@ -5445,6 +5450,39 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'carries the rest.',
   },
   {
+    id: 'declared-index-bare-unique-true-retired',
+    order: 86,
+    text:
+      'It also makes a declared index state its uniqueness scope (ADR-0120 D1, staged to this '
+      + 'protocol by D7). On `indexes[].unique`, bare `true` was the one spelling whose scope was '
+      + 'positional: it built the index over exactly `fields`, one holder across the whole '
+      + 'installation, while reading like "unique per organization" to an author who knew the '
+      + 'field-level meaning. The parse now refuses it with a prescription naming both words — '
+      + '`\'global\'` (installation-wide, the index bare `true` built) and `\'organization\'` (one '
+      + 'holder per organization). Field-level `unique: true` is untouched. The D2 conversion '
+      + '`declared-index-unique-scope` rewrites a declared index\'s bare `true` to `\'global\'`, '
+      + 'which is lossless and drift-free by construction, retired from the load path so authors '
+      + 'are refused at the door while stored rows, built artifacts and `os migrate meta` replay '
+      + 'it. Its D3 record is the semantic entry `declared-index-bare-unique-true-retired`: '
+      + 'whether each respelled index was really meant installation-wide is the author\'s call.',
+  },
+  {
+    id: 'deployment-plumbing-organization-columns-retired',
+    order: 86,
+    text:
+      'It also takes the injected organization column off seven deployment-level platform tables — '
+      + '`sys_job`, `sys_job_run`, `sys_job_queue`, `sys_flow_dispatch`, `sys_migration`, '
+      + '`sys_migration_journal` and `sys_presence` (ADR-0131 D7). A writer census found no writer that '
+      + 'attributes a row of any of them to an organization, so the column only ever held NULL, and under '
+      + 'a walled posture the tenant wall hid every row from every reader. Each now declares '
+      + '`systemFields: { tenant: false }` and the object-level capability gate '
+      + '`requiredPermissions: [\'manage_platform_settings\']`: with no column there is no wall, so reads '
+      + 'are governed by object permission, and the gate keeps one organization\'s administrator off '
+      + 'another organization\'s rows. Nothing in stack metadata is rewritten; an existing database keeps '
+      + 'the column as an orphan the boot drift report names, and `os migrate apply --allow-destructive` '
+      + 'drops it. The D3 records are the seven `sys-*-organization-column-retired` semantic entries.',
+  },
+  {
     id: 'duration-keys-unit-in-key',
     order: 24,
     text:
@@ -5596,6 +5634,25 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`flow-approval-node-config-contract-refused`.',
   },
   {
+    id: 'flow-builtin-node-config-values-refused',
+    order: 85,
+    text:
+      'Then the builtin arm stops being presence-only: a present value a builtin node\'s executor '
+      + 'contract refuses is refused at parse, at `nodes.N.config.<key>`, with the same '
+      + '`node-config-refused-by-contract` code. Every builtin executor parses its config against that '
+      + 'contract before it acts, so a `create_record` `outputVariable: 42` or a screen field `min: \'1\'` '
+      + 'used to pass `objectstack validate` and `objectstack compile`, register, and fail every run that '
+      + 'reached the node. The arm judges only what the build can know the run will parse: never a value '
+      + 'carrying a `{token}`, whatever its slot\'s type (held back by ruling, not admitted: outside `http` '
+      + 'such a token in a number or boolean slot still fails at its first run, so those slots take a '
+      + 'literal); on `http`, which parses after interpolating, only '
+      + 'token-free values and never the credential-held `signingSecret`; on a `loop`, only one with a '
+      + '`body`; on the region containers, never the region slots. Key membership is untouched. No key '
+      + 'is removed, so there is no tombstone, and no D2 conversion exists: the platform cannot know the '
+      + 'value the author meant. Its D3 record is the semantic entry '
+      + '`flow-builtin-node-config-values-refused`.',
+  },
+  {
     id: 'flow-decision-edge-branching-first-match',
     order: 45,
     text:
@@ -5611,6 +5668,38 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'decision with no `mode` takes the first-match meaning on upgrade and nothing rewrites '
       + 'it; `os migrate meta --stored` lists each one for review, and `mode: \'inclusive\'` is '
       + 'the one-line fix where a node meant every branch.',
+  },
+  {
+    id: 'flow-edge-unresolved-or-repeated-refused',
+    order: 86,
+    text:
+      'It also refuses, at parse, a flow edge that does not resolve in its own graph or that repeats '
+      + 'an earlier one. An edge\'s `source` and `target` must name nodes of the graph that declares '
+      + 'it — the flow\'s own nodes, or the region body\'s for an edge inside a region — because the '
+      + 'engine resolves them there alone, and a dangling edge carried the run nowhere, silently; and '
+      + 'an edge with the same `source`, `target`, `type`, `condition` and branch `label` as an earlier '
+      + 'edge of that graph is refused, because the engine runs a target once per out-edge it selects '
+      + 'and a copy ran it again. Both are judged in the region walk the node-id rule uses, so '
+      + '`objectstack validate`, `registerFlow` and the metadata save door agree. No key is removed, '
+      + 'so there is no tombstone, and no D2 conversion exists: a dangling endpoint carries no intent '
+      + 'a rewrite could recover, and dropping a copy changes how often its target runs. Its D3 record '
+      + 'is the semantic entry `flow-edge-unresolved-or-repeated-refused`.',
+  },
+  {
+    id: 'flow-script-subflow-config-undeclared-keys-refused',
+    order: 87,
+    text:
+      'And the builtin arm judges key membership where no other door does: a key a `script` or '
+      + '`subflow` node\'s executor contract does not declare is refused at parse, at '
+      + '`nodes.N.config.<key>`, with the same `node-config-refused-by-contract` code. Those two '
+      + 'descriptors publish no `configSchema`, so `registerFlow`\'s undeclared-key check skipped them, '
+      + 'while their executors parse the strict contract and refuse the node on an undeclared key: a '
+      + '`script` `bogusKey` used to pass `objectstack validate`, `objectstack compile` and registration '
+      + 'and fail every run that reached the node. Every other builtin keeps its undeclared keys at '
+      + 'registration, against its descriptor; a retired `script` key keeps its tombstone. No key is '
+      + 'removed, so there is no tombstone, and no D2 conversion exists: the platform cannot know what '
+      + 'an undeclared key was meant to be. Its D3 record is the semantic entry '
+      + '`flow-script-subflow-config-undeclared-keys-refused`.',
   },
   {
     id: 'flow-write-node-stored-metadata-target-refused',
@@ -5764,6 +5853,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'The D2 conversion `view-list-tabs-removed` strips the key from every list payload in '
       + '`stack.views[]` as a lossless delete, and is retired from the load path, so authors are '
       + 'refused at parse rather than rewritten.',
+  },
+  {
+    id: 'manifest-permissions-string-list-retired',
+    order: 85,
+    text:
+      'It also retires the flat-list form of a package manifest\'s `permissions` (ADR-0049 '
+      + 'enforce-or-remove): `ManifestPermissionsSchema` was a union of a list of permission strings '
+      + 'and the structured ADR-0025 block `{ services, hooks, network, fs }`, and nothing ever acted '
+      + 'on the list — the loader registers the consented grant set, never the manifest\'s request — '
+      + 'so the block is now the only form. A list is refused at parse with its prescription, and the '
+      + 'D2 conversion `manifest-permissions-string-list-removed` strips it from the stack\'s manifest '
+      + 'and every `packages[].manifest` as a lossless delete, retired from the load path; translating '
+      + 'what each dropped string meant into the four lists is the author\'s judgement, not a rewrite.',
   },
   {
     id: 'mapping-lookup-params-retired',
@@ -7115,6 +7217,7 @@ const step18: MigrationStep = {
         + 'declares `reflectionInterval` without an enabled `longTerm`. Every agent parses under the new '
         + 'schema.',
       conversionIds: ['agent-memory-long-term-store-removed'],
+      relevantWhen: { kind: 'stack-declares', keys: ['agents'] },
     },
     // #21277 — ADR-0049 enforce-or-remove (ruling record 5945617233, letter A) —
     // the D3 entry of the `agent-structured-output-refused-members-removed`
@@ -7159,6 +7262,7 @@ const step18: MigrationStep = {
         + 'agent that relied on coercion declares the exact types in `schema` and a test turn returns an '
         + 'answer that validates without conversion.',
       conversionIds: ['agent-structured-output-refused-members-removed'],
+      relevantWhen: { kind: 'stack-declares', keys: ['agents'] },
     },
     {
       id: 'ai-conversation-analytics-duration-unit-in-key',
@@ -7341,6 +7445,7 @@ const step18: MigrationStep = {
         + 'to be queried) or keep it and confirm that `/analytics/meta` omits the cube and that a query '
         + 'naming it answers 404 `CUBE_NOT_FOUND`. Every compiled artifact in use was built by '
         + '`os compile` from this release or later.',
+      relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
     },
     // An inert key made real, and the request class that goes from answered to
     // refused because of it: the engine aggregate path's whole refusal set, which a
@@ -7403,6 +7508,7 @@ const step18: MigrationStep = {
         + 'beside a dimension over a joined object — or each one that did now groups by a dimension '
         + 'without a single interval. A host that overrides `queryCapabilities` to raw SQL only either '
         + 'adds an engine aggregate bridge or groups by no one-interval dimension.',
+      relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
     },
     {
       id: 'analytics-date-range-array-two-bounds-required',
@@ -7692,6 +7798,7 @@ const step18: MigrationStep = {
         + 'meant to cache for one minute reads `cacheTtlSeconds: 60`. A GET to the endpoint repeated '
         + 'inside that window is answered from the cache, and one repeated after it reflects a record '
         + 'changed in between.',
+      relevantWhen: { kind: 'stack-declares', keys: ['apis'] },
     },
     {
       id: 'api-error-retry-after-unit-in-key',
@@ -8272,6 +8379,51 @@ const step18: MigrationStep = {
         + 'reference under sharingModel: controlled_by_parent`. Stored metadata keeps loading '
         + 'byte-identically (`safeParse` green, `required` unrewritten).',
     },
+    {
+      id: 'cbp-master-detail-required-lint-error',
+      surface: 'object.fields.MASTER.required / .readonly / .system, where MASTER is a '
+        + '`master_detail` reference on an object declaring `sharingModel: \'controlled_by_parent\'` '
+        + '— as judged by `os lint` under `relationship/master-detail-required`',
+      replacement: '`required: true` on every `master_detail` reference of a `controlled_by_parent` '
+        + 'object, with neither `readonly: true` nor `system: true` on it: declare the master '
+        + 'reference as an ordinary required field. `os lint` now reports each of the three unsafe '
+        + 'shapes there — `required` absent or `false`; `required: true` + `readonly: true`; '
+        + '`required: true` + `system: true` — at `error` under `relationship/master-detail-required`, '
+        + 'so `os lint` exits non-zero and the metadata-generation rubric marks the stack invalid. On '
+        + 'every other object the rule is unchanged: a `warning` for a `master_detail` without '
+        + '`required: true`, and no finding for the two flagged shapes.',
+      reason:
+        'A `controlled_by_parent` detail derives ALL of its record access from the master that its '
+        + '`master_detail` reference names (ADR-0055). Record validation never checks a field that is '
+        + 'not `required`, and skips `readonly` and `system` fields before its required check is '
+        + 'reached, so on these three shapes nothing but the security gate refuses an insert that '
+        + 'omits the master FK. A record that lands without it anyway is readable by nobody — the '
+        + 'derived read filter `masterFK IN (accessible master ids)` never matches null — and every '
+        + 'later by-id write is refused. Before this step the lint predicate was `required !== true` '
+        + 'at `warning` on every object: the two flagged shapes drew no finding at any severity, and '
+        + 'the third drew a warning that an author or a generator could ignore. The maintainer ruling '
+        + 'of 2026-08-16 (Direction 1) scheduled the promotion for the v18 boundary as a deliberate '
+        + 'narrowing of the authoring contract. Its builder half (the '
+        + '`cbp-master-detail-required-forced` entry) forces `required: true` at '
+        + '`ObjectSchema.create` but never inspects `readonly` or `system`, so two of the three shapes '
+        + 'still pass the builder and meet their first authoring-time refusal here, and the third '
+        + 'still reaches it from any object not authored through the builder. Runtime tolerance is '
+        + 'unchanged on purpose: the security gate keeps refusing these inserts, and keeps resolving '
+        + 'the master for metadata already at rest.',
+      acceptanceCriteria:
+        '`os lint` reports no `relationship/master-detail-required` finding at `error`: on every '
+        + 'object declaring `sharingModel: \'controlled_by_parent\'`, each `master_detail` reference '
+        + 'declares `required: true` (or omits it and is authored through `ObjectSchema.create`, '
+        + 'which emits `required: true`) and carries neither `readonly: true` nor `system: true`. '
+        + '⚠️ WHICH DOOR: the refusal is `os lint`\'s and the metadata-generation rubric\'s only. The '
+        + 'rule is not in the authoring-rule registry, so `os build`, `os validate` and the metadata '
+        + 'save door do not run it, and a stack carrying the shape still builds and publishes — read '
+        + '`os lint`\'s exit code, not a green build. Stored metadata is not rewritten and keeps '
+        + 'loading, and the security gate still refuses an insert that omits the master FK on these '
+        + 'shapes. Repo census at the time of the change: 129 authored objects across the example '
+        + 'apps, the platform and plugin objects and the CLI\'s golden eval corpus, 7 of them '
+        + '`controlled_by_parent`, 0 findings at `error`.',
+    },
     // The CEL-lowering face of the list-comparand refusal: the pushdown compiler
     // every row-level policy and declared sharing rule compiles through, plus the
     // driver-mongodb face that answered the lowered shape. Recorded as its own entry
@@ -8551,6 +8703,7 @@ const step18: MigrationStep = {
         + '`description` conveying what that label was meant to announce, or the author has confirmed '
         + 'the existing description does. With a screen reader, focusing the chart graphic announces '
         + 'the description as its name.',
+      relevantWhen: { kind: 'stack-declares', keys: ['dashboards', 'reports', 'pages'] },
     },
     {
       id: 'cli-command-contribution-retired',
@@ -9261,6 +9414,7 @@ const step18: MigrationStep = {
         + 'derived ON clause reads, so a join keyed after the object it REACHES never resolved at all. '
         + 'Nothing else regresses: `joins.<alias>.name` is unchanged, and it is what both the joined '
         + 'table and the per-object RLS/tenant read scope are resolved from.',
+      relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
     },
     // #20300 — ADR-0049 enforce-or-remove (triage verdict RETIRE) — the D3 entry of
     // the `cube-member-inner-name-removed` family (one D3 entry per retirement
@@ -9293,6 +9447,7 @@ const step18: MigrationStep = {
         + 'author has either kept the key (nothing else changes) or re-keyed the member to the intended '
         + 'name and updated every query, dashboard and report that names `<cube>.<old key>`. '
         + '`GET /api/v1/analytics/meta` lists each member as `<cube>.<key>` exactly as before the upgrade.',
+      relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
     },
     // #20943, maintainer ruling D — a cube member's `sql` is a column reference;
     // the expression half is retired at the contract (ADR-0021's zero raw
@@ -9345,6 +9500,7 @@ const step18: MigrationStep = {
         + 'ratio: the same value divided by 100 when the expression returned percentage points). '
         + 'Every dashboard, report or saved query that named the cube member now names the dataset '
         + 'measure. A cube member that aggregates a column parses byte-identically to before.',
+      relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
     },
     // #21000 (ADR-0049 enforce-or-remove) — `AggregationMetricType`'s `number`,
     // `string` and `boolean` declared a custom SQL expression returning that type,
@@ -9390,6 +9546,7 @@ const step18: MigrationStep = {
         + 'returns the aggregate the author chose, and every dashboard, report or saved query that read '
         + 'the measure is checked against the number it now returns. A measure typed with one of the six '
         + 'aggregates parses byte-identically to before.',
+      relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
     },
     // #10414 (ADR-0049 enforce-or-remove) — the D3 entry of the
     // `metric-filters-removed` family (ruling B on #17152: one D3 entry per
@@ -9421,6 +9578,7 @@ const step18: MigrationStep = {
         + 'renamed the metric if its name promised the filter. With the condition re-expressed, a query '
         + 'over a fixture where the condition excludes rows returns the filtered aggregate (strictly '
         + 'smaller for a positive sum over excluded rows), not the unfiltered one.',
+      relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
     },
     // #20637 — ADR-0049 enforce-or-remove (maintainer ruling, letter C) — the D3
     // entry of the `cube-refresh-key-removed` family (one D3 entry per retirement
@@ -9445,6 +9603,7 @@ const step18: MigrationStep = {
         'No cube carries `refreshKey`, and the parse refuses one with the prescription. Every analytics '
         + 'query answers as it did before the upgrade. Nothing the author maintains relies on cube results '
         + 'being cached or refreshed on a schedule.',
+      relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
     },
     // #19992 (ADR-0049 enforce-or-remove; triage direction REMOVE under ruling 乙
     // on #19910: 「a currency's decimal places are the currency's, not a
@@ -9520,6 +9679,7 @@ const step18: MigrationStep = {
         + 'buttons meant to open an object\'s form declare `actionType: \'form\'` with an '
         + '`<object>.<view>` target instead. Clicking each converted button opens the intended '
         + 'page or form rather than a refusal dialog.',
+      relevantWhen: { kind: 'stack-declares', keys: ['dashboards'] },
     },
     // #15680 (stack card of #14478, maintainer ruling B: a duration key carries its
     // unit in its NAME) — the D3 entry of the
@@ -9550,6 +9710,7 @@ const step18: MigrationStep = {
         + 'console the deployment runs, an open dashboard re-queries its widgets at that cadence; '
         + 'where it does not, the console build predates the renderer\'s move to the new key, and the '
         + 'author has recorded that until the console is upgraded.',
+      relevantWhen: { kind: 'stack-declares', keys: ['dashboards'] },
     },
     // The judgement half of `dashboard-widget-chart-config-structure-removed`. The
     // D2 conversion strips the four keys mechanically; what they CARRIED cannot be
@@ -10177,6 +10338,7 @@ const step18: MigrationStep = {
         + 'stands down rather than guessing wherever the type cannot be resolved: no '
         + '`sourceFieldMeta` wired, an unknown field, or a `relationship.field` path whose '
         + 'column lives on a joined object.',
+      relevantWhen: { kind: 'stack-declares', keys: ['datasets'] },
     },
     {
       id: 'dataset-measure-selecting-aggregate-field-type-refused',
@@ -10253,6 +10415,7 @@ const step18: MigrationStep = {
         + 'wired, an unknown field, or a `relationship.field` path whose column lives on a '
         + 'joined object. A measure column over such a pair also stops carrying a corrected '
         + '`fields[].type`, because the pair no longer produces a column at all.',
+      relevantWhen: { kind: 'stack-declares', keys: ['datasets'] },
     },
     // #21220 (ADR-0049 enforce-or-remove) — an ADR-0021 dataset dimension's and
     // measure's `field` is a column reference, the accept set the cube members it
@@ -10568,6 +10731,37 @@ const step18: MigrationStep = {
         'has a username in that URL\'s userinfo and connects authenticated as that user; every ' +
         'datasource meant to connect anonymously carries no `credentialsRef`; no datasource ' +
         'parse reports this URL-branch refusal.',
+    },
+    // ADR-0120 D1 / D2 / D5a, staged by D7 to protocol 18: the declared index's
+    // positional `unique: true` is refused, and the chain respells it `'global'`.
+    {
+      id: 'declared-index-bare-unique-true-retired',
+      surface: '`indexes[].unique: true` on a declared index (`objects[]` and `objectExtensions[]`) — '
+        + 'the bare boolean, the one `unique` spelling whose scope was positional',
+      replacement: 'a stated scope: `unique: \'global\'` (one holder across the whole installation — '
+        + 'exactly the index bare `true` built, which is what the chain writes) or '
+        + '`unique: \'organization\'` (one holder per organization — the driver prepends the NULL-safe '
+        + 'organization key part `COALESCE(organization_id, \'__global__\')` to `fields` at '
+        + 'registration). `unique: false` / omitted is unchanged, and field-level `unique: true` is '
+        + 'unchanged and stays valid (it means per organization there)',
+      reason:
+        'The mechanical rewrite keeps every index exactly as it was built — `\'global\'` IS the verbatim '
+        + 'column list bare `true` materialized, so nothing on disk changes. What the chain cannot know '
+        + 'is what the author MEANT. On a declared index bare `true` read like "unique per '
+        + 'organization" to anyone who knew the field-level meaning, and silently built an '
+        + 'installation-wide constraint instead: an index meant per organization has been refusing a '
+        + 'second organization\'s value all along, and its refusal told that organization somebody '
+        + 'else holds it. Each respelled index is therefore a decision the owner makes once: keep '
+        + '`\'global\'` for a genuinely installation-wide key (a hostname, an external provider id, an '
+        + 'engine dedup key), or move it to `\'organization\'` so each organization may hold the value '
+        + 'once — a change to the physical index that `os migrate plan` shows before anything is '
+        + 'applied.',
+      acceptanceCriteria:
+        'No declared index in the sources carries `unique: true`: `os validate` passes, and every '
+        + 'stored `object` row reads back with `\'global\'` where it held bare `true`. `os migrate plan` '
+        + 'against the existing database shows no index operation for an index kept at `\'global\'`. '
+        + 'Each index moved to `\'organization\'` appears in that plan as a planned index change.',
+      conversionIds: ['declared-index-unique-scope'],
     },
     {
       id: 'device-request-response-interval-unit-in-key',
@@ -13139,6 +13333,83 @@ const step18: MigrationStep = {
         + 'row that exists only in `sys_metadata`. An approval node the contract accepts parses and '
         + 'registers byte-identically to before.',
     },
+    // #21898 — the D3 entry for the build doors refusing a VALUE a builtin flow
+    // node's executor contract refuses: the value half of the executor-contract arm
+    // of `flowNodeConfigRefusals` (`flow-node-config-refusals.ts`), beside the
+    // presence half (`flow-node-config-required-keys-refused`) and the approval
+    // contract judged whole (`flow-approval-node-config-contract-refused`). It
+    // narrows a flow's accept set; no key is removed, so there is no tombstone and
+    // no RETIRED_KEYS_BY_MAJOR row. There is no D2 conversion either: the platform
+    // cannot know the value the author meant, and the runtime never ran such a node.
+    //
+    // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+    // inside a code span and a table cell.
+    {
+      id: 'flow-builtin-node-config-values-refused',
+      surface:
+        'a builtin flow node (get_record, create_record, update_record, delete_record, notify, http, screen, '
+        + 'script, subflow, map, loop, parallel, try_catch) whose config carries a value its executor '
+        + 'contract refuses — a value of the wrong type (create_record outputVariable 42, a screen field min '
+        + 'written as the string 1, get_record limit as a string, update_record multi as a string), a value '
+        + 'outside the declared set or range (notify severity loud, screen mode view, loop maxIterations 0, '
+        + 'try_catch retry.maxRetries above 10), an empty script function or subflow flowName, or a rule '
+        + 'finding on present keys (a notify template beside an inline title). Never a value carrying a '
+        + 'token in braces, an undeclared or retired key, a region slot, or an http signingSecret. '
+        + 'Reachable wherever a flow is authored or stored: defineStack({ flows }) sources, defineFlow(), an '
+        + 'exported stack passed to objectstack validate or objectstack compile, a flow saved from the Studio '
+        + 'flow designer, and a flow row already sitting in sys_metadata',
+      replacement:
+        'the value the contract declares, written at the key the refusal names: a string where it wants a '
+        + 'string (`outputVariable: \'taskId\'`), a number where it wants a number (`min: 1`, `limit: 10`, '
+        + '`maxIterations: 5`, `timeoutMs: 5000`), a boolean where it wants a boolean (`multi: true`, '
+        + '`durable: true`), one of the declared values (`severity: \'warning\'`, `mode: \'edit\'`), or a value '
+        + 'inside the declared range. Outside `http`, a number or boolean slot takes a LITERAL only: those '
+        + 'executors parse the config as authored, so a `{token}` template there (`limit: \'{page.size}\'`, '
+        + '`maxIterations: \'{cap}\'`) passes the build doors and still fails every run. Only `http` '
+        + 'interpolates its config before it parses, so only an `http` slot may also take a sole-token template '
+        + 'that resolves to the declared type (`timeoutMs: \'{timeout}\'`, `durable: \'{durable}\'`). For a rule '
+        + 'finding, follow the rule\'s own sentence (keep `template` or the inline `title` / `message`, not both)',
+      reason:
+        'Every builtin executor (`service-automation` `builtin/`) parses its node\'s `config` against the '
+        + 'contract `getBuiltinNodeConfigContracts()` names before it acts, and refuses the node on any '
+        + 'finding. The build doors judged only the keys that contract requires, left out, so a present value '
+        + 'it refuses — `create_record` `outputVariable: 42`, a screen field `min: \'1\'` (the shape the Studio '
+        + 'designer used to store for a field\'s Min / Max) — passed `FlowSchema.parse`, `objectstack '
+        + 'validate` and `objectstack compile`, registered, and then failed every run that reached the node: '
+        + 'the config is metadata, and no rerun could succeed. The one judge `FlowSchema.parse`, '
+        + '`AutomationEngine.registerFlow` (which parses first) and `objectstack validate` share '
+        + '(`flowNodeConfigRefusals`) now refuses such a value as `node-config-refused-by-contract`, anchored '
+        + 'at the key, in the contract\'s own words — the code the approval contract already uses. It judges '
+        + 'only what the build can know the run will parse, and holds one more class back by ruling: a value '
+        + 'carrying a `{token}` is never refused at the build doors for its pre-interpolation type — which is '
+        + 'no promise it runs, since every builtin but `http` parses its config as authored and so still '
+        + 'refuses a token in a number or boolean slot at its first run; `http` parses after interpolating its '
+        + 'whole config, so only token-free '
+        + 'values are judged there and never `signingSecret`, which the credential channel may supply; a '
+        + '`loop` with no `body` is not parsed by its executor and is judged for nothing; the region slots of '
+        + '`loop`, `parallel` and `try_catch` are judged as graphs of their own and by `validateControlFlow`. '
+        + 'An undeclared or retired key, a `predicate` ledger slot (a screen field `visibleWhen`) and a `value` '
+        + 'ledger slot (a CRUD `fields` value) keep the judges they had. ⚠️ No D2 conversion: the platform '
+        + 'cannot know the value the author meant. ⚠️ Where such a node already sits the whole flow is '
+        + 'refused: registered from the metadata registry or `sys_metadata` at boot it is skipped with a '
+        + '`warn` naming it, its trigger not armed, while the flows beside it register; a '
+        + '`defineStack({ flows })` source throws `StackSchemaInvalidError` for the whole stack; an artifact '
+        + 'file is refused whole at load. ADR-0087, ADR-0031.',
+      acceptanceCriteria:
+        'Run `objectstack validate` over every stack authored in config files, and boot every deployed '
+        + 'stack. Each refusal names the node and the key: `FlowSchema.parse` anchors a `custom` issue at '
+        + '`nodes.N.config.<key>` (`nodes.N.config.outputVariable`, `nodes.N.config.fields.0.min`, or the '
+        + 'region path `nodes.N.config.body.nodes.M.config…`), `objectstack validate` prints the same path, '
+        + 'and `validateStackExpressions` phrases it as `node \'mk\' (create_record) config.outputVariable`. '
+        + 'For each hit write the value the contract declares, per the replacement. Two proofs. (1) For a '
+        + 'stack authored in config files, `objectstack validate` is clean. (2) Boot the stack and confirm '
+        + 'each flow REGISTERS: no `failed to register flow` warn for it — that warn line is the locator for '
+        + 'a row that exists only in `sys_metadata`. A node whose values its contract accepts parses and '
+        + 'registers byte-identically to before. A `{token}` template parses and registers as before too, and '
+        + 'runs only where the run parses it after interpolation (`http`) or where the slot takes a string; in a '
+        + 'number or boolean slot of any other builtin it fails at its first run exactly as it did, so write a '
+        + 'literal there.',
+    },
     // The absent half of the decision-branch predicate rule. A SEPARATE entry from
     // `flow-predicate-slot-blank-string-refused` on purpose: that one keeps the
     // run a blank predicate made (it evaluated `false`, so `'false'` runs the same
@@ -13360,6 +13631,78 @@ const step18: MigrationStep = {
         + "slot phrase. A flow that boots without that warn is unaffected; every structural "
         + 'condition carrying a non-blank `source` parses byte-identically to before.',
     },
+    // Two refusals in one entry because they are one walk and one remedy family:
+    // an edge must resolve in the graph that declares it, and must not be a copy
+    // the engine cannot tell from an earlier edge. Neither has a D2 conversion —
+    // a dangling endpoint carries no intent a rewrite could recover, and dropping
+    // a repeated edge changes how many times its target runs.
+    //
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'flow-edge-unresolved-or-repeated-refused',
+      surface:
+        'a flow edge whose source or target is not the id of a node in the graph that declares it — '
+        + 'the flow\'s own nodes for a top-level edge, the region body\'s nodes for an edge inside a '
+        + 'loop, parallel or try_catch region, so a top-level edge into a region node is one of them — '
+        + 'and a later edge of the same graph with the same source, target, type, condition and branch '
+        + 'label as an earlier one. Reachable wherever a flow is authored or stored: defineStack flows '
+        + 'sources, defineFlow, an exported stack passed to objectstack validate, a flow saved from the '
+        + 'Studio flow designer after a node was removed (its edges were left behind, and a node added '
+        + 'later under the reused id picked them up), and a flow row already sitting in sys_metadata',
+      replacement:
+        'an edge whose `source` and `target` are node ids declared in the same graph as the edge: '
+        + 're-point the endpoint at the node it was meant to reach, or delete the edge. Deleting a '
+        + 'dangling edge changes nothing a run did, with one exception: a conditioned edge into a '
+        + 'missing node still counted as the branch taken when its condition held, so a default '
+        + 'sibling was passed over and, on an exclusive `decision`, the later conditioned siblings '
+        + 'were skipped — where a flow relied on that, point the edge at a node that ends the branch. '
+        + 'For a repeated edge, delete the later copy: the target then runs once per traversal '
+        + 'instead of once per copy — a CHANGE of behaviour wherever the copies ran it more than once, '
+        + 'which is the defect being removed. An edge meant to take its own route needs its own '
+        + '`condition` or branch `label`',
+      reason:
+        'The engine resolves an edge\'s endpoints in the graph that declares it — traversal looks the '
+        + 'target up there, and a region runs against a view of its own nodes and edges — and runs a '
+        + 'target once per out-edge it selects. `FlowSchema` held node ids and edge ids unique and '
+        + 'checked neither that an edge names a node of its graph nor that it is not a copy of another, '
+        + 'so a draft holding an edge into a node it no longer had, or one edge three times, passed '
+        + '`FlowSchema.parse`, `objectstack validate` and the metadata save door, published with '
+        + '`_diagnostics.valid: true`, and ran: the dangling edge carried the run nowhere, silently, '
+        + 'and the repeated edge ran its target once per copy (one record update created three '
+        + 'identical records). The parse now refuses both at every depth the region walk reaches: an '
+        + 'endpoint at `edges.N.source` / `edges.N.target` (or the region path '
+        + '`nodes.N.config.body.edges.M.target`), naming the missing id and, when it is a node of '
+        + 'another graph, that graph; a repeated edge at `edges.N`, naming the earlier copy. Repeated '
+        + 'means the key the engine selects on — `source`, `target`, `type`, `condition` (its dialect '
+        + 'and source) and branch `label` — so two nodes joined by edges with different conditions, a '
+        + '`fault` edge beside a default one, or `approve` and `reject` branches into one node stay '
+        + 'legal. A region edge naming no node of its region was already refused at registration by '
+        + 'the region analysis; the top-level half had no refusal anywhere. '
+        + '⚠️ No D2 conversion: a dangling endpoint carries no intent a rewrite could recover, and '
+        + 'dropping a repeated edge changes how many times its target runs. '
+        + '⚠️ Where such an edge already sits the whole flow is refused: registered from the metadata '
+        + 'registry or `sys_metadata` at boot it is skipped with a `warn` naming it, its trigger not '
+        + 'armed, while the flows beside it register; a `defineStack` flows source throws '
+        + '`StackSchemaInvalidError` for the whole stack; an artifact file is refused whole at load. '
+        + 'ADR-0087, ADR-0031.',
+      acceptanceCriteria:
+        'Grep every flow in `defineStack` flows sources, exported stacks and every flow row in '
+        + '`sys_metadata` — including the `edges` of each `loop` / `parallel` / `try_catch` region '
+        + 'body — for an edge whose `source` or `target` is not the `id` of a node in the `nodes` list '
+        + 'beside that `edges` list, and for two edges in one `edges` list with the same `source`, '
+        + '`target`, `type`, `condition` and `label`. Each refusal names the edge: `FlowSchema.parse` '
+        + 'anchors a `custom` issue at `edges.N.source`, `edges.N.target` or `edges.N` (or the region '
+        + 'path `nodes.N.config.body.edges.M…`), and `objectstack validate` prints the same path. For a '
+        + 'dangling endpoint, point it at the node the edge was meant to reach or delete the edge; for '
+        + 'a repeated edge, delete the later copy. Two proofs. (1) For a stack authored in config '
+        + 'files, `objectstack validate` is clean. (2) Boot the stack and confirm each flow REGISTERS: '
+        + 'no `failed to register flow` warn for it (the three boot paths spell it `[Automation] failed '
+        + 'to register flow`, `[Automation] flow re-sync: failed to register flow` and `[Automation] '
+        + 'cold-boot flow bind: failed to register flow`) — that warn line is the locator for a row '
+        + 'that exists only in `sys_metadata`. A flow whose edges all resolve in their own graph and '
+        + 'repeat nothing parses and registers byte-identically to before.',
+    },
     // ONE entry for the family, not one per node type: every member is the same
     // decision — a node config its executor cannot run is refused where the flow
     // is built, by one judge (`flowNodeConfigRefusals`), instead of registering
@@ -13504,6 +13847,76 @@ const step18: MigrationStep = {
         + 'warn line is the locator for a row that exists only in `sys_metadata`. A non-blank '
         + 'predicate parses and registers byte-identically to before, and a non-string in these '
         + 'slots keeps its own earlier refusal (at `registerFlow` and `objectstack validate`).',
+    },
+    // #21982 — the D3 entry for the build doors refusing an UNDECLARED KEY on a
+    // `script` or `subflow` node's config: the key half of the executor-contract
+    // arm of `flowNodeConfigRefusals` (`flow-node-config-refusals.ts`), beside the
+    // value half (`flow-builtin-node-config-values-refused`) and the presence half
+    // (`flow-node-config-required-keys-refused`). It narrows a flow's accept set;
+    // no key is removed, so there is no tombstone and no RETIRED_KEYS_BY_MAJOR
+    // row. There is no D2 conversion either: the platform cannot know what an
+    // undeclared key was meant to be, and the runtime never ran such a node.
+    //
+    // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+    // inside a code span and a table cell.
+    {
+      id: 'flow-script-subflow-config-undeclared-keys-refused',
+      surface:
+        'a script or subflow flow node whose config carries a key its executor contract does not declare — a '
+        + 'typo (funtion), a key copied from another node type (a subflow timeoutMs written inside config, an '
+        + 'approvers list on a script), or a key nothing reads (bogusKey). script declares function, inputs and '
+        + 'outputVariable; subflow declares flowName, input and outputVariable. Never a retired script key '
+        + '(actionType, template, recipients, variables, script), which keeps its own path, and never a key on '
+        + 'any other builtin node type, whose undeclared keys registration already judges against the node '
+        + 'type descriptor. Reachable wherever a flow is authored or stored: defineStack({ flows }) sources, '
+        + 'defineFlow(), an exported stack passed to objectstack validate or objectstack compile, a flow saved '
+        + 'from the Studio flow designer, and a flow row already sitting in sys_metadata',
+      replacement:
+        'the key the contract declares, or no key: rename a typo to the declared key it meant (`function`, '
+        + '`inputs`, `outputVariable` on a `script`; `flowName`, `input`, `outputVariable` on a `subflow`), move '
+        + 'a value the function or the child flow should receive into `inputs` (script) or `input` (subflow), '
+        + 'move a `subflow` timeout to the node itself (`{ id, type: \'subflow\', timeoutMs: 30000, config: { … } }`), '
+        + 'and delete a key nothing reads. The refusal carries the contract\'s own sentence, with its '
+        + 'did-you-mean for a near miss',
+      reason:
+        'The `script` and `subflow` executors (`service-automation` `builtin/screen-nodes.ts`, '
+        + '`builtin/subflow-node.ts`) parse the node\'s `config` against a strict contract '
+        + '(`ScriptConfigSchema`, `SubflowConfigSchema`) before they act, and refuse the node on an undeclared '
+        + 'key. No door before the run judged one: `registerFlow`\'s undeclared-key check derives the declared '
+        + 'set from the node type descriptor\'s `configSchema`, and these two descriptors publish none (the '
+        + 'schemaless class, `SCHEMALESS_NODE_CONFIG_SCHEMAS`), while the build doors\' executor-contract arm '
+        + 'judged required keys and present values but held key membership back on the premise that '
+        + 'registration judges it. So a `script` node carrying `bogusKey` passed `FlowSchema.parse`, `objectstack '
+        + 'validate` and `objectstack compile` (which copied the key into the artifact), registered, and then '
+        + 'failed every run that reached the node: the config is metadata, and no rerun could succeed. The one '
+        + 'judge `FlowSchema.parse`, `AutomationEngine.registerFlow` (which parses first) and `objectstack '
+        + 'validate` share (`flowNodeConfigRefusals`) now refuses such a key on these two types as '
+        + '`node-config-refused-by-contract`, anchored at the key, one refusal per key, in the contract\'s own '
+        + 'words — the code the value half and the approval contract already use. Every other builtin keeps its '
+        + 'undeclared keys where they were judged: at registration, against its descriptor, with that check\'s '
+        + 'own prescriptions. `decision` is schemaless too, but its executor parses no contract, so an '
+        + 'undeclared key there fails no run and stays unjudged. A retired `script` key keeps its tombstone '
+        + 'path. ⚠️ A spelling the ADR-0087 D2 conversion `flow-node-script-config-aliases` or '
+        + '`flow-node-subflow-flow-alias` still rewrites at load (`functionName`, `input` on a `script`; `flow` '
+        + 'on a `subflow`) is converted before the judge at every door that converts first; met by a direct '
+        + '`FlowSchema.parse` or `defineFlow()` it is refused like any other undeclared key, as the missing '
+        + 'canonical key already was. ⚠️ No D2 conversion: the platform cannot know what an undeclared key was '
+        + 'meant to be. ⚠️ Where such a node already sits the whole flow is refused: registered from the '
+        + 'metadata registry or `sys_metadata` at boot it is skipped with a `warn` naming it, its trigger not '
+        + 'armed, while the flows beside it register; a `defineStack({ flows })` source throws '
+        + '`StackSchemaInvalidError` for the whole stack; an artifact file is refused whole at load. ADR-0087, '
+        + 'ADR-0031.',
+      acceptanceCriteria:
+        'Run `objectstack validate` over every stack authored in config files, and boot every deployed '
+        + 'stack. Each refusal names the node and the key: `FlowSchema.parse` anchors a `custom` issue at '
+        + '`nodes.N.config.<key>` (`nodes.N.config.bogusKey`, or the region path '
+        + '`nodes.N.config.body.nodes.M.config…`), `objectstack validate` prints the same path, and '
+        + '`validateStackExpressions` phrases it as `node \'summarize\' (script) config.bogusKey`. For each hit '
+        + 'rename, move or delete the key per the replacement. Two proofs. (1) For a stack authored in config '
+        + 'files, `objectstack validate` is clean. (2) Boot the stack and confirm each flow REGISTERS: no '
+        + '`failed to register flow` warn for it — that warn line is the locator for a row that exists only in '
+        + '`sys_metadata`. A `script` or `subflow` node whose keys its contract declares parses and registers '
+        + 'byte-identically to before.',
     },
     // A value a flow reads, not an authorable key: there is no D2 conversion and
     // nothing for `objectstack migrate meta` to rewrite. The sibling of
@@ -13809,6 +14222,7 @@ const step18: MigrationStep = {
         + 'to be allowed thirty seconds reads `timeoutMs: 30000`. A hook that runs longer than its '
         + '`timeoutMs` fails with a timeout at that limit, and one that finishes inside it completes as '
         + 'it did before the upgrade. No code reads or writes `timeout` on a hook definition.',
+      relevantWhen: { kind: 'stack-declares', keys: ['hooks'] },
     },
     {
       id: 'hot-reload-inert-state-strategies-retired',
@@ -14234,6 +14648,7 @@ const step18: MigrationStep = {
         + '`timeoutMs` fails with a timeout and is retried under `retryPolicy`, and an attempt that '
         + 'finishes inside it succeeds as before. No code reads or writes `timeout` on a job '
         + 'definition.',
+      relevantWhen: { kind: 'stack-declares', keys: ['jobs'] },
     },
     {
       id: 'kernel-compatibility-matrix-estimated-migration-time-unit-in-key',
@@ -14955,6 +15370,42 @@ const step18: MigrationStep = {
         + 'package\'s manifest, and no registry listing. If any does, the correct answer is a '
         + 'deliberate republish under the new id, not an in-place edit.',
     },
+    // ADR-0049 enforce-or-remove, ruled option A on the plugin-permissions parent
+    // card (2026-08-30): the legacy flat-list arm of a package manifest's
+    // `permissions` leaves, and the structured ADR-0025 §3.2 block is the only
+    // form. The list's deletion is mechanical (the D2 conversion
+    // `manifest-permissions-string-list-removed`); what each dropped string meant
+    // in terms of services, hooks, network hosts and filesystem paths is not, and
+    // that judgement is what this entry carries.
+    {
+      id: 'manifest-permissions-string-list-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code span.
+      surface:
+        'manifest.permissions as a flat list of permission strings (and packages[].manifest.permissions) — '
+        + 'the legacy arm of ManifestPermissionsSchema left; the schema is now the structured plugin '
+        + 'permission block alone',
+      replacement:
+        'the structured block `permissions: { services, hooks, network, fs }` — each a list naming the '
+        + 'platform services the plugin resolves, the lifecycle hooks it registers, the network hosts it '
+        + 'reaches and the filesystem paths it touches; or no `permissions` key when the plugin needs none',
+      reason:
+        'ADR-0049 enforce-or-remove: the flat list was parsed and never acted on. The loader registers the '
+        + 'consented grant set on the environment artifact with the permission enforcer, never the '
+        + 'manifest\'s request, so a list granted, refused and requested nothing at load; the only code that '
+        + 'met one was two reports saying it had been skipped. The D2 conversion '
+        + '`manifest-permissions-string-list-removed` deletes the list from existing sources and stored '
+        + 'artifacts, losslessly for every load. What it cannot do is translate: a capability string such as '
+        + '`system.user.read` names no service, hook, host or path, so whether the plugin needs a grant at '
+        + 'all, and which, is the author\'s judgement. Authoring now refuses a list at parse with that '
+        + 'prescription, and TypeScript rejects it',
+      acceptanceCriteria:
+        'No manifest — the stack\'s own, any packages[] entry, any objectstack.plugin.json — declares '
+        + '`permissions` as a list; a list is refused at parse with its prescription, and TypeScript rejects '
+        + 'it. Every plugin whose dropped list stood for a real need declares it in the structured block, '
+        + 'naming each service, hook, network host and filesystem path it touches, and `os plugin build` '
+        + 'parses the manifest clean. A plugin that needs no grant declares no `permissions` key.',
+      conversionIds: ['manifest-permissions-string-list-removed'],
+    },
     // A D3 semantic TODO, not a D2 conversion, and the reason is the widening half.
     // The mechanical part of this move is trivial in one direction — `01.1.1`
     // becomes `1.1.1` — but the chain cannot know whether an author who wrote a
@@ -15033,6 +15484,7 @@ const step18: MigrationStep = {
         + '(no `import_reference_not_found` row) — or the missing referenced records are created by a '
         + 'step that runs before the import, since the import itself never creates them. Row counts '
         + 'and links match the pre-upgrade import of the same file.',
+      relevantWhen: { kind: 'stack-declares', keys: ['mappings'] },
     },
     // #15680 (stack card of #14478, maintainer ruling B: a duration key carries its
     // unit in its NAME) — the D3 entry of the
@@ -16359,6 +16811,7 @@ const step18: MigrationStep = {
         + 'upgrade, and `allowTransfer` behaves as before. Every documented process that assumed a '
         + 'restore or purge grant — an erasure-request runbook, an access review, an audit control — '
         + 'names the mechanism it actually uses instead.',
+      relevantWhen: { kind: 'stack-declares', keys: ['permissions'] },
     },
     // #20321 (ADR-0049 enforce-or-remove) — the D3 entry of the
     // `permission-rls-tags-removed` family (ruling B on #17152: one D3 entry per
@@ -18504,7 +18957,7 @@ const step18: MigrationStep = {
         + 'sign-in failed `INVALID_EMAIL_OR_PASSWORD` behind a "User not found" warn pointing at the '
         + '`sys_user` row rather than at the account — four checklist items rediscovered that '
         + 'independently. Its discriminating power here was near zero: `sys_sso_provider` declares '
-        + '`{ fields: [\'provider_id\'], unique: true }`, so `provider_id → issuer` is a function '
+        + '`{ fields: [\'provider_id\'], unique: \'global\' }`, so `provider_id → issuer` is a function '
         + 'within an environment.',
       acceptanceCriteria:
         'BEFORE the column is dropped, `os migrate account-issuer` reads zero on the deployment: no '
@@ -18524,6 +18977,322 @@ const step18: MigrationStep = {
         + 'for a row, so the key cannot separate the old IdP\'s subjects from the new one\'s, and the '
         + '`sys_sso_provider` update door refuses an issuer change while accounts are still bound to '
         + 'that provider.',
+    },
+    // #15207 (ADR-0131 D7, C6) — one D3 entry per removed column, as the card
+    // requires. A platform-object COLUMN retirement, not a spec-key retirement: no
+    // authorable spec key moves, so nothing lands in RETIRED_KEYS_BY_MAJOR and no
+    // D2 conversion exists to pair with (the ups-delegated-from-column-retired
+    // shape). The writer census behind the verdict is cited in the reason.
+    {
+      id: 'sys-flow-dispatch-organization-column-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'sys_flow_dispatch.organization_id — the injected organization column left the flow trigger '
+        + 'dispatch claim ledger (packages/services/service-automation/src/sys-flow-dispatch.object.ts, '
+        + 'which now declares systemFields.tenant false), and reading the table now requires the '
+        + 'manage_platform_settings capability',
+      replacement:
+        'nothing on this table — `sys_flow_dispatch` is deployment-level state (ADR-0131 D7) and no '
+        + 'organization owns a row. Delete any authored filter, list-view column, report grouping, '
+        + 'formula or seed key that names `organization_id` on `sys_flow_dispatch`. A principal that '
+        + 'must read the table needs the `manage_platform_settings` capability, which platform '
+        + 'administrators hold',
+      reason:
+        'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
+        + 'and loses the column; the writer decides membership, not the name. Writer census at commit '
+        + 'e67ba80049 of this repository\'s main branch: the sole writer is ObjectStoreFlowDispatchStore '
+        + 'in @objectstack/service-automation: two write sites (the claim insert and the settle '
+        + 'update), each under a system context whose row is a dispatch key and its outcome, naming no '
+        + 'organization. So the injected column only ever held NULL. The census is the same procedure '
+        + 'that reports the organization-stamping writers of sys_http_delivery, sys_secret and '
+        + 'sys_email, so it can fire. Under a walled posture the tenant wall compared that NULL to the '
+        + 'caller organization and hid every row from every reader, platform administrators included; '
+        + 'with no column there is no wall, and the table is governed by object permission instead '
+        + '(D7). The capability gate is part of the same change, not a follow-up: the '
+        + 'organization_admin grant carries the superuser bits on every object, so without it a walled '
+        + 'deployment would hand each organization administrator every other organization\'s rows. '
+        + 'Existing databases: schema sync is additive, so the physical column stays and the boot drift '
+        + 'report names it orphaned; by the census it holds only NULL, so dropping it loses nothing. '
+        + 'The operator drops it with os migrate apply --allow-destructive, the remedy the drift report '
+        + 'names.',
+      acceptanceCriteria:
+        'No authored metadata names `organization_id` on `sys_flow_dispatch`: the field resolver '
+        + '(lint and the data door) now answers it as an unknown field. On every tenancy posture a '
+        + 'principal without `manage_platform_settings` is refused 403 PERMISSION_DENIED on a read of '
+        + '`sys_flow_dispatch`, and a platform administrator lists every row with no organization '
+        + 'filter. After os migrate apply --allow-destructive the boot no longer reports the orphaned '
+        + 'column.',
+    },
+    // #15207 (ADR-0131 D7, C6) — one D3 entry per removed column, as the card
+    // requires. A platform-object COLUMN retirement, not a spec-key retirement: no
+    // authorable spec key moves, so nothing lands in RETIRED_KEYS_BY_MAJOR and no
+    // D2 conversion exists to pair with (the ups-delegated-from-column-retired
+    // shape). The writer census behind the verdict is cited in the reason.
+    {
+      id: 'sys-job-organization-column-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'sys_job.organization_id — the injected organization column left the platform background-job '
+        + 'catalogue (packages/platform-objects/src/audit/sys-job.object.ts, which now declares '
+        + 'systemFields.tenant false), and reading the table now requires the manage_platform_settings '
+        + 'capability',
+      replacement:
+        'nothing on this table — `sys_job` is deployment-level state (ADR-0131 D7) and no '
+        + 'organization owns a row. Delete any authored filter, list-view column, report grouping, '
+        + 'formula or seed key that names `organization_id` on `sys_job`. A principal that must read '
+        + 'the table needs the `manage_platform_settings` capability, which platform administrators '
+        + 'hold',
+      reason:
+        'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
+        + 'and loses the column; the writer decides membership, not the name. Writer census at commit '
+        + 'e67ba80049 of this repository\'s main branch: the sole writer is DbJobAdapter in '
+        + '@objectstack/service-job: four write sites (the update and insert arms of the schedule '
+        + 'upsert, the active toggle and the run summary bump), each under a system context whose row '
+        + 'literal names no organization. So the injected column only ever held NULL. The census is the '
+        + 'same procedure that reports the organization-stamping writers of sys_http_delivery, '
+        + 'sys_secret and sys_email, so it can fire. Under a walled posture the tenant wall compared '
+        + 'that NULL to the caller organization and hid every row from every reader, platform '
+        + 'administrators included; with no column there is no wall, and the table is governed by '
+        + 'object permission instead (D7). The capability gate is part of the same change, not a '
+        + 'follow-up: the organization_admin grant carries the superuser bits on every object, so '
+        + 'without it a walled deployment would hand each organization administrator every other '
+        + 'organization\'s rows. Existing databases: schema sync is additive, so the physical column '
+        + 'stays and the boot drift report names it orphaned; by the census it holds only NULL, so '
+        + 'dropping it loses nothing. The operator drops it with os migrate apply --allow-destructive, '
+        + 'the remedy the drift report names.',
+      acceptanceCriteria:
+        'No authored metadata names `organization_id` on `sys_job`: the field resolver (lint and the '
+        + 'data door) now answers it as an unknown field. On every tenancy posture a principal without '
+        + '`manage_platform_settings` is refused 403 PERMISSION_DENIED on a read of `sys_job`, and a '
+        + 'platform administrator lists every row with no organization filter. After os migrate apply '
+        + '--allow-destructive the boot no longer reports the orphaned column.',
+    },
+    // #15207 (ADR-0131 D7, C6) — one D3 entry per removed column, as the card
+    // requires. A platform-object COLUMN retirement, not a spec-key retirement: no
+    // authorable spec key moves, so nothing lands in RETIRED_KEYS_BY_MAJOR and no
+    // D2 conversion exists to pair with (the ups-delegated-from-column-retired
+    // shape). The writer census behind the verdict is cited in the reason.
+    {
+      id: 'sys-job-queue-organization-column-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'sys_job_queue.organization_id — the injected organization column left the durable job and '
+        + 'message queue (packages/platform-objects/src/audit/sys-job-queue.object.ts, which now '
+        + 'declares systemFields.tenant false), and reading the table now requires the '
+        + 'manage_platform_settings capability',
+      replacement:
+        'nothing on this table — `sys_job_queue` is deployment-level state (ADR-0131 D7) and no '
+        + 'organization owns a row. Delete any authored filter, list-view column, report grouping, '
+        + 'formula or seed key that names `organization_id` on `sys_job_queue`. A principal that must '
+        + 'read the table needs the `manage_platform_settings` capability, which platform '
+        + 'administrators hold',
+      reason:
+        'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
+        + 'and loses the column; the writer decides membership, not the name. Writer census at commit '
+        + 'e67ba80049 of this repository\'s main branch: the sole writer is DbQueueAdapter in '
+        + '@objectstack/service-queue: nine write sites (the publish insert and the worker update and '
+        + 'delete paths), each under a system context whose row literal names no organization. So the '
+        + 'injected column only ever held NULL. The census is the same procedure that reports the '
+        + 'organization-stamping writers of sys_http_delivery, sys_secret and sys_email, so it can '
+        + 'fire. Under a walled posture the tenant wall compared that NULL to the caller organization '
+        + 'and hid every row from every reader, platform administrators included; with no column there '
+        + 'is no wall, and the table is governed by object permission instead (D7). The capability gate '
+        + 'is part of the same change, not a follow-up: the organization_admin grant carries the '
+        + 'superuser bits on every object, so without it a walled deployment would hand each '
+        + 'organization administrator every other organization\'s rows. Existing databases: schema sync '
+        + 'is additive, so the physical column stays and the boot drift report names it orphaned; by '
+        + 'the census it holds only NULL, so dropping it loses nothing. The operator drops it with os '
+        + 'migrate apply --allow-destructive, the remedy the drift report names.',
+      acceptanceCriteria:
+        'No authored metadata names `organization_id` on `sys_job_queue`: the field resolver (lint '
+        + 'and the data door) now answers it as an unknown field. On every tenancy posture a principal '
+        + 'without `manage_platform_settings` is refused 403 PERMISSION_DENIED on a read of '
+        + '`sys_job_queue`, and a platform administrator lists every row with no organization filter. '
+        + 'After os migrate apply --allow-destructive the boot no longer reports the orphaned column.',
+    },
+    // #15207 (ADR-0131 D7, C6) — one D3 entry per removed column, as the card
+    // requires. A platform-object COLUMN retirement, not a spec-key retirement: no
+    // authorable spec key moves, so nothing lands in RETIRED_KEYS_BY_MAJOR and no
+    // D2 conversion exists to pair with (the ups-delegated-from-column-retired
+    // shape). The writer census behind the verdict is cited in the reason.
+    {
+      id: 'sys-job-run-organization-column-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'sys_job_run.organization_id — the injected organization column left the platform job run '
+        + 'history (packages/platform-objects/src/audit/sys-job-run.object.ts, which now declares '
+        + 'systemFields.tenant false), and reading the table now requires the manage_platform_settings '
+        + 'capability',
+      replacement:
+        'nothing on this table — `sys_job_run` is deployment-level state (ADR-0131 D7) and no '
+        + 'organization owns a row. Delete any authored filter, list-view column, report grouping, '
+        + 'formula or seed key that names `organization_id` on `sys_job_run`. A principal that must '
+        + 'read the table needs the `manage_platform_settings` capability, which platform '
+        + 'administrators hold',
+      reason:
+        'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
+        + 'and loses the column; the writer decides membership, not the name. Writer census at commit '
+        + 'e67ba80049 of this repository\'s main branch: the sole writer is DbJobAdapter in '
+        + '@objectstack/service-job: two write sites (the run start insert and the run finish update), '
+        + 'each under a system context whose row literal names no organization, including for a job '
+        + 'that declares the organization it runs as, whose stamp reaches the job data writes and never '
+        + 'this ledger. So the injected column only ever held NULL. The census is the same procedure '
+        + 'that reports the organization-stamping writers of sys_http_delivery, sys_secret and '
+        + 'sys_email, so it can fire. Under a walled posture the tenant wall compared that NULL to the '
+        + 'caller organization and hid every row from every reader, platform administrators included; '
+        + 'with no column there is no wall, and the table is governed by object permission instead '
+        + '(D7). The capability gate is part of the same change, not a follow-up: the '
+        + 'organization_admin grant carries the superuser bits on every object, so without it a walled '
+        + 'deployment would hand each organization administrator every other organization\'s rows. '
+        + 'Existing databases: schema sync is additive, so the physical column stays and the boot drift '
+        + 'report names it orphaned; by the census it holds only NULL, so dropping it loses nothing. '
+        + 'The operator drops it with os migrate apply --allow-destructive, the remedy the drift report '
+        + 'names.',
+      acceptanceCriteria:
+        'No authored metadata names `organization_id` on `sys_job_run`: the field resolver (lint and '
+        + 'the data door) now answers it as an unknown field. On every tenancy posture a principal '
+        + 'without `manage_platform_settings` is refused 403 PERMISSION_DENIED on a read of '
+        + '`sys_job_run`, and a platform administrator lists every row with no organization filter. '
+        + 'After os migrate apply --allow-destructive the boot no longer reports the orphaned column.',
+    },
+    // #15207 (ADR-0131 D7, C6) — one D3 entry per removed column, as the card
+    // requires. A platform-object COLUMN retirement, not a spec-key retirement: no
+    // authorable spec key moves, so nothing lands in RETIRED_KEYS_BY_MAJOR and no
+    // D2 conversion exists to pair with (the ups-delegated-from-column-retired
+    // shape). The writer census behind the verdict is cited in the reason.
+    {
+      id: 'sys-migration-journal-organization-column-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'sys_migration_journal.organization_id — the injected organization column left the migration '
+        + 'run journal (packages/platform-objects/src/system/sys-migration-journal.object.ts, which now '
+        + 'declares systemFields.tenant false), and reading the table now requires the '
+        + 'manage_platform_settings capability',
+      replacement:
+        'nothing on this table — `sys_migration_journal` is deployment-level state (ADR-0131 D7) and '
+        + 'no organization owns a row. Delete any authored filter, list-view column, report grouping, '
+        + 'formula or seed key that names `organization_id` on `sys_migration_journal`. A principal '
+        + 'that must read the table needs the `manage_platform_settings` capability, which platform '
+        + 'administrators hold',
+      reason:
+        'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
+        + 'and loses the column; the writer decides membership, not the name. Writer census at commit '
+        + 'e67ba80049 of this repository\'s main branch: the sole writer is the @objectstack/core '
+        + 'migration runner: one append site, under a system context or under the transaction it opened '
+        + 'with one, and the row contract MigrationJournalEventSchema has no organization field to '
+        + 'carry. So the injected column only ever held NULL. The census is the same procedure that '
+        + 'reports the organization-stamping writers of sys_http_delivery, sys_secret and sys_email, so '
+        + 'it can fire. Under a walled posture the tenant wall compared that NULL to the caller '
+        + 'organization and hid every row from every reader, platform administrators included; with no '
+        + 'column there is no wall, and the table is governed by object permission instead (D7). The '
+        + 'capability gate is part of the same change, not a follow-up: the organization_admin grant '
+        + 'carries the superuser bits on every object, so without it a walled deployment would hand '
+        + 'each organization administrator every other organization\'s rows. Existing databases: schema '
+        + 'sync is additive, so the physical column stays and the boot drift report names it orphaned; '
+        + 'by the census it holds only NULL, so dropping it loses nothing. The operator drops it with '
+        + 'os migrate apply --allow-destructive, the remedy the drift report names.',
+      acceptanceCriteria:
+        'No authored metadata names `organization_id` on `sys_migration_journal`: the field resolver '
+        + '(lint and the data door) now answers it as an unknown field. On every tenancy posture a '
+        + 'principal without `manage_platform_settings` is refused 403 PERMISSION_DENIED on a read of '
+        + '`sys_migration_journal`, and a platform administrator lists every row with no organization '
+        + 'filter. After os migrate apply --allow-destructive the boot no longer reports the orphaned '
+        + 'column.',
+    },
+    // #15207 (ADR-0131 D7, C6) — one D3 entry per removed column, as the card
+    // requires. A platform-object COLUMN retirement, not a spec-key retirement: no
+    // authorable spec key moves, so nothing lands in RETIRED_KEYS_BY_MAJOR and no
+    // D2 conversion exists to pair with (the ups-delegated-from-column-retired
+    // shape). The writer census behind the verdict is cited in the reason.
+    {
+      id: 'sys-migration-organization-column-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'sys_migration.organization_id — the injected organization column left the deployment '
+        + 'data-migration flag ledger (packages/platform-objects/src/system/sys-migration.object.ts, '
+        + 'which now declares systemFields.tenant false), and reading the table now requires the '
+        + 'manage_platform_settings capability',
+      replacement:
+        'nothing on this table — `sys_migration` is deployment-level state (ADR-0131 D7) and no '
+        + 'organization owns a row. Delete any authored filter, list-view column, report grouping, '
+        + 'formula or seed key that names `organization_id` on `sys_migration`. A principal that must '
+        + 'read the table needs the `manage_platform_settings` capability, which platform '
+        + 'administrators hold',
+      reason:
+        'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
+        + 'and loses the column; the writer decides membership, not the name. Writer census at commit '
+        + 'e67ba80049 of this repository\'s main branch: eleven write sites in six files (the '
+        + 'platform-objects migration flag helpers, the ObjectQL lax-deviation and boot-admission '
+        + 'revocation writes, and the seed-tenancy, membership-backfill and flow-credential receipts), '
+        + 'each under a system context, and the row contract DataMigrationFlagSchema has no '
+        + 'organization field to carry. So the injected column only ever held NULL. The census is the '
+        + 'same procedure that reports the organization-stamping writers of sys_http_delivery, '
+        + 'sys_secret and sys_email, so it can fire. Under a walled posture the tenant wall compared '
+        + 'that NULL to the caller organization and hid every row from every reader, platform '
+        + 'administrators included; with no column there is no wall, and the table is governed by '
+        + 'object permission instead (D7). The capability gate is part of the same change, not a '
+        + 'follow-up: the organization_admin grant carries the superuser bits on every object, so '
+        + 'without it a walled deployment would hand each organization administrator every other '
+        + 'organization\'s rows. Existing databases: schema sync is additive, so the physical column '
+        + 'stays and the boot drift report names it orphaned; by the census it holds only NULL, so '
+        + 'dropping it loses nothing. The operator drops it with os migrate apply --allow-destructive, '
+        + 'the remedy the drift report names.',
+      acceptanceCriteria:
+        'No authored metadata names `organization_id` on `sys_migration`: the field resolver (lint '
+        + 'and the data door) now answers it as an unknown field. On every tenancy posture a principal '
+        + 'without `manage_platform_settings` is refused 403 PERMISSION_DENIED on a read of '
+        + '`sys_migration`, and a platform administrator lists every row with no organization filter. '
+        + 'After os migrate apply --allow-destructive the boot no longer reports the orphaned column.',
+    },
+    // #15207 (ADR-0131 D7, C6) — one D3 entry per removed column, as the card
+    // requires. A platform-object COLUMN retirement, not a spec-key retirement: no
+    // authorable spec key moves, so nothing lands in RETIRED_KEYS_BY_MAJOR and no
+    // D2 conversion exists to pair with (the ups-delegated-from-column-retired
+    // shape). The writer census behind the verdict is cited in the reason.
+    {
+      id: 'sys-presence-organization-column-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'sys_presence.organization_id — the injected organization column left the realtime presence '
+        + 'table (packages/services/service-realtime/src/objects/sys-presence.object.ts, which now '
+        + 'declares systemFields.tenant false), and reading the table now requires the '
+        + 'manage_platform_settings capability',
+      replacement:
+        'nothing on this table — `sys_presence` is deployment-level state (ADR-0131 D7) and no '
+        + 'organization owns a row. Delete any authored filter, list-view column, report grouping, '
+        + 'formula or seed key that names `organization_id` on `sys_presence`. A principal that must '
+        + 'read the table needs the `manage_platform_settings` capability, which platform '
+        + 'administrators hold',
+      reason:
+        'ADR-0131 D7: a table whose rows no writer attributes to an organization is deployment-level '
+        + 'and loses the column; the writer decides membership, not the name. Writer census at commit '
+        + 'e67ba80049 of this repository\'s main branch: nothing writes the table through ObjectQL at '
+        + 'all (presence travels the realtime path, and the generic data door exposes reads only), and '
+        + 'a person present in several organizations is one person. So the injected column only ever '
+        + 'held NULL. The census is the same procedure that reports the organization-stamping writers '
+        + 'of sys_http_delivery, sys_secret and sys_email, so it can fire. Under a walled posture the '
+        + 'tenant wall compared that NULL to the caller organization and hid every row from every '
+        + 'reader, platform administrators included; with no column there is no wall, and the table is '
+        + 'governed by object permission instead (D7). The capability gate is part of the same change, '
+        + 'not a follow-up: the organization_admin grant carries the superuser bits on every object, so '
+        + 'without it a walled deployment would hand each organization administrator every other '
+        + 'organization\'s rows. Existing databases: schema sync is additive, so the physical column '
+        + 'stays and the boot drift report names it orphaned; by the census it holds only NULL, so '
+        + 'dropping it loses nothing. The operator drops it with os migrate apply --allow-destructive, '
+        + 'the remedy the drift report names.',
+      acceptanceCriteria:
+        'No authored metadata names `organization_id` on `sys_presence`: the field resolver (lint and '
+        + 'the data door) now answers it as an unknown field. On every tenancy posture a principal '
+        + 'without `manage_platform_settings` is refused 403 PERMISSION_DENIED on a read of '
+        + '`sys_presence`, and a platform administrator lists every row with no organization filter. '
+        + 'After os migrate apply --allow-destructive the boot no longer reports the orphaned column.',
     },
     {
       id: 'system-cache-durations-unit-in-key',
@@ -21840,6 +22609,33 @@ const step18: MigrationStep = {
         + '`pagination: { pageSize: 25 }` still parses to 25; `pageSize: 0`, a negative and a '
         + 'fraction are still refused. A view that must keep 25 rows per page declares '
         + '`pagination: { pageSize: 25 }` and shows 25 rows on its first page.',
+    },
+    // A TS/API surface, never stored in stack metadata: there is no source for the
+    // chain to rewrite, so this entry is the whole ADR-0087 registration.
+    {
+      id: 'visibility-strict-options-unexported',
+      surface:
+        '`VISIBILITY_STRICT_OPTIONS` (const) on `@objectstack/spec/shared` — the shared '
+        + '`strictObject` options of the visibility-carrying view/page shapes (ADR-0089 D3a)',
+      replacement:
+        '(removed from the public surface — no replacement export. It was an internal option bag '
+        + 'for this package\'s own schemas; the visibility contract it configures is unchanged and '
+        + 'still published through the schemas that use it — `FormFieldSchema`, `FormSectionSchema` '
+        + 'and the page component — together with `normalizeVisibleWhen` and '
+        + '`VISIBILITY_ALIAS_KEYS`, which stay exported.)',
+      reason:
+        'ADR-0049 enforce-or-remove applied to an export. The const was barrel-exported while its '
+        + 'type, `StrictObjectOptions`, is deliberately unpublished, so no consumer could annotate it, '
+        + 'spread it into a typed option bag or name it in a parameter — a published value with no '
+        + 'usable contract and zero measured pull outside this package. Publishing the type instead '
+        + 'was weighed and not adopted: no consumer ever asked for it, and it would turn the '
+        + 'strict-object template\'s internals into public API.',
+      acceptanceCriteria:
+        'No code imports `VISIBILITY_STRICT_OPTIONS` from `@objectstack/spec`, `@objectstack/spec/shared` '
+        + 'or any other entry (TS2305 after upgrade). Every visibility-carrying shape parses and '
+        + 'refuses exactly as before — the options object is unchanged, only where it is exported '
+        + 'from moved. No authored metadata document ever carried it, so `os migrate meta` has '
+        + 'nothing to visit.',
     },
     {
       id: 'wait-node-event-config-required',

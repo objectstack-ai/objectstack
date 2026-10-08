@@ -250,6 +250,108 @@ function refOf(def: any): string | undefined {
   return referenceCarrierOf({ reference: def?.reference }, 'data-model-rules refOf');
 }
 
+// ─── R2 under controlled_by_parent ──────────────────────────────────
+
+/** The rule id R2 reports under, on both tiers. */
+const MASTER_DETAIL_REQUIRED = 'relationship/master-detail-required';
+
+/**
+ * R2's `error` tier — a `master_detail` reference on a
+ * `sharingModel: 'controlled_by_parent'` object in one of the three shapes that
+ * leave the security gate as the only thing refusing a detail record saved
+ * without its master:
+ *
+ *   1. `required` absent (or `false`);
+ *   2. `required: true` + `readonly: true`;
+ *   3. `required: true` + `system: true`.
+ *
+ * Why these three. A `controlled_by_parent` detail derives ALL of its record
+ * access from the master its `master_detail` reference names (ADR-0055: such an
+ * object "must declare exactly one required `master_detail` field"). Record
+ * validation (`validateRecord`, `@objectstack/objectql`) never checks a field
+ * that is not `required`, and skips `readonly` / `system` fields before its
+ * required check is reached — so on all three shapes an insert that omits the
+ * master FK is refused by `assertControlledByParentWrite` (plugin-security) and
+ * by nothing else. A record that lands without its master anyway is readable by
+ * nobody: the derived read filter `masterFK IN (accessible master ids)` never
+ * matches null, and every later by-id write is refused.
+ *
+ * Why `error` here and `warning` elsewhere. This is the criterion
+ * `validate-security-posture.ts` states at its head — an `error` rule mirrors a
+ * hard runtime enforcement point and moves the failure from runtime-deny to an
+ * author-time fix. Under `controlled_by_parent` the security gate's refusal
+ * stands behind every one of these shapes; outside it nothing at runtime refuses
+ * a non-required `master_detail`, so there it stays a likely-wrong choice at
+ * `warning`, unchanged. Maintainer ruling of 2026-08-16, Direction 1, scheduled
+ * for the v18 boundary — the card that carries it verbatim is #9139 (the thread
+ * the ruling was recorded on no longer resolves on the board); the runtime half
+ * of that ruling is untouched
+ * (the security gate's fallbacks stay, so metadata already at rest keeps
+ * loading and is still guarded).
+ *
+ * Scope — EVERY `master_detail` field of a `controlled_by_parent` object, not
+ * only the one the runtime resolves as the master: that is the scope the
+ * builder half of the same ruling already enforces (`ObjectSchema.create()`
+ * forces `required: true` on every `master_detail` reference under
+ * `controlled_by_parent` and refuses an explicit `required: false` —
+ * `forceCbpMasterDetailRequired` in `packages/spec/src/data/object.zod.ts`).
+ * The builder never inspects `readonly` / `system`, so shapes 2 and 3 pass
+ * through `create()` untouched, and shape 1 survives every path that does not
+ * go through `create()` (a plain object literal, raw `.parse()` of stored
+ * metadata); this rule is where all three meet a refusal at authoring time.
+ *
+ * ⚠ Reach: `lintDataModel` is `os lint`'s sweep and the metadata-generation
+ * rubric (`score.ts`), and nothing else — it is not an `AUTHORING_RULES` entry
+ * (`authoring-rule-wiring.test.ts` → `DIRECT_CALL_RATCHET`), so `os build`,
+ * `os validate` and the metadata save door do not run it. The `error` moves
+ * `os lint`'s exit code and the rubric's `valid`, not a publish verdict.
+ *
+ * One finding per field, located at the first defect it names; the `fix`
+ * names every edit the field needs.
+ *
+ * ⛔ Keep this above the first `export function`: `authoring-rule-wiring.test.ts`
+ * reads an exported rule's body as the source text up to the next `export`, so
+ * an `error`-emitting helper placed below one of the three registered advisory
+ * rules above `lintDataModel` is read as that rule emitting `error`.
+ */
+function cbpMasterReferenceFinding(
+  objectName: string,
+  fieldName: string,
+  fieldPath: string,
+  parent: string,
+  def: any,
+): LintIssue | undefined {
+  const missingRequired = def.required !== true;
+  const flags = (['readonly', 'system'] as const).filter((flag) => def[flag] === true);
+  if (!missingRequired && flags.length === 0) return undefined;
+
+  const subject = `master_detail "${objectName}.${fieldName}" → ${parent}`;
+  const derivation =
+    `"${objectName}" is controlled_by_parent, so its record access is derived through this ` +
+    `reference — a record saved without its master is readable by nobody (the derived read filter ` +
+    `never matches an empty master) and refused on every later write`;
+  const flagWords = flags.map((flag) => `\`${flag}: true\``).join(' and ');
+  const message = missingRequired
+    ? flags.length === 0
+      ? `${subject} must be required: ${derivation}`
+      : `${subject} must be required and must not be ${flagWords}: ${derivation}; record validation ` +
+        `also skips readonly and system fields before its required check`
+    : `${subject} is required but also ${flagWords}: record validation skips readonly and system ` +
+      `fields before its required check, so \`required: true\` is never enforced on it — and ` +
+      `${derivation}`;
+
+  return {
+    severity: 'error',
+    rule: MASTER_DETAIL_REQUIRED,
+    message,
+    path: `${fieldPath}.${missingRequired ? 'required' : flags[0]}`,
+    fix: [
+      ...(missingRequired ? ['required: true'] : []),
+      ...flags.map((flag) => `drop ${flag}: true`),
+    ].join(', '),
+  };
+}
+
 // ─── Uniqueness declarations (ADR-0120) ─────────────────────────────
 
 export const UNIQUE_DOUBLE_DECLARATION = 'unique/double-declaration';
@@ -285,11 +387,12 @@ function fieldUniqueScope(u: unknown): 'organization' | 'global' {
 }
 
 /**
- * Which boundary does a DECLARED-index `unique` ask for? Bare `true` is the
- * DEPRECATED positional spelling of `'global'` (verbatim columns — today's
- * behavior; warned by `unique/unscoped-declared-index`, rejected at protocol
- * 18, #5082). `'organization'` asks for the NULL-safe organization key part
- * to be prepended at registration (ADR-0120 D1/D3).
+ * Which boundary does a DECLARED-index `unique` ask for? `'organization'` asks
+ * for the NULL-safe organization key part to be prepended at registration
+ * (ADR-0120 D1/D3); `'global'` is the verbatim column list. Bare `true` — the
+ * positional spelling of `'global'`, refused since protocol 18 (#5082) — still
+ * reads as `'global'` here, because this rule also runs over the unparsed
+ * stack `os lint` sees, where R11 reports the spelling itself.
  */
 function indexUniqueScope(u: unknown): 'organization' | 'global' {
   return u === 'organization' ? 'organization' : 'global';
@@ -309,13 +412,20 @@ function indexUniqueScope(u: unknown): 'organization' | 'global' {
  * checkable at authoring time, which is what makes this the first gate in the
  * #4986 saga that can actually run here.
  *
- * 17.x: warning. Protocol 18 rejects the spelling at validate/publish (#5082).
- * Advisory — never fails a build in 17.x.
+ * Protocol 18 (#5082, ADR-0120 D7): an ERROR. 17.x warned; the spelling is
+ * now refused, and this rule is one of its two refusal channels. The other is
+ * the schema itself — `IndexSchema.unique` refuses bare `true` with the same
+ * prescription, at every door that parses (`os validate` / `os build`,
+ * `ObjectSchema.create`, the runtime save door). This rule is what refuses it
+ * where nothing parses: `os lint` is the cheap pre-flight and runs every rule
+ * over the NORMALIZED, unparsed stack.
  *
  * Concrete harm: #8323 measured the cross-tenant 409-vs-201 oracle end to end.
  *
- * Wiring: own AUTHORING_RULES entry (validate/build), and `lintDataModel`
- * calls it for `os lint` — each command reports each finding exactly once.
+ * Wiring: one AUTHORING_RULES entry on all three commands (a gating rule must
+ * run on all three). `lintDataModel` no longer calls it — the registry entry
+ * is what reports it under `os lint`, so each command reports each finding
+ * exactly once.
  */
 export function lintUnscopedDeclaredIndexes(objects: any[]): LocatedLintIssue[] {
   const issues: LocatedLintIssue[] = [];
@@ -334,20 +444,20 @@ export function lintUnscopedDeclaredIndexes(objects: any[]): LocatedLintIssue[] 
       const cols = colList.join(', ');
       const indexLabel = typeof idx?.name === 'string' && idx.name.trim() ? ` '${idx.name.trim()}'` : '';
       issues.push({
-        severity: 'warning',
+        severity: 'error',
         rule: UNIQUE_UNSCOPED_DECLARED_INDEX,
         where: indexWhere(obj, idx, j, colList),
         message:
           `"${obj.name}" declares index${indexLabel} [${cols}] with bare \`unique: true\` — a unique index whose scope is ` +
-          `unstated (ADR-0120). Today the bare spelling materializes over exactly its \`fields\`, i.e. installation-wide; ` +
-          `an author who meant "unique per organization" gets no per-organization constraint and no error. ` +
-          `Protocol 18 rejects this spelling, and stored metadata that still carries it converts to ` +
-          `\`unique: 'global'\`, which builds the same physical index.`,
+          `unstated (ADR-0120). Protocol 18 refuses this spelling on a declared index: it built the index over ` +
+          `exactly its \`fields\`, i.e. installation-wide, while reading like "unique per organization". ` +
+          `Stored metadata that still carries it converts to \`unique: 'global'\`, which builds the same physical index.`,
         path: `objects[${i}].indexes[${j}]`,
         fix:
-          `State the scope: \`unique: 'global'\` (installation-wide — exactly today's behavior) or ` +
+          `State the scope: \`unique: 'global'\` (installation-wide — the exact index bare \`true\` built) or ` +
           `\`unique: 'organization'\` (one holder per organization — the driver prepends the NULL-safe ` +
-          `organization key part at registration).`,
+          `organization key part at registration). Run \`os migrate meta --from 17\` to list the mechanical ` +
+          `edits for existing sources; apply them by hand.`,
       });
     }
   }
@@ -468,7 +578,8 @@ export function lintUniqueDeclarations(objects: any[]): LocatedLintIssue[] {
  * predating the vocabulary that can now say so.
  *
  * Why this is worth a nudge rather than left alone. The legacy spelling
- * `{ fields: ['organization_id', 'name'], unique: true }` says "per
+ * `{ fields: ['organization_id', 'name'], unique: 'global' }` (bare `true`
+ * before protocol 18 — the conversion respells it, zero drift) says "per
  * organization" to a reader and materializes as a plain composite — and SQL
  * UNIQUE is NULL-distinct, so on every row where the organization column is
  * NULL it enforces **nothing** (#5030, measured). On a single-organization
@@ -543,11 +654,13 @@ export function lintLegacyOrganizationComposites(objects: any[]): LocatedLintIss
  * metadata-generation scorer.
  */
 export function lintDataModel(objects: any[]): LintIssue[] {
-  // R10/R11/R12 live in their own exported functions so `os validate`/`os build`
+  // R10/R12 live in their own exported functions so `os validate`/`os build`
   // can run those rules without pulling in the whole best-practice sweep
-  // (#3991, ADR-0120 D5a/D5b/D5c) — here `os lint` picks all three up.
+  // (#3991, ADR-0120 D5b/D5c) — here `os lint` picks both up. R11 is not
+  // called here since it became an error at protocol 18 (#5082): a gating
+  // rule runs on all three commands through its own registry entry, which is
+  // what reports it under `os lint`, exactly once.
   const issues: LintIssue[] = [
-    ...lintUnscopedDeclaredIndexes(objects),
     ...lintUniqueDeclarations(objects),
     ...lintLegacyOrganizationComposites(objects),
   ];
@@ -736,10 +849,20 @@ export function lintDataModel(objects: any[]): LintIssue[] {
 
       if (type === 'master_detail') {
         // R2 — master-detail children should require their parent.
-        if (def.required !== true) {
+        //
+        // Two tiers, one rule id. On a `controlled_by_parent` object the master
+        // reference is what the object's whole record access is derived through,
+        // so an unsafe shape there is refused at `error`
+        // (`cbpMasterReferenceFinding`); everywhere else a non-required
+        // `master_detail` is a likely-wrong choice and stays a `warning`,
+        // byte-for-byte as before.
+        if (obj.sharingModel === 'controlled_by_parent') {
+          const finding = cbpMasterReferenceFinding(obj.name, fieldName, fieldPath, parent, def);
+          if (finding) issues.push(finding);
+        } else if (def.required !== true) {
           issues.push({
             severity: 'warning',
-            rule: 'relationship/master-detail-required',
+            rule: MASTER_DETAIL_REQUIRED,
             message: `master_detail "${obj.name}.${fieldName}" → ${parent} should be required (a detail record cannot exist without its master)`,
             path: `${fieldPath}.required`,
             fix: 'required: true',

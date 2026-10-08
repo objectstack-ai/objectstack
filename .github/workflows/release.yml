@@ -368,16 +368,23 @@ jobs:
       #
       # Two more classes exist and did NOT move on that train, because both are
       # major-boundary only: packages/spec/src/kernel/protocol-version.ts, and
-      # per bundled template objectstack.config.ts / objectstack.manifest.json.
-      # A major cannot reach this lane while check-changeset-no-major.mjs holds
-      # (pr-automation.yml refuses a PR that introduces one), so they are dormant
-      # rather than covered — and the shape assertion below says so out loud on
-      # the first train that wakes them, instead of validating a surface with no
-      # gate behind it. cut-rc.yml's allowlist block carries the same
-      # measurement for the RC lane and agrees path-for-path.
+      # per bundled template objectstack.config.ts / objectstack.manifest.json
+      # (with the template's own package.json, whose `^N.0.0` ranges move too).
+      # They stayed dormant while check-changeset-no-major.mjs held; pre mode
+      # stands that guard aside, and the v18 opening woke them. RE-MEASURED on
+      # that first boundary train (2026-10-07: 3d9188502e plus the opening's
+      # `.changeset/pre.json` and `major` changeset, 37 changesets,
+      # @objectstack/cli 17.7.0 -> 18.0.0-next.0): 236 paths, 0 outside the
+      # surface, 4 major-only — the three blank-template files and
+      # protocol-version.ts. The template half is now judged by the gates below;
+      # protocol-version.ts is still refused, for the measured reason given at
+      # the refusal. cut-rc.yml's allowlist block carries the same surface for
+      # the RC lane and agrees path-for-path.
       #
       # WHAT IS CHECKED, AND WHY EACH ONE (7 s total, measured on the rendered
-      # tree in this job's own state: install, NO build)
+      # tree in this job's own state: install, NO build. With the major-boundary
+      # gates below, the whole step held 44 s on a shared dev container,
+      # 2026-10-07, on a 17.8.0 train — every gate green)
       # ---------------------------------------------------------------------
       # Two halves, because the classes above fail in two different ways.
       #
@@ -416,6 +423,32 @@ jobs:
       #     check:release-notes, check:release-page-status,
       #     check-release-section-coverage.mjs, check:published-readme-links
       #                                 the four gates that READ CHANGELOG.md.
+      #
+      #   And the gates of the two MAJOR-boundary classes, run on EVERY refresh
+      #   rather than only on the train that moves them: each reads a version
+      #   this step writes on every train, and a gate that runs once a major
+      #   rots unseen between majors. All existing gates; none needs a build.
+      #     create-objectstack's suite  the bundled templates RENDERED: the
+      #                                 scaffolder's own copy and identity
+      #                                 rewrite, from a template packed the way
+      #                                 npm ships it, plus the ratchets that
+      #                                 judge all three stamps against
+      #                                 create-objectstack's NEW major
+      #                                 (template-consistency.test.ts).
+      #                                 Measured on the boundary train: 16
+      #                                 files, 249 tests, green, 23 s.
+      #     check:template-manifests   each stamped manifest still parses as
+      #                                 TemplateManifestSchema (2 s, green).
+      #     protocol-version.test.ts   PROTOCOL_VERSION in lockstep with spec's
+      #                                 NEW major. ONE file, 5 s — reachable
+      #                                 without the whole spec suite, which
+      #                                 this comment used to say it was not.
+      #     check:spec-changes, check:upgrade-guide
+      #                                 the two committed artifacts DERIVED from
+      #                                 PROTOCOL_MAJOR (2-3 s each). Measured
+      #                                 RED on the boundary train: the version
+      #                                 pass moves the constant and regenerates
+      #                                 neither.
       #
       # ⛔ WHAT IS DELIBERATELY NOT RUN, AND WHY IT IS NOT AN OMISSION.
       #   The whole derived farm. Fed this 313-path change set,
@@ -595,22 +628,27 @@ jobs:
           # check with a diagnosis of their own. Measured: with the pattern
           # missing, protocol-version.ts fell into the "wrote outside the
           # reviewed surface" branch instead, which is red for the right reason
-          # and wrong about why. What this lane does not have is a gate for
-          # either. protocol-version.ts is judged by
-          # packages/spec/src/kernel/protocol-version.test.ts, reachable only
-          # through the whole @objectstack/spec suite (measured: 424 files,
-          # 11273 tests, 5m26s — not a per-refresh cost), and the template stamps
-          # by a full template render. Unreachable while
-          # check-changeset-no-major.mjs holds; loud, not silent, the day it
-          # stops holding.
-          MAJOR_ONLY="$(grep -xF -f "${TEMPLATE_LIST}" "${MOVED_FILE}" || true)"
+          # and wrong about why.
+          #
+          # The TEMPLATE stamps are validated, not refused: the create-objectstack
+          # suite and check:template-manifests in the content half judge them
+          # (see the header). They are counted here only for the summary.
+          #
+          # protocol-version.ts is still REFUSED, and not for want of a gate: its
+          # three gates run below. What moving it does is wider than all three.
+          # The ADR-0087 D1 handshake (`assertProtocolCompat` on the app LOAD
+          # seam, packages/runtime/src/app-plugin.ts) refuses every manifest whose
+          # `engines.protocol` excludes the new major, and this repository's own
+          # example apps declare the old one. Measured with the boundary train's
+          # constant: `^17` -> OS_PROTOCOL_INCOMPATIBLE, `^18` -> ok (control on
+          # the pre-version tree: the reverse). No gate this lane can afford boots
+          # them, so the refusal stays until a reviewed change says how the
+          # protocol major moves on this lane. It is collected rather than exited
+          # on, so one boundary run names every gate verdict as well.
+          MAJOR_TEMPLATES="$(grep -xF -f "${TEMPLATE_LIST}" "${MOVED_FILE}" || true)"
+          UNVALIDATED=''
           if grep -qxF 'packages/spec/src/kernel/protocol-version.ts' "${MOVED_FILE}"; then
-            MAJOR_ONLY="${MAJOR_ONLY}"$'\n'"packages/spec/src/kernel/protocol-version.ts"
-          fi
-          if [ -n "${MAJOR_ONLY//[[:space:]]/}" ]; then
-            printf '%s\n' "${MAJOR_ONLY}" | sed '/^$/d; s/^/::error::  unvalidated: /'
-            echo "::error::this version pass crossed a MAJOR boundary and wrote the surfaces above, which this lane has no gate for. A major was not reachable here when this step was written (pr-automation.yml refuses a PR introducing one), so the gates were left out rather than guessed at. Wire them in before letting this refresh through."
-            exit 1
+            UNVALIDATED='packages/spec/src/kernel/protocol-version.ts'
           fi
 
           # ── CONTENT ──────────────────────────────────────────────────────
@@ -634,15 +672,31 @@ jobs:
           run_gate pnpm check:release-page-status
           run_gate node scripts/check-release-section-coverage.mjs
           run_gate pnpm check:published-readme-links
+          # The MAJOR-boundary classes' gates. `--fail-if-no-match`: a filter that
+          # matches no package otherwise exits 0 having run nothing.
+          run_gate pnpm --filter create-objectstack --fail-if-no-match test
+          run_gate pnpm --filter @objectstack/spec --fail-if-no-match check:template-manifests
+          run_gate pnpm --filter @objectstack/spec --fail-if-no-match exec vitest run --project local src/kernel/protocol-version.test.ts
+          run_gate pnpm --filter @objectstack/spec --fail-if-no-match check:spec-changes
+          run_gate pnpm --filter @objectstack/spec --fail-if-no-match check:upgrade-guide
 
+          template_moved=$(printf '%s\n' "${MAJOR_TEMPLATES}" | sed '/^$/d' | wc -l | tr -d ' ')
           {
             echo "- post-version surface: \`${moved}\` path(s), all inside the reviewed shape"
+            echo "- major-boundary template stamps moved: \`${template_moved}\` (judged by the content gates)"
             echo "- content gates failed: \`${#failed[@]}\`"
+            echo "- major-boundary surfaces left unvalidated: \`$([ -n "${UNVALIDATED}" ] && echo 1 || echo 0)\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "${#failed[@]}" -ne 0 ]; then
             printf '::error::the post-version tree fails %s gate(s) that no CI run would ever have judged: %s\n' \
               "${#failed[@]}" "$(printf '%s; ' "${failed[@]}")"
+          fi
+          if [ -n "${UNVALIDATED}" ]; then
+            echo "::error::  unvalidated: ${UNVALIDATED}"
+            echo "::error::this version pass moved the protocol major. Its lockstep and the two artifacts derived from it are judged above, but the move also makes the protocol handshake refuse every manifest still declaring the old major in engines.protocol — this repository's example apps among them — and no gate on this lane boots them. A reviewed change must decide how the protocol major moves before this refresh goes through."
+          fi
+          if [ "${#failed[@]}" -ne 0 ] || [ -n "${UNVALIDATED}" ]; then
             exit 1
           fi
           echo 'Post-version tree validated.'

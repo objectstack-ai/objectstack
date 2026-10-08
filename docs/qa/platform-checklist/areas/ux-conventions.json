@@ -1,0 +1,287 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "ux-conventions",
+  "axis": "records",
+  "title": "Cross-cutting UX conventions — every write answers, every disabled control explains itself, labels over machine names (console and Studio)",
+  "items": [
+    {
+      "id": "ux-conventions.write-feedback",
+      "title": "Every user-initiated write answers visibly — success names what changed, a refusal says why, and a no-op claims nothing",
+      "since": "v17.7",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "admin (the platform admin seeded by --seed-admin)",
+        "member (non-admin end user) for the record rows"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a writable scratch package for the Studio rows — create it from the Studio landing and delete it at teardown; the showcase package itself is read-only in Studio",
+          "the organization capability for the Invite User row (a stock showcase boot bootstraps a Default Organization)",
+          "an independent read of server truth for every row — a second browser context or the REST API — so a write is never judged by what the UI says about it"
+        ],
+        "knownGaps": [
+          "Expected FAIL on stock: Setup → Users → Invite User declares successMessage 'Invitation sent' (packages/platform-objects/src/identity/sys-user.object.ts#invite_user), yet after Confirm the console showed no feedback while the sys_invitation and sys_email rows were written (objectstack-ai/objectui#11817). Score it FAIL and cite the card; do not re-file.",
+          "Expected FAIL on stock: Studio Publish gives no success confirmation — only the header flips to 'No drafts pending publish' (objectstack-ai/objectui#11807).",
+          "Expected FAIL on stock: inline edit shows '1 row modified · Save All (1)' after a click with no value change (objectstack-ai/objectui#11816) — negative[1].",
+          "Undo is scored only where a surface offers it today (record edit — records-forms.record-edit-undo). Its absence elsewhere is recorded in the evidence and is never a FAIL of this item: which writes should offer Undo is a product decision, not this item's oracle."
+        ]
+      },
+      "variants": [
+        "record create — New form save on showcase_task",
+        "record inline edit — Edit inline → change Priority → save the row",
+        "bulk delete — select two rows → Delete in the selection bar → confirm",
+        "kanban move — drag a card Backlog → To Do (direct manipulation: the card in its new column IS the success feedback; a refused move must revert with an error)",
+        "declared record action — Mark Done on a task record (declared successMessage 'Task marked done.', examples/app-showcase/src/ui/actions/index.ts#MarkDoneAction)",
+        "param action dialog — Setup → Users → Invite User → Confirm (declared successMessage 'Invitation sent')",
+        "approval decision — Approvals inbox → Approve with a comment",
+        "import — Tasks → Import a two-row CSV → the result screen",
+        "Studio autosave — rename a field label in the scratch package",
+        "Studio publish — Publish the scratch package",
+        "Studio discard — Discard changes on a pending draft",
+        "settings save — Settings → Localization → save a value"
+      ],
+      "steps": [
+        "sign in as admin; keep a second context (or the REST API) open to read server truth independently of the UI",
+        "for each variant perform the write once, then within ~2 s capture a screenshot and the DOM of every feedback region — toasts ([data-sonner-toast]), role=status / role=alert regions, and the surface's own save indicator — recording the verbatim text, or its absence",
+        "for each variant read server-side whether the write landed (GET the record, the metadata item or the sys_ row) and record the request's status from the network log",
+        "repeat the record rows signed in as the member persona, on member-owned records",
+        "negative pass: (a) submit the create form with a required field empty, then again with a value that breaks a validation rule; (b) open an inline editor and leave it without changing the value",
+        "where a variant offers Undo (record edit), click it and read the record back"
+      ],
+      "acceptance": [
+        {
+          "clause": "every write that landed server-side produced visible feedback on the surface that started it — a toast, an inline status, or (direct manipulation only) the item visibly in its new place",
+          "oracle": "dom",
+          "verify": "per variant, the captured feedback text is non-empty, or (kanban only) the card's column in the DOM matches the status the server read returns; pair every row with its step-3 server read",
+          "evidence": "per-variant table: variant · landed (y/n, request status) · feedback text verbatim or 'none' · screenshot"
+        },
+        {
+          "clause": "success feedback names what changed — the record, item or count — rather than a bare 'Success' or a machine name",
+          "oracle": "screenshot",
+          "verify": "read the captured text: it names the subject (record title, invitee email, package label, 'N created · M skipped'); a generic 'Done' / 'Success' or a raw snake_case name scores FAIL for that row",
+          "evidence": "the verbatim feedback strings"
+        },
+        {
+          "clause": "a declared successMessage is the text the user sees",
+          "oracle": "dom",
+          "verify": "for Mark Done and Invite User compare the toast text with the action's declared successMessage (examples/app-showcase/src/ui/actions/index.ts#MarkDoneAction, packages/platform-objects/src/identity/sys-user.object.ts#invite_user)",
+          "evidence": "declared string vs shown string, per action"
+        },
+        {
+          "clause": "a refused write shows an error that says why — next to the field or in an error toast — and never a success message",
+          "oracle": "network",
+          "verify": "negative (a): the request answers 4xx, the UI shows the server's reason, and no success toast appears in the same capture window",
+          "evidence": "request status and error code, the error text shown, screenshot"
+        },
+        {
+          "clause": "a no-op claims nothing — leaving an editor unchanged produces no saved/modified state and sends no write",
+          "oracle": "network",
+          "verify": "negative (b): no PATCH/PUT in the network log and no modified or saved indicator in the DOM",
+          "evidence": "network log excerpt and DOM capture"
+        },
+        {
+          "clause": "where Undo is offered it restores the prior value server-side",
+          "oracle": "api",
+          "verify": "after Undo, GET the record and compare the field with its pre-edit value",
+          "evidence": "before / after / after-undo values"
+        }
+      ],
+      "negative": [
+        "a refused write (required field empty, validation rule broken) never shows a success toast",
+        "a no-op (open and close an inline editor without a change) produces no 'modified' state and no write request",
+        "feedback claiming success while the write did not land (4xx/5xx, or no request at all) is a FAIL — the inverse of a silent success"
+      ],
+      "traps": [
+        "automation-input",
+        "eventual-consistency",
+        "hydration-race"
+      ],
+      "source": [
+        "maintainer instruction, verbatim: 「写进测试清单：把这些原则加到 docs/qa/platform-checklist/，例如\"每个写操作都有反馈\"\"每个禁用控件都说明原因\"\"不对用户显示机器名\"。这样以后每轮测试都会检查。」",
+        "browser QA pass 2026-10-07 on the showcase boot (objectstack 879bd38c, objectui 179f6fe9): objectstack-ai/objectui#11817, objectstack-ai/objectui#11807, objectstack-ai/objectui#11816",
+        "examples/app-showcase/src/ui/actions/index.ts#MarkDoneAction",
+        "packages/platform-objects/src/identity/sys-user.object.ts#invite_user"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-08",
+          "change": "authored on the maintainer's instruction as a cross-cutting convention; grounded in the 2026-10-07 browser QA pass, expected-fail rows cite their cards"
+        }
+      ]
+    },
+    {
+      "id": "ux-conventions.disabled-control-reason",
+      "title": "Every disabled control explains itself — the reason shows on hover and on keyboard focus, and is exposed as an accessible description",
+      "since": "v17.7",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "admin",
+        "member (non-admin) — for the disabled states only a non-privileged persona meets"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a showcase_task record with done = false (the stock seeds carry several)",
+          "the read-only showcase package in Studio (stock)"
+        ],
+        "knownGaps": [
+          "Expected FAIL on stock: the task record's Archive button (examples/app-showcase/src/ui/actions/index.ts#ArchiveTaskAction, disabled while has(record.done) && record.done != true) renders disabled in both its record_header and record_section placements with no title, tooltip or aria-describedby (objectstack-ai/objectui#11811). The action spec has no author-facing reason next to `disabled`, so a generic platform fallback passes clause 3 and is recorded as generic in the evidence — note which one was shown.",
+          "Known PASS reference: Studio's Publish button on the read-only showcase package carries a tooltip — check it first to calibrate the oracle before scoring the other rows."
+        ]
+      },
+      "variants": [
+        "declared action disabled by its `disabled` predicate — Archive on a not-done task, record header AND record section placement",
+        "Studio Publish on a read-only package",
+        "Studio controls on a read-only package — the automation enable toggle, field inspector inputs, validation editor selects",
+        "import wizard — the step's continue/import button while a required field is unmapped",
+        "a form submit button, where the surface disables it instead of validating on submit",
+        "toolbar or bulk buttons rendered disabled for the member persona"
+      ],
+      "steps": [
+        "sign in as admin; on each variant locate every control rendered disabled (the disabled attribute, aria-disabled=true, or data-disabled)",
+        "hover each one for 1 s and screenshot; then reach it — or its focusable wrapper — with Tab and screenshot again",
+        "read the accessibility tree for each control: accessible name, accessible description (the aria-describedby target's text) and title",
+        "repeat the member-persona variant signed in as a member"
+      ],
+      "acceptance": [
+        {
+          "clause": "every disabled control shows a reason on pointer hover",
+          "oracle": "screenshot",
+          "verify": "the hover screenshot shows a tooltip or adjacent text explaining the disabled state; nothing appearing scores FAIL for that control",
+          "evidence": "per-control screenshot with the control's label"
+        },
+        {
+          "clause": "the same reason is reachable without a pointer and exposed to assistive technology",
+          "oracle": "dom",
+          "verify": "the control or its focusable wrapper is in the tab order and carries an accessible description (aria-describedby resolving to non-empty text) or a title; a disabled control with neither scores FAIL",
+          "evidence": "accessibility-tree dump per control"
+        },
+        {
+          "clause": "the reason is specific when the author or the platform knows the condition, generic only as a fallback",
+          "oracle": "dom",
+          "verify": "classify each reason: one that names the condition (e.g. 'Available once the task is done', 'This package is read-only') or a generic fallback ('Not available') passes, and the evidence records which of the two it was; an empty reason fails",
+          "evidence": "verbatim reason strings, classified specific / generic / none"
+        }
+      ],
+      "negative": [
+        "an ENABLED control carries no leftover disabled reason",
+        "a control removed by its `visible` predicate is absent from the DOM rather than rendered disabled — out of this item's scope; record it if seen"
+      ],
+      "traps": [
+        "wrong-persona",
+        "hydration-race"
+      ],
+      "source": [
+        "maintainer instruction, verbatim: 「写进测试清单：把这些原则加到 docs/qa/platform-checklist/，例如\"每个写操作都有反馈\"\"每个禁用控件都说明原因\"\"不对用户显示机器名\"。这样以后每轮测试都会检查。」",
+        "browser QA pass 2026-10-07 on the showcase boot (objectstack 879bd38c, objectui 179f6fe9): objectstack-ai/objectui#11811",
+        "examples/app-showcase/src/ui/actions/index.ts#ArchiveTaskAction"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-08",
+          "change": "authored on the maintainer's instruction as a cross-cutting convention; grounded in the 2026-10-07 browser QA pass, the expected-fail row cites its card"
+        }
+      ]
+    },
+    {
+      "id": "ux-conventions.labels-over-machine-names",
+      "title": "Where a label exists users see the label — machine names, raw ids and spec paths appear only as secondary text",
+      "since": "v17.7",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "admin (Studio, Setup)",
+        "member (console record surfaces)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a writable scratch package for the Studio rows holding one object, one permission set and one nav item",
+          "read access to the served metadata of every sampled surface — labels are read from metadata, never assumed"
+        ],
+        "knownGaps": [
+          "Expected FAIL on stock: Explain access renders the principal as the raw user id; the Access list shows a new permission set by its name; the nav editor shows nav_item_N and truncated object names; the Changes panel lists machine names (objectstack-ai/objectui#11862).",
+          "Expected FAIL on stock: Profile shows the auth library's raw user.role ('user') for the platform admin (objectstack-ai/objectui#11866).",
+          "Expected FAIL on stock: the flow inspector's Node Type select lists raw snake_case types such as http_request, connector_action and try_catch (objectstack-ai/objectui#11778).",
+          "Regression rows, expected PASS: the audit-log actor and composite field values render as people and labels since objectstack-ai/objectui#11697."
+        ]
+      },
+      "variants": [
+        "Studio → Access → Explain access result (the principal line)",
+        "Studio → Access → permission-set list (scratch package)",
+        "Studio → Interfaces → nav editor items (scratch package)",
+        "Studio → Changes panel (pending items)",
+        "Studio → flow inspector Node Type select",
+        "Studio → field type picker and the object pickers (Lookup related object, flow trigger object)",
+        "console → list column headers and the filter field picker (showcase_task)",
+        "console → record page lookup and user values (showcase_task)",
+        "Setup → audit log actor column",
+        "avatar menu → Profile (role badge and Role field)",
+        "error banners met while running the other items (Studio save refusals)"
+      ],
+      "steps": [
+        "before the browser: for each variant read the served metadata (GET /api/v1/meta/<type>/<name>) and note each sampled item's label next to its machine name — expectations derive from data",
+        "sign in as admin; visit each variant, screenshot it and capture the DOM text of each sampled item's primary label",
+        "for user references read the user's name and email (GET /api/v1/data/sys_user/<id>) and compare with what renders",
+        "scan the visible text of every variant for an id-shaped string (20+ alphanumeric characters), a dotted Zod path (segment.index.segment), a TypeScript class name, or an issue reference (repo#number)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the primary text of each sampled item is its label, not its machine name",
+          "oracle": "dom",
+          "verify": "compare the rendered primary text with the label and name read in step 1; rendered text equal to the name while a distinct label exists scores FAIL for that row",
+          "evidence": "per-row table: surface · label · name · rendered text"
+        },
+        {
+          "clause": "user references render as a person, never as an id",
+          "oracle": "dom",
+          "verify": "the rendered text equals the user's name or email from the sys_user read; an id-shaped string scores FAIL",
+          "evidence": "rendered string vs sys_user name / email"
+        },
+        {
+          "clause": "where a machine name is shown it is secondary — beside its label and visually subordinate",
+          "oracle": "screenshot",
+          "verify": "the machine name appears only next to its label, in smaller, muted or monospace text",
+          "evidence": "a screenshot per row where a machine name appears"
+        },
+        {
+          "clause": "user-facing banners and help text carry no raw spec path, class name or tracker id",
+          "oracle": "dom",
+          "verify": "no visible string on any variant matches a dotted Zod path, a TypeScript class name such as MetadataClient, or an issue reference",
+          "evidence": "every matching string, with its surface"
+        }
+      ],
+      "negative": [
+        "a machine name rendered because the item genuinely declares no label is an authoring gap, not a renderer FAIL — read the metadata before scoring",
+        "developer surfaces (the API panel, Advanced JSON editors) may show machine names — out of scope"
+      ],
+      "traps": [
+        "wrong-panel",
+        "hydration-race"
+      ],
+      "source": [
+        "maintainer instruction, verbatim: 「写进测试清单：把这些原则加到 docs/qa/platform-checklist/，例如\"每个写操作都有反馈\"\"每个禁用控件都说明原因\"\"不对用户显示机器名\"。这样以后每轮测试都会检查。」",
+        "browser QA pass 2026-10-07 on the showcase boot (objectstack 879bd38c, objectui 179f6fe9): objectstack-ai/objectui#11862, objectstack-ai/objectui#11866, objectstack-ai/objectui#11778, objectstack-ai/objectui#11785",
+        "objectstack-ai/objectui#11697 (fixed — the regression rows)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-08",
+          "change": "authored on the maintainer's instruction as a cross-cutting convention; grounded in the 2026-10-07 browser QA pass, expected-fail rows cite their cards"
+        }
+      ]
+    }
+  ]
+}

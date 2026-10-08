@@ -747,6 +747,27 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     expect((engine.tables.get('sys_user') ?? []).some((u: any) => u.email === 'user@mail.acme.com')).toBe(false);
   });
 
+  it('[ADR-0131 D4] the self-registration grant writes both columns, and they agree', async () => {
+    // The fake engine stores exactly the payload the writer sends — no platform
+    // hook stands behind it here — so this pins the writer's own payload.
+    const engine = createMemoryEngine();
+    seedExistingUser(engine);
+    seedPermissionSet(engine, 'portal_user');
+    const manager = makeManager(engine, {
+      audience: { posture: 'open', selfRegistrationPermissionSet: 'portal_user' },
+    });
+    const admitted = await signUp(manager, 'joiner@anywhere.com');
+    expect(admitted.status).toBeLessThan(300);
+    await vi.waitFor(() => {
+      const grants = engine.tables.get('sys_user_permission_set') ?? [];
+      expect(grants.length).toBe(1);
+      expect(grants[0].permission_set_id).toBe('ps_portal_user');
+      expect(grants[0].permission_set).toBe('portal_user');
+      const setRow = (engine.tables.get('sys_permission_set') ?? []).find((r: any) => r.id === grants[0].permission_set_id);
+      expect(setRow?.name).toBe(grants[0].permission_set);
+    });
+  });
+
   it('email_domain forces email verification on: the wired flag, the public config, and the minted session agree', async () => {
     const engine = createMemoryEngine();
     seedExistingUser(engine);

@@ -60,7 +60,9 @@
  * SCOPE, re-derived on `origin/main` @ 2ba4329e rather than inherited from the
  * filing: four routes across two plugin factories, both in `utils/console.ts`,
  * which the guard confirms is the ONLY file in this package's 109 sources that
- * mounts a route at all.
+ * mounts a route at all. A fifth, `GET /forms/:slug`, joined the console-static
+ * family later: a redirect to the bundle's public form page, in the same peer
+ * group as the two redirects already here.
  *
  * This module is package-internal: it is the guard's data, not public API, and
  * `@objectstack/cli` is a binary rather than a consumed library surface. It
@@ -133,6 +135,19 @@ export const CONSOLE_ROUTE_LEDGER: readonly ConsoleRouteLedgerEntry[] = [
             'redirects the bare mount path to its trailing-slash form, the ordinary SPA convention — the Console is built '
             + 'with `base: \'/_console/\'`, so relative asset URLs only resolve from the slashed path. Pure navigation '
             + 'plumbing for a static bundle; there is nothing here for an SDK to express.',
+    },
+    {
+        route: 'GET /forms/:slug',
+        family: 'console-static',
+        mountedIn: 'utils/console.ts',
+        disposition: 'static-asset',
+        note:
+            'redirects (302) the path an author writes as a public form\'s `sharing.publicLink` to the Console\'s public '
+            + 'form page, `/_console/f/<slug>`, which `GET /_console/*` serves from the bundle. The same peer group as '
+            + '`GET /` and `GET /_console`: navigation to a static bundle, which no client method builds. It answers '
+            + 'only when the anonymous form door `GET /api/v1/forms/:slug` (REST ledger, `forms` family) serves the slug '
+            + 'to the same request, asked in-process, and otherwise falls through to the unmatched-request 404. So it '
+            + 'reveals nothing that door does not, and the decision stays in one place.',
     },
     {
         route: 'GET /_console/*',

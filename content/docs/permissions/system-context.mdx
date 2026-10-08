@@ -10,7 +10,7 @@ the seed loader replaying package fixtures, a plugin's boot reconciler, a
 service self-write, a migration.
 
 This page is **the authority** for what that flag actually does. It exists
-because the flag is not one concept: it is a single boolean read at **114
+because the flag is not one concept: it is a single boolean read at **115
 distinct sites across 19 packages**, and knowing three of those behaviours gives
 no hint that the other hundred-and-four exist. Every documented app-side bug
 traced to `isSystem` had the same shape — the metadata was complete and correct,
@@ -127,6 +127,7 @@ that silently does not happen.
 | 22 | Strict-drop refusal never fires | objectql | Lose: a caller that opted into loud refusal gets **silence** — strict refuses exactly what the strip would have taken, and the strip took nothing. One exception: a `formula` value, which the `computed` strip takes from every caller, so strict still refuses it | `packages/objectql/src/engine.ts#insert`, `packages/objectql/src/readonly-strict-errors.ts#READONLY_CLASS_REASONS` |
 | 23 | **Referential-integrity check skipped** | objectql | Get: writes proceed against unreachable/unresolvable targets. Lose: an `isSystem` caller can write a **dangling reference** | `packages/objectql/src/engine.ts#assertReferencesResolve` |
 | 23b | **Position-catalog check skipped** — a `sys_user_position` write whose `position` names no `sys_position` row is not refused | plugin-security | Get: a system writer can store an assignment naming no catalog row — the seed loader writes `stack.data` from `AppPlugin.start()`, before `kernel:ready` seeds the declared position catalog, so a refusal there would fail every authored assignment seed on a fresh boot. Lose: such a row grants nothing and nothing says so. A non-system insert, or a non-system update that changes `position`, is refused `400 VALIDATION_FAILED` / `reference_not_found` instead when no catalog row the writer's context reaches carries the name: its organization's rows plus the organization-less ones, read as `{ ...context, isSystem: true }`, never a bare `{ isSystem: true }`, so a name only another organization carries is refused like one nobody carries. It is the same stand-down, and the same tenant scope, as the engine's referential-integrity check for a lookup column | `packages/plugins/plugin-security/src/position-catalog-refusal.ts#assertPositionNamesCatalogRow` |
+| 23c | **Grant-name check relaxed for an unresolvable id** — a `sys_user_permission_set` write that supplies `permission_set` beside a `permission_set_id` naming no set the writer's context reaches keeps the supplied name | plugin-security | Get: a system writer can store a grant naming a set whose row does not exist yet — seed replay and boot provisioning may write the grant before the set row, the ordering the engine's referential-integrity check also stands down for. Lose: such a row's name is unchecked until a backfill names it. Everything else is judged for every caller, system included: the name is derived from the id on every write that carries one, and a supplied name that names any other set is refused `400 VALIDATION_FAILED` / `invalid_value`; a non-system caller's name beside an unresolvable id is refused the same way, read as `{ ...context, isSystem: true }` through the hook's `ctx.api.sudo()`, never a bare `{ isSystem: true }` (ADR-0131 D4) | `packages/plugins/plugin-security/src/grant-permission-set-name.ts#settle` |
 | 24 | Tenant-audit warning silenced; `bypassTenantAudit` threaded to the driver | objectql | Get: unscoped system writes stop warning. Lose: the signal that would flag a genuine user-path scoping bug | `packages/objectql/src/engine.ts#buildDriverOptions` |
 | 25 | Engine-owned / append-only write guard bypassed | plugin-security | Get: generic writes to `managedBy` engine-owned objects | `packages/plugins/plugin-security/src/system-write-guard.ts#isUserContextWrite`, `#assertEngineOwnedWriteAllowed` |
 | 26 | Identity write guard bypassed (ADR-0092) | plugin-auth | Get: direct writes to identity tables through the generic data path | `packages/plugins/plugin-auth/src/identity-write-guard.ts#isUserContextWrite` |
@@ -138,7 +139,7 @@ that silently does not happen.
 
 ### 3. Sharing (`plugin-sharing`)
 
-The largest single consumer — **17 of the 114 sites**.
+The largest single consumer — **17 of the 115 sites**.
 
 | # | Behaviour when `isSystem` | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|
@@ -281,7 +282,7 @@ Ownership injection, `readonly` bypass and sharing materialisation are
 independent decisions, and a seed loader plausibly wants the first two but not
 the third. The concept is nevertheless **staying as one boolean**:
 
-- **Shipped semantics.** `isSystem` is a published contract with 114 read sites
+- **Shipped semantics.** `isSystem` is a published contract with 115 read sites
   in 19 packages. Splitting it is a breaking contract change across all of them.
   (The ruling was taken when the census read 80 sites in 18 packages; the count
   has grown, which strengthens rather than weakens the argument.)
@@ -355,16 +356,16 @@ still holds equal to the census on every pull request:
 | Appearances of the bare identifier `isSystem` in non-test sources | 813 | — |
 | — parsed as a declaration | 27 | ✅ |
 | — parsed as an object-literal / type key (producers and option objects) | 310 | — |
-| — parsed as a property **read** | 120 | ✅ |
+| — parsed as a property **read** | 121 | ✅ |
 | — parsed in some other syntactic position (a local, a cast, a conditional) | 9 | ✅ |
 | — the remainder: text inside comments and string literals | 358 | — |
 | Of those reads: reads of one of the unrelated metadata fields | 6 | ✅ |
-| Of those reads: reads of `ExecutionContext.isSystem` | **114** | ✅ |
-| — behaviour-bearing (rows 1–61 above) | 111 | ✅ |
+| Of those reads: reads of `ExecutionContext.isSystem` | **115** | ✅ |
+| — behaviour-bearing (rows 1–61 above) | 112 | ✅ |
 | — carry the flag onward only (rows 62–64 above) | 3 | ✅ |
 | Packages containing at least one elevation read | **19** | ✅ |
-| Files containing at least one elevation read | 52 | ✅ |
-| — the distinct symbols those reads live in — what this page anchors | 97 | ✅ |
+| Files containing at least one elevation read | 53 | ✅ |
+| — the distinct symbols those reads live in — what this page anchors | 98 | ✅ |
 | — of those files, the ones holding more than one read in one symbol | 8 | ✅ |
 
 The six rows marked — are a **dated decomposition, not a live claim**: they were
@@ -428,7 +429,7 @@ same resolver, and the same registration shape, that holds `docs/adr/**`.
 Renaming a symbol is now a loud red instead of a silent misdirection.
 
 ⚠️ **The precision that costs, priced here rather than buried.** A symbol anchor
-cannot say WHICH read inside a function it means, and **8** of the **52**
+cannot say WHICH read inside a function it means, and **8** of the **53**
 anchored files hold more than one read inside a single symbol. So the population
 check runs per file at symbol granularity: every file the census finds a read in
 must be anchored, and the set of symbols this page cites into that file must

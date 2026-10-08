@@ -693,3 +693,96 @@ describe('[#21978] the repository lock: a row with a checksum is judged exactly 
         expect(caseGridRow(again)).toBeUndefined();
     });
 });
+
+/**
+ * [#22114] `getMetaItem`'s registry reads, answered empty: this double holds
+ * no artifact, so every item it serves comes from a stored row.
+ */
+function withReadRegistry(h: ReturnType<typeof makeEngine>): ReturnType<typeof makeEngine> {
+    h.engine.registry = {
+        ...h.engine.registry,
+        getItem: () => undefined,
+        getArtifactItem: () => undefined,
+        listItems: () => [],
+        getObject: () => undefined,
+        isPackageDisabled: () => false,
+        applyNavContributions: (app: unknown) => app,
+    };
+    return h;
+}
+
+const READ = { type: 'view', name: 'case_grid', organizationId: ORG } as const;
+
+describe('[#22114] the item read serves the version token the save door accepts', () => {
+    it('active and draft: the read\'s `version` is the receipt\'s token, keyed, never the stored hash — and it pins the next save', async () => {
+        const h = withReadRegistry(makeEngine());
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        const active: any = await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
+        const draft: any = await p.saveMetaItem({ ...ref, item: viewBody('staged'), mode: 'draft' } as any);
+
+        const readActive: any = await p.getMetaItem({ ...READ });
+        const readDraft: any = await p.getMetaItem({ ...READ, state: 'draft' });
+        expect(readActive.version).toBe(active.version);
+        expect(readDraft.version).toBe(draft.version);
+        expect(readActive.version).toMatch(KEYED);
+        expect(readActive.version).toBe(await keyedDigest(activeHash(h)));
+        expectNoStoredHash(JSON.stringify(readActive), storedHashes(h));
+
+        const next: any = await p.saveMetaItem({ ...ref, item: viewBody('v2'), parentVersion: readActive.version } as any);
+        expect(next.success).toBe(true);
+        expect(((await p.getMetaItem({ ...READ })) as any).version).toBe(next.version);
+    });
+
+    it('`null` where the save\'s address holds no row — an organization falling back to the env-wide row', async () => {
+        const h = withReadRegistry(makeEngine());
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        // Env-wide row only; the org-scoped read serves it (ADR-0005 fallback),
+        // while an org-scoped save writes the org partition, where nothing is.
+        await p.saveMetaItem({ type: 'view', name: 'case_grid', item: viewBody('env-wide'), actor: 'admin' } as any);
+
+        const read: any = await p.getMetaItem({ ...READ });
+        expect(read.item?.label).toBe('env-wide');
+        expect(read.version).toBeNull();
+        // `null` is the create pin: honoured, and then refused once the row exists.
+        const created: any = await p.saveMetaItem({ ...ref, item: viewBody('org'), parentVersion: null } as any);
+        const refused = await rejection(() =>
+            p.saveMetaItem({ ...ref, item: viewBody('org again'), parentVersion: null } as any));
+        expect(refused.code).toBe('METADATA_CONFLICT');
+        expect(refused.status).toBe(409);
+        expect(refused.currentVersion).toBe(created.version);
+    });
+
+    it('a `previewDrafts` read publishes no `version` — it serves two lifecycles', async () => {
+        const h = withReadRegistry(makeEngine());
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
+        const withoutDraft: any = await p.getMetaItem({ ...READ, previewDrafts: true });
+        expect(withoutDraft).not.toHaveProperty('version');
+        await p.saveMetaItem({ ...ref, item: viewBody('staged'), mode: 'draft' } as any);
+        const withDraft: any = await p.getMetaItem({ ...READ, previewDrafts: true });
+        expect(withDraft.item?.label).toBe('staged');
+        expect(withDraft).not.toHaveProperty('version');
+    });
+
+    it('the conflict refusal states `currentVersion`: the keyed head the next read serves, or `null` with no row', async () => {
+        const h = withReadRegistry(makeEngine());
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        const v1: any = await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
+        const v2: any = await p.saveMetaItem({ ...ref, item: viewBody('v2'), parentVersion: v1.version } as any);
+
+        const stale = await rejection(() =>
+            p.saveMetaItem({ ...ref, item: viewBody('lost'), parentVersion: v1.version } as any));
+        expect(stale.code).toBe('METADATA_CONFLICT');
+        expect(stale.status).toBe(409);
+        expect(stale.currentVersion).toBe(v2.version);
+        expect(((await p.getMetaItem({ ...READ })) as any).version).toBe(stale.currentVersion);
+        expect(stale.message).toContain(`(current is ${v2.version})`);
+
+        // A draft pin with no draft row: the head is `null`, stated as such.
+        const noDraft = await rejection(() =>
+            p.saveMetaItem({ ...ref, item: viewBody('d'), mode: 'draft', parentVersion: v2.version } as any));
+        expect(noDraft.code).toBe('METADATA_CONFLICT');
+        expect(noDraft.status).toBe(409);
+        expect(noDraft).toHaveProperty('currentVersion', null);
+    });
+});

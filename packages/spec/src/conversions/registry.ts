@@ -6986,6 +6986,162 @@ const datasetCountMeasureEmptyFieldRemoved: MetadataConversion = {
 };
 
 /**
+ * A declared index's bare `unique: true` → `unique: 'global'` (protocol 18,
+ * #5082 — ADR-0120 D2, the conversion half of D7's protocol-18 wave).
+ *
+ * ADR-0120 D1 made uniqueness scope an explicit vocabulary on both surfaces:
+ * `'global'` (one holder across the whole installation — materialized over
+ * exactly the listed `fields`) and `'organization'` (one holder per
+ * organization — the driver prepends the NULL-safe organization key part at
+ * registration). On a declared index, bare `true` was the one spelling whose
+ * scope was encoded by POSITION: it set neither driver flag and materialized
+ * verbatim, i.e. it meant `'global'`, while reading like "unique per
+ * organization" to anyone who knew the field-level meaning (the #4986 trap).
+ * 17.x warned (lint `unique/unscoped-declared-index`); protocol 18 refuses it
+ * at the parse (`IndexSchema.unique`).
+ *
+ * **Lossless by construction — `'global'` IS what bare `true` built.** Every
+ * driver resolves the two identically: `driver-sql`'s `normalizeDeclaredIndex`
+ * takes both verbatim and names the index from the same boolean
+ * (`isUniqueScopeDeclared`), the memory driver's declared-index constraint and
+ * the Mongo/Turso index sync read the same truthiness. So the physical index is
+ * byte-identical and schema drift sees nothing (ADR-0120 matrix invariant 2:
+ * the S4/S5 corpus — the nine engine-owned idempotency/dedup keys among them —
+ * keeps its expected-index output byte for byte; `driver-sql`'s
+ * `sql-driver-unique-tenancy.test.ts` replays this conversion over that corpus
+ * and asserts it).
+ *
+ * **Field-level `unique: true` is NOT converted** (ADR-0120 D1): there it has
+ * one documented meaning — per organization — and stays valid indefinitely.
+ * Only `indexes[]` entries are walked, on `objects[]` and on
+ * `objectExtensions[]` (both embed `IndexSchema`). `false`, `'global'` and
+ * `'organization'` pass through untouched, so the transform is idempotent:
+ * a second pass finds no bare `true` left.
+ *
+ * **Retired from the load path** — the authoring funnel does NOT replay it, so
+ * a live author meets `IndexSchema`'s refusal and its prescription (state
+ * `'global'` or `'organization'`) instead of being converted silently: the
+ * whole point of D1 is that the author STATES the scope. Data at rest has no
+ * author to teach, so the stored-row seam (`applyConversionsToStoredItem`), the
+ * artifact door inside its declared-floor window, and `os migrate meta --from
+ * 17` all replay it — a `sys_metadata` row or a built artifact carrying the old
+ * spelling converts to the index it always built, and never flags
+ * `metadata_spec_invalid`.
+ */
+const declaredIndexUniqueScope: MetadataConversion = {
+  id: 'declared-index-unique-scope',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'object.indexes[].unique / objectExtensions[].indexes[].unique',
+  summary:
+    "declared-index bare `unique: true` → `unique: 'global'` (ADR-0120 D2 — the scope is "
+    + 'stated, never positional; `\'global\'` is exactly the index bare `true` built, so the '
+    + 'physical index is byte-identical; field-level `unique: true` is not converted)',
+  apply(stack, emit) {
+    // `indexes` is an ARRAY one level down, so drill in and copy-on-write: an
+    // owner whose indexes carry no bare `true` keeps its identity (pattern of
+    // `object-index-type-partial-removed`).
+    const respell = (owner: Dict, path: string): Dict => {
+      const indexes = owner.indexes;
+      if (!Array.isArray(indexes)) return owner;
+      let changed = false;
+      const next = indexes.map((idx, i) => {
+        if (!isDict(idx) || idx.unique !== true) return idx;
+        changed = true;
+        emit({ from: 'true', to: 'global', path: `${path}.indexes[${i}].unique` });
+        return { ...idx, unique: 'global' };
+      });
+      return changed ? { ...owner, indexes: next } : owner;
+    };
+    let out = mapCollection(stack, 'objects', respell);
+    out = mapCollection(out, 'objectExtensions', respell);
+    return out;
+  },
+  fixture: {
+    before: {
+      objects: [
+        {
+          // S4 — a platform-wide composite dedup key.
+          name: 'http_delivery',
+          label: 'HTTP Delivery',
+          indexes: [
+            { fields: ['source', 'dedup_key'], unique: true },
+            // A non-unique index passes through untouched.
+            { fields: ['status'] },
+          ],
+        },
+        {
+          // S5 — an engine idempotency key written by sudo (organization NULL).
+          name: 'sys_notification',
+          label: 'Notification',
+          // Field-level bare `true` is per-organization and stays valid (D1).
+          fields: { recipient_key: { type: 'text', unique: true } },
+          indexes: [
+            { name: 'idx_notification_dedup', fields: ['dedup_key'], unique: true },
+            { fields: ['recipient_key', 'read'], unique: false },
+          ],
+        },
+        {
+          // Both stated scopes pass through untouched.
+          name: 'crm_case',
+          label: 'Case',
+          indexes: [
+            { fields: ['department', 'code'], unique: 'organization' },
+            { fields: ['external_ref'], unique: 'global' },
+          ],
+        },
+      ],
+      objectExtensions: [
+        {
+          extend: 'crm_case',
+          indexes: [{ fields: ['legacy_ref'], unique: true }],
+        },
+      ],
+    },
+    after: {
+      objects: [
+        {
+          name: 'http_delivery',
+          label: 'HTTP Delivery',
+          indexes: [
+            { fields: ['source', 'dedup_key'], unique: 'global' },
+            { fields: ['status'] },
+          ],
+        },
+        {
+          name: 'sys_notification',
+          label: 'Notification',
+          fields: { recipient_key: { type: 'text', unique: true } },
+          indexes: [
+            { name: 'idx_notification_dedup', fields: ['dedup_key'], unique: 'global' },
+            { fields: ['recipient_key', 'read'], unique: false },
+          ],
+        },
+        {
+          name: 'crm_case',
+          label: 'Case',
+          indexes: [
+            { fields: ['department', 'code'], unique: 'organization' },
+            { fields: ['external_ref'], unique: 'global' },
+          ],
+        },
+      ],
+      objectExtensions: [
+        {
+          extend: 'crm_case',
+          indexes: [{ fields: ['legacy_ref'], unique: 'global' }],
+        },
+      ],
+    },
+    // Three notices: one per declared index carrying bare `true` (two on
+    // objects, one on the extension). The field-level `true`, the `false`, the
+    // two stated scopes and the non-unique index emit none.
+    expectedNotices: 3,
+  },
+};
+
+/**
  * `element:filter` — the whole element retired (protocol 18, #9220, ADR-0049
  * enforce-or-remove at ELEMENT grain).
  *
@@ -8753,6 +8909,112 @@ const recordHighlightsFieldIconRemoved: MetadataConversion = {
       ],
     },
     // Two notices: the region-level object entry and the slotted one.
+    expectedNotices: 2,
+  },
+};
+
+/**
+ * A package manifest's `permissions` as a flat list of permission strings →
+ * dropped (protocol 18 — ADR-0049 enforce-or-remove, ruled option A: retire
+ * the legacy arm so the structured ADR-0025 §3.2 block is the only one).
+ *
+ * `ManifestPermissionsSchema` was a union of that list and the structured
+ * `{ services, hooks, network, fs }` block. Nothing in this repository ever
+ * acted on the list: the loader registers the CONSENTED grant set
+ * (`grantedPermissions` on the environment artifact) with the permission
+ * enforcer, never the manifest's request, and the only code that met a list
+ * on a manifest was two drop reports saying it had been skipped. So the delete
+ * changes no load, no grant and no refusal.
+ *
+ * ## Why a strip and not a rewrite
+ *
+ * A capability string (`system.user.read`) names no platform service, hook,
+ * network host or filesystem path, and no table maps one onto the four lists —
+ * inventing one would write grants nobody asked for into a consent request. So
+ * the list is removed whole and the notice carries the strings it dropped
+ * (`from`), which is what the author translates by hand; the schema's own
+ * answer to a list says the same.
+ *
+ * ## Reach
+ *
+ * A manifest sits in two places a converted definition carries it: the stack's
+ * own `manifest`, and each `packages[].manifest` of a multi-package artifact
+ * (ADR-0130 D4). Only a list whose every member is a string is this entry's
+ * surface — that is exactly what the retired arm accepted, so an array of
+ * objects (a permission-set collection written one stage too early) is left as
+ * stored for the schema to refuse, never deleted. `devPlugins[]` is not walked:
+ * its entries are assembly instructions that may be live plugin objects, which
+ * a copy-on-write spread would strip of their prototype.
+ *
+ * The top-level `permissions` key is the ADR-0090 permission-SET collection
+ * and is never touched.
+ *
+ * ## Why `retiredFromLoadPath`
+ *
+ * The schema refuses the list with its prescription, so a live author is
+ * taught the structured block rather than silently rewritten; the entry
+ * exists so a stored artifact built while the list was legal replays clean at
+ * the artifact door, and so `os migrate meta --from 17` lists the mechanical
+ * edits for author sources. Deletion is idempotent by construction: a manifest
+ * without the key is returned as is.
+ */
+const manifestPermissionsStringListRemoved: MetadataConversion = {
+  id: 'manifest-permissions-string-list-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'manifest.permissions',
+  summary:
+    "manifest 'permissions' as a flat list of permission strings removed (ADR-0049 — no loader ever read "
+    + 'the list, so dropping it changes no grant; the structured { services, hooks, network, fs } block is '
+    + 'the only form, and a permission string has no mechanical mapping onto it)',
+  apply(stack, emit) {
+    const stripList = (manifest: unknown, path: string): unknown => {
+      if (!isDict(manifest)) return manifest;
+      const list = manifest.permissions;
+      if (!Array.isArray(list) || !list.every((entry) => typeof entry === 'string')) return manifest;
+      const next: Dict = { ...manifest };
+      delete next.permissions;
+      emit({ from: `permissions: ${JSON.stringify(list)}`, to: '(removed)', path: `${path}.permissions` });
+      return next;
+    };
+
+    let next = stack;
+    const manifest = stripList(stack.manifest, 'manifest');
+    if (manifest !== stack.manifest) next = { ...next, manifest };
+
+    const packages = stack.packages;
+    if (Array.isArray(packages)) {
+      let touched = false;
+      const nextPackages = packages.map((entry, i) => {
+        if (!isDict(entry)) return entry;
+        const converted = stripList(entry.manifest, `packages[${i}].manifest`);
+        if (converted === entry.manifest) return entry;
+        touched = true;
+        return { ...entry, manifest: converted };
+      });
+      if (touched) next = { ...next, packages: nextPackages };
+    }
+    return next;
+  },
+  fixture: {
+    before: {
+      manifest: { id: 'com.acme.reports', permissions: ['system.user.read', 'system.data.write'] },
+      packages: [
+        { manifest: { id: 'com.acme.reports.export', permissions: ['system.object.read'] } },
+        // The structured block is the canonical form and rides through
+        // untouched — the strip dispatches on a list, never on the key.
+        { manifest: { id: 'com.acme.reports.share', permissions: { services: ['object'] } } },
+      ],
+    },
+    after: {
+      manifest: { id: 'com.acme.reports' },
+      packages: [
+        { manifest: { id: 'com.acme.reports.export' } },
+        { manifest: { id: 'com.acme.reports.share', permissions: { services: ['object'] } } },
+      ],
+    },
+    // One per stripped list — the stack's own manifest and one package entry.
     expectedNotices: 2,
   },
 };
@@ -14779,6 +15041,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: dashboardRefreshIntervalToRefreshIntervalSeconds, order: 24 },
   { conversion: dashboardWidgetChartConfigStructureRemoved, order: 33 },
   { conversion: datasetCountMeasureEmptyFieldRemoved, order: 54 },
+  { conversion: declaredIndexUniqueScope, order: 61 },
   { conversion: elementFilterRemoved, order: 4 },
   { conversion: elementFormRemoved, order: 5 },
   { conversion: elementInputTargetVariableRemoved, order: 3 },
@@ -14794,6 +15057,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: hookTimeoutToTimeoutMs, order: 21 },
   { conversion: jobTimeoutToTimeoutMs, order: 22 },
   { conversion: listViewSortStringClauseToArray, order: 30 },
+  { conversion: manifestPermissionsStringListRemoved, order: 61 },
   { conversion: mappingLookupParamsRemoved, order: 11 },
   { conversion: memoryPersistenceAutoSaveIntervalToMs, order: 27 },
   { conversion: metricFiltersRemoved, order: 7 },

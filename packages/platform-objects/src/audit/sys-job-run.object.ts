@@ -22,6 +22,16 @@ export const SysJobRun = ObjectSchema.create({
   icon: 'play',
   isSystem: true,
   managedBy: 'append-only',
+  // [ADR-0131 D7] Deployment-level state: NO tenant column. The sole writer,
+  // `DbJobAdapter` (`startRun` / `finishRun`), writes under a system context
+  // carrying no organization and no row names one — not even for a job that
+  // declares the organization it runs as, whose stamp reaches the job's own
+  // data writes, never this ledger. Who may read is object permission (D7):
+  // the platform-only capability below, since without the wall a walled
+  // deployment's `organization_admin` would otherwise read every
+  // organization's run errors.
+  systemFields: { tenant: false },
+  requiredPermissions: ['manage_platform_settings'],
   // ADR-0057: run history is append-only telemetry. The platform
   // LifecycleService is the ONE sweeper for this window (the plugin-local
   // JobRunRetention it replaced kept the same 30d default).

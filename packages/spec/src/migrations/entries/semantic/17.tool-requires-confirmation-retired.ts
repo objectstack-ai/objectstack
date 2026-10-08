@@ -65,4 +65,5 @@ export const entry: SemanticMigration = {
     + 'Deleting it without that decision leaves exactly the state the retirement exists to '
     + 'end: a destructive tool nobody is approving, now without even the false flag to show '
     + 'that somebody once meant to.',
+  relevantWhen: { kind: 'stack-declares', keys: ['tools'] },
 };

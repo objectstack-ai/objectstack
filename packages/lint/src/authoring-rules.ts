@@ -309,9 +309,10 @@ export interface AuthoringRuleContext {
    *
    * [#22019] One other rule reads it, on that argument: `validateStackExpressions`
    * is one entry over several PASSES, and an `object` write is admitted for its
-   * field-formula pass alone (`runStackExpressionPasses`, `StackExpressionOptions`). The
-   * entry-level `runtimeTypes` can say that an object write reaches the rule; it
-   * cannot say which of the rule's passes judge that write.
+   * field-formula pass and (#22032) its validation-rule and field-rule-slot
+   * passes alone (`runStackExpressionPasses`, `StackExpressionOptions`). The entry-level
+   * `runtimeTypes` can say that an object write reaches the rule; it cannot say
+   * which of the rule's passes judge that write.
    */
   runtimeWriteType?: string;
   /**
@@ -515,6 +516,24 @@ const RUNTIME_OBJECT_ADVISORY_VOLUME =
   'the gating object rules alone; crossing an advisory one is a separate UX decision.';
 
 /**
+ * A gating rule whose whole finding the runtime write door already refuses ONE
+ * STEP EARLIER, in its own parse (#5082).
+ *
+ * `saveMetaItem` validates the body against the type's schema
+ * (`getMetadataTypeSchema` — `ObjectSchema` for an `object` write) and throws
+ * `INVALID_METADATA` / 422 before the authoring gate is reached. Where that
+ * schema refuses exactly what the rule reports — with the same prescription —
+ * a runtime crossing could never fire: every body it would judge has already
+ * been refused, so the entry would be wiring that reads as coverage and runs
+ * nothing.
+ */
+const RUNTIME_REFUSED_BY_THE_DOOR_PARSE =
+  'Refused one step earlier at this surface: the runtime write door parses an object body against ' +
+  'ObjectSchema before the authoring gate runs, and IndexSchema.unique refuses bare `true` there ' +
+  'with the same prescription (INVALID_METADATA / 422), so a crossing could never fire. The rule ' +
+  'gates `os lint`, which never parses.';
+
+/**
  * `ExprIssue` is the one rule finding that carries no rule id of its own — it
  * predates the `{ rule, path, hint }` shape every other rule settled on. Given
  * one here so `os lint --json` and the docs can name it like any other.
@@ -588,9 +607,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // NARROW by construction, not by snapshot shape: `ctx.runtimeWriteType`
     // reaches `runStackExpressionPasses` — the body `validateStackExpressions`
     // runs, whose public signature is unchanged — which on an object write runs
-    // the field-formula pass and fences every other object-borne expression
+    // the passes admitted there and fences every other object-borne expression
     // pass off by name (`StackExpressionOptions.runtimeWriteType`) — each of
-    // those is a crossing of its own, not a rider on this one.
+    // those is a crossing of its own, not a rider on another.
     //
     // MEASURED over the stored corpus at the door's own snapshot shape before
     // crossing: every formula field the repository ships — 29 fields on 28
@@ -598,6 +617,35 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // app-multi-package none; platform `display_title` formulas: 22 on 22) →
     // 0 differential errors and 0 advisories, against 1 refusal for the card's
     // own `sqrt(record.amount)` body under the same harness.
+    //
+    // [#22032, pass 1] The validation-rule pass joins the object door: every
+    // `validations[]` `condition` and `when`, with the null-guard gate over
+    // the nested `then` / `otherwise` branches — the same sentence of
+    // `formulas.mdx`, and the same gap (`sqrt(record.amount) > 1` and a bare
+    // `amount > 1` saved with a 200). No entry-level change: `object` was
+    // already declared above. MEASURED first, at both the raw and the parsed
+    // shape: every validation rule the repository ships — 21 rules carrying 13
+    // predicates on 10 objects (examples: app-crm 3 on 2, app-showcase 6 on 4,
+    // app-todo 2 on 1; platform: plugin-security 2 on 2, and one
+    // predicate-less rule on `sys_user`) → 0 build errors and 0 warnings for
+    // the pass, and 0 door errors and 0 advisories at the door's own snapshot
+    // shape, against 2 refusals at each for the card's two bodies in the same
+    // harness.
+    //
+    // [#22032, pass 2] The field-rule-slot pass joins the object door: every
+    // field's `requiredWhen` / `readonlyWhen` / `conditionalRequired` /
+    // `visibleWhen`, with the `parent` gate, the `requiredWhen` null guard and
+    // the reference-traversal refusal — the same sentence of `formulas.mdx`,
+    // and the gap the card measured (a bare `requiredWhen: 'amount > 1'` saved
+    // with a 200). The per-option `visibleWhen` stays fenced. No entry-level
+    // change. MEASURED first, at both the raw and the parsed shape: every
+    // field-rule slot the repository ships — 9 slots on 8 fields of 3 objects
+    // (examples: app-showcase 8 slots on 2 objects, three of them
+    // `parent`-scoped; platform: plugin-security 1 on `sys_permission_set`),
+    // over 118 objects → 0 build
+    // errors and 0 warnings for the pass, and 0 door errors and 0 advisories
+    // at the door's own snapshot shape, against a refusal at each for the
+    // card's body in the same harness.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object'],
     run: (stack, ctx) =>
@@ -1751,20 +1799,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   },
   // ADR-0120 D5a — a declared index with bare `unique: true` states no scope
   // at all (`unique/unscoped-declared-index` — the #4986 trap). Fires on the
-  // spelling alone, no tenancy inference; 17.x warns, protocol 18 rejects the
-  // spelling (#5082).
+  // spelling alone, no tenancy inference. 17.x warned; protocol 18 refuses the
+  // spelling (#5082, ADR-0120 D7), so the rule is GATING and runs on all three
+  // commands — `lintDataModel` stopped calling it in the same change, so
+  // `os lint` reports it here, once. Under `os validate` / `os build` the
+  // parse (`IndexSchema.unique`) refuses the spelling first with the same
+  // prescription; under `os lint`, which never parses, this entry is the
+  // refusal.
   {
     name: 'lintUnscopedDeclaredIndexes',
-    tier: 'advisory',
+    tier: 'gating',
     input: 'parsed',
-    commands: ['validate', 'build'],
+    commands: ALL,
     source: 'packages/lint/src/data-model-rules.ts',
     surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
-    scopeReason:
-      '`os lint` already reports this rule through `lintDataModel`, which calls it directly ahead of ' +
-      'R10 in its best-practice sweep — registering it for `lint` as well would report every finding ' +
-      'twice. This is coverage recorded, not coverage missing: all three commands report the rule.',
+    surfaceReason: RUNTIME_REFUSED_BY_THE_DOOR_PARSE,
     run: (stack) =>
       lintUnscopedDeclaredIndexes(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
         severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,

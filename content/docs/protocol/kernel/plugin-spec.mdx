@@ -631,9 +631,11 @@ consent request; what the runtime enforces is the *granted* set.
 
 ### Declared Permissions
 
-`ManifestSchema.permissions` accepts either the legacy flat `string[]` or the structured
-`PluginPermissionsSchema` block — four keys, and no `system` list
-(`packages/spec/src/kernel/manifest.zod.ts`):
+`ManifestSchema.permissions` takes the structured `PluginPermissionsSchema` block — four
+keys, and no `system` list (`packages/spec/src/kernel/manifest.zod.ts`). Its legacy flat
+`string[]` form was retired in `@objectstack/spec` 17: nothing ever read the list, a list
+is refused at parse with the migration prescription, and `os migrate meta --from 17` lists
+where to delete one — translating each string into the four lists is done by hand.
 
 ```typescript
 permissions: {

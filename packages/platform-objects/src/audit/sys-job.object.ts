@@ -22,6 +22,19 @@ export const SysJob = ObjectSchema.create({
   icon: 'clock',
   isSystem: true,
   managedBy: 'engine-owned',
+  // [ADR-0131 D7] Deployment-level state: NO tenant column. The writer
+  // decides membership, not the name — the sole writer, `DbJobAdapter`, writes
+  // every row under a system context carrying no organization, and no row it
+  // writes names one, so the injected column only ever held NULL.
+  // `systemFields.tenant: false` is the opt-out that removes the INJECTED
+  // column (see `sys_metadata_activation` for why not `tenancy.enabled`).
+  //
+  // With no column there is no tenant wall either, so who may read is decided
+  // by object permission (D7): the platform-only capability below. Without it,
+  // a walled deployment's `organization_admin` — whose `'*'` grant carries the
+  // superuser bits — would read every organization's job errors here.
+  systemFields: { tenant: false },
+  requiredPermissions: ['manage_platform_settings'],
   description: 'Catalogue of registered background jobs',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)

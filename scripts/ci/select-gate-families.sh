@@ -52,26 +52,45 @@
 # the self-test, which reads lint.yml and refuses any other spelling.
 #
 #   pm_dispatch_gates      `pnpm check:pm-dispatch-gates`, which spawns
-#                          `scripts/pm/dispatch-gates.mjs --self-test`. Its
-#                          self-test discovers every workflow file, resolves
-#                          every check:* script through the root and package
-#                          `package.json`s, reads each gate's source for its
-#                          watch hints (so ALL of scripts/** and every
-#                          packages/*/scripts/**), and reads .claude/**,
-#                          skills/** (the frame-sync COPIES table),
-#                          `AGENTS.md`, `CLAUDE.md`. Those are the tool's OWN
-#                          inputs and they are this family's read-set.
+#                          `scripts/pm/dispatch-gates.mjs --self-test`. This
+#                          read-set is MEASURED, not inferred (#22076): one
+#                          full battery run on 3d9188502e under a read hook on
+#                          every fs open and every child process, its node
+#                          children included. Outside the whole-tree censuses
+#                          named below, the files it opens are: every workflow
+#                          file and the composite actions they use; the source
+#                          of every gate its discovery resolves (a CODE file
+#                          under scripts/ or a workspace package's scripts/ --
+#                          `resolveCheckToFiles` admits no other extension)
+#                          and every scripts/ module those import; the root
+#                          `package.json` and the manifest of each package a
+#                          `--filter` row names; scripts/pm/**; and the
+#                          pm-dispatch rulebook, .claude/skills/pm-dispatch/**.
+#                          Those are the tool's OWN inputs and they are this
+#                          family's read-set.
+#                          It opens NO data or prose file beyond them: not a
+#                          `.json`, `.md` or `.txt` under scripts/ outside
+#                          scripts/pm/, and nothing of skills/**, `AGENTS.md`,
+#                          `CLAUDE.md` or the `.claude/**` prose and JSON
+#                          outside the rulebook. A few of those it only tests
+#                          for EXISTENCE (the frame-sync COPIES table names
+#                          skills/** files, the governed read floor names
+#                          .claude/agents/os-dev.md), and a modification
+#                          cannot move an existence test.
 #                          ⛔ The battery reads MORE than that -- the CONTENT
-#                          of every JS/TS and shell (`.sh`) file in the tree
-#                          (the compound-anchor census of
-#                          `function ...SelfTest...(` declarations, the
-#                          exposed-scratch-dir sweep of every
-#                          mkdtempSync/mkdirSync caller and the nested
-#                          .gitignore files it consults) and the tracked NAME
-#                          set (hint reachability, test-file residue), which is
-#                          why an ADDED path anywhere used to run it. Those
-#                          reads are real and they are DELIBERATELY off the PR
-#                          path: see "The self-test families" below.
+#                          of every JS/TS file in the tree twice (the
+#                          compound-anchor census of `function ...SelfTest...(`
+#                          declarations, and the exposed-scratch-dir sweep of
+#                          every mkdtempSync/mkdirSync caller with the
+#                          .gitignore files `git check-ignore` consults), of
+#                          every non-test TypeScript file (the error-code
+#                          literal census), of every tracked `.sh` file (the
+#                          shell-mask census), of a handful of named product
+#                          files it holds as live specimens, and the tracked
+#                          NAME set (hint reachability, test-file residue),
+#                          which is why an ADDED path anywhere used to run it.
+#                          Those reads are real and they are DELIBERATELY off
+#                          the PR path: see "The self-test families" below.
 #   query_options_erasure  `pnpm check:query-options-erasure`. Lints
 #                          packages/**/*.{ts,tsx,mts,cts} under
 #                          `eslint.config.mjs`, reads its baseline
@@ -165,6 +184,48 @@
 # block owns that argument. Widening this set further -- moving another step
 # behind the selector, or making one of these read-sets smaller -- is again a
 # maintainer call, taken here, under this script's self-test.
+#
+# ## pm_dispatch_gates keys on what the battery OPENS (#22076)
+#
+# That call was taken once more, for this family alone: the maintainer asked
+# for the CI cost tasks, verbatim 「CI 优化按照你的建议创建任务」, and triage
+# ruled the direction on the card -- narrow the read-set to the inputs that can
+# change the battery's verdicts, keep the backstop, say what coverage moves.
+# The measured read-set above found two classes the arm still ran on only
+# because their DIRECTORY was in the old read-set, while the battery opens no
+# file in them:
+#
+#   - a data or prose file under scripts/ outside scripts/pm/ (`.json`, `.md`,
+#     `.txt`: a ratchet baseline, a pinned ledger, a fixture log), UNLESS some
+#     file spells a relative specifier ending in its name. An import a gate
+#     source makes is the one edge by which the discovery could open such a
+#     file (it follows `./` and `../` specifiers into scripts/), so a name no
+#     specifier spells is a file it cannot reach;
+#   - agent prose and JSON outside the pm-dispatch rulebook: skills/**,
+#     `AGENTS.md`, `CLAUDE.md`, .claude/agents/**, the .claude/ settings and
+#     the other skills under .claude/skills/.
+#
+# For a MODIFICATION that is the ratchet-grade claim, not #19498's weaker one:
+# no case reads these files' bytes or anything computed from them, so no case
+# can change verdict. What moves from PR time to push-on-main and the hourly
+# run is the NAME half -- an ADDED file in these two classes, which the
+# tracked-name sweep sees and which, like an added file in every other class
+# since #19498, is judged here by its class and not its status.
+#
+# A third class takes #19498's weaker claim, and only that one: a TEST file
+# under a workspace package's scripts/ that no package manifest and nothing
+# under .github/ names. The discovery opens a package's scripts/ file only as
+# a gate source, and a gate source is a file a check:* command or a workflow
+# step spells; such a test is spelled by neither, so the one battery reader
+# left is the pair of whole-tree censuses -- which read it exactly as they
+# read a test under src/, a class that has skipped this family since #19498.
+# That census coverage is what moves for it.
+#
+# A deletion or a rename still runs every family. Everything else the arm ran
+# on, it still runs on: scripts/pm/**, every code file under the root
+# scripts/, every non-test file under a package's scripts/, the rulebook,
+# every `.claude/**` code file (the hooks, which the shell-mask census reads),
+# the workflow tree and every package manifest.
 #
 # ## migration_registry ADDS a gate to the PR path; it scopes nothing away
 #
@@ -381,6 +442,43 @@ is_masked_source() {
   return 1
 }
 
+# named_by_relative_specifier <path>  -- exit 0 when some file in the HEAD
+# tree spells a quoted relative specifier (`./...` or `../...`) whose last
+# segment is this path's basename, and ALSO when git grep cannot answer:
+# fail-open. It exists for one edge. The dispatch derivation opens a file that
+# is not a gate source only by following an import out of one, and it follows
+# only a quoted specifier that starts `./` or `../`, so a basename no such
+# specifier spells is a file the derivation cannot reach. The search is a
+# superset of that edge on purpose -- the whole tree, comments unmasked, a
+# reference that is no import at all -- and every extra hit answers "named",
+# which runs the family.
+named_by_relative_specifier() {
+  local base pattern rc
+  base=${1##*/}
+  pattern=$(printf '%s' "$base" | sed -e 's/[][\.*^$+?(){}|]/\\&/g')
+  rc=0
+  git grep -q -E -e "['\"]\\.\\.?/([^'\"]*/)?${pattern}['\"]" HEAD -- > /dev/null 2>&1 || rc=$?
+  if [ "$rc" -eq 1 ]; then return 1; fi
+  return 0
+}
+
+# named_in_gate_wiring <path>  -- exit 0 when this path's basename is spelled
+# anywhere in a package manifest or anywhere under .github/ in the HEAD tree,
+# and ALSO when git grep cannot answer: fail-open. A file under a workspace
+# package's scripts/ is a gate source only when a check:* command in a
+# manifest or a workflow step names it (`resolveCheckToFiles` reads the
+# command text; the discovery follows no import into a package's scripts/),
+# so a basename spelled in neither place names no gate source. A comment, a
+# lookalike name, a step that is no gate: every extra hit answers "named".
+named_in_gate_wiring() {
+  local base rc
+  base=${1##*/}
+  rc=0
+  git grep -q -F -e "$base" HEAD -- '*package.json' '.github/' > /dev/null 2>&1 || rc=$?
+  if [ "$rc" -eq 1 ]; then return 1; fi
+  return 0
+}
+
 # reads_gate_tree <path> <class>  -- exit 0 when this change is inside the
 # read-set the dispatch derivation shares with the gates built on it: the
 # workflow tree it discovers (.github/**, workflows and composite actions),
@@ -413,17 +511,52 @@ family_reads() {
   case "$class" in unknown|root-config) return 0 ;; esac
   case "$id" in
     pm_dispatch_gates)
-      # NARROWED to the tool's own inputs (#19498). What it keeps: the
-      # derivation's own read-set above, plus the agent configuration the
-      # battery's live cases read (.claude/**, skills/**, AGENTS.md,
-      # CLAUDE.md).
-      # ⛔ What it gives up, on the ruling this script's header quotes: the
+      # NARROWED to the tool's own inputs (#19498), and those to the files the
+      # battery OPENS (#22076). What it keeps: the derivation's own read-set
+      # above, scripts/pm/** whole, and the pm-dispatch rulebook its live
+      # cases read.
+      # ⛔ What it gives up, on the rulings this script's header quotes: the
       # whole-tree censuses -- every masked source and every `.sh` file read
       # for the compound-anchor sweep, the nested .gitignore files the
       # exposed-scratch-dir sweep consults, and the tracked NAME sweep that
       # made an ADDED path anywhere run it. Those reads are real; they run on
       # push-on-main and on the hourly full run, and not on a PR.
-      case "$class" in agent-config) return 0 ;; esac
+      case "$path" in
+        scripts/pm/*|.claude/skills/pm-dispatch/*) return 0 ;;
+      esac
+      case "$class" in
+        agent-config)
+          # Prose and JSON the battery never opens. A `.claude/**` file of any
+          # other kind -- a hook's shell, a workflow script -- still runs it.
+          case "$path" in
+            *.md|*.json) return 1 ;;
+          esac
+          return 0
+          ;;
+        scripts)
+          # Data and prose under scripts/: no gate resolves to one, and no
+          # import reaches one unless a relative specifier spells its name. An
+          # extension not listed here runs it, whatever it is.
+          case "$path" in
+            *.json|*.md|*.txt)
+              if named_by_relative_specifier "$path"; then return 0; fi
+              return 1
+              ;;
+          esac
+          ;;
+        workspace)
+          # A test under a package's scripts/ is product test code to this
+          # battery -- the two whole-tree censuses read it as they read every
+          # source file -- unless gate wiring names it. A package manifest and
+          # every other file under a scripts/ keep running it below.
+          case "$path" in
+            */scripts/*.test.ts|*/scripts/*.test.tsx|*/scripts/*.test.mts|*/scripts/*.test.cts|*/scripts/*.test.js|*/scripts/*.test.mjs|*/scripts/*.test.cjs)
+              if named_in_gate_wiring "$path"; then return 0; fi
+              return 1
+              ;;
+          esac
+          ;;
+      esac
       if reads_gate_tree "$path" "$class"; then return 0; fi
       return 1
       ;;

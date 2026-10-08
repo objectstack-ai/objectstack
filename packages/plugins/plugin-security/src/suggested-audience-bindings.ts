@@ -232,8 +232,11 @@ function suggestionKey(packageId: string, setName: string, anchor: string): stri
 
 /**
  * One installed package whose `manifest.permissions` this reader could not read
- * as permission sets, and which arm of `ManifestPermissionsSchema` it turned
- * out to be carrying.
+ * as permission sets, and which ADR-0025 form it turned out to be carrying:
+ * the structured block `ManifestPermissionsSchema` declares, or the flat
+ * string list that schema RETIRED (`adr-0025-legacy-strings`) — refused at
+ * parse since, but still able to sit on a registry row installed from a
+ * bundle that never passed that parse.
  *
  * `entries` counts the ARRAY members that were dropped, and is `0` for the
  * structured arm, which is one object dropped whole.
@@ -276,8 +279,8 @@ function classifyManifestPermissions(
     // An object, so `Array.isArray` is false and the whole value is dropped.
     return typeof permissions === 'object' ? { arm: 'adr-0025-structured', entries: 0 } : null;
   }
-  // The legacy flat arm is `string[]`; a permission set is an object with a
-  // `name`. Count what `consider` refuses on SHAPE — never what it refuses on
+  // The retired legacy flat list is `string[]`; a permission set is an object
+  // with a `name`. Count what `consider` refuses on SHAPE — never what it refuses on
   // `isDefault` or on missing provenance, which are decisions, not drops.
   const entries = permissions.filter((e) => !e || typeof e !== 'object' || !(e as { name?: unknown }).name).length;
   return entries > 0 ? { arm: 'adr-0025-legacy-strings', entries } : null;
@@ -294,17 +297,18 @@ function classifyManifestPermissions(
  * registry stores both under the same key:
  *
  *  - AUTHORING stage — `ManifestSchema.permissions` is `ManifestPermissionsSchema`
- *    (`kernel/manifest.zod.ts`): the capability grant a plugin REQUESTS, either
- *    the legacy flat `string[]` or the structured `{ services, hooks, network,
- *    fs }` block (ADR-0025 §3.2);
+ *    (`kernel/manifest.zod.ts`): the capability grant a plugin REQUESTS, the
+ *    structured `{ services, hooks, network, fs }` block (ADR-0025 §3.2). Its
+ *    legacy flat `string[]` form is retired and refused at parse, so a list
+ *    here is a row whose bundle never passed that parse;
  *  - ASSEMBLED stage — the collection wins and the key is `PermissionSet[]`
  *    (`AssembledPackageBodySchema` in `stack.zod.ts`, ADR-0130 D4), whose own
  *    table states that precedence key by key.
  *
  * This reader wants the assembled reading. Handed the authoring one it used to
  * return an empty list and say nothing: the structured arm fell out of
- * `Array.isArray`, and every member of the legacy arm fell out of `consider`'s
- * first line. A package declaring the other reading produced no suggestion, no
+ * `Array.isArray`, and every member of a (now retired) flat list fell out of
+ * `consider`'s first line. A package declaring the other reading produced no suggestion, no
  * row and no log — AGENTS.md "Route & surface ownership" §3: absence must be
  * loud.
  *
@@ -338,12 +342,13 @@ function reportDroppedManifestPermissions(
       `plugin-GRANT reading, not the ADR-0090 permission-SET collection this reconciler reads — those ` +
       `declarations contribute NO audience-binding suggestion, and until now they said nothing at all. ` +
       `One key carries two incompatible readings and the registry stores both in the same slot: at the ` +
-      `AUTHORING stage \`ManifestSchema.permissions\` is the capability grant a plugin requests (the legacy ` +
-      `flat \`string[]\`, or the structured \`{ services, hooks, network, fs }\` block, ADR-0025 §3.2); at ` +
+      `AUTHORING stage \`ManifestSchema.permissions\` is the capability grant a plugin requests (the ` +
+      `structured \`{ services, hooks, network, fs }\` block, ADR-0025 §3.2 — its legacy flat \`string[]\` ` +
+      `form is retired and refused at parse, so a list here is a row that never passed that parse); at ` +
       `the ASSEMBLED stage the collection wins and the key is \`PermissionSet[]\` ` +
       `(\`AssembledPackageBodySchema\`, ADR-0130 D4). This pass reads the ASSEMBLED one, so the authoring ` +
-      `one is skipped whole — the structured arm is an object and never enters the loop, and every member ` +
-      `of the legacy arm is a bare string with no \`name\`. CONSEQUENCE: if any of these packages meant to ` +
+      `one is skipped whole — the structured block is an object and never enters the loop, and every ` +
+      `member of a retired flat list is a bare string with no \`name\`. CONSEQUENCE: if any of these packages meant to ` +
       `ship a permission set with \`isDefault: true\`, no \`sys_audience_binding_suggestion\` row exists ` +
       `for it and no admin is ever prompted to bind it — the console shows one fewer suggestion and the ` +
       `deployment goes on looking healthy. If they meant the ADR-0025 grant, nothing is lost and this line ` +

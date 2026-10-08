@@ -104,12 +104,12 @@ describe('ManifestSchema', () => {
         version: '1.0.0',
         type: 'plugin',
         name: 'Admin Tools',
-        permissions: [
-          'system.user.read',
-          'system.user.write',
-          'system.data.read',
-          'system.data.write',
-        ],
+        // The structured ADR-0025 §3.2 block — the only form since the flat
+        // string list retired (`manifest-permissions-string-list.test.ts`).
+        permissions: {
+          services: ['object', 'auth'],
+          hooks: ['record.beforeInsert'],
+        },
       };
 
       expect(() => ManifestSchema.parse(manifest)).not.toThrow();
@@ -143,17 +143,9 @@ describe('ManifestSchema', () => {
         type: 'app',
         name: 'ObjectStack CRM',
         description: 'Complete customer relationship management solution with sales, marketing, and service modules',
-        permissions: [
-          'app.access.crm',
-          'crm.lead.read',
-          'crm.lead.write',
-          'crm.opportunity.read',
-          'crm.opportunity.write',
-          'crm.account.read',
-          'crm.account.write',
-          'crm.contact.read',
-          'crm.contact.write',
-        ],
+        // No `permissions`: an app's record access is its permission SETS, in the
+        // stack's own `permissions` collection — the manifest-stage key is a
+        // plugin's capability grant, and an app ships no code that needs one.
         objects: [
           './objects/lead.object.ts',
           './objects/opportunity.object.ts',
@@ -202,10 +194,10 @@ describe('ManifestSchema', () => {
         type: 'plugin',
         name: 'SAML Authentication Plugin',
         description: 'Enables SAML 2.0 single sign-on authentication',
-        permissions: [
-          'system.auth.configure',
-          'system.user.create',
-        ],
+        permissions: {
+          services: ['auth'],
+          network: ['idp.example.com'],
+        },
         // `extensions` retired (commit dce5cd4f0) — nothing ever read the container.
       };
 
@@ -219,9 +211,9 @@ describe('ManifestSchema', () => {
         type: 'driver',
         name: 'PostgreSQL Driver',
         description: 'PostgreSQL database driver with advanced features',
-        permissions: [
-          'system.datasource.manage',
-        ],
+        permissions: {
+          network: ['db.internal'],
+        },
         // `extensions` retired (commit dce5cd4f0) — nothing ever read the container.
       };
 
@@ -259,9 +251,9 @@ describe('ManifestSchema', () => {
         type: 'gateway',
         name: 'GraphQL Gateway',
         description: 'GraphQL API protocol gateway for ObjectStack',
-        permissions: [
-          'system.api.configure',
-        ],
+        permissions: {
+          services: ['object', 'http'],
+        },
       };
 
       expect(() => ManifestSchema.parse(graphqlGateway)).not.toThrow();
@@ -684,6 +676,23 @@ describe('manifest.id — reverse-domain identifier', () => {
     it('shows both examples', () => {
       const msg = refusalFor('blank');
       for (const example of MANIFEST_ID_EXAMPLES) expect(msg).toContain(example);
+    });
+
+    it('reads as product guidance: a headline in product words, neutral examples (#22093)', () => {
+      // The Studio-measured case: a display name typed where the id goes.
+      const r = ManifestSchema.safeParse(legal('Repairs Center'));
+      const issue = r.success ? undefined : r.error.issues.find((i) => i.path[0] === 'id');
+      expect(issue?.code).toBe('invalid_format');
+      const msg = issue?.message ?? '';
+      const headline = msg.slice(0, msg.indexOf('. ') + 1);
+      expect(headline).toContain("'Repairs Center'");
+      // The key is still named (#4001), as a locator after the headline — the
+      // sentence an author reads first does not lead with a JSON path.
+      expect(headline).not.toContain('manifest.id');
+      expect(msg).toContain('(`manifest.id`)');
+      // The examples are in no real vendor's namespace.
+      expect(msg).not.toMatch(/steedos|superset|apache/i);
+      for (const example of MANIFEST_ID_EXAMPLES) expect(example).not.toMatch(/steedos|superset|apache/i);
     });
 
     it('suggests com.example.<value> for a bare word', () => {

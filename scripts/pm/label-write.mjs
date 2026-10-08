@@ -79,7 +79,13 @@
  * reads are unaffected, and the read-back is what closes the write either
  * way. `auto` (the default) picks `dispatch` in a cloud seat container and
  * `direct` elsewhere, and prints which. The whole-set `PATCH` fallback below
- * belongs to `direct` alone: the relay only has additive verbs.
+ * belongs to `direct` alone: the relay only has additive verbs. ⛔ Once a
+ * dispatch is ACCEPTED, its run is the only answer: no run in the start
+ * window, or none completed, is exit 6 under `auto` exactly as under
+ * `dispatch` — never a direct write after it. The relay may merely be queued,
+ * and the direct write would book the stroke against the seat's personal
+ * account instead of the fleet's and may land it twice
+ * (`fleet-write/dispatch.mjs`'s no-run conformance pins every sender to this).
  *
  * ## Exit codes — capture them BEFORE any pipe
  *
@@ -120,7 +126,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
-import { EXIT_UNCONFIRMED, exitForResult, fallbackText, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { EXIT_UNCONFIRMED, exitForResult, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
 import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
 import { isProxyRefusal, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from './write-pace.mjs';
 import {
@@ -638,9 +644,9 @@ export async function runLabelWrite(options, deps = {}) {
     httpCalls.push({ op: 'relay', call: `dispatch ${packed.payload.request_id}`, status: sent.status, verdict: sent.state, detail: sent.run?.url ?? sent.detail ?? '' });
     if (sent.ok) {
       relay = sent;
-    } else if (route.requested === 'auto' && sent.state === 'no-run') {
-      record(`[${stamp()}] ③ ${fallbackText(sent, 'label-write')}`);
     } else if (sent.state === 'no-run' || sent.state === 'timeout') {
+      // ⛔ Under EVERY transport request, `auto` included: the dispatch was accepted and may still run, so a direct
+      // write here would be the same stroke booked against the seat's personal account — and possibly a second one.
       record(unconfirmedText(sent, 'label-write'));
       return result(EXIT_UNCONFIRMED, { stoppedAt: 3, labels, assignees, transport: route.transport, relay: sent });
     } else {
@@ -921,6 +927,18 @@ async function driveOffline(argv, boardInit = {}, extra = {}) {
   return { parsed, exit: res.exit, res, fake, out, sent, text: out.join('\n') };
 }
 
+/**
+ * The no-run conformance probe — `fleet-write/dispatch.mjs`'s header names the
+ * contract and its self-test drives it: ONE stroke (an add) through this tool's
+ * real write path against the offline fake board, on the route and the sender
+ * the conformance hands in. Answers the exit, every request that left this
+ * process directly (`METHOD /path`), and what the tool printed.
+ */
+export async function relayMissProbe({ route, send }) {
+  const run = await driveOffline(['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'x'], { labels: [] }, { route, send });
+  return { exit: run.exit, calls: run.fake.calls.map((c) => `${c.method} ${c.path}`), text: run.text };
+}
+
 // The battery ledger this self-test's floor is evaluated against. A battery
 // that stops registering cases is the bug; a pinned TOTAL would hide it the
 // moment a sibling battery grows (#13489, the shape post-stamped.mjs carries).
@@ -934,7 +952,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the fallback: one PATCH, and the assignee echo that makes it survivable': 7,
   'the remaining exits: refusal, mismatch, the ONE-OF block and the dry run': 5,
   'the CLI: what a typo must never be allowed to mean': 8,
-  'the relay transport: ONE dispatch carrying the whole stroke, the same read-back, auto falls back only on no-run': 12,
+  'the relay transport: ONE dispatch carrying the whole stroke, the same read-back, and an accepted dispatch with no run UNCONFIRMED under auto too — never a direct write': 14,
 });
 const SELF_TEST_BATTERY_FLOOR = 10;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -1132,7 +1150,7 @@ export async function selfTest() {
   t('--repo defaults to this board, never to a sibling', parseOptions(['--issue', '7', '--add', 'x']).options.repo, resolveSweepRepo(process.env).repo);
 
   // ── the relay transport ──────────────────────────────────────────────────
-  battery('the relay transport: ONE dispatch carrying the whole stroke, the same read-back, auto falls back only on no-run');
+  battery('the relay transport: ONE dispatch carrying the whole stroke, the same read-back, and an accepted dispatch with no run UNCONFIRMED under auto too — never a direct write');
   {
     const SESSION = 'session_01ABCDEFGHJKMNPQRSTVWXYZ';
     const dispatchRoute = (requested = 'dispatch') => ({ requested, transport: 'dispatch', reason: 'self-test: dispatch', error: null, session: SESSION });
@@ -1153,7 +1171,8 @@ export async function selfTest() {
     const noRunExplicit = await driveOffline(['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'x'], { labels: [] }, { route: dispatchRoute('dispatch'), relay: 'no-run' });
     t('under an EXPLICIT dispatch, no run is exit 6 — no fall-back', [noRunExplicit.exit, noRunExplicit.fake.calls.map((c) => c.op)], [EXIT_UNCONFIRMED, ['card-read']]);
     const noRunAuto = await driveOffline(['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'x'], { labels: [] }, { route: dispatchRoute('auto'), relay: 'no-run' });
-    t('under AUTO, no run falls back to direct — said out loud — and the write lands and reads back', [noRunAuto.exit, noRunAuto.text.includes('Falling back to DIRECT'), noRunAuto.fake.calls.map((c) => c.op)], [EXIT_OK, true, ['card-read', 'label-add', 'card-read']]);
+    t('⛔ under AUTO, an accepted dispatch with no run is exit 6 UNCONFIRMED too — ONE dispatch, and ZERO direct calls after it: the pre-read alone, no POST, no DELETE, no read-back', [noRunAuto.exit, noRunAuto.sent.length, noRunAuto.fake.calls.map((c) => `${c.method} ${c.path}`)], [EXIT_UNCONFIRMED, 1, ['GET /repos/objectstack-ai/objectstack/issues/7']]);
+    t('…the answer an EXPLICIT dispatch gives, in the shared UNCONFIRMED sentence (go READ, never re-run blind)', [noRunAuto.exit === noRunExplicit.exit, noRunAuto.res.relay ? noRunAuto.text.includes(unconfirmedText(noRunAuto.res.relay, 'label-write')) : false], [true, true]);
     const failedRun = await driveOffline(['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'x'], { labels: [] }, { route: dispatchRoute('auto'), relay: 'failure' });
     t('⛔ a run that FAILED is never fallen back from, even under auto: exit 5, no direct write', [failedRun.exit, failedRun.fake.calls.map((c) => c.op)], [EXIT_PLATFORM_REFUSAL, ['card-read']]);
     const refusedDispatch = await driveOffline(['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'x'], { labels: [] }, { route: dispatchRoute('auto'), relay: 'refused' });

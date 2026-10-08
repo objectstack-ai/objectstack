@@ -434,7 +434,10 @@ export function analyzeRegion(region: { nodes: FlowNodeParsed[]; edges?: FlowEdg
     ids.add(n.id);
   }
 
-  // Edge integrity + in/out degree.
+  // Edge integrity + in/out degree. Within `MAX_REGION_DEPTH` a parsed flow
+  // never arrives here with an edge naming no node of its region: `FlowSchema`
+  // refuses it at parse, anchored at the edge (#22088). Beyond the ceiling, and
+  // for a raw-region caller (`bpmn-mapping`), these two lines are the refusal.
   const hasIncoming = new Set<string>();
   const hasOutgoing = new Set<string>();
   const adj = new Map<string, string[]>();

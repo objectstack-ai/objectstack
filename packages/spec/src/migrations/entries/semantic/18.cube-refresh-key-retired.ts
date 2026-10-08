@@ -25,4 +25,5 @@ export const entry: SemanticMigration = {
     'No cube carries `refreshKey`, and the parse refuses one with the prescription. Every analytics '
     + 'query answers as it did before the upgrade. Nothing the author maintains relies on cube results '
     + 'being cached or refreshed on a schedule.',
+  relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
 };

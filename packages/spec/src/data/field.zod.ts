@@ -566,16 +566,17 @@ export { AddressSchema };
  * ⚠️ **Field-surface only — the parenthetical below is FALSE on a declared
  * index, and that is why this map is not shared.** "`'organization'` … the
  * explicit spelling of true" holds here (`FieldSchema.unique`), where bare
- * `true` resolves per-organization. On `IndexSchema.unique` bare `true` is the
- * positional spelling of `'global'` (the #4986 trap, retired at protocol 18 by
- * #5082) — so a shared message read at the one moment an author is looking for
- * the accepted spelling prescribed a value that CHANGES materialization on an
- * index that may already exist, which is the unannounced reinterpretation the
- * #8323 ruling (maintainer, 2026-08-13) exists to prevent. `object.zod.ts`
- * therefore carries its own sibling map, `declaredIndexUniqueScopeError`,
- * pinned equivalent to this one on accept/reject by
- * `unique-scope-message.test.ts`. Keep the two vocabularies in step; only the
- * parentheticals may differ.
+ * `true` resolves per-organization. On `IndexSchema.unique` bare `true` was the
+ * positional spelling of `'global'` (the #4986 trap) and is REFUSED since
+ * protocol 18 (#5082) — so a shared message read at the one moment an author
+ * is looking for the accepted spelling prescribed a value that CHANGES
+ * materialization on an index that may already exist, which is the
+ * unannounced reinterpretation the #8323 ruling (maintainer, 2026-08-13)
+ * exists to prevent. `object.zod.ts` therefore carries its own sibling map,
+ * `declaredIndexUniqueScopeError`, pinned against this one on accept/reject by
+ * `unique-scope-message.test.ts`: the index surface accepts this vocabulary
+ * minus bare `true`, and nothing else may differ. Keep the two vocabularies in
+ * step; only the parentheticals and the bare-`true` row may differ.
  *
  * ⚠️ **One of the two hand-written `$ZodErrorMap`s in `packages/spec`, and the
  * pair stays a pair.** This docblock used to say "pattern of
@@ -654,13 +655,14 @@ const uniqueScopeError: z.core.$ZodErrorMap = (issue) => {
  *
  * ⚠️ **This schema is the FIELD surface's.** The vocabulary above is shared
  * with `IndexSchema.unique`, but the *meaning of bare `true`* is not: on a
- * declared index it is the positional spelling of `'global'`, not of
- * `'organization'` (the #4986 trap; #5082 retires it at protocol 18). The
- * index surface therefore declares its own structurally identical union with
- * its own rejection text in `object.zod.ts` — accepting and rejecting exactly
- * what this one does, pinned by `unique-scope-message.test.ts`. Widening or
- * narrowing the member list here is a change to BOTH surfaces: make it in both
- * places or the pin fails.
+ * declared index it was the positional spelling of `'global'`, not of
+ * `'organization'` (the #4986 trap), and since protocol 18 (#5082) the index
+ * surface REFUSES it. The index surface therefore declares its own union with
+ * its own rejection text in `object.zod.ts` — this vocabulary minus bare
+ * `true`, and otherwise accepting and rejecting exactly what this one does,
+ * pinned by `unique-scope-message.test.ts`. Widening or narrowing the member
+ * list here is a change to BOTH surfaces: make it in both places or the pin
+ * fails.
  */
 export const UniqueScopeSchema = lazySchema(() =>
   z.union([z.boolean(), z.literal('global'), z.literal('organization')], {
@@ -699,10 +701,11 @@ export function isUniqueDeclared(unique: unknown): boolean {
  * `isUniqueDeclared(u) && !isGlobalUnique(u)` is that question), so field
  * consumers need no new predicate. This helper exists for the DECLARED-index
  * side, where the two spellings differ: `'organization'` asks the driver to
- * prepend the NULL-safe organization key part at registration, while bare
- * `true` stays verbatim (deprecated spelling of `'global'` — warned in 17.x,
- * rejected at protocol 18). Single source of truth so SQL and Mongo index
- * sync cannot drift on the distinction.
+ * prepend the NULL-safe organization key part at registration, while
+ * `'global'` stays verbatim (bare `true`, its positional spelling, is refused
+ * on a declared index since protocol 18, and stored metadata converts it to
+ * `'global'`). Single source of truth so SQL and Mongo index sync cannot drift
+ * on the distinction.
  */
 export function isOrganizationUnique(unique: unknown): boolean {
   return unique === 'organization';
@@ -1137,9 +1140,11 @@ export const FieldSchema = lazySchema(() => {
    * array: an emptied required set fails validation loudly — `[]` does not
    * satisfy `required` (#9447, maintainer ruling 2026-08-18). The empty set is
    * always representable (it reads back as `[]`, never `null` — see
-   * `multiple`), so the required check judges emptiness, not absence.
+   * `multiple`), so the required check judges emptiness, not absence. The
+   * describe is form help in Studio and carries the rule, not the ruling date
+   * (#22093).
    */
-  required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it (maintainer ruling 2026-08-18). NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
+  required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
 
   /**
    * Physical storage constraints (ADR-0113). Deliberately separate from the
@@ -1166,8 +1171,13 @@ export const FieldSchema = lazySchema(() => {
    * readers (generated code, formula/filter predicates) never need a null
    * branch. Same ruling: `required` on a multi-value lookup means non-empty
    * array (see `required` above).
+   *
+   * Declarability: `multiple: true` outside the multi-capable types is refused
+   * at parse (maintainer ruling 2026-09-13), and on `radio` by the narrower
+   * 2026-08-22 ruling. The rulings and their dates live in these comments; the
+   * describe is form help in Studio and carries only the rule (#22093).
    */
-  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Declarable ONLY on the multi-capable types — select, lookup, user, file, image — and redundantly on the inherently-multi option types (multiselect, checkboxes, tags); `multiple: true` on any other type is REFUSED at parse (maintainer ruling 2026-09-13), and on `radio` by the narrower 2026-08-22 ruling. An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every writer (cascade repair, form clears, API writes), not just cascade repair (maintainer ruling 2026-08-18).'),
+  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Declarable ONLY on the multi-capable types — select, lookup, user, file, image — and redundantly on the inherently-multi option types (multiselect, checkboxes, tags); `multiple: true` on any other type, `radio` included, is REFUSED at parse. An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every writer (cascade repair, form clears, API writes), not just cascade repair.'),
   // `true` = unique WITHIN the tenant on a tenant-scoped object (composite
   // `(tenantField, field)` index); `'global'` = platform-wide single-column
   // unique. See {@link UniqueScopeSchema} for the scope vocabulary (ADR-0120).

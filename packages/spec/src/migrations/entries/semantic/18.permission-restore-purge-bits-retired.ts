@@ -36,4 +36,5 @@ export const entry: SemanticMigration = {
     + 'upgrade, and `allowTransfer` behaves as before. Every documented process that assumed a '
     + 'restore or purge grant — an erasure-request runbook, an access review, an audit control — '
     + 'names the mechanism it actually uses instead.',
+  relevantWhen: { kind: 'stack-declares', keys: ['permissions'] },
 };

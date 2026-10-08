@@ -33,4 +33,5 @@ export const entry: SemanticMigration = {
     + 'author has either kept the key (nothing else changes) or re-keyed the member to the intended '
     + 'name and updated every query, dashboard and report that names `<cube>.<old key>`. '
     + '`GET /api/v1/analytics/meta` lists each member as `<cube>.<key>` exactly as before the upgrade.',
+  relevantWhen: { kind: 'stack-declares', keys: ['analyticsCubes'] },
 };

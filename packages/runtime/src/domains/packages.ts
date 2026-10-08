@@ -51,6 +51,9 @@ import { isWritablePackage } from '@objectstack/metadata-protocol';
 // could not even
 // express. One statement of the contract, imported by both doors.
 import type { DeletePackageRequest, DeletePackageResponse } from '@objectstack/metadata-protocol';
+// [#22090] The stored-member half of `POST /packages/:id/revert`, typed from
+// the producer's method — see `revertStoredPackage` on the handle below.
+import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 // [#13598] The DECLARED protocol contracts this domain's request literals are
 // compiled against. Imported, never restated: a second hand-written
 // `saveMetaItem(…)` signature here would silently drift from the one the spec
@@ -187,6 +190,12 @@ export type PackagesDomainProtocol =
     & {
         /** Declared by the producer (`@objectstack/metadata-protocol`), #9960. */
         deletePackage?(request: DeletePackageRequest): Promise<DeletePackageResponse>;
+        /**
+         * [#22090] Typed from the producer's own method signature rather than
+         * restated here, so a key this door sends that the producer does not
+         * declare is a compile error.
+         */
+        revertStoredPackage?: ObjectStackProtocolImplementation['revertStoredPackage'];
         /** ⚠️ Undeclared request shapes — see "Where the ledger honestly ends". */
         publishPackageDrafts?(request: any): Promise<any>;
         discardPackageDrafts?(request: any): Promise<any>;
@@ -1788,7 +1797,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // to the package, reverting it to its last published baseline
         // ("abandon all my changes"). NON-destructive: active metadata and
         // physical tables are untouched. Routes through the sys_metadata
-        // path (no metadata-service dependency, unlike /revert below).
+        // path (no metadata-service dependency; /revert below shares its
+        // per-draft step and asks the metadata service only for a package
+        // with no stored row).
         if (parts.length === 2 && parts[1] === 'discard-drafts' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
@@ -1882,6 +1893,30 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'revert' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
+            // [#22090] A package's members live in one of two places, and each
+            // is reverted by the service that holds it. A Studio-authored
+            // package is `sys_metadata` rows bound by `package_id` — the rows
+            // discard-drafts reads — which the metadata service's in-memory
+            // registry never holds, so asking only that service answered 404
+            // "No metadata items found" for a package with published items and
+            // a pending draft. The protocol is asked FIRST: it reverts the
+            // stored members (or refuses a never-published package with the
+            // declared 409), and answers `stored: false` when the package has no
+            // stored row, leaving the metadata service's revert below to answer
+            // exactly as it always has — a code-shipped package, an unknown id.
+            const protocol = await resolveProtocol(deps, _context);
+            if (protocol && typeof protocol.revertStoredPackage === 'function') {
+                try {
+                    const organizationId = await deps.resolveActiveOrganizationId(_context);
+                    const stored = await protocol.revertStoredPackage({
+                        packageId: id,
+                        ...(organizationId ? { organizationId } : {}),
+                    });
+                    if (stored.stored) return { handled: true, response: deps.success({ success: true }) };
+                } catch (e: any) {
+                    return { handled: true, response: deps.errorFromThrown(e, 500) };
+                }
+            }
             const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
             if (metadataService && typeof (metadataService as any).revertPackage === 'function') {
                 await (metadataService as any).revertPackage(id);
