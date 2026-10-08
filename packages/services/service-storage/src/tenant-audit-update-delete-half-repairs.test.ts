@@ -130,6 +130,21 @@ function createRecordingEngine(seed: Array<{ object: string; data: any }> = []) 
     async update(object: string, data: any, options?: any) {
       assertEngineUpdateDispatch(data, options);
       updates.push({ object, data: { ...data }, options });
+      // [#22332] A declared predicate update — the chunk door's conditional
+      // progress write — lands on the rows that hold every `where` term (an
+      // absent column holds `null`) and answers the matched-row count, as the
+      // real engine's does.
+      if (options?.multi) {
+        const matched = rows.filter(
+          (r) =>
+            r.object === object &&
+            Object.entries(options.where ?? {}).every(([k, v]) =>
+              k === 'id' ? String(r.data.id) === String(v) : (r.data[k] ?? null) === (v ?? null),
+            ),
+        );
+        for (const r of matched) Object.assign(r.data, data);
+        return matched.length;
+      }
       // [#22313] A by-id update lands on the row, as it does in the real
       // engine: the chunked completion reads back the record the chunk door
       // wrote, and assembles only an upload that holds its declared bytes.
@@ -455,7 +470,13 @@ describe('[#13178] the routes: the upload doors pass the session organization on
 
     const update = engine._updates.find((u: any) => u.object === 'sys_upload_session');
     expect(update).toBeTruthy();
-    expect(update.options).toEqual({ where: { id: 's1' }, context: { tenantId: 'org_A', isSystem: true } });
+    // [#22332] The progress write is conditional on the progress the door
+    // read — here a seeded row carrying none — and scoped exactly as before.
+    expect(update.options).toEqual({
+      where: { parts: null, uploaded_chunks: null, uploaded_size: null, id: 's1' },
+      multi: true,
+      context: { tenantId: 'org_A', isSystem: true },
+    });
   });
 
   it('the progress door — which WRITES when it expires a row — scopes that write too', async () => {
