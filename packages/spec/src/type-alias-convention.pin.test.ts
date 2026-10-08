@@ -1547,7 +1547,10 @@ export type Iso_ui_notification__NotificationTypeSchema = Assert<Eq< z.input< ty
 // is normalized on parse), so `ElementDataSourceParsed` is declared and this
 // pin deleted.
 export type Iso_ui_page__PageComponentType = Assert<Eq< z.input< typeof M163.PageComponentType >, z.infer< typeof M163.PageComponentType > >>;
-export type Iso_ui_page__PageTypeSchema = Assert<Eq< z.input< typeof M163.PageTypeSchema >, z.infer< typeof M163.PageTypeSchema > >>;
+// `PagePrintSchema` (#22158) joins the family the day it lands: no defaults,
+// no transforms, so `PagePrint` is the only name it carries.
+export type Iso_ui_page__PagePrintSchema = Assert<Eq< z.input< typeof M163.PagePrintSchema >, z.infer< typeof M163.PagePrintSchema > >>;
+export type Iso_ui_page__PageTypeSchema =Assert<Eq< z.input< typeof M163.PageTypeSchema >, z.infer< typeof M163.PageTypeSchema > >>;
 
 // ui/report.zod.ts
 // `JoinedReportBlockSchema` left the family on #19920: its `z.ZodTypeAny`
