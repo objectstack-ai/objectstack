@@ -7,7 +7,7 @@
 
 A flow TEXT slot — a `notify` node's `title` and `message`, a `screen` node's `title` and `description`, a refusing `end` node's `message` — reads ADR-0032 §3's `{{ }}` template holes, rendered by the formula template engine over the flow's variables. A single-brace `{…}` token in one is refused at `objectstack validate`, at `registerFlow` and by the node's contract, with the `{{ }}` spelling of each token.
 
-Clause-②: yes
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: registered flow-text-slot-single-brace-refused -->
 
