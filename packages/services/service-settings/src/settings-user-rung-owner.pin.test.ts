@@ -44,11 +44,14 @@ const MANIFEST = {
   ],
 } as any;
 
-// The service's stored row shape, per rung.
-const userRow = (userId: string, value: string): Row => ({
+// The service's stored row shape, per rung. A user row with a `null` owner is
+// the shape an ownerless write stored before the write half refused it; a
+// database may still hold one.
+const userRow = (userId: string | null, value: string): Row => ({
   namespace: NS, key: 'theme', scope: 'user', user_id: userId, value,
   value_enc: null, encrypted: false, locked: false, locked_reason: null,
 });
+const PEOPLE = [userRow(null, 'ownerless'), userRow(USER_A, 'dark'), userRow(USER_B, 'light')];
 const tenantRow = (key: string, value: string): Row => ({
   namespace: NS, key, scope: 'tenant', user_id: null, value,
   value_enc: null, encrypted: false, locked: false, locked_reason: null,
@@ -74,17 +77,20 @@ function matches(row: Row, where: Row): boolean {
  * tenant and user rungs. Every user id resolves in `sys_user`, so the
  * service's own user-reference refusal never decides a case here.
  */
-function engineStack(seed: Row[]) {
+function engineStack(seed: Row[], opts: { overAnswer?: boolean } = {}) {
   const stores: Record<string, Row[]> = {
     sys_platform_setting: seed
       .filter((r) => r.scope === 'global')
       .map(({ scope: _scope, user_id: _userId, ...stored }) => ({ ...stored })),
     sys_setting: seed.filter((r) => r.scope !== 'global').map((r) => ({ ...r })),
   };
-  const find = vi.fn(async (object: string, opts: any) => {
-    if (object === 'sys_user') return [{ id: opts?.where?.id }];
-    const hits = (stores[object] ?? []).filter((r) => matches(r, opts?.where ?? {}));
-    return typeof opts?.limit === 'number' ? hits.slice(0, opts.limit) : hits;
+  const find = vi.fn(async (object: string, query: any) => {
+    if (object === 'sys_user') return [{ id: query?.where?.id }];
+    // `overAnswer`: a store that hands back every row of the namespace to any
+    // load, whatever else the predicate asked for.
+    const where = opts.overAnswer ? { namespace: query?.where?.namespace } : query?.where ?? {};
+    const hits = (stores[object] ?? []).filter((r) => matches(r, where));
+    return typeof query?.limit === 'number' ? hits.slice(0, query.limit) : hits;
   });
   const insert = vi.fn(async (object: string, data: Row) => {
     (stores[object] ??= []).push({ ...data });
@@ -150,12 +156,12 @@ describe('the user rung answers only its owner', () => {
   describe.each(STACKS)('%s', (_label, stack) => {
     describe.each(READ_PATHS)('%s', (_path, read) => {
       it.each(NO_USER)('a resolve with no user id never answers a user-scoped row (%s)', async (_c, ctx) => {
-        const { svc } = stack([userRow(USER_A, 'dark'), userRow(USER_B, 'light')]);
+        const { svc } = stack(PEOPLE);
         expect(await read(svc, ctx)).toBe('system');
       });
 
       it('control: a caller with a user id reads only their own row', async () => {
-        const { svc } = stack([userRow(USER_A, 'dark'), userRow(USER_B, 'light')]);
+        const { svc } = stack(PEOPLE);
         expect(await read(svc, { userId: USER_A })).toBe('dark');
         expect(await read(svc, { userId: USER_B })).toBe('light');
         expect(await read(svc, { userId: 'usr_owner_c' })).toBe('system');
@@ -163,7 +169,7 @@ describe('the user rung answers only its owner', () => {
     });
 
     it('with no user id, a user-scoped key falls through to the tenant rung, then global, then the default', async () => {
-      const users = [userRow(USER_A, 'dark'), userRow(USER_B, 'light')];
+      const users = PEOPLE;
 
       const withTenant = await stack([...users, tenantRow('theme', 'tenant-theme')]).svc.get(NS, 'theme');
       expect(withTenant).toMatchObject({ value: 'tenant-theme', source: 'tenant' });
@@ -186,7 +192,7 @@ describe('the user rung answers only its owner', () => {
     });
 
     it('a reset with no user id counts no user row and writes nothing', async () => {
-      const { svc, wrote, snapshot } = stack([userRow(USER_A, 'dark'), userRow(USER_B, 'light')]);
+      const { svc, wrote, snapshot } = stack(PEOPLE);
       const before = snapshot();
       expect(await svc.resetNamespace(NS)).toBe(0);
       expect(wrote()).toBe(0);
@@ -200,6 +206,16 @@ describe('the user rung answers only its owner', () => {
         expect(await svc.get(NS, 'banner', ctx)).toMatchObject({ value: 'maintenance', source: 'global' });
       }
     });
+  });
+});
+
+describe('the user rung compares the owner itself, whatever rows the store answers', () => {
+  it.each(READ_PATHS)('%s', async (_path, read) => {
+    const { svc } = engineStack(PEOPLE, { overAnswer: true });
+    expect(await read(svc, { userId: USER_B })).toBe('light');
+    expect(await read(svc, { userId: USER_A })).toBe('dark');
+    expect(await read(svc, { userId: 'usr_owner_c' })).toBe('system');
+    expect(await read(svc, {})).toBe('system');
   });
 });
 
