@@ -3383,8 +3383,8 @@ export class AuthManager {
             // Both reads run as the platform (`withSystemContext`): this hook
             // IS the slug guard — the organization id is the `where`, not the
             // reader — so neither read reaches the engine with no principal
-            // and no opt-in (the security middleware's principal-less
-            // hand-off, ADR-0096).
+            // and no opt-in (the security middleware's former principal-less
+            // hand-off, which ADR-0096 D5 replaced with a refusal).
             const dataEngine = withSystemContext(rawEngine) as any;
 
             let currentSlug: string | undefined;

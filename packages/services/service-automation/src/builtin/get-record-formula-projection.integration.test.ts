@@ -16,6 +16,10 @@
  * both run identities. The reference is the same node with the formula left
  * out of `fields`: the formula read must serve that row plus the formula.
  *
+ * [#22344] The one-row branch also names `id` in the projection it hands the
+ * engine (its `output.id` is read off the row), so the row it serves carries
+ * `id` beside the named fields; the list branch serves the named fields only.
+ *
  * Composition: the real stack the other `*.integration.test.ts` files in this
  * package boot — `ObjectKernel`, `ObjectQLPlugin`, `driver-sql` on
  * better-sqlite3 `:memory:`, and the real `AutomationServicePlugin`.
@@ -129,16 +133,19 @@ describe('flow get_record serves exactly its `fields` when one is a formula (#22
 
   const CASES: Array<[RunAs, Branch]> = [['system', 'one'], ['system', 'list'], ['user', 'one'], ['user', 'list']];
 
+  /** The one-row branch's `id` (#22344); the list branch adds nothing. */
+  const idOf = (branch: Branch): Record<string, unknown> => (branch === 'one' ? { id: 'line_1' } : {});
+
   it.each(CASES)('runAs %s, %s: the formula read serves the named fields plus the formula, nothing else', async (runAs, branch) => {
     const row = await served(runAs, branch, ['name', 'total_price']);
-    expect(Object.keys(row).sort()).toEqual(['name', 'total_price']);
+    expect(Object.keys(row).sort()).toEqual([...Object.keys(idOf(branch)), 'name', 'total_price']);
     // 3 × 7 — computed from two columns the node never named.
     expect(row.total_price).toBe(21);
   });
 
   it.each(CASES)('runAs %s, %s: it equals the same read without the formula, plus the formula value', async (runAs, branch) => {
     const without = await served(runAs, branch, ['name', 'quantity']);
-    expect(without, 'control: a projection with no formula is the named columns').toStrictEqual({ name: 'Widget', quantity: 3 });
+    expect(without, 'control: a projection with no formula is the named columns').toStrictEqual({ ...idOf(branch), name: 'Widget', quantity: 3 });
     const withFormula = await served(runAs, branch, ['name', 'quantity', 'total_price']);
     expect(withFormula).toStrictEqual({ ...without, total_price: 21 });
   });

@@ -13,9 +13,10 @@
 // `authRequired: true` keeps answering 401.
 //
 // Why a status code alone cannot hold this: a principal-less context and a
-// guest both end in `403 PERMISSION_DENIED` once the engine-level deny for the
-// principal-less hand-off lands, so `declarative-endpoint-policy`'s 403 stops
-// telling the two apart. What this file pins is the context the ENGINE is
+// guest both end in `403 PERMISSION_DENIED` now that the engine-level deny that
+// replaced the principal-less hand-off has landed (ADR-0096 D5), so
+// `declarative-endpoint-policy`'s 403 no longer tells the two apart. What this
+// file pins is the context the ENGINE is
 // handed (an engine spy), whether the DRIVER is reached (a middleware
 // registered after boot runs last, right before the driver), and what the
 // caller is told (status, envelope, and that no byte of the row comes back).

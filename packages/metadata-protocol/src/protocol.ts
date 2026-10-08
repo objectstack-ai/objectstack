@@ -11230,11 +11230,13 @@ export class ObjectStackProtocolImplementation implements
         // were eliminated by measurement, not by reading:
         //  - the driver's tenant wall never engages — `buildDriverOptions`
         //    sets `DriverOptions.tenantId` only from `execCtx.tenantId`
-        //    (`objectql/engine.ts`), and this read passes no context;
-        //  - plugin-security's Layer 0 never engages — the middleware takes
-        //    its principal-less `return next()` thousands of lines before the
-        //    `objectFields.has('organization_id')` gate that would have
-        //    carried it;
+        //    (`objectql/engine.ts`), and this read's context carries no
+        //    `tenantId` (only the system opt-in below);
+        //  - plugin-security's Layer 0 never engages — the middleware
+        //    short-circuits on that `isSystem` opt-in (it used to take its
+        //    principal-less `return next()`, refused since ADR-0096 D5)
+        //    thousands of lines before the `objectFields.has('organization_id')`
+        //    gate that would have carried it;
         //  - no posture would save it anyway: `computeTenantLayer0Filter`
         //    yields `null` under `single` and the deny sentinel under
         //    `isolated` with no tenantId.

@@ -1241,9 +1241,12 @@ export class HttpDispatcher {
     /**
      * Slim engine facade matching the ActionContext.engine shape handlers expect.
      *
-     * ⚠️ TRUSTED (SECURITY-DEFINER-like) BY DESIGN (#2849): these calls carry NO
-     * ExecutionContext, so the data engine's security middleware skips RLS / FLS /
-     * CRUD / tenant scoping entirely. Action bodies are the app author's own code
+     * ⚠️ TRUSTED (SECURITY-DEFINER-like) BY DESIGN (#2849): these calls carry the
+     * caller's envelope elevated with `isSystem: true` (`buildActionExecutionContext`
+     * in `./action-execution.ts`, #3914), so the data engine's security middleware
+     * short-circuits RLS / FLS / CRUD. They used to carry NO ExecutionContext,
+     * which the middleware then skipped and since ADR-0096 D5 refuses. Action
+     * bodies are the app author's own code
      * and legitimately perform cross-object writes the invoking user could not
      * (convert-lead, cascade-close). The boundary is therefore enforced at INVOKE
      * time (`ai.exposed` + ADR-0066 D4 capability gate), and every dispatch is
@@ -1508,7 +1511,8 @@ export class HttpDispatcher {
             // gate is the one asking the question — the caller's user id is
             // the `where`, not the reader — so the read runs as the platform,
             // never as a context with no principal and no opt-in (the
-            // security middleware's principal-less hand-off, ADR-0096).
+            // security middleware's former principal-less hand-off, which
+            // ADR-0096 D5 replaced with a refusal).
             rows = await ql.find(ENVIRONMENT_MEMBER_OBJECT, {
                 where: { environment_id: environmentId, user_id: userId },
                 limit: 1,
