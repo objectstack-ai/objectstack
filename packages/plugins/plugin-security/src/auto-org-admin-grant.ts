@@ -72,8 +72,9 @@ const SYSTEM_CTX = { isSystem: true } as const;
  *
  * [#12699] `suppressUnbounded` is the deployment's own veto on the walled
  * branch (`OrgScopingEntitlement.suppressUnboundedOrgAdminGrant`): D4's "Layer
- * 0 bounds it" rationale stops holding on a deployment that carves
- * platform-global objects OUT of the wall, so such a deployment declares that
+ * 0 bounds it" rationale stops holding on a deployment that declares objects
+ * platform-global (ADR-0131 D7: they carry no organization column there, so no
+ * wall bounds them), so such a deployment declares that
  * arming a walled posture must NOT auto-grant the unbounded superbits — the
  * de-VAMA'd variant is granted on walled postures too. Fail closed: `false`/
  * absent keeps today's posture-keyed behaviour exactly.
