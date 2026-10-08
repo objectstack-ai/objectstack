@@ -3104,7 +3104,7 @@ const METADATA_ARRAY_KEYS = [
   // registry declares `position` `allowOrgOverride: false`. With the entry
   // present the door's type-level refusal covers it like every other
   // `security`-domain type (`engine-security-catalog-package-door.test.ts`).
-  // `roles` stays below as the inert retired spelling it already was.
+  // `roles` stays in the list as the inert retired spelling it already was.
   'roles', 'positions', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
   // AI Protocol
   'agents', 'tools', 'skills', 'ragPipelines',
