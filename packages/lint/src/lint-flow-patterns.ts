@@ -157,6 +157,8 @@ import {
   APPROVAL_NODE_TYPE,
   APPROVAL_REVISE_NODE_TYPE,
   collectFlowGraphs,
+  FLOW_NODE_TEXT_SLOTS,
+  flowNodeTextSlotSources,
 } from '@objectstack/spec/automation';
 import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automation';
 // [#15429] The decision's `mode` contract, parsed here so `os validate` and
@@ -649,11 +651,20 @@ function scanFilterForDateEquality(
 }
 
 // Flow node VALUES interpolate with SINGLE braces (`{var}` / `{rec.field}` /
-// `{$User.Id}`). Two wrong-syntax mistakes AI/human authors carry over from the
-// *formula* template dialect (`{{ path }}`) or other platforms:
-//   - `{{ai_reply}}`  — double-brace (verified: no flow node uses `{{ }}`).
+// `{$User.Id}`) — every config string EXCEPT the text slots (#22110, ADR-0032
+// D3: a notify `title` / `message`, a screen `title` / `description`, an `end`
+// `message` — `FLOW_NODE_TEXT_SLOTS`), which render the `{{ }}` holes of the
+// formula template dialect. Two wrong-syntax mistakes AI/human authors carry
+// over between the two, or from other platforms:
+//   - `{{ai_reply}}`  — double-brace on a single-brace value. NOT flagged on a
+//                       text slot, where it is the spelling; the reverse
+//                       mistake there — a single-brace token on a text slot —
+//                       is refused at `error` by the build door
+//                       (`validate-expressions`, the spec's one judge), so this
+//                       rule does not repeat it.
 //   - `$source.id`    — a `$`-prefixed reference written bare (resolves as a
-//                       literal string), instead of `{source.id}`.
+//                       literal string), instead of `{source.id}` — or
+//                       `{{ source.id }}` on a text slot.
 const DOUBLE_BRACE = /\{\{\s*[\w$][\w$.\s]*\}\}/;
 // A `$Ident.field` not immediately inside a `{` (so `{$User.Id}` is NOT flagged).
 // Require a letter/_ after `$` so currency like `$5.00` is never matched.
@@ -661,6 +672,16 @@ const BARE_DOLLAR_REF = /(?:^|[^{])\$[A-Za-z_]\w*\.[A-Za-z_]/;
 
 /** Config keys whose string values are CEL predicates, not interpolated templates. */
 const CEL_KEYS = new Set(['condition', 'expression', 'conditions']);
+
+/** `config` without its node type's `{{ }}` text slots — the strings that keep the single-brace dialect. */
+function withoutTextSlots(nodeType: unknown, config: unknown): unknown {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return config;
+  const keys = FLOW_NODE_TEXT_SLOTS.filter((slot) => slot.nodeType === nodeType).map((slot) => slot.key);
+  if (keys.length === 0) return config;
+  const rest: AnyRec = { ...(config as AnyRec) };
+  for (const key of keys) delete rest[key];
+  return rest;
+}
 
 /** Collect every interpolated-template string value in a node config (skips CEL keys). */
 function collectTemplateStrings(value: unknown, key: string | undefined, out: string[]): void {
@@ -1706,17 +1727,22 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
         // there ships to the endpoint as literal text. Remove fewer than the
         // node's own slots and the double-count returns; remove more and a key
         // that was never a region is deleted unread.
+        //
+        // [#22110] And WITHOUT the node's text slots, which read `{{ }}`: a
+        // double brace there is the spelling, and their own bare-`$` check
+        // below prescribes the hole.
         const strings: string[] = [];
-        collectTemplateStrings(stripRegions(node.config, ownRegionKeys(node.type)), undefined, strings);
+        collectTemplateStrings(withoutTextSlots(node.type, stripRegions(node.config, ownRegionKeys(node.type))), undefined, strings);
         for (const str of strings) {
           if (DOUBLE_BRACE.test(str)) {
             findings.push({
               where: nodeWhere,
-              message: `double-brace interpolation \`${str.trim().slice(0, 80)}\` — flow node values use SINGLE braces.`,
+              message: `double-brace interpolation \`${str.trim().slice(0, 80)}\` — this flow node value uses SINGLE braces.`,
               hint:
-                `Use \`{var}\` (e.g. \`{record.title}\`): a flow node value is a string template in which only ` +
+                `Use \`{var}\` (e.g. \`{record.title}\`): this flow node value is a string template in which only ` +
                 `single-brace \`{…}\` tokens resolve and all other text is literal. Double-brace \`{{ }}\` is ` +
-                `the formula/template-field dialect, not flow node values.`,
+                `the template dialect of the text slots only — a notify \`title\` / \`message\`, a screen ` +
+                `\`title\` / \`description\`, an \`end\` \`message\`.`,
               rule: FLOW_DOUBLE_BRACE_INTERP,
             });
           }
@@ -1728,6 +1754,21 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
                 `Wrap it and bind a variable: \`{source.id}\` (or \`{$User.Id}\` for the current user) — a flow ` +
                 `node value is a string template in which only single-brace \`{…}\` tokens resolve and all ` +
                 `other text is literal.`,
+              rule: FLOW_BARE_DOLLAR_REF,
+            });
+          }
+        }
+        // [#22110] The text slots' own bare-`$` check: read OUTSIDE their
+        // `{{ }}` holes, where a `$name.path` is the hole's correct content.
+        for (const slot of flowNodeTextSlotSources(node.type, node.config)) {
+          const outsideHoles = slot.source.replace(/\{\{[^}]*\}\}/g, '');
+          if (BARE_DOLLAR_REF.test(outsideHoles)) {
+            findings.push({
+              where: nodeWhere,
+              message: `\`${slot.source.trim().slice(0, 80)}\` looks like a reference written as a literal — a bare \`$ref.field\` in the ${slot.label} is NOT rendered.`,
+              hint:
+                `Write it as a hole: \`{{ $ref.field }}\` (e.g. \`{{ $error.message }}\`) — a text slot renders only ` +
+                `\`{{ }}\` holes, and all other text is literal.`,
               rule: FLOW_BARE_DOLLAR_REF,
             });
           }

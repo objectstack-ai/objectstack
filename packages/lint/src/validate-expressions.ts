@@ -91,6 +91,8 @@ import {
   predicateSlotRefusal,
   resolveFlowNodeExpressions,
   flowNodeValueTemplateRefusals,
+  flowNodeTextSlotSources,
+  textSlotTemplateRefusal,
   structuralConditionRefusal,
 } from '@objectstack/spec/automation';
 // [#15137] The `value`-role half. Same two published primitives the engine
@@ -1750,6 +1752,25 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
             source: templateRefusal.source,
             severity: 'error',
           });
+        }
+        // [#22110] The TEXT slots (a notify `title` / `message`, a screen
+        // `title` / `description`, an `end` `message`) render ADR-0032 §3's
+        // `{{ }}` holes. The same two checks `registerFlow` runs on the same
+        // config, in the same order: a single-brace token left from the 17.x
+        // dialect is refused with its hole spelling (the spec's one judge),
+        // and a slot carrying none is compiled as the `template` it is — a
+        // hole holding logic or an unknown formatter is an `error` here, not a
+        // throw at the node mid-run.
+        for (const slot of flowNodeTextSlotSources(nodeType, cfg)) {
+          const slotWhere = `${at} · node '${node.id}' (${nodeType}) ${slot.label} at config.${slot.path}`;
+          const tokenRefusal = textSlotTemplateRefusal(slot.source);
+          if (tokenRefusal !== undefined) {
+            issues.push({ where: slotWhere, message: tokenRefusal, source: slot.source, severity: 'error' });
+            continue;
+          }
+          for (const e of validateExpression('template', slot.source).errors) {
+            issues.push({ where: slotWhere, message: e.message, source: e.source, severity: 'error' });
+          }
         }
         // #1870 — a `script` node must name a callable, and since #4343 that is
         // the whole of what the node does: `config.function`. A node without one

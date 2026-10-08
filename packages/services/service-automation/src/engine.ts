@@ -48,6 +48,10 @@ import { FlowValueSlotSchema, VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/a
 // judge, shared with `objectstack validate` (`@objectstack/lint` calls the same
 // function on the same config), so build and registration give one verdict.
 import { flowNodeValueTemplateRefusals } from '@objectstack/spec/automation';
+// [#22110] The flow TEXT slots read ADR-0032 §3's `{{ }}` holes — the one judge
+// of the single-brace tokens they may still carry, and the one list of where
+// those slots are, both shared with `objectstack validate`.
+import { flowNodeTextSlotSources, textSlotTemplateRefusal } from '@objectstack/spec/automation';
 // [#17322] The EVALUATED-slot rule, IMPORTED rather than re-derived. It is the
 // rule `FlowEdgeSchema.condition` already composes since #15807, so a node's
 // `config.condition` — which no schema stands in front of — is held to the same
@@ -232,7 +236,7 @@ import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 // `./builtin/` is safe in this direction: `template.ts` imports only
 // `../guard-refusal.js` and package-external contracts, so nothing it pulls in
 // reaches back here.
-import { interpolateText } from './builtin/template.js';
+import { renderTextSlot } from './builtin/template.js';
 
 /**
  * Does this `decision` take EVERY out-edge whose condition holds (#15429)?
@@ -10684,6 +10688,26 @@ export class AutomationEngine implements IAutomationService {
                     );
                 }
 
+                // [#22110] The TEXT slots (a notify `title` / `message`, a screen
+                // `title` / `description`, an `end` `message`) render ADR-0032
+                // §3's `{{ }}` holes. A single-brace token left from the 17.x
+                // dialect is refused with its hole spelling (the spec's one
+                // judge — the node contracts refuse the same set at parse), and
+                // a slot carrying none is compiled as the template it is, so a
+                // hole holding logic or an unknown formatter stops the flow here
+                // instead of throwing at the node mid-run.
+                for (const slot of flowNodeTextSlotSources(node.type, node.config)) {
+                    const slotWhere = `${at}node '${node.id}' (${node.type}) ${slot.label} at config.${slot.path}`;
+                    const tokenRefusal = textSlotTemplateRefusal(slot.source);
+                    if (tokenRefusal !== undefined) {
+                        failures.push(`  • ${slotWhere}: ${tokenRefusal}\n      source: \`${slot.source}\``);
+                        continue;
+                    }
+                    for (const e of validateExpression('template', slot.source).errors) {
+                        failures.push(`  • ${slotWhere}: ${e.message}\n      source: \`${slot.source}\``);
+                    }
+                }
+
                 // Descriptor-declared expression slots (#4027). The ledger names them
                 // per node type and carries the dialect each one takes, so a declared
                 // key like `screen.fields[].visibleWhen` is checked as the bare CEL it
@@ -10936,12 +10960,13 @@ export class AutomationEngine implements IAutomationService {
             if (endConfig?.outcome === 'refused') {
                 throw new FlowRefusalSignal(
                     node.id,
-                    // The SAME interpolation a screen `description` gets — the
-                    // ruling's words, one implementation (`interpolateText`).
+                    // The SAME rendering a screen `description` gets — the
+                    // ruling's words, one implementation (`renderTextSlot`, the
+                    // `{{ }}` text renderer since #22110).
                     // Rendered HERE, against the live variable map, because
                     // that is what makes the text per-record; a template on the
                     // wire would put the rendering in every runner.
-                    interpolateText(endConfig.message, variables, context),
+                    renderTextSlot(endConfig.message, variables),
                 );
             }
             return;
