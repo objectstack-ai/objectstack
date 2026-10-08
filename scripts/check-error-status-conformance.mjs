@@ -160,7 +160,6 @@ import {
 import { tmpdir } from 'node:os';
 import { maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
 import { basename, dirname, join, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
@@ -209,12 +208,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '26 — a code the DOOR TRANSLATES away is not a wire producer: derived from': 8,
   '27 — the vocabulary parse reads the enum ARRAY and stops at its bracket: an': 2,
   '28 — the corpus walk skips an entry that VANISHED between readdir and stat,': 10,
-  '29 — the dispatch-gates declaration: a source edit under the scan root derives this gate,': 11,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 30;
+const SELF_TEST_BATTERY_FLOOR = 29;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -223,43 +221,6 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 const SCAN_ROOT = 'packages';
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage', 'build', 'fixtures']);
-
-// ── The dispatch-gates declaration: the `ROOT_DIR_WATCH_HINTS` idiom (#22320) ──
-//
-// `scripts/pm/dispatch-gates.mjs` builds a card's gate list by reading PATH
-// LITERALS out of each gate's source and matching them against the card's
-// changed files. `SCAN_ROOT` is a bare single-segment word, and that extractor
-// refuses a bare word BY DESIGN (its own docblock prices admitting one). So the
-// only literals it read here were the four tracked files below, a roster of
-// files that already exist. It filed this gate under its artifact-roster block
-// for EVERY card. A dev's local sweep for a diff that added a status-emitting
-// site under the scan root derived its command list without this gate, and CI
-// then failed the PR here (#22311, a route file under the services tree).
-//
-// The array names what `walk` admits, in the subtree spelling the extractor
-// accepts: every `.ts` or `.tsx` file at any depth under the scan root.
-// Measured at 4e4111ca0: the walk admits 2999 files. The two hints cover 7847
-// of the 8526 tracked files under the root, and every walked file is among
-// them (complete). The 4848 they name and the walk never opens are 4826 test
-// files, 21 files under a skipped `fixtures` directory and one declaration
-// file: the filters this idiom cannot spell. So the declaration errs WIDE, and
-// that direction is chosen. A wasted run is one source scan with no build; a
-// miss is a CI round trip.
-//
-// ⛔ No `.mts` hint: the walk never opens one, so it would name files this gate
-// does not read. ⛔ Not the bare subtree of the root either: that adds every
-// manifest, README and config under it, and nothing here opens those.
-// ⛔ Never computed from `SCAN_ROOT`. The runtime value would be identical and
-// every local assertion would stay green, but the extractor reads a computed
-// spelling as NOTHING, so the gate would drop back out of every brief
-// (`check:watch-hint-literal` holds the literal spelling). Self-test battery 29
-// holds the other side: the derivation reads these hints off this source, a
-// real emit-site path derives the gate, a docs-only path does not, and every
-// file the walk admits on the live tree is covered.
-// `scripts/pm/bare-root-worklist.mjs` records the matching DECLARED-NARROWER
-// row and holds its spelling SET-EQUAL to this array.
-const ROOT_DIR_WATCH_HINTS = ['packages/**/*.ts', 'packages/**/*.tsx'];
-
 const ERRORS_ZOD = 'packages/spec/src/api/errors.zod.ts';
 const DOC_HANDLING = 'content/docs/protocol/kernel/error-handling.mdx';
 const DOC_CATALOG = 'content/docs/api/error-catalog.mdx';
@@ -1220,7 +1181,7 @@ function runFixture({ files, handling, catalog, members }) {
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
-async function selfTest() {
+function selfTest() {
   // The battery ledger this self-test's floor is evaluated against (#13489).
   // `battery()` opens a battery; every assertion below is attributed to the one
   // most recently opened, so a section that stops running stops registering and
@@ -1967,80 +1928,7 @@ async function selfTest() {
     rmSync(walkRoot, { recursive: true, force: true });
   }
 
-  // 29 — the dispatch-gates declaration (#22320). `ROOT_DIR_WATCH_HINTS` is read
-  //      by ANOTHER tool, so nothing in this gate's own run can go red when it
-  //      is wrong. A missing hint is a gate the derivation never names for a
-  //      source edit under the scan root, which is the defect this battery was
-  //      written for. A surplus hint names the gate for files it never opens.
-  //      Both directions are asked here, of the live tree, through the
-  //      derivation's OWN extractor and covering rule. The import sits inside
-  //      this body, where the extractor's self-test mask blanks the specifier,
-  //      so it adds nothing to the population this file declares (29b holds
-  //      that). The fixture paths are strings, not files: `hintCovers` judges a
-  //      path, so a later rename cannot empty a case.
-  battery('29 — the dispatch-gates declaration: a source edit under the scan root derives this gate,');
-  const { extractWatchHints, hintCovers } = await import('./pm/dispatch-gates.mjs');
-  const ownFile = fileURLToPath(import.meta.url);
-  const checkoutRoot = fileURLToPath(new URL('..', import.meta.url));
-  const repoPath = (p) => relative(checkoutRoot, p).split('\\').join('/');
-  const derivedHints = extractWatchHints(readFileSync(ownFile, 'utf8'), repoPath(ownFile));
-  const derives = (path, hints = derivedHints) => hints.some((h) => hintCovers(h, path));
-  check('29a the derivation reads every declared hint off this source',
-    ROOT_DIR_WATCH_HINTS.length > 0 && ROOT_DIR_WATCH_HINTS.every((h) => derivedHints.includes(h)),
-    `declared ${JSON.stringify(ROOT_DIR_WATCH_HINTS)}, extracted ${JSON.stringify(derivedHints)}. A declaration `
-      + 'the extractor cannot read (a computed spelling, a leading glob) names this gate for nothing');
-  check('29b the self-test\'s own import of the derivation adds no hint: the self-test mask blanks it',
-    !derivedHints.some((h) => h.includes('dispatch-gates')),
-    `extracted ${JSON.stringify(derivedHints)}`);
-  // The positive case the card asked for, spelled as the path of the real diff
-  // that CI failed on this gate while the local derivation did not name it.
-  const EMIT_SITE_EDIT = 'packages/services/service-storage/src/storage-routes.ts';
-  check('29c an edit to the emit site a real red diff touched derives this gate',
-    derives(EMIT_SITE_EDIT), `not derived: ${EMIT_SITE_EDIT}`);
-  const walkedAbs = [];
-  walk(join(checkoutRoot, SCAN_ROOT), walkedAbs);
-  const walked = walkedAbs.map(repoPath);
-  // Asked of the tree that path sits in, not of the one file: a later rename of
-  // that file must not red this gate, and 29e below already holds every walked
-  // file to the declaration.
-  const servicesTree = EMIT_SITE_EDIT.split('/').slice(0, 2).join('/');
-  check('29d …and the walk really opens source files in that tree on the live checkout, so 29c is about the '
-      + 'population and not about a path this gate never reads',
-    walked.some((p) => p.startsWith(`${servicesTree}/`)),
-    `${walked.length} file(s) walked, none under ${servicesTree}`);
-  // COMPLETENESS against the walk itself, not against a copy of its filter.
-  const undeclared = walked.filter((p) => !ROOT_DIR_WATCH_HINTS.some((h) => hintCovers(h, p)));
-  check('29e every file the walk admits is named by a declared hint: an undeclared one is a file this gate '
-      + 'opens and no dispatch brief can see',
-    walked.length > 0 && undeclared.length === 0,
-    `${walked.length} walked, ${undeclared.length} undeclared${undeclared.length ? `: ${undeclared.slice(0, 3).join(', ')}` : ''}`);
-  const deadHints = ROOT_DIR_WATCH_HINTS.filter((h) => !walked.some((p) => hintCovers(h, p)));
-  check('29f no declared hint is DEAD: each one names at least one file the walk opens',
-    deadHints.length === 0, `dead: ${JSON.stringify(deadHints)}`);
-  // The card's control: a docs-only edit to a page this gate never reads.
-  const DOCS_ONLY_EDIT = 'content/docs/ai/agents.mdx';
-  check('29g CONTROL: a docs-only edit to a page this gate never reads does not derive it',
-    !derives(DOCS_ONLY_EDIT),
-    `derived through ${derivedHints.filter((h) => hintCovers(h, DOCS_ONLY_EDIT)).join(', ')}`);
-  check('29h …while an edit to either page this gate DOES read still derives it: the roster stays beside the '
-      + 'declaration',
-    derives(DOC_CATALOG) && derives(DOC_HANDLING));
-  // PRECISION: what the declaration must NOT name under its own root.
-  const NON_SOURCE_EDITS = [
-    'packages/services/service-storage/README.md',
-    'packages/services/service-storage/package.json',
-  ];
-  check('29i PRECISION: a non-source file under the scan root does not derive this gate',
-    NON_SOURCE_EDITS.every((p) => !derives(p)),
-    `derived: ${NON_SOURCE_EDITS.filter((p) => derives(p)).join(', ')}`);
-  check('NEGATIVE CONTROL 29j: the bare subtree spelling of the root WOULD name them, so 29i can fail',
-    NON_SOURCE_EDITS.every((p) => derives(p, extractWatchHints(`const H = ['${SCAN_ROOT}/**'];`))));
-  check('NEGATIVE CONTROL 29k: the extractor still refuses the bare root and reads a computed spelling as '
-      + 'nothing, so the refusal stays as designed and 29a can fail',
-    extractWatchHints(`const SCAN_ROOT = '${SCAN_ROOT}';`).length === 0
-      && extractWatchHints('const H = [`${SCAN_ROOT}/**/*.ts`];').length === 0);
-
-  const CASES = 81;
+  const CASES = 70;
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -2105,9 +1993,7 @@ async function selfTest() {
     + 'DOOR TRANSLATES away is no wire producer — reported, kept out of the unpinned census, with the arm-less '
     + 'negative control still producing and an untranslated code untouched, and the corpus walk skips an entry that '
     + 'VANISHED between readdir and stat (every present file still scanned) while a dangling symlink, ENOTDIR, a '
-    + 'permission error and a missing root still throw, and the dispatch-gates declaration is read off this '
-    + 'source, derives this gate for a real emit-site path and for every file the walk opens, and does not '
-    + 'derive it for a docs-only path or a non-source file under the scan root.',
+    + 'permission error and a missing root still throw.',
   );
   selfTestReachedVerdict = true;
   process.exit(0);
@@ -2425,7 +2311,7 @@ function main() {
 // this gate's full report into the importer's stdout before returning a binding.
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    await selfTest();
+    selfTest();
       if (!selfTestReachedVerdict) {
         console.error(
           '\n✗ check-error-status-conformance self-test: selfTest() returned without reaching its verdict,\n'
