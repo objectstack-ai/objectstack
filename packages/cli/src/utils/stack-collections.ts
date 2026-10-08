@@ -372,9 +372,14 @@ export function artifactObjectNames(raw: unknown): string[] {
  * Computed on first use, never at module load: both schemas are lazy proxies
  * and touching `.shape` forces the whole graph, which the CLI pays for on every
  * invocation if it happens at import time.
+ *
+ * Exported for the one other reader that needs the same set: `os migrate meta
+ * --write` tracing a package body back to the `composeStacks` input that
+ * authored it (`authored-source-codemod.ts`). Composition copies exactly these
+ * keys from an input stack onto its manifest's fields.
  */
 let cachedCollectionKeys: readonly string[] | undefined;
-function packageOwnedCollectionKeys(): readonly string[] {
+export function packageOwnedCollectionKeys(): readonly string[] {
   if (cachedCollectionKeys) return cachedCollectionKeys;
   const bodyKeys = new Set(shapeKeys(AssembledPackageBodySchema, 'AssembledPackageBodySchema'));
   cachedCollectionKeys = shapeKeys(ObjectStackDefinitionSchema, 'ObjectStackDefinitionSchema')
