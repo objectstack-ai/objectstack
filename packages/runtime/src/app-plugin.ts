@@ -1134,8 +1134,9 @@ export class AppPlugin implements Plugin {
                                 + `. ${field === 'permissions'
                                     ? 'Nothing is lost if an ADR-0025 §3.2 capability GRANT was meant — '
                                       + '`manifest.permissions` is the manifest-stage grant a package requests '
-                                      + '(a flat list of permission strings, or `{ services, hooks, network, fs }`), '
-                                      + 'and this registrar only reads ADR-0090 permission sets. But if permission '
+                                      + '(`{ services, hooks, network, fs }`; a flat list of permission strings is '
+                                      + 'its retired legacy form, refused at parse and never read at load), and '
+                                      + 'this registrar only reads ADR-0090 permission sets. But if permission '
                                       + 'sets were meant, none is registered, no audience-binding suggestion is '
                                       + 'offered, and the boot goes on looking healthy'
                                     : `\`${field}\` is not a key \`ManifestSchema\` declares, so this value reached `

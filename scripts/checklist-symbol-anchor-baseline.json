@@ -18,6 +18,7 @@
     "areas/platform-core.json": 58,
     "areas/records-forms.json": 78,
     "areas/search.json": 14,
-    "areas/studio-authoring.json": 26
+    "areas/studio-authoring.json": 26,
+    "areas/ux-conventions.json": 8
   }
 }
