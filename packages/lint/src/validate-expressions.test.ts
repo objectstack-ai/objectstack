@@ -3033,6 +3033,11 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // `grammar` excuse #19938 added here left with the import it excused:
       // this file no longer imports `'./flow-template-grammar.js'`.)
       'templateRefusal',
+      // [#22110] The spec's text-slot locator, one slot at a time. Its keys are
+      // that helper's own `{ path, label, source }` — never metadata keys: the
+      // metadata keys it reads (`title`, `message`, `description`) are named in
+      // the spec's `FLOW_NODE_TEXT_SLOTS`, not by name here.
+      'slot',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });

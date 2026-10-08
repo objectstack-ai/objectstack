@@ -93,8 +93,8 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         configSchema: {
           type: 'object',
           properties: {
-            title: { type: 'string', title: 'Title', description: 'Heading shown above the screen.' },
-            description: { type: 'string', format: 'multiline', title: 'Description', description: 'Body text. Interpolates {var} references (e.g. {approval_path}).' },
+            title: { type: 'string', title: 'Title', description: 'Heading shown above the screen. Renders {{ }} placeholders (e.g. {{ record.name }}).' },
+            description: { type: 'string', format: 'multiline', title: 'Description', description: 'Body text. Renders {{ }} placeholders: a variable path with an optional formatter (e.g. {{ approval_path }}, {{ record.amount | currency }}).' },
             fields: {
               type: 'array',
               title: 'Fields',

@@ -392,14 +392,12 @@ export type CronExpressionInput = z.input<typeof CronExpressionInputSchema>;
  *   `@objectstack/metadata-protocol`). Both spellings resolve identically
  *   there — single-brace `titleFormat` values are legal by construction, not
  *   a grammar this schema failed to enforce.
- * - A notify flow node's `title` / `message` read the other way: their
- *   renderer is the flow interpolator (`interpolate()` in
- *   `@objectstack/service-automation`), which substitutes single-brace `{var}`
- *   only — a `{{var}}` keeps its outer braces in the sent text, and the
- *   build's `flow-double-brace-interpolation` rule flags it on a flow node.
- *   Those two slots take this same input from the package-internal
- *   constructor (`./typed-expression-input.ts`), so their refusals prescribe
- *   `{record.name}` instead of this schema's `{{record.name}}`.
+ * - A notify flow node's `title` / `message` read `{{var}}` too, and only that:
+ *   since protocol 18 (#22110, ADR-0032 D3) their renderer is the formula
+ *   template engine, and a single-brace `{var}` there is refused at every door
+ *   (`automation/flow-text-slot-template.ts`). Those two slots take this same
+ *   input from the package-internal constructor (`./typed-expression-input.ts`)
+ *   so their refusals can name the slot.
  *
  * So write the spelling the slot's renderer reads — `{{var}}` on this schema's
  * slots, `{var}` on a notify node's — and do not read either spelling as

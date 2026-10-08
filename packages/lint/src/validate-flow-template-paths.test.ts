@@ -893,6 +893,22 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
     expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
   });
 
+  // [#22110] A text slot reads `{{ }}` holes now; the path inside one is the
+  // same reference, and judged the same way — the switch of delimiter must not
+  // blind this check on the slots where most references live.
+  it('judges a path inside a `{{ }}` hole on a text slot the same way', () => {
+    const findings = validateFlowTemplatePaths(
+      scheduleFlow([FETCH_ONE, { id: 'note', type: 'notify', config: { title: 'Case {{ caseRecord.subjcet }}' } }]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
+    expect(
+      validateFlowTemplatePaths(
+        scheduleFlow([FETCH_ONE, { id: 'note', type: 'notify', config: { title: 'Case {{ caseRecord.subject }}' } }]),
+      ),
+    ).toEqual([]);
+  });
+
   it('resolves the declared-variable + loop shape examples/app-todo ships', () => {
     const findings = validateFlowTemplatePaths(
       scheduleFlow(
