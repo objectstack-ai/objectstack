@@ -65,7 +65,7 @@ const TAGS = ['compliance', 'gdpr'];
 // Unanchored, because a thrown `ZodError`'s message is the JSON of its issues;
 // the key-first house convention is asserted on the issue message itself below.
 const PRESCRIPTION =
-  /`rowLevelSecurity\[\]\.tags` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049 enforce-or-remove\).*Delete the key\..*`positions`.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand\./s;
+  /`rowLevelSecurity\[\]\.tags` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049 enforce-or-remove\).*Delete the key\..*`positions`.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./s;
 
 const permissionSet = (policy: Record<string, unknown>) => ({
   name: 'compliance_reviewer',

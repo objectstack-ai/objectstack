@@ -2602,7 +2602,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       is_system: {
         label: "システムテンプレート",
-        help: "プラグイン/プラットフォームが提供。テナントは編集可能ですが削除は推奨しません"
+        help: "プラグイン/プラットフォームが提供"
       },
       variables_json: {
         label: "変数（JSON）",
@@ -2619,7 +2619,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       customized: {
         label: "カスタマイズ済み",
-        help: "管理者がパッケージで宣言されたテンプレートを編集すると設定されます。以後、起動時のシードはこの行を上書きしません（文面を変えたパスワードリセットメールは再デプロイ後も残ります）。admin 行では意味を持ちません。"
+        help: "組織レベルのテンプレート編集が閉じられる前に管理者が編集した、パッケージで宣言されたテンプレートに設定されています。起動時のシードはこの行を上書きしません。現在はこれを設定する操作はありません。admin 行では意味を持ちません。"
       },
       created_at: {
         label: "作成日時"
@@ -3257,7 +3257,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "スコープ",
         help: "この行が属する設定解決階層のレイヤー。",
         options: {
-          global: "グローバル",
           tenant: "テナント",
           user: "ユーザー"
         }
@@ -3276,7 +3275,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       locked: {
         label: "ロック済み",
-        help: "true の場合、下位スコープの行はこの値を上書きできず、下位スコープへの書き込みは 409 を返します。プラットフォーム管理者がすべてのテナントにグローバル値を固定するために使用します（フェーズ 2 カスケード）。"
+        help: "true の場合、下位スコープの行はこの値を上書きできず、下位スコープへの書き込みは 409 を返します。テナント行は、そのテナントのユーザーに対して値を固定します（フェーズ 2 カスケード）。"
       },
       locked_reason: {
         label: "ロック理由",

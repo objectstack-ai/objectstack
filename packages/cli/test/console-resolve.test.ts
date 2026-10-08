@@ -20,6 +20,7 @@ import {
   isConsoleVersionCompatible,
   detectConsoleShaDrift,
   formatConsoleShaDriftWarning,
+  formatConsoleDistMissingWarning,
 } from '../src/utils/console.js';
 
 // resolveConsolePath() also discovers the real, version-locked workspace
@@ -221,5 +222,110 @@ describe('detectConsoleShaDrift', () => {
 
     const warnings = warningsFor(consoleDir);
     expect(warnings).toEqual([]);
+  });
+});
+
+describe('formatConsoleDistMissingWarning — the remedy named for where the server runs', () => {
+  /** The framework repo's remedy, and the one the warning used to name everywhere. */
+  const BUILD_REMEDY = 'pnpm objectui:build';
+  const RETIRED_REMEDY = '@object-ui/console';
+
+  function writeJson(file: string, value: unknown): void {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(value));
+  }
+
+  /** A console package with a manifest and no `dist/` — what the warning is printed for. */
+  function writeUnbuiltConsole(dir: string): string {
+    writeJson(path.join(dir, 'package.json'), { name: '@objectstack/console', version: '1.0.0' });
+    return dir;
+  }
+
+  function tmpRoot(tag: string): string {
+    return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `os-console-remedy-${tag}-`)));
+  }
+
+  /**
+   * The framework repo's shape: the root manifest declares the build script
+   * (or, for the control, does not), and `packages/console` is the workspace
+   * package `@objectstack/cli` resolves.
+   */
+  function makeFrameworkTree(withScript: boolean): { root: string; consoleDir: string } {
+    const root = tmpRoot('repo');
+    writeJson(path.join(root, 'package.json'), {
+      name: 'framework-root',
+      private: true,
+      scripts: withScript
+        ? { build: 'turbo run build', 'objectui:build': 'bash scripts/build-console.sh' }
+        : { build: 'turbo run build' },
+    });
+    const consoleDir = writeUnbuiltConsole(path.join(root, 'packages', 'console'));
+    return { root, consoleDir };
+  }
+
+  it('names `pnpm objectui:build` and the root to run it in, inside the framework repo', () => {
+    const { root, consoleDir } = makeFrameworkTree(true);
+
+    const message = formatConsoleDistMissingWarning(consoleDir);
+    expect(message).toContain(BUILD_REMEDY);
+    expect(message).toContain(` in ${root} `);
+    expect(message).toContain(path.join('packages', 'console', 'dist'));
+    expect(message).not.toContain('@objectstack/console');
+    expect(message).not.toContain(RETIRED_REMEDY);
+  });
+
+  it('control: the same layout without the script gets the install remedy — the script is the signal, not the layout', () => {
+    const { consoleDir } = makeFrameworkTree(false);
+
+    const message = formatConsoleDistMissingWarning(consoleDir);
+    expect(message).not.toContain(BUILD_REMEDY);
+    expect(message).toContain('@objectstack/console');
+  });
+
+  it('names the `@objectstack/console` install in a project that installed the CLI (hoisted and pnpm-store layouts)', () => {
+    const project = tmpRoot('app');
+    writeJson(path.join(project, 'package.json'), {
+      name: 'consumer-app',
+      scripts: { dev: 'objectstack dev' },
+    });
+    for (const consoleDir of [
+      writeUnbuiltConsole(path.join(project, 'node_modules', '@objectstack', 'console')),
+      writeUnbuiltConsole(
+        path.join(
+          project, 'node_modules', '.pnpm', '@objectstack+console@1.0.0',
+          'node_modules', '@objectstack', 'console',
+        ),
+      ),
+    ]) {
+      const message = formatConsoleDistMissingWarning(consoleDir);
+      expect(message).toContain('@objectstack/console');
+      expect(message).toContain(path.join(consoleDir, 'dist'));
+      expect(message).not.toContain(BUILD_REMEDY);
+      expect(message).not.toContain(RETIRED_REMEDY);
+    }
+  });
+
+  it('stops at the consuming project\'s own manifest, even inside a framework checkout', () => {
+    // A project created inside a directory whose manifest declares the script:
+    // the console it resolved is ITS install, which `objectui:build` does not
+    // build, so the install remedy is the true one.
+    const outer = tmpRoot('outer');
+    writeJson(path.join(outer, 'package.json'), {
+      name: 'framework-root',
+      scripts: { 'objectui:build': 'bash scripts/build-console.sh' },
+    });
+    const project = path.join(outer, 'scratch', 'my-app');
+    const consoleDir = writeUnbuiltConsole(
+      path.join(project, 'node_modules', '@objectstack', 'console'),
+    );
+    writeJson(path.join(project, 'package.json'), { name: 'my-app' });
+    expect(formatConsoleDistMissingWarning(consoleDir)).not.toContain(BUILD_REMEDY);
+
+    // Control: without the project's own manifest the walk reaches the outer
+    // one — so the stop above is what kept the answer right.
+    fs.rmSync(path.join(project, 'package.json'));
+    const climbed = formatConsoleDistMissingWarning(consoleDir);
+    expect(climbed).toContain(BUILD_REMEDY);
+    expect(climbed).toContain(` in ${outer} `);
   });
 });

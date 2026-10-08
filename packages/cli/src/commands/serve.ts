@@ -153,6 +153,7 @@ import {
   decideConsoleMount,
   formatConsoleShaDriftWarning,
   formatConsoleShaDriftRefusal,
+  formatConsoleDistMissingWarning,
   createConsoleStaticPlugin,
   createRuntimeAssetsPlugin,
   type ConsoleShaDrift,
@@ -5066,7 +5067,7 @@ export default class Serve extends Command {
           } else if (refusedForDrift && consoleDrift) {
             console.error(chalk.red(formatConsoleShaDriftRefusal(consoleDrift)));
           } else {
-            console.warn(chalk.yellow(`  ⚠ Console dist not found — install \`@object-ui/console\` (already built) or run \`pnpm --filter @object-ui/console build\` in the objectui workspace`));
+            console.warn(chalk.yellow(formatConsoleDistMissingWarning(consolePath)));
           }
         }
       }

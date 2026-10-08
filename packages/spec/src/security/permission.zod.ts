@@ -464,7 +464,7 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
     'granting the bit delivered nothing. Delete the key — a dispatched `restore` stays denied ' +
     'fail-closed by the permission evaluator\'s destructive-operation backstop, and the bit ' +
     'returns with the M2 lifecycle initiative alongside the operation it gates. ' +
-    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   allowPurge: retiredKey(
     '`objects.<object>.allowPurge` was removed in @objectstack/spec 17 (ADR-0049) — ' +
@@ -474,7 +474,7 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
     'dispatched `purge` stays denied fail-closed by the permission evaluator\'s ' +
     'destructive-operation backstop, and the bit returns with the M2 lifecycle initiative' +
     ' alongside the operation it gates. ' +
-    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   /** 

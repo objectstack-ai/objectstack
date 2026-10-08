@@ -63,7 +63,7 @@
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
-import { SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
+import { SysPlatformSetting, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import {
@@ -203,6 +203,9 @@ function makeMemoryDriver() {
   const matches = (row: Record<string, unknown>, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
     return Object.entries(where).every(([k, v]) => {
+      // `$or` is the one combinator the settings reads emit (ADR-0131 D7: every
+      // `sys_setting` read names its rungs); anything else still refuses.
+      if (k === '$or') return (v as any[]).some((b) => matches(row, b));
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       return (row[k] ?? null) === (v ?? null);
     });
@@ -296,7 +299,11 @@ type Tenancy =
 
 interface Mounted {
   http: MockHttp;
-  /** REAL `sys_setting` rows, read out of the driver's own store. */
+  /**
+   * REAL settings rows of this file's manifest, read out of the driver's own
+   * store. The manifest is `scope: 'global'`, so the store is the global rung's
+   * `sys_platform_setting` (ADR-0131 D7).
+   */
   settingRows: () => Record<string, unknown>[];
   /** REAL `sys_setting_audit` rows — where this seam's `tenantId` lands. */
   auditRows: () => Record<string, unknown>[];
@@ -315,6 +322,7 @@ async function mount(tenancy: Tenancy): Promise<Mounted> {
   engine.registerDriver(driver, true);
   await engine.init();
   engine.registry.registerObject(SysSetting as any, OWNER_PACKAGE);
+  engine.registry.registerObject(SysPlatformSetting as any, OWNER_PACKAGE);
   engine.registry.registerObject(SysSettingAudit as any, OWNER_PACKAGE);
 
   // The permission tables belong to plugins this package must not depend on,
@@ -387,7 +395,7 @@ async function mount(tenancy: Tenancy): Promise<Mounted> {
 
   return {
     http,
-    settingRows: () => [...rowsOf('sys_setting').values()],
+    settingRows: () => [...rowsOf('sys_platform_setting').values()],
     auditRows: () => [...rowsOf('sys_setting_audit').values()],
     contextFromRequest: captured.contextFromRequest!,
   };

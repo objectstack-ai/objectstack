@@ -3867,7 +3867,7 @@ describe('ListViewSchema — retired striped/bordered/virtualScroll (every reade
         ListViewSchema.parse({ type: 'grid', columns: ['name'], [key]: true });
       } catch (e) { message = String((e as Error).message); }
       expect(message).toMatch(new RegExp(`view\\.${key}\` was removed`));
-      expect(message).toMatch(/Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand\./);
+      expect(message).toMatch(/Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./);
     }
   });
   it('accepts the live grid siblings byte-identically (rowHeight/selection/pagination/resizable)', () => {
@@ -3945,7 +3945,7 @@ describe('ListViewSchema.exportOptions — object form + array lift + pdf retire
     expect(message).toMatch(/a printable document \(an invoice, a delivery order, a letter\) is a page that declares\s+`print`/);
     expect(message).not.toMatch(/#\d{3,5}\b/);
     expect(message).toMatch(/'csv', 'xlsx' and 'json'/);
-    expect(message).toMatch(/Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand\./);
+    expect(message).toMatch(/Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./);
   });
 
   it("REJECTS 'pdf' in the object form's `formats` with the same prescription", () => {
@@ -4457,7 +4457,7 @@ describe("ListViewSchema — the RETIRED `page` view type", () => {
     };
     for (const body of [{ type: 'page', columns: [] }, { type: 'grid', pageName: 'p', columns: [] }]) {
       expect(collect(body)).toContain(
-        'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+        'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
       );
     }
   });

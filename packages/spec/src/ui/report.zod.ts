@@ -173,13 +173,13 @@ const JOINED_BLOCK_CHART_RETIRED =
   + 'block `chart`, so the chart parsed and nothing was plotted. Delete the key. A chart is drawn '
   + 'from a non-joined report\'s own top-level `chart`: to plot one of these slices, give it a '
   + 'report of its own with that `chart`. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 const JOINED_CONTAINER_CHART_REFUSED =
   'a `joined` report draws no chart — it draws each block as a table and never reads `chart`, '
   + 'on the container or on a block. Delete `chart`; to plot one of these slices, give it a '
   + 'non-joined report of its own with that `chart`. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * The refusal a `joined` report's block with no `dataset` earns, at

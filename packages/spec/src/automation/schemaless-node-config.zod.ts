@@ -319,7 +319,8 @@ export const ScriptConfigSchema = lazySchema(() => strictObject({
     + 'the Slack connector, or an `http` node posting to a webhook; for anything else, move the '
     + 'name into `config.function`. '
     + 'Run `os migrate meta --from 16` to list the mechanical edits for the shorthand '
-    + 'case into `config.function`; the stub and marker values are removed.',
+    + 'case into `config.function`; `--write` applies the ones it can prove, and the stub and '
+    + 'marker values are removed.',
   ),
   template: retiredKey(
     '`script.config.template` was removed in @objectstack/spec 17 — it fed only the '
@@ -327,27 +328,27 @@ export const ScriptConfigSchema = lazySchema(() => strictObject({
     + 'id was ever resolved. Delete the key. A `notify` node carries its own `title`/`message`, and '
     + 'stored templates live in the messaging service (`sys_notification_template`), not on the '
     + 'node. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   recipients: retiredKey(
     '`script.config.recipients` was removed in @objectstack/spec 17 — the addresses were '
     + 'logged, never messaged: the `email`/`slack` branches it fed delivered nothing. Use a '
     + '`notify` node, whose `recipients` (user ids, field refs or addresses) reach the messaging '
     + 'service for real. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   variables: retiredKey(
     '`script.config.variables` was removed in @objectstack/spec 17 — it injected values '
     + 'into a template no side effect ever rendered. Delete the key. A `notify` node carries '
     + 'structured data in `payload`; a registered function takes it in `config.inputs`. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   script: retiredKey(
     '`script.config.script` was removed in @objectstack/spec 17 — the built-in runtime has '
     + 'no server-side JS sandbox, so an inline body was recognized and never executed: the node '
     + 'warned and completed as a no-op. Move the logic into a registered function '
     + '(`defineStack({ functions })`) and name it in `config.function`. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 }));
 

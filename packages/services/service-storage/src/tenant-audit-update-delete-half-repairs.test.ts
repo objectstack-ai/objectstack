@@ -346,7 +346,11 @@ async function withRoutes(
   }
 }
 
-const committedFile = (id: string): FileRecord => ({ ...fileRec(id), status: 'pending' });
+// [#22046] The rows these doors act on carry their uploader: the commit and
+// progress doors now refuse a caller who is not the file's `owner_id` before
+// any write, so a seed with no owner would measure that refusal instead of
+// the write context these cases pin. `u1` is the session `withRoutes` hands in.
+const committedFile = (id: string): FileRecord => ({ ...fileRec(id), status: 'pending', owner_id: 'u1' });
 
 describe('[#13178] the routes: the upload doors pass the session organization on their writes', () => {
   it('POST /upload/complete scopes the sys_file commit — the session it used to discard', async () => {
@@ -443,6 +447,8 @@ describe('[#13178] the routes: the upload doors pass the session organization on
           // be missed when threading a write context by hand.
           data: { ...sessionRec('s1'), expires_at: new Date(Date.now() - 60_000).toISOString() },
         },
+        // [#22046] The session reaches its uploader through `file_id`.
+        { object: 'sys_file', data: committedFile('f_s1') },
       ],
       async (server) => {
         const res = createMockRes();

@@ -108,6 +108,10 @@ function wireBoot(
       if (object === 'sys_setting') {
         return { async find() { harness.reads.push('sys_setting'); return rows.settings.map((r) => ({ ...r })); } };
       }
+      // [ADR-0131 D7] The settings family's second holder: the global rung's store.
+      if (object === 'sys_platform_setting') {
+        return { async find() { harness.reads.push('sys_platform_setting'); return []; } };
+      }
       if (object === 'sys_metadata') return { async find() { harness.reads.push('sys_metadata'); return []; } };
       return undefined;
     },
@@ -247,7 +251,7 @@ describe('os secret rewrap — guards that stop a run before any row is opened o
   }, 60_000);
 
   it('a dry run over tables the boot measured absent reads none of them, and reports empty work', async () => {
-    const h = wireBoot(freshRows(), { absent: ['sys_secret', 'sys_setting', 'sys_metadata'] });
+    const h = wireBoot(freshRows(), { absent: ['sys_secret', 'sys_setting', 'sys_platform_setting', 'sys_metadata'] });
     const { payload, exitCode } = await run(['--no-declared-datasources']);
 
     // "Not asked": a table that does not exist holds nothing, so no read is issued.

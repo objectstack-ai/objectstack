@@ -117,7 +117,7 @@ export const RETIRED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = new Map
     + 'no-renderer exclusion), so every key on this element was a capability claim nothing '
     + 'kept. Delete the `element:filter` component; list surfaces own their filtering — use a '
     + "view's `userFilters` quick-filter bar or the list toolbar's filter builder. "
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.'],
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.'],
   // #21504, ADR-0049 enforce-or-remove (triage ruling 5963897014: retire,
   // refused by name — the `user:profile` precedent above). Zero producers
   // measured in objectstack, cloud and hotcrm, and objectui registers no
@@ -149,7 +149,7 @@ export const RETIRED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = new Map
     + 'and use the object-bound `object-form` block instead — it is rendered, '
     + 'designer-publishable, and carries the same intent (`objectName`, `fields`, `mode`, '
     + '`submitText`). '
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.'],
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.'],
 ]);
 
 /**
@@ -450,7 +450,7 @@ export const PageComponentSchema = lazySchema(() => strictObject({
     'applied, use the sibling `responsiveStyles` (ADR-0065) — per-breakpoint CSS maps compiled ' +
     "to id-scoped CSS at render, e.g. `responsiveStyles: { xsmall: { display: 'none' } }` to " +
     'hide a component on the narrowest screens. ' +
-    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 
   /** ARIA accessibility attributes */
@@ -730,7 +730,7 @@ export function checkPageRequiresKind(
       + ': it exists only on the kinds whose source the platform compiles at save, `html` and its '
       + 'deprecated alias `jsx`, where it is derived from the source and stored. On a '
       + `\`${kind}\` page nothing derives it and nothing enforces it. Delete the key. `
-      + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+      + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   });
 }
 
@@ -772,7 +772,7 @@ const PAGE_ASSIGNED_PROFILES_RETIRED =
   + "audience is the permission set's: gate the DATA the page shows with the object's permission "
   + 'sets, and bind those sets to people through positions (`sys_position_permission_set`) — '
   + 'those are the checks the runtime actually runs. '
-  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * The wrong-layer pointer `profiles` / `assignedTo` now carry. Deliberately the

@@ -1769,6 +1769,27 @@ function metaSavePreconditionPin(headers: Record<string, unknown> | undefined):
 }
 
 /**
+ * [#22128] The ONE reading of `?package=` on the `/meta/:type/:name` item doors
+ * — the read (`GET`), the save (`PUT`) and the publish
+ * (`POST …/publish`): the package the request names, or `undefined` when it
+ * names none. `all` is the metadata list's "show everything" scope and the
+ * empty value states nothing, so both name no package: the save writes the
+ * env-local overlay (its draft inheriting the package of the item's active
+ * row, #11087) and the publish keeps its historical match-any-package draft
+ * resolution. A non-string value is not forwarded either.
+ *
+ * One function because the read's `version` is the token the save at the same
+ * address compares against: a read that forwarded the literal `all` resolved
+ * that token at a package no save writes, so it served `null` beside a row the
+ * save then judged, and a client that pinned `If-None-Match: *` on that `null`
+ * was refused. ⛔ Never a third inline copy at a door: the save and publish
+ * doors each carried one, and the read door had none.
+ */
+function metaItemPackageBinding(raw: unknown): string | undefined {
+    return typeof raw === 'string' && raw !== '' && raw !== 'all' ? raw : undefined;
+}
+
+/**
  * [#20378 · #20441] THE AUTHORING-DOOR REFUSAL — ruling 5865708652 (letter B),
  * carried to `/audit` by triage's grade 5871509797. Sends it and answers `true`
  * when {@link mayReadPendingDrafts} does not admit `caller`; answers `false`,
@@ -6867,7 +6888,11 @@ export class RestServer {
                             ));
                         } else {
                             // Non-cached version
-                            const packageId = req.query?.package || undefined;
+                            // [#22128] The save door's reading of `?package=`
+                            // ({@link metaItemPackageBinding}): the served
+                            // `version` is resolved at the address that save
+                            // writes, so `all` names no package here either.
+                            const packageId = metaItemPackageBinding(req.query?.package);
                             // [commit 2a29caa53] Typed against the spec request shape —
                             // the `as any` this literal used to carry is
                             // retired now that the spec declares `state` and
@@ -7165,11 +7190,9 @@ export class RestServer {
 
                     // Software-package binding (Studio package authoring).
                     // `?package=<id>` binds the saved row to that package
-                    // (sys_metadata.package_id). 'all'/empty = env-local overlay.
-                    const packageRaw = req.query?.package;
-                    const packageId = typeof packageRaw === 'string' && packageRaw && packageRaw !== 'all'
-                        ? packageRaw
-                        : undefined;
+                    // (sys_metadata.package_id). 'all'/empty = env-local overlay
+                    // ({@link metaItemPackageBinding}, the item read's too).
+                    const packageId = metaItemPackageBinding(req.query?.package);
 
                     // [#8805] THE WRITE-SIDE ORGANIZATION. Until this landed the
                     // door passed none, so `recordMetadataAudit` stamped
@@ -7952,10 +7975,7 @@ export class RestServer {
                     // does. Widening `MetadataItem` is a `packages/spec` contract
                     // change and stays filed rather than taken here.
                     if (refuseRepeatedQueryParams(req, res, ['package'])) return;
-                    const packageRaw = req.query?.package;
-                    const packageId = typeof packageRaw === 'string' && packageRaw && packageRaw !== 'all'
-                        ? packageRaw
-                        : undefined;
+                    const packageId = metaItemPackageBinding(req.query?.package);
 
                     // [#8805] The publish half of the same organization, and it
                     // is REQUIRED for the `PUT` fix to be usable rather than a

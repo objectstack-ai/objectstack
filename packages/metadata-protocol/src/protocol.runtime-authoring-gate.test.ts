@@ -1885,10 +1885,11 @@ describe('runtime authoring gate on OBJECT writes — the validation-rule verdic
  *      the same findings: rule, location, message and hint.
  *
  * Every gate of the pass (the root verdict, the null guard, the traversal
- * refusal, the retired `conditionalRequired`) and the fence over option
- * `visibleWhen` and the object's action predicates are pinned in
- * `@objectstack/lint`'s `runtime-gate.object-field-rule-writes.test.ts` and
- * `runtime-gate.object-formula-writes.test.ts`.
+ * refusal, the retired `conditionalRequired`) and the fence over the object's
+ * action predicates are pinned in `@objectstack/lint`'s
+ * `runtime-gate.object-field-rule-writes.test.ts` and
+ * `runtime-gate.object-formula-writes.test.ts`; option `visibleWhen` joined
+ * the door in pass 3 (the block below).
  *
  * ⚠️ As in the #22019 block above: this package reaches `@objectstack/lint`
  * through its built `dist/`, so an edit to the rule is invisible here until
@@ -2022,6 +2023,187 @@ describe('runtime authoring gate on OBJECT writes — the field-rule-slot verdic
         }
         // And the valid slots are clean at the build too, not just at the door.
         expect(buildFindings(fxField(VALID))).toEqual([]);
+    });
+});
+
+/**
+ * [#22032, pass 3] The object save door gives the build's verdict on a
+ * field option's `visibleWhen`.
+ *
+ * The same `formulas.mdx` sentence covers an option's `visibleWhen`: the
+ * shared validator backs `os build` and metadata registration. After pass 2
+ * the build's expression rule ran the whole field walk on this door except the
+ * per-option loop, which kept its own fence, so an option whose `visibleWhen`
+ * read a bare field (`amount > 1`) still saved with a 200, while `os build`
+ * refused it at `error`.
+ *
+ * The lift is in `@objectstack/lint` (the option loop's object-write guard is
+ * gone); no code here moves. Pinned through the REAL `saveMetaItem` /
+ * `publishMetaItem` / `publishPackageDrafts`:
+ *
+ *  (a) the door refuses a bare reference, an unregistered function and a read
+ *      through a reference field — a 422 `INVALID_METADATA` carrying the
+ *      build's located finding — on an active save, on a draft's promotion and
+ *      on a package's draft publish, and nothing lands;
+ *  (b) the showcase's two option shapes still save: a `record.country`
+ *      cascade and the `'org_admin' in current_user.positions` role gate — the
+ *      option evaluator binds `current_user` (ADR-0068 D1), so the build
+ *      accepts it there, and so does this door;
+ *  (d) for each refused body the door's issues and the build's findings are
+ *      the same findings: rule, location, message and hint.
+ *
+ * The rest of the pass's findings, the `current_user` contrast with the
+ * field's own slot, and the fence over the object's action predicates are
+ * pinned in `@objectstack/lint`'s
+ * `runtime-gate.object-option-visibility-writes.test.ts` and
+ * `runtime-gate.object-formula-writes.test.ts`.
+ *
+ * ⚠️ As in the #22019 block above: this package reaches `@objectstack/lint`
+ * through its built `dist/`, so an edit to the rule is invisible here until
+ * `pnpm --filter @objectstack/lint build` has run.
+ */
+describe('runtime authoring gate on OBJECT writes — the option visibleWhen verdict (#22032 pass 3)', () => {
+    /** `sharingModel` is authored so `security-owd-unset` stays quiet and the refusal is the option's. */
+    const fxOption = (provinceZj: unknown, restricted: unknown = "'org_admin' in current_user.positions") => ({
+        name: 'fx_option',
+        label: 'Option Probe',
+        sharingModel: 'private',
+        fields: {
+            name: { type: 'text', label: 'Name' },
+            amount: { type: 'number', label: 'Amount' },
+            // A self-reference, so the reference resolves in the write's own snapshot.
+            account: { type: 'lookup', label: 'Account', reference: 'fx_option' },
+            country: {
+                type: 'select',
+                label: 'Country',
+                options: [{ label: 'China', value: 'cn' }, { label: 'United States', value: 'us' }],
+            },
+            province: {
+                type: 'select',
+                label: 'Province',
+                options: [
+                    { label: 'Zhejiang', value: 'zj', visibleWhen: provinceZj },
+                    { label: 'California', value: 'ca', visibleWhen: "record.country == 'us'" },
+                ],
+            },
+            tier: {
+                type: 'select',
+                label: 'Tier',
+                options: [
+                    { label: 'Standard', value: 'standard' },
+                    { label: 'Restricted', value: 'restricted', visibleWhen: restricted },
+                ],
+            },
+        },
+    });
+    /** One refused body per finding kind, each refused by `os build` at `error`; the first is the card's shape. */
+    const REFUSED = [
+        { body: 'amount > 1', subject: 'bare reference `amount`' },
+        { body: 'sqrt(record.amount) > 1', subject: '`sqrt`' },
+        { body: "record.account.name == 'x'", subject: 'reads `name` through `record.account`' },
+    ] as const;
+    /** The showcase's cascade; the role gate rides every body as `tier`'s `restricted` option. */
+    const CASCADE = "record.country == 'cn'";
+    /** Where the build locates the refused option's finding — the option the author edits. */
+    const WHERE = "object 'fx_option' · field 'province' option 'zj' visibleWhen";
+
+    const optionRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'object' && r.name === 'fx_option');
+
+    /** The build's findings for one object, through the build's own entry. */
+    const buildFindings = (obj: unknown) => {
+        const stack = { objects: [obj] };
+        return runAuthoringRules('build', { normalized: stack, parsed: stack })
+            .filter((f) => f.rule === EXPRESSION_INVALID);
+    };
+
+    for (const { body, subject } of REFUSED) {
+        it(`(a) REFUSES an active save of an option's \`visibleWhen: ${body}\` with a 422 carrying the build's located finding`, async () => {
+            const { protocol, rows } = makeProtocol();
+
+            const err = await protocol
+                .saveMetaItem({ type: 'object', name: 'fx_option', item: fxOption(body) })
+                .catch((e: any) => e);
+
+            expect(err, 'the save resolved — the door still accepts the option predicate').toBeInstanceOf(Error);
+            expect(err.status).toBe(422);
+            expect(err.code).toBe('INVALID_METADATA');
+            expect(err.rulesRun).toContain('validateStackExpressions');
+            const issues = err.issues.filter((i: any) => i.rule === EXPRESSION_INVALID);
+            expect(issues, `issues: ${JSON.stringify(err.issues)}`).toHaveLength(1);
+            expect(issues[0].path).toBe(WHERE);
+            expect(issues[0].where).toBe(WHERE);
+            expect(issues[0].severity).toBe('error');
+            // The named subject: what the author typed, as the build names it.
+            expect(issues[0].message).toContain(subject);
+            // And nothing landed — a gate that refuses after persisting is a log line.
+            expect(optionRows(rows)).toEqual([]);
+        });
+    }
+
+    it("(a) REFUSES the card-shaped body on a draft's PROMOTION — the draft door is not a bypass", async () => {
+        const { protocol } = makeProtocol();
+        // A draft save is never gated (#4463 D1): the author may keep a half-finished object.
+        await expect(
+            protocol.saveMetaItem({ type: 'object', name: 'fx_option', item: fxOption(REFUSED[0].body), mode: 'draft' }),
+        ).resolves.toMatchObject({ success: true });
+
+        const err = await protocol.publishMetaItem({ type: 'object', name: 'fx_option' }).catch((e: any) => e);
+
+        expect(err?.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID);
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(issue.path).toBe(WHERE);
+    });
+
+    it("(a) REFUSES the card-shaped body on a PACKAGE's draft publish — nothing goes live", async () => {
+        const { protocol, rows } = makeProtocol();
+        await expect(
+            protocol.saveMetaItem({
+                type: 'object', name: 'fx_option', item: fxOption(REFUSED[0].body), mode: 'draft', packageId: 'app.fx',
+            }),
+        ).resolves.toMatchObject({ success: true });
+
+        const res = await protocol.publishPackageDrafts({ packageId: 'app.fx' });
+
+        expect(res.outcome, JSON.stringify(res)).toBe('refused');
+        expect(res.publishedCount).toBe(0);
+        expect(res.failed).toEqual([expect.objectContaining({ type: 'object', name: 'fx_option', code: 'INVALID_METADATA' })]);
+        expect(optionRows(rows).map((r) => r.state)).toEqual(['draft']);
+    });
+
+    it("(b) the showcase's cascade and its `current_user` role gate still save, and the row lands", async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const result = await protocol.saveMetaItem({ type: 'object', name: 'fx_option', item: fxOption(CASCADE) });
+
+        expect(result.success).toBe(true);
+        expect(optionRows(rows).map((r) => r.state)).toEqual(['active']);
+    });
+
+    it('(d) the door and `os build` give the SAME findings for each refused body', async () => {
+        for (const { body } of REFUSED) {
+            const { protocol } = makeProtocol();
+            const err = await protocol
+                .saveMetaItem({ type: 'object', name: 'fx_option', item: fxOption(body) })
+                .catch((e: any) => e);
+            const atDoor = (err.issues ?? []).filter((i: any) => i.rule === EXPRESSION_INVALID);
+
+            const atBuild = buildFindings(fxOption(body));
+
+            // Non-vacuous on both sides: one finding each, and an error at the build.
+            expect(atBuild, body).toHaveLength(1);
+            expect(atBuild[0]!.severity).toBe('error');
+            expect(atDoor, body).toHaveLength(1);
+            // Compared key by key — the door reuses the build's call, so a reworded
+            // or relocated door verdict is a second dialect, and red.
+            for (const key of ['rule', 'where', 'path', 'message', 'hint'] as const) {
+                expect(atDoor[0][key], `door and build disagree on '${key}' for ${body}`).toBe(atBuild[0]![key]);
+            }
+        }
+        // And the still-accepted options are clean at the build too, not just at the door.
+        expect(buildFindings(fxOption(CASCADE))).toEqual([]);
     });
 });
 

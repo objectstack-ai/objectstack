@@ -83,6 +83,7 @@ export {
   buildConfigChangeAuditSink,
   CONFIG_CHANGE_ACTION,
   CONFIG_CHANGE_OBJECT_NAME,
+  CONFIG_CHANGE_GLOBAL_OBJECT_NAME,
 } from './config-change-audit.js';
 export {
   registerSettingsRoutes,

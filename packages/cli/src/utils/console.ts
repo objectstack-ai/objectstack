@@ -294,6 +294,75 @@ export function hasConsoleDist(consolePath: string): boolean {
   return fs.existsSync(path.join(consolePath, 'dist', 'index.html'));
 }
 
+// ─── "No dist" remedy — named for where the server runs ─────────────
+
+/** The framework repo's root script that builds `packages/console/dist`. */
+const CONSOLE_BUILD_SCRIPT = 'objectui:build';
+
+/**
+ * The directory whose `package.json` declares `objectui:build` for this
+ * console package, or `null`.
+ *
+ * Only the NEAREST `package.json` above `consolePath` is asked. In the
+ * framework repo that is the root manifest (`packages/` carries none), which
+ * declares the script. An installed `@objectstack/console` stops at the
+ * consuming project's own manifest — including the pnpm store layout, whose
+ * intermediate directories carry none — so a project that merely sits inside
+ * a framework checkout is never told to run a script that does not build the
+ * console it actually resolved. The signal is the script itself rather than
+ * the repo's layout or its `.objectui-sha` pin, so the remedy is named only
+ * where it exists.
+ */
+function findConsoleBuildRoot(consolePath: string): string | null {
+  let dir = path.dirname(consolePath);
+  for (let depth = 0; depth < 8; depth++) {
+    const pkgPath = path.join(dir, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+        return typeof pkg?.scripts?.[CONSOLE_BUILD_SCRIPT] === 'string' ? dir : null;
+      } catch {
+        return null; // unreadable manifest — name the install remedy instead
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/**
+ * The boot warning for a resolved console package with no built `dist/`.
+ *
+ * Two places reach it, and each gets the remedy that works there:
+ *
+ *   - the framework repo, where `packages/console/dist` is a gitignored build
+ *     that `pnpm build` never produces — `pnpm objectui:build`, run at the
+ *     root it was found under (it is a root script, so it does not resolve
+ *     from the example directory `pnpm dev` runs in);
+ *   - anywhere else, where the Console arrives prebuilt as
+ *     `@objectstack/console`, a dependency of `@objectstack/cli` — so the
+ *     remedy is that package install. (An installed `@object-ui/console`,
+ *     which this text used to name, is never consulted: that name is matched
+ *     only as the workspace package of a sibling `../objectui` checkout.)
+ */
+export function formatConsoleDistMissingWarning(consolePath: string): string {
+  const dist = path.join(consolePath, 'dist');
+  const buildRoot = findConsoleBuildRoot(consolePath);
+  if (buildRoot) {
+    return (
+      `  ⚠ Console dist not found at ${path.relative(buildRoot, dist)} — \`pnpm build\` does not produce it. ` +
+      `Build it with \`pnpm ${CONSOLE_BUILD_SCRIPT}\` in ${buildRoot} ` +
+      `(uses a ../objectui checkout if present, else clones objectui at the pinned commit — needs network).`
+    );
+  }
+  return (
+    `  ⚠ Console dist not found at ${dist} — the Console ships prebuilt in \`${CONSOLE_PACKAGE}\`, ` +
+    `a dependency of \`@objectstack/cli\`; reinstall it at the same version as the CLI.`
+  );
+}
+
 // ─── objectui-SHA Drift Guard (dev monorepo only) ───────────────────
 
 /**

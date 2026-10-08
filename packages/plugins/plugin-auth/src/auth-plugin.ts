@@ -69,11 +69,7 @@ import { runSetInitialPassword } from './set-initial-password.js';
 import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
 import type { CounterStore } from './rate-limit-storage.js';
-import {
-  authIdentityObjects,
-  authObjectExtensions,
-  authPluginManifestHeader,
-} from './manifest.js';
+import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
 import {
   devSeedAdminEmail,
@@ -643,22 +639,21 @@ export class AuthPlugin implements Plugin {
     this.tenancy = tenancy;
 
     ctx.getService<{ register(m: any): void }>('manifest').register({
-      ...authPluginManifestHeader,
-      ...(this.options.manifestDatasource
-        ? { defaultDatasource: this.options.manifestDatasource }
-        : {}),
-      // [ADR-0108 / #3723] Registered as authored: nothing widens the
-      // `sys_invitation.role` / `sys_member.role` selects at boot. The closed
-      // four-name vocabulary those objects declare statically
-      // (`BUILTIN_MEMBERSHIP_ROLE_OPTIONS`) is the whole list, and it is the
-      // write-side guardrail that keeps an ungoverned capability grant
-      // unrepresentable.
-      objects: authIdentityObjects,
-      // [#8009] `sys_sso_provider.oidc_client_secret` — the encrypted home of the
-      // OIDC client secret that used to sit in cleartext inside `oidc_config`.
-      // See `manifest.ts` for why the field is declared here and not on the
-      // object file.
-      objectExtensions: authObjectExtensions,
+      // The header, `objects` and `objectExtensions`, from the ONE builder
+      // `IdentityObjectsPlugin` registers on its own in a reduced kernel, so the
+      // two paths cannot carry different lists. In it:
+      // - [ADR-0108 / #3723] `objects` registered as authored: nothing widens
+      //   the `sys_invitation.role` / `sys_member.role` selects at boot. The
+      //   closed four-name vocabulary those objects declare statically
+      //   (`BUILTIN_MEMBERSHIP_ROLE_OPTIONS`) is the whole list, and it is the
+      //   write-side guardrail that keeps an ungoverned capability grant
+      //   unrepresentable.
+      // - [#8009] `objectExtensions` carries
+      //   `sys_sso_provider.oidc_client_secret`, the encrypted home of the OIDC
+      //   client secret that used to sit in cleartext inside `oidc_config`. See
+      //   `manifest.ts` for why the field is declared there and not on the
+      //   object file.
+      ...authIdentityManifest({ datasource: this.options.manifestDatasource }),
       // ADR-0048 — Setup/Studio/Account apps (and the Setup nav contributions)
       // moved to their own one-app packages (@objectstack/{setup,studio,account}),
       // each registering under its own package id so /apps/<packageId> resolves
@@ -986,18 +981,11 @@ export class AuthPlugin implements Plugin {
           // settings service is optional — keep the configured appName.
         }
 
-        // #2815 — seed the built-in bilingual auth SMS templates into
-        // sys_notification_template (insert-if-missing; tenant edits are
-        // never overwritten). Only meaningful when phone sign-in is on;
-        // the table may not exist yet on a fresh env (messaging provisions
-        // it at kernel:ready), so failures log-and-continue.
-        if (this.authManager.isPhoneNumberEnabled()) {
-          const engine = this.authManager.getDataEngine();
-          if (engine) {
-            const { seedPhoneSmsTemplates } = await import('./phone-sms-texts.js');
-            await seedPhoneSmsTemplates(engine, ctx.logger);
-          }
-        }
+        // The built-in auth SMS texts are NOT seeded into
+        // sys_notification_template: a rung with no row there renders the
+        // built-in text itself (`resolvePhoneSmsTemplateBody`), and a row an
+        // operator authored still wins (ADR-0131 — a row exists only when an
+        // organization authored it).
       }
     });
 

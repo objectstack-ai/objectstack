@@ -14,10 +14,12 @@ The thing you end up with isn't just an app — it's an app that AI can *operate
 because the same metadata generates an MCP server.
 
 <Callout type="info">
-Want to understand the pieces the agent writes before you review them?
-[Anatomy of an ObjectStack App](/docs/getting-started/quick-start) is a tour of
-the metadata — objects, actions, views — and how to read it. This page is the
-workflow; that one is the map.
+**The agent path** from [Start here](/docs/getting-started): an agent writes the
+app, and you verify it. Want to write it by hand and understand every file
+instead → [Your First Project](/docs/getting-started/your-first-project). To
+understand the pieces the agent writes before you review them, keep
+[Anatomy of an ObjectStack App](/docs/getting-started/quick-start) beside this
+page: this page is the workflow; that one is the map.
 </Callout>
 
 ## The build loop
@@ -155,8 +157,10 @@ export const ResolveTicketAction = defineAction({
   label: 'Resolve',
   objectName: 'support_desk_ticket',
   icon: 'check-circle',
-  type: 'script',
-  target: 'resolveTicket',
+  // What the click does: write `status: 'resolved'` to this ticket. No handler
+  // to write or register; the platform performs the update.
+  operation: 'update',
+  patch: { status: 'resolved' },
   locations: ['record_header', 'list_item'],
   // Only offer "Resolve" on tickets that aren't already resolved or closed.
   // Predicates are CEL, record-scoped — `record.status`, never bare `status`.
@@ -222,6 +226,17 @@ export const SupportApp = defineApp({
   ],
 });
 ```
+
+The **Resolve** action is a *declarative field write*: `operation: 'update'` with
+`patch: { status: 'resolved' }` sets the ticket's status when it is clicked.
+There is no handler to write or register, and the update runs as the signed-in
+user, so their permissions and the object's validations apply exactly as they
+would to an edit. An action that runs code of its own names a handler in
+`target` instead, and then something must register that handler: `os validate`
+passes an unregistered one, the `os dev` boot log warns
+`[action-governance] declared script actions with NO handler`, and the button
+fails when clicked (the
+[two paths](/docs/ui/actions#give-it-server-behavior--two-paths) a handler takes).
 
 The agent also **exports each new file from its directory's barrel** — the object
 from `src/objects/index.ts`, and the action, view and app from
@@ -320,9 +335,12 @@ as the dev admin the server seeds on an empty database
 (`admin@objectos.ai` / `admin123`). Then drive the app like a user:
 
 - Create a ticket. Confirm the fields, labels, and picklist colors match intent.
-- Check the **Resolve** action shows on an open ticket — and **disappears** once
-  the ticket is resolved (that's the `record.status` predicate doing its job).
 - Open the **Support → Open** nav item; confirm the filter shows only open tickets.
+- Open your ticket and click **Resolve** in its header. You should see the
+  *Ticket resolved.* toast, the status change to **Resolved**, and the
+  **Resolve** button disappear — the `patch` wrote the status, and the
+  `record.status` predicate now hides the action. Back in **Support → Open**,
+  the ticket is no longer listed.
 
 {/* screenshot placeholder: /_console/ ticket list with the Support nav group */}
 {/* screenshot placeholder: ticket record with the Resolve action in the header */}

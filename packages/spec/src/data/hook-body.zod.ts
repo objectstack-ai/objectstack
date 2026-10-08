@@ -18,7 +18,7 @@ const CRYPTO_HASH_RETIRED =
   + 'in the host (a Connector recipe, or an engine-side hook) instead. If you need hashing in '
   + 'a body, reopen it through the capability admission process — implementation first, the '
   + 'declaration lands with the implementation. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * Capability tokens a script body may request.
