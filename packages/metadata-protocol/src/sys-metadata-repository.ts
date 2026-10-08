@@ -211,10 +211,10 @@ function storedRowBody(row: any): Record<string, unknown> {
  * `null` — the declared "no label" — in three cases, and ⛔ never the item
  * name, which would make "has a label" and "has none" one answer:
  *   - the body declares none;
- *   - it declares one `I18nLabelSchema` refuses (a row stored before its type
- *     validated draft saves, or a type with no registered schema). The
- *     declared field cannot carry it, and serving it would hand the reader a
- *     shape its own type rules out;
+ *   - it declares one `I18nLabelSchema` refuses (a row stored before its
+ *     type's schema was enforced on save, or a row of a type with no
+ *     registered schema). The declared field cannot carry it, and serving it
+ *     would hand the reader a shape its own type rules out;
  *   - its stored bytes do not parse. {@link SysMetadataRepository.lockHead}
  *     answers the same bytes the same way, for the same reason: a header
  *     listing must not turn into a parse failure. The draft stays listed — and
