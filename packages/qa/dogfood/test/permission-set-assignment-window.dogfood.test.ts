@@ -175,7 +175,8 @@ describe('a permission-set assignment grants only inside its validity window (AD
       user_id: uid.bare, permission_set_id: setId, valid_from: iso(at), valid_until: iso(at - HOUR),
     });
     const body = (await res.json()) as any;
-    expect([res.status, body?.error?.code]).toEqual([400, 'VALIDATION_FAILED']);
+    expect([res.status, body?.code]).toEqual([400, 'VALIDATION_FAILED']);
+    expect((body?.fields ?? []).map((f: any) => [f.field, f.code])).toEqual([['valid_until', 'rule_violation']]);
     expect(await ql.find(GRANTS, { where: { user_id: uid.bare }, context: SYS })).toEqual([]);
   });
 });
