@@ -336,8 +336,10 @@ export async function assertNamedFieldsReadable(
  * ## Why this is separate from {@link assertNamedFieldsReadable}
  *
  * That gate judges READABILITY, and it is a no-op in the two tiers where the
- * caller-supplied kind of {@link NamedExpression} is dangerous: a deployment
- * with no security service wires no reader, and an object the reader answers
+ * caller-supplied kind of {@link NamedExpression} is dangerous: a host that
+ * wires no reader (it constructs `AnalyticsService` without one — the plugin
+ * always wires one, and on a deployment with no security service its bridge
+ * throws, so the query is refused), and an object the reader answers
  * `undefined` for is skipped (`continue`). In both, a member whose text is not
  * a column reference reached the native statement as written — `NativeSQLStrategy`
  * emits an unrecognised `sql` verbatim, into the grouping and filter positions.

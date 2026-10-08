@@ -480,10 +480,16 @@ rewrites such a cell for you.
   the driver's raw `execute()` behind the row-scope layer only. The service now
   asks the new optional `ISecurityService.canReadObject(object, context)` for
   the base object and every joined object before choosing a strategy. A
-  deployment with no `security` service keeps its old behaviour and warns at
-  init; a registered one that cannot be used denies. **Migration:** a principal
-  now refused needs object-level read on that object — the grant `/data`
-  already requires.
+  registered `security` service that cannot be used denies, and so does a
+  deployment with no `security` service: the kernel's lookup throws, so the
+  query is refused, fail-closed, although `/data` has no object-level gate
+  there. **Migration:** a principal now refused needs object-level read on that
+  object — the grant `/data` already requires; a deployment with no `security`
+  service registers one, or its host supplies its own `admitObjectRead`.
+  *Erratum, 2026-10-08 — this bullet said "A deployment with no `security`
+  service keeps its old behaviour and warns at init". In the published 17.5.0
+  packages the kernel's lookup throws on a `security` service nothing ever
+  registered, so analytics refused the query, fail-closed (#22279).*
 - **The saved-report stack is removed** (`8d1f7ab`, #20125). Its eight routes
   answer the standard unmatched-route `404`; nine `REPORTS_*` / `SCHEDULE_*`
   error codes leave the ledger; `defineStack` refuses `requires: ['reports']`

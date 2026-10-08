@@ -31,9 +31,7 @@ Disambiguation: there is **no** `record_detail`, `app_launcher`, or
 `type: 'app'`, a utility panel is `type: 'utility'`. Likewise
 grid/kanban/calendar/gallery/timeline are NOT page types — they are
 *visualizations* of a `list` page
-(`interfaceConfig.appearance.allowedVisualizations`). Former roadmap-only types
-(`dashboard`, `form`, `record_detail`, `record_review`, `overview`, `blank`)
-were removed from the enum because they never shipped a renderer.
+(`interfaceConfig.appearance.allowedVisualizations`).
 
 ### Templates & Regions
 
@@ -357,13 +355,15 @@ resolves any doc regardless of which app you came from. The URL is
 one URL. Do **not** design per-app or per-package doc URLs; that gives one
 doc many addresses and breaks cross-references.
 
-To surface a doc inside an app, add a navigation item that **links into**
-that global URL. There is no dedicated `doc` nav-item type yet, so use a
-`url` item pointing at `/docs/<name>`:
+To surface a doc inside an app, add a `doc` navigation item (a `url` item is
+for an external or custom URL): `doc: '<name>'` opens that page,
+`book: '<book>'` opens the book at its first readable page (both: that page
+in that book). It inherits the docs audience gate, and `os build` refuses a
+target the package lacks (`docs/nav-target`):
 
 ```typescript
 navigation: [
-  { id: 'nav_help', type: 'url', url: '/docs/crm_user_guide',
+  { id: 'nav_help', type: 'doc', doc: 'crm_user_guide',
     label: 'User Guide', icon: 'book-open' },
 ]
 ```

@@ -145,15 +145,20 @@ describe('[#3545] unresolvable object metadata — security posture fails closed
       await expect(h.run(memberRead())).resolves.toBeDefined();
     });
 
-    it('an anonymous request is unaffected — it short-circuits before the posture read', async () => {
+    it('a principal-less request never reaches the posture read — ADR-0096 D5 strict mode refuses it first', async () => {
+      // [#21908] It used to be handed through ahead of the posture read. It is
+      // now refused at that same point, so the outage is still not what
+      // decides it: the refusal is the strict-mode one, and the posture
+      // outage is never consulted (nothing is logged for it).
       const h = await boot({ resolvable: false });
-      const anon: any = {
+      const principalLess: any = {
         object: 'task',
         operation: 'find',
         ast: { where: undefined },
-        context: { positions: [], permissions: [] }, // no userId
+        context: { positions: [], permissions: [] }, // no userId, not isSystem
       };
-      await expect(h.run(anon)).resolves.toBeDefined();
+      await expect(h.run(principalLess)).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+      expect(h.logger.error).not.toHaveBeenCalled();
     });
 
     it('a system/boot operation is unaffected — isSystem short-circuits the middleware', async () => {
