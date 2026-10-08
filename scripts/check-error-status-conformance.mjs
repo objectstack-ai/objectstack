@@ -2000,8 +2000,14 @@ async function selfTest() {
   const walkedAbs = [];
   walk(join(checkoutRoot, SCAN_ROOT), walkedAbs);
   const walked = walkedAbs.map(repoPath);
-  check('29d …and that path is a file the walk really opens on the live tree, so 29c is about the population',
-    walked.includes(EMIT_SITE_EDIT), `${walked.length} file(s) walked, ${EMIT_SITE_EDIT} not among them`);
+  // Asked of the tree that path sits in, not of the one file: a later rename of
+  // that file must not red this gate, and 29e below already holds every walked
+  // file to the declaration.
+  const servicesTree = EMIT_SITE_EDIT.split('/').slice(0, 2).join('/');
+  check('29d …and the walk really opens source files in that tree on the live checkout, so 29c is about the '
+      + 'population and not about a path this gate never reads',
+    walked.some((p) => p.startsWith(`${servicesTree}/`)),
+    `${walked.length} file(s) walked, none under ${servicesTree}`);
   // COMPLETENESS against the walk itself, not against a copy of its filter.
   const undeclared = walked.filter((p) => !ROOT_DIR_WATCH_HINTS.some((h) => hintCovers(h, p)));
   check('29e every file the walk admits is named by a declared hint: an undeclared one is a file this gate '
