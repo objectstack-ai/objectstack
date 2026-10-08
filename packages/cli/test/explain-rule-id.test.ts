@@ -27,6 +27,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as lint from '@objectstack/lint';
 import {
+  AUTHORING_RULES,
+  EXPRESSION_INVALID,
   FIELD_NO_CONSUMERS,
   RULE_EXPLANATIONS,
   SECURITY_OWD_UNSET,
@@ -219,5 +221,45 @@ describe('the printed shape of each shortened rule — verdict, fix, rule line w
     expect(authoringFindingDetailLines({ rule: 'liveness-dead-property', path: 'views[0].name', hint: 'Remove it.' }))
       .toEqual(['fix: Remove it.', 'rule: liveness-dead-property  at views[0].name']);
     expect(authoringFindingDetailLines({ rule: 'some-rule', path: 'p' })).toEqual(['rule: some-rule  at p']);
+  });
+
+  // The `fix:` label is only true of a hint that IS a fix. `expression-invalid`
+  // used to put the authored source in `hint`, which printed as
+  // `fix: source: \`status != "resolved"\`` — the expression the author already
+  // wrote, offered as the fix. The source is a quote: it rides the verdict, so
+  // it still reaches the text face (and the runtime 422 issue's `message`).
+  it('expression-invalid: the authored source rides the verdict, and no `fix: source:` line is printed', async () => {
+    const entry = AUTHORING_RULES.find((r) => r.name === 'validateStackExpressions');
+    expect(entry, 'the registry entry that adapts ExprIssue into expression-invalid').toBeDefined();
+    const [finding] = entry!.run(
+      {
+        objects: [
+          {
+            name: 'my_app_ticket',
+            fields: {
+              title: { type: 'text' },
+              status: { type: 'select', options: [{ label: 'Open', value: 'open' }, { label: 'Resolved', value: 'resolved' }] },
+            },
+          },
+        ],
+        actions: [
+          { name: 'resolve_ticket', label: 'Resolve', objectName: 'my_app_ticket', type: 'script', visible: 'status != "resolved"' },
+        ],
+      },
+      {},
+    );
+    expect(finding?.rule).toBe(EXPRESSION_INVALID);
+    expect(finding.message).toContain('Write `record.status`');
+    expect(finding.message).toMatch(/ — source: `status != "resolved"`$/);
+    expect(finding.hint).toBe('');
+
+    const out = await captureStdout(() => printAuthoringRuleErrors([finding]));
+    const lines = out.split('\n').filter((l) => l.trim() !== '');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toBe(`  • ${finding.where}: ${finding.message}`);
+    expect(lines[0]).toContain('source: `status != "resolved"`');
+    expect(lines[1]).toBe(`      rule: expression-invalid  at ${finding.path}`);
+    expect(out).not.toMatch(/fix: source:/);
+    expect(out).not.toMatch(/^\s*fix:/m);
   });
 });

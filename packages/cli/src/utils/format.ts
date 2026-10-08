@@ -2128,9 +2128,10 @@ export type AuthoringRuleFinding = AuthoringAdvisory;
  *
  * The `hint` line is conditional, which is how `printAuthoringAdvisories` and
  * `init` already rendered it; `compile`/`validate` printed it unconditionally.
- * `AuthoringFinding.hint` is a required non-empty string in every rule the
- * registry ships (checked: no rule emits an empty one), so the two forms
- * differ on no finding this CLI can actually produce.
+ * [#22161] The condition is now load-bearing: `hint` prints as the `fix:`
+ * line, and `expression-invalid` emits an empty one — its finding carries no
+ * fix of its own, and the authored source it used to put there is a quote,
+ * which rides the message instead.
  */
 export function printAuthoringRuleErrors(
   errors: readonly AuthoringRuleFinding[],
