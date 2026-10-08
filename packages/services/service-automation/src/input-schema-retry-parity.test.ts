@@ -55,8 +55,11 @@ function countingFlowEngine(opts: {
     const engine = new AutomationEngine(createTestLogger());
     const runs = { count: 0 };
 
+    // A test double under a type of its own, never the builtin `script`:
+    // `inputSchema` reads TOP-LEVEL config keys, and the `script` contract
+    // refuses an undeclared key at the flow parse `registerFlow` runs first.
     engine.registerNodeExecutor({
-        type: 'script',
+        type: 'probe_step',
         async execute() {
             runs.count++;
             return opts.executeResult ? opts.executeResult(runs.count) : { success: true };
@@ -72,11 +75,9 @@ function countingFlowEngine(opts: {
             { id: 'start', type: 'start', label: 'Start' },
             {
                 id: 'work',
-                type: 'script' as any,
+                type: 'probe_step',
                 label: 'Work',
-                // `function` is the key the script executor contract requires;
-                // the flow parse refuses a script node without it (#20316).
-                config: { function: 'noop', ...opts.config },
+                config: { ...opts.config },
                 inputSchema: opts.inputSchema,
             },
             { id: 'end', type: 'end', label: 'End' },
