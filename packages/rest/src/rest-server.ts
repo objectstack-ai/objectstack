@@ -59,6 +59,7 @@ import {
     normalizeIfNoneMatch,
     relateObjectSchemaMaskPosture,
     resolveObjectSchemaMaskPosture,
+    resolveObjectSchemaRuntimeView,
     OBJECT_SCHEMA_MASK_NOT_APPLICABLE,
     type ObjectSchemaMaskPosture,
     // [#8805] The organization a metadata WRITE carries, given the caller's
@@ -3812,12 +3813,14 @@ export class RestServer {
         environmentId: string | undefined,
         envelope: Record<string, any>,
         document: any,
-        i18nService?: any,
+        i18nService: any,
+        runtimeDocument: unknown,
     ): Promise<any> {
         // [#10235] The per-column sortability projection, served beside the
         // document whenever the document IS an object schema, computed from the
-        // FINAL document (post ADR-0106 masking) and never inside `item`.
-        // [#20408] Both halves are `translateMetaEnvelope` in
+        // caller's runtime view of the FINAL document (post ADR-0106 masking;
+        // [#22250] `runtimeDocument`, `resolveObjectSchemaRuntimeView`) and never
+        // inside `item`. [#20408] Both halves are `translateMetaEnvelope` in
         // `./meta-item-read-gate.ts` — the runtime dispatcher's item read answers
         // the same body through it.
         return metaReadGate.translateMetaEnvelope(
@@ -3825,6 +3828,7 @@ export class RestServer {
             RestServer.metaTypeSingular(type),
             envelope,
             document,
+            runtimeDocument,
         );
     }
 
@@ -3866,7 +3870,7 @@ export class RestServer {
             requestLocale: (i18n) => this.extractLocale(req, i18n),
             // [#21476] The uncached arm's share of the public-form intake
             // reason the cached arm states (`GET /meta/:type/:name`).
-            translateEnvelope: async (envelope, document) =>
+            translateEnvelope: async (envelope, document, runtimeDocument) =>
                 this.translateMetaEnvelope(
                     req, req.params.type, environmentId, envelope as Record<string, any>,
                     RestServer.metaTypeSingular(req.params.type) === 'view'
@@ -3874,6 +3878,8 @@ export class RestServer {
                             document, await this.anonymousFormIntakeWarnings(environmentId, req, p, document),
                         )
                         : document,
+                    undefined,
+                    runtimeDocument,
                 ),
         };
     }
@@ -6673,7 +6679,12 @@ export class RestServer {
                             // for the dashboard gate. The comparison moves below,
                             // against the fingerprinted ETag, which is the one
                             // that identifies what we are actually sending.
-                            const maskApplies = maskPosture.kind !== 'passthrough';
+                            // [#22250] A D4-exempt caller's posture carrying
+                            // `runtime` is one: the definition is served whole,
+                            // but the `sortability` beside it follows that
+                            // caller's own field permission, which the
+                            // protocol's validator does not hash either.
+                            const maskApplies = maskPosture.kind !== 'passthrough' || maskPosture.runtime !== undefined;
                             // [#21476] Same move for a `view`: its body can carry
                             // the public-form intake reason, which derives from
                             // the posture and the bound object, and the
@@ -6750,6 +6761,12 @@ export class RestServer {
                                 cachedDocument = stampAnonymousFormIntakeWarnings(cachedDocument, warnings);
                                 intakeFingerprint = anonymousFormIntakeFingerprint(warnings);
                             }
+                            // [#22250] The caller's runtime view of what is
+                            // served — the document itself unless the caller is
+                            // D4-exempt and their own field permission withholds
+                            // some of its fields — which `sortability` derives
+                            // from, and whose fingerprint the validator folds.
+                            const runtimeView = await resolveObjectSchemaRuntimeView(cachedDocument, maskPosture);
 
                             // [ADR-0106 D6 tier 2] Visibility undetermined →
                             // the body is unmasked, so it must not be stored or
@@ -6762,7 +6779,7 @@ export class RestServer {
                                 res.json(await this.translateMetaEnvelope(
                                     req, req.params.type, environmentId,
                                     { type: metaType, name: req.params.name },
-                                    cachedDocument, cacheI18n,
+                                    cachedDocument, cacheI18n, runtimeView.document,
                                 ));
                                 return;
                             }
@@ -6775,9 +6792,15 @@ export class RestServer {
                                 // fingerprint is empty → the ETag is byte-identical
                                 // to the pre-ADR one. A cohort shares 304s; a
                                 // permission change moves the fingerprint and
-                                // self-invalidates the stale 304.
+                                // self-invalidates the stale 304. [#22250] So does
+                                // the runtime view's: a D4-exempt caller whose
+                                // permission withholds a field is served a
+                                // different `sortability`, never a 304 for another's.
                                 const value = foldVisibilityFingerprintIntoEtag(
-                                    foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint),
+                                    foldVisibilityFingerprintIntoEtag(
+                                        foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint),
+                                        runtimeView.fingerprint,
+                                    ),
                                     intakeFingerprint,
                                 );
                                 const etagValue = result.etag.weak
@@ -6837,6 +6860,7 @@ export class RestServer {
                             };
                             res.json(await this.translateMetaEnvelope(
                                 req, req.params.type, environmentId, cachedEnvelope, cachedDocument, cacheI18n,
+                                runtimeView.document,
                             ));
                         } else {
                             // Non-cached version
