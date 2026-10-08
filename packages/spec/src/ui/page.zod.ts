@@ -1029,8 +1029,8 @@ export function checkPagePrintComposition(
       path: ['print'],
       message: '`print` is refused on a `type: \'list\'` page: a list page draws its records through '
         + '`interfaceConfig` as a paged grid, not as authored blocks. To let users print a list as shown, '
-        + 'set `interfaceConfig.allowPrinting: true`; to print a document, declare `print` on a `record`, '
-        + '`home` or `app` page with its blocks in `regions`.',
+        + 'set `interfaceConfig.allowPrinting: true`; to print a document, declare `print` on a page of '
+        + '`type: \'record\'`, `\'home\'` or `\'app\'` with its blocks in `regions`.',
     });
     return;
   }
