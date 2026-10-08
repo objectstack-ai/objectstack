@@ -2272,15 +2272,16 @@ export class SchemaRegistry {
    * Read, in this order: a built-in (only when `builtIns` — see
    * {@link BUILT_IN_SECURITY_CATALOG_NAMES} for why the item seam does not ask);
    * the bare slot (an override a package bound to itself, else an
-   * environment-authored item); every composite `<packageId>:<name>` slot; the
-   * package claims. A package that holds the name more than one way is one
-   * holder. A disabled package is still installed, and still holds its names.
+   * environment-authored item — the latter only when `environment`); every
+   * composite `<packageId>:<name>` slot; the package claims. A package that
+   * holds the name more than one way is one holder. A disabled package is still
+   * installed, and still holds its names.
    */
   private securityCatalogHoldersOtherThan(
     type: SecurityCatalogType,
     name: string,
     exceptPackageId: string | undefined,
-    opts: { builtIns: boolean },
+    opts: { builtIns: boolean; environment: boolean },
   ): SecurityCatalogHolder[] {
     const found = new Map<string, SecurityCatalogHolder>();
     const add = (holder: SecurityCatalogHolder) => {
@@ -2292,7 +2293,8 @@ export class SchemaRegistry {
     for (const [key, item] of this.metadata.get(type) ?? []) {
       const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
       if (key === name) {
-        add(typeof stamped === 'string' && stamped !== '' ? { kind: 'package', packageId: stamped } : { kind: 'environment' });
+        if (typeof stamped === 'string' && stamped !== '') add({ kind: 'package', packageId: stamped });
+        else if (opts.environment) add({ kind: 'environment' });
       } else if (key.endsWith(suffix)) {
         add({
           kind: 'package',
@@ -2329,7 +2331,7 @@ export class SchemaRegistry {
       const key = `${type}|${name}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      for (const existingHolder of this.securityCatalogHoldersOtherThan(type, name, selfId, { builtIns: true })) {
+      for (const existingHolder of this.securityCatalogHoldersOtherThan(type, name, selfId, { builtIns: true, environment: true })) {
         conflicts.push({ catalogType: type, name, incomingPackageId: selfId, existingHolder });
       }
     }
@@ -3755,8 +3757,26 @@ export class SchemaRegistry {
     // ⛔ A registration with no `packageId` is the bare slot — `sys_metadata`
     // hydration, the metadata write-through — and is never judged here: an
     // environment save over a package-held name is outside the ruling.
+    //
+    // A BUILT-IN name is held by the platform, and the registration of one
+    // here is the platform declaring its own name (`plugin-security`'s
+    // `registerBuiltinPositions`, in its `start()`) — the holder's own
+    // registration, never a second holder. Packages are refused built-in names
+    // at the package door, and a second package registering one here is still
+    // refused below (in either order: the other package's slot is a holder).
+    // What is NOT asked for a built-in name is the environment catalog: an
+    // environment item under a built-in name exists only because an
+    // environment save went over the platform's name — outside the ruling — and
+    // it is hydrated (`ObjectQLPlugin.start`, which every `start()` depending on
+    // the engine follows) BEFORE the platform declares, so asking it would
+    // refuse the platform's own declaration and with it the boot. The stored
+    // definition keeps answering first from the bare slot (ADR-0005); the
+    // declaration sits beside it.
     if (packageId && isSecurityCatalogType(type)) {
-      const holders = this.securityCatalogHoldersOtherThan(type, baseName, packageId, { builtIns: false });
+      const holders = this.securityCatalogHoldersOtherThan(type, baseName, packageId, {
+        builtIns: false,
+        environment: !BUILT_IN_SECURITY_CATALOG_NAMES[type].has(baseName),
+      });
       if (holders.length > 0) {
         throw new SecurityCatalogNameConflictError(
           holders.map((existingHolder) => ({ catalogType: type, name: baseName, incomingPackageId: packageId, existingHolder })),

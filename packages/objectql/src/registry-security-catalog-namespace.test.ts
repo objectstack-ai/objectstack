@@ -155,6 +155,37 @@ describe('the built-in holders', () => {
     expect(await caught(() => registry.registerItem('position', body('position', 'everyone', 'Everyone'), 'name', 'com.objectstack.plugin-security'))).toBeUndefined();
   });
 
+  // An environment item under a built-in name exists only where an environment
+  // save went over the platform's name (outside the ruling), and boot hydration
+  // registers it BEFORE the platform's `start()` declares the built-ins. The
+  // declaration is the built-in holder's own registration, not a second holder:
+  // it is admitted, and the stored definition keeps answering first.
+  it('the platform\'s declaration of a built-in name is admitted over an environment item under that name, which keeps answering first', async () => {
+    const { registry } = await boot();
+    registry.registerItem('position', body('position', 'org_admin', 'stored at the door'), 'name');
+    expect(await caught(() => registry.registerItem('position', body('position', 'org_admin', 'Organization Admin'), 'name', 'com.objectstack.plugin-security'))).toBeUndefined();
+    expect(registry.getItem<{ label: string }>('position', 'org_admin')?.label).toBe('stored at the door');
+  });
+
+  it('…while a second PACKAGE registering a built-in name at the item seam is refused, in either order', async () => {
+    const first = await boot();
+    first.registry.registerItem('position', body('position', 'everyone', 'Everyone'), 'name', 'com.objectstack.plugin-security');
+    const after = await caught(() => first.registry.registerItem('position', body('position', 'everyone', 'other'), 'name', 'com.acme.other'));
+    expectRefusal(after, 'com.acme.other', { kind: 'package', packageId: 'com.objectstack.plugin-security' });
+
+    const second = await boot();
+    second.registry.registerItem('position', body('position', 'everyone', 'other'), 'name', 'com.acme.other');
+    const before = await caught(() => second.registry.registerItem('position', body('position', 'everyone', 'Everyone'), 'name', 'com.objectstack.plugin-security'));
+    expectRefusal(before, 'com.objectstack.plugin-security', { kind: 'package', packageId: 'com.acme.other' });
+  });
+
+  it('CONTROL — for a name that is NOT built in, an environment item still refuses a package-bound registration at the item seam', async () => {
+    const { registry } = await boot();
+    registry.registerItem('position', body('position', 'env_position', 'stored at the door'), 'name');
+    const err = await caught(() => registry.registerItem('position', body('position', 'env_position', 'direct'), 'name', 'com.acme.direct'));
+    expectRefusal(err, 'com.acme.direct', { kind: 'environment' });
+  });
+
   // The platform's permission sets are declared by plugin-security on its own
   // manifest, so they are held as that package's; which side the refusal stops
   // depends on which registers first, and both sides are named either way.

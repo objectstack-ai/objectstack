@@ -91,7 +91,12 @@ const COLLECTION_KEY: Readonly<Record<SecurityCatalogType, string>> = Object.fre
  *
  * Applied at the package door ({@link declaredSecurityCatalogNames}'s caller),
  * never at the registry's own item seam: the platform declares these names to
- * the registry itself, under its own package id.
+ * the registry itself, under its own package id, and that declaration is the
+ * built-in holder's own registration — never a second holder. So the item seam
+ * asks it only whether another PACKAGE holds the name. It does not ask the
+ * environment catalog: an environment item under a built-in name exists only
+ * where an environment save went over the platform's name, which is outside
+ * the ruling, and it is hydrated before the platform declares.
  */
 export const BUILT_IN_SECURITY_CATALOG_NAMES: Readonly<Record<SecurityCatalogType, ReadonlySet<string>>> = Object.freeze({
   position: new Set<string>([...BUILTIN_IDENTITY_NAMES, ...AUDIENCE_ANCHOR_POSITIONS]),
