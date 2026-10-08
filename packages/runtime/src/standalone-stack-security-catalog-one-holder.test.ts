@@ -29,6 +29,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NAMESPACE_CONFLICT_CODE } from '@objectstack/objectql';
+import { SecurityPlugin, SECURITY_PLUGIN_ID, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { Runtime } from './runtime.js';
 import { AppPlugin } from './app-plugin.js';
 import { createStandaloneStack } from './standalone-stack.js';
@@ -145,6 +146,23 @@ describe('a package\'s security catalog name another holder holds refuses the bo
 
     const { refusal } = await boot([...stack.plugins, second]);
     expectRefusal(refusal, 'com.test.second', { kind: 'package', packageId: 'com.test.first' });
+  }, BOOT_TIMEOUT);
+
+  // The shape the dogfood fixtures used to compose: an app declaring a
+  // permission set AND the same set handed to `plugin-security`'s
+  // `defaultPermissionSets`, which declares every entry on that plugin's own
+  // manifest. One set, two packages: refused, whichever registers second, with
+  // both named. (`os serve` never composes this — it hands the plugin the
+  // default's NAME only, `appSecurityPluginOptions`.)
+  it('a permission set the app declares AND hands to plugin-security\'s defaultPermissionSets: two holders, refused', async () => {
+    const names = { position: 'dup_position', permission: 'dup_set', capability: 'dup.export' };
+    const stack = await artifactStack(stackOf('com.test.dup', names));
+    const security = new SecurityPlugin({
+      defaultPermissionSets: [...securityDefaultPermissionSets, { name: 'dup_set', label: 'handed to the plugin', objects: {} } as never],
+    });
+    const { refusal } = await boot([...stack.plugins, security]);
+    // The app's `AppPlugin` registers first here, so the plugin's is the second holder.
+    expectRefusal(refusal, SECURITY_PLUGIN_ID, { kind: 'package', packageId: 'com.test.dup' });
   }, BOOT_TIMEOUT);
 
   it('CONTROL: the same two-package artifact with distinct names boots, and the door registers each package\'s position under its own package', async () => {
