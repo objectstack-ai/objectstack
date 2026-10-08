@@ -6182,6 +6182,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'authored content silently.',
   },
   {
+    id: 'sys-setting-global-rung-moved',
+    order: 87,
+    text:
+      'It also moves the settings cascade\'s global rung out of the tenant-scoped `sys_setting` into '
+      + 'the new tenant-less `sys_platform_setting` (ADR-0131 D7): one row per namespace and key for the '
+      + 'deployment, no organization column, reads governed by the `manage_platform_settings` '
+      + 'capability. The settings service writes a global-scope key there and reads the rung from there '
+      + 'alone, and the `global` option of `sys_setting.scope` retires because no write reaches it. The '
+      + 'cascade order and the `global` resolution source are unchanged. Nothing moves automatically: the '
+      + 'v18 upgrade ceremony moves existing global rows, `sys_secret` handles included, and they open '
+      + 'unchanged because the ADR-0128 AAD binds no holder object and no organization. The D3 record is '
+      + 'the `sys-setting-global-rung-moved` semantic entry.',
+  },
+  {
     id: 'time-default-zone-refused',
     order: 50,
     text:
