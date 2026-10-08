@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from './registry.js';
 
 /**
@@ -39,9 +39,25 @@ describe('ObjectStackProtocolImplementation - destructive change detection', () 
             count: vi.fn().mockResolvedValue(0),
             aggregate: vi.fn().mockResolvedValue([]),
         };
-        // No environmentId — bypass the overlay opt-in gate so we test
-        // only the destructive check.
+        // `account` is a packaged object (`'pkg'`), and `object` has no
+        // per-org overlay channel, so the package door refuses its in-place
+        // write before the destructive check on every kernel topology. This
+        // suite used to reach the check by leaving `environmentId` unset,
+        // which skipped that door; the door is now asked on every topology,
+        // so the suite opens the documented operator hatch instead — the one
+        // route by which a packaged object's write reaches the check.
+        process.env.OS_METADATA_WRITABLE = 'object';
+        // Two memoised readers of the same env var — the protocol's gate and
+        // the repository's `assertAllowed`. Both are reset.
+        ObjectStackProtocolImplementation.resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
         protocol = new ObjectStackProtocolImplementation(mockEngine);
+    });
+
+    afterEach(() => {
+        delete process.env.OS_METADATA_WRITABLE;
+        ObjectStackProtocolImplementation.resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
     });
 
     it('blocks save when a field is removed', async () => {
