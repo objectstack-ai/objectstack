@@ -1,8 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `create_record` / `update_record` `fields.*` — the `objectstack validate` half
- * of the value slot #19938 declares (the contract half of #11182 ruling D).
+ * `create_record` / `update_record` `fields.*` and `assignment` values — the
+ * `objectstack validate` half of the value slots (#19938 declared `fields.*`,
+ * the contract half of #11182 ruling D; #19939 retired the `{…}` template
+ * dialect from every value slot, its C half).
  *
  * Driven through the REGISTRY, the way `os validate` runs it: the stack is
  * normalized, parsed by `ObjectStackDefinitionSchema`, and handed to
@@ -12,20 +14,26 @@
  *
  * Two halves:
  *
- *  1. **Refusal** — a malformed envelope in `fields.*` is a located `error`
- *     under the rule id `expression-invalid`, led by the slot-neutral
- *     `VALUE_ENVELOPE_REFUSAL` (never "an assignment value"), the same verdict
- *     `registerFlow` throws on. A valid envelope, a `{token}` template and a
- *     literal are clean.
- *  2. **The hint** (ruling D point 1) — a `{…}` template EXPRESSION in any
- *     `value` slot is pointed at the envelope, at `warning` only, with the one
- *     conversion trap (`/ 100` → `/ 100.0`) stated. Plain references, date
- *     macros, `$User` paths and non-value slots get nothing.
+ *  1. **The malformed envelope** — a located `error` under the rule id
+ *     `expression-invalid`, led by the slot-neutral `VALUE_ENVELOPE_REFUSAL`
+ *     (never "an assignment value"), the same verdict `registerFlow` throws
+ *     on. A valid envelope and a literal are clean.
+ *  2. **The retired template dialect** (#19939) — a `{…}` token in a value
+ *     slot is a located `error` under the same rule id, led by
+ *     `VALUE_SLOT_TEMPLATE_REFUSAL` and naming the token's CEL spelling — in
+ *     every value slot and both legacy `assignment` shapes. It replaced the
+ *     `warning` hint ruling D point 1 put there for 17.x. The two spellings
+ *     CEL cannot write yet (date macros, `$User` paths) and non-value slots
+ *     get nothing.
  */
 
 import { describe, expect, it } from 'vitest';
 import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
-import { ASSIGNMENT_VALUE_ENVELOPE_REFUSAL, VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/automation';
+import {
+  ASSIGNMENT_VALUE_ENVELOPE_REFUSAL,
+  VALUE_ENVELOPE_REFUSAL,
+  VALUE_SLOT_TEMPLATE_REFUSAL,
+} from '@objectstack/spec/automation';
 import { EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
 import { runAuthoringRules, splitBySeverity, EXPRESSION_INVALID } from './authoring-rules.js';
 
@@ -84,7 +92,7 @@ describe('`fields.*` value slot — the malformed envelope is a located error at
     [t, 'CEL that does not parse', { dialect: 'cel', source: 'price *' }, ''],
     [t, 'an unknown function', { dialect: 'cel', source: 'nosuchfn(price)' }, ''],
   ] as const))('%s: %s — rule `expression-invalid`, severity `error`, at `config.fields.total`', (nodeType, _what, envelope, detail) => {
-    const findings = validate(nodeType, crud(nodeType, { subject: 'Quote {price}', total: envelope }));
+    const findings = validate(nodeType, crud(nodeType, { subject: 'Quote', total: envelope }));
     expect(findings).toHaveLength(1);
     const [f] = findings;
     // The envelope a gate reads: the rule id and the severity.
@@ -100,10 +108,11 @@ describe('`fields.*` value slot — the malformed envelope is a located error at
     expect(splitBySeverity(findings).errors).toHaveLength(1);
   });
 
-  it.each(NODE_TYPES)('%s: a valid envelope, `{token}` templates and literals are clean', (nodeType) => {
+  it.each(NODE_TYPES)('%s: a valid envelope, the two kept spellings and literals are clean', (nodeType) => {
     expect(validate(nodeType, crud(nodeType, {
       total: { dialect: 'cel', source: 'round(price * 100) / 100.0' },
-      subject: 'Quote for {price}',
+      subject: { dialect: 'cel', source: "'Quote for ' + string(price)" },
+      label: 'Quote',
       owner: '{$User.Id}',
       due: '{TODAY() + 7}',
       n: 3, ok: true, nothing: null,
@@ -119,36 +128,36 @@ describe('`fields.*` value slot — the malformed envelope is a located error at
   });
 });
 
-describe('the author-time hint — a `{…}` template expression in a value slot points at the envelope (#11182 ruling D)', () => {
-  const HINTED: ReadonlyArray<[NodeType, Record<string, unknown>, string]> = [
-    ['create_record', crud('create_record', { total: '{round(price * 100) / 100}' }), 'config.fields.total'],
-    ['update_record', crud('update_record', { total: '{price * 2}' }), 'config.fields.total'],
-    ['create_record', crud('create_record', { subject: 'Total: {max(price, 10)}' }), 'config.fields.subject'],
-    ['assignment', { assignments: { total: '{floor(price)}' } }, 'config.assignments.total'],
+describe('the retired template dialect — a `{…}` token in a value slot is a located error (#19939)', () => {
+  const REFUSED: ReadonlyArray<[string, NodeType, Record<string, unknown>, string, string]> = [
+    ['a template expression (the 17.x hint\'s own case)', 'create_record', crud('create_record', { total: '{round(price * 100) / 100}' }), 'config.fields.total', "source: 'round(price * 100) / 100.0'"],
+    ['arithmetic', 'update_record', crud('update_record', { total: '{price * 2}' }), 'config.fields.total', "source: 'price * 2'"],
+    ['a function inside text', 'create_record', crud('create_record', { subject: 'Total: {max(price, 10)}' }), 'config.fields.subject', "\"'Total: ' + (max(price, 10))\""],
+    ['a plain reference', 'update_record', crud('update_record', { subject: '{record.name}' }), 'config.fields.subject', "source: 'record.name'"],
+    ['text with a reference hole', 'create_record', crud('create_record', { subject: 'Follow up on {record.name}' }), 'config.fields.subject', "\"'Follow up on ' + record.name\""],
+    ['a nested literal string', 'create_record', crud('create_record', { payload: { note: '{price}' } }), 'config.fields.payload.note', "source: 'price'"],
+    ['the canonical assignment map', 'assignment', { assignments: { total: '{floor(price)}' } }, 'config.assignments.total', "source: 'floor(price)'"],
+    ['the legacy assignment array', 'assignment', { assignments: [{ variable: 'total', value: '{price}' }] }, 'config.assignments[0].value', "source: 'price'"],
+    ['the legacy bare assignment config', 'assignment', { total: '{price}' }, 'config.total', "source: 'price'"],
   ];
 
-  it.each(HINTED)('%s: warns at the slot, never errors — the template form keeps its meaning', (nodeType, config, at) => {
+  it.each(REFUSED)('%s — rule `expression-invalid`, severity `error`, located, with the CEL spelling', (_what, nodeType, config, at, spelling) => {
     const findings = validate(nodeType, config);
     expect(findings).toHaveLength(1);
     const [f] = findings;
-    expect(f!.severity).toBe('warning');
     expect(f!.rule).toBe(EXPRESSION_INVALID);
-    expect(f!.where).toContain(at);
-    expect(f!.message).toContain("{ dialect: 'cel', source: '…' }");
-    // The one conversion trap, stated where the author reads the hint.
-    expect(f!.message).toContain('`round(x * 100) / 100.0`');
-    // Advisory: `os validate` still passes.
-    expect(splitBySeverity(findings).errors).toEqual([]);
+    expect(f!.severity).toBe('error');
+    expect(f!.where).toContain(` at ${at}`);
+    expect(f!.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(f!.message).toContain(spelling);
+    // It gates: `os validate` exits non-zero on it.
+    expect(splitBySeverity(findings).errors).toHaveLength(1);
   });
 
   it.each([
-    ['a plain reference — CEL adds nothing, and an absent key would start faulting', '{record.name}'],
-    ['text with a reference hole', 'Follow up on {record.name}'],
-    ['a date macro — CEL has no string form of a Timestamp', '{NOW()}'],
+    ['a date macro — CEL has no string form of a Timestamp yet', '{NOW()}'],
     ['a date macro with an offset', '{TODAY() + 7}'],
-    ['a `$User` path — the flow CEL scope binds no user', '{$User.Id}'],
-    ['an unknown function — a run-time refusal, not a candidate to move', '{ROUND(price)}'],
-    ['a string literal token', '{"fixed"}'],
+    ['a `$User` path — the flow CEL scope binds no user yet', '{$User.Id}'],
     ['plain text', 'approved'],
   ])('says nothing for %s', (_why, value) => {
     for (const nodeType of NODE_TYPES) {

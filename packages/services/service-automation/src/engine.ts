@@ -44,6 +44,10 @@ import { predicateSlotRefusal, resolveFlowNodeExpressions, structuralConditionRe
 // declares (`assignment.assignments.*`, `create_record` / `update_record`
 // `fields.*`).
 import { FlowValueSlotSchema, VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/automation';
+// [#19939] The `{…}` template dialect retired from the value slots — the one
+// judge, shared with `objectstack validate` (`@objectstack/lint` calls the same
+// function on the same config), so build and registration give one verdict.
+import { flowNodeValueTemplateRefusals } from '@objectstack/spec/automation';
 // [#17322] The EVALUATED-slot rule, IMPORTED rather than re-derived. It is the
 // rule `FlowEdgeSchema.condition` already composes since #15807, so a node's
 // `config.condition` — which no schema stands in front of — is held to the same
@@ -10663,6 +10667,23 @@ export class AutomationEngine implements IAutomationService {
                 // start-node trigger gate + decision/branch predicates live in config.condition
                 checkStructuralCondition(`${at}node '${node.id}' (${node.type}) condition`, cfg.condition);
 
+                // [#19939] The value slots' OTHER form — a literal — refused where
+                // it still spells the retired `{…}` template dialect (the C half
+                // of #11182 ruling D). Every value the ledger's `value` role holds
+                // is walked (`resolveFlowNodeValueSlots`, inside the judge), plus
+                // the two legacy `assignment` shapes the executor still reads, so
+                // neither shape is a way around the refusal. The executors refuse
+                // the same set at run time — `parseNodeConfig` through
+                // `FlowValueSlotSchema` on the CRUD nodes, the same call on the
+                // `assignment` node — so a flow that registers is never refused
+                // there, and vice versa.
+                for (const refusal of flowNodeValueTemplateRefusals(node.type, node.config)) {
+                    failures.push(
+                        `  • ${at}node '${node.id}' (${node.type}) ${refusal.label} at config.${refusal.path}: `
+                        + `${refusal.message}\n      source: \`${refusal.source}\``,
+                    );
+                }
+
                 // Descriptor-declared expression slots (#4027). The ledger names them
                 // per node type and carries the dialect each one takes, so a declared
                 // key like `screen.fields[].visibleWhen` is checked as the bare CEL it
@@ -10737,7 +10758,8 @@ export class AutomationEngine implements IAutomationService {
             throw new Error(
                 `Flow '${flowName}' has ${failures.length} invalid expression${failures.length > 1 ? 's' : ''} (ADR-0032 §1a). ` +
                 `Predicates — conditions and declared bare-CEL slots such as a screen field's \`visibleWhen\` — ` +
-                `must not wrap references in \`{…}\` template braces; template slots (e.g. \`loop.collection\`) require them:\n` +
+                `must not wrap references in \`{…}\` template braces, and neither may a value slot (a computed ` +
+                `value is a CEL envelope); template slots (e.g. \`loop.collection\`) require them:\n` +
                 `${failures.join('\n')}`,
             );
         }

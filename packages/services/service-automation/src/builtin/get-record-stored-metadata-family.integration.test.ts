@@ -80,7 +80,9 @@ type Branch = 'one' | 'list';
  * and copies the first row.
  */
 function familyReadFlow(name: string, object: string, runAs: RunAs, branch: Branch, fields?: string[]) {
-  const ref = branch === 'one' ? 'rec' : 'rec.0';
+  // A CEL path (#19939 — the `{…}` template dialect is retired from value
+  // slots): the list branch reads its first row by index.
+  const ref = branch === 'one' ? 'rec' : 'rec[0]';
   return {
     name,
     label: name,
@@ -107,7 +109,11 @@ function familyReadFlow(name: string, object: string, runAs: RunAs, branch: Bran
         label: 'Copy',
         config: {
           objectName: COPY_OBJECT.name,
-          fields: { title: name, body: `{${ref}.metadata}`, hash: `{${ref}.checksum}` },
+          fields: {
+            title: name,
+            body: { dialect: 'cel', source: `${ref}.metadata` },
+            hash: { dialect: 'cel', source: `${ref}.checksum` },
+          },
         },
       },
       { id: 'end', type: 'end', label: 'End' },

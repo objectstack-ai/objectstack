@@ -5717,6 +5717,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`flow-script-subflow-config-undeclared-keys-refused`.',
   },
   {
+    id: 'flow-value-slot-template-dialect-refused',
+    order: 88,
+    text:
+      'It retires the single-brace `{…}` template dialect from the flow VALUE slots (the C half of the '
+      + 'maintainer\'s ruling D on the flow expression dialects): the `assignment` node\'s values, in all '
+      + 'three shapes, and the `fields` map of `create_record` and `update_record`, where a CEL value '
+      + 'envelope is already the expression form. A string there is now the literal '
+      + 'text it spells, and one carrying a `{…}` token is refused — by `FlowValueSlotSchema`, '
+      + '`registerFlow`, `objectstack validate` and the executor alike — with the CEL spelling of each token. '
+      + 'No D2 conversion exists: every authored spelling was measured lossy (an absent key writes nothing '
+      + 'under the template and fails under CEL; CEL divides two integers as integers), so which value an '
+      + 'absent key should write is the author\'s judgment. The date macros and the `$User` paths keep their '
+      + 'meaning until CEL can spell them. Its D3 record is the semantic entry '
+      + '`flow-value-slot-template-dialect-refused`.',
+  },
+  {
     id: 'flow-write-node-stored-metadata-target-refused',
     order: 74,
     text:
@@ -14040,6 +14056,42 @@ const step18: MigrationStep = {
         + 'expecting the stored value; a flow that needs a credential obtains it through a privileged '
         + 'binder; a start or edge condition that compared such a field against a literal is rewritten to '
         + 'test whether it is set (not null).',
+    },
+    // The template dialect leaves the flow value slots: one dialect for a computed
+    // value, CEL. Semantic-only — every token spelling authored in flows was
+    // measured lossy under conversion, so no D2 conversion rewrites any of them,
+    // and the date macros and run-user paths CEL cannot write yet are kept.
+    {
+      id: 'flow-value-slot-template-dialect-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'flows[].nodes[].config of an assignment node (the assignments map, the legacy assignments array and the '
+        + 'legacy bare config) and of create_record and update_record nodes (the fields map) — a string value, or a '
+        + 'string anywhere inside an array or object value, carrying a single-brace template token',
+      replacement:
+        'a CEL value envelope, { dialect: "cel", source: "…" }, evaluated to the value: a path is the same path '
+        + '(record.owner; a numeric segment becomes an index, list[0]; a variable whose name starts with $ is read '
+        + 'through vars, vars["$error"].message), arithmetic is the same arithmetic with every integer divisor written '
+        + 'as a double (round(x * 100) / 100.0), and text with holes is one concatenation (\'Hello \' + o.name). A '
+        + 'string with no token is the literal text it spells, and braces meant literally are a CEL string literal',
+      reason:
+        'The interpolator and the CEL engine answer differently for every token spelling authored in flows, so no '
+        + 'conversion is lossless (ADR-0087 D2) and none is applied. A path, an absent variable, key or list index '
+        + 'wrote nothing under the template and fails the run under CEL; text with a null hole rendered nothing and '
+        + 'CEL refuses + null; CEL divides two integers as integers, so round(x * 100) / 100 truncates 123.46 to 123. '
+        + 'Where a value may be absent, which of nothing, null or a default the field should take is the author\'s '
+        + 'decision — the template decided it silently. Two spellings are kept with their old meaning, because CEL '
+        + 'cannot write them yet: the date macros NOW() and TODAY() with a day offset (CEL yields a Timestamp, not the '
+        + 'ISO text, and has no string form for one) and the run-user paths beginning $User. (the flow CEL scope binds '
+        + 'no user). A flow carrying a refused value is refused at registration, by objectstack validate and by the '
+        + 'executor; a stored flow carrying one is skipped at boot with a warn naming it.',
+      acceptanceCriteria:
+        'Run objectstack validate: it reports each refused value as expression-invalid at the node and the value\'s '
+        + 'path, with the CEL spelling of its tokens. Rewrite each as that envelope; where a variable or key may be '
+        + 'absent, guard it (has(record.owner) ? record.owner : null, has(vars.x) ? vars.x : null for a variable) or '
+        + 'route around the node. Re-run the flow paths that write those fields and compare the stored values with '
+        + 'the ones the template wrote.',
     },
     // #21654 — the D3 entry for `FlowSchema`'s refusal of a write node aimed at a
     // stored-metadata table: the save-time half of #21624, which applies #21520's

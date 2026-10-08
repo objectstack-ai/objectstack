@@ -1,8 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
-import { defineActionDescriptor, isExpressionEnvelopeShaped } from '@objectstack/spec/automation';
+import { defineActionDescriptor, flowNodeValueTemplateRefusals, isExpressionEnvelopeShaped } from '@objectstack/spec/automation';
 import { DEFAULT_BRANCH_LABEL, type AutomationEngine } from '../engine.js';
+import { refuseNode } from '../guard-refusal.js';
 import { interpolate } from './template.js';
 
 /**
@@ -99,8 +100,15 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
         //   • bundled example flows → `{ assignments: [{ variable, value }] }`
         //   • legacy / hand-authored → `{ <var>: <value> }` (config keys ARE
         //     the variables).
-        // Values interpolate `{var}` against the live flow variables, matching
-        // the CRUD / screen nodes (so `value: '{record.amount}'` resolves).
+        // [#19939] Values are literals: the `{var}` template dialect is
+        // retired from every assignment value, in all three shapes (the C half
+        // of #11182 ruling D). A value that still spells it is refused before
+        // any variable is set, by the one judge `registerFlow` and `objectstack
+        // validate` call (`flowNodeValueTemplateRefusals`) — so the legacy
+        // shapes are no way around it, and a flow that registered cannot be
+        // refused here. What reaches `interpolate()` below carries no token, or
+        // only the two the retirement keeps until CEL can spell them (the date
+        // macros, `{$User.*}`); on everything else it is the identity.
         //
         // [#15137] …with ONE exception, and only in the canonical map: a value
         // that is envelope-shaped (`isExpressionEnvelopeShaped` — a plain object
@@ -137,7 +145,7 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
                 // Designer form (ADR-0018, #3304): the canonical Studio shape — a
                 // single free-form `assignments` map, rendered by the designer's
                 // flat keyValue editor. Values stay `true`-permissive (literals,
-                // `{var}` templates, numbers…). The legacy array / bare-config
+                // CEL value envelopes, numbers…). The legacy array / bare-config
                 // shapes the executor also accepts are read-compatible and not
                 // offered for new authoring. No `required`: an empty node is valid.
                 configSchema: {
@@ -149,6 +157,15 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
             }),
             async execute(node, variables, context) {
                 const config = (node.config ?? {}) as Record<string, unknown>;
+                // [#19939] The run-time twin of the registration refusal: the
+                // same judge on the same config, before anything is assigned.
+                const templateRefusal = flowNodeValueTemplateRefusals('assignment', config)[0];
+                if (templateRefusal) {
+                    return refuseNode(
+                        `assignment '${node.id}': ${templateRefusal.label} at config.${templateRefusal.path}: `
+                        + `${templateRefusal.message} — source: \`${templateRefusal.source}\``,
+                    );
+                }
                 const raw = config.assignments;
                 // `declared` = this pair sits in the ledger's `assignments.*`
                 // slot, so an envelope there is an expression (#15137). False for

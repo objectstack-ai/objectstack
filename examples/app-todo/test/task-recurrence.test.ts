@@ -29,10 +29,16 @@
  * to be computed BEFORE the create node, which is what a registered function
  * invoked by a `script` node is for (#1870, pure per #4396).
  *
+ * (Both readings above are history, kept for the reasoning: since #19938 a
+ * `fields` value may be a CEL value envelope, which IS evaluated, and since
+ * #19939 a value slot no longer reads the `{…}` template dialect at all — the
+ * pre-fix `DATEADD({…})` shape is now refused at registration, before any
+ * driver sees it. The script stays: a recurrence rule is a function's job.)
+ *
  * The suite drives the app's REAL metadata (`allFlows`, the real `Task` object,
  * the real `todoFunctions` registry) through a real kernel over sqlite, so it
  * fails if any link is re-broken: the function name, the node wiring, the
- * arithmetic, or the interpolation shape of the `due_date` slot.
+ * arithmetic, or the shape of the `due_date` slot.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -40,6 +46,7 @@ import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
+import { VALUE_SLOT_TEMPLATE_REFUSAL } from '@objectstack/spec/automation';
 import { RecordChangeTriggerPlugin } from '@objectstack/trigger-record-change';
 
 import { allFlows, TaskCompletionFlow } from '../src/flows/index.js';
@@ -262,12 +269,12 @@ describe('#7037 — the recurrence branch computes a real next due date', () => 
       expect(script.config.outputVariable).toBe('nextDueDate');
     });
 
-    it('create_next_task reads the computed variable as a WHOLE-STRING token', () => {
-      // A whole-string `{token}` is the one form `interpolateString` returns the
-      // raw value for. Any surrounding text turns the slot back into
-      // text-with-holes — which is precisely the shape that shipped `DATEADD`.
+    it('create_next_task reads the computed variable as a CEL path — the raw value, type kept', () => {
+      // [#19939] A value slot computes with a CEL value envelope; a bare path
+      // hands the create the RAW value the script returned. Text around it
+      // would be a concatenation — the shape that shipped `DATEADD`.
       const fields = node('create_next_task').config.fields;
-      expect(fields.due_date).toBe('{nextDueDate}');
+      expect(fields.due_date).toEqual({ dialect: 'cel', source: 'nextDueDate' });
     });
 
     it('the recurring branch runs the computation BEFORE the create', () => {
@@ -291,10 +298,12 @@ describe('#7037 — the recurrence branch computes a real next due date', () => 
     });
 
     it('GUARD: no write node in any app flow puts function-call text in a field value', () => {
-      // The class, not the instance. `fields` values are interpolated, never
+      // The class, not the instance. A STRING `fields` value is a literal, never
       // evaluated, so ANY `NAME(...)` text in one reaches the driver verbatim —
-      // whatever the invented function is called. This is the check that would
-      // have caught the original defect at authoring time.
+      // whatever the invented function is called. (A computed value is a CEL
+      // envelope, an object, which this guard leaves to the envelope's own CEL
+      // check.) This is the check that would have caught the original defect
+      // at authoring time.
       const callShaped = /^[A-Za-z_][A-Za-z0-9_]*\s*\(/;
       for (const flow of allFlows) {
         for (const n of (flow.nodes ?? []) as any[]) {
@@ -304,7 +313,7 @@ describe('#7037 — the recurrence branch computes a real next due date', () => 
             expect(
               callShaped.test(value.trim()),
               `flow '${flow.name}' node '${n.id}' field '${field}' = ${value} — ` +
-              `a create/update field value is template-interpolated, not evaluated`,
+              `a string create/update field value is a literal, not evaluated`,
             ).toBe(false);
           }
         }
@@ -369,19 +378,23 @@ describe('#7037 — the recurrence branch computes a real next due date', () => 
       expect((Array.isArray(all) ? all : []).length).toBe(1);
     }, 30000);
 
-    it('REVERSE: the pre-fix shape — a function call left in the field value — is refused by the driver', async () => {
+    it('REVERSE: the pre-fix shape — a function call left in the field value — is refused at registration', async () => {
       // The pre-#7037 defect, rebuilt from the REAL flow so it cannot drift: the
       // computation node removed, the recurring edge pointed straight at the
       // create, and `due_date` written as text-with-holes wrapping a call to a
       // function that does not exist.
       //
       // The invented name is deliberately NOT the historical one. What failed
-      // was never specific to `DATEADD`: a `create_record` field value is
-      // interpolated and passed through verbatim, so ANY function-call text
-      // reaches the driver as a literal string. Pinning the class keeps the
-      // dead name out of the repo entirely, which is the other half of this
-      // card — an invented function name in a shipped example is exactly the
-      // shape an AI author copies.
+      // was never specific to `DATEADD`: ANY function-call text in a field
+      // value was a literal. Pinning the class keeps the dead name out of the
+      // repo entirely, which is the other half of this card — an invented
+      // function name in a shipped example is exactly the shape an AI author
+      // copies.
+      //
+      // [#19939] Before, this shape registered and the DRIVER refused the write
+      // at run time (`Due Date must be a valid date`). The `{…}` tokens are the
+      // retired template dialect in a value slot now, so it never registers —
+      // and the refusal names the CEL spelling instead.
       const { automation, data } = await bootTodoKernel();
       const ctx = { context: { userId: 'u_todo' } };
 
@@ -393,52 +406,34 @@ describe('#7037 — the recurrence branch computes a real next due date', () => 
         'create_next_task';
       broken.nodes.find((n: any) => n.id === 'create_next_task').config.fields.due_date =
         'SHIFT_DATE({completedTask.due_date}, {completedTask.recurrence_interval}, "{completedTask.recurrence_type}")';
-      // The fixture is a manual flow: it must not race the real one on the same
-      // record-change hook.
       delete broken.nodes.find((n: any) => n.type === 'start').config.triggerType;
       broken.type = 'autolaunched';
-      automation.registerFlow(broken.name, broken);
+      let refusal = '';
+      try {
+        automation.registerFlow(broken.name, broken);
+      } catch (err) {
+        refusal = (err as Error).message;
+      }
+      expect(refusal, 'the pre-fix shape must not register').toContain(VALUE_SLOT_TEMPLATE_REFUSAL);
+      expect(refusal).toContain("node 'create_next_task' (create_record) create_record field value at config.fields.due_date");
+      expect(refusal).not.toMatch(/no function named/);
 
-      // [#14147] Unlike the cases above, this fixture must START from an
-      // already-completed row — there is no transition to stamp on, and the
-      // object's `completed_date_required` rule refuses a completed task with a
-      // blank `completed_date`. Seeding a server-owned column at create time is
-      // a SYSTEM act (maintainer ruling, 2026-09-03: `context.isSystem`,
-      // `runAs: 'system'`, a system hook or a seed), so this one write declares
-      // itself trusted. Nothing else about the case changes: the subject is
-      // still what the BROKEN flow fixture does with an uncomputed date, and
-      // the assertions below are untouched.
+      // [#14147] The real flow needs an already-completed row to start from —
+      // seeding a server-owned column at create time is a SYSTEM act
+      // (maintainer ruling, 2026-09-03), so this one write declares itself
+      // trusted.
       const created = await data.insert('todo_task', {
         subject: 'Reverse fixture task', status: 'completed', priority: 'normal', owner: 'u_todo',
         due_date: '2026-08-10', is_recurring: true, recurrence_type: 'daily', recurrence_interval: 1,
         completed_date: '2026-08-09T10:00:00.000Z',
       }, { context: { userId: 'u_todo', isSystem: true } });
       const id = Array.isArray(created) ? created[0].id : created.id;
-
-      // Driven directly rather than through the record-change hook, so the
-      // context has to supply what the hook would: the triggering record AND the
-      // `previous` row the start predicate transitions from. Without `previous`
-      // the CEL gate aborts with `No such key: status` — the same totality trap
-      // #6882 documented on the insert leg — and the run would fail for a reason
-      // that has nothing to do with this card.
       const record = { ...(Array.isArray(created) ? created[0] : created), id };
       const trigger = { record, previous: { ...record, status: 'in_progress' }, userId: 'u_todo' };
 
-      const result: any = await automation.execute(broken.name, trigger);
-
-      // The direction that matters: the run FAILS, and it fails inside the
-      // create with the field's own date refusal — NOT with "no function named
-      // 'SHIFT_DATE' is registered", because nothing ever tried to CALL one.
-      // The value was never a call; it was always just text.
-      expect(result?.success, `unexpected result: ${JSON.stringify(result)}`).toBe(false);
-      const text = String(result?.error ?? '') + JSON.stringify(result?.output ?? null);
-      expect(text).toContain('create_next_task');
-      expect(text).toMatch(/valid date|ISO-8601|invalid_date/);
-      expect(text).not.toMatch(/no function named/);
-
       // Non-vacuous: the REAL flow, on the very same kernel and record, computes
-      // the date and completes. So the failure above is the missing computation,
-      // not a broken fixture or an unusable harness.
+      // the date and completes. So the refusal above is the retired dialect, not
+      // a broken fixture or an unusable harness.
       const good: any = await automation.execute('task_completion', trigger);
       expect(good?.success, `unexpected result: ${JSON.stringify(good)}`).toBe(true);
       const spawned = (await data.find('todo_task', { where: { subject: 'Reverse fixture task' }, ...ctx }))

@@ -76,5 +76,9 @@ export * from './schedule-organization.zod';
 export * from './node-executor.zod';
 export * from './flow-node-expression-paths';
 export * from './flow-node-config-refusals';
+// [#19939] The `{…}` template dialect retired from flow value slots — the one
+// judge `FlowValueSlotSchema`, `registerFlow`, `objectstack validate` and the
+// executors share.
+export * from './flow-value-slot-template';
 export * from './bpmn-interop.zod';
 export * from './bpmn-mapping';

@@ -193,31 +193,33 @@ node type has registered, after the boot pull had registered it.
   label: 'Build digest',
   config: {
     assignments: {
-      // `{token}` flow interpolation — a sole token keeps the token's type,
-      // text with holes stays text
-      owner_name: '{manager.name}',
-      // CEL value envelope — evaluated by the expression engine to a value, so
+      // CEL value envelope — evaluated by the expression engine to a value,
+      // type kept; a path copies the value it names
+      owner_name: { dialect: 'cel', source: 'manager.name' },
       // the declared CEL stdlib is reachable from metadata: one line per task
       digest: { dialect: 'cel', source: 'joinNonEmpty(overdue_tasks.map(t, t.subject), "\\n")' },
+      // anything else is a literal, written as it is
+      status: 'pending',
     },
   },
 }
 ```
 
-A value's **shape** selects its form — there is no mode key. A plain string is
-always `{token}` interpolation (a bare `a + b` is the literal text `a + b`, not
-CEL); an object that names a `dialect` is an expression envelope and must be a
-valid `cel` one — a missing, empty, whitespace-only or non-string `source`, an
-`ast` with no `source`, or a `template` / `cron` dialect, is refused at the
-variable's path. Numbers, booleans, arrays and plain objects are assigned as
-literals. A later `notify` node renders the variable as any other:
-`message: '{digest}'`, and it renders the **evaluated** value.
+A value's **shape** selects its form — there is no mode key. An object that
+names a `dialect` is an expression envelope and must be a valid `cel` one — a
+missing, empty, whitespace-only or non-string `source`, an `ast` with no
+`source`, or a `template` / `cron` dialect, is refused at the variable's path.
+Everything else is a **literal**, assigned as it is: a string is the text it
+spells (a bare `a + b` is the literal text `a + b`, not CEL), and numbers,
+booleans, arrays and plain objects are what they look like. A later `notify`
+node renders the variable as any other: `message: '{digest}'`, and it renders
+the **evaluated** value.
 
 The same rules hold for the field values of `create_record` / `update_record`
 (below): the `assignments` map and the `fields` map are the flow's **value
-slots**, and each accepts a CEL value envelope beside `{token}` templates and
-literals. Only a slot's top-level value is judged — an object nested inside a
-JSON value or an array is data, whatever keys it carries.
+slots**, and each takes a CEL value envelope or a literal. Only a slot's
+top-level value is an expression — an object nested inside a JSON value or an
+array is data, whatever keys it carries.
 
 <Callout type="info" title="Where a malformed envelope is refused">
 
@@ -241,6 +243,34 @@ nothing is assigned or written in its place.
 
 </Callout>
 
+<Callout type="warn" title="The `{…}` template dialect is retired from value slots">
+
+A value slot no longer reads `{token}` interpolation ([#19939]): a string there
+is the literal text it spells, so one carrying a `{…}` token — `'{record.owner}'`,
+`'Hello {name}'`, `'{round(x * 100) / 100}'`, at any depth of an array or object
+value, in all three `assignment` shapes — is **refused** at `objectstack
+validate`, at `registerFlow` and by the executor, with the CEL spelling of each
+token. Nothing converts it for you: every spelling answers differently under CEL
+for some input, so the rewrite is yours to judge.
+
+| you wrote | write instead | what changes |
+|:---|:---|:---|
+| `'{record.owner}'`, `'{x}'` | `{ dialect: 'cel', source: 'record.owner' }` | CEL refuses an **absent** variable or key where the template wrote nothing — guard one that may be absent: `has(record.owner) ? record.owner : null`, `has(vars.x) ? vars.x : null` (writes `null`) |
+| `'{list.0}'` | `source: 'list[0]'` | an empty list fails the run |
+| `'{$error.message}'` | `source: 'vars["$error"].message'` | a `$`-named variable is read through `vars` |
+| `'{round(x * 100) / 100}'` | `source: 'round(x * 100) / 100.0'` | CEL divides two integers as integers: keep a decimal operand on every division |
+| `'Follow up on {record.name}'` | `source: "'Follow up on ' + record.name"` | wrap a non-string hole in `string(…)`, one that may be null in `coalesce(…, '')` |
+| braces meant literally, `'{"a": 1}'` | `source: "'{\"a\": 1}'"` | a CEL string literal |
+
+Two spellings **keep** their meaning for now, because CEL cannot write them yet:
+the date macros (`'{NOW()}'`, `'{TODAY() + 7}'` — CEL's `now()` / `today()` are
+timestamps, not the ISO text the macros write, and there is no string form for
+one) and the run user (`'{$User.Id}'` — the flow's CEL scope binds no user).
+
+[#19939]: https://github.com/objectstack-ai/objectstack/issues/19939
+
+</Callout>
+
 **Create Record:**
 
 ```typescript
@@ -251,12 +281,14 @@ nothing is assigned or written in its place.
   config: {
     objectName: 'task',
     fields: {
-      title: 'Follow up on {record.name}',
-      assignee: '{record.owner}',
-      due_date: '{TODAY() + 7}',   // braces required — without them this writes the literal text
-      // CEL value envelope — evaluated to the value written, same rules as an
+      // CEL value envelopes — evaluated to the value written, same rules as an
       // assignment value. `100.0`, not `100`: CEL divides two integers as integers.
+      title: { dialect: 'cel', source: "'Follow up on ' + record.name" },
+      assignee: { dialect: 'cel', source: 'has(record.owner) ? record.owner : null' },
       estimate: { dialect: 'cel', source: 'round(record.amount * 0.15 * 100.0) / 100.0' },
+      // a date macro — one of the two `{…}` spellings a value slot still reads
+      due_date: '{TODAY() + 7}',
+      status: 'open',              // a literal
     },
   },
 }
@@ -328,7 +360,7 @@ compile error carrying the same prescription.
   config: {
     function: 'scoreLead',                  // registered via defineStack({ functions })
     inputs: { rating: '{record.rating}' },  // {var} templates resolve against flow variables
-    outputVariable: 'leadScore',            // later: fields: { score: '{leadScore}' }
+    outputVariable: 'leadScore',            // later: fields: { score: { dialect: 'cel', source: 'leadScore' } }
   },
 }
 ```
@@ -1882,42 +1914,47 @@ failures so one broken flow does not abort startup.
 
 ## Expressions in flows
 
-A flow mixes **two expression dialects**, and the rule is short: **every
-condition is CEL; braces are for values** — and the numeric functions the value
-dialect accepts are mirrored from CEL's, so a name you learn in conditions
-means the same thing inside braces.
+A flow computes with **one expression dialect, CEL**: every condition is bare
+CEL, and every computed value (a field value, an assignment value) is a CEL
+value envelope. Braces are for **text** slots — a `notify` title or message, a
+screen description — and the date macros a value slot still reads.
 
 | Where | Dialect | Write it like | Bindings |
 |:---|:---|:---|:---|
 | Start-node `condition` | **CEL** (bare, no braces) | `record.amount > 500` | `record.*`, `previous.*`, bare field names, `vars.*` |
 | Edge `condition` | **CEL** (bare, no braces) | `record.status == 'open'` | same as above |
 | Decision-node `conditions[].expression` | **CEL** (bare, no braces) | `order_amount > 10000` | flow variables by name, and `vars.*` |
-| Field values in `create_record` / `update_record` | **Interpolation** (braces required) | `'Follow up on {record.name}'`, `'{TODAY() + 7}'` | `{var}`, `{var.path}`, `{$User.Id}`, `{$User.Email}`, `{NOW()}`, `{TODAY()}`, `{TODAY() + 90}` (whole days), and the CEL-mirrored numeric functions `round`, `floor`, `ceil`, `abs`, `min`, `max` (#11060) — `round` is **integer-only**, exactly like CEL's (there is no `round(x, 2)`); for N decimals write `{round(x * 100) / 100.0}` (scale 2). Keep the decimal point: in CEL `round()` returns an int and `int / int` is integer division, so `round(x * 100) / 100` drops the decimals there — `/ 100.0` is right in both dialects |
+| Field values and assignment values, as a **literal** | none — written as it is | `'open'`, `42`, `true`, `['a', 'b']` | — (a `{…}` template token is refused here since [#19939](https://github.com/objectstack-ai/objectstack/issues/19939), except the date macros `{NOW()}` / `{TODAY() ± N}` and `{$User.*}`, which still resolve until CEL can write them) |
 | Field values and assignment values, as a **CEL value envelope** | **CEL** (in an envelope) | `{ dialect: 'cel', source: 'round(price * 100.0) / 100.0' }` | flow variables by name, and `vars.*` — the whole CEL stdlib (`joinNonEmpty`, …) |
 
-A value slot takes either form, chosen by shape: a string is interpolation, an
-object naming a `dialect` is a CEL envelope. The template form keeps working
-unchanged; `objectstack validate` points a template **expression** — arithmetic
-or one of the six functions inside braces — at the envelope with a warning,
-never an error. Plain references (`{record.name}`), the date macros and
-`{$User.*}` are left alone: CEL's `now()` / `today()` are timestamps, not the
-strings the macros write, and the flow's CEL scope binds no user.
+A value slot takes either form, chosen by shape: an object naming a `dialect`
+is a CEL envelope, everything else is a literal. The `{token}` template dialect
+it used to read is retired: `objectstack validate`, `registerFlow` and the
+executor refuse a `{…}` token in a value slot with its CEL spelling (see *The
+`{…}` template dialect is retired from value slots* above). The date macros and
+`{$User.*}` are kept until CEL can write them: CEL's `now()` / `today()` are
+timestamps, not the strings the macros write, and the flow's CEL scope binds no
+user.
 
 <Callout type="warn">
 **The failure modes to memorize:**
 
-1. **Braces missing in a field value** — `due_date: 'TODAY() + 7'` writes the
-   literal text `TODAY() + 7` into the field. Write `'{TODAY() + 7}'`.
+1. **A computed value written as a string** — `due_date: 'TODAY() + 7'` or
+   `amount: 'price * 2'` writes the literal text into the field. Compute it with
+   a CEL value envelope (`{ dialect: 'cel', source: 'price * 2' }`); the date
+   macros keep their braces for now: `'{TODAY() + 7}'`.
 2. **Braces put *into* a condition** — `'{record.amount} > 500'`. Conditions
    fail loudly rather than silently, with an error that tells you to drop the
    braces.
-3. **An unsupported function in a field value** — `total: '{ROUND(x, 2)}'`,
-   `'{Math.round(x)}'`, `'{(x).toFixed(2)}'` — fails the node with a **named
-   error** listing the supported set and, where one is close, the spelling you
-   meant. Before #11060 this was a *silent* failure: the unknown name was
-   rewritten to `null` and the field was simply written `undefined`. A `fault`
-   edge does not catch this error — the expression itself is wrong, so
-   re-running can never succeed; fix the spelling.
+3. **A `{…}` template in a value slot** — `total: '{round(x * 100) / 100}'`,
+   `owner: '{record.owner}'` — is refused with the CEL spelling to write
+   instead. In a text slot, an unsupported function in braces —
+   `'{ROUND(x, 2)}'`, `'{Math.round(x)}'`, `'{(x).toFixed(2)}'` — fails the node
+   with a **named error** listing the supported set and, where one is close,
+   the spelling you meant. Before #11060 this was a *silent* failure: the
+   unknown name was rewritten to `null` and the field was simply written
+   `undefined`. A `fault` edge does not catch this error — the expression
+   itself is wrong, so re-running can never succeed; fix the spelling.
 </Callout>
 
 <Callout type="info">
@@ -2145,7 +2182,7 @@ export const hotLeadFollowUp: Flow = {
         objectName: 'task',
         fields: {
           subject: 'Follow up on hot lead',
-          related_to: '{record.id}',
+          related_to: { dialect: 'cel', source: 'record.id' },
           priority: 'high',
         },
       },
