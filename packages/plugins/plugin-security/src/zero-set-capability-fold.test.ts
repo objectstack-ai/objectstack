@@ -37,7 +37,9 @@
  * Controls: a caller holding the capability is served the stored value and may
  * query and write the field; a caller holding a set without the capability
  * reads the same answers as before this card. The last block pins the class's
- * boundary: a principal-less context is handed straight through.
+ * former boundary: a principal-less context used to be handed straight through;
+ * [#21908] ADR-0096 D5 strict mode refuses it at object admission, and its
+ * field answers are the zero-set ones.
  *
  * Fixtures are synthetic. Harness mirrors `zero-set-masking.test.ts`.
  */
@@ -300,32 +302,34 @@ describe('[#21063] the controls: a caller who resolves a set reads the answers t
   });
 });
 
-describe('[#21063] the class boundary: a principal-less context is handed through untouched, and the projections agree', () => {
+describe('[#21908] the former class boundary: a principal-less context is refused at object admission (ADR-0096 D5), and the projections give it the zero-set answers', () => {
   const PRINCIPAL_LESS = { positions: [], permissions: [] };
 
-  it('the middleware serves the field as stored, and admits a query on it and a write naming it', async () => {
+  it('the middleware refuses the read, every query on the field and every write naming it at object admission; the write admission agrees', async () => {
     const { plugin, middleware } = await boot();
-    expect(await served(middleware, PRINCIPAL_LESS)).toEqual(ROW);
+    expect(
+      await run(middleware, { object: 'ledger', operation: 'find', context: { ...PRINCIPAL_LESS }, options: {}, ast: { where: {} } }),
+    ).toEqual(REFUSED_AT_ADMISSION);
     for (const [position, operation, ast] of PROBES) {
       expect(
         await run(middleware, { object: 'ledger', operation, context: { ...PRINCIPAL_LESS }, options: {}, ast: ast(GATED) }),
         `${GATED} as ${position}`,
-      ).toEqual({ admitted: true });
+      ).toEqual(REFUSED_AT_ADMISSION);
     }
     for (const operation of ['insert', 'update'] as const) {
       const data = { [GATED]: PAYLOAD_VALUE[GATED] };
       expect(
         await run(middleware, { object: 'ledger', operation, context: { ...PRINCIPAL_LESS }, options: {}, ast: { where: {} }, data }),
         `${operation} naming ${GATED}`,
-      ).toEqual({ admitted: true });
-      expect(await plugin.canWriteObject('ledger', operation, { ...PRINCIPAL_LESS }, data)).toBe(true);
+      ).toEqual(REFUSED_AT_ADMISSION);
+      expect(await plugin.canWriteObject('ledger', operation, { ...PRINCIPAL_LESS }, data)).toBe(false);
     }
   });
 
-  it('the read, query and write projections answer the full field set for it', async () => {
+  it('the read, query and write projections leave the capability-gated field out, as for any caller who resolves no set', async () => {
     const { plugin } = await boot();
-    expect(await plugin.getReadableFields('ledger', { ...PRINCIPAL_LESS })).toEqual(FIELDS);
-    expect(await plugin.getQueryableFields('ledger', { ...PRINCIPAL_LESS })).toEqual(FIELDS);
-    expect(await plugin.getWritableFields('ledger', { ...PRINCIPAL_LESS })).toEqual(FIELDS);
+    expect(await plugin.getReadableFields('ledger', { ...PRINCIPAL_LESS })).toEqual(WITHOUT_GATED);
+    expect(await plugin.getQueryableFields('ledger', { ...PRINCIPAL_LESS })).toEqual(WITHOUT_GATED);
+    expect(await plugin.getWritableFields('ledger', { ...PRINCIPAL_LESS })).toEqual(WITHOUT_GATED);
   });
 });

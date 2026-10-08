@@ -345,24 +345,38 @@ describe('#18682 — a related user the caller cannot read makes the rule fault 
 });
 
 /**
- * A caller that is not SYSTEM is bound whether or not it carries a `userId`: the
- * public-form submitter (the grant the REST form route builds) and a
- * principal-less context (the middleware's fall-open) included.
+ * A caller that is not SYSTEM is bound whether or not it carries a `userId`:
+ * the public-form submitter (the grant the REST form route builds) included.
+ * [#21908] A principal-less context (the middleware's former fall-open) is no
+ * longer bound by the related read at all: ADR-0096 D5 strict mode refuses it
+ * at admission, on every door, before anything related is read.
  */
 describe('#18682 — a caller with no userId that is not system is bound like a user', () => {
   const PUBLIC_FORM = (object: string) => ({ publicFormGrant: { object }, permissions: ['guest_portal'], anonymous: true });
 
   it('org Y’s line: every door refuses identically, whatever that row holds', async () => {
-    for (const caller of [PUBLIC_FORM('qa_note'), { positions: [], permissions: [] }]) {
-      const secret = await observe('secret', 'line_y', caller, 'isolated', 'qa_note');
-      const open = await observe('public', 'line_y', caller, 'isolated', 'qa_note');
+    const caller = PUBLIC_FORM('qa_note');
+    const secret = await observe('secret', 'line_y', caller, 'isolated', 'qa_note');
+    const open = await observe('public', 'line_y', caller, 'isolated', 'qa_note');
 
-      expect(open.seen).toEqual(secret.seen);
-      expect(secret.seen.refusal?.code).toBe('VALIDATION_FAILED');
-      expect(secret.seen.committed).toBe(0);
-      expect(secret.seen.preview.valid).toBe(false);
-      expect(secret.readsOfLine).toEqual([]);
-    }
+    expect(open.seen).toEqual(secret.seen);
+    expect(secret.seen.refusal?.code).toBe('VALIDATION_FAILED');
+    expect(secret.seen.committed).toBe(0);
+    expect(secret.seen.preview.valid).toBe(false);
+    expect(secret.readsOfLine).toEqual([]);
+  });
+
+  it('[#21908] a principal-less caller: every door refuses at admission, identically, and the line is never read', async () => {
+    const caller = { positions: [], permissions: [] };
+    const secret = await observe('secret', 'line_y', caller, 'isolated', 'qa_note');
+    const open = await observe('public', 'line_y', caller, 'isolated', 'qa_note');
+
+    expect(open.seen).toEqual(secret.seen);
+    expect(secret.seen.refusal?.code).toBe('PERMISSION_DENIED');
+    expect(secret.seen.update).toMatchObject({ code: 'PERMISSION_DENIED' });
+    expect(secret.seen.committed).toBe(0);
+    expect(secret.seen.preview.valid).toBe(false);
+    expect(secret.readsOfLine).toEqual([]);
   });
 
   it('a user only org Y holds, under no wall: every door refuses, whatever its value — the write as not readable, the preview at its write gate', async () => {
