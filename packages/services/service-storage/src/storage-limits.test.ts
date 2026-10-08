@@ -262,6 +262,60 @@ describe('[#22283] §1 · the upload doors refuse a file over max_upload_mb, bef
     expect((await store.getSession(uploadId))?.uploaded_size).toBe(MIB);
   });
 
+  it('chunk door: a RETRIED chunk index replaces its earlier bytes — a retry is not counted twice, a grown retry still is judged', async () => {
+    const { adapter, routes } = await mountDoors(SAVED_ONE_MB);
+    const started = await call(routes, 'POST', `${BASE}/upload/chunked`, {
+      body: { filename: 'r.bin', mimeType: 'application/octet-stream', totalSize: MIB },
+    });
+    const { uploadId, resumeToken } = started.body.data;
+    const uploadChunk = vi.spyOn(adapter, 'uploadChunk');
+    const chunk = (index: number, bytes: number) =>
+      call(routes, 'PUT', `${BASE}/upload/chunked/:uploadId/chunk/:chunkIndex`, {
+        params: { uploadId, chunkIndex: String(index) },
+        headers: { 'x-resume-token': resumeToken },
+        rawBody: async () => Buffer.alloc(bytes),
+      });
+
+    // Chunk 0 sent twice (the client lost the first answer): the upload holds
+    // 600 KiB, not 1200 KiB, so the retry is under the 1 MiB limit.
+    expect((await chunk(0, 600 * 1024)).status).toBe(200);
+    expect((await chunk(0, 600 * 1024)).status).toBe(200);
+    expect((await chunk(1, 400 * 1024)).status).toBe(200);
+    expect(uploadChunk).toHaveBeenCalledTimes(3);
+
+    // A retry of chunk 1 that grows it to 500 KiB would make 1100 KiB.
+    expectTooLarge(await chunk(1, 500 * 1024));
+    expect(uploadChunk).toHaveBeenCalledTimes(3);
+  });
+
+  it('chunk door: a session whose parts carry no sizes (started before sizes were recorded) is judged by its running total', async () => {
+    const { store, routes } = await mountDoors(SAVED_ONE_MB);
+    await store.createSession({
+      id: 'legacy-session',
+      file_id: 'f-legacy',
+      key: 'user/f-legacy.bin',
+      filename: 'legacy.bin',
+      mime_type: 'application/octet-stream',
+      total_size: MIB,
+      chunk_size: 5 * MIB,
+      total_chunks: 1,
+      resume_token: 'tok',
+      status: 'in_progress',
+    } as any);
+    await store.updateSession('legacy-session', {
+      uploaded_chunks: 1,
+      uploaded_size: 600 * 1024,
+      parts: JSON.stringify([{ chunkIndex: 0, eTag: 'etag-0' }]),
+    } as any);
+    const retry = await call(routes, 'PUT', `${BASE}/upload/chunked/:uploadId/chunk/:chunkIndex`, {
+      params: { uploadId: 'legacy-session', chunkIndex: '0' },
+      headers: { 'x-resume-token': 'tok' },
+      rawBody: async () => Buffer.alloc(600 * 1024),
+    });
+    // No per-chunk sizes to sum: the running total is the bound, and 1200 KiB is over.
+    expectTooLarge(retry);
+  });
+
   it('chunk door: a declared content-length that would pass the limit is refused before the body is read', async () => {
     const { routes } = await mountDoors(SAVED_ONE_MB);
     const started = await call(routes, 'POST', `${BASE}/upload/chunked`, {

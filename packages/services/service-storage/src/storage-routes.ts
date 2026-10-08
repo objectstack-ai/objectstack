@@ -890,9 +890,13 @@ export function registerStorageRoutes(
       // [#22283] The bytes received so far plus this chunk, against the saved
       // limit — the declared length first, so an oversized chunk is refused
       // before it is read, then the bytes actually read, before the backend
-      // stores them and before the progress write.
+      // stores them and before the progress write. "So far" is what the
+      // upload will hold: a RETRIED chunk index replaces its earlier bytes in
+      // both backends, so those bytes are not counted twice (see
+      // `bytesHeldByOtherChunks`).
       const { maxUploadBytes } = currentLimits();
-      const receivedSoFar = session.uploaded_size ?? 0;
+      const currentParts: StoredChunkPart[] = JSON.parse(session.parts ?? '[]');
+      const receivedSoFar = bytesHeldByOtherChunks(currentParts, chunkIndex, session.uploaded_size ?? 0);
       const reaches = (n: number) => `This chunk would bring the upload to ${n} bytes`;
       const declaredChunk = declaredContentLength(req);
       if (declaredChunk !== undefined && !requireWithinUploadLimit(receivedSoFar + declaredChunk, maxUploadBytes, reaches, res)) return;
@@ -917,9 +921,9 @@ export function registerStorageRoutes(
         eTag = await storage.uploadChunk(uploadId, chunkIndex + 1, data);
       }
 
-      // Update session progress
-      const currentParts: Array<{ chunkIndex: number; eTag: string }> = JSON.parse(session.parts ?? '[]');
-      currentParts.push({ chunkIndex, eTag });
+      // Update session progress — each part records its size (#22283), so
+      // the limit above can tell a retried chunk from a new one.
+      currentParts.push({ chunkIndex, eTag, size: data.byteLength });
       const uploadedChunks = (session.uploaded_chunks ?? 0) + 1;
       const uploadedSize = (session.uploaded_size ?? 0) + data.byteLength;
       await store.updateSession(
@@ -1253,6 +1257,39 @@ export function registerStorageRoutes(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** One entry of `sys_upload_session.parts`. `size` is recorded since #22283; rows written before it lack it. */
+interface StoredChunkPart {
+  chunkIndex: number;
+  eTag: string;
+  size?: number;
+}
+
+/**
+ * [#22283] The bytes the upload holds in chunks OTHER than `chunkIndex` —
+ * what the chunk door adds this chunk to before judging the limit.
+ *
+ * A chunk index sent again REPLACES its earlier bytes (the local adapter
+ * rewrites `.parts/UPLOAD/INDEX`, S3 overwrites the part number), so a
+ * client retrying a chunk whose answer it lost must not be judged as if the
+ * upload held both copies. The latest size per index counts, and the index
+ * being written now counts as this chunk alone.
+ *
+ * A session whose parts predate the recorded `size` (started before this
+ * change, still inside its TTL) has no per-chunk sizes to sum, so it is judged
+ * by its running `uploaded_size` — the upper bound the bytes cannot exceed.
+ * That side refuses a retry near the limit rather than admitting an upload
+ * over it, and it ends with that session.
+ */
+function bytesHeldByOtherChunks(parts: ReadonlyArray<StoredChunkPart>, chunkIndex: number, uploadedSize: number): number {
+  if (parts.some((p) => typeof p.size !== 'number')) return uploadedSize;
+  const latest = new Map<number, number>();
+  for (const p of parts) latest.set(p.chunkIndex, p.size as number);
+  latest.delete(chunkIndex);
+  let held = 0;
+  for (const size of latest.values()) held += size;
+  return held;
+}
 
 function buildKey(scope: string, fileId: string, filename: string): string {
   const ext = filename.includes('.') ? '.' + filename.split('.').pop() : '';
