@@ -25,12 +25,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL, assertEngineUpdateDispatch, resolveEngineUpdateDispatch } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { LocalStorageAdapter } from './local-storage-adapter.js';
-import { StorageMetadataStore } from './metadata-store.js';
-import type { UploadSessionRecord } from './metadata-store.js';
+import { StorageMetadataStore, updateSessionProgressIfUnchanged } from './metadata-store.js';
+import type { UploadSessionProgress, UploadSessionRecord } from './metadata-store.js';
 import { registerStorageRoutes, CHUNK_RECORD_ATTEMPTS } from './storage-routes.js';
 import { SystemFile } from './objects/system-file.object.js';
 import { SystemUploadSession } from './objects/system-upload-session.object.js';
@@ -86,13 +86,15 @@ function createMockRes(): Res {
 
 interface Backend {
   store: StorageMetadataStore;
+  /** The real engine, when there is one. */
+  engine: any;
   /** `sys_upload_session` writes that reached the engine — `null` on the stand-in, which has none. */
   sessionWrites(): number | null;
   teardown(): Promise<void>;
 }
 
 async function standIn(): Promise<Backend> {
-  return { store: new StorageMetadataStore(null), sessionWrites: () => null, teardown: async () => {} };
+  return { store: new StorageMetadataStore(null), engine: null, sessionWrites: () => null, teardown: async () => {} };
 }
 
 async function realEngine(): Promise<Backend> {
@@ -111,6 +113,7 @@ async function realEngine(): Promise<Backend> {
   };
   return {
     store: new StorageMetadataStore(ql as any),
+    engine: ql,
     sessionWrites: () => writes,
     teardown: async () => {
       try {
@@ -308,5 +311,183 @@ describe.each([
     expect(parts.map((p) => p.chunkIndex)).toEqual(
       Array.from({ length: CHUNK_RECORD_ATTEMPTS }, (_, i) => 100 + i),
     );
+  });
+});
+
+// ── the store's conditional progress write ─────────────────────────────────
+
+const sessionRec = (id: string): UploadSessionRecord => ({
+  id,
+  file_id: `f_${id}`,
+  key: `user/${id}.bin`,
+  filename: `${id}.bin`,
+  total_size: 20,
+  chunk_size: 10,
+  total_chunks: 2,
+  status: 'in_progress',
+});
+
+const ONE_PART: UploadSessionProgress = {
+  parts: JSON.stringify([{ chunkIndex: 0, eTag: 'e0', size: 10 }]),
+  uploaded_chunks: 1,
+  uploaded_size: 10,
+};
+
+describe.each([
+  ['the engine-absent stand-in', standIn],
+  ['a real ObjectQL over SqlDriver (sqlite :memory:)', realEngine],
+] as const)('[#22332] updateSessionProgressIfUnchanged — %s', (_label, makeBackend) => {
+  let backend: Backend;
+  let store: StorageMetadataStore;
+
+  beforeEach(async () => {
+    backend = await makeBackend();
+    store = backend.store;
+    await store.createSession(sessionRec('s1'));
+  });
+
+  afterEach(async () => {
+    await backend.teardown();
+  });
+
+  it('lands on a row that still holds the progress the caller read', async () => {
+    const seen = (await store.getSession('s1'))!;
+    expect(await updateSessionProgressIfUnchanged(store, 's1', seen, ONE_PART)).toBe(true);
+    expect(await store.getSession('s1')).toMatchObject(ONE_PART);
+  });
+
+  it.each([
+    ['parts', { parts: '[{"chunkIndex":9,"eTag":"x","size":1}]' }],
+    ['uploaded_chunks', { uploaded_chunks: 7 }],
+    ['uploaded_size', { uploaded_size: 7 }],
+  ] as const)('REFUSED once %s moved since the read — the row keeps the other write', async (_column, moved) => {
+    const seen = (await store.getSession('s1'))!;
+    await store.updateSession('s1', moved);
+
+    expect(await updateSessionProgressIfUnchanged(store, 's1', seen, ONE_PART)).toBe(false);
+    expect(await store.getSession('s1')).toMatchObject(moved);
+  });
+
+  it('REFUSED for a row that is gone', async () => {
+    const seen = (await store.getSession('s1'))!;
+    await store.deleteSession('s1');
+    expect(await updateSessionProgressIfUnchanged(store, 's1', seen, ONE_PART)).toBe(false);
+    expect(await store.getSession('s1')).toBeNull();
+  });
+});
+
+describe('[#22332] updateSessionProgressIfUnchanged on a wired engine is the engine’s conditional update', () => {
+  let backend: Backend;
+  let calls: Array<{ data: any; options: any; dispatch: string; answer: unknown }>;
+
+  beforeEach(async () => {
+    backend = await realEngine();
+    const ql = backend.engine;
+    const inner = ql.update;
+    calls = [];
+    ql.update = async (object: string, data: any, options: any) => {
+      // Snapshotted before the call: the engine may decorate what it is handed.
+      const asked = { data: structuredClone(data), options: structuredClone(options) };
+      const answer = await inner(object, data, options);
+      if (object === 'sys_upload_session' && options?.multi) {
+        assertEngineUpdateDispatch(asked.data, asked.options);
+        calls.push({ ...asked, dispatch: resolveEngineUpdateDispatch(asked.data, asked.options).kind, answer });
+      }
+      return answer;
+    };
+  });
+
+  afterEach(async () => {
+    await backend.teardown();
+  });
+
+  it('the guard rides the `where` beside the id, as a declared predicate, scoped like every by-id write', async () => {
+    const { store } = backend;
+    await store.createSession(sessionRec('s1'), { organizationId: 'org_A' });
+    const seen = (await store.getSession('s1'))!;
+
+    expect(await updateSessionProgressIfUnchanged(store, 's1', seen, ONE_PART, { organizationId: 'org_A' })).toBe(true);
+
+    expect(calls).toEqual([
+      {
+        data: ONE_PART,
+        options: {
+          where: { parts: '[]', uploaded_chunks: 0, uploaded_size: 0, id: 's1' },
+          multi: true,
+          context: { tenantId: 'org_A', isSystem: true },
+        },
+        dispatch: 'multi',
+        answer: 1,
+      },
+    ]);
+  });
+
+  it('a row stamped for another organization matches nothing — the write misses, it does not land there', async () => {
+    const { store } = backend;
+    await store.createSession(sessionRec('s1'), { organizationId: 'org_B' });
+    const seen = (await store.getSession('s1'))!;
+
+    expect(await updateSessionProgressIfUnchanged(store, 's1', seen, ONE_PART, { organizationId: 'org_A' })).toBe(false);
+    expect((await store.getSession('s1'))!.parts).toBe('[]');
+  });
+
+  it('REFUSED loudly when the engine answers something other than a matched-row count', async () => {
+    const { store } = backend;
+    await store.createSession(sessionRec('s1'));
+    const seen = (await store.getSession('s1'))!;
+    backend.engine.update = async (_o: string, data: any) => ({ ...data });
+
+    await expect(updateSessionProgressIfUnchanged(store, 's1', seen, ONE_PART)).rejects.toMatchObject({
+      name: 'StorageMetadataStoreError',
+      objectName: 'sys_upload_session',
+      operation: 'update',
+      message: expect.stringContaining('where a matched-row count was due'),
+    });
+  });
+
+  it('the chunk door answers 500, once, when its write cannot reach a row nothing else moved', async () => {
+    const rootDir = join(tmpdir(), `os-chunk-cas-unreachable-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await fs.mkdir(rootDir, { recursive: true });
+    try {
+      const server = createMockHttpServer();
+      registerStorageRoutes(server as any, new LocalStorageAdapter({ rootDir, signingSecret: 'test-secret' }), backend.store, {
+        basePath: BASE,
+      });
+      const initRes = createMockRes();
+      await server.handler('POST', INIT)(
+        createMockReq({ body: { filename: 'u.bin', mimeType: 'application/octet-stream', totalSize: 10 } }),
+        initRes,
+      );
+      expect(initRes._status, JSON.stringify(initRes._json)).toBe(200);
+      const { uploadId, resumeToken } = initRes._json.data;
+      // The conditional write matches no row and changes nothing, whatever it is asked.
+      const inner = backend.engine.update;
+      let conditional = 0;
+      backend.engine.update = async (object: string, data: any, options: any) => {
+        if (object === 'sys_upload_session' && options?.multi) {
+          conditional++;
+          return 0;
+        }
+        return inner(object, data, options);
+      };
+
+      const res = createMockRes();
+      await server.handler('PUT', CHUNK)(
+        createMockReq({
+          params: { uploadId, chunkIndex: '0' },
+          headers: { 'x-resume-token': resumeToken },
+          rawBody: async () => Buffer.alloc(10, 0x61),
+        }),
+        res,
+      );
+
+      expect(res._status, JSON.stringify(res._json)).toBe(500);
+      expect(res._json.error.code).toBe('INTERNAL');
+      expect(res._json.error.message).toContain('the write cannot reach the row');
+      expect(conditional, 'no retry loop over a write that cannot land').toBe(1);
+      expect((await backend.store.getSession(uploadId))!.parts).toBe('[]');
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
   });
 });
