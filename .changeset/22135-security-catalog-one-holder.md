@@ -1,5 +1,5 @@
 ---
-'@objectstack/objectql': minor
+'@objectstack/objectql': major
 ---
 
 feat(objectql)!: positions, permission sets and capabilities hold one name per deployment — a package registering a name that an installed package, the environment catalog or a built-in already holds is refused, naming both holders
@@ -8,7 +8,7 @@ Clause-②: no
 
 <!-- adr-0087: not-required (no-migration-prescription) the refusal removes no key, export or field and changes the shape of no stored body; what an author does about a refused name is pick a different one, which no conversion can choose for them -->
 
-**BREAKING** — an accept-set narrowing at the package registration door, shipped as `minor` under the launch-window convention for accept-set narrowings (Changesets pre mode is not yet in on `main`). A deployment whose packages share a position, permission set or capability name booted before this release and is refused at boot after it.
+**BREAKING** — an accept-set narrowing at the package registration door, shipped as `major` on the v18 pre-release line (`.changeset/pre.json` is in `next` pre mode on `main`). A deployment whose packages share a position, permission set or capability name booted before this release and is refused at boot after it.
 
 **Why.** An assignment names a position or a permission set by its bare name, with no package to tell two definitions apart (ADR-0131 D4). Before this release two installed packages could ship one name, and which definition granted depended on registration order. Measured on a booted kernel with two packages sharing one name per type: the by-name catalog read resolved the permission set and the capability to the first-registered package, and the position to the last-registered one. An app declaring the platform's own `admin_full_access` registered beside it, and the by-name read answered the app's set. The maintainer ruled the security catalog out of ADR-0048 §3.4's cross-package coexistence: each of the three types holds one namespace per deployment. Every other metadata type keeps §3.4's coexistence unchanged.
 
@@ -22,6 +22,6 @@ The platform's own permission sets (`admin_full_access`, `member_default`, …) 
 
 **What an author sees.** The boot, or the install, fails with an ADR-0112 envelope: `code: 'NAMESPACE_CONFLICT'` (the code the namespace gate already carries; `NAMESPACE_CONFLICT_CODE` is exported) and `status: 422`. The message names the incoming package and the existing holder of each conflicting name, all conflicts in one message. The thrown error carries `conflicts[]` with `{ catalogType, name, incomingPackageId, existingHolder }`, where `existingHolder` is `{ kind: 'package', packageId }`, `{ kind: 'environment' }` or `{ kind: 'built-in' }`. **The one-line fix: rename the item in one of the two packages, or uninstall one of them.** A built-in name is never available to a package. An assignment that named the old name must name the new one; nothing rewrites stored assignments.
 
-**What is NOT refused.** The same package registering its own name again (an idempotent reload, a re-install, a hot reload). An item of any other metadata type shared by two packages. An environment save over a package-held name: a registration with no package (every `sys_metadata` hydration and metadata write-through) is never judged here, and a packaged permission set is already locked against an in-place edit (`403`). `OS_METADATA_COLLISION=warn` downgrades the namespace gate only. It does not downgrade this refusal.
+**What is NOT refused.** The same package registering its own name again (an idempotent reload, a re-install, a hot reload). An item of any other metadata type shared by two packages. An environment save over a package-held name: a registration with no package (every `sys_metadata` hydration and metadata write-through) is never judged here, and a packaged permission set is already locked against an in-place edit (`403`). `OS_METADATA_COLLISION=warn` downgrades the namespace gate only. It does not downgrade this refusal. At cold boot, packages register before the environment catalog loads from `sys_metadata`, so a package newly added to a deployment over a permission-set or position name the environment catalog already holds is not refused at cold boot (the registry's existing collision warning fires), while a hot install of the same package is refused; whether a cold boot should refuse too is open on #22307.
 
 **Measured producers.** On objectstack `1604e094f5`, the four examples (`app-crm`, `app-showcase`, `app-todo`, `app-multi-package`) and the platform built-ins carry 50 catalog declarations, and no name has more than one holder. Deployed and marketplace packages NOT MEASURED.

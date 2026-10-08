@@ -121,8 +121,8 @@ describe('a package\'s security catalog name another holder holds refuses the bo
 
     const { refusal } = await boot(stack.plugins);
     expectRefusal(refusal, 'com.test.second', { kind: 'package', packageId: 'com.test.first' });
-    // Every conflicting name in one refusal: the position no registry slot holds
-    // is reported beside the two the engine registers.
+    // Every conflicting name in one refusal: the position, the permission set
+    // and the capability the first package holds.
     expect((refusal as any).conflicts.map((c: any) => `${c.catalogType}/${c.name}`)).toEqual([
       'position/regional_manager',
       'permission/regional_set',
