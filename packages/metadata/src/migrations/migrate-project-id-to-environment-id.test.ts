@@ -32,7 +32,6 @@ import {
     SysMetadataHistoryObject,
     SysMetadataAuditObject,
     SysMetadataCommitObject,
-    SysViewDefinitionObject,
 } from '@objectstack/metadata-core';
 
 import {
@@ -57,7 +56,6 @@ const DECLARED_OBJECTS: readonly DeclaredObject[] = [
     SysMetadataHistoryObject,
     SysMetadataAuditObject,
     SysMetadataCommitObject,
-    SysViewDefinitionObject,
 ] as unknown as readonly DeclaredObject[];
 
 /**

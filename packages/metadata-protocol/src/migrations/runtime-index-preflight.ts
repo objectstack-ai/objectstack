@@ -5,14 +5,17 @@
  *
  * ## The gap this closes
  *
- * Three migrations in this directory tighten an existing UNIQUE index into a
+ * Two migrations in this directory tighten an existing UNIQUE index into a
  * NULL-safe (and sometimes row-scoped) form at `kernel:ready`:
  *
  * | migration | table | index(es) |
  * |---|---|---|
  * | `ensureMetadataOverlayIndexes` | `sys_metadata` | active + draft |
- * | `ensureViewDefinitionActiveIndex` | `sys_view_definition` | active |
  * | `ensureSysSettingIdentityIndex` | `sys_setting` | row identity |
+ *
+ * A third, `ensureViewDefinitionActiveIndex` (`sys_view_definition`), retired
+ * with its table under ADR-0131 D13: no writer or reader of that table's rows
+ * existed, so there was no uniqueness of its to protect.
  *
  * Each is a **tightening**, so rows the previous index admitted can block the
  * build. When that happens the migration refuses (ADR-0120 D4: the previous
@@ -34,9 +37,9 @@
  *
  * Measured end to end before this module existed: a database carrying the same
  * duplicate damage twice — once under a DECLARED organization-unique index and
- * once under `sys_view_definition`'s runtime one — produced an `os migrate
- * plan` that named the declared one in full and said nothing whatsoever about
- * the runtime one. The control is what makes that evidence rather than a
+ * once under a runtime one (then `sys_view_definition`'s, since retired) —
+ * produced an `os migrate plan` that named the declared one in full and said
+ * nothing whatsoever about the runtime one. The control is what makes that evidence rather than a
  * reading: a fixture that simply failed to carry damage would have been silent
  * on both.
  *
@@ -87,14 +90,8 @@ import {
     buildSysSettingPresenceSql,
     sysSettingIdentityKeyParts,
 } from './sys-setting-identity-index.js';
-import {
-    VIEW_ACTIVE_INDEX_NAME,
-    VIEW_DEFINITION_TABLE,
-    buildDuplicateProbeSql as buildViewActiveDuplicateProbeSql,
-    viewActiveIndexKeyParts,
-} from './view-definition-active-index.js';
 
-/** The column every one of the three duplicate-listing queries counts into. */
+/** The column every one of the duplicate-listing queries counts into. */
 const DUPLICATE_ROWS_COLUMN = 'duplicate_rows';
 
 /**
@@ -169,16 +166,16 @@ function isMysqlClient(client?: string): boolean {
 }
 
 /**
- * Every index the three `kernel:ready` migrations tighten — FOUR, from three
+ * Every index the `kernel:ready` migrations tighten — THREE, from two
  * migrations, because `ensureMetadataOverlayIndexes` builds one index per
  * overlay state and either can be blocked independently.
  *
- * ## Why one arm takes a dialect and three do not
+ * ## Why one arm takes a dialect and the others do not
  *
  * `sys_setting`'s listing query is the only one whose bare spelling is not
  * merely unidiomatic on MySQL but a parse error: `key` is a RESERVED word
  * there, measured as `ERROR 1064` on MySQL 8.0.46 (#9434), which is why the
- * migration already ships a MySQL-spelled variant. The other three queries name
+ * migration already ships a MySQL-spelled variant. The other two queries name
  * no MySQL-reserved identifier, so the platform's own spelling — the one the
  * migration prints in its boot report — runs on all three dialects, and
  * compiling a second variant of them would buy nothing and add a second
@@ -197,15 +194,6 @@ export function runtimeIndexProbes(opts: { client?: string } = {}): RuntimeIndex
     return [
         overlay('active'),
         overlay('draft'),
-        {
-            migration: 'ensureViewDefinitionActiveIndex',
-            table: VIEW_DEFINITION_TABLE,
-            index: VIEW_ACTIVE_INDEX_NAME,
-            keyParts: viewActiveIndexKeyParts(),
-            rowScope: "state = 'active'",
-            presenceSql: buildPresenceSql(VIEW_DEFINITION_TABLE),
-            duplicateSql: buildViewActiveDuplicateProbeSql(),
-        },
         {
             migration: 'ensureSysSettingIdentityIndex',
             table: SYS_SETTING_TABLE,
@@ -244,8 +232,8 @@ function groupSortKey(group: RuntimeIndexDuplicateGroup): string {
  * It separates the two failures the per-probe presence question below cannot
  * tell apart. Reading "the presence SELECT did not answer" as "the table is not
  * here" is right when the seam works, and catastrophic when it does not: a seam
- * that accepts every statement and answers none of them would report all four
- * tightenings as `table-absent` — a clean bill of health from a probe that never
+ * that accepts every statement and answers none of them would report every
+ * tightening as `table-absent` — a clean bill of health from a probe that never
  * ran, which is the #10677 defect `os migrate duplicates` already closed on its
  * own scan. So liveness is established once, first, against a statement whose
  * failure cannot mean "absent".
@@ -317,8 +305,8 @@ async function runProbe(exec: IndexExec, probe: RuntimeIndexProbe): Promise<Runt
  * Pre-flight every `kernel:ready` index tightening against a live database.
  *
  * Read-only from end to end, and sequential on purpose: this runs inside a
- * command an operator may point at production, and four `SELECT`s in a row cost
- * nothing worth parallelising a shared seam for.
+ * command an operator may point at production, and a handful of `SELECT`s in a
+ * row cost nothing worth parallelising a shared seam for.
  *
  * A probe that fails never aborts the run — an inventory that stopped at the
  * first unreadable table would be one the operator cannot trust to be complete,

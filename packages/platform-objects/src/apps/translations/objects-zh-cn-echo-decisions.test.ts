@@ -183,7 +183,6 @@ const DECISIONS: readonly Decision[] = [
     'sys_email_template',
     'sys_metadata',
     'sys_metadata_history',
-    'sys_view_definition',
     'sys_metadata_audit',
     'sys_secret',
     'sys_setting_audit',

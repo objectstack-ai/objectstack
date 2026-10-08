@@ -4,9 +4,9 @@
  * #9380 — the three `kernel:ready` platform-table migrations never armed on a
  * self-hosted boot, and arming them must not make a read-only command write.
  *
- * `assembleMetadataProtocol` arms #5839 (the `sys_view_definition` active-row
- * index), #8629 (`sys_setting`'s row-identity index) and #8686 (the seed/API
- * tenancy backfill) behind one gate whose own comment says standalone belongs
+ * `assembleMetadataProtocol` armed #5839 (the `sys_view_definition` active-row
+ * index, since retired with its table under ADR-0131 D13), #8629 (`sys_setting`'s
+ * row-identity index) and #8686 (the seed/API tenancy backfill) behind one gate whose own comment says standalone belongs
  * on the INSIDE of it: "platform / standalone kernels own their local
  * sys_metadata; per-project (cloud) kernels source metadata from the control
  * plane and must NOT provision these tables locally."
@@ -91,7 +91,7 @@ async function readState(): Promise<{ data: unknown; schema: unknown }> {
   try {
     const k = (probe as any).knex;
     return {
-      // Everything the three migrations could move. Column-projected, not
+      // Everything the migrations could move. Column-projected, not
       // `select('*')`: a boot that is ALLOWED to run schema-sync DDL adds
       // audit/ownership columns to `crm_case`, and that is not what any of
       // these cases is about (see the non-deferred case below).
@@ -104,7 +104,7 @@ async function readState(): Promise<{ data: unknown; schema: unknown }> {
           .orderBy(['object', 'tenant_id']),
       },
       // The physical schema, so a case asserting "this boot changed nothing"
-      // also covers the two INDEX migrations (#5839, #8629). Without this the
+      // also covers the INDEX migration (#8629). Without this the
       // only migration a green run could speak for would be #8686's, and a
       // read-only boot that quietly created an index would pass.
       schema: await k('sqlite_master').select('type', 'name', 'tbl_name', 'sql').orderBy(['type', 'name']),
