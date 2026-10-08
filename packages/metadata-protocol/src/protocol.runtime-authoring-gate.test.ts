@@ -2228,7 +2228,8 @@ describe('runtime authoring gate on OBJECT writes — the option visibleWhen ver
  *  (a) the measured body is refused on an active save — a 422
  *      `INVALID_METADATA` carrying the build's located finding — and nothing
  *      lands;
- *  (b) the same body still saves as a DRAFT (drafts are never gated);
+ *  (b) the same body still saves as a DRAFT (drafts are never gated), and the
+ *      draft's promotion and a package's draft publish are refused;
  *  (c) control: an option reading `record` saves, and the row lands;
  *  (d) the door's issue and the build's finding are the same finding.
  *
@@ -2296,11 +2297,32 @@ describe('runtime authoring gate on OBJECT writes — an option visibleWhen read
         expect(lineRows(rows)).toEqual([]);
     });
 
-    it('(b) the same body still saves as a DRAFT — drafts are never gated', async () => {
+    it('(b) the same body still saves as a DRAFT — drafts are never gated — and its PROMOTION is refused', async () => {
         const { protocol, rows } = hostWithHeader();
 
         await expect(saveLine(protocol, line(PARENT), { mode: 'draft' })).resolves.toMatchObject({ success: true });
+        expect(lineRows(rows).map((r) => r.state)).toEqual(['draft']);
 
+        const err = await protocol.publishMetaItem({ type: 'object', name: 'fx_line' }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID);
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(issue.path).toBe(WHERE);
+        expect(lineRows(rows).map((r) => r.state)).toEqual(['draft']);
+    });
+
+    it("(b) a PACKAGE's draft publish of the same body is refused — nothing goes live", async () => {
+        const { protocol, rows } = hostWithHeader();
+        await expect(
+            saveLine(protocol, line(PARENT), { mode: 'draft', packageId: 'app.fx' }),
+        ).resolves.toMatchObject({ success: true });
+
+        const res = await protocol.publishPackageDrafts({ packageId: 'app.fx' });
+
+        expect(res.outcome, JSON.stringify(res)).toBe('refused');
+        expect(res.publishedCount).toBe(0);
+        expect(res.failed).toEqual([expect.objectContaining({ type: 'object', name: 'fx_line', code: 'INVALID_METADATA' })]);
         expect(lineRows(rows).map((r) => r.state)).toEqual(['draft']);
     });
 
