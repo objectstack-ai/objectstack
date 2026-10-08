@@ -140,9 +140,11 @@ async function boot(makeDriver: () => unknown, posture: Posture = 'isolated'): P
   engines.push(engine);
 
   // The stored-row half: a hook that clears the column when asked to by name.
-  engine.on('beforeUpdate', 'qa_ledger', (async (ctx: { input: { data: Record<string, unknown> } }) => {
-    if (ctx.input.data.name === 'detached') ctx.input.data.organization_id = null;
-  }) as never);
+  for (const object of ['qa_ledger', 'qa_vault']) {
+    engine.on('beforeUpdate', object, (async (ctx: { input: { data: Record<string, unknown> } }) => {
+      if (ctx.input.data.name === 'detached') ctx.input.data.organization_id = null;
+    }) as never);
+  }
 
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
@@ -307,20 +309,51 @@ for (const [driverName, makeDriver] of DRIVERS) {
       });
     }
 
-    it('⭐ a platform administrator on a posture-permitting object is exempt, as today', async () => {
+    it('⭐ an ordinary tenant object: the same caller\'s update that does not touch the organization is admitted and keeps it', async () => {
       const b = await boot(makeDriver);
 
-      expectAdmitted(await attempt(() => byId(b, 'qa_vault', { id: 'r1', organization_id: null }, PLATFORM_CTX)));
+      expectAdmitted(await attempt(() => byId(b, 'qa_ledger', { id: 'r1', name: 'renamed' })));
+      expectAdmitted(await attempt(() => predicate(b, 'qa_ledger', { name: 'renamed again' })));
 
-      expect((await b.table('qa_vault'))[0]).toEqual({ id: 'r1', organization_id: null });
+      expect(await b.table('qa_ledger')).toEqual(SEEDED);
     });
 
-    it('⭐ the `single` posture is unchanged: no wall, so the update lands', async () => {
+    // On an ordinary tenant object `organization_id` is the registry's
+    // injected `readonly` column, and the engine's static-readonly strip drops
+    // a non-system caller's value for it before the statement — wall or no
+    // wall. So a caller-SENT empty organization never reaches that row's store
+    // on an admitted write; a HOOK-written one does (the strip keeps a hook's
+    // write). The grant tables declare the column themselves, not `readonly`,
+    // so a sent value is stored as sent. The controls below read each
+    // object's store accordingly.
+    it('⭐ a platform administrator on a posture-permitting object is exempt, as today, the stored-row half included', async () => {
+      const b = await boot(makeDriver);
+
+      expectAdmitted(await attempt(() => byId(b, 'qa_vault', { id: 'r1', name: 'detached' }, PLATFORM_CTX)));
+      expectAdmitted(await attempt(() => byId(b, 'qa_vault', { id: 'r2', organization_id: null }, PLATFORM_CTX)));
+
+      expect(await b.table('qa_vault')).toEqual([
+        { id: 'r1', organization_id: null },
+        { id: 'r2', organization_id: OWN_ORG },
+      ]);
+    });
+
+    it('⭐ the `single` posture is unchanged: no wall, so an emptied organization is admitted and stored as the engine stores it', async () => {
       const b = await boot(makeDriver, 'single');
+      const organizationField = (object: string) =>
+        (b.engine.getSchema(object) as { fields: Record<string, { readonly?: boolean }> }).fields.organization_id;
+      expect(organizationField('qa_ledger').readonly, 'the injected column is readonly').toBe(true);
+      expect(organizationField('sys_user_position').readonly ?? false, 'the grant table declares it writable').toBe(false);
 
-      expectAdmitted(await attempt(() => byId(b, 'qa_ledger', { id: 'r1', organization_id: null })));
+      expectAdmitted(await attempt(() => byId(b, 'sys_user_position', { id: 'r1', organization_id: null })));
+      expectAdmitted(await attempt(() => byId(b, 'qa_ledger', { id: 'r1', name: 'detached' })));
+      expectAdmitted(await attempt(() => byId(b, 'qa_ledger', { id: 'r2', organization_id: null })));
 
-      expect((await b.table('qa_ledger'))[0]).toEqual({ id: 'r1', organization_id: null });
+      expect((await b.table('sys_user_position'))[0]).toEqual({ id: 'r1', organization_id: null });
+      expect(await b.table('qa_ledger')).toEqual([
+        { id: 'r1', organization_id: null },
+        { id: 'r2', organization_id: OWN_ORG },
+      ]);
     });
 
     it('⭐ an INSERT that sends an empty organization keeps today’s rule: the platform fills it with the caller’s organization', async () => {
