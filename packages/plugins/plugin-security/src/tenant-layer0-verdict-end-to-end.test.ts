@@ -16,11 +16,13 @@
  * Two populations, one deployment, one caller:
  *   - a walled tenant object ⇒ the event names the caller's organization —
  *     the wall's equality term, recorded and read;
- *   - a deployment-exempted object (#12699 `platformGlobalObjects`) ⇒ the
- *     event names NOTHING — the #15706 population: the wall composed no
- *     predicate, recorded `none`, and the producer (which reads nothing but
- *     the recorded verdict) omits the key. The former producer stamped the
- *     caller's organization here from the context — the wrong key.
+ *   - a deployment-declared platform-global object (#12699
+ *     `platformGlobalObjects`, made total by ADR-0131 D7: no organization
+ *     column on the declaring deployment) ⇒ the event names NOTHING — the
+ *     #15706 population: the wall composed no predicate, recorded `none`, and
+ *     the producer (which reads nothing but the recorded verdict) omits the
+ *     key. The former producer stamped the caller's organization here from
+ *     the context — the wrong key.
  *
  * Harness lineage: `walled-platform-bucket-diagnostic.test.ts` (the real
  * engine over SQLite) and `deployment-platform-global-exemption.test.ts` (the
@@ -79,6 +81,10 @@ async function boot(opts: { platformGlobalObjects?: string[] } = {}) {
     true,
   );
   await engine.init();
+  // [ADR-0131 D7] The deployment's declaration is the injected-columns plan's
+  // input, installed on the registry before the objects register — what
+  // `ObjectQLPlugin.start()` does on a booted kernel (this harness has none).
+  if (opts.platformGlobalObjects) engine.registry.setDeploymentPlatformGlobalObjects(opts.platformGlobalObjects);
   engine.registerApp({
     id: 'com.objectstack.qa.layer0-verdict-15813',
     name: 'Layer 0 verdict weld',
@@ -149,13 +155,14 @@ describe('[#15813] end to end — the plugin records the verdict, the engine pub
     expect(event.organizationId).toBe('org_acme');
   });
 
-  it('a deployment-exempted object under the SAME wall and caller: the key is ABSENT — the #15706 population, closed', async () => {
+  it('a deployment-declared object under the SAME wall and caller: the key is ABSENT — the #15706 population, closed', async () => {
     const { engine, published } = await boot({ platformGlobalObjects: ['qa_widget_registry'] });
-    // Rows across two organizations: the wall composes nothing on this object,
-    // so the sweep reaches both — exactly the batch a wrong key would mislabel.
+    // Rows written by two organizations' callers. On the declaring deployment
+    // the object has no organization column, so the rows carry none — nothing
+    // for the wall OR the driver to scope on.
     await seed(engine, 'qa_widget_registry', [
-      { status: 'open', amount: '1', organization_id: 'org_acme' },
-      { status: 'open', amount: '2', organization_id: 'org_globex' },
+      { status: 'open', amount: '1' },
+      { status: 'open', amount: '2' },
     ]);
     published.length = 0;
 
@@ -164,20 +171,14 @@ describe('[#15813] end to end — the plugin records the verdict, the engine pub
     const bulk = published.filter((e) => e.type === 'data.records.updated');
     expect(bulk).toHaveLength(1);
     const event = BulkDataEventSchema.parse(bulk[0].payload);
-    // Ground truth, past every scope: both rows are in the table, one per
-    // organization — the population a wrong key would have mislabelled.
+    // Ground truth, past every scope: the table has no organization column.
     const driver: any = (engine as any).getDriver('qa_widget_registry');
-    const raw = await driver.knex('qa_widget_registry').select('organization_id');
-    expect(raw.map((r: any) => r.organization_id).sort()).toEqual(['org_acme', 'org_globex']);
-    // Measured, not assumed: the sweep matched ONE row. Layer 0 composed no
-    // wall here (the carve-out), but the engine still threads the caller's
-    // `tenantId` to the driver as `DriverOptions.tenantId` and the SQL driver
-    // scopes on it — the D8 driver leg, which no #12699 declaration reaches
-    // (filed as its own finding; not this seam's to change). So the batch
-    // was narrower than Layer 0 alone implies, and the ABSENT key below is
-    // an under-delivery in the safe direction — never the wrong key the
-    // former producer stamped from the context on exactly this object.
-    expect(event.matched).toBe(1);
+    expect(Object.keys(await driver.knex('qa_widget_registry').columnInfo())).not.toContain('organization_id');
+    // [ADR-0131 D7] Layer 0 and the driver AGREE: the sweep matched BOTH rows.
+    // Before D7 the wall stood down here while the SQL driver went on scoping
+    // the caller's `tenantId` (the D8 driver leg the #12699 stand-down never
+    // reached), so this sweep matched one row — measured on this harness.
+    expect(event.matched).toBe(2);
     expect(hasOrgKey(bulk[0].payload)).toBe(false);
     expect(event.organizationId).toBeUndefined();
   });

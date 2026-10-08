@@ -4,7 +4,7 @@ import { ObjectQL } from './engine.js';
 import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
-import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/core';
+import { resolveArtifactPackageOrder, artifactPackageId, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
 // [#21777] The ONE "is this schema the remote's?" predicate, shared with `ObjectQL.syncSchemas`.
@@ -315,6 +315,110 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
+   * [ADR-0131 D7] The objects the deployment declares platform-global, as this
+   * plugin installed them at `start()` — compared at `kernel:ready` by
+   * {@link assertDeploymentPlatformGlobalObjectsUnchanged}.
+   */
+  private installedPlatformGlobalObjects: ReadonlySet<string> = new Set<string>();
+
+  /**
+   * [ADR-0131 D7 — the #12699 declaration made total] Read the deployment's
+   * `OrgScopingEntitlement.platformGlobalObjects` off the mounted `org-scoping`
+   * service and install it as the injected-columns plan's input: every object
+   * it names gets NO organization column on this deployment, so Layer 0 and
+   * the driver agree by having nothing to scope.
+   *
+   * ## Why here, at the top of `start()` (ADR-0116)
+   *
+   * Every `init()` has completed by now — the Phase 1/2 split — and the
+   * provider declares `org-scoping` in `providesServices`, i.e. registers it
+   * unconditionally in its `init()`. So the declaration read here is final for
+   * this boot, and no table exists yet: the first schema sync is below. The
+   * plan is ALSO computed at registration, inside each registrant's `init()`,
+   * and the provider cannot be ordered ahead of those (it hard-depends on this
+   * plugin), so the registry re-plans every object already registered
+   * (`SchemaRegistry.setDeploymentPlatformGlobalObjects`).
+   *
+   * Fail closed, through the one reader (`readDeploymentOrgScopingEntitlement`,
+   * `@objectstack/core`): no service or an absent key installs nothing and
+   * every plan is byte-identical; a junk key is refused loudly and installs
+   * nothing, so no object loses its column.
+   */
+  private installDeploymentPlatformGlobalObjects(ctx: PluginContext): void {
+    if (!this.ql) return;
+    const reading = this.readDeploymentPlatformGlobalObjects(ctx);
+    this.installedPlatformGlobalObjects = reading;
+    if (reading.size === 0) return;
+    const { replanned, keptAuthoredColumn } =
+      this.ql.registry.setDeploymentPlatformGlobalObjects(reading);
+    const objects = [...reading].sort();
+    ctx.logger.info(
+      `[ObjectQLPlugin] deployment declares ${objects.length} platform-global object(s) — no ` +
+        'organization column on THIS deployment (ADR-0131 D7); each is governed by object permission, ' +
+        'not by the organization wall',
+      { objects, replannedAtStart: replanned },
+    );
+    if (keptAuthoredColumn.length > 0) {
+      ctx.logger.warn(
+        `[ObjectQLPlugin] deployment declares ${keptAuthoredColumn.join(', ')} platform-global, but the ` +
+          'object DECLARES its own organization_id: that column is the author\'s, not the platform\'s, so it ' +
+          'stays and the organization wall keeps scoping it. Remove the authored organization_id field to ' +
+          'make the declaration take effect, or drop the object from the declaration.',
+        { objects: keptAuthoredColumn },
+      );
+    }
+  }
+
+  /** The validated `platformGlobalObjects` reading; warns for a refused key. */
+  private readDeploymentPlatformGlobalObjects(ctx: PluginContext): ReadonlySet<string> {
+    let service: unknown;
+    try {
+      service = ctx.getService('org-scoping');
+    } catch {
+      service = undefined;
+    }
+    const reading = readDeploymentOrgScopingEntitlement(service);
+    for (const refusal of reading.refused) {
+      if (refusal.key !== 'platformGlobalObjects') continue;
+      ctx.logger.warn(
+        `[ObjectQLPlugin] org-scoping entitlement key 'platformGlobalObjects' REFUSED — ${refusal.problem}`,
+        { key: refusal.key, declared: refusal.value },
+      );
+    }
+    return reading.platformGlobalObjects;
+  }
+
+  /**
+   * [ADR-0131 D7] At `kernel:ready`, refuse the boot when the `org-scoping`
+   * service now declares a different platform-global set than the one the
+   * columns were planned from at `start()`. That only happens when a provider
+   * registers `org-scoping` outside its `init()` (or swaps it), which ADR-0116
+   * gives no ordering for: the objects it names were provisioned WITH the
+   * column, and serving on would advertise a declaration the deployment does
+   * not honour. Reads the service without warning — a junk key was warned
+   * about at `start()` and reads as the same empty set.
+   */
+  private assertDeploymentPlatformGlobalObjectsUnchanged(ctx: PluginContext): void {
+    let service: unknown;
+    try {
+      service = ctx.getService('org-scoping');
+    } catch {
+      service = undefined;
+    }
+    const now = readDeploymentOrgScopingEntitlement(service).platformGlobalObjects;
+    const before = this.installedPlatformGlobalObjects;
+    const same = now.size === before.size && [...now].every((name) => before.has(name));
+    if (same) return;
+    throw new Error(
+      '[ObjectQLPlugin] the org-scoping service\'s platformGlobalObjects declaration changed after the engine ' +
+        `planned the columns at start() (planned: [${[...before].sort().join(', ')}]; now: ` +
+        `[${[...now].sort().join(', ')}]). The objects it names were provisioned with an organization column. ` +
+        "Register 'org-scoping' in the provider's init() and declare it in its providesServices (ADR-0116), " +
+        'so every plugin start() — this engine\'s schema sync included — reads the final declaration.',
+    );
+  }
+
+  /**
    * Arm the protocol-driven rebinds. Shared by both assembly modes: called with
    * the in-house shim when `registerProtocol` is on, and lazily from `start()`
    * against whatever registered `protocol` (MetadataProtocolPlugin) otherwise.
@@ -560,6 +664,11 @@ export class ObjectQLPlugin implements Plugin {
   start = async (ctx: PluginContext) => {
     ctx.logger.info('ObjectQL engine starting...');
 
+    // [ADR-0131 D7] FIRST: the deployment's platform-global declaration is the
+    // injected-columns plan's input, so it is installed before anything below
+    // registers another object or creates a table.
+    this.installDeploymentPlatformGlobalObjects(ctx);
+
     // Delegated-assembly mode (ADR-0076 Step 2): the protocol was registered
     // by MetadataProtocolPlugin during init — arm the authored hook/action
     // rebind against it now that all inits ran. Graceful when absent.
@@ -602,6 +711,11 @@ export class ObjectQLPlugin implements Plugin {
     // Idempotent: the bind fully replaces the 'metadata-service' package
     // set, so edited hooks re-bind and deleted hooks tear down.
     ctx.hook('kernel:ready', async () => {
+        // [ADR-0131 D7] The declaration the columns were planned from must still
+        // be the deployment's: a provider that registered `org-scoping` after
+        // this plugin's start() was never read, so its objects were provisioned
+        // WITH the column. Refused here, by name, rather than served.
+        this.assertDeploymentPlatformGlobalObjectsUnchanged(ctx);
         // A field naming a picklist no package declares fails the boot, naming
         // the field and the package — never served as a select with nothing to
         // choose — and so does an extension of such a list, whose values would

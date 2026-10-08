@@ -5,6 +5,17 @@
  * mounted `org-scoping` service (`OrgScopingEntitlement`,
  * `@objectstack/spec/security`).
  *
+ * ## Why it lives in core
+ *
+ * The two keys have two consumers in two packages that cannot import each
+ * other: the engine's schema registry (`@objectstack/objectql`) plans the
+ * columns from `platformGlobalObjects` (ADR-0131 D7: a declared object gets no
+ * organization column on this deployment), and `@objectstack/plugin-security`
+ * shapes the `organization_admin` auto-grant from
+ * `suppressUnboundedOrgAdminGrant`. Both depend on this package, so the ONE
+ * reader — and its fail-closed contract — lives here. Each caller warns for
+ * the refused key it consumes, and only that one.
+ *
  * ## Why a reader, and why it fails closed per key
  *
  * The `org-scoping` service is the enterprise runtime's own object — a live
@@ -16,8 +27,8 @@
  * never coerced onto a permissive branch. Here the non-permissive branch is
  * "the key was never declared":
  *
- *   - `platformGlobalObjects` junk ⇒ NO object is exempted (everything walls
- *     exactly as its own declaration says);
+ *   - `platformGlobalObjects` junk ⇒ NO object is declared (every object's
+ *     injected-columns plan is exactly what its own declaration says);
  *   - `suppressUnboundedOrgAdminGrant` junk ⇒ the auto-grant keeps today's
  *     posture-keyed behaviour.
  *
@@ -28,8 +39,9 @@
  * ⛔ Partial honouring is refusal's other failure mode: one junk ENTRY voids
  * the whole `platformGlobalObjects` key rather than dropping the entry. The
  * declarer is first-party runtime code; half-honouring a malformed list hides
- * the bug behind mostly-working behaviour, while a whole-key refusal walls
- * every named object — loud on the first smoke test, and safe.
+ * the bug behind mostly-working behaviour, while a whole-key refusal keeps the
+ * organization column (and the wall) on every named object — loud on the
+ * first smoke test, and safe.
  *
  * ## Read timing
  *
@@ -40,7 +52,9 @@
  * registers after the reader's own init). A re-registered service is a new
  * instance and re-validates; in-place mutation of a declaration is outside the
  * contract (the interface is readonly, and every declared key is expected to
- * be constant for the kernel's life).
+ * be constant for the kernel's life). The engine reads `platformGlobalObjects`
+ * once, at its plugin's `start()`, before the first schema sync — see
+ * `SchemaRegistry.setDeploymentPlatformGlobalObjects` for the ordering.
  */
 
 import {
@@ -60,8 +74,9 @@ export interface RefusedEntitlementKey {
 /** The validated, fail-closed reading of the deployment's declaration. */
 export interface DeploymentOrgScopingEntitlementReading {
   /**
-   * Objects this deployment declares platform-global (Layer 0 must not wall
-   * them here). Empty when the key is absent, junk, or no service is mounted.
+   * Objects this deployment declares platform-global — each gets no
+   * organization column on this deployment (ADR-0131 D7). Empty when the key is
+   * absent, junk, or no service is mounted.
    */
   readonly platformGlobalObjects: ReadonlySet<string>;
   /**
