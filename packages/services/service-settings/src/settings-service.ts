@@ -55,14 +55,42 @@ import {
 const DEFAULT_OBJECT = 'sys_setting';
 
 /**
- * The execution context `SettingsService`'s own `sys_setting` reads and writes
- * run under (#8030, #21913).
+ * The tenant-less object that stores the cascade's GLOBAL rung (ADR-0131 D7).
  *
- * `sys_setting` is a platform-owned table with platform-owned columns
- * (`value_enc`, `updated_by` are declared `readonly: true`), and this service
- * is the only writer of them — after its own capability, lock and validation
- * gates. See {@link SettingsService.upsertRow} for the full argument and for
- * why the field stays `readonly` for everybody else.
+ * The global rung left the tenant-scoped `sys_setting`: a deployment-level
+ * value has no organization, and a tenant-scoped table could only hold it as a
+ * NULL-organization row that a walled posture hides from every reader. So the
+ * rung has its own store, read and written ONLY here:
+ *
+ *  - a write at a key whose declared scope is `global` lands in this object,
+ *    keyed `(namespace, key)` — never in `sys_setting`;
+ *  - the resolver's global rung is read from this object and nowhere else.
+ *    `sys_setting` reads exclude `scope = 'global'` in the query itself, so a
+ *    row a pre-v18 database still holds there is not a second source for the
+ *    rung. Moving those rows is the v18 upgrade ceremony's job (ADR-0131 D14:
+ *    a manual operator step behind a boot refusal), ⛔ never a fallback read
+ *    here and never an automatic move at boot.
+ *
+ * The rank table ({@link SettingsService.scopeRank}), the `source: 'global'`
+ * resolution value and `SpecifierScope` are unchanged: they name the cascade
+ * rung, not its storage.
+ */
+const PLATFORM_SETTING_OBJECT = 'sys_platform_setting';
+
+/**
+ * The execution context `SettingsService`'s own reads and writes of its two
+ * stores — `sys_setting` and {@link PLATFORM_SETTING_OBJECT} — run under
+ * (#8030, #21913).
+ *
+ * Both are platform-owned tables with platform-owned columns (`value_enc`,
+ * `updated_by` are declared `readonly: true`), and this service is the only
+ * writer of them — after its own capability, lock and validation gates. See
+ * {@link SettingsService.upsertRow} for the full argument and for why the field
+ * stays `readonly` for everybody else. On `sys_platform_setting` the opt-in also
+ * carries the read past the object's own `requiredPermissions` gate: the
+ * settings door in front of the service has already applied the manifest's
+ * capability, and the platform-only capability on the object governs the
+ * generic data API, not this service's plumbing (ADR-0131 D7).
  *
  * The reads ({@link SettingsService.loadRows}, `upsertRow`'s existence probe,
  * and [#21908] `readStoredHandle`'s re-read of the stored handle) and
@@ -614,7 +642,8 @@ export class SettingsService {
    * Late-bind a data engine and (optionally) an audit sink. Plugins
    * call this from `kernel:ready` once `objectql` is wired so the
    * SettingsService swaps from its in-memory fallback to the real
-   * `sys_setting` table without re-registering the service.
+   * `sys_setting` / `sys_platform_setting` tables without re-registering the
+   * service.
    */
   bindEngine(
     engine: SettingsEngine,
@@ -1271,7 +1300,10 @@ export class SettingsService {
    * exactly as {@link get} does), then group the remaining keys by which
    * `loadRows` argument their scope requires — `user`-scoped keys read
    * `(namespace, userId)`, everything else `(namespace, null)` — one load per
-   * group, and walk each key's cascade over its group's rows.
+   * group, and walk each key's cascade over its group's rows. [ADR-0131 D7]
+   * The global rung lives in its own object and no grouping argument changes
+   * it, so it is read once per call, whatever the grouping: at most two
+   * `sys_setting` reads plus one `sys_platform_setting` read.
    *
    * Row-for-row equivalent to calling {@link get} per key BY CONSTRUCTION:
    * the env-override branch, the scope→userId mapping, and the cascade are
@@ -1344,14 +1376,16 @@ export class SettingsService {
     if (pending.length > 0) {
       const userKeys = pending.filter((p) => p.scope === 'user');
       const otherKeys = pending.filter((p) => p.scope !== 'user');
-      const [userRows, otherRows] = await Promise.all([
-        userKeys.length > 0
-          ? this.loadRows(namespace, ctx.userId ?? null)
-          : Promise.resolve([] as SettingsRow[]),
-        otherKeys.length > 0
-          ? this.loadRows(namespace, null)
-          : Promise.resolve([] as SettingsRow[]),
-      ]);
+      // [ADR-0131 D7] One load per required `loadRows` argument, as before —
+      // and the global rung, which no argument changes, is read ONCE for both
+      // (see `loadRowSets`).
+      const groups: Array<string | null> = [
+        ...(userKeys.length > 0 ? [ctx.userId ?? null] : []),
+        ...(otherKeys.length > 0 ? [null] : []),
+      ];
+      const sets = await this.loadRowSets(namespace, groups);
+      const userRows = userKeys.length > 0 ? sets[0] : [];
+      const otherRows = otherKeys.length > 0 ? sets[sets.length - 1] : [];
       for (const { key, scope } of userKeys) {
         out[key] = await this.resolveKeyFromRows(reg, key, scope, userRows);
       }
@@ -1725,9 +1759,10 @@ export class SettingsService {
 
     for (const [key, rawValue] of Object.entries(patch)) {
       const scope = reg.scopes.get(key)!;
-      // global rows are platform-wide (tenant_id=null, user_id=null);
-      // user rows pin to ctx.userId; tenant rows leave user_id null and
-      // let the engine's tenant scoping fill in tenant_id from ctx.
+      // global rows are deployment-wide and land in `sys_platform_setting`,
+      // which has no organization and no user column (ADR-0131 D7, see
+      // `rowIdentity`); user rows pin to ctx.userId; tenant rows leave user_id
+      // null and let the engine's tenant scoping fill in tenant_id from ctx.
       const userId = scope === 'user' ? ctx.userId ?? null : null;
       const isEncrypted = reg.encryptedKeys.has(key);
       const isNull = rawValue === null || typeof rawValue === 'undefined';
@@ -2316,41 +2351,32 @@ export class SettingsService {
   // Persistence helpers (engine or in-memory)
   // ---------------------------------------------------------------------
 
+  /** The namespace's rows every rung of one key's cascade can draw on. */
   private async loadRows(namespace: string, userId: string | null): Promise<SettingsRow[]> {
+    return (await this.loadRowSets(namespace, [userId]))[0];
+  }
+
+  /**
+   * One row set per requested `userId`, each holding every rung's rows for the
+   * namespace — the global rung from `sys_platform_setting`, the tenant and
+   * user rungs from `sys_setting` ([ADR-0131 D7]).
+   *
+   * The global rung does not depend on `userId`, so on the engine path it is
+   * read ONCE and shared by every set; each set then costs one `sys_setting`
+   * read. That is what keeps {@link getMany}'s grouped load at one
+   * `sys_setting` read per grouping argument (#10826) with the rung's own read
+   * added once, rather than once per group.
+   */
+  private async loadRowSets(
+    namespace: string,
+    userIds: ReadonlyArray<string | null>,
+  ): Promise<SettingsRow[][]> {
     if (this.engine) {
-      const where: Record<string, unknown> = { namespace };
-      // A user-keyed load must still see tenant/global rows (user_id NULL):
-      // resolveKey's user→tenant→global cascade and the Phase-2 upper-scope
-      // lock check both search THIS one result set, so a bare user_id
-      // equality starves them of every upper-scope row on engine-bound
-      // deployments while the in-memory branch below includes them (#11228).
-      if (userId !== null) {
-        where.$or = [{ user_id: userId }, { scope: 'tenant' }, { scope: 'global' }];
-      }
-      // Settings rows include platform-wide (`global` scope, tenant_id=null)
-      // entries; bypass the tenant-scoping audit warning so loads work
-      // uniformly across global/tenant/user without log noise. Per-tenant
-      // isolation for `tenant`-scope rows is still enforced by the engine
-      // once an ExecutionContext.tenantId is plumbed through (Phase 2+).
-      // The explicit system opt-in: see SETTINGS_SYSTEM_CONTEXT.
-      const rows = await this.engine.find(this.objectName, {
-        where,
-        bypassTenantAudit: true,
-        context: SETTINGS_SYSTEM_CONTEXT,
-      } as any);
-      return rows.map((r) => ({
-        namespace: r.namespace,
-        key: r.key,
-        scope: r.scope as SpecifierScope,
-        user_id: r.user_id ?? null,
-        value: r.value ?? null,
-        value_enc: r.value_enc ?? null,
-        encrypted: Boolean(r.encrypted),
-        locked: Boolean(r.locked),
-        locked_reason: r.locked_reason ?? null,
-        updated_at: r.updated_at,
-        updated_by: r.updated_by ?? null,
-      }));
+      const [globalRows, ...scopedSets] = await Promise.all([
+        this.loadGlobalRows(namespace),
+        ...userIds.map((userId) => this.loadScopedRows(namespace, userId)),
+      ]);
+      return scopedSets.map((scoped) => [...globalRows, ...scoped]);
     }
     // The engine branch above was not taken. When a bind is DECLARED-but-pending
     // that is the pre-bind window, and this read is about to be answered from a
@@ -2361,11 +2387,81 @@ export class SettingsService {
     // `loadRows`, and that answer IS correct (env outranks every persisted
     // scope), so it must not be reported.
     this.reportPreBindRead(namespace);
-    return this.memory.filter(
-      (r) =>
-        r.namespace === namespace &&
-        (userId === null || r.user_id === userId || r.scope === 'tenant' || r.scope === 'global'),
+    // The in-memory fallback is ONE store for every rung: rows keep their
+    // `scope` tag, and there is no table split to mirror.
+    return userIds.map((userId) =>
+      this.memory.filter(
+        (r) =>
+          r.namespace === namespace &&
+          (userId === null || r.user_id === userId || r.scope === 'tenant' || r.scope === 'global'),
+      ),
     );
+  }
+
+  /**
+   * [ADR-0131 D7] The global rung: the namespace's `sys_platform_setting` rows,
+   * tagged `scope: 'global'` for the cascade walk. The object has no `scope`,
+   * no `user_id` and no organization column — one row per `(namespace, key)`
+   * for the deployment — so the read is `namespace` alone and needs no
+   * tenant-audit bypass. The explicit system opt-in: see SETTINGS_SYSTEM_CONTEXT.
+   */
+  private async loadGlobalRows(namespace: string): Promise<SettingsRow[]> {
+    const rows = await this.engine!.find(PLATFORM_SETTING_OBJECT, {
+      where: { namespace },
+      context: SETTINGS_SYSTEM_CONTEXT,
+    });
+    return rows.map((r) => this.toSettingsRow(r, 'global'));
+  }
+
+  /**
+   * The tenant and user rungs: the namespace's `sys_setting` rows.
+   *
+   * ⛔ `scope = 'global'` is excluded IN THE QUERY. The global rung's one source
+   * is {@link loadGlobalRows}; a global row a pre-v18 database still holds in
+   * `sys_setting` must not answer as a second one — the v18 upgrade ceremony
+   * moves it (ADR-0131 D14), and until then it is simply not a rung.
+   */
+  private async loadScopedRows(namespace: string, userId: string | null): Promise<SettingsRow[]> {
+    // A user-keyed load must still see the tenant rows (user_id NULL):
+    // resolveKey's user→tenant→global cascade and the Phase-2 upper-scope lock
+    // check both search THIS one result set, so a bare user_id equality starves
+    // them of every upper-scope row on engine-bound deployments while the
+    // in-memory branch includes them (#11228). The global rung is not in this
+    // table any more; `loadRowSets` adds it.
+    const where: Record<string, unknown> = {
+      namespace,
+      $or: userId !== null
+        ? [{ user_id: userId }, { scope: 'tenant' }]
+        : [{ scope: 'tenant' }, { scope: 'user' }],
+    };
+    // Bypass the tenant-scoping audit warning so loads work uniformly across
+    // the tenant and user rungs without log noise. Per-tenant isolation for
+    // `tenant`-scope rows is still enforced by the engine once an
+    // ExecutionContext.tenantId is plumbed through (Phase 2+).
+    // The explicit system opt-in: see SETTINGS_SYSTEM_CONTEXT.
+    const rows = await this.engine!.find(this.objectName, {
+      where,
+      bypassTenantAudit: true,
+      context: SETTINGS_SYSTEM_CONTEXT,
+    } as any);
+    return rows.map((r) => this.toSettingsRow(r, r.scope as SpecifierScope));
+  }
+
+  /** A stored row in the cascade's shape, on the rung its store says it is. */
+  private toSettingsRow(r: any, scope: SpecifierScope): SettingsRow {
+    return {
+      namespace: r.namespace,
+      key: r.key,
+      scope,
+      user_id: scope === 'global' ? null : r.user_id ?? null,
+      value: r.value ?? null,
+      value_enc: r.value_enc ?? null,
+      encrypted: Boolean(r.encrypted),
+      locked: Boolean(r.locked),
+      locked_reason: r.locked_reason ?? null,
+      updated_at: r.updated_at,
+      updated_by: r.updated_by ?? null,
+    };
   }
 
   /**
@@ -2376,7 +2472,8 @@ export class SettingsService {
    * ### Why the update is a SYSTEM write (#8030)
    *
    * `sys_setting.value_enc` and `sys_setting.updated_by` are declared
-   * `readonly: true` (`packages/platform-objects/src/system/sys-setting.object.ts`),
+   * `readonly: true` (`packages/platform-objects/src/system/sys-setting.object.ts`;
+   * the global rung's `sys_platform_setting` declares the same two the same way),
    * and the engine STRIPS author-declared read-only columns from a
    * **non-system** caller's UPDATE payload (`stripReadonlyFields`, gated on
    * `if (!opCtx.context?.isSystem)` in `packages/objectql/src/engine.ts`). On
@@ -2410,31 +2507,44 @@ export class SettingsService {
    */
   /**
    * The composite key identifying ONE settings row, in the shape the engine
-   * path needs.
+   * path needs — the object that stores the row's rung, the `where` that names
+   * the row there, and the columns the row is written with.
    *
    * Extracted rather than repeated (#8262): `reapRotatedSecret`'s verification
    * read has to target **exactly** the row `upsertRow` just wrote. A re-read
    * aimed at a slightly different row would answer a different question while
    * looking correct — and the answer decides whether a ciphertext is deleted.
+   *
+   * [ADR-0131 D7] The rung picks the store. A `global` row lives in
+   * `sys_platform_setting`, keyed `(namespace, key)` and written WITHOUT `scope`
+   * or `user_id` — that object declares neither, and no organization column
+   * either. A `tenant` / `user` row lives in `sys_setting`, keyed
+   * `(namespace, key, scope, user_id)` exactly as before. Neither carries a
+   * tenant-audit bypass: the global rung's object has no tenant field to audit,
+   * and the tenant/user rungs keep the warning for a write missing its tenant.
    */
   private rowIdentity(row: SettingsRow): {
+    object: string;
     where: Record<string, unknown>;
-    // Narrow on purpose: spread into a `SettingsEngine.find` options object it
-    // has to stay assignable to the DECLARED option type, so the verification
-    // read below needs no `as any` erasure of the contract it depends on.
-    bypass: { bypassTenantAudit?: true };
+    data: Record<string, unknown>;
   } {
+    if (row.scope === 'global') {
+      const { scope: _scope, user_id: _userId, ...data } = row;
+      return {
+        object: PLATFORM_SETTING_OBJECT,
+        where: { namespace: row.namespace, key: row.key },
+        data,
+      };
+    }
     return {
+      object: this.objectName,
       where: {
         namespace: row.namespace,
         key: row.key,
         scope: row.scope,
         user_id: row.user_id ?? null,
       },
-      // global rows are platform-wide — bypass the tenant audit warning
-      // (we intentionally write tenant_id=null). tenant/user rows still
-      // benefit from the warning when ctx.tenantId is missing.
-      bypass: row.scope === 'global' ? { bypassTenantAudit: true } : {},
+      data: { ...row },
     };
   }
 
@@ -2461,42 +2571,43 @@ export class SettingsService {
 
   private async upsertRow(row: SettingsRow): Promise<string | null> {
     if (this.engine) {
-      const { where, bypass } = this.rowIdentity(row);
+      const { object, where, data } = this.rowIdentity(row);
       // All three engine calls carry the explicit system opt-in
       // (SETTINGS_SYSTEM_CONTEXT): the probe and the insert for the same
       // reason as the update below, and none of them relies on a missing
       // principal to pass the security middleware.
-      const existing = await this.engine.find(this.objectName, {
+      const existing = await this.engine.find(object, {
         where,
         limit: 1,
-        ...bypass,
         context: SETTINGS_SYSTEM_CONTEXT,
-      } as any);
+      });
       if (existing[0]) {
         const previousEnc = (existing[0] as { value_enc?: unknown }).value_enc;
-        await this.engine.update(this.objectName, {
+        await this.engine.update(object, {
           where,
-          data: { ...row },
+          data,
           context: SETTINGS_SYSTEM_CONTEXT,
-          ...bypass,
-        } as any);
+        });
         return SettingsService.handleOf(previousEnc);
       }
       // Under the opt-in the engine no longer checks that a user-scope row's
       // `user_id` names a user, so the service keeps that refusal before the
       // insert (see assertUserReferenceResolves). The update branch above was
-      // already a system write and is unchanged.
+      // already a system write and is unchanged. A global row names no user
+      // (its object has no `user_id`), so there is nothing to resolve.
       const engine = this.engine;
-      await assertUserReferenceResolves(
-        async (id) => (await engine.find(USER_OBJECT, { where: { id }, limit: 1, context: SETTINGS_SYSTEM_CONTEXT }))[0],
-        {
-          object: this.objectName,
-          field: 'user_id',
-          label: registeredLabel(engine, { object: this.objectName, field: 'user_id' }, 'User'),
-        },
-        row.user_id,
-      );
-      await this.engine.insert(this.objectName, { ...row }, { ...bypass, context: SETTINGS_SYSTEM_CONTEXT } as any);
+      if (object === this.objectName) {
+        await assertUserReferenceResolves(
+          async (id) => (await engine.find(USER_OBJECT, { where: { id }, limit: 1, context: SETTINGS_SYSTEM_CONTEXT }))[0],
+          {
+            object: this.objectName,
+            field: 'user_id',
+            label: registeredLabel(engine, { object: this.objectName, field: 'user_id' }, 'User'),
+          },
+          row.user_id,
+        );
+      }
+      await this.engine.insert(object, data, { context: SETTINGS_SYSTEM_CONTEXT });
       return null;
     }
     const idx = this.memoryIndexOf(row);
@@ -2522,7 +2633,8 @@ export class SettingsService {
    * hygiene we ask operators to practise.
    *
    * Nothing else can reference the handle: ids are minted per `encrypt()` call,
-   * `sys_setting.value_enc` is the only column that holds one, and the audit
+   * `value_enc` on the row's own store (`sys_setting`, or `sys_platform_setting`
+   * for the global rung) is the only column that holds one, and the audit
    * trail records digests (`hmac-sha256:…`) rather than handles — so it stays
    * readable after the ciphertext is gone.
    *
@@ -2637,13 +2749,12 @@ export class SettingsService {
     row: SettingsRow,
   ): Promise<{ found: boolean; handle: string | null }> {
     if (this.engine) {
-      const { where, bypass } = this.rowIdentity(row);
+      const { object, where } = this.rowIdentity(row);
       // The explicit system opt-in, as the write it verifies carries: see
-      // SETTINGS_SYSTEM_CONTEXT.
-      const rows = await this.engine.find(this.objectName, {
+      // SETTINGS_SYSTEM_CONTEXT. Same object and same `where` as the write.
+      const rows = await this.engine.find(object, {
         where,
         limit: 1,
-        ...bypass,
         context: SETTINGS_SYSTEM_CONTEXT,
       });
       const current = Array.isArray(rows) ? rows[0] : undefined;

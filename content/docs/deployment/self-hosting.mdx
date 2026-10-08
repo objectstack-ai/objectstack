@@ -138,8 +138,14 @@ in the project scaffold —
 # ── Build stage: compile TypeScript metadata to the artifact ─────────
 FROM node:22-slim AS build
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci
+# Installs from the lockfile this project carries, so commit it: scaffolding
+# writes pnpm-lock.yaml when it installs with pnpm, package-lock.json with npm.
+# pnpm runs through Corepack at the major .github/workflows/ci.yml pins; keep
+# the two in step (unpinned, Corepack takes the registry's newest major).
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* package-lock.json* ./
+RUN if [ -f pnpm-lock.yaml ]; then corepack pnpm@10 install --frozen-lockfile; \
+    elif [ -f package-lock.json ]; then npm ci; \
+    else echo "No lockfile: run pnpm install or npm install, then commit it." >&2; exit 1; fi
 COPY . .
 RUN npx os build              # → dist/objectstack.json
 

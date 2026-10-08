@@ -142,6 +142,9 @@ function makeWarnOnlyLogger() {
   };
 }
 
+/** A metadata service that declares no position: every position here comes from the registry. */
+const NO_METADATA_POSITIONS = { get: async () => undefined, list: async () => [] };
+
 /**
  * `sys_position` double whose INSERT is vetoed the way a legacy platform-wide
  * unique index vetoes it: the row never lands and the driver throws.
@@ -158,7 +161,14 @@ function makeQl(
   const rows: any[] = [];
   return {
     rows,
-    registry: { listItems: (type: string) => (type === 'position' ? [...declared] : []) },
+    // The members the security catalog read takes from the engine registry —
+    // the declared-positions seeder reads through it (ADR-0131 C2 S2b), with
+    // `NO_METADATA_POSITIONS` as the metadata service.
+    registry: {
+      listItems: (type: string) => (type === 'position' ? [...declared] : []),
+      getItem: (type: string, name: string) => (type === 'position' ? declared.find((d) => d?.name === name) : undefined),
+      isPackageDisabled: () => false,
+    },
     async find(object: string, q: any) {
       if (object !== 'sys_position') return [];
       const where = q?.where ?? {};
@@ -229,7 +239,7 @@ describe('a unique-violation refusal during catalog seeding is boot-visible', ()
     // ⭐ Resolves rather than rejects. A rethrow would turn a silent
     // degradation into a boot failure on every deployment carrying the legacy
     // index — a behaviour change this repair deliberately does not make.
-    const r = await bootstrapDeclaredPositions(ql, null, { logger, organizationId: 'org_1' });
+    const r = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS, { logger, organizationId: 'org_1' });
 
     // The seed really did land nothing — the defect's precondition holds.
     expect(r.seeded).toBe(0);
@@ -276,7 +286,7 @@ describe('a unique-violation refusal during catalog seeding is boot-visible', ()
     );
     const ql = makeQl(THREE_POSITIONS, { insertThrows: () => leaky });
 
-    await bootstrapDeclaredPositions(ql, null, { logger, organizationId: 'org_1' });
+    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS, { logger, organizationId: 'org_1' });
 
     const serialized = JSON.stringify(refusalLines(warns, errors));
     // [#8682] This is a server LOG, which is exactly the boundary the bound-
@@ -298,7 +308,7 @@ describe('a unique-violation refusal during catalog seeding is boot-visible', ()
       organization_id: 'org_1',
     });
 
-    const r = await bootstrapDeclaredPositions(ql, null, { logger, organizationId: 'org_1' });
+    const r = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS, { logger, organizationId: 'org_1' });
 
     expect(r.updated).toBe(0);
     const refusals = refusalLines(warns, errors);
@@ -321,7 +331,7 @@ describe('the refusal warning is aggregated, not one line per refused row', () =
     }));
     const ql = makeQl(many, { insertThrows: mysqlDuplicateEntry });
 
-    const r = await bootstrapDeclaredPositions(ql, null, { logger, organizationId: 'org_1' });
+    const r = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS, { logger, organizationId: 'org_1' });
 
     expect(r.seeded).toBe(0);
     const refusals = refusalLines(warns, errors);
@@ -357,7 +367,7 @@ describe('a refusal that is not a unique violation keeps its own class', () => {
     const { logger, warns, errors } = makeLogger();
     const ql = makeQl(THREE_POSITIONS, { insertThrows: connectionFailure });
 
-    await bootstrapDeclaredPositions(ql, null, { logger, organizationId: 'org_1' });
+    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS, { logger, organizationId: 'org_1' });
 
     // ⭐ FUNCTIONAL channel, deliberately. Escalating a retrying outage to
     // `error` is the over-application that trains everyone to skim `error`,
@@ -521,7 +531,7 @@ describe('the two classes take different log levels (AGENTS.md degradation rule)
     const { logger, warns, errors } = makeLogger();
     const ql = makeQl(THREE_POSITIONS, { insertThrows: postgresUniqueViolation });
 
-    await bootstrapDeclaredPositions(ql, null, { logger, organizationId: 'org_1' });
+    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS, { logger, organizationId: 'org_1' });
 
     expect(errors).toHaveLength(1);
     expect(refusalLines(warns)).toHaveLength(0);
@@ -537,7 +547,7 @@ describe('a pass that is not refused reports exactly what it did before', () => 
     const { logger, warns, errors } = makeLogger();
     const ql = makeQl(THREE_POSITIONS);
 
-    const r = await bootstrapDeclaredPositions(ql, null, { logger, organizationId: 'org_1' });
+    const r = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS, { logger, organizationId: 'org_1' });
 
     expect(r).toMatchObject({ seeded: 3, updated: 0, unchanged: 0, unreadable: 0 });
     expect(ql.rows).toHaveLength(3);

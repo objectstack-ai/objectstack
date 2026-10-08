@@ -102,6 +102,17 @@ import type { SettingsAuditSink, SettingsDiagnosticsLogger } from './settings-se
 export const CONFIG_CHANGE_OBJECT_NAME = 'sys_setting';
 
 /**
+ * The object a change on the GLOBAL rung is recorded against (ADR-0131 D7).
+ *
+ * A global-scope value is stored in the tenant-less `sys_platform_setting`, not
+ * in `sys_setting`, so its ledger row names the object the value actually
+ * changed in. Tenant- and user-scope changes keep
+ * {@link CONFIG_CHANGE_OBJECT_NAME}. Published beside it for the same reason:
+ * a host reproducing the row must not spell either by hand.
+ */
+export const CONFIG_CHANGE_GLOBAL_OBJECT_NAME = 'sys_platform_setting';
+
+/**
  * The `sys_audit_log.action` value settings writes carry.
  *
  * A declared member of the object's action enum
@@ -295,9 +306,10 @@ export function buildConfigChangeAuditSink(
           // The first-class principal label (ADR-0014 D2): a user id, a service
           // principal, or null for an in-process/boot write.
           actor,
-          object_name: CONFIG_CHANGE_OBJECT_NAME,
+          object_name: entry.scope === 'global' ? CONFIG_CHANGE_GLOBAL_OBJECT_NAME : CONFIG_CHANGE_OBJECT_NAME,
           // A settings write has no single record id: `sys_setting` is keyed on
-          // the composite `(namespace, key, scope, user_id)`. Null is the honest
+          // the composite `(namespace, key, scope, user_id)` and
+          // `sys_platform_setting` on `(namespace, key)`. Null is the honest
           // answer and the shape `plugin-auth`'s run-level `import` row already
           // uses; WHICH setting changed is in `metadata` and `new_value`.
           record_id: null,
