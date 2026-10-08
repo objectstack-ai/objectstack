@@ -1162,6 +1162,13 @@ export default class MigrateMeta extends Command {
       // conversions itself against the raw authored source so each rewrite is
       // attributed to a chain hop, not silently pre-applied by the load-time
       // D2 pass. Running the D2 pass here would leave the chain's diff empty.
+      //
+      // `convert: false` reaches only THIS call. The stack's own `defineStack`
+      // call runs the D2 pass inside the config module whenever the schema
+      // accepts its input, so `config` is the raw source only because the
+      // load starts it from the argument that call was given (`loadConfig`,
+      // `authoredSource`). That holds for a one-package stack; a composed
+      // project's package bodies are assembled from converted stacks.
       const normalized = normalizeStackInput(config as Record<string, unknown>, { convert: false });
 
       if (!flags.json) printStep(`Replaying chain: protocol ${fromMajor} → ${toMajor}…`);
