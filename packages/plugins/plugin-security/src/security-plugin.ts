@@ -41,6 +41,8 @@ import {
   unregisterGrantPermissionSetNameHooks,
 } from './grant-permission-set-name.js';
 import { runOneTimeGrantPermissionSetNameBackfill } from './grant-permission-set-name-backfill.js';
+import { createPositionWriteThrough } from './position-write-through.js';
+import { runOneTimePositionEnvironmentBackfill } from './position-environment-backfill.js';
 import {
   explainAccess,
   buildContextForUser,
@@ -4530,6 +4532,25 @@ export class SecurityPlugin implements Plugin {
       { object: 'sys_permission_set' },
     );
 
+    // [ADR-0131 D3, C2 stage S7] Under `single`, a non-system create, edit,
+    // rename or delete of a position also writes its DEFINITION through the
+    // metadata door at environment scope — the row first, then the
+    // definition; a refused definition undoes the row. Registered AFTER the
+    // security middleware, so it runs INSIDE it. Stands down for a walled
+    // posture, a name a package or built-in holds, and a kernel without a
+    // capable metadata protocol. See `position-write-through.ts`.
+    ql.registerMiddleware(
+      createPositionWriteThrough({
+        ql,
+        getProtocol: () => {
+          try { return (ctx as any).getService?.('protocol') ?? null; } catch { return null; }
+        },
+        getPosture: () => this.tenancyPosture,
+        logger: ctx.logger,
+      }),
+      { object: 'sys_position' },
+    );
+
     // Defer platform admin bootstrap until all plugins finish starting —
     // sys_user / sys_permission_set objects must be registered (by
     // plugin-auth and platform-objects respectively) before we can
@@ -5021,6 +5042,37 @@ export class SecurityPlugin implements Plugin {
       (ctx as any).hook('kernel:bootstrapped', runGrantNameBackfill);
     } else {
       void runGrantNameBackfill();
+    }
+
+    // [ADR-0131 D3, C2 stage S7] Give every row-only position — written in
+    // Setup before the write-through above existed — its environment
+    // definition, once per `single` deployment, recorded in `sys_migration`.
+    // At `kernel:bootstrapped` for the reason the grant-name backfill gives,
+    // and one more: an environment definition minted ahead of a package's
+    // declaration of the same name would refuse that package. See
+    // `position-environment-backfill.ts`.
+    const runPositionBackfill = async (): Promise<void> => {
+      try {
+        let door: unknown = null;
+        try { door = (ctx as any).getService?.('protocol') ?? null; } catch { door = null; }
+        await runOneTimePositionEnvironmentBackfill(ql as any, {
+          posture: this.tenancyPosture,
+          catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
+          door,
+          logger: ctx.logger,
+        });
+      } catch (e) {
+        ctx.logger.warn(
+          '[security] the row-only position backfill did not run — positions created in Setup before the ' +
+            'environment write-through keep no environment definition until a later boot runs it',
+          { error: (e as Error)?.message },
+        );
+      }
+    };
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('kernel:bootstrapped', runPositionBackfill);
+    } else {
+      void runPositionBackfill();
     }
 
     // ── Project the permission sets of a package that arrives AFTER the boot ──
