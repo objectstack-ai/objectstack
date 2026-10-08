@@ -19,6 +19,10 @@
  * `service-automation`'s `builtin/config-unknown-keys.test.ts`.
  *
  * Integration tier: it spawns the source CLI (`packages/cli/vitest-tiers.ts`).
+ * Not named `.e2e`, so it runs on every PR and in the merge queue rather than
+ * nightly; two spawns, one per fixture, keep that cost to the floor. The CLI
+ * runs through `bin/run-dev.js` (source, via tsx), and `@objectstack/spec`
+ * resolves through `exports` to `dist/`.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -82,18 +86,16 @@ const stackOf = (retry: Retry, retryPolicy: Retry) => ({
   jobs: [{ name: 'rtk_sweep', schedule: { type: 'interval', intervalMs: 60000 }, handler: 'jobs/sweep.ts', retryPolicy }],
 });
 
-const DECLARED_RETRY: Retry = { maxRetries: 2, backoffMs: 500, backoffMultiplier: 2, maxRetryDelayMs: 10000, jitter: true };
-const DECLARED_POLICY: Retry = { maxRetries: 2, backoffMs: 5000, backoffMultiplier: 2 };
+const DECLARED_POLICY: Retry = { maxRetries: 2, backoffMs: 5000, backoffMultiplier: 2, maxRetryDelayMs: 60000, jitter: true };
 
 const FIXTURES = {
-  /** The card's slip under a `try_catch` node's `retry`. */
-  flowSlip: stackOf({ maxRetry: 2 }, DECLARED_POLICY),
-  /** The same slip on a job's `retryPolicy`. */
-  jobSlip: stackOf(DECLARED_RETRY, { ...DECLARED_POLICY, maxRetry: 3 }),
-  /** Every declared key on both. */
-  clean: stackOf(DECLARED_RETRY, DECLARED_POLICY),
-  /** The pre-17 `retryDelayMs`, alone: the conversion renames it before the judge. */
-  legacy: stackOf({ maxRetries: 2, retryDelayMs: 500 }, DECLARED_POLICY),
+  /** The measured slip, `maxRetry` for `maxRetries`, under a `try_catch` node's `retry` AND on a job's `retryPolicy`. */
+  slip: stackOf({ maxRetry: 2 }, { ...DECLARED_POLICY, maxRetry: 3 }),
+  /**
+   * Every declared key on the job, and on the flow the pre-17 `retryDelayMs`
+   * alone, which the conversion renames before the judge sees it.
+   */
+  declared: stackOf({ maxRetries: 2, retryDelayMs: 500, backoffMultiplier: 2, maxRetryDelayMs: 10000, jitter: true }, DECLARED_POLICY),
 } as const;
 
 interface Run {
@@ -144,32 +146,21 @@ afterAll(() => {
 });
 
 describe('os validate refuses a key the retry policy does not declare', () => {
-  it('a try_catch retry.maxRetry: exit 1, refused at the key by the flow node judge, with the declared key named', async () => {
-    const run = await runCli(['validate', '--json'], dirs.get('flowSlip')!);
+  it('exit 1: the try_catch retry.maxRetry refused at the key by the flow node judge, the job\'s at its policy', async () => {
+    const run = await runCli(['validate', '--json'], dirs.get('slip')!);
     expect(run.code, `expected exit 1:\n${run.stdout}\n${run.stderr}`).toBe(1);
     const errors = errorsOf(run.stdout);
-    expect(errors.map((e) => ({ code: e.code, path: (e.path ?? []).join('.') }))).toEqual([
-      { code: 'custom', path: 'flows.0.nodes.1.config.retry.maxRetry' },
-    ]);
-    // The rename pair is the did-you-mean's subject: the declared key the author meant.
-    expect(errors[0]!.message).toContain('`maxRetry` → `maxRetries`');
+    const located = errors.map((e) => ({ code: e.code, path: (e.path ?? []).join('.') }));
+    expect(located).toContainEqual({ code: 'custom', path: 'flows.0.nodes.1.config.retry.maxRetry' });
+    expect(located).toContainEqual({ code: 'unrecognized_keys', path: 'jobs.0.retryPolicy' });
+    expect(located).toHaveLength(2);
+    // The rename pair is the did-you-mean's subject, at both: the declared key the author meant.
+    for (const error of errors) expect(error.message, (error.path ?? []).join('.')).toContain('`maxRetry` → `maxRetries`');
   }, 180_000);
 
-  it('a job retryPolicy.maxRetry: exit 1, refused at the policy as an unrecognized key', async () => {
-    const run = await runCli(['validate', '--json'], dirs.get('jobSlip')!);
-    expect(run.code, `expected exit 1:\n${run.stdout}\n${run.stderr}`).toBe(1);
-    const errors = errorsOf(run.stdout);
-    expect(errors.map((e) => ({ code: e.code, path: (e.path ?? []).join('.') }))).toEqual([
-      { code: 'unrecognized_keys', path: 'jobs.0.retryPolicy' },
-    ]);
-    expect(errors[0]!.message).toContain('`maxRetry` → `maxRetries`');
+  it('CONTROL: every declared key, and a pre-17 retryDelayMs the conversion renames, exit 0', async () => {
+    const run = await runCli(['validate', '--json'], dirs.get('declared')!);
+    expect(run.code, `expected exit 0:\n${run.stdout}\n${run.stderr}`).toBe(0);
+    expect((JSON.parse(run.stdout) as { valid?: boolean }).valid).toBe(true);
   }, 180_000);
-
-  it('CONTROL: every declared key on both, and a pre-17 retryDelayMs the conversion renames, exit 0', async () => {
-    for (const kind of ['clean', 'legacy'] as const) {
-      const run = await runCli(['validate', '--json'], dirs.get(kind)!);
-      expect(run.code, `${kind}: expected exit 0:\n${run.stdout}\n${run.stderr}`).toBe(0);
-      expect((JSON.parse(run.stdout) as { valid?: boolean }).valid, kind).toBe(true);
-    }
-  }, 240_000);
 });
