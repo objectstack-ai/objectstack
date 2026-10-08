@@ -168,3 +168,18 @@ export type {
     MetaTypeReadRefusal,
     MetaTypeWriteRefusal,
 } from './meta-item-read-gate.js';
+
+// [#22141] …and the write side of the same parity: the precondition
+// (`If-Match` / `If-None-Match: *` → `parentVersion`, with its two `400`
+// refusals) and the lifecycle (`?mode=draft` → `mode`) a `PUT /meta/:type/:name`
+// asks `saveMetaItem` for. `RestServer` reads them through it, and so does the
+// runtime dispatcher's `/meta` domain — the only answer behind the
+// `@objectstack/hono` catch-all, which dropped all three until this landed.
+// Each door hands in its own headers and query and writes a refusal in its own
+// envelope (`meta-save-request.ts`'s header is the authority).
+export { metaSaveRequestOptions } from './meta-save-request.js';
+export type {
+    MetaSaveRequestHttp,
+    MetaSaveRequestMembers,
+    MetaSaveRequestOptions,
+} from './meta-save-request.js';
