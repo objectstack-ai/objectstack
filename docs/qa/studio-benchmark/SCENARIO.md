@@ -56,7 +56,13 @@ them. If the console makes the author type one, that is a counted machine-name e
 
 Step 8's notification is the end-to-end proof that steps 4–7 composed: the validation must let a
 ticket with a due date through, the flow must fire on the status change, and the recipient must
-resolve from the lookup.
+resolve from the lookup. The end user assigns **themselves** as the Technician, so the notification
+lands in the inbox of the person driving step 8.
+
+The script deliberately names **no access step**. A low-code author expects a published app to
+work for its users; if the end user is refused, the author grants access where they find it, and
+the run scores it as rework (SCORING.md, *Rework the script does not name*) with the refusal
+classed `missing-step`. ⛔ Do not add the grant to the script to make step 8 pass.
 
 ## What a run hands back
 
