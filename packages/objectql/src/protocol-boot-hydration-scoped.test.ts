@@ -356,7 +356,7 @@ describe('cold boot — a package-held catalog name the environment catalog hold
     const catalogBody = (type: CatalogType, name: string, label: string) =>
         type === 'permission' ? { name, label, objects: {} } : { name, label };
     const storedRow = (type: CatalogType, name: string, packageId: string | null = null) =>
-        overlayRow({ type, name, package_id: packageId, metadata: catalogBody(type, name, 'saved in the environment') });
+        overlayRow({ type, name, package_id: packageId, metadata: JSON.stringify(catalogBody(type, name, 'saved in the environment')) });
     /** A package declaring `decl` — the flat shape `AppPlugin.init` hands the `manifest` service. */
     const pkgOf = (decl: Partial<Record<CatalogType, string[]>>) => ({
         id: PKG,
