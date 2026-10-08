@@ -17009,13 +17009,17 @@ export class ObjectQL implements IObjectQLEngine {
 
         // [#22305] A row the cascade itself deletes refuses nothing and is
         // cleared of nothing: the triage ruling on #22305 is that a child in the
-        // cascade set never restricts a sibling in the same set. Such a row
-        // cannot be left dangling, because this same unit of work removes it,
-        // and clearing its reference would be a write against a row about to
-        // go. So `restrict` (authored, or the escalation above) and `set_null`
-        // judge only the rows OUTSIDE the set, and a relation whose rows are
-        // all inside it is done. `cascade` keeps every row: its rows ARE the
-        // set, and the walk deletes them below.
+        // cascade set never restricts a sibling in the same set. Such a row is
+        // not left dangling, because this same unit of work removes it, and
+        // clearing its reference would be a write against a row about to go.
+        // (The one cascade that is not one unit of work is
+        // `planCascadeAtomicity`'s `'split'`: there a later refusal can strand
+        // such a row, the partial outcome `warnCascadeNotAtomic` already
+        // declares for every row that path deletes.) So `restrict` (authored,
+        // or either half of the required escalation) and `set_null` judge only
+        // the rows OUTSIDE the set, and a relation whose rows are all inside it
+        // is done. `cascade` keeps every row: its rows ARE the set, and the
+        // walk deletes them below.
         //
         // After `probedIds`, on purpose: the disclosure check still compares
         // the caller's own view against every row the elevated probe read, so a
