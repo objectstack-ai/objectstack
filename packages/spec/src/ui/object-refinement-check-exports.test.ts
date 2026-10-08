@@ -239,7 +239,8 @@ const pageRequiresFixtures: Fixture[] = [
 
 // A print page prints exactly the blocks it authors (#22158, ruling B′ on
 // #8346): `print` is refused on the kinds and types that draw blocks nobody
-// authored, and a running header or footer needs the region it repeats.
+// authored or are no document (`list`, `utility`), and a running header or
+// footer needs the region it repeats.
 const PRINT_REGIONS = [
   { name: 'header', components: [{ type: 'element:text' }] },
   { name: 'main', components: [{ type: 'record:details' }] },
@@ -248,6 +249,7 @@ const pagePrintFixtures: Fixture[] = [
   { label: '`print` on a `slotted` page', value: { ...PAGE_BASE, kind: 'slotted', regions: PRINT_REGIONS, print: {} }, refusesAt: ['print'] },
   { label: '`print` on an `html` page with a `source`', value: { ...PAGE_BASE, kind: 'html', source: 'Card', regions: PRINT_REGIONS, print: {} }, refusesAt: ['print'] },
   { label: '`print` on a `list` page', value: { ...PAGE_BASE, type: 'list', regions: PRINT_REGIONS, print: {} }, refusesAt: ['print'] },
+  { label: '`print` on a `utility` page', value: { ...PAGE_BASE, type: 'utility', regions: PRINT_REGIONS, print: {} }, refusesAt: ['print'] },
   { label: '`print` on a `full` page with no `regions`', value: { ...PAGE_BASE, print: {} }, refusesAt: ['print'] },
   { label: '`print.repeatFooter` with no `footer` region', value: { ...PAGE_BASE, regions: PRINT_REGIONS, print: { repeatHeader: true, repeatFooter: true } }, refusesAt: ['print.repeatFooter'] },
   { label: '`print` on a `full` page with `regions` and its `header` region', value: { ...PAGE_BASE, regions: PRINT_REGIONS, print: { repeatHeader: true } }, refusesAt: [] },

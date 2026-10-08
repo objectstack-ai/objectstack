@@ -979,6 +979,17 @@ export const PagePrintSchema = lazySchema(() => strictObject({
 const PRINT_PAGE_KINDS: readonly string[] = ['full'];
 
 /**
+ * The page types a print page may take — a record page (the document bound to
+ * one record: an invoice, a delivery order) and a home or app page (a document
+ * bound to no single record: a letter, a monthly report). `list` draws a paged
+ * grid and `utility` is a floating panel; neither is a document.
+ */
+const PRINT_PAGE_TYPES: readonly string[] = ['record', 'home', 'app'];
+
+/** The admitted page types, spelled once for every refusal that names them. */
+const PRINT_PAGE_TYPES_PHRASE = "of `type: 'record'`, `'home'` or `'app'` with its blocks in `regions`";
+
+/**
  * The print-page composition check attached to {@link PageSchema} (ruling B′
  * on #8346): a page that declares `print` must print exactly the blocks it
  * authors, because the printable block subset is judged on those blocks.
@@ -992,6 +1003,8 @@ const PRINT_PAGE_KINDS: readonly string[] = ['full'];
  *    judge;
  *  - `print` on a `list` page — it draws its records through `interfaceConfig`
  *    as a paged grid; the list's own print control is `allowPrinting`;
+ *  - `print` on a `utility` page — a floating panel, not a document (the
+ *    admitted types are {@link PRINT_PAGE_TYPES});
  *  - `print` on a `full` page with no `regions` — it draws the synthesized
  *    default layout instead;
  *  - `print.repeatHeader` / `print.repeatFooter` on a page with no region of
@@ -1019,7 +1032,7 @@ export function checkPagePrintComposition(
       code: 'custom',
       path: ['print'],
       message: `\`print\` is refused on a \`kind: '${kind}'\` page: a print page prints exactly the blocks it `
-        + `authors, and ${why}. Author the document as a \`kind: 'full'\` page with its blocks in \`regions\`.`,
+        + `authors, and ${why}. Author the document as a \`kind: 'full'\` page ${PRINT_PAGE_TYPES_PHRASE}.`,
     });
     return;
   }
@@ -1029,8 +1042,21 @@ export function checkPagePrintComposition(
       path: ['print'],
       message: '`print` is refused on a `type: \'list\'` page: a list page draws its records through '
         + '`interfaceConfig` as a paged grid, not as authored blocks. To let users print a list as shown, '
-        + 'set `interfaceConfig.allowPrinting: true`; to print a document, declare `print` on a page of '
-        + '`type: \'record\'`, `\'home\'` or `\'app\'` with its blocks in `regions`.',
+        + `set \`interfaceConfig.allowPrinting: true\`; to print a document, declare \`print\` on a page ${PRINT_PAGE_TYPES_PHRASE}.`,
+    });
+    return;
+  }
+  // `type` absent is the spec default, `record` — admitted.
+  const type = page.type ?? 'record';
+  if (!PRINT_PAGE_TYPES.includes(type)) {
+    const why = type === 'utility'
+      ? 'a utility page is a floating panel beside the page a user is on (notes, a phone dialer), not a document'
+      : `a \`${type}\` page is not a document page`;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['print'],
+      message: `\`print\` is refused on a \`type: '${type}'\` page: ${why}. To print a document, declare `
+        + `\`print\` on a page ${PRINT_PAGE_TYPES_PHRASE}.`,
     });
     return;
   }
@@ -1202,7 +1228,7 @@ export const PageSchema = lazySchema(() => strictObject({
    * console's print rendering (card ②) reads it.
    */
   print: PagePrintSchema.optional()
-    .describe("Print declaration — makes this page a print page, a document authored in the page's own blocks: paper size and orientation, margins in millimetres, the running header and footer (the page's own `header` / `footer` regions), page numbers and page-break hints, each mapped to print CSS. A print page is a `kind: 'full'` page with its blocks in `regions`, and every block in it must come from the printable block subset: containers that draw every child (`page:section`, `page:card`, `page:footer`), field blocks (`record:details`, `record:highlights`), the child-record table `record:line_items`, `element:text`, `element:image`, `element:divider`, `element:definition-list`, `element:repeater`, `element:number` and `object-metric`; `os validate` / `os build` / `os lint` and the metadata save door refuse any other block inside it. Consumer: the console's browser print rendering, and later the server-side PDF renderer; until it ships, the declaration is validated but nothing applies it. A list view's print button is `allowPrinting`, not this."),
+    .describe("Print declaration — makes this page a print page, a document authored in the page's own blocks: paper size and orientation, margins in millimetres, the running header and footer (the page's own `header` / `footer` regions), page numbers and page-break hints, each mapped to print CSS. A print page is a `kind: 'full'` page of `type: 'record'`, `'home'` or `'app'` with its blocks in `regions`, and every block in it must come from the printable block subset: containers that draw every child (`page:section`, `page:card`, `page:footer`), field blocks (`record:details`, `record:highlights`), the child-record table `record:line_items`, `element:text`, `element:image`, `element:divider`, `element:definition-list`, `element:repeater`, `element:number` and `object-metric`; `os validate` / `os build` / `os lint` and the metadata save door refuse any other block inside it. Consumer: the console's browser print rendering, and later the server-side PDF renderer; until it ships, the declaration is validated but nothing applies it. A list view's print button is `allowPrinting`, not this."),
 
   /**
    * Override semantics for record pages.

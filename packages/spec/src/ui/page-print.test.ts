@@ -129,6 +129,22 @@ describe('checkPagePrintComposition — a print page prints exactly the blocks i
     expect(issues[0].message).toMatch(/interfaceConfig\.allowPrinting/);
   });
 
+  it('refuses `print` on a `utility` page — a floating panel, not a document — and names the admitted types', () => {
+    const issues = issuesOf({ ...BASE, type: 'utility', regions: REGIONS, print: {} });
+    expect(issues.map((i) => [i.path, i.code])).toEqual([['print', 'custom']]);
+    expect(issues[0].message).toMatch(/type: 'utility'.*floating panel.*not a document/s);
+    expect(issues[0].message).toContain("`type: 'record'`, `'home'` or `'app'`");
+  });
+
+  it('names the same admitted types in the `list` and `kind` refusals', () => {
+    for (const value of [
+      { ...BASE, type: 'list', regions: REGIONS, print: {} },
+      { ...BASE, kind: 'slotted', regions: REGIONS, print: {} },
+    ]) {
+      expect(issuesOf(value)[0].message).toContain("`type: 'record'`, `'home'` or `'app'`");
+    }
+  });
+
   it('refuses `print` on a full page with no regions — it would draw the synthesized default layout', () => {
     for (const value of [{ ...BASE, print: {} }, { ...BASE, regions: [], print: {} }]) {
       const issues = issuesOf(value);
@@ -156,9 +172,10 @@ describe('checkPagePrintComposition — a print page prints exactly the blocks i
     }
   });
 
-  it('leaves a page without `print` untouched — the slotted and list pages it refuses above still parse', () => {
+  it('leaves a page without `print` untouched — the slotted, list and utility pages it refuses above still parse', () => {
     expect(issuesOf({ ...BASE, kind: 'slotted' })).toEqual([]);
     expect(issuesOf({ ...BASE, type: 'list' })).toEqual([]);
+    expect(issuesOf({ ...BASE, type: 'utility' })).toEqual([]);
     expect(issuesOf({ ...BASE })).toEqual([]);
   });
 });

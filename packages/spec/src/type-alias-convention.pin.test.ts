@@ -1550,7 +1550,7 @@ export type Iso_ui_page__PageComponentType = Assert<Eq< z.input< typeof M163.Pag
 // `PagePrintSchema` (#22158) joins the family the day it lands: no defaults,
 // no transforms, so `PagePrint` is the only name it carries.
 export type Iso_ui_page__PagePrintSchema = Assert<Eq< z.input< typeof M163.PagePrintSchema >, z.infer< typeof M163.PagePrintSchema > >>;
-export type Iso_ui_page__PageTypeSchema =Assert<Eq< z.input< typeof M163.PageTypeSchema >, z.infer< typeof M163.PageTypeSchema > >>;
+export type Iso_ui_page__PageTypeSchema = Assert<Eq< z.input< typeof M163.PageTypeSchema >, z.infer< typeof M163.PageTypeSchema > >>;
 
 // ui/report.zod.ts
 // `JoinedReportBlockSchema` left the family on #19920: its `z.ZodTypeAny`
