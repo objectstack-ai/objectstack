@@ -16621,25 +16621,41 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<CascadeDeleteSet> {
     const set: CascadeDeleteSet = { members: new Map(), entered: new Map(), elevationsFiled: new Set() };
     cascadeSetAdd(set.members, object, id);
+    // The cascading relations pointing at each object, scanned once per object
+    // rather than once per record: a wide cascade has many records of few
+    // objects.
+    const cascading = new Map<string, Array<{ childName: string; fieldName: string; fdef: any }>>();
+    const cascadingInto = (target: string) => {
+      let relations = cascading.get(target);
+      if (!relations) {
+        relations = [];
+        for (const child of objects) {
+          const childName = (child as any)?.name as string | undefined;
+          const fields = (child as any)?.fields as Record<string, any> | undefined;
+          if (!childName || !fields) continue;
+          for (const [fieldName, fdef] of Object.entries(fields)) {
+            if (this.cascadeRelationBehavior(target, child, fieldName, fdef) === 'cascade') {
+              relations.push({ childName, fieldName, fdef });
+            }
+          }
+        }
+        cascading.set(target, relations);
+      }
+      return relations;
+    };
     // A queue the loop appends to while it iterates: an array iterator reads
     // `length` on every step, so each record pushed below is visited in turn.
     const queue: Array<{ object: string; id: string | number }> = [{ object, id }];
     for (const target of queue) {
-      for (const child of objects) {
-        const childName = (child as any)?.name as string | undefined;
-        const fields = (child as any)?.fields as Record<string, any> | undefined;
-        if (!childName || !fields) continue;
-        for (const [fieldName, fdef] of Object.entries(fields)) {
-          if (this.cascadeRelationBehavior(target.object, child, fieldName, fdef) !== 'cascade') continue;
-          this.fileReferenceCheckElevation(set, target.object, target.id, childName, fieldName, context);
-          const rows = await this.probeReferencingRows(
-            childName, fieldName, fdef, target.id, this.referenceProbeFilter(fieldName, fdef, target.id), context,
-          );
-          for (const row of rows) {
-            const depId = row?.id;
-            if (depId != null && cascadeSetAdd(set.members, childName, depId)) {
-              queue.push({ object: childName, id: depId });
-            }
+      for (const { childName, fieldName, fdef } of cascadingInto(target.object)) {
+        this.fileReferenceCheckElevation(set, target.object, target.id, childName, fieldName, context);
+        const rows = await this.probeReferencingRows(
+          childName, fieldName, fdef, target.id, this.referenceProbeFilter(fieldName, fdef, target.id), context,
+        );
+        for (const row of rows) {
+          const depId = row?.id;
+          if (depId != null && cascadeSetAdd(set.members, childName, depId)) {
+            queue.push({ object: childName, id: depId });
           }
         }
       }
