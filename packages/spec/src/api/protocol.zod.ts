@@ -418,6 +418,19 @@ const MetadataProtectionEnvelopeFields = {
  * protection keys — because it is computed from the served document itself,
  * never from the lock resolver). See `sortability.zod.ts` for the category
  * set and the consumer contract.
+ *
+ * [#22114] `version` is the READ half of the ADR-0008 optimistic-concurrency
+ * chain: the token a client sends back as `If-Match`, served by the read it
+ * edits from. ADR-0008 says clients pass `If-Match: <hash>`, and a client can
+ * only send a token it was served — before this member only a save receipt
+ * served one, so the first save after a load could not be pinned and two
+ * editors who each loaded and saved once overwrote each other. It is the
+ * keyed token of the stored row a SAVE to this item would compare against —
+ * the same producer and the same row as {@link SaveMetaItemResponseSchema}'s
+ * `version`, so a read after a save serves the receipt's token byte for byte.
+ * Like the protection keys it is published by the uncached branch only (the
+ * cached branch never consults the store's rows), and it is the one key whose
+ * `null` is a statement: no stored row is there, so the next save is a create.
  */
 export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
@@ -431,6 +444,23 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
     + '`type`. See `ObjectSortabilitySchema` for the closed category set.',
   ),
   ...MetadataProtectionEnvelopeFields,
+  version: z.string().nullable().optional().describe(
+    'ADR-0008 version token of the STORED row a save to this item compares '
+    + 'against, at this read\'s scope (the caller\'s organization partition and '
+    + '`?package=`) and lifecycle (`?state=draft` reads the draft row, the plain '
+    + 'read the active row). The same keyed token a save receipt\'s `version` '
+    + 'serves for that row: send it back as the `If-Match` request header on '
+    + '`PUT /meta/:type/:name` (with `?mode=draft` for the draft) and a '
+    + 'concurrent edit is refused 409 `METADATA_CONFLICT` instead of '
+    + 'overwritten. `null` when no stored row is there — an item served from '
+    + 'code or a package artifact, or from a row in another scope (the '
+    + 'environment-wide row an organization falls back to, a package-less row a '
+    + 'package read falls back to) — so the next save creates one: pin it with '
+    + '`If-None-Match: *`. ABSENT on the cached published-value branch and on a '
+    + '`?preview=draft` read, which publish no version: absence means "not '
+    + 'published here", never "no row". Opaque — echo it verbatim, never parse '
+    + 'it.',
+  ),
 }));
 
 /**
@@ -649,11 +679,14 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
   parentVersion: z.string().nullable().optional().describe(
     'ADR-0008 optimistic-concurrency pin: the version token the caller '
     + 'believes is current (on the REST door, the `If-Match` request '
-    + 'header). Present as a string, a concurrent edit is reported as a 409 '
+    + 'header; the item read\'s `version` and a save receipt\'s `version` '
+    + 'serve it). Present as a string, a concurrent edit is reported as a 409 '
     + 'conflict instead of silently overwritten. ⚠️ `null` is NOT the same '
     + 'as absent: a present `null` asserts "no current row of this '
     + 'lifecycle" — the first-write pin, refused 409 when a row already '
-    + 'exists — while an ABSENT key is unpinned: the implementation adopts '
+    + 'exists (on the REST door, `If-None-Match: *`; that header takes `*` '
+    + 'alone and never beside `If-Match`, and any other spelling is refused '
+    + '400) — while an ABSENT key is unpinned: the implementation adopts '
     + 'the current row\'s hash as the parent (last-write-wins). Nullable '
     + 'because that is the implementation\'s parameter type, and unlike the '
     + 'reset twin (which folds a present `null` back to the current hash) '
@@ -734,12 +767,16 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
 export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
   success: z.boolean(),
   version: z.string().describe(
-    'Content hash of the just-committed body, and the token the ADR-0008 '
+    'Version token of the row this write left, and the token the ADR-0008 '
     + 'optimistic-concurrency chain runs on: send it back as the `If-Match` '
     + 'request header on the next write to that item and a concurrent edit is '
-    + 'reported as 409 `metadata_conflict` instead of silently overwritten. '
-    + 'Opaque to callers — echo it verbatim, never parse it. Currently emitted '
-    + 'as `sha256:<64 hex chars>`, but the format is not part of this contract.',
+    + 'refused 409 `METADATA_CONFLICT` instead of silently overwritten. The item '
+    + 'read serves the same token for the same row (`GetMetaItemResponseSchema.version`). '
+    + 'A keyed digest of the stored content hash, never the hash itself (under '
+    + 'the registered crypto provider\'s key, or a process-scoped key while none '
+    + 'is registered). Opaque to callers — echo it verbatim, never parse it. '
+    + 'Currently emitted as `hmac-sha256:` plus 64 hex characters, but the '
+    + 'format is not part of this contract.',
   ),
   seq: z.number().int().describe(
     'Monotonic sequence number of the metadata event this write appended to '
@@ -783,6 +820,51 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
     + '`PublishMetaItemResponseSchema`.',
   ),
   message: z.string().optional(),
+}));
+
+/**
+ * Metadata Conflict — the 409 body of the `/meta/:type/:name` write doors
+ *
+ * Describes the body `PUT /api/v1/meta/:type/:name` (and its sibling write
+ * doors: `POST …/publish`, `POST …/rollback`, `DELETE …`) answers when the
+ * ADR-0008 optimistic lock refuses the write: a version token that names no
+ * current head (`If-Match`), a "no row" pin a row has since contradicted
+ * (`If-None-Match: *`), or a race the repository lost. The body is the REST
+ * door's flat ADR-0112 dialect — `code` beside `error`, not inside it — the
+ * position `check:route-envelope` holds for that door.
+ *
+ * `currentVersion` is the current head AS DATA (#22114). The sentence in
+ * `error` has always named it (`… (current is <token>)`), so a client offering
+ * "reload" or "overwrite anyway" had to parse prose or re-send unguarded; it
+ * now reads the token it would pin to here. On the save door it is the token
+ * the next item read at the same address serves as `version`
+ * ({@link GetMetaItemResponseSchema}), and `null` when no row of the target
+ * lifecycle is there (a draft save after a publish drained the draft) — the
+ * state `If-None-Match: *` pins. Both doors of the chain serve it keyed, never
+ * the stored content hash.
+ *
+ * Scope: this is the body of the conflicts the four `/meta` item doors answer
+ * through the protocol's one conflict builder, which is how each of them
+ * answers the repository's refusal. Not described here: a per-item
+ * `METADATA_CONFLICT` inside a batch outcome (`failed[]` of the package publish
+ * door), which is a row of a 2xx, not a refusal body.
+ */
+export const MetadataConflictErrorSchema = lazySchema(() => z.object({
+  error: z.string().describe(
+    'Human-readable refusal sentence, unchanged by `currentVersion`: it names '
+    + 'the item and the version the door judged current. For display and logs; '
+    + 'branch on `code` and read `currentVersion`, never parse this.',
+  ),
+  code: z.literal('METADATA_CONFLICT').describe(
+    'ADR-0112 registered code of the optimistic-lock refusal.',
+  ),
+  currentVersion: z.string().nullable().describe(
+    'The version token of the head the door judged current — the value the '
+    + 'sentence names — or `null` when no row of the target lifecycle exists. '
+    + 'Send it as `If-Match` to overwrite deliberately (or `If-None-Match: *` '
+    + 'when it is `null`), or re-read the item to merge first. Opaque — echo '
+    + 'it verbatim, never parse it.',
+  ),
 }));
 
 /**
@@ -900,12 +982,15 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
     + 'best-effort side effects below, each of which reports its own `success`.',
   ),
   version: z.string().describe(
-    'Content hash of the just-promoted body, and the token the ADR-0008 '
+    'Version token of the row this promotion left, and the token the ADR-0008 '
     + 'optimistic-concurrency chain runs on: send it back as the `If-Match` '
     + 'request header on the next write to that item and a concurrent edit is '
-    + 'reported as 409 `metadata_conflict` instead of silently overwritten. '
-    + 'Opaque to callers — echo it verbatim, never parse it. Currently emitted '
-    + 'as `sha256:<64 hex chars>`, but the format is not part of this contract.',
+    + 'refused 409 `METADATA_CONFLICT` instead of silently overwritten. A keyed '
+    + 'digest of the stored content hash, never the hash itself — the same form '
+    + '`SaveMetaItemResponseSchema.version` and the item read\'s `version` '
+    + 'serve. Opaque to callers — echo it verbatim, never parse it. Currently '
+    + 'emitted as `hmac-sha256:` plus 64 hex characters, but the format is not '
+    + 'part of this contract.',
   ),
   seq: z.number().int().describe(
     'Monotonic sequence number of the `op=\'publish\'` metadata event this '
@@ -1071,11 +1156,12 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     type: z.string().describe('Metadata type of the promoted draft (canonical singular).'),
     name: z.string().describe('Item name of the promoted draft.'),
     version: z.string().describe(
-      'Content hash of the just-promoted body — the same ADR-0008 '
+      'Version token of the promoted row — the same keyed ADR-0008 '
       + 'optimistic-concurrency token the single-item doors return: echo it '
-      + 'back as `If-Match` on the next write to this item. Opaque to '
-      + 'callers; currently `sha256:<64 hex chars>`, but the format is not '
-      + 'part of this contract.',
+      + 'back as `If-Match` on the next write to this item. A keyed digest of '
+      + 'the stored content hash, never the hash itself. Opaque to callers; '
+      + 'currently `hmac-sha256:` plus 64 hex characters, but the format is '
+      + 'not part of this contract.',
     ),
     advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
       'Non-gating findings the runtime authoring gate raised against '
@@ -3287,6 +3373,10 @@ export type GetMetaItemLayeredResponse = z.input<typeof GetMetaItemLayeredRespon
 export type RuntimeAuthoringIssue = z.input<typeof RuntimeAuthoringIssueSchema>;
 export type SaveMetaItemRequest = z.input<typeof SaveMetaItemRequestSchema>;
 export type SaveMetaItemResponse = z.input<typeof SaveMetaItemResponseSchema>;
+/** The 409 `METADATA_CONFLICT` body of the `/meta/:type/:name` write doors (#22114). */
+export type MetadataConflictError = z.input<typeof MetadataConflictErrorSchema>;
+/** Post-parse shape of {@link MetadataConflictError} — defaults applied, transforms run (ADR-0122). */
+export type MetadataConflictErrorParsed = z.infer<typeof MetadataConflictErrorSchema>;
 export type PublishMetaItemRequest = z.input<typeof PublishMetaItemRequestSchema>;
 export type PublishMetaItemResponse = z.input<typeof PublishMetaItemResponseSchema>;
 /**

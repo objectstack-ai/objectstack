@@ -1718,6 +1718,57 @@ function mayReadPendingDrafts(caller: unknown): boolean {
 }
 
 /**
+ * [#22114] The ADR-0008 pin `PUT /meta/:type/:name` reads off its request
+ * headers: `parentVersion` for `saveMetaItem` — the `If-Match` token (ETag-style
+ * quotes stripped), `null` for `If-None-Match: *` ("no row of this lifecycle
+ * is here", the first-write pin the protocol has always declared), or
+ * `undefined` for neither (unpinned, last-write-wins, as before) — or the
+ * sentence of a `400` for a pin that cannot be honoured.
+ *
+ * `If-None-Match` is read on this route from the day it lands with a CLOSED
+ * value set, `*` alone (AGENTS.md 〈Route & surface ownership〉 rule 5's reason,
+ * one carrier over): a header read for the values it knows and dropped
+ * otherwise would write a caller unguarded who asked for a guard. Measured
+ * before it landed: no first-party client sends `If-None-Match` on a `PUT`
+ * (the SDK sends it only on its cached `GET`, objectui's ETag hook has no
+ * caller), and nothing on this path read it. Two refusals, both `400`:
+ *
+ *  - a value other than `*` — an entity-tag list asks "write unless the head is
+ *    one of these", a condition no `/meta` client has and this door does not
+ *    evaluate;
+ *  - `If-None-Match` beside `If-Match` — the pair can never hold (RFC 9110
+ *    §13.2.2 evaluates both: `If-Match` true needs a current row, `*` true
+ *    needs none), and a `409` would send the caller round a re-read that
+ *    serves a token it would pair with `*` again.
+ */
+function metaSavePreconditionPin(headers: Record<string, unknown> | undefined):
+    | { ok: true; parentVersion?: string | null }
+    | { ok: false; message: string } {
+    const ifMatch = headers?.['if-match'] ?? headers?.['If-Match'];
+    const ifNoneMatch = headers?.['if-none-match'] ?? headers?.['If-None-Match'];
+    if (ifNoneMatch !== undefined) {
+        if (ifMatch !== undefined) {
+            return {
+                ok: false,
+                message: 'Send If-Match or If-None-Match, not both. If-Match: <version> saves only over that '
+                    + 'version; If-None-Match: * saves only where no row of this lifecycle exists. A row '
+                    + 'cannot both exist and not exist, so this pair can never be honoured.',
+            };
+        }
+        if (typeof ifNoneMatch !== 'string' || ifNoneMatch.trim() !== '*') {
+            return {
+                ok: false,
+                message: 'If-None-Match on this route takes "*" alone (save only if no row of this lifecycle '
+                    + 'exists). To pin a save to the version you read, send it as If-Match: <version>.',
+            };
+        }
+        return { ok: true, parentVersion: null };
+    }
+    if (typeof ifMatch === 'string') return { ok: true, parentVersion: ifMatch.replace(/^"|"$/g, '') };
+    return { ok: true };
+}
+
+/**
  * [#20378 · #20441] THE AUTHORING-DOOR REFUSAL — ruling 5865708652 (letter B),
  * carried to `/audit` by triage's grade 5871509797. Sends it and answers `true`
  * when {@link mayReadPendingDrafts} does not admit `caller`; answers `false`,
@@ -6800,6 +6851,13 @@ export class RestServer {
                             // carries no `lock` — it is the fast published-value path
                             // and never consulted the lock resolver; a caller that
                             // needs the ADR-0008 OCC carriers reads the uncached path.
+                            // [#22114] That includes `version`, the read's token. Its
+                            // ETag above stays the CACHE validator and is not the token:
+                            // the validator varies by locale (#1319), by the caller's
+                            // field visibility (ADR-0106 D3) and by the served bytes
+                            // (`getMetaItemCached`, #16525), none of which moves the
+                            // stored row's version, and an item with no stored row has
+                            // a validator but no version at all.
                             const cachedEnvelope = {
                                 type: metaType,
                                 name: req.params.name,
@@ -7076,10 +7134,15 @@ export class RestServer {
                     // The token is the crypto provider's keyed digest of the
                     // stored content hash, never the hash itself; the protocol
                     // compares it in that form, so it passes through here as sent.
-                    const ifMatchHeader = req.headers?.['if-match'] ?? req.headers?.['If-Match'];
-                    const parentVersion = typeof ifMatchHeader === 'string'
-                        ? ifMatchHeader.replace(/^"|"$/g, '') // strip ETag-style quotes
-                        : undefined;
+                    // [#22114] The item read serves the same token as `version`,
+                    // and `If-None-Match: *` pins a save that expects no row —
+                    // see {@link metaSavePreconditionPin}.
+                    const pin = metaSavePreconditionPin(req.headers);
+                    if (!pin.ok) {
+                        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: pin.message } });
+                        return;
+                    }
+                    const parentVersion = pin.parentVersion;
                     // [#7749 producer, #7941 precedence] The request's authenticated
                     // identity — one producer, shared by every `/meta` write (see
                     // resolveMetaWriteActor). `X-Actor` is not consulted.
