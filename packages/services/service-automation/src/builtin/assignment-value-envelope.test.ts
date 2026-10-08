@@ -37,6 +37,7 @@ import {
   resolveFlowNodeExpressions,
   isExpressionEnvelopeShaped,
   ASSIGNMENT_VALUE_ENVELOPE_REFUSAL,
+  VALUE_SLOT_TEMPLATE_REFUSAL,
 } from '@objectstack/spec/automation';
 import { EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
 import { ExpressionEngine } from '@objectstack/formula';
@@ -195,7 +196,7 @@ describe('assignment value envelope — registration refusal (#15137 ask 1)', ()
       ...assignmentFlow({
         assignments: {
           digest: RULING_EXAMPLE,
-          greeting: 'Hello {name}',          // `{token}` interpolation — untouched
+          greeting: 'Hello',                 // a literal (#19939 retired `{token}` here)
           count: 3,                          // literal
           flags: { enabled: true },          // plain object literal
           nothing: null,
@@ -405,9 +406,22 @@ describe('assignment value envelope — the legacy shapes are untouched (#15137 
     expect(result.output).toEqual({ digest: RULING_EXAMPLE });
   });
 
-  it.each(MALFORMED)('$label registers unchanged in the legacy array form — no flow stops registering', ({ envelope }) => {
+  // An envelope there is a literal, so its MALFORMED shape stops nothing
+  // registering — except where the literal's own strings spell the retired
+  // `{…}` template dialect, which the legacy shapes read like any value
+  // (#19939: no shape is a way around that retirement).
+  it.each(MALFORMED.filter(({ envelope }) => !String(envelope.source ?? '').includes('{')))(
+    '$label registers unchanged in the legacy array form — no flow stops registering',
+    ({ envelope }) => {
+      expect(() => engine.registerFlow('assign_flow', assignmentFlow({
+        assignments: [{ variable: 'digest', value: envelope }],
+      }))).not.toThrow();
+    },
+  );
+
+  it('[#19939] a legacy-shape literal whose string spells the `{…}` dialect is refused like any value', () => {
     expect(() => engine.registerFlow('assign_flow', assignmentFlow({
-      assignments: [{ variable: 'digest', value: envelope }],
-    }))).not.toThrow();
+      assignments: [{ variable: 'digest', value: { dialect: 'template', source: 'Hello {name}' } }],
+    }))).toThrow(VALUE_SLOT_TEMPLATE_REFUSAL);
   });
 });

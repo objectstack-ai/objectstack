@@ -1,0 +1,100 @@
+---
+title: When to use ObjectStack, and when not to
+navTitle: When to Use It
+description: "Where ObjectStack fits today and where it does not, the five questions to answer before you start, and what you get in the first weeks and after a year."
+---
+
+ObjectStack is for business applications whose definition you want to own, that AI
+writes and agents operate. This page says where that fits today, where it does not,
+and what to settle before you start. What the word means is on
+[Business Ontology](/docs/concepts/ontology); how this differs from other things called
+an ontology is on [How ObjectStack compares](/docs/concepts/compare).
+
+## A good fit
+
+- **New business applications.** CRM, ticketing, approvals, operations and internal
+  tools. Objects, relations, actions, permissions and flows are most of what these apps
+  are, and they are exactly what the ontology declares.
+- **Teams small enough that one person, or a few, can define the business.** An agent
+  writes the definition; someone still has to know what it should say. The fewer people
+  who must agree on it, the faster the loop runs.
+- **ISVs shipping many vertical apps.** Each vertical is a definition on the same
+  runtime. What differs between them is the definition, not the stack underneath it.
+- **The long tail of departmental apps around a core ERP.** The spreadsheets and
+  low-code forms that track what the ERP does not — vendor onboarding, inspections,
+  internal requests — are small, specific and change often. Each one becomes a typed
+  definition in a repository instead of a file that gets emailed around.
+- **Back offices meant to be operated by agents from day one.** Every deployment is an
+  MCP server, on by default: objects are tools, the actions an author exposes are tools,
+  and permissions decide what an agent may call. See
+  [Connect an MCP Client](/docs/ai/connect-mcp).
+
+## Not a fit today
+
+- **Replacing the core ERP or finance system of a large enterprise.** A general ledger,
+  consolidation, tax and payroll carry regulation and edge cases that packaged systems
+  already encode. Build around that core, not instead of it.
+- **Workloads whose value is integrating many existing systems.** ObjectStack can
+  federate an external database as a datasource, but federation is early and read-only
+  by default; writes need an explicit opt-in on both the datasource and the object. See
+  [External Datasources](/docs/data-modeling/external-datasources). When the job is
+  mostly making existing systems legible to agents, a layer over those systems fits
+  better.
+- **Analytics over data lakes.** The [analytics layer](/docs/data-modeling/analytics)
+  defines metrics over the app's own objects for its reports and dashboards. It is not
+  built to query a lake.
+- **Algorithm-heavy domains, such as pricing or scheduling — unless the algorithm is
+  wrapped as an action.** The ontology declares what can be done; it does not express an
+  optimiser. Write the algorithm as code behind an
+  [action](/docs/ai/actions-as-tools), and permissions, audit and agent access apply to
+  it like any other action.
+- **Workloads that require a certified platform.** ObjectStack is open-source software
+  you deploy and operate, and it carries no compliance certification of its own. Where a
+  workload must run on a certified platform, certifying your deployment is work you own.
+
+## Five questions before you start
+
+The ontology is one sentence with five parts. Answer them for your business:
+
+1. **What we have** — the objects and their fields.
+2. **How it relates** — the lookups and master-detail links between them.
+3. **What can be done** — the actions a user or an agent may take on a record.
+4. **Who may do it** — permission sets, row-level and field-level security, sharing.
+5. **What happens when** — record triggers, scheduled jobs, approvals, workflows.
+
+If the team can answer them, the ontology is a day's work, because an agent does the
+writing. If it cannot, no tool helps yet, this one included. The first investment is
+answering these five questions, not installing anything.
+
+## What you get and when
+
+**In the first weeks.** One definition instead of four copies: the database schema,
+the API, the UI and the agent tools are derived from it, so a requirement changes in one
+place. Apps in days: an agent writes the definition, `os validate` rejects what would
+fail at runtime, and you review a small diff in the Console. The MCP surface is on by
+default, so agents connect under the same permissions as the people who use the app.
+
+**After a year.** The ontology is an asset in your repository: ordinary TypeScript,
+versioned, reviewed as diffs, and run by an Apache-2.0 runtime. It does not depend on one
+model — any coding agent can write it and any MCP client can operate it. Every change
+passes the same gate before it runs.
+
+**Later.** Operations that grow without headcount growing with them, because agents
+act through the same governed surface as people. Cheap experiments, because a new object
+or flow is a reviewed diff rather than a project. Cheap replication across entities — a
+new subsidiary, region or brand starts from a copy of the definition, not a rebuild.
+
+All of this rests on the definition staying small enough for an agent to read whole;
+[the example CRM's measurement](/docs/concepts/metadata-driven#4-small-enough-to-fit-in-an-agents-context)
+shows what that looks like.
+
+## Next steps
+
+- **Try it** — [Build with Claude Code](/docs/getting-started/build-with-claude-code)
+  walks the loop end to end, and
+  [Anatomy of an ObjectStack App](/docs/getting-started/quick-start) shows how to read
+  what the agent writes.
+- [Example Apps](/docs/getting-started/examples) — run a CRM and a kitchen-sink app.
+- [Business Ontology](/docs/concepts/ontology) — what the definition is.
+- [How ObjectStack compares](/docs/concepts/compare) — the other things called an
+  ontology, and where they are stronger.

@@ -580,6 +580,14 @@ export {
 } from './validate-component-types.js';
 export type { ComponentTypeFinding } from './validate-component-types.js';
 
+// #22158 — the printable block subset inside a page that declares `print`
+// (ruling B′ on #8346); the subset itself is `@objectstack/spec/ui`'s.
+export {
+  validatePrintPageBlocks,
+  PRINT_PAGE_BLOCK_UNPRINTABLE,
+} from './validate-print-page-blocks.js';
+export type { PrintPageBlockFinding } from './validate-print-page-blocks.js';
+
 export {
   validateChartBindings,
   CHART_DIMENSION_UNKNOWN,
@@ -690,6 +698,12 @@ export type {
   FieldConsumerSeverity,
   FieldConsumerVerdict,
 } from './validate-field-consumers.js';
+
+// [#22161] The long-form reasoning behind an author-time rule, keyed by rule
+// id — what `os explain <rule-id>` prints. A finding carries one verdict and
+// one fix; the "why" lives here, once (see the module note).
+export { RULE_EXPLANATIONS, explainRule } from './rule-explanations.js';
+export type { RuleExplanation } from './rule-explanations.js';
 
 export {
   validateTranslationReferences,

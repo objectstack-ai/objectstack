@@ -213,6 +213,8 @@
     "PageHeaderProps": "ui/PageHeaderProps",
     "PageNavItem": "ui/PageNavItem",
     "PageNavItemSchema": "ui/PageNavItem",
+    "PagePrint": "ui/PagePrint",
+    "PagePrintSchema": "ui/PagePrint",
     "PageRegion": "ui/PageRegion",
     "PageRegionSchema": "ui/PageRegion",
     "PageSchema": "ui/Page",

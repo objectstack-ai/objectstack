@@ -9,8 +9,9 @@
 // and `suppressWarnings: ['<rule-id>']` in authored metadata. The rule files
 // export a named constant for exactly that reason: a consumer should compare
 // against the constant, not retype the slug. But `package.json#exports` opens
-// only "." and "./runtime" (and `tsup.config.ts` builds only those two
-// entries), so a constant that no barrel re-exports is not merely inconvenient
+// only the entries `tsup.config.ts` builds ("." and "./runtime", plus the
+// data-only "./rule-explanations" since #22161), so a constant that no barrel
+// re-exports is not merely inconvenient
 // to reach — it is UNREACHABLE. There is no deep path to fall back to, and the
 // consumer's only remaining option is the string literal the constant existed
 // to eliminate.
@@ -37,11 +38,11 @@
 //     rule surface` additionally pins a floor on the number of ids found, so a
 //     future edit that breaks the extraction pattern fails loudly instead of
 //     passing over an empty set.
-//  2. A barrel entry the check never imported. The two entries are named
+//  2. A barrel entry the check never imported. The entries are named
 //     statically below (a fully dynamic import cannot be bundled reliably), but
 //     `barrel entries match the published exports map` proves that list is the
 //     COMPLETE set of published entries by deriving it independently from
-//     `package.json#exports` and from `tsup.config.ts`. Adding a third entry
+//     `package.json#exports` and from `tsup.config.ts`. Adding an entry
 //     without registering it here fails rather than going unchecked.
 //
 // The reverse direction (`no barrel export names a rule id that no rule file
@@ -58,6 +59,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as indexBarrel from './index.js';
 import * as runtimeBarrel from './runtime.js';
+import * as ruleExplanationsBarrel from './rule-explanations.js';
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const pkgDir = join(srcDir, '..');
@@ -72,6 +74,8 @@ const pkgDir = join(srcDir, '..');
 const BARREL_ENTRIES: Record<string, Record<string, unknown>> = {
   index: indexBarrel as unknown as Record<string, unknown>,
   runtime: runtimeBarrel as unknown as Record<string, unknown>,
+  // [#22161] Data only — it declares no rule id constant, so it carries none.
+  'rule-explanations': ruleExplanationsBarrel as unknown as Record<string, unknown>,
 };
 
 /**

@@ -59,6 +59,7 @@ import {
     normalizeIfNoneMatch,
     relateObjectSchemaMaskPosture,
     resolveObjectSchemaMaskPosture,
+    resolveObjectSchemaRuntimeView,
     OBJECT_SCHEMA_MASK_NOT_APPLICABLE,
     type ObjectSchemaMaskPosture,
     // [#8805] The organization a metadata WRITE carries, given the caller's
@@ -213,6 +214,9 @@ import type {
 // to the implementation is a governed-surface edit, so it is left to the
 // maintainer; this line goes when that row moves.
 export { filterAppForUser } from './meta-item-read-gate.js';
+// [#22141] The `PUT /meta/:type/:name` door's precondition and lifecycle, read
+// through the ONE mapping the runtime dispatcher's `/meta` domain asks too.
+import { metaSaveRequestOptions } from './meta-save-request.js';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
     resolveEffectiveApiMethods,
@@ -1718,57 +1722,6 @@ function mayReadPendingDrafts(caller: unknown): boolean {
 }
 
 /**
- * [#22114] The ADR-0008 pin `PUT /meta/:type/:name` reads off its request
- * headers: `parentVersion` for `saveMetaItem` — the `If-Match` token (ETag-style
- * quotes stripped), `null` for `If-None-Match: *` ("no row of this lifecycle
- * is here", the first-write pin the protocol has always declared), or
- * `undefined` for neither (unpinned, last-write-wins, as before) — or the
- * sentence of a `400` for a pin that cannot be honoured.
- *
- * `If-None-Match` is read on this route from the day it lands with a CLOSED
- * value set, `*` alone (AGENTS.md 〈Route & surface ownership〉 rule 5's reason,
- * one carrier over): a header read for the values it knows and dropped
- * otherwise would write a caller unguarded who asked for a guard. Measured
- * before it landed: no first-party client sends `If-None-Match` on a `PUT`
- * (the SDK sends it only on its cached `GET`, objectui's ETag hook has no
- * caller), and nothing on this path read it. Two refusals, both `400`:
- *
- *  - a value other than `*` — an entity-tag list asks "write unless the head is
- *    one of these", a condition no `/meta` client has and this door does not
- *    evaluate;
- *  - `If-None-Match` beside `If-Match` — the pair can never hold (RFC 9110
- *    §13.2.2 evaluates both: `If-Match` true needs a current row, `*` true
- *    needs none), and a `409` would send the caller round a re-read that
- *    serves a token it would pair with `*` again.
- */
-function metaSavePreconditionPin(headers: Record<string, unknown> | undefined):
-    | { ok: true; parentVersion?: string | null }
-    | { ok: false; message: string } {
-    const ifMatch = headers?.['if-match'] ?? headers?.['If-Match'];
-    const ifNoneMatch = headers?.['if-none-match'] ?? headers?.['If-None-Match'];
-    if (ifNoneMatch !== undefined) {
-        if (ifMatch !== undefined) {
-            return {
-                ok: false,
-                message: 'Send If-Match or If-None-Match, not both. If-Match: <version> saves only over that '
-                    + 'version; If-None-Match: * saves only where no row of this lifecycle exists. A row '
-                    + 'cannot both exist and not exist, so this pair can never be honoured.',
-            };
-        }
-        if (typeof ifNoneMatch !== 'string' || ifNoneMatch.trim() !== '*') {
-            return {
-                ok: false,
-                message: 'If-None-Match on this route takes "*" alone (save only if no row of this lifecycle '
-                    + 'exists). To pin a save to the version you read, send it as If-Match: <version>.',
-            };
-        }
-        return { ok: true, parentVersion: null };
-    }
-    if (typeof ifMatch === 'string') return { ok: true, parentVersion: ifMatch.replace(/^"|"$/g, '') };
-    return { ok: true };
-}
-
-/**
  * [#22128] The ONE reading of `?package=` on the `/meta/:type/:name` item doors
  * — the read (`GET`), the save (`PUT`) and the publish
  * (`POST …/publish`): the package the request names, or `undefined` when it
@@ -1784,8 +1737,20 @@ function metaSavePreconditionPin(headers: Record<string, unknown> | undefined):
  * save then judged, and a client that pinned `If-None-Match: *` on that `null`
  * was refused. ⛔ Never a third inline copy at a door: the save and publish
  * doors each carried one, and the read door had none.
+ *
+ * [#22188] …and on every other `/meta` door that reads `?package=`: the
+ * layered read, the list, the book tree and the diagnostics sweep, which each
+ * forwarded `all` to the store as a package id no item is bound to (the
+ * layered read answered `404`, the list `[]`). Without `?package=`, the list
+ * already spans every package and the env-local overlay, so "no package" is
+ * the list's "show everything". Exported from the package entry, and the
+ * runtime dispatcher's `/meta` domain reads `?package=` through it on its own
+ * copies of these doors, so the two transports cannot read `all` differently.
+ * The item read's cache bypass (`packageScoped`) is not a second reading: it
+ * asks whether the raw parameter is present to pick the uncached arm, and that
+ * arm asks this function.
  */
-function metaItemPackageBinding(raw: unknown): string | undefined {
+export function metaItemPackageBinding(raw: unknown): string | undefined {
     return typeof raw === 'string' && raw !== '' && raw !== 'all' ? raw : undefined;
 }
 
@@ -3860,12 +3825,14 @@ export class RestServer {
         environmentId: string | undefined,
         envelope: Record<string, any>,
         document: any,
-        i18nService?: any,
+        i18nService: any,
+        runtimeDocument: unknown,
     ): Promise<any> {
         // [#10235] The per-column sortability projection, served beside the
         // document whenever the document IS an object schema, computed from the
-        // FINAL document (post ADR-0106 masking) and never inside `item`.
-        // [#20408] Both halves are `translateMetaEnvelope` in
+        // caller's runtime view of the FINAL document (post ADR-0106 masking;
+        // [#22250] `runtimeDocument`, `resolveObjectSchemaRuntimeView`) and never
+        // inside `item`. [#20408] Both halves are `translateMetaEnvelope` in
         // `./meta-item-read-gate.ts` — the runtime dispatcher's item read answers
         // the same body through it.
         return metaReadGate.translateMetaEnvelope(
@@ -3873,6 +3840,7 @@ export class RestServer {
             RestServer.metaTypeSingular(type),
             envelope,
             document,
+            runtimeDocument,
         );
     }
 
@@ -3914,7 +3882,7 @@ export class RestServer {
             requestLocale: (i18n) => this.extractLocale(req, i18n),
             // [#21476] The uncached arm's share of the public-form intake
             // reason the cached arm states (`GET /meta/:type/:name`).
-            translateEnvelope: async (envelope, document) =>
+            translateEnvelope: async (envelope, document, runtimeDocument) =>
                 this.translateMetaEnvelope(
                     req, req.params.type, environmentId, envelope as Record<string, any>,
                     RestServer.metaTypeSingular(req.params.type) === 'view'
@@ -3922,6 +3890,8 @@ export class RestServer {
                             document, await this.anonymousFormIntakeWarnings(environmentId, req, p, document),
                         )
                         : document,
+                    undefined,
+                    runtimeDocument,
                 ),
         };
     }
@@ -3968,7 +3938,8 @@ export class RestServer {
         // `getMetaItemLayered({ packageId: ['a','b'] })`. Gated in the helper,
         // not in its two callers, so both entry points answer identically.
         if (refuseRepeatedQueryParams(req, res, ['package'])) return;
-        const layeredPackageId = req.query?.package || undefined;
+        // [#22188] Read through {@link metaItemPackageBinding}: `all` names no package.
+        const layeredPackageId = metaItemPackageBinding(req.query?.package);
         // [#9454] State the ORG scope, exactly as the `/published` overlay read
         // already does. Without it the layered view resolved the env-wide row
         // only, so an author who had just saved an org overlay opened Studio to
@@ -5852,7 +5823,9 @@ export class RestServer {
                         const result = await (p as any).getMetaDiagnostics({
                             type: diagnosticsType,
                             severity,
-                            packageId: (req.query?.package as string | undefined) || undefined,
+                            // [#22188] The list's reading ({@link metaItemPackageBinding}):
+                            // each swept type is a list read, so `all` names no package.
+                            packageId: metaItemPackageBinding(req.query?.package),
                             // SPREAD, never `organizationId: x ?? null` — the
                             // implementation declares `organizationId?: string`
                             // (optional plain string, not nullable), and a
@@ -6093,7 +6066,9 @@ export class RestServer {
                         // `query-multiplicity.ts` for why picking one of two
                         // conflicting intents is worse than a 400.
                         if (refuseRepeatedQueryParams(req, res, ['package', 'preview', 'object', 'include', 'id'])) return;
-                        const packageId = req.query?.package || undefined;
+                        // [#22188] Read through {@link metaItemPackageBinding}:
+                        // `all`, this list's "show everything" scope, names no package.
+                        const packageId = metaItemPackageBinding(req.query?.package);
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
                         // [#9488] …and BEFORE any listing work: a `:type` that
@@ -6427,7 +6402,8 @@ export class RestServer {
                         const prot = await this.resolveProtocol(environmentId, req);
                         // [#6877] One package scopes the book lookup.
                         if (refuseRepeatedQueryParams(req, res, ['package'])) return;
-                        const packageId = req.query?.package || undefined;
+                        // [#22188] Read through {@link metaItemPackageBinding}: `all` names no package.
+                        const packageId = metaItemPackageBinding(req.query?.package);
                         // [#20408] The route's whole answer is
                         // `createMetaBookTreeAnswer` in `./meta-item-read-gate.ts`
                         // — the book and doc reads, THE `DocsAudience` (#19790: one
@@ -6721,7 +6697,12 @@ export class RestServer {
                             // for the dashboard gate. The comparison moves below,
                             // against the fingerprinted ETag, which is the one
                             // that identifies what we are actually sending.
-                            const maskApplies = maskPosture.kind !== 'passthrough';
+                            // [#22250] A D4-exempt caller's posture carrying
+                            // `runtime` is one: the definition is served whole,
+                            // but the `sortability` beside it follows that
+                            // caller's own field permission, which the
+                            // protocol's validator does not hash either.
+                            const maskApplies = maskPosture.kind !== 'passthrough' || maskPosture.runtime !== undefined;
                             // [#21476] Same move for a `view`: its body can carry
                             // the public-form intake reason, which derives from
                             // the posture and the bound object, and the
@@ -6798,6 +6779,12 @@ export class RestServer {
                                 cachedDocument = stampAnonymousFormIntakeWarnings(cachedDocument, warnings);
                                 intakeFingerprint = anonymousFormIntakeFingerprint(warnings);
                             }
+                            // [#22250] The caller's runtime view of what is
+                            // served — the document itself unless the caller is
+                            // D4-exempt and their own field permission withholds
+                            // some of its fields — which `sortability` derives
+                            // from, and whose fingerprint the validator folds.
+                            const runtimeView = await resolveObjectSchemaRuntimeView(cachedDocument, maskPosture);
 
                             // [ADR-0106 D6 tier 2] Visibility undetermined →
                             // the body is unmasked, so it must not be stored or
@@ -6810,7 +6797,7 @@ export class RestServer {
                                 res.json(await this.translateMetaEnvelope(
                                     req, req.params.type, environmentId,
                                     { type: metaType, name: req.params.name },
-                                    cachedDocument, cacheI18n,
+                                    cachedDocument, cacheI18n, runtimeView.document,
                                 ));
                                 return;
                             }
@@ -6823,9 +6810,15 @@ export class RestServer {
                                 // fingerprint is empty → the ETag is byte-identical
                                 // to the pre-ADR one. A cohort shares 304s; a
                                 // permission change moves the fingerprint and
-                                // self-invalidates the stale 304.
+                                // self-invalidates the stale 304. [#22250] So does
+                                // the runtime view's: a D4-exempt caller whose
+                                // permission withholds a field is served a
+                                // different `sortability`, never a 304 for another's.
                                 const value = foldVisibilityFingerprintIntoEtag(
-                                    foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint),
+                                    foldVisibilityFingerprintIntoEtag(
+                                        foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint),
+                                        runtimeView.fingerprint,
+                                    ),
                                     intakeFingerprint,
                                 );
                                 const etagValue = result.etag.weak
@@ -6885,6 +6878,7 @@ export class RestServer {
                             };
                             res.json(await this.translateMetaEnvelope(
                                 req, req.params.type, environmentId, cachedEnvelope, cachedDocument, cacheI18n,
+                                runtimeView.document,
                             ));
                         } else {
                             // Non-cached version
@@ -7160,14 +7154,25 @@ export class RestServer {
                     // stored content hash, never the hash itself; the protocol
                     // compares it in that form, so it passes through here as sent.
                     // [#22114] The item read serves the same token as `version`,
-                    // and `If-None-Match: *` pins a save that expects no row —
-                    // see {@link metaSavePreconditionPin}.
-                    const pin = metaSavePreconditionPin(req.headers);
-                    if (!pin.ok) {
-                        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: pin.message } });
+                    // and `If-None-Match: *` pins a save that expects no row.
+                    // [#22141] The pin and `?mode=draft` are read through
+                    // {@link metaSaveRequestOptions} — the ONE mapping the
+                    // runtime dispatcher's `/meta` door asks too, so the
+                    // `@objectstack/hono` catch-all cannot answer this request
+                    // differently. Its `request` members are spread into the
+                    // save below, each present only when the caller asked.
+                    //
+                    // The multiplicity guard runs FIRST: it refuses a repeated
+                    // `force`, `package` or `mode` (see the `force` read below
+                    // for why that one is sharp) and UNWRAPS one occurrence
+                    // encoded as an array, so `?mode=` reaches the mapping as
+                    // the string it reads.
+                    if (refuseRepeatedQueryParams(req, res, ['force', 'package', 'mode'])) return;
+                    const saveOptions = metaSaveRequestOptions({ headers: req.headers, query: req.query });
+                    if (!saveOptions.ok) {
+                        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: saveOptions.message } });
                         return;
                     }
-                    const parentVersion = pin.parentVersion;
                     // [#7749 producer, #7941 precedence] The request's authenticated
                     // identity — one producer, shared by every `/meta` write (see
                     // resolveMetaWriteActor). `X-Actor` is not consulted.
@@ -7181,8 +7186,8 @@ export class RestServer {
                     // string, and a non-empty array is truthy — so
                     // `?force=false&force=false`, a caller repeating an explicit
                     // OPT-OUT, turned the destructive-change guard ON. An
-                    // inversion, on a destructive verb, reported as 200.
-                    if (refuseRepeatedQueryParams(req, res, ['force', 'package', 'mode'])) return;
+                    // inversion, on a destructive verb, reported as 200. The
+                    // multiplicity guard above refuses it before this read.
                     const forceRaw = req.query?.force;
                     const force = typeof forceRaw === 'string'
                         ? ['true', '1', 'yes', 'on'].includes(forceRaw.toLowerCase())
@@ -7291,13 +7296,13 @@ export class RestServer {
                         // a client cannot smuggle a face in.
                         writeFace: 'meta-envelope',
                         ...(environmentId ? { environmentId } : {}),
-                        ...(parentVersion !== undefined ? { parentVersion } : {}),
+                        // `parentVersion` and `mode`, each only when asked —
+                        // a closed two-key object read off the headers and the
+                        // query, never the body.
+                        ...saveOptions.request,
                         ...(actor ? { actor } : {}),
                         ...(force ? { force: true } : {}),
                         ...(packageId ? { packageId } : {}),
-                        ...((typeof req.query?.mode === 'string'
-                            && req.query.mode.toLowerCase() === 'draft')
-                            ? { mode: 'draft' } : {}),
                     };
                     const result = await p.saveMetaItem(saveRequest);
                     res.json(result);

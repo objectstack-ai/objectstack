@@ -36,6 +36,12 @@
  *    barrel shape the example apps use, in the module namespace's sorted
  *    order), and the `@objectstack/spec` `define*` helpers and `.create`
  *    factories, which the authored-source load hands their argument through;
+ *  - through `composeStacks([…])`, only into an artifact package body:
+ *    `packages[i].manifest.<key>` is read from input i the way composition
+ *    assembles the body (see {@link packageBodyKeys}), and only when every
+ *    input up to i is a stack literal with a `manifest` and no `packages` of
+ *    its own, so entry i is input i's. A key composed from all the inputs at
+ *    once has no one literal as its source;
  *  - the literal's own statically known values must match the loaded value at
  *    that site (a helper that parsed, defaulted or rebuilt it fails the match);
  *  - every binding the walk crossed must have no reference other than the
@@ -58,6 +64,19 @@
  * left half-converted. The command re-runs the chain over the written sources
  * and restores every file if the written sites do not come back clean.
  *
+ * ## The one edit no conversion makes: the declared protocol range (#22219)
+ *
+ * The load refuses a manifest whose declared protocol range excludes the
+ * runtime's major, and its refusal names `migrate meta --from N` as the remedy.
+ * No conversion moves that range, so a write of the chain's edits alone left
+ * the refusal standing. The command therefore hands the planner one more edit,
+ * a {@link RangeRewrite}, and the planner treats it as one more applied entry
+ * with one more change: it is traced, proved, refused, written, re-checked and
+ * restored exactly like the chain's own edits. It is reported apart
+ * (`plan.range`), because it is not one of the chain's `applied` entries.
+ * Which range is owed, and at which key, is the command's question, not this
+ * module's.
+ *
  * ## What it never writes
  *
  * The chain's semantic TODOs (`todos`) are judgment calls; nothing here reads
@@ -70,6 +89,7 @@ import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from 
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ts as TS } from 'ts-morph';
 import type { MigrationApplication } from '@objectstack/spec/migrations';
+import { packageOwnedCollectionKeys } from './stack-collections.js';
 import { syntacticDiagnostics } from './emitted-source-parses.js';
 
 type Ts = typeof TS;
@@ -136,6 +156,27 @@ export interface FileRewrite {
   after: string;
 }
 
+/**
+ * The manifest's declared protocol range, moved to the major the migrated
+ * source targets (#22219). The command decides that it is owed and at which
+ * key; the planner writes it like any other edit.
+ */
+export interface RangeRewrite {
+  /** Where the range sits in the stack, spelled like `applied[].path` (`manifest.engines.protocol`). */
+  path: string;
+  /** The range as authored. */
+  from: string;
+  /** The range written in its place. */
+  to: string;
+  /** The protocol major `to` admits. */
+  major: number;
+}
+
+/** What became of a {@link RangeRewrite}: written at a site, or left for the author with the reason. */
+export type RangeOutcome =
+  | { rewrite: RangeRewrite; status: 'written'; file: string; line: number }
+  | { rewrite: RangeRewrite; status: 'manual'; refusal: CodemodRefusal };
+
 export interface AuthoredSourceWritePlan {
   /** The project directory every written file lies under (the config's directory). */
   projectRoot: string;
@@ -148,6 +189,8 @@ export interface AuthoredSourceWritePlan {
    * a site without reporting it.
    */
   unexplained: string[];
+  /** The declared protocol range, when the input carried a {@link RangeRewrite}. */
+  range?: RangeOutcome;
 }
 
 export interface AuthoredSourceWriteInput {
@@ -163,6 +206,8 @@ export interface AuthoredSourceWriteInput {
   migrated: Record<string, unknown>;
   /** The chain's mechanical applications (`result.applied`), in order. */
   applied: readonly MigrationApplication[];
+  /** The declared protocol range the load refuses, when the command owes it an edit (#22219). */
+  range?: RangeRewrite;
 }
 
 /** Thrown inside a walk; caught at the change it was resolving. */
@@ -337,7 +382,18 @@ type SNode =
   | { k: 'scalar'; file: SourceFileRec; node: TS.Expression }
   /** A binding imported from `@objectstack/spec` (`name` is the imported name, `*` a namespace). */
   | { k: 'spec'; name: string }
-  | { k: 'specMember'; owner: string; member: string };
+  | { k: 'specMember'; owner: string; member: string }
+  /**
+   * A `composeStacks([…], …)` call, with its input list as read from the
+   * source. Its artifact's `packages[i].manifest` is input i's assembled body;
+   * every other key is composed from all the inputs at once.
+   */
+  | { k: 'composed'; describe: string; inputs: Extract<SNode, { k: 'array' } | { k: 'list' }> }
+  /** The `packages` list of a composition. */
+  | { k: 'composedPackages'; describe: string; inputs: Extract<SNode, { k: 'array' } | { k: 'list' }> }
+  /** One entry of it, `{ manifest: <body> }`, and the body itself — both input `input`'s. */
+  | { k: 'composedEntry'; describe: string; input: Extract<SNode, { k: 'object' }> }
+  | { k: 'composedBody'; describe: string; input: Extract<SNode, { k: 'object' }> };
 
 /** A module-level binding the walk crossed, and how to tell its references apart. */
 interface BindingRef {
@@ -371,6 +427,20 @@ class Trail {
  */
 const SPEC_SPECIFIER_RE = /^@objectstack\/spec(?:\/[\w./-]+)?$/;
 const DEFINE_HELPER_RE = /^define[A-Z]/;
+/** The stack composer, followed into the package bodies it assembles and nowhere else. */
+const STACK_COMPOSER = 'composeStacks';
+
+/**
+ * The keys a package body takes from its input stack rather than from the
+ * input's `manifest`: composition builds a body as `{ ...input.manifest }` and
+ * then writes each package-owned collection the input carries over it. So a
+ * body key is read from the input when it is one of these and the input
+ * writes it, and from the input's `manifest` otherwise.
+ */
+let cachedPackageBodyKeys: ReadonlySet<string> | undefined;
+function packageBodyKeys(): ReadonlySet<string> {
+  return (cachedPackageBodyKeys ??= new Set(packageOwnedCollectionKeys()));
+}
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
 const TS_EXT_FOR_JS: Readonly<Record<string, readonly string[]>> = {
   '.js': ['.ts', '.tsx', '.js'],
@@ -619,6 +689,17 @@ class SourceGraph {
       target = this.resolveExpr(file, callee, trail);
     } catch (error) {
       if (!(error instanceof Refusal)) throw error;
+    }
+    if (target?.k === 'spec' && target.name === STACK_COMPOSER) {
+      const describe = `${this.snippet(file, callee)}(…)`;
+      if (args.length < 1 || ts.isSpreadElement(args[0]!)) {
+        refuse('helper', `\`${describe}\` is not called with a list of stacks`);
+      }
+      const inputs = this.resolveExpr(file, args[0]!, trail);
+      if (inputs.k !== 'array' && inputs.k !== 'list') {
+        refuse('computed', `the stacks \`${describe}\` composes are not written as an array`);
+      }
+      return { k: 'composed', describe, inputs };
     }
     const transparent = target !== undefined
       && ((target.k === 'spec' && DEFINE_HELPER_RE.test(target.name))
@@ -1025,6 +1106,21 @@ function subsetOf(partial: unknown, rt: unknown): boolean {
   return Object.is(partial, rt);
 }
 
+/**
+ * Whether the object literal writes `key` itself: `false` only when it is
+ * provably absent there; a spread or computed key that could supply it is
+ * refused, as {@link SourceGraph.findProp} refuses it.
+ */
+function writesKey(g: SourceGraph, obj: Extract<SNode, { k: 'object' }>, key: string): boolean {
+  try {
+    g.findProp(obj, key);
+    return true;
+  } catch (error) {
+    if (error instanceof Refusal && error.refusal.kind === 'injected') return false;
+    throw error;
+  }
+}
+
 class Locator {
   private readonly cache = new Map<string, Located | Refusal>();
   private readonly configFile: SourceFileRec;
@@ -1048,6 +1144,12 @@ class Locator {
       return this.graph.resolveExport(this.configFile, 'default', trail, new Set());
     }
     return { k: 'namespace', file: this.configFile };
+  }
+
+  /** Input `index` of a composition's input list. */
+  private composedInput(inputs: Extract<SNode, { k: 'array' } | { k: 'list' }>, index: number, trail: Trail): SNode {
+    if (inputs.k === 'list') return inputs.items[index]!(trail);
+    return this.graph.resolveExpr(inputs.file, inputs.node.elements[index]!, trail);
   }
 
   private step(node: SNode, seg: Segment, trail: Trail, rtParent: unknown, atRoot: boolean): SNode {
@@ -1084,6 +1186,47 @@ class Locator {
       case 'namespace':
         if (typeof seg !== 'string') refuse('mismatch', `the module namespace of ${g.rel(node.file)} has no index ${seg}`);
         return g.resolveExport(node.file, seg, trail, new Set());
+      case 'composed':
+        if (seg === 'packages') return { k: 'composedPackages', describe: node.describe, inputs: node.inputs };
+        if (atRoot && typeof seg === 'string' && this.namedExports.includes(seg)) {
+          return g.resolveExport(this.configFile, seg, trail, new Set());
+        }
+        refuse('helper', `\`${String(seg)}\` is composed by \`${node.describe}\` from all of its inputs, so no one literal is its source`);
+      case 'composedPackages': {
+        if (typeof seg !== 'number') refuse('mismatch', `the packages of \`${node.describe}\` are a list where the loaded value is an object`);
+        const count = node.inputs.k === 'array' ? node.inputs.node.elements.length : node.inputs.items.length;
+        if (!Array.isArray(rtParent) || rtParent.length !== count || seg >= count) {
+          refuse('helper', `\`${node.describe}\` composes ${count} input(s) into ${Array.isArray(rtParent) ? rtParent.length : 'no'} package(s), so package ${seg} is not one input's body`);
+        }
+        // Entry i is input i's body only when no input before it contributes
+        // a different number of entries: each one up to i must be a stack
+        // literal with a `manifest` and no `packages` list of its own. The
+        // inputs before i are read on a trail of their own — they are not
+        // the site, so their bindings take no part in its shared check.
+        let input: SNode | undefined;
+        for (let j = 0; j <= seg; j++) {
+          input = this.composedInput(node.inputs, j, j === seg ? trail : new Trail());
+          if (input.k !== 'object') {
+            refuse('helper', `input ${j} of \`${node.describe}\` is not written as a stack literal, so the package it contributes cannot be read`);
+          }
+          g.findProp(input, 'manifest');
+          if (writesKey(g, input, 'packages')) {
+            refuse('helper', `input ${j} of \`${node.describe}\` carries its own \`packages\`, so its packages are not one body each`);
+          }
+        }
+        return { k: 'composedEntry', describe: node.describe, input: input as Extract<SNode, { k: 'object' }> };
+      }
+      case 'composedEntry':
+        if (seg !== 'manifest') refuse('injected', `a package entry \`${node.describe}\` assembles carries only \`manifest\`, not \`${String(seg)}\``);
+        return { k: 'composedBody', describe: node.describe, input: node.input };
+      case 'composedBody': {
+        if (typeof seg !== 'string') refuse('mismatch', `a package body \`${node.describe}\` assembles is an object where the loaded value is an array`);
+        if (packageBodyKeys().has(seg) && writesKey(g, node.input, seg)) {
+          return g.resolveExpr(node.input.file, g.valueOf(g.findProp(node.input, seg)), trail);
+        }
+        const manifest = g.resolveExpr(node.input.file, g.valueOf(g.findProp(node.input, 'manifest')), trail);
+        return this.step(manifest, seg, trail, rtParent, false);
+      }
       case 'scalar':
         refuse('mismatch', `the literal at ${g.at(node.file, node.node)} is a scalar where the loaded value has members`);
       default:
@@ -1128,6 +1271,9 @@ class Locator {
     if (node.k === 'list') refuse('spread', `the container is assembled by ${node.describe}, not written as one literal`);
     if (node.k === 'namespace') refuse('computed', 'the container is a module namespace, not a literal');
     if (node.k === 'scalar') refuse('mismatch', `the literal at ${g.at(node.file, node.node)} is a scalar where the loaded value is a container`);
+    if (node.k === 'composed' || node.k === 'composedPackages' || node.k === 'composedEntry' || node.k === 'composedBody') {
+      refuse('helper', `the container is assembled by \`${node.describe}\`, not written as one literal`);
+    }
     if (node.k !== 'object' && node.k !== 'array') refuse('computed', 'the value comes from `@objectstack/spec`, not from the project');
 
     const real = realpathSafe(node.file.path);
@@ -1569,9 +1715,46 @@ function overlapping(edits: readonly TextEdit[]): TextEdit | undefined {
 }
 
 /**
+ * The entry a {@link RangeRewrite} stands as among the chain's: its label sits
+ * where a conversion id would, so a re-check names it the way it names theirs.
+ */
+function rangeApplication(range: RangeRewrite): MigrationApplication {
+  return {
+    toMajor: range.major,
+    conversionId: 'declared protocol range',
+    surface: range.path,
+    from: range.from,
+    to: range.to,
+    path: range.path,
+  };
+}
+
+/**
+ * `root` with `value` at `path`, copying only the containers on the way. A path
+ * that leads nowhere changes nothing, so the edit is then attributed to nothing.
+ */
+function withValueAt(root: unknown, path: readonly Segment[], value: unknown): Record<string, unknown> {
+  const set = (node: unknown, depth: number): unknown => {
+    if (depth === path.length) return value;
+    const seg = path[depth]!;
+    if (Array.isArray(node) && typeof seg === 'number' && seg < node.length) {
+      const copy = [...node];
+      copy[seg] = set(node[seg], depth + 1);
+      return copy;
+    }
+    if (isPlainObject(node) && typeof seg === 'string' && node[seg] !== undefined) {
+      return { ...node, [seg]: set(node[seg], depth + 1) };
+    }
+    return node;
+  };
+  return set(root, 0) as Record<string, unknown>;
+}
+
+/**
  * Plan `os migrate meta --write`: which of the chain's mechanical changes can be
  * written into which authored files, the bytes each file would hold, and the
  * reason for every change left to the author. Reads the sources; writes nothing.
+ * A {@link RangeRewrite} rides the same plan as one more entry (#22219).
  */
 export async function planAuthoredSourceWrite(input: AuthoredSourceWriteInput): Promise<AuthoredSourceWritePlan> {
   const { ts } = await import('ts-morph');
@@ -1582,13 +1765,23 @@ export async function planAuthoredSourceWrite(input: AuthoredSourceWriteInput): 
   const locator = new Locator(ts, graph, input.config, input.namedExports, configPath);
   const planner = new Planner(ts, graph, locator);
 
+  // The declared range joins as the last entry, and its new value joins the
+  // migrated stack, so every phase below plans it as it plans a conversion's.
+  const rangeIndex = input.range ? input.applied.length : -1;
+  const applied: readonly MigrationApplication[] = input.range
+    ? [...input.applied, rangeApplication(input.range)]
+    : input.applied;
+  const migrated = input.range
+    ? withValueAt(input.migrated, parsePath(input.range.path), input.range.to)
+    : input.migrated;
+
   // Attribution: each change to the entries that explain it.
-  const changes = diffStacks(input.normalized, input.migrated);
-  const appliedPaths = input.applied.map((a) => parsePath(a.path));
+  const changes = diffStacks(input.normalized, migrated);
+  const appliedPaths = applied.map((a) => parsePath(a.path));
   const entriesOf = changes.map((c) => explainingEntries(appliedPaths, c.path));
 
   // Components: entries that share a change are written together or not at all.
-  const parent = input.applied.map((_, i) => i);
+  const parent = applied.map((_, i) => i);
   const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i]!)));
   for (const entries of entriesOf) for (const e of entries.slice(1)) parent[find(e)] = find(entries[0]!);
   const componentOf = (entry: number) => find(entry);
@@ -1678,33 +1871,45 @@ export async function planAuthoredSourceWrite(input: AuthoredSourceWriteInput): 
     break;
   }
 
-  // Report by applied entry, in chain order.
-  const written: WrittenSite[] = [];
-  const manual: ManualSite[] = [];
-  input.applied.forEach((application, i) => {
+  /** Where entry `i` was written, or why it was not. */
+  const entrySite = (i: number): { file: string; line: number } | { refusal: CodemodRefusal } => {
     const comp = componentOf(i);
     const mine = (changesOf.get(comp) ?? []).filter((ci) => entriesOf[ci]!.includes(i));
     if (mine.length === 0) {
-      manual.push({ application, refusal: { kind: 'unattributed', reason: 'no edit in the migrated stack could be tied to this site' } });
-      return;
+      return { refusal: { kind: 'unattributed', reason: 'no edit in the migrated stack could be tied to this site' } };
     }
     const compRefusal = refusedComponent.get(comp);
     if (compRefusal) {
       const own = mine.map((ci) => refusedChange.get(ci)).find((r) => r !== undefined);
-      manual.push({
-        application,
+      return {
         refusal: own ?? { kind: 'entangled', reason: `a conversion's edits are written whole or not at all, and a linked site was refused: ${compRefusal.reason}` },
-      });
-      return;
+      };
     }
     // The line of a member that was there (a rename's old key, a removed or
     // rewritten value) over the line of the literal a new key went into.
-    const site = mine.find((ci) => changes[ci]!.op !== 'add') ?? mine[0]!;
-    const r = resolved.get(site)!;
-    written.push({ application, file: graph.rel(r.container.node.file), line: r.line });
-  });
+    const at = mine.find((ci) => changes[ci]!.op !== 'add') ?? mine[0]!;
+    const r = resolved.get(at)!;
+    return { file: graph.rel(r.container.node.file), line: r.line };
+  };
 
-  return { projectRoot, rewrites, written, manual, unexplained };
+  // Report by applied entry, in chain order; the declared range apart.
+  const written: WrittenSite[] = [];
+  const manual: ManualSite[] = [];
+  let range: RangeOutcome | undefined;
+  for (const [i, application] of applied.entries()) {
+    const site = entrySite(i);
+    if (i === rangeIndex && input.range) {
+      range = 'refusal' in site
+        ? { rewrite: input.range, status: 'manual', refusal: site.refusal }
+        : { rewrite: input.range, status: 'written', file: site.file, line: site.line };
+    } else if ('refusal' in site) {
+      manual.push({ application, refusal: site.refusal });
+    } else {
+      written.push({ application, file: site.file, line: site.line });
+    }
+  }
+
+  return { projectRoot, rewrites, written, manual, unexplained, ...(range ? { range } : {}) };
 }
 
 /**
@@ -1737,17 +1942,23 @@ export interface WriteVerification {
 /**
  * Hold a write to its own report: re-run over the written sources, the chain
  * must apply exactly the changes the plan left manual — every written site
- * gone, every manual one still there.
+ * gone, every manual one still there. The declared range is held the same
+ * way (#22219): `rerunRange` is the range edit the written sources still owe,
+ * which must be absent when the plan wrote it and present when it left it.
  */
 export function verifyAuthoredSourceWrite(
   plan: AuthoredSourceWritePlan,
   rerun: readonly MigrationApplication[],
+  rerunRange?: RangeRewrite,
 ): WriteVerification {
   const key = (a: MigrationApplication) => `${a.path} (${a.conversionId})`;
   const expected = new Map<string, number>();
-  for (const m of plan.manual) expected.set(key(m.application), (expected.get(key(m.application)) ?? 0) + 1);
+  const leave = (a: MigrationApplication) => expected.set(key(a), (expected.get(key(a)) ?? 0) + 1);
+  for (const m of plan.manual) leave(m.application);
+  if (plan.range?.status === 'manual') leave(rangeApplication(plan.range.rewrite));
+  const owed = rerunRange ? [...rerun, rangeApplication(rerunRange)] : rerun;
   const stillApplied: string[] = [];
-  for (const a of rerun) {
+  for (const a of owed) {
     const k = key(a);
     const n = expected.get(k) ?? 0;
     if (n > 0) expected.set(k, n - 1);

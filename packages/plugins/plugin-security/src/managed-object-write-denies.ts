@@ -49,15 +49,20 @@
  * would wrongly widen `sys_user`). This byte-preserves the prior behavior.
  *
  * ── Deliberately NOT covered: engine-owned system / append-only objects ──
- * ADR-0103's engine-owned objects (`sys_audit_log`, `sys_automation_run`, …)
- * are also reached by the wildcard in the target sets that carry one, but we do
- * NOT inject deny entries for them: a per-object entry FULLY OVERRIDES the
- * wildcard (lookup, not merge — see `default-permission-sets.ts`), so injecting
+ * ADR-0103's engine-owned objects (`sys_automation_run`, …) are also reached by
+ * the wildcard in the target sets that carry one, but we do NOT inject deny
+ * entries for them: a per-object entry FULLY OVERRIDES the wildcard (lookup,
+ * not merge — see `default-permission-sets.ts`), so injecting
  * `{ allowRead: true, ...writes:false }` would silently drop
  * `organization_admin`'s `viewAllRecords` / `modifyAllRecords` — a read-side
  * narrowing. Their user-context writes are already rejected at the
  * engine by `assertEngineOwnedWriteAllowed` (ADR-0103) and reflected in the
  * `/me/permissions` clamp, so the permission-set layer needs no change for them.
+ * The compliance ledger `sys_audit_log` is the one engine-owned object
+ * `organization_admin` names explicitly, read only and WITHOUT the superuser
+ * bits, in its static declaration — that narrowing is deliberate there
+ * (ADR-0131 D7: the ledger has no tenant column, so the wildcard's bypass would
+ * skip its organization row scope), and this module injects nothing for it.
  */
 
 import type { PermissionSet } from '@objectstack/spec/security';

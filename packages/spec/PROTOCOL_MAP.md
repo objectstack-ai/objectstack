@@ -33,7 +33,6 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`seed.zod.ts`](src/data/seed.zod.ts) | | **Seed**. Seed data / fixtures — bootstrap, reference, and demo rows applied on publish. (Was `dataset` until #1620; the `dataset` name now belongs to the analytics semantic layer.) |
 | [`seed-loader.zod.ts`](src/data/seed-loader.zod.ts) | | **Seed Loader**. How seed rows are resolved and applied. |
 | [`analytics.zod.ts`](src/data/analytics.zod.ts) | | **Data Analytics**. Aggregation and multidimensional analysis types. |
-| [`document.zod.ts`](src/data/document.zod.ts) | | **Document**. Unstructured document storage protocol. |
 | [`filter.zod.ts`](src/data/filter.zod.ts) | | **Filter**. Low-level filter syntax definitions. |
 | [`hook.zod.ts`](src/data/hook.zod.ts) | | **Triggers/Hooks**. Database trigger definitions (before/after insert/update). |
 | [`mapping.zod.ts`](src/data/mapping.zod.ts) | | **Data Mapping**. Rules for transforming data between schemas. |

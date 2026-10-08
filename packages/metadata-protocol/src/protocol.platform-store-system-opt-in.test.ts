@@ -4,9 +4,10 @@
  * [#21911, ADR-0096] The metadata protocol's platform-store calls carry the
  * EXPLICIT system opt-in, never a principal-less context.
  *
- * plugin-security hands an engine operation whose context carries no user, no
- * position, no permission set and no `isSystem` straight to `next()` (the
- * ADR-0096 E1 hand-off). The protocol's own reads and writes of the
+ * plugin-security used to hand an engine operation whose context carries no
+ * user, no position, no permission set and no `isSystem` straight to `next()`
+ * (the ADR-0096 E1 hand-off); since ADR-0096 D5 it refuses one. The protocol's
+ * own reads and writes of the
  * `sys_metadata` family reached the engine exactly that way — a `{ where }`
  * with no `context`, or a repository transaction context with only its
  * handle — so they worked only because the hand-off let them through. They
@@ -327,5 +328,66 @@ describe('[#21908] row 23 — the repository reads the engine-lane slice left ca
             expect((await it.next()).done).toBe(false);
             await it.return?.();
         });
+    });
+});
+
+describe('[#21908] the deny round — the platform-store calls still reaching the engine principal-less', () => {
+    // ADR-0096 D5 strict mode makes the security middleware REFUSE a context
+    // with no principal and no `isSystem`. Each producer below read or wrote
+    // the store that way behind a door that had already authorized its caller
+    // (publish, history, audit, diff, commits, migration, the legacy delete),
+    // so each carries the explicit opt-in now, like the calls above.
+
+    it('the publish path: the promotion draft read and the org-scoped publish probes', async () => {
+        const { engine, calls } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine) as any;
+        await protocol.saveMetaItem({ type: 'view', name: 'proj_task_grid', item: viewBody('proj_task_grid'), mode: 'draft' });
+
+        // No package stated: the promotion reads the draft row's own binding.
+        await expectSystemOptIn(calls, 'publishMetaItem', async () => {
+            await protocol.publishMetaItem({ type: 'view', name: 'proj_task_grid' });
+        });
+        await expectSystemOptIn(calls, 'promoteDraftForPublish', () =>
+            protocol.promoteDraftForPublish({ type: 'view', name: 'proj_task_grid' }).catch(() => undefined));
+        await expectSystemOptIn(calls, 'resolveDraftOrgScopeForPublish', () =>
+            protocol.resolveDraftOrgScopeForPublish('view', 'proj_task_grid', 'org_a'));
+    });
+
+    it('the readers behind the history, audit, diff and commit doors', async () => {
+        const { engine, calls } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine) as any;
+        await protocol.saveMetaItem({ type: 'view', name: 'proj_task_grid', item: viewBody('proj_task_grid'), mode: 'publish' });
+
+        await expectSystemOptIn(calls, 'resolveMetaItemOrgScope', () =>
+            protocol.resolveMetaItemOrgScope('view', 'proj_task_grid', 'org_a'));
+        await expectSystemOptIn(calls, 'auditMetaItem', () =>
+            protocol.auditMetaItem({ type: 'view', name: 'proj_task_grid' }));
+        const diffCalls = await expectSystemOptIn(calls, 'diffMetaItem', () =>
+            protocol.diffMetaItem({ type: 'view', name: 'proj_task_grid' }));
+        expect(diffCalls.some((c) => c.table === 'sys_metadata_history' && c.verb === 'find')).toBe(true);
+        await expectSystemOptIn(calls, 'listCommits', () => protocol.listCommits({ packageId: 'app.pin' }));
+        await expectSystemOptIn(calls, 'revertCommit', () =>
+            protocol.revertCommit({ commitId: 'c_absent' }).catch(() => undefined));
+        await expectSystemOptIn(calls, 'rollbackToPackageCommit', () =>
+            protocol.rollbackToPackageCommit({ commitId: 'c_absent' }).catch(() => undefined));
+    });
+
+    it('the namespace probe, the migration scan and the legacy (code-only) delete', async () => {
+        const { engine, calls } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine) as any;
+        await protocol.saveMetaItem({ type: 'view', name: 'proj_task_grid', item: viewBody('proj_task_grid'), mode: 'publish' });
+
+        await expectSystemOptIn(calls, 'metaTypeNamespaceExists', () => protocol.metaTypeNamespaceExists('view'));
+        await expectSystemOptIn(calls, 'migrateStoredMetadata', () => protocol.migrateStoredMetadata({}));
+
+        // A code-only row, as a control-plane kernel holds one: the delete
+        // reaches the legacy path, which reads it and deletes it by id.
+        await engine.insert('sys_metadata', {
+            type: 'job', name: 'nightly_job', organization_id: null, package_id: null, state: 'active',
+            metadata: JSON.stringify({ name: 'nightly_job' }),
+        }, { context: { isSystem: true } });
+        const deleteCalls = await expectSystemOptIn(calls, 'deleteMetaItem (legacy path)', () =>
+            protocol.deleteMetaItem({ type: 'job', name: 'nightly_job' }));
+        expect(deleteCalls.some((c) => c.verb === 'delete' && c.table === 'sys_metadata')).toBe(true);
     });
 });

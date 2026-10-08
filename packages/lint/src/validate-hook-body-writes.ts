@@ -59,8 +59,16 @@
 //     legitimately branch per object (`if (ctx.object === '…')`), so only a
 //     field missing on EVERY named target is flagged;
 //   • targets declared by another package (not in this stack);
-//   • one-level aliasing (`const doc = ctx.input; doc.x = 1`) — known miss,
-//     deliberately: v1 does no data-flow analysis.
+//   • one-level aliasing of `ctx.input` (`const doc = ctx.input; doc.x = 1`) —
+//     known miss, deliberately: v1 does no data-flow analysis.
+//
+// ⚠️ [#22212] `ctx.api` is the one receiver whose alias IS followed: a
+// never-reassigned, singly-declared local bound to it (`const api = ctx.api`,
+// `const { api } = ctx`) is read as `ctx.api` by `api-crud-literal`. Not a
+// data-flow analysis — `collectCtxApiAliases` lists the bindings it accepts and
+// every shape it leaves opaque — but the reach that motivated it was a whole
+// app whose conventions mandate the alias, so neither hook write-set rule saw
+// a single one of its writes.
 //
 // Severity: always `warning` (advisory, never gates). Same posture as
 // `lintUnknownAuthoringKeys` (#3786) — ratchet only with field data.
@@ -232,18 +240,26 @@ export const HOOK_BODY_WRITE_PATTERNS: readonly HookBodyWritePattern[] = [
     // see the note on `API_WRITE_METHODS` below for the sandbox reading and the
     // build-time refusal that now backs it.
     id: 'api-crud-literal',
+    // [#22212] The receiver is `ctx.api` OR a local bound to it — see
+    // `collectCtxApiAliases` for exactly which bindings are followed.
     syntax:
-      "ctx.api.object('<object>').insert({…}) | .update({…}) | .updateById(id, {…})",
+      "ctx.api.object('<object>').insert({…}) | .update({…}) | .updateById(id, {…}) — " +
+      'receiver `ctx.api`, or a never-reassigned local bound to it (`const api = ctx.api`, `const { api } = ctx`)',
     example: {
       // Real ObjectRepository signatures: the record payload is argument 0 for
       // insert/update and argument 1 for updateById. (`update(data)` — NOT
-      // `update(id, data)`; the id travels inside the payload/options.)
+      // `update(id, data)`; the id travels inside the payload/options.) The
+      // last two statements are the aliased receiver, in the spelling a body
+      // lowered from a TypeScript handler carries.
       source:
         "await ctx.api.object('audit_log').insert({ event: 'won' }); " +
-        "await ctx.api.object('crm_deal').updateById(id, { stage: 'won' });",
+        "await ctx.api.object('crm_deal').updateById(id, { stage: 'won' }); " +
+        'const api = ctx.api as HookApi | undefined; ' +
+        "await api?.object('crm_task').update({ status: 'done' });",
       writes: [
         { field: 'event', object: 'audit_log' },
         { field: 'stage', object: 'crm_deal' },
+        { field: 'status', object: 'crm_task' },
       ],
     },
   },
@@ -611,6 +627,19 @@ export function extractHookBodyWriteSet(source: string): ExtractedHookBodyWriteS
     node.expression.text === 'ctx' &&
     node.name.text === prop;
 
+  // [#22212] The `api-crud-literal` receiver: `ctx.api` itself, or a local the
+  // body bound to it ({@link collectCtxApiAliases}). Type-only and non-null
+  // wrappers are see-through on both — `(ctx.api as HookApi)!` is `ctx.api` at
+  // run time, and a body lowered from a TypeScript handler may carry either.
+  const apiAliases = collectCtxApiAliases(tsc, sf);
+  const isCtxApiReceiver = (node: ts.Node): boolean => {
+    const bare = unwrapTypeOnly(tsc, node);
+    if (isCtxDot(bare, 'api')) return true;
+    if (!tsc.isIdentifier(bare)) return false;
+    const scope = apiAliases.get(bare.text);
+    return scope !== undefined && bare.pos >= scope.pos && bare.end <= scope.end;
+  };
+
   /** The literal field name of an LHS rooted at `ctx.<prop>`, if any. */
   const fieldOfCtxLhs = (lhs: ts.Expression, prop: string): string | undefined => {
     if (tsc.isPropertyAccessExpression(lhs) && tsc.isIdentifier(lhs.name) && isCtxDot(lhs.expression, prop)) {
@@ -730,7 +759,10 @@ export function extractHookBodyWriteSet(source: string): ExtractedHookBodyWriteS
         }
       }
 
-      // Pattern: api-crud-literal — ctx.api.object('<lit>').<method>(payload…).
+      // Pattern: api-crud-literal — ctx.api.object('<lit>').<method>(payload…),
+      // the receiver spelled `ctx.api` or a local bound to it (#22212). An
+      // optional chain (`api?.object(…)`) is the same node kinds, so it matches
+      // here without a branch of its own.
       if (tsc.isPropertyAccessExpression(callee) && tsc.isIdentifier(callee.name)) {
         const payloadIndex = API_WRITE_METHODS.get(callee.name.text);
         const recv = callee.expression;
@@ -739,7 +771,7 @@ export function extractHookBodyWriteSet(source: string): ExtractedHookBodyWriteS
           tsc.isCallExpression(recv) &&
           tsc.isPropertyAccessExpression(recv.expression) &&
           recv.expression.name.text === 'object' &&
-          isCtxDot(recv.expression.expression, 'api') &&
+          isCtxApiReceiver(recv.expression.expression) &&
           recv.arguments.length === 1
         ) {
           const objArg = recv.arguments[0];
@@ -770,6 +802,187 @@ export function extractHookBodyWriteSet(source: string): ExtractedHookBodyWriteS
     ctxRecordEscapes: recordRefs.some((ref) => !consumedRecordRefs.has(ref)),
     ...(parseFailure ? { parseFailure } : {}),
   };
+}
+
+/**
+ * `node` with every wrapper that changes nothing at run time peeled off:
+ * parentheses, `as T`, `<T>x`, `x satisfies T` and the non-null `x!`. A body
+ * lowered from a TypeScript handler can carry any of them around `ctx.api`.
+ */
+function unwrapTypeOnly(tsc: typeof ts, node: ts.Node): ts.Node {
+  let cur = node;
+  for (;;) {
+    if (
+      tsc.isParenthesizedExpression(cur) ||
+      tsc.isAsExpression(cur) ||
+      tsc.isTypeAssertionExpression(cur) ||
+      tsc.isSatisfiesExpression(cur) ||
+      tsc.isNonNullExpression(cur)
+    ) {
+      cur = cur.expression;
+      continue;
+    }
+    return cur;
+  }
+}
+
+/** Source span a local binding is visible in (its declaring block or function). */
+interface BindingScope {
+  pos: number;
+  end: number;
+}
+
+/**
+ * [#22212] The local names a body binds to `ctx.api`, each with the span it is
+ * visible in — the receivers `api-crud-literal` follows besides `ctx.api`.
+ *
+ * Measured reach, which is why this is not the "no data-flow analysis" miss the
+ * module header accepts for `ctx.input`: an app whose conventions mandate
+ * `const api = ctx.api as HookApi | undefined` (25 declarations, 73
+ * `api.object(` writes and ZERO direct `ctx.api.object(` calls in the reporting
+ * app) had every hook write invisible to both hook write-set rules, while the
+ * byte-identical statement spelled `ctx.api.object(…)` fired both.
+ *
+ * Followed — one level, and only where the binding needs no flow analysis:
+ *
+ *   • `const|let|var <name> = ctx.api` — through the type-only wrappers of
+ *     {@link unwrapTypeOnly} (`as HookApi | undefined`, `ctx.api!`, parens);
+ *   • `const { api } = ctx` and `const { api: <name> } = ctx` — the same
+ *     binding spelled as a destructure (no default, no rest).
+ *
+ * Opaque, deliberately — the name then means "not provably `ctx.api`", and a
+ * write through it is skipped exactly like a dynamic object name:
+ *
+ *   • the name is declared MORE THAN ONCE anywhere in the body (a nested
+ *     function's parameter, a block-local `const`, a catch binding …). Without
+ *     a scope analysis a second declaration can shadow the alias at any use
+ *     site, so the alias is dropped outright rather than resolved;
+ *   • the name is ever an assignment target (`=`, a compound or logical
+ *     assignment, `++`/`--`, a destructuring assignment, a `for…in/of` head);
+ *   • the initializer is anything but `ctx.api` (`ctx.api ?? x`, `cond ? ctx.api
+ *     : x`, `ctx.api.sudo()` — the elevated channel stays invisible, as the
+ *     readonly rule requires);
+ *   • an alias of an alias (`const b = api`).
+ *
+ * A reference outside the declaring block (or function, for `var`) is not
+ * the alias either — with one declaration of the name in the whole body it can
+ * only be a free identifier there, which throws rather than writes.
+ */
+function collectCtxApiAliases(tsc: typeof ts, sf: ts.SourceFile): Map<string, BindingScope> {
+  const declarations = new Map<string, number>();
+  const assigned = new Set<string>();
+  const candidates = new Map<string, BindingScope>();
+  const blockScopes: ts.Node[] = [];
+  const functionScopes: ts.Node[] = [];
+
+  const declare = (name: ts.BindingName): void => {
+    if (tsc.isIdentifier(name)) {
+      declarations.set(name.text, (declarations.get(name.text) ?? 0) + 1);
+      return;
+    }
+    for (const element of name.elements) {
+      if (!tsc.isOmittedExpression(element)) declare(element.name);
+    }
+  };
+  // Over-approximates on a destructuring target (every identifier under it is
+  // marked) — the safe direction: a marked name only stops being an alias.
+  const markAssigned = (target: ts.Node): void => {
+    const bare = unwrapTypeOnly(tsc, target);
+    if (tsc.isIdentifier(bare)) {
+      assigned.add(bare.text);
+      return;
+    }
+    const collect = (n: ts.Node): void => {
+      if (tsc.isIdentifier(n)) assigned.add(n.text);
+      tsc.forEachChild(n, collect);
+    };
+    collect(bare);
+  };
+  const isCtx = (node: ts.Node): boolean => {
+    const bare = unwrapTypeOnly(tsc, node);
+    return tsc.isIdentifier(bare) && bare.text === 'ctx';
+  };
+  const isCtxApi = (node: ts.Node): boolean => {
+    const bare = unwrapTypeOnly(tsc, node);
+    return tsc.isPropertyAccessExpression(bare) && isCtx(bare.expression) && bare.name.text === 'api';
+  };
+
+  const walk = (node: ts.Node): void => {
+    const opensBlock =
+      tsc.isSourceFile(node) ||
+      tsc.isBlock(node) ||
+      tsc.isCaseBlock(node) ||
+      tsc.isForStatement(node) ||
+      tsc.isForInStatement(node) ||
+      tsc.isForOfStatement(node);
+    const opensFunction = tsc.isFunctionLike(node);
+    if (opensBlock) blockScopes.push(node);
+    if (opensFunction) functionScopes.push(node);
+
+    if (tsc.isVariableDeclarationList(node)) {
+      const blockScoped = (node.flags & (tsc.NodeFlags.Let | tsc.NodeFlags.Const)) !== 0;
+      const scopeNode = blockScoped
+        ? blockScopes[blockScopes.length - 1]
+        : (functionScopes[functionScopes.length - 1] ?? sf);
+      const scope = { pos: scopeNode.pos, end: scopeNode.end };
+      for (const decl of node.declarations) {
+        declare(decl.name);
+        if (!decl.initializer) continue;
+        if (tsc.isIdentifier(decl.name) && isCtxApi(decl.initializer)) {
+          candidates.set(decl.name.text, scope);
+        } else if (tsc.isObjectBindingPattern(decl.name) && isCtx(decl.initializer)) {
+          for (const element of decl.name.elements) {
+            if (element.dotDotDotToken || element.initializer || !tsc.isIdentifier(element.name)) continue;
+            const key = element.propertyName ?? element.name;
+            const keyText = tsc.isIdentifier(key) || tsc.isStringLiteral(key) ? key.text : undefined;
+            if (keyText === 'api') candidates.set(element.name.text, scope);
+          }
+        }
+      }
+    } else if (tsc.isCatchClause(node) && node.variableDeclaration) {
+      declare(node.variableDeclaration.name);
+    } else if (tsc.isParameter(node)) {
+      declare(node.name);
+    } else if (
+      (tsc.isFunctionDeclaration(node) ||
+        tsc.isFunctionExpression(node) ||
+        tsc.isClassDeclaration(node) ||
+        tsc.isClassExpression(node)) &&
+      node.name
+    ) {
+      declare(node.name);
+    }
+
+    if (
+      tsc.isBinaryExpression(node) &&
+      node.operatorToken.kind >= tsc.SyntaxKind.FirstAssignment &&
+      node.operatorToken.kind <= tsc.SyntaxKind.LastAssignment
+    ) {
+      markAssigned(node.left);
+    } else if (
+      (tsc.isPrefixUnaryExpression(node) || tsc.isPostfixUnaryExpression(node)) &&
+      (node.operator === tsc.SyntaxKind.PlusPlusToken || node.operator === tsc.SyntaxKind.MinusMinusToken)
+    ) {
+      markAssigned(node.operand);
+    } else if (
+      (tsc.isForInStatement(node) || tsc.isForOfStatement(node)) &&
+      !tsc.isVariableDeclarationList(node.initializer)
+    ) {
+      markAssigned(node.initializer);
+    }
+
+    tsc.forEachChild(node, walk);
+    if (opensFunction) functionScopes.pop();
+    if (opensBlock) blockScopes.pop();
+  };
+  walk(sf);
+
+  const aliases = new Map<string, BindingScope>();
+  for (const [name, scope] of candidates) {
+    if (name === 'ctx' || declarations.get(name) !== 1 || assigned.has(name)) continue;
+    aliases.set(name, scope);
+  }
+  return aliases;
 }
 
 /**

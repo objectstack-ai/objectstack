@@ -405,6 +405,10 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         "A one-time membership decision (the ADR-0093 D6 backfill, or the default organization's owner bind) was carried out but its `sys_migration` record was never written. Every log line reads clean and the memberships it wrote stand, while the record that makes the decision ONE-TIME is absent, so the next boot decides it again — re-deciding membership for users whose membership was already decided at creation (ADR-0093 D7).",
     ],
     [
+        'persistGrantNameBackfillRecord',
+        "The one-time grant-name backfill (ADR-0131 D4) named the grants it could, but its `sys_migration` verdict row was never written. Every log line reads clean and the names it wrote stand, while the record that makes the pass ONE-TIME is absent, so every later boot scans the whole grant table again and re-reports the grants it cannot name.",
+    ],
+    [
         'runWideningAlters',
         "The widening ALTER never ran — the MySQL column keeps its legacy zero-precision type (`TIMESTAMP` for a `Field.datetime`, `TIME` for a `Field.time`) while the object stays registered and served, so every subsequent write silently drops the milliseconds the canonical storage form promises are always present: a `TIMESTAMP` truncates them, and a `TIME(0)` ROUNDS a fractional literal, changing the wall clock it was asked to store. Reads come back looking clean because the value that was stored is the value that is returned, and nothing else reports the column is still un-widened (#9609).",
     ],

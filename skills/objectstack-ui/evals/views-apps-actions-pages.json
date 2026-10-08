@@ -34,11 +34,11 @@
     {
       "id": 4,
       "prompt": "Design a custom lead record page: the Convert action inline in the header, a highlights strip, a stage path over `status`, and the related contacts. Also write a user guide for the `crm` package under src/docs and link it from the nav.",
-      "expected_output": "`definePage({ name, label, type: 'record', object: 'lead', template: 'three-column', regions: [...] })` with `page:header` (the declared action's id in `properties.actions`, no sibling action node), `record:highlights`, `record:path` (`statusField`, `stages`), `record:related_list`. The guide is a flat, namespace-prefixed `src/docs/crm_user_guide.md` in pure Markdown (MDX and image references are rejected at build), surfaced by a `type: 'url'` nav item pointing at `/docs/crm_user_guide`.",
+      "expected_output": "`definePage({ name, label, type: 'record', object: 'lead', template: 'three-column', regions: [...] })` with `page:header` (the declared action's id in `properties.actions`, no sibling action node), `record:highlights`, `record:path` (`statusField`, `stages`), `record:related_list`. The guide is a flat, namespace-prefixed `src/docs/crm_user_guide.md` in pure Markdown (MDX and image references are rejected at build), surfaced by a `type: 'doc'` nav item (`doc: 'crm_user_guide'`).",
       "files": [],
       "assertions": {
-        "must_contain": ["definePage", "type: 'record'", "regions", "page:header", "record:path", "src/docs/", "/docs/"],
-        "must_not_contain": ["record_detail", ".mdx"]
+        "must_contain": ["definePage", "type: 'record'", "regions", "page:header", "record:path", "src/docs/", "type: 'doc'"],
+        "must_not_contain": ["record_detail", ".mdx", "type: 'url'"]
       }
     },
     {

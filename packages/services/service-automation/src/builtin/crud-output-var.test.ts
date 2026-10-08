@@ -33,7 +33,7 @@ function fakeData() {
 const ctxWith = (data: any): any => ({ logger: makeLogger(), getService: (n: string) => (n === 'data' ? data : undefined) });
 
 describe('create_record outputVariable (#1873)', () => {
-  it('exposes the created record so {var.id} resolves in a later node', async () => {
+  it('exposes the created record so `var.id` resolves in a later node (a CEL value envelope since #19939)', async () => {
     const engine = new AutomationEngine(makeLogger());
     const { data, updates } = fakeData();
     registerCrudNodes(engine, ctxWith(data));
@@ -43,7 +43,7 @@ describe('create_record outputVariable (#1873)', () => {
       nodes: [
         { id: 'start', type: 'start', label: 'Start' },
         { id: 'mk', type: 'create_record', label: 'Create', config: { objectName: 'topic', outputVariable: 'topic', fields: { title: 'X' } } },
-        { id: 'upd', type: 'update_record', label: 'Update', config: { objectName: 'signal', filter: { id: 'sig1' }, fields: { promoted_topic: '{topic.id}' } } },
+        { id: 'upd', type: 'update_record', label: 'Update', config: { objectName: 'signal', filter: { id: 'sig1' }, fields: { promoted_topic: { dialect: 'cel', source: 'topic.id' } } } },
         { id: 'end', type: 'end', label: 'End' },
       ],
       edges: [
@@ -62,7 +62,7 @@ describe('create_record outputVariable (#1873)', () => {
     expect(updates[0].fields.promoted_topic).toBe('topic_1');
   });
 
-  it('exposes non-id fields of the created record too ({var.title})', async () => {
+  it('exposes non-id fields of the created record too (`var.title`)', async () => {
     const engine = new AutomationEngine(makeLogger());
     const { data, updates } = fakeData();
     registerCrudNodes(engine, ctxWith(data));
@@ -71,7 +71,7 @@ describe('create_record outputVariable (#1873)', () => {
       nodes: [
         { id: 'start', type: 'start', label: 'Start' },
         { id: 'mk', type: 'create_record', label: 'Create', config: { objectName: 'topic', outputVariable: 'topic', fields: { title: 'X' } } },
-        { id: 'upd', type: 'update_record', label: 'Update', config: { objectName: 'signal', filter: { id: 'sig1' }, fields: { ref: '{topic.title}' } } },
+        { id: 'upd', type: 'update_record', label: 'Update', config: { objectName: 'signal', filter: { id: 'sig1' }, fields: { ref: { dialect: 'cel', source: 'topic.title' } } } },
         { id: 'end', type: 'end', label: 'End' },
       ],
       edges: [

@@ -44,7 +44,8 @@
  *     that is not itself an identity table. "Who is a platform admin" is
  *     resolved by NAME: the first step of `resolveAdminUserIds` looks the
  *     permission set up as `where: { name: 'admin_full_access' }` and only then
- *     reads the grants pointing at its id. Remove that row, call it something
+ *     reads the grants naming it ([ADR-0131] D4: the grant's `permission_set`
+ *     column, no longer the row's id). Remove that row, call it something
  *     else, or (ADR-0049, since `active` became a resolution-time predicate)
  *     switch it off, and every grant, every `sys_user` row and every
  *     `sys_member` row survives untouched while nobody is a platform admin any
@@ -329,6 +330,7 @@ import {
 } from '@objectstack/core';
 
 import { isOrgAdminGrade } from './invitation-role-cap.js';
+import { GRANT_SET_ID_FIELD, GRANT_SET_NAME_FIELD, grantSetNameOf } from './grant-set-name.js';
 
 /** `sys_user_permission_set` has no `SystemObjectName` member; it is spelled once, here. */
 const USER_PERMISSION_SET = 'sys_user_permission_set';
@@ -616,6 +618,33 @@ function applyPending(
 }
 
 /**
+ * [ADR-0131 D4] The permission set a grant row names once `pending` lands, as
+ * the enumeration reads it — or `undefined` when it names none, or when this
+ * guard cannot know what it will name.
+ *
+ * `simulated` is `applyPending(raw, …)`. The one case it gets wrong is a
+ * write that RE-POINTS the grant's id without carrying its name: the
+ * platform derives the new name from the new id in an engine hook that runs
+ * after this guard, so the simulated row still shows the old name. Such a row
+ * is read as naming nothing — standing taken away, the one direction this
+ * simulation is allowed to round in. An id echoed unchanged keeps its name.
+ */
+function simulatedGrantSetName(
+  raw: Record<string, unknown>,
+  simulated: Record<string, unknown>,
+  pending: PendingStandingWrite | undefined,
+): string | undefined {
+  const patch = pending?.table === USER_PERMISSION_SET && pending.patch ? pending.patch : undefined;
+  const id = toId(raw.id);
+  if (patch && id && pending!.ids.has(id) && !(GRANT_SET_NAME_FIELD in patch)) {
+    for (const key of [GRANT_SET_ID_FIELD, 'permissionSetId']) {
+      if (key in patch && toId(patch[key]) !== toId(raw[GRANT_SET_ID_FIELD] ?? raw.permissionSetId)) return undefined;
+    }
+  }
+  return grantSetNameOf(simulated);
+}
+
+/**
  * Which keys of a `sys_member` payload can move the administrator enumeration.
  * The `sys_member` half of `resolveAdminUserIds` reads exactly two columns —
  * the graded `role` and the `user_id` the standing belongs to — so a payload
@@ -631,8 +660,15 @@ export const MEMBER_STANDING_KEYS = ['role', 'user_id', 'userId'] as const;
  * at, whose it is, whether it is org-scoped, and its ADR-0091 validity window
  * — every column the grant half of the enumeration consumes, in both the
  * snake_case and camelCase spellings the readers already tolerate.
+ *
+ * [ADR-0131 D4] The enumeration reads WHICH set by the grant's name,
+ * `permission_set`, so a write touching that column alone moves it. The id
+ * spellings stay: a write that re-points the id carries the name the platform
+ * will derive from it only after this guard has run, so the guard reads such
+ * a write as taking the standing away (`simulatedGrantSetName`).
  */
 export const GRANT_STANDING_KEYS = [
+  'permission_set',
   'permission_set_id',
   'permissionSetId',
   'user_id',
@@ -939,6 +975,17 @@ export function registerLastAdminGuard(
     // list would read as absent here and absent means ACTIVE — the guard would
     // model an environment in which no set is ever deactivated and permit the
     // one write that empties it.
+    //
+    // [ADR-0131 D4] A grant holds `admin_full_access` BY NAME — its
+    // `permission_set` column — so the grant half reads the grants NAMING the
+    // set, and the set rows only for whether the name is in effect: it is when
+    // at least one row bearing it survives the pending write still named so,
+    // and none of them is deactivated. With one row (the `single` catalog)
+    // that is exactly the row's own verdict; where a name has several rows
+    // (another organization's copy), one switched off is read as switching the
+    // name off — an under-count, the direction this guard may round in. A
+    // grant that names nothing is not counted at all: it holds no set by name,
+    // and `refuseIfEmptiedRatherThanFresh` reads it as evidence instead.
     const legacyGrantAnchorRetired = postureEnforcesWall(resolveTenancyPosture());
     const sets = legacyGrantAnchorRetired
       ? []
@@ -946,20 +993,23 @@ export function registerLastAdminGuard(
         where: { name: ADMIN_FULL_ACCESS },
         fields: ['id', 'name', 'active'],
       });
-    const adminSetIds: string[] = [];
+    let adminSetNamed = false;
+    let adminSetSwitchedOff = false;
     for (const rawSet of sets) {
       const set = applyPending(rawSet, pending, SystemObjectName.PERMISSION_SET);
       if (!set) continue; // removed outright by the pending write
       if (set.name !== ADMIN_FULL_ACCESS) continue; // renamed away — the row survives, the meaning does not
       // Deactivated — the row survives under its own name and grants nothing,
       // judged by the SAME predicate `resolveAuthzContext` resolves with.
-      if (!isRowActive(set)) continue;
-      const sid = toId(set.id);
-      if (sid) adminSetIds.push(sid);
+      if (!isRowActive(set)) {
+        adminSetSwitchedOff = true;
+        continue;
+      }
+      adminSetNamed = true;
     }
-    if (adminSetIds.length > 0) {
+    if (adminSetNamed && !adminSetSwitchedOff) {
       const links = await scan(op, USER_PERMISSION_SET, {
-        where: { permission_set_id: { $in: adminSetIds } },
+        where: { [GRANT_SET_NAME_FIELD]: ADMIN_FULL_ACCESS },
       });
       for (const raw of links) {
         const link = applyPending(raw, pending, USER_PERMISSION_SET);
@@ -967,9 +1017,10 @@ export function registerLastAdminGuard(
         if (!link) continue;
         // Re-pointed away from `admin_full_access` — the row survives, the
         // standing does not. Re-tested rather than assumed, because the scan's
-        // own `where` only proved where the grant pointed BEFORE the write.
-        const setId = toId(link.permission_set_id ?? link.permissionSetId);
-        if (setId !== undefined && !adminSetIds.includes(setId)) continue;
+        // own `where` only proved what the grant named BEFORE the write; a
+        // re-pointed id whose name this guard cannot know yet reads as naming
+        // nothing (`simulatedGrantSetName`).
+        if (simulatedGrantSetName(raw, link, pending) !== ADMIN_FULL_ACCESS) continue;
         // An org-SCOPED grant makes a tenant admin, not the environment's
         // break-glass admin — the same distinction `resolveAuthzContext` draws
         // when it derives `platform_admin` from the unscoped grant only. This
@@ -1116,6 +1167,17 @@ export function registerLastAdminGuard(
    * and every later ban, delete and downgrade sails through unguarded. So the
    * deactivated row with unscoped, in-window grants still pointing at it is
    * read as the SAME evidence, with its own remedy — re-activate it.
+   *
+   * [ADR-0131 D4] Read BY NAME, as the enumeration is: a dangling grant is one
+   * whose `permission_set` names a set no `sys_permission_set` row carries any
+   * more, and a grant that names NOTHING (`grantSetNameOf` is empty) is
+   * evidence too — the enumeration counts no such grant, so an environment
+   * whose administrators hold only such grants reads as empty, and the
+   * bootstrap window must not open on it. On a fresh install every grant names
+   * its set (the platform writes the name with the id), so the fresh answer is
+   * unchanged. Such a grant is an upgraded deployment's, before the one-time
+   * backfill names it at `kernel:bootstrapped`, or one the backfill could not
+   * name; refusing is the fail-closed reading of both.
    */
   const refuseIfEmptiedRatherThanFresh = async (op: GuardedOp): Promise<void> => {
     // [#11663 L5] Both refusals below name ONE remedy — put the
@@ -1136,20 +1198,19 @@ export function registerLastAdminGuard(
       : '';
     const sets = await scan(op, SystemObjectName.PERMISSION_SET, { fields: ['id', 'name', 'active'] });
     const known = new Set<string>();
-    const deactivatedAdminSetIds: string[] = [];
+    let adminSetDeactivated = false;
     for (const row of sets) {
-      const sid = toId(row.id);
-      if (!sid) continue;
-      known.add(sid);
-      if (row.name === ADMIN_FULL_ACCESS && !isRowActive(row)) deactivatedAdminSetIds.push(sid);
+      if (typeof row.name !== 'string' || row.name === '') continue;
+      known.add(row.name);
+      if (row.name === ADMIN_FULL_ACCESS && !isRowActive(row)) adminSetDeactivated = true;
     }
 
     // The deactivated-break-glass case, checked before the dangling one: it has
     // a precise diagnosis and a one-click remedy, so it must not be reported as
     // the vaguer "something was deleted" story.
-    if (deactivatedAdminSetIds.length > 0) {
+    if (adminSetDeactivated) {
       const held = await scan(op, USER_PERMISSION_SET, {
-        where: { permission_set_id: { $in: deactivatedAdminSetIds } },
+        where: { [GRANT_SET_NAME_FIELD]: ADMIN_FULL_ACCESS },
       });
       const nowMs = Date.now();
       const stranded = held.filter(
@@ -1176,29 +1237,29 @@ export function registerLastAdminGuard(
     }
     // With no permission set at all every grant is dangling, and `$nin: []` is
     // not a predicate every driver agrees on — so that case reads unfiltered
-    // and lets the in-memory re-test below do the work.
+    // and lets the in-memory re-test below do the work. `$nin` keeps the rows
+    // whose name is NULL (#5298), which are evidence here as well.
     const candidates = await scan(op, USER_PERMISSION_SET, {
-      ...(known.size > 0 ? { where: { permission_set_id: { $nin: [...known] } } } : {}),
+      ...(known.size > 0 ? { where: { [GRANT_SET_NAME_FIELD]: { $nin: [...known] } } } : {}),
     });
 
     const now = Date.now();
     const dangling: string[] = [];
     for (const link of candidates) {
-      const setId = toId(link.permission_set_id ?? link.permissionSetId);
-      // A grant that points at nothing names no deleted set.
-      if (!setId) continue;
+      const name = grantSetNameOf(link);
       // `$nin` is NULL-safe on this engine (#5298) and the drivers differ on
       // the edges, so danglingness is re-tested in memory rather than trusted
       // from the `where` — the same discipline the enumeration applies to
-      // `permission_set_id` and `name`.
-      if (known.has(setId)) continue;
+      // the grant's name and the set's `name`.
+      if (name !== undefined && known.has(name)) continue;
       // An org-SCOPED grant never conferred the environment's break-glass
       // standing, and an out-of-window one never conferred it either, so
       // neither is evidence that this environment once had a platform admin.
       if (link.organization_id ?? link.organizationId) continue;
       if (!isGrantActive(link, now)) continue;
       const uid = toId(link.user_id ?? link.userId);
-      dangling.push(uid ? `'${uid}' → '${setId}'` : `'${setId}'`);
+      const target = name !== undefined ? `'${name}'` : '(no permission-set name yet)';
+      dangling.push(uid ? `'${uid}' → ${target}` : target);
     }
     if (dangling.length === 0) return; // a genuinely fresh environment
 
@@ -1210,8 +1271,8 @@ export function registerLastAdminGuard(
     throw refuse(
       `Refusing this ${words.noun}: this environment recognises NO administrator, and this is not ` +
         `the bootstrap window — ${dangling.length} unscoped, in-window '${USER_PERMISSION_SET}' ` +
-        `grant(s) still point at a '${SystemObjectName.PERMISSION_SET}' row that no longer exists ` +
-        `(${dangling.join(', ')}). That is the state a DELETED '${ADMIN_FULL_ACCESS}' ` +
+        `grant(s) still name a permission set that no '${SystemObjectName.PERMISSION_SET}' row ` +
+        `carries any more, or name none yet (${dangling.join(', ')}). That is the state a DELETED '${ADMIN_FULL_ACCESS}' ` +
         'permission-set row leaves behind: it un-makes every platform admin at once, and ' +
         'reading the resulting emptiness as "no administrator to protect" would switch this guard ' +
         `off for every other write too (${BREAK_GLASS_CITATION}). Restore the ` +

@@ -410,6 +410,34 @@ describe('coerceRow', () => {
     expect(lax.data).toEqual({ s: 'zzz' });
   });
 
+  // #22183 — the engine's option check admits a kept value only when the write
+  // names it, so coercion reports exactly what it KEPT, never what it matched.
+  it('reports the kept option values per field, and only the unmatched ones', async () => {
+    const metaMap = meta({
+      s: { type: 'select', options: [{ label: 'A', value: 'a' }] },
+      tags: { type: 'multiselect', options: [{ label: 'A', value: 'a' }, { label: 'B', value: 'b' }] },
+      plain: { type: 'text' },
+    });
+    const lax = await coerceRow(
+      { s: '  zzz ', tags: 'B, qq; a, rr', plain: 'x' },
+      metaMap,
+      { createMissingOptions: true },
+    );
+    expect(lax.errors).toEqual([]);
+    expect(lax.data).toEqual({ s: 'zzz', tags: ['b', 'qq', 'a', 'rr'], plain: 'x' });
+    expect(lax.keptOptionValues).toEqual({ s: ['zzz'], tags: ['qq', 'rr'] });
+
+    // Every cell matched: nothing kept, so the write carries no admission.
+    const matched = await coerceRow({ s: 'A', tags: 'a; b' }, metaMap, { createMissingOptions: true });
+    expect(matched.data).toEqual({ s: 'a', tags: ['a', 'b'] });
+    expect(matched.keptOptionValues).toEqual({});
+
+    // The option off: the cell is refused at coercion and nothing is kept.
+    const strict = await coerceRow({ s: 'zzz' }, metaMap, {});
+    expect(strict.errors.map((e) => e.code)).toEqual(['invalid_option']);
+    expect(strict.keptOptionValues).toEqual({});
+  });
+
   it('passes unknown columns through untouched', async () => {
     const { data } = await coerceRow({ mystery: 'raw' }, new Map(), {});
     expect(data).toEqual({ mystery: 'raw' });

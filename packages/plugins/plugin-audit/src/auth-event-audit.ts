@@ -304,16 +304,13 @@ export function createAuthEventAuditSink(opts: AuthEventAuditSinkOptions): AuthE
         new_value: null,
         ip_address: event.ipAddress ?? null,
         user_agent: event.userAgent ?? null,
+        // [ADR-0131 D7] The ledger's attribution field, and the column its
+        // `sys_audit_log_org` row policy scopes organization readers on.
         tenant_id: tenantId,
         metadata:
           event.context && Object.keys(event.context).length > 0 ? safeStringify(event.context) : null,
       };
-      // Both columns are conditionally present — see `createFieldPresenceProbe`.
-      // `organization_id` is what the SecurityPlugin's RLS predicate gates on,
-      // so an unstamped row is a row non-admin members can never see.
-      if (objectHasField('sys_audit_log', 'organization_id')) {
-        row.organization_id = tenantId;
-      }
+      // `actor` is conditionally present — see `createFieldPresenceProbe`.
       if (objectHasField('sys_audit_log', 'actor')) {
         // ADR-0014 D2's principal label. For an ordinary sign-in the subject IS
         // the principal; for an impersonation session the admin who started it

@@ -18,8 +18,9 @@ import type {
   StorageWriteContext,
 } from './metadata-store.js';
 // [#22175] Whether a door's scoped by-id write can reach the row it names —
-// the store's own answer, asked before the write.
-import { organizationOutOfWriteReach } from './metadata-store.js';
+// the store's own answer, asked before the write. [#22332] And the chunk
+// door's conditional progress write.
+import { organizationOutOfWriteReach, updateSessionProgressIfUnchanged } from './metadata-store.js';
 import type { LocalStorageAdapter } from './local-storage-adapter.js';
 // [#22046] The ONE upload ownership rule. Declared in its own module and only
 // CALLED here — the three doors below share it rather than each carrying a
@@ -35,6 +36,14 @@ import {
 // guard's own `findFileHolder`.
 import type { FileHolder } from './attachment-lifecycle.js';
 import { contentDispositionValue } from './content-disposition.js';
+// [#22283] The `storage` settings namespace's Limits group — read and resolved
+// in ONE module, called per request by the doors below.
+import {
+  resolveStorageLimits,
+  BYTES_PER_UPLOAD_MB,
+  type ResolvedStorageLimits,
+  type StorageLimitsSnapshot,
+} from './storage-limits.js';
 
 /** Authorization verdict for an attachments-scope download (#2970 item 2). */
 export type FileReadVerdict = 'allow' | 'deny' | 'unauthenticated';
@@ -43,6 +52,8 @@ export type FileReadVerdict = 'allow' | 'deny' | 'unauthenticated';
  * [#22175] The answer the commit and chunked-completion doors give an uploader
  * whose active organization is no longer the one the upload was started in —
  * see `requireStartingOrganization` inside {@link registerStorageRoutes}.
+ * [#22218] The chunk door gives it too, and so does the progress door when the
+ * session's expiry stamp is due.
  *
  * `409` / `RESOURCE_CONFLICT`, the standard-catalog member HTTP 409 derives
  * (ADR-0112; no storage extension code is registered for this): the request
@@ -59,6 +70,84 @@ const ORGANIZATION_CHANGED_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
 const ORGANIZATION_CHANGED_MESSAGE =
   'This upload was started in a different organization than your active one. ' +
   'Switch your active organization back to the one the upload was started in, then finish the upload.';
+
+/**
+ * [#22283] The answer every upload door gives a file over the resolved
+ * `max_upload_mb` — before the backend stores a byte and before any row is
+ * written.
+ *
+ * `413` because that is the condition (RFC 9110, content too large).
+ * `VALIDATION_ERROR` because it is the standard-catalog member the platform
+ * itself derives for a `413` (`standardErrorCodeForHttpStatus`, ADR-0112): the
+ * catalog names no `413` member, and the ledger's `PAYLOAD_TOO_LARGE` row is
+ * registered under `@objectstack/rest` alone, so stamping it here would be an
+ * unregistered emitter (`check:error-code-provenance`). The status carries the
+ * specific condition; the message names the limit and where it is set.
+ */
+const UPLOAD_TOO_LARGE_STATUS = 413;
+const UPLOAD_TOO_LARGE_CODE: StandardErrorCode = 'VALIDATION_ERROR';
+
+/** The refusal's message: what was measured, the limit, and the one setting that moves it. */
+function uploadTooLargeMessage(measured: string, maxUploadBytes: number): string {
+  const mb = Math.round((maxUploadBytes / BYTES_PER_UPLOAD_MB) * 100) / 100;
+  return (
+    `${measured}, over the maximum upload size of ${mb} MB (${maxUploadBytes} bytes). ` +
+    'The limit is the "Max upload size (MB)" storage setting (max_upload_mb in the storage settings), ' +
+    'which an administrator can change.'
+  );
+}
+
+/**
+ * [#22313] The answer the chunked-completion door gives an upload that does
+ * not hold the file it declared — a declared chunk it never received, a chunk
+ * beyond the declared count, bytes that do not add up to the declared total
+ * size — or a request whose parts list names a chunk the upload does not hold,
+ * or names it with another eTag. Nothing is assembled and the session stays in
+ * flight, so the uploader can send what it lacks and complete again.
+ *
+ * `409` / `RESOURCE_CONFLICT`, the standard-catalog member HTTP 409 derives
+ * (ADR-0112; no storage extension code is registered for this): the request
+ * conflicts with where the upload stands, and the caller can resolve it. Not
+ * `400`: the request can be well formed and still be refused here, because
+ * what is missing is bytes the server does not hold. The `details` carry the
+ * chunk indexes, so a client can re-send exactly those.
+ */
+const INCOMPLETE_UPLOAD_STATUS = 409;
+const INCOMPLETE_UPLOAD_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
+
+/**
+ * [#22332] How many times the chunk door tries to record a stored chunk in the
+ * upload's progress before it refuses.
+ *
+ * The record is written with a compare-and-set
+ * (`updateSessionProgressIfUnchanged`), and a write only loses to a write
+ * that landed between the door's read and its own — so each lost attempt is
+ * another chunk recorded, and a chunk loses at most once per chunk recorded
+ * alongside it. Sixteen covers parallel uploaders well beyond the four to ten
+ * lanes they commonly run; past it the door refuses rather than spin.
+ *
+ * The refusal is `409` / `RESOURCE_CONFLICT` (ADR-0112's standard member for
+ * HTTP 409, the code the completion door answers too): the chunk's bytes are
+ * stored but the upload does not record it, and sending the chunk again
+ * resolves it — a re-sent chunk replaces its slot. ⛔ Never a `200`: a chunk
+ * answered as stored and missing from the record is the loss this guards.
+ */
+export const CHUNK_RECORD_ATTEMPTS = 16;
+const CHUNK_NOT_RECORDED_STATUS = 409;
+const CHUNK_NOT_RECORDED_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
+
+/**
+ * The request's declared `content-length`, or `undefined` when it carries none
+ * that parses. A pre-check only, so an oversized body is refused before it is
+ * read into memory: the bytes actually read are judged again after.
+ */
+function declaredContentLength(req: IHttpRequest): number | undefined {
+  const raw = (req.headers ?? {})['content-length'];
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  if (first === undefined || first === null || String(first).trim() === '') return undefined;
+  const n = Number(first);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
 
 /**
  * What the upload routes need to know about the caller (#2755, widened #12745).
@@ -92,10 +181,31 @@ export interface StorageUploadSession {
  */
 export interface StorageRoutesOptions {
   basePath?: string;
-  /** Default presigned URL TTL in seconds */
+  /**
+   * Default presigned URL TTL in seconds (3600 when unset). A SAVED
+   * `storage.presigned_ttl` wins over it; the namespace's own default does not
+   * (see {@link StorageRoutesOptions.limitsSnapshot}).
+   */
   presignedTtl?: number;
-  /** Default chunked upload session TTL in seconds */
+  /**
+   * Default chunked upload session TTL in seconds (86400 when unset). A SAVED
+   * `storage.session_ttl` wins over it; the namespace's own default does not.
+   */
   sessionTtl?: number;
+  /**
+   * [#22283] The `storage` settings namespace's Limits group as last read —
+   * `presigned_ttl`, `session_ttl` and `max_upload_mb` — asked once per
+   * request, so a save reaches the next upload without a remount. Resolved
+   * against `presignedTtl` / `sessionTtl` above by `resolveStorageLimits`
+   * (`storage-limits.ts`): a saved value wins over these options, these options
+   * win over the namespace default.
+   *
+   * Absent, or answering `undefined` (no settings namespace bound): the TTLs
+   * are the options above and NO upload size limit applies — the behaviour
+   * before the Limits group was honoured. `composeStorageRoutes` binds it from
+   * the `storage` service the plugin registers, for both mounts.
+   */
+  limitsSnapshot?: () => StorageLimitsSnapshot | undefined;
   /**
    * Session resolver for the UPLOAD entry points (#2755). When wired, the
    * presigned/complete/chunked upload routes reject anonymous requests with
@@ -196,9 +306,31 @@ export function registerStorageRoutes(
   opts: StorageRoutesOptions = {},
 ): void {
   const basePath = opts.basePath ?? '/api/v1/storage';
-  const presignedTtl = opts.presignedTtl ?? 3600;
-  const sessionTtl = opts.sessionTtl ?? 86400;
   const downloadTtl = opts.downloadTtl ?? 300;
+
+  // [#22283] The limits THIS request is served under — the saved Limits group
+  // resolved against this mount's own options, asked per request (never
+  // hoisted to registration) so a settings save reaches the next request.
+  const currentLimits = (): ResolvedStorageLimits =>
+    resolveStorageLimits(opts.limitsSnapshot?.(), {
+      presignedTtl: opts.presignedTtl,
+      sessionTtl: opts.sessionTtl,
+    });
+
+  // [#22283] The size gate every upload door asks before it stores a byte or
+  // writes a row. `false` ⇒ the 413 was already sent and the handler must stop.
+  // `bytes` that is not a finite number cannot be judged and passes — the
+  // byte-carrying doors judge what they actually receive.
+  const requireWithinUploadLimit = (
+    bytes: number,
+    maxUploadBytes: number | undefined,
+    measured: (bytes: number) => string,
+    res: IHttpResponse,
+  ): boolean => {
+    if (maxUploadBytes === undefined || !Number.isFinite(bytes) || bytes <= maxUploadBytes) return true;
+    sendError(res, UPLOAD_TOO_LARGE_STATUS, UPLOAD_TOO_LARGE_CODE, uploadTooLargeMessage(measured(bytes), maxUploadBytes));
+    return false;
+  };
 
   // ── Download authorization gate (#2970 item 2, ADR-0104 D3 wave 2) ───
   // Two kinds of file are gated, both deriving access from a PARENT record:
@@ -225,7 +357,7 @@ export function registerStorageRoutes(
     const fieldOwned = !!file.ref_object && file.ref_id != null && file.ref_id !== '';
     const gated = file.scope === 'attachments' || fieldOwned;
     if (!gated || file.acl === 'public_read' || !opts.authorizeFileRead) {
-      return presignedTtl;
+      return currentLimits().presignedTtl;
     }
     let verdict: FileReadVerdict;
     try {
@@ -368,20 +500,25 @@ export function registerStorageRoutes(
     return false;
   };
 
-  // ── Starting-organization gate (#22175) ──────────────────────────────
-  // The commit and chunked-completion doors write by id under the ACTING
-  // organization (`StorageWriteContext`), and on an engine-backed store that
-  // write is SCOPED to it: the driver's statement reaches a row stamped for
-  // the acting organization or for none, and no other. An uploader who
-  // switched their active organization after starting an upload therefore
-  // names a row the write cannot reach, and that scoped miss used to surface
-  // as `500 INTERNAL` carrying the store's outage text ("Restore the data
-  // engine…") — an organization change diagnosed, to the caller and to the
-  // operator, as a data-engine fault.
+  // ── Starting-organization gate (#22175, #22218) ──────────────────────
+  // The commit, chunked-completion and chunk doors write by id under the
+  // ACTING organization (`StorageWriteContext`), and so does the progress
+  // door's expiry stamp. On an engine-backed store that write is SCOPED to
+  // it: the driver's statement reaches a row stamped for the acting
+  // organization or for none, and no other. An uploader who switched their
+  // active organization after starting an upload therefore names a row the
+  // write cannot reach, and that scoped miss used to surface as `500
+  // INTERNAL` carrying the store's outage text ("Restore the data engine…") —
+  // an organization change diagnosed, to the caller and to the operator, as a
+  // data-engine fault.
   //
-  // Each door now asks this right after the ownership rule (so only the
-  // uploader ever learns of it) and BEFORE any write, the expiry stamp
-  // included. `false` ⇒ the 409 was already sent and the handler must stop.
+  // Each door asks this right after the check that proves the caller may act
+  // on the upload — the ownership rule, or on the chunk door the resume token
+  // — so only that caller ever learns of it, and BEFORE its first write: the
+  // expiry stamp, and on the chunk door the backend chunk as well. The
+  // progress door asks only when the stamp is due, because a progress read
+  // writes nothing else and has no reach to miss. `false` ⇒ the 409 was
+  // already sent and the handler must stop.
   //
   // The question is the write's own reach and nothing wider, and the store
   // answers it (`organizationOutOfWriteReach`) for the write context the door
@@ -450,26 +587,43 @@ export function registerStorageRoutes(
   const TERMINAL_SESSION_STATUSES = new Set(['completed', 'failed', 'expired']);
 
   /**
-   * Status an in-flight session `expired` once it is past its own `expires_at`,
-   * and hand back the row as it now stands.
+   * Whether an in-flight session is past its own `expires_at`, so that the
+   * `expired` stamp is due.
    *
    * A row with no `expires_at` (or an unparseable one) has no declared deadline
    * and is left alone: this enforces the deadline the session itself carries,
-   * it does not invent one. Terminal rows are returned untouched — a
-   * `completed` upload does not become `expired` by sitting around.
+   * it does not invent one. Terminal rows are never due — a `completed` upload
+   * does not become `expired` by sitting around.
    */
-  const expireIfPastDeadline = async (
+  const expiryStampDue = (session: UploadSessionRecord): boolean => {
+    if (TERMINAL_SESSION_STATUSES.has(session.status)) return false;
+    const deadline = session.expires_at ? Date.parse(session.expires_at) : NaN;
+    return Number.isFinite(deadline) && deadline <= Date.now();
+  };
+
+  /**
+   * Status the session `expired` — the write {@link expiryStampDue} says is
+   * due — and hand back the row as it now stands.
+   */
+  const stampExpired = async (
     session: UploadSessionRecord,
     context?: StorageWriteContext,
   ): Promise<UploadSessionRecord> => {
-    if (TERMINAL_SESSION_STATUSES.has(session.status)) return session;
-    const deadline = session.expires_at ? Date.parse(session.expires_at) : NaN;
-    if (!Number.isFinite(deadline) || deadline > Date.now()) return session;
     const updated = await store.updateSession(session.id, { status: 'expired' }, context);
     // `updateSession` answers null only when the row went away under us (the
     // TTL sweep, most likely) — the caller is refused either way.
     return updated ?? { ...session, status: 'expired' };
   };
+
+  /**
+   * Status an in-flight session `expired` once it is past its own `expires_at`,
+   * and hand back the row as it now stands.
+   */
+  const expireIfPastDeadline = async (
+    session: UploadSessionRecord,
+    context?: StorageWriteContext,
+  ): Promise<UploadSessionRecord> =>
+    expiryStampDue(session) ? stampExpired(session, context) : session;
 
   /**
    * Best-effort `failed` stamp for a completion that threw.
@@ -508,6 +662,12 @@ export function registerStorageRoutes(
         sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and size are required');
         return;
       }
+      // [#22283] The declared size against the saved limit — before the
+      // pending row and before any URL is minted. On the local adapter the
+      // bytes are judged again at `_local/raw`; an S3 URL takes them straight
+      // to the bucket, so this is the platform's one look at that upload.
+      const { presignedTtl, maxUploadBytes } = currentLimits();
+      if (!requireWithinUploadLimit(Number(size), maxUploadBytes, (n) => `The declared file size is ${n} bytes`, res)) return;
 
       const fileId = randomUUID();
       const key = buildKey(scope ?? 'user', fileId, filename);
@@ -632,6 +792,11 @@ export function registerStorageRoutes(
         sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and totalSize are required');
         return;
       }
+      // [#22283] The declared total against the saved limit — before the file
+      // row, the backend multipart and the session row. The chunk door judges
+      // the bytes as they arrive.
+      const { sessionTtl, maxUploadBytes } = currentLimits();
+      if (!requireWithinUploadLimit(Number(totalSize), maxUploadBytes, (n) => `The declared total size is ${n} bytes`, res)) return;
 
       const chunkSize = Math.max(reqChunkSize ?? 5242880, 5242880);
       const totalChunks = Math.ceil(totalSize / chunkSize);
@@ -742,6 +907,13 @@ export function registerStorageRoutes(
         return;
       }
 
+      // [#22218] This door writes the session row — the expiry stamp below,
+      // then the progress after the chunk — so that row must be in the scoped
+      // writes' reach. Asked after the resume token, for the same reason the
+      // expiry check is, and before the expiry stamp and the backend chunk, so
+      // a refused chunk lands nowhere.
+      if (!requireStartingOrganization(writeContext, [session], 'chunk', uploadId, res)) return;
+
       // Expiry is checked AFTER the resume token: a caller who cannot prove it
       // owns the session learns nothing about its state (#7667).
       const live = await expireIfPastDeadline(session, writeContext);
@@ -755,6 +927,20 @@ export function registerStorageRoutes(
         return;
       }
 
+      // [#22283] The bytes received so far plus this chunk, against the saved
+      // limit — the declared length first, so an oversized chunk is refused
+      // before it is read, then the bytes actually read, before the backend
+      // stores them and before the progress write. "So far" is what the
+      // upload will hold: a RETRIED chunk index replaces its earlier bytes in
+      // both backends, so those bytes are not counted twice (see
+      // `bytesHeldByOtherChunks`).
+      const { maxUploadBytes } = currentLimits();
+      const currentParts: StoredChunkPart[] = JSON.parse(session.parts ?? '[]');
+      const receivedSoFar = bytesHeldByOtherChunks(currentParts, chunkIndex, session.uploaded_size ?? 0);
+      const reaches = (n: number) => `This chunk would bring the upload to ${n} bytes`;
+      const declaredChunk = declaredContentLength(req);
+      if (declaredChunk !== undefined && !requireWithinUploadLimit(receivedSoFar + declaredChunk, maxUploadBytes, reaches, res)) return;
+
       // Get raw body (binary data)
       let data: Buffer;
       if (req.rawBody) {
@@ -767,6 +953,7 @@ export function registerStorageRoutes(
         sendError(res, 400, 'INVALID_REQUEST', 'Binary body required');
         return;
       }
+      if (!requireWithinUploadLimit(receivedSoFar + data.byteLength, maxUploadBytes, reaches, res)) return;
 
       // Upload the chunk (S3 uses 1-based part numbers)
       let eTag = '';
@@ -774,20 +961,66 @@ export function registerStorageRoutes(
         eTag = await storage.uploadChunk(uploadId, chunkIndex + 1, data);
       }
 
-      // Update session progress
-      const currentParts: Array<{ chunkIndex: number; eTag: string }> = JSON.parse(session.parts ?? '[]');
-      currentParts.push({ chunkIndex, eTag });
-      const uploadedChunks = (session.uploaded_chunks ?? 0) + 1;
-      const uploadedSize = (session.uploaded_size ?? 0) + data.byteLength;
-      await store.updateSession(
-        uploadId,
-        {
-          uploaded_chunks: uploadedChunks,
-          uploaded_size: uploadedSize,
-          parts: JSON.stringify(currentParts),
-        },
-        writeContext,
-      );
+      // Update session progress — each part records its size (#22283), so
+      // the limit above can tell a retried chunk from a new one. [#22313] A
+      // chunk index sent again REPLACES its slot in the record, exactly as it
+      // replaces its bytes in the backend, so a retry is counted once in
+      // `uploaded_chunks` and `uploaded_size` — the counts `resumeUpload`
+      // resumes from (see `recordChunk`).
+      //
+      // [#22332] The record is merged from the row this door READ, so it is
+      // written only while the row still holds that progress: a chunk PUT
+      // running alongside this one may have recorded its part in between, and
+      // an unconditional write erased it — both answered `200` and the upload
+      // held one chunk. When the write does not land, the door re-reads the
+      // row and merges again, up to CHUNK_RECORD_ATTEMPTS.
+      const part = { chunkIndex, eTag, size: data.byteLength };
+      let seen = session;
+      let parts = currentParts;
+      for (let attempt = 1; ; attempt++) {
+        const progress = recordChunk(parts, part, seen.uploaded_size ?? 0);
+        const landed = await updateSessionProgressIfUnchanged(
+          store,
+          uploadId,
+          seen,
+          {
+            uploaded_chunks: progress.uploadedChunks,
+            uploaded_size: progress.uploadedSize,
+            parts: JSON.stringify(progress.parts),
+          },
+          writeContext,
+        );
+        if (landed) break;
+        if (attempt >= CHUNK_RECORD_ATTEMPTS) {
+          sendError(
+            res,
+            CHUNK_NOT_RECORDED_STATUS,
+            CHUNK_NOT_RECORDED_CODE,
+            `Chunk ${chunkIndex} was stored, but recording it in the upload's progress lost to another write on each of ` +
+              `${CHUNK_RECORD_ATTEMPTS} attempts, so the upload does not hold it: send this chunk again.`,
+            { details: { chunkIndex, attempts: CHUNK_RECORD_ATTEMPTS } },
+          );
+          return;
+        }
+        const fresh = await store.getSession(uploadId);
+        if (!fresh) {
+          sendError(res, 404, 'UPLOAD_SESSION_NOT_FOUND', 'Upload session not found');
+          return;
+        }
+        // A write that did not land on a row still holding the progress it
+        // was conditioned on lost to no other write: it cannot reach the row.
+        // Trying again would answer the same, and a `409` would tell the
+        // uploader to retry what cannot succeed.
+        if (sameProgress(fresh, seen)) {
+          throw new Error(
+            `Chunk ${chunkIndex} was stored, but its progress write to upload session '${uploadId}' matched no row ` +
+              'although the row still holds the progress the write was conditioned on: the write cannot reach the ' +
+              'row, and the upload does not hold the chunk.',
+          );
+        }
+        seen = fresh;
+        parts = JSON.parse(fresh.parts ?? '[]');
+      }
 
       sendOk(res, {
         chunkIndex,
@@ -834,10 +1067,35 @@ export function registerStorageRoutes(
         return;
       }
 
+      // [#22313] The server is the guard, whatever the client lists. The
+      // backend assembles the parts the SESSION holds — its own record of
+      // every chunk the chunk door stored, with the eTag the backend answered
+      // for it — never the request's list: a resuming client lists only the
+      // chunks its own pass sent, and assembling that list completed a short
+      // file with a `200`. The list is CHECKED against the record (a listed
+      // chunk the upload does not hold, or holds with another eTag, is
+      // refused), and the record against the declared size. Asked after the
+      // expiry check and before the `completing` write, so a refused upload is
+      // left in flight to be finished.
+      const listed = listedParts(req.body?.parts);
+      if (listed === null) {
+        sendError(
+          res,
+          400,
+          'INVALID_REQUEST',
+          'parts must be an array of { chunkIndex, eTag } entries: chunkIndex a whole number, eTag the string the chunk upload answered',
+        );
+        return;
+      }
+      const verdict = judgeCompletion(session, listed);
+      if (!verdict.ok) {
+        sendError(res, INCOMPLETE_UPLOAD_STATUS, INCOMPLETE_UPLOAD_CODE, verdict.message, { details: verdict.details });
+        return;
+      }
+
       await store.updateSession(uploadId, { status: 'completing' }, writeContext);
 
-      const partsFromBody = (req.body?.parts ?? []) as Array<{ chunkIndex: number; eTag: string }>;
-      const partsForBackend = partsFromBody.map(p => ({
+      const partsForBackend = verdict.parts.map(p => ({
         partNumber: p.chunkIndex + 1,
         eTag: p.eTag,
       }));
@@ -898,11 +1156,19 @@ export function registerStorageRoutes(
       // expiry write below and before the progress answer discloses the row.
       if (!requireUploader(authSession, await store.getFile(stored.file_id), res)) return;
 
+      // [#22218] The expiry stamp is this door's only write, so the session
+      // row must be in its reach only when the stamp is due. A read with
+      // nothing to stamp has no reach to miss, and keeps answering the
+      // uploader from any organization. Decided ONCE, so the question and the
+      // stamp cannot disagree about the deadline.
+      const due = expiryStampDue(stored);
+      if (due && !requireStartingOrganization(writeContext, [stored], 'progress', uploadId, res)) return;
+
       // Progress REPORTS the expiry rather than refusing it: `expired` is a
       // declared member of `UploadProgressSchema.status`, and a resuming client
       // (the SDK's `resumeUpload` polls this first) needs to be told the
       // session is gone, not handed a 410 it has to interpret (#7667).
-      const session = await expireIfPastDeadline(stored, writeContext);
+      const session = due ? await stampExpired(stored, writeContext) : stored;
 
       const uploadedChunks = session.uploaded_chunks ?? 0;
       const uploadedSize = session.uploaded_size ?? 0;
@@ -1026,6 +1292,14 @@ export function registerStorageRoutes(
       }
 
       const payload = localAdapter.verifyToken(token, 'put');
+      // [#22283] The local adapter's byte door for a presigned upload: the
+      // declared length first, so an oversized body is refused before it is
+      // read, then the bytes actually read — before `upload` stores them.
+      // Judged against the limit in force NOW, whatever the URL was minted under.
+      const { maxUploadBytes } = currentLimits();
+      const bodyIs = (n: number) => `The upload body is ${n} bytes`;
+      const declaredBody = declaredContentLength(req);
+      if (declaredBody !== undefined && !requireWithinUploadLimit(declaredBody, maxUploadBytes, bodyIs, res)) return;
       let data: Buffer;
       if (req.rawBody) {
         data = await req.rawBody();
@@ -1035,6 +1309,7 @@ export function registerStorageRoutes(
         sendError(res, 400, 'INVALID_REQUEST', 'Binary body required');
         return;
       }
+      if (!requireWithinUploadLimit(data.byteLength, maxUploadBytes, bodyIs, res)) return;
 
       await storage.upload(payload.k, data, { contentType: payload.ct });
       // `{ ok: true, key }` until #3689. `ok` was a second, private word for
@@ -1093,6 +1368,227 @@ export function registerStorageRoutes(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** One entry of `sys_upload_session.parts`. `size` is recorded since #22283; rows written before it lack it. */
+interface StoredChunkPart {
+  chunkIndex: number;
+  eTag: string;
+  size?: number;
+}
+
+/**
+ * [#22283] The bytes the upload holds in chunks OTHER than `chunkIndex` —
+ * what the chunk door adds this chunk to before judging the limit.
+ *
+ * A chunk index sent again REPLACES its earlier bytes (the local adapter
+ * rewrites `.parts/UPLOAD/INDEX`, S3 overwrites the part number), so a
+ * client retrying a chunk whose answer it lost must not be judged as if the
+ * upload held both copies. The latest size per index counts, and the index
+ * being written now counts as this chunk alone.
+ *
+ * A session whose parts predate the recorded `size` (started before this
+ * change, still inside its TTL) has no per-chunk sizes to sum, so it is judged
+ * by its running `uploaded_size` — the upper bound the bytes cannot exceed.
+ * That side refuses a retry near the limit rather than admitting an upload
+ * over it, and it ends with that session.
+ */
+function bytesHeldByOtherChunks(parts: ReadonlyArray<StoredChunkPart>, chunkIndex: number, uploadedSize: number): number {
+  if (parts.some((p) => typeof p.size !== 'number')) return uploadedSize;
+  const latest = new Map<number, number>();
+  for (const p of parts) latest.set(p.chunkIndex, p.size as number);
+  latest.delete(chunkIndex);
+  let held = 0;
+  for (const size of latest.values()) held += size;
+  return held;
+}
+
+/**
+ * [#22313] The parts the upload HOLDS: one per chunk index, the latest entry
+ * the record carries for it. A record written before #22313 can list an index
+ * more than once (the chunk door appended every send); the later entry is the
+ * one whose bytes the backend holds.
+ */
+function heldPartsByIndex(parts: ReadonlyArray<StoredChunkPart>): Map<number, StoredChunkPart> {
+  const held = new Map<number, StoredChunkPart>();
+  for (const p of parts) held.set(p.chunkIndex, p);
+  return held;
+}
+
+/**
+ * [#22313] The session's record and progress once the chunk door has stored
+ * `part`. The chunk's index REPLACES its slot — the backend replaced its bytes
+ * — so `uploadedChunks` is the number of distinct chunks held and a re-sent
+ * chunk leaves both counts where they were.
+ *
+ * `uploadedSize` is the sum of the latest size per chunk. A session whose
+ * record still carries a part with no size (started before #22283, still
+ * inside its TTL) has no per-chunk sizes to sum, so it keeps its running total,
+ * as {@link bytesHeldByOtherChunks} judges it — an upper bound that ends with
+ * that session.
+ */
+function recordChunk(
+  parts: ReadonlyArray<StoredChunkPart>,
+  part: StoredChunkPart & { size: number },
+  runningTotal: number,
+): { parts: StoredChunkPart[]; uploadedChunks: number; uploadedSize: number } {
+  const held = heldPartsByIndex(parts);
+  held.set(part.chunkIndex, part);
+  const next = [...held.values()].sort((a, b) => a.chunkIndex - b.chunkIndex);
+  const sized = next.every((p) => typeof p.size === 'number');
+  return {
+    parts: next,
+    uploadedChunks: next.length,
+    uploadedSize: sized ? next.reduce((sum, p) => sum + (p.size as number), 0) : runningTotal + part.size,
+  };
+}
+
+/**
+ * [#22332] Whether two reads of one session row hold the same progress — the
+ * three columns the chunk door's conditional write is compared on.
+ */
+function sameProgress(a: UploadSessionRecord, b: UploadSessionRecord): boolean {
+  return (
+    (a.parts ?? null) === (b.parts ?? null) &&
+    (a.uploaded_chunks ?? null) === (b.uploaded_chunks ?? null) &&
+    (a.uploaded_size ?? null) === (b.uploaded_size ?? null)
+  );
+}
+
+/** One entry of a completion request's `parts` list. */
+interface ListedPart {
+  chunkIndex: number;
+  eTag: string;
+}
+
+/**
+ * [#22313] The completion request's `parts`, or `null` when it is not a list
+ * of `{ chunkIndex, eTag }` — an entry the door cannot read is an entry it
+ * cannot check. An absent list is an empty one, as it always was.
+ */
+function listedParts(raw: unknown): ListedPart[] | null {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) return null;
+  for (const p of raw) {
+    if (!p || typeof p !== 'object') return null;
+    const { chunkIndex, eTag } = p as Record<string, unknown>;
+    if (!Number.isInteger(chunkIndex) || typeof eTag !== 'string') return null;
+  }
+  return raw as ListedPart[];
+}
+
+/** What the completion door's refusal carries in `error.details` — chunk indexes are zero-based. */
+interface IncompleteUploadDetails {
+  /** The chunk count the upload declared at its start. */
+  totalChunks: number;
+  /** The byte count the upload declared at its start. */
+  totalSize: number;
+  /**
+   * The bytes the chunks it holds come to — or, for a session whose record
+   * predates per-chunk sizes, its running total, which they cannot exceed.
+   */
+  heldBytes: number;
+  /** Declared chunks the upload does not hold: send these. */
+  missingChunks: number[];
+  /** Chunks the upload holds beyond its declared count. */
+  unexpectedChunks: number[];
+  /** Chunks the request lists that the upload does not hold. */
+  unheldListedChunks: number[];
+  /** Chunks the request lists with an eTag other than the one the upload holds for them. */
+  mismatchedChunks: number[];
+}
+
+type CompletionVerdict =
+  | { ok: true; parts: StoredChunkPart[] }
+  | { ok: false; message: string; details: IncompleteUploadDetails };
+
+const chunkList = (indexes: ReadonlyArray<number>): string =>
+  `${indexes.length === 1 ? 'chunk' : 'chunks'} ${indexes.join(', ')}`;
+
+/**
+ * [#22313] Whether the chunked-completion door may assemble this upload, and
+ * from which parts.
+ *
+ * The parts are the session's OWN record — every chunk the chunk door stored,
+ * with the eTag the backend answered for it, which is all a backend needs to
+ * assemble (S3's `CompleteMultipartUpload` takes part numbers and those eTags;
+ * the local adapter reads the part files by number). The request's list is
+ * checked against that record and never replaces it: it may omit a chunk the
+ * upload holds (a resuming client lists only what its own pass sent), and it
+ * may not name a chunk the upload does not hold, or name one with another
+ * eTag.
+ *
+ * The record is then checked against what the upload declared: every chunk
+ * index from 0 to `total_chunks - 1`, none beyond it, and sizes adding up to
+ * `total_size` exactly. A session whose record predates per-chunk sizes is
+ * judged by its running `uploaded_size`, an upper bound: below the declared
+ * total it is certainly short.
+ */
+function judgeCompletion(session: UploadSessionRecord, listed: ReadonlyArray<ListedPart>): CompletionVerdict {
+  const held = heldPartsByIndex(JSON.parse(session.parts ?? '[]') as StoredChunkPart[]);
+  const totalChunks = Number(session.total_chunks);
+  const totalSize = Number(session.total_size);
+
+  const missingChunks: number[] = [];
+  for (let i = 0; i < totalChunks; i++) if (!held.has(i)) missingChunks.push(i);
+  const unexpectedChunks = [...held.keys()].filter((i) => !(i >= 0 && i < totalChunks)).sort((a, b) => a - b);
+
+  const unheld = new Set<number>();
+  const mismatched = new Set<number>();
+  for (const p of listed) {
+    const holding = held.get(p.chunkIndex);
+    if (!holding) unheld.add(p.chunkIndex);
+    else if (holding.eTag !== p.eTag) mismatched.add(p.chunkIndex);
+  }
+  const unheldListedChunks = [...unheld].sort((a, b) => a - b);
+  const mismatchedChunks = [...mismatched].sort((a, b) => a - b);
+
+  const parts = [...held.values()].sort((a, b) => a.chunkIndex - b.chunkIndex);
+  const sized = parts.every((p) => typeof p.size === 'number');
+  const heldBytes = sized ? parts.reduce((sum, p) => sum + (p.size as number), 0) : Number(session.uploaded_size ?? 0);
+  const sizeAgrees = sized ? heldBytes === totalSize : heldBytes >= totalSize;
+
+  const clauses: string[] = [];
+  if (missingChunks.length > 0) {
+    clauses.push(
+      `It does not hold ${chunkList(missingChunks)} of the ${totalChunks} it declared (indexes are zero-based): ` +
+        'upload the missing chunks, then complete again.',
+    );
+  }
+  if (unexpectedChunks.length > 0) {
+    clauses.push(`It holds ${chunkList(unexpectedChunks)}, beyond the ${totalChunks} it declared.`);
+  }
+  if (!sizeAgrees && missingChunks.length === 0 && unexpectedChunks.length === 0) {
+    clauses.push(
+      sized
+        ? `The chunks it holds come to ${heldBytes} bytes, not the ${totalSize} bytes it declared.`
+        : `The chunks it holds come to at most ${heldBytes} bytes, short of the ${totalSize} bytes it declared.`,
+    );
+  }
+  if (unheldListedChunks.length > 0) {
+    clauses.push(`The request lists ${chunkList(unheldListedChunks)}, which this upload does not hold.`);
+  }
+  if (mismatchedChunks.length > 0) {
+    clauses.push(
+      `The request lists ${chunkList(mismatchedChunks)} with an eTag other than the one this upload holds: ` +
+        'list the eTag the last upload of that chunk answered, or upload it again.',
+    );
+  }
+  if (clauses.length === 0 && sizeAgrees) return { ok: true, parts };
+
+  return {
+    ok: false,
+    message: `This chunked upload cannot be completed. ${clauses.join(' ')} Nothing was assembled; the upload stays open until it expires.`,
+    details: {
+      totalChunks,
+      totalSize,
+      heldBytes,
+      missingChunks,
+      unexpectedChunks,
+      unheldListedChunks,
+      mismatchedChunks,
+    },
+  };
+}
 
 function buildKey(scope: string, fileId: string, filename: string): string {
   const ext = filename.includes('.') ? '.' + filename.split('.').pop() : '';

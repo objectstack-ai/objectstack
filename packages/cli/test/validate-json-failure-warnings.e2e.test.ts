@@ -166,11 +166,16 @@ function payloadOf(run: Run, label: string): Record<string, unknown> {
 }
 
 /**
- * A stack raising ONE advisory of each class while parsing cleanly: a bare
- * `unique: true` index (authoring-RULE advisory), an unknown `requires` token
- * (#3366 capability hint), an undeclared key inside `visibleWhen` (#3786
+ * A stack raising ONE advisory of each class while parsing cleanly: `title`
+ * unique twice — per organization on the field, `'global'` on a declared index
+ * (authoring-RULE advisory, `unique/double-declaration`), an unknown `requires`
+ * token (#3366 capability hint), an undeclared key inside `visibleWhen` (#3786
  * finding), and — by declaring neither `apps` nor `plugins` — the structural
  * advisory that must NOT appear on any failure exit.
+ *
+ * The rule advisory was a bare declared `unique: true` until protocol 18 refused
+ * that spelling at the parse (ADR-0120 D7, PR #22103), which then stopped every
+ * run at the parse gate, before the gate under test.
  *
  * The key sits inside `visibleWhen` rather than on the object or field itself:
  * an undeclared key in either of those positions has been a hard PARSE error
@@ -189,11 +194,12 @@ export default defineStack({
       name: '${ns}_ticket',
       label: 'Ticket',
       sharingModel: 'private',
-      indexes: [{ name: '${ns}_title_idx', fields: ['title'], unique: true }],
+      indexes: [{ name: '${ns}_title_idx', fields: ['title'], unique: 'global' }],
       fields: {
         title: {
           type: 'text',
           label: 'Title',
+          unique: true,
           visibleWhen: { dialect: 'cel', source: 'true', ${PLANTED_KEY}: 1 },
         },${extraFields}
       },
@@ -293,7 +299,7 @@ beforeAll(() => {
         broken: { type: 'this_is_not_a_field_type', label: 'Broken' },`));
 
   // rule errors — an expression naming a field that does not resolve, raised
-  // alongside the bare-`unique` advisory.
+  // alongside the `unique/double-declaration` advisory.
   make('rulefail', stack('rfail', [PLANTED_TOKEN], `
         subject: { type: 'text', label: 'Subject', visibleWhen: { dialect: 'cel', source: 'record.zzz_no_such_field' } },`));
 

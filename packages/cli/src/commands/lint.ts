@@ -37,6 +37,7 @@ import {
   isExitSignal,
   errorCodeFields,
   isReportedError,
+  explainPointer,
 } from '../utils/format.js';
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -1019,9 +1020,16 @@ export default class Lint extends Command {
       // already cover. A project that ships neither is checked against its
       // default locale alone, which its inline labels already satisfy — so this
       // stays silent for projects that do not translate.
+      //
+      // [#22238] Judged over the package-union stack. A multi-package
+      // `preserve` artifact carries its collections and `translations` only in
+      // `packages[]` and keeps `i18n` at the top level, so the top level alone
+      // had no key to expect and every `i18n/missing-*` went silent. The union
+      // keeps `i18n` and folds the rest back in; a stack that already carries
+      // its collections comes back by identity.
       let hiddenPlatform = 0;
       if (!flags['skip-i18n']) {
-        const coverage = computeI18nCoverage(normalized, {
+        const coverage = computeI18nCoverage(authoringRuleUnionStack(normalized as Record<string, unknown>), {
           defaultLocale: flags['default-locale'],
           strict: flags['i18n-strict'],
         });
@@ -1115,7 +1123,10 @@ export default class Lint extends Command {
           'ℹ';
 
         console.log(`  ${color(icon)} ${color(issue.message)}`);
-        console.log(chalk.dim(`    ${issue.rule}  at ${issue.path}`));
+        // [#22161] The same `os explain <rule-id>` pointer `os validate` and
+        // `os build` print, from the same one spelling, for the rules that have
+        // a long-form explanation.
+        console.log(chalk.dim(`    ${issue.rule}  at ${issue.path}${explainPointer(issue.rule)}`));
         if (flags.fix && issue.fix) {
           console.log(chalk.green(`    → fix: ${issue.fix}`));
         }

@@ -2,9 +2,10 @@
 //
 // ADR-0021 Phase 2 — shared kernel-boot + reconciliation driver.
 //
-// Boots an example stack with a real in-memory engine + the analytics service,
-// then reconciles every dual-form dashboard widget (legacy `aggregate()` vs
-// dataset `queryDataset()`). Read-only: never writes metadata or data.
+// Boots an example stack with a real in-memory engine + the analytics service
+// (+ an explicit, open `security` service: see `openSecurity`), then reconciles
+// every dual-form dashboard widget (legacy `aggregate()` vs dataset
+// `queryDataset()`). Read-only: never writes metadata or data.
 
 import { ObjectKernel, DriverPlugin, AppPlugin } from '@objectstack/runtime';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
@@ -12,10 +13,37 @@ import { ObjectQLPlugin } from '@objectstack/objectql';
 import { AnalyticsServicePlugin } from '@objectstack/service-analytics';
 import { DatasetSchema } from '@objectstack/spec/ui';
 import type { Dataset, Dashboard, Report } from '@objectstack/spec/ui';
-import type { IAnalyticsService, DatasetSelection } from '@objectstack/spec/contracts';
+import type { IAnalyticsService, DatasetSelection, ISecurityService } from '@objectstack/spec/contracts';
 import type { FilterCondition } from '@objectstack/spec/data';
 import { reconcileDashboard, reconcileReports, type ReconcileExecutors, type WidgetReconcileResult } from './reconcile.js';
 import { resolveDateMacros } from './macros.js';
+
+/**
+ * The `security` service this reconciliation runs under: registered
+ * EXPLICITLY, and OPEN on purpose.
+ *
+ * [#22235] The analytics read bridges DENY, fail-closed, on a kernel that
+ * registers no security service: the kernel's lookup throws on the miss, the
+ * bridge reads that as a security service it cannot use, and every dataset
+ * query is refused `PERMISSION_DENIED` — which this runner would report as a
+ * mismatch on every widget. That is the declared behaviour, so a composition
+ * that wants analytics to answer registers a security service.
+ *
+ * This runner compares NUMBERS, not access. Its legacy path
+ * (`engine.aggregate()`) runs with no caller context on an engine that carries
+ * no security middleware, so the dataset path is given that same posture, by
+ * name: every object readable, no row restriction, no field answer. A real
+ * security plugin would put an access policy on the comparison, which is not
+ * what a reconciliation measures.
+ */
+const openSecurity = {
+  /** Object-level: every object is readable here. */
+  canReadObject: async (_object: string): Promise<boolean> => true,
+  /** Row-level: `undefined` is "no row restriction on this object". */
+  getReadFilter: async (_object: string): Promise<FilterCondition | undefined> => undefined,
+  /** Field-level: `undefined` is "no answer", which judges no field. */
+  getReadableFields: async (_object: string): Promise<string[] | undefined> => undefined,
+} satisfies Partial<ISecurityService>;
 
 interface DataEngineLike {
   aggregate(object: string, options: {
@@ -46,6 +74,14 @@ export async function reconcileApp(opts: ReconcileAppOptions): Promise<number> {
   await kernel.use(new ObjectQLPlugin());
   await kernel.use(new DriverPlugin(new SqliteWasmDriver({ filename: ':memory:' })));
   await kernel.use(new AppPlugin(opts.config as ConstructorParameters<typeof AppPlugin>[0]));
+  // The open `security` service above, mounted explicitly — without it every
+  // dataset query is refused (see `openSecurity`).
+  await kernel.use({
+    name: 'analytics-reconcile.security-open',
+    init: async (ctx: { registerService(name: string, service: unknown): void }) => {
+      ctx.registerService('security', openSecurity);
+    },
+  });
   // Force the ObjectQL aggregate path (no raw SQL) so legacy and dataset paths
   // run through the identical engine.aggregate() — the cleanest apples-to-apples.
   await kernel.use(new AnalyticsServicePlugin({

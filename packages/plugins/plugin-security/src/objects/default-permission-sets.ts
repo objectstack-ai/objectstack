@@ -245,6 +245,56 @@ const privateCredentialRowScope = () => [
   { name: 'sys_jwks_none', object: 'sys_jwks', operation: 'select', using: 'id == null' },
 ];
 
+/**
+ * [ADR-0131 D7] The organization read scope of the compliance ledger,
+ * `sys_audit_log`.
+ *
+ * The ledger carries no organization column (`systemFields: { tenant: false }`):
+ * some of its rows are about deployment-level actions no organization owns, so
+ * the tenant wall (Layer 0) is inert on it, and D7 governs it by object
+ * permission. The organization a row is ABOUT is the plain attribution field
+ * `tenant_id`, which every writer stamps (NULL for a deployment-level action).
+ * This policy scopes an organization reader to the rows about its active
+ * organization; it is the ONE spelling of that scope, so no reader re-derives
+ * the wall's posture ladder (D8).
+ *
+ * - **A platform tenant policy**, recognised by provenance
+ *   (`isPlatformTenantPolicy`), so `collectRLSPolicies` strips it when no wall
+ *   is enforced (ADR-0105 D3): under `single` the one organization's readers
+ *   read the ledger as they did before.
+ * - **The platform administrator reads every row**, deployment-level rows
+ *   included: `admin_full_access`'s wildcard carries the superuser read bypass,
+ *   which skips Layer 1 on an object with no tenant column.
+ * - **`organization_admin` names the ledger explicitly, without the superuser
+ *   bits** (its `objects` below). Its wildcard's bypass would otherwise skip
+ *   this policy too and hand each organization's admin every organization's
+ *   rows, as it did on the seven plumbing tables before their capability gate.
+ * - **Where it is spread**: every shipped set that carries row-level security —
+ *   `organization_admin` (and so its derived no-bypass variant),
+ *   `viewer_readonly`, whose wildcard reads the ledger, and `member_default`,
+ *   the baseline every authenticated human resolves, so a ledger read an
+ *   application set grants is scoped as well. A set with no policy for an
+ *   object leaves it unfiltered, and `member_default` is absent where no
+ *   platform baseline is composed (the reason `scimProjectionRowScope` gives).
+ *   ⚠️ Out of reach: an application set that grants the superuser read bypass
+ *   on the ledger (`viewAllRecords` on it or on a wildcard) skips Layer 1, as
+ *   every such grant does on an object Layer 0 does not wall.
+ * - **Under `group`** `current_user.organization_id` is the active
+ *   organization, so the scope is that organization's rows, not the union.
+ *
+ * `select` (not `all`): a user-context write on this engine-owned object is
+ * refused at the engine (ADR-0103); its writers write under system context,
+ * which no row policy reaches. A fresh array per set.
+ */
+const auditLedgerRowScope = () => [
+  {
+    name: 'sys_audit_log_org',
+    object: 'sys_audit_log',
+    operation: 'select',
+    using: 'tenant_id == current_user.organization_id',
+  },
+];
+
 /** The identity object whose `Admin` field group the sets below withhold or keep. */
 const IDENTITY_OBJECT = 'sys_user';
 /** The field group the identity object's declaration marks as admin-review data. */
@@ -427,6 +477,12 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       sys_position_permission_set: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
       sys_user_permission_set: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
       sys_user_position: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      // [ADR-0131 D7] The compliance ledger, WITHOUT the superuser bits: the
+      // ledger has no tenant column, so the wildcard's `viewAllRecords` would
+      // skip its organization row scope (`sys_audit_log_org`, see
+      // `auditLedgerRowScope`) and read every organization's rows. Read only:
+      // the ledger is append-only and written under system context.
+      sys_audit_log: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
     },
     systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
     // [#21237] Keeps the identity object's `Admin` group for an org admin, who
@@ -611,6 +667,9 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // does not reach them — the blanket's explicit entry, not the wildcard,
       // is what resolves for them. See `privateCredentialRowScope` above.
       ...privateCredentialRowScope(),
+      // [ADR-0131 D7] The compliance ledger: the rows about the active
+      // organization. See `auditLedgerRowScope` above.
+      ...auditLedgerRowScope(),
     ],
   }),
   PermissionSetSchema.parse({
@@ -1166,6 +1225,9 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       ...scimProjectionRowScope(),
       // [#20027] The credential tables: no row — see `privateCredentialRowScope`.
       ...privateCredentialRowScope(),
+      // [ADR-0131 D7] The compliance ledger: the rows about the active
+      // organization, for a ledger read any set grants — see `auditLedgerRowScope`.
+      ...auditLedgerRowScope(),
     ],
   }),
   PermissionSetSchema.parse({
@@ -1296,6 +1358,9 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       ...scimProjectionRowScope(),
       // [#20027] Repeated here for the same reason: the credential tables, no row.
       ...privateCredentialRowScope(),
+      // [ADR-0131 D7] Repeated here for the same reason: the compliance ledger's
+      // organization scope, which this set's wildcard read reaches.
+      ...auditLedgerRowScope(),
     ],
   }),
 

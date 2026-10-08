@@ -1534,10 +1534,22 @@ function declaredMultiValued(field: { type?: unknown; multiple?: unknown } | nul
   });
 }
 
+/**
+ * Plan the formula pass of a read: which formula fields to evaluate, and —
+ * when the caller named a projection — the projection the DRIVER is asked for.
+ *
+ * A projection naming a formula field is widened to every stored column (plus
+ * `id`), because CEL's `record.<field>` reads whatever the formula needs off
+ * the full row. That widening is a means of EVALUATING the formula and never
+ * an answer: [#22300] `widened` lists the columns it added beyond what the
+ * caller named, and {@link withoutFormulaWidening} cuts them back off the rows
+ * once the read is done, so the caller gets the projection it declared plus
+ * the formula's value. `widened` is absent whenever nothing was widened.
+ */
 function planFormulaProjection(
   schema: any,
   requestedFields: string[] | undefined
-): { plan: FormulaPlanEntry[]; projected?: string[] } {
+): { plan: FormulaPlanEntry[]; projected?: string[]; widened?: string[] } {
   if (!schema?.fields) return { plan: [] };
   const allFieldNames = Object.keys(schema.fields);
   // When no explicit projection, evaluate every formula field on the schema —
@@ -1578,11 +1590,67 @@ function planFormulaProjection(
       if (fdef?.type === 'formula') continue;
       projected.add(fname);
     }
-    return { plan, projected: Array.from(projected) };
+    // [#22300] What the widening added — `id` included when the caller did not
+    // name it — is what the read cuts back off once the formulas are computed.
+    const named = new Set(requestedFields);
+    const widened = Array.from(projected).filter((f) => !named.has(f));
+    return { plan, projected: Array.from(projected), ...(widened.length > 0 ? { widened } : {}) };
   }
   // Implicit/full projection — leave projected undefined so the driver
   // returns its default columns (typically *).
   return { plan };
+}
+
+/**
+ * [#22300] Cut the columns {@link planFormulaProjection} widened a projection
+ * by back off what a read RETURNS — the formula saw the full row, the caller
+ * does not. Without it, a projection naming a formula field answered with every
+ * stored column (tenant, owner, owning unit, audit actors and timestamps, every
+ * unnamed field): a flow's `get_record`, whose `config.fields` is declared as
+ * "only these fields are read", passed all of them on to whatever its later
+ * nodes sent out.
+ *
+ * ## The answer it restores
+ *
+ * The same projection without the formula, plus the formula's value: measured
+ * on driver-sql (a projection is exactly the named columns — no `id` unless it
+ * is named) and pinned against it in `engine-formula-projection-trim.test.ts`.
+ * `id` is cut like any other widened column when the caller did not name it.
+ *
+ * ## Where it runs, and why there
+ *
+ * On the result `find` / `findOne` hand back, AFTER the middleware chain —
+ * the last internal consumer. Everything before it keeps reading the widened
+ * row exactly as before: the formula pass, `expand`, file-reference
+ * resolution, the `afterFind` hooks, the secret mask and the `__search`
+ * strip, and the middlewares' post-phase (field-level security's result mask,
+ * the audit redactions that judge a row by columns the caller did not name).
+ * Cutting earlier would starve those of a column they read today.
+ *
+ * It REMOVES the widened columns rather than keeping a list: a key an
+ * `afterFind` hook derives, or an expanded relation the caller named, is not
+ * the widening's and survives. A widened column a hook re-assigns is cut — the
+ * caller never named it.
+ *
+ * Never mutates a row: a row carrying a widened column is replaced by a copy
+ * without it, in the row's own key order; a row carrying none is returned as
+ * is.
+ */
+function withoutFormulaWidening<T>(row: T, widened: ReadonlySet<string> | undefined): T {
+  if (!widened || !row || typeof row !== 'object' || Array.isArray(row)) return row;
+  const source = row as unknown as Record<string, unknown>;
+  if (!Object.keys(source).some((key) => widened.has(key))) return row;
+  const cut: Record<string, unknown> = {};
+  for (const key of Object.keys(source)) {
+    if (!widened.has(key)) cut[key] = source[key];
+  }
+  return cut as unknown as T;
+}
+
+/** {@link withoutFormulaWidening} over a `find` result; anything but an array passes through. */
+function rowsWithoutFormulaWidening<T>(rows: T, widened: ReadonlySet<string> | undefined): T {
+  if (!widened || !Array.isArray(rows)) return rows;
+  return rows.map((row) => withoutFormulaWidening(row, widened)) as unknown as T;
 }
 
 /**
@@ -2883,9 +2951,11 @@ export interface OperationContext {
    * to stamp `BulkDataEvent.organizationId`.
    *
    * The seam ruled on #15706: the wall is computed ONCE, where every input is
-   * visible (the posture in force, the caller's organization scope, the
-   * object's tenancy clauses AND the deployment's #12699 carve-out, which no
-   * schema carries), and its decision travels here as a value. A reader
+   * visible (the posture in force, the caller's organization scope and the
+   * object's tenancy clauses — which, since ADR-0131 D7, include the
+   * deployment's #12699 platform-global declaration, recorded on the
+   * registered object as `systemFields.tenant: false`), and its decision
+   * travels here as a value. A reader
    * answers from this member ALONE and re-derives nothing — a re-derivation
    * is a mirror of the wall, and a mirror structurally sees only the clauses
    * it was taught (the #15706 mislabel).
@@ -3093,7 +3163,19 @@ const METADATA_ARRAY_KEYS = [
   // `readDeclared(ql, 'capability')` returned nothing, which made the
   // author-side `packageId` — documented as the FALLBACK — mandatory,
   // and its omission a silent, unenforced authorization declaration.
-  'roles', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
+  //
+  // [#22203] `positions` for the same reason, and with a write-door
+  // consequence: ADR-0090 D3 renamed `roles` to `positions`, and the rename
+  // reached the artifact door's map but never this list, so a stack-declared
+  // position had no registry entry under its package. The metadata save door
+  // decides "a code package ships this" from exactly that entry
+  // (`isArtifactBacked` → `getArtifactItem`), so a save over a package's
+  // position took the runtime-create tier and was accepted, although the type
+  // registry declares `position` `allowOrgOverride: false`. With the entry
+  // present the door's type-level refusal covers it like every other
+  // `security`-domain type (`engine-security-catalog-package-door.test.ts`).
+  // `roles` stays in the list as the inert retired spelling it already was.
+  'roles', 'positions', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
   // AI Protocol
   'agents', 'tools', 'skills', 'ragPipelines',
   // API Protocol
@@ -3533,10 +3615,14 @@ function eventOrganizationValue(value: unknown): string | undefined {
  * re-derived the wall here — from the enforced posture, the execution
  * context's `tenantId` / `accessible_org_ids` / `posture` rung, and the
  * object schema's tenancy clauses. It could not see the third clause
- * plugin-security folds into `tenancyDisabled` — the deployment-declared
- * `platformGlobalObjects` carve-out (#12699), which no schema carries — and
+ * plugin-security then folded into `tenancyDisabled` — the deployment-declared
+ * `platformGlobalObjects` carve-out (#12699), which no schema carried — and
  * stamped the caller's organization onto a batch Layer 0 had never
- * constrained: a WRONG key, the #13566 leak shape. The ruling's acceptance
+ * constrained: a WRONG key, the #13566 leak shape. (ADR-0131 D7 has since
+ * made that declaration total: a declared object is registered with no
+ * organization column and declaring `systemFields.tenant: false`, so the fold
+ * is retired — but the rule below does not lean on that; the ruling's
+ * acceptance criterion is about the seam, not one clause.) The ruling's acceptance
  * criterion, verbatim: the verdict recorded must be what the wall decided,
  * not a re-statement of its inputs; if the recorded value can be derived by
  * the reader from anything else on the context, the mirror has not been
@@ -5725,7 +5811,9 @@ export class ObjectQL implements IObjectQLEngine {
    * [#9261] "The probe found no organizations" and "the probe could not run"
    * are different facts (ADR-0110 D3), and this returns the FIRST one only when
    * it measured it. The `catch {}` this replaces answered both with `[]`, which
-   * `resolveSystemWriteOrganization` reads as `no-organization-yet` — so one
+   * `resolveSystemWriteOrganization` then read as "no organization yet" (a
+   * branch that landed the row; since ADR-0131 D9 a registered-but-empty
+   * organization object is refused instead) — so one
    * transient failure silently skipped both halves of the #8844 ruling: the
    * single-organization stamp (rows land untenanted and fork exactly the
    * counter the ruling exists to protect) and the multi-organization REFUSAL
@@ -5808,8 +5896,9 @@ export class ObjectQL implements IObjectQLEngine {
    * Returns the organization id to thread as `DriverOptions.tenantId` (the same
    * knob a session write sets, so the driver stamps the column and the counter
    * scopes by it), or `undefined` when there is nothing to resolve. Throws
-   * {@link SystemWriteOrganizationRequiredError} on the multi-organization
-   * branch.
+   * {@link SystemWriteOrganizationRequiredError} wherever no owner is
+   * derivable (ADR-0131 D9): a wall, several organizations, or — under
+   * `single`, in a composition that registers the organization object — none.
    *
    * Called AFTER the beforeInsert hooks on purpose: a hook that stamps the
    * organization itself has carried it, and must not then be refused for a
@@ -5853,12 +5942,18 @@ export class ObjectQL implements IObjectQLEngine {
     if (rows.every((row) => carriesOrganization(row?.[tenantField]))) return undefined;
 
     const posture = this.resolveEnginePosture();
+    // [ADR-0131 D9] Zero organizations is refused under `single` only where
+    // the composition registers the organization object; the composition that
+    // registers none keeps today's branch (`no-organization-object`). The
+    // probe itself is unchanged and answers `[]` for both — this is the one
+    // fact that tells them apart, read from the same registry the probe reads.
     const decision = await resolveSystemWriteOrganization({
       posture,
       probeOrganizations: () => this.probeInstallOrganizations(),
+      organizationObjectRegistered: !!this._registry.getObject(ORGANIZATION_OBJECT),
     });
     if (decision.kind === 'derived') return decision.organizationId;
-    if (decision.kind === 'no-organization-yet') return undefined;
+    if (decision.kind === 'no-organization-object') return undefined;
     throw new SystemWriteOrganizationRequiredError(
       object,
       posture,
@@ -12070,6 +12165,9 @@ export class ObjectQL implements IObjectQLEngine {
     assertProjectionHasNoDottedPaths(object, 'find', _findSchema, ast.fields);
     const _findFormula = planFormulaProjection(_findSchema, ast.fields);
     if (_findFormula.projected) ast.fields = _findFormula.projected;
+    // [#22300] The columns that widening added, cut back off the answer at the
+    // `return` — see `withoutFormulaWidening`.
+    const _findWidened = _findFormula.widened ? new Set(_findFormula.widened) : undefined;
 
     // Drop any requested PLAIN field that doesn't exist on the schema.
     // Without this, drivers (notably SqlDriver) emit `SELECT unknown_col
@@ -12206,7 +12304,9 @@ export class ObjectQL implements IObjectQLEngine {
       }
     });
 
-    return opCtx.result as any[];
+    // [#22300] The formula widening is cut back off the answer here, after the
+    // middleware chain — every internal consumer above read the full row.
+    return rowsWithoutFormulaWidening(opCtx.result as any[], _findWidened);
   }
 
   /**
@@ -12373,6 +12473,8 @@ export class ObjectQL implements IObjectQLEngine {
     const _findOneRequestedFields = Array.isArray(ast.fields) ? [...ast.fields] : undefined;
     const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields);
     if (_findOneFormula.projected) ast.fields = _findOneFormula.projected;
+    // [#22300] Same as `find`: what the widening added is cut at the `return`.
+    const _findOneWidened = _findOneFormula.widened ? new Set(_findOneFormula.widened) : undefined;
 
     // Drop unknown PLAIN fields — see the equivalent block in `find()` for
     // the rationale, and for why this tolerance is plain-columns-only ([#7589]
@@ -12475,7 +12577,8 @@ export class ObjectQL implements IObjectQLEngine {
       return hookContext.result;
     });
 
-    return opCtx.result;
+    // [#22300] Same cut as `find`, same position: after the middleware chain.
+    return withoutFormulaWidening(opCtx.result, _findOneWidened);
   }
 
   /**
@@ -12916,6 +13019,9 @@ export class ObjectQL implements IObjectQLEngine {
         // in a second pass after its own strip).
         validateRecordInScope(schemaForValidation, row, mode, 'include', {
           mediaValueShapeStrict, valueShapeStrict, messages, onAdmittedValueShapeViolation,
+          // [#22183] The option values an import kept for this write — the
+          // preview admits exactly what the write would.
+          keptOptionValues: options?.context?.keptOptionValues,
         });
         evaluateValidationRules(schemaForValidation as any, row, mode, {
           logger: this.logger, currentUser, skipStateMachine, messages,
@@ -13730,7 +13836,8 @@ export class ObjectQL implements IObjectQLEngine {
             // its SHAPE is judged here like any other field's. See
             // `ReadonlyValueScope` (record-validator.ts).
             normalizeMultiValueFields(schemaForValidation, rows[i], 'include');
-            validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation });
+            // [#22183] `keptOptionValues`: the option values an import kept for this write.
+            validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
             evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) });
             await this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
@@ -15088,7 +15195,8 @@ export class ObjectQL implements IObjectQLEngine {
                // become a refusal. Readonly values are judged after the strip
                // (`validateRecordInScope(…, 'only')`, below).
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'skip');
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
+               // [#22183] `keptOptionValues`: the option values an import kept for this write.
+               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
                // [#5284] Demand-driven, and the demand is asked PER OBJECT.
                //
                // This gate used to ask `this.hooks.get('afterUpdate').length > 0`
@@ -15423,7 +15531,8 @@ export class ObjectQL implements IObjectQLEngine {
                // become a refusal. Readonly values are judged after the strip
                // (`validateRecordInScope(…, 'only')`, below).
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'skip');
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
+               // [#22183] `keptOptionValues`: the option values an import kept for this write.
+               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
                // [#2982] The middleware-composed AST — asserted present and
                // bound to the memoized row read in the pre-phase above, so the
                // injected row-scoping (RLS write filter, sharing's

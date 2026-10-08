@@ -2500,7 +2500,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       headers_json: {
         label: "Headers (JSON)",
-        help: "Custom headers supplied to IEmailService.send, as a JSON object of name → value. Written in both delivery modes (it is audit evidence as much as delivery input). Absent on rows written before this column existed, which read back as \"no custom headers\". Never returned on the generic data path — headers are the ordinary place a credential goes; the delivery paths recover it through the engine's privileged accessor."
+        help: "Custom headers supplied with the message when it was sent, as a JSON object of name → value. Written in both delivery modes (it is audit evidence as much as delivery input). Absent on rows written before this column existed, which read back as \"no custom headers\". Never returned on the generic data path — headers are the ordinary place a credential goes; the delivery paths recover it through the engine's privileged accessor."
       },
       attachments_json: {
         label: "Attachments (JSON)",
@@ -2508,7 +2508,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       status: {
         label: "Status",
-        help: "Lifecycle state — queued by IEmailService.send before transport call",
+        help: "Lifecycle state — queued when the message is submitted for sending, before the first delivery attempt",
         options: {
           queued: "queued",
           sent: "sent",

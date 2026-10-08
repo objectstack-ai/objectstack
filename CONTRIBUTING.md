@@ -1,447 +1,158 @@
-# Contributing to ObjectStack Protocol
+# Contributing to ObjectStack
 
-Thank you for your interest in contributing to ObjectStack! This guide will help you get started with contributing to the protocol specifications.
+Thank you for your interest in contributing to ObjectStack! This repository is the
+whole open stack, not only the protocol: the Zod protocol (`packages/spec`), the
+microkernel, the runtime, the drivers, plugins and services, the CLI, the client SDK,
+the example apps and the documentation site. This guide takes you from a fork to a
+pull request.
+
+**[AGENTS.md](./AGENTS.md) is the rulebook, for human contributors and coding agents
+alike.** It holds naming, the Zod-first and contract-first rules, the documentation
+guardrails and the changeset rules. This file does not restate them. Where a rule
+matters, it points you to AGENTS.md, and if the two ever disagree, AGENTS.md wins.
 
 ## 📋 Table of Contents
 
 - [Code of Conduct](#code-of-conduct)
 - [Getting Started](#getting-started)
-- [Development Workflow](#development-workflow)
-- [Contribution Types](#contribution-types)
-- [Coding Standards](#coding-standards)
-- [Testing Guidelines](#testing-guidelines)
-- [Documentation Guidelines](#documentation-guidelines)
+- [Making a Change](#making-a-change)
+- [Where Things Live](#where-things-live)
 - [Pull Request Process](#pull-request-process)
 - [Community](#community)
 
 ## Code of Conduct
 
-We are committed to providing a welcoming and inclusive environment. Please be respectful and professional in all interactions.
+We are committed to providing a welcoming and inclusive environment. Please read the
+[Code of Conduct](./CODE_OF_CONDUCT.md) and be respectful and professional in all
+interactions.
 
 ## Getting Started
 
 ### Prerequisites
 
-- **Node.js** >= 22.0.0
-- **PNPM** >= 8.0.0
-- **Git** >= 2.0.0
+- **Node.js** 22 or later (`engines.node` in the root `package.json`)
+- **pnpm 10**. `corepack enable` installs the exact version the root `package.json`
+  pins in `packageManager`, and a pnpm 10 you installed yourself switches to that
+  pinned version inside this repository. pnpm 8 and 9 cannot install this workspace:
+  pnpm 8 refuses the lockfile, and pnpm 9 stops a frozen install on the `overrides`
+  that live in `pnpm-workspace.yaml`.
+- **Git**
 
 ### Initial Setup
 
 ```bash
-# 1. Fork the repository on GitHub
+# 1. Fork objectstack-ai/objectstack on GitHub
 # 2. Clone your fork
-git clone https://github.com/YOUR_USERNAME/spec.git
-cd spec
+git clone https://github.com/YOUR_USERNAME/objectstack.git
+cd objectstack
 
-# 3. Add upstream remote
-git remote add upstream https://github.com/objectstack-ai/spec.git
+# 3. Add the upstream remote
+git remote add upstream https://github.com/objectstack-ai/objectstack.git
 
 # 4. Install dependencies
+corepack enable
 pnpm install
 
-# 5. Build the project
-pnpm build
-
-# 6. Run tests
-pnpm test
-```
-
-## Development Workflow
-
-### 1. Choose What to Work On
-
-Before starting, review:
-- **[PRIORITIES.md](./internal/planning/PRIORITIES.md)** - Current sprint priorities
-- **[DEVELOPMENT_ROADMAP.md](./internal/planning/DEVELOPMENT_ROADMAP.md)** - Long-term roadmap
-- **[GitHub Issues](https://github.com/objectstack-ai/spec/issues)** - Open issues
-
-### 2. Create a Branch
-
-```bash
-# Update your main branch
-git checkout main
-git pull upstream main
-
-# Create a feature branch
-git checkout -b feature/your-feature-name
-# or
-git checkout -b fix/your-bug-fix
-```
-
-### 3. Make Your Changes
-
-Follow the [Coding Standards](#coding-standards) and ensure:
-- Changes are minimal and focused
-- Code follows existing patterns
-- Tests are added/updated
-- Documentation is updated
-
-### 4. Test Your Changes
-
-```bash
-# Run all tests
-pnpm test
-
-# Run tests for specific package
-pnpm --filter @objectstack/spec test
-
-# Build to verify schemas
+# 5. Build the workspace (nothing builds it implicitly)
 pnpm build
 ```
 
-### 5. Submit Your Changes
+The README's [Hack on the framework](./README.md#hack-on-the-framework) section
+covers the rest: building the Console, running an example app with `pnpm dev`, and
+how long a first build and a full test run take.
 
-```bash
-# Stage your changes
-git add .
+## Making a Change
 
-# Commit with descriptive message
-git commit -m "feat: add new field type for encrypted data"
+1. **Start from an issue.** Pick one from the
+   [issue tracker](https://github.com/objectstack-ai/objectstack/issues), or open one
+   that describes the bug or the proposal before you write code.
+   [ROADMAP.md](./ROADMAP.md) and [docs/NORTH-STAR.md](./docs/NORTH-STAR.md) show
+   where the project is going.
+2. **Branch off an up-to-date `main`, one branch and one pull request per issue**,
+   with the issue number in the branch name:
 
-# Push to your fork
-git push origin feature/your-feature-name
+   ```bash
+   git fetch upstream
+   git checkout -b fix/issue-1234-short-slug upstream/main
+   ```
 
-# Create Pull Request on GitHub
-```
+   Working in a checkout that coding agents also use? Give every task its own
+   `git worktree` instead of switching branches in a shared tree. AGENTS.md
+   (Prime Directive #11 and *Multi-agent working discipline*) explains why, and what
+   a worktree does not isolate.
+3. **Make the change, following AGENTS.md.** Read its *Prime Directives* before a
+   structural change, and its *Context Routing* table for the rules of the path you
+   are editing.
+4. **Test what your change reaches**, not only the file you edited:
 
-## Contribution Types
+   ```bash
+   pnpm --filter @objectstack/<pkg> test       # one package
+   pnpm --filter @objectstack/<pkg> typecheck  # a type-check-covered package
+   pnpm turbo run test --affected              # every package your branch reaches
+   pnpm lint                                   # the only style authority (no formatter)
+   ```
 
-### 🔧 Protocol Definitions
+   Did you touch `packages/spec`? Then regenerate its checked-in artifacts before you
+   push. The steps are in AGENTS.md under *Touched `packages/spec`?*.
+5. **Add a changeset when the change publishes.** Run `pnpm changeset` and commit the
+   `.changeset/*.md` file it writes. A bug fix in a released package takes a `patch`
+   changeset. AGENTS.md's *Post-Task Checklist* (step 3) states the whole rule: which
+   bump a change takes, the `Clause-②` declaration, and the migration a breaking
+   change must carry.
 
-Adding or modifying protocol definitions in `packages/spec/src/`:
+## Where Things Live
 
-1. **Create Zod Schema** - Always start here
-2. **Add JSDoc Comments** - Document with `@description`
-3. **Write Tests** - Target 80%+ coverage
-4. **Generate Schemas** - Run `pnpm build`
-5. **Create Documentation** - Add MDX in `content/docs/references/`
+| Path | What it holds |
+|:---|:---|
+| `packages/spec/src/` | The protocol: Zod schemas, types and constants. AGENTS.md lists the domains. |
+| `packages/`, `packages/plugins/`, `packages/services/`, … | The kernel, runtime, drivers, plugins, services, CLI and SDK. The README's package directory has them all. |
+| `content/docs/` | The documentation site's pages, in trees such as `getting-started/`, `concepts/`, `data-modeling/`, `ui/`, `automation/`, `api/` and `deployment/`. Preview with `pnpm docs:dev`. |
+| `content/docs/references/` | Generated from the Zod schemas by `packages/spec/scripts/build-docs.ts`. Never edit it by hand. |
+| `content/docs/releases/` | Written at release time from changesets. Never edit it in a code pull request. |
+| `examples/` | The example apps. The README's *Examples* table describes each one. |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Design details, the plugin lifecycle and the dependency graph. |
 
-> **Single Source of Truth — One Zod schema per metadata type.**
-> Each metadata type (`view`, `dashboard`, `flow`, `agent`, `tool`, `object`, …)
-> has exactly **one** Zod schema under `packages/spec/src/{domain}/`. Do
-> **not** re-declare the same shape as a `*.object.ts` projection table —
-> that pattern was removed in ADR-0005 (see `docs/adr/0005-…`). Studio
-> editing forms and the overlay validator (`resolveOverlaySchema()` in
-> `packages/objectql/src/protocol.ts`) both bind to that one schema.
->
-> **Runtime opt-in for org overlays** lives in exactly one place: the
-> `allowOrgOverride` boolean on the type's entry in
-> `DEFAULT_METADATA_TYPE_REGISTRY`
-> (`packages/spec/src/kernel/metadata-plugin.zod.ts`). Do not maintain a
-> parallel whitelist in runtime code.
-
-Example:
-```typescript
-/**
- * Represents an encrypted field for storing sensitive data
- * @description Provides end-to-end encryption for sensitive information
- */
-export const EncryptedFieldSchema = z.object({
-  /** Field type identifier */
-  type: z.literal('encrypted'),
-  
-  /** Encryption algorithm (default: AES-256-GCM) */
-  algorithm: z.enum(['aes-256-gcm', 'rsa-4096']).default('aes-256-gcm'),
-  
-  /** Key management strategy */
-  keyManagement: z.enum(['user', 'organization', 'system']).default('organization'),
-});
-```
-
-### 📚 Documentation
-
-- **Concepts** - High-level explanations in `content/docs/concepts/`
-- **Guides** - How-to tutorials in `content/docs/guides/`
-- **References** - API documentation in `content/docs/references/`
-- **Specifications** - Protocol specs in `content/docs/specifications/`
-
-### 🐛 Bug Fixes
-
-1. Create an issue describing the bug (if not exists)
-2. Reference the issue in your PR
-3. Add regression tests
-4. Update documentation if behavior changes
-
-### ✨ Examples
-
-Add working examples in `examples/`:
-- Include `README.md` with setup instructions
-- Provide `objectstack.config.ts` configuration
-- Add `CHANGELOG.md` for version history
-
-## Coding Standards
-
-### Naming Conventions
-
-**CRITICAL**: Follow these naming conventions strictly:
-
-#### Configuration Keys (TypeScript Properties)
-Use `camelCase`:
-```typescript
-{
-  maxLength: 100,
-  defaultValue: 'none',
-}
-```
-
-#### Machine Names (Data Values)
-Use `snake_case`:
-```typescript
-{
-  name: 'project_task',
-  object: 'account',
-  field: 'first_name',
-}
-```
-
-### Schema Definition Pattern
-
-```typescript
-import { z } from 'zod';
-
-/**
- * Schema description
- * @description Detailed explanation
- */
-export const MySchema = z.object({
-  /** Property description */
-  propertyName: z.string().describe('Property description'),
-  
-  /** Another property */
-  anotherProperty: z.number().optional().describe('Optional property'),
-});
-
-export type MyType = z.infer<typeof MySchema>;
-```
-
-### File Organization
-
-```
-packages/spec/src/
-├── data/           # ObjectQL - Data Protocol
-│   ├── field.zod.ts
-│   ├── object.zod.ts
-│   └── validation.zod.ts
-├── ui/             # ObjectUI - UI Protocol
-│   ├── app.zod.ts
-│   ├── view.zod.ts
-│   └── theme.zod.ts
-├── system/         # ObjectOS - System Protocol
-│   ├── manifest.zod.ts
-│   ├── plugin.zod.ts
-│   └── driver.zod.ts
-├── ai/             # AI Protocol
-│   ├── agent.zod.ts
-│   └── model.zod.ts
-└── api/            # API Protocol
-    ├── envelopes.zod.ts
-    └── requests.zod.ts
-```
-
-## Testing Guidelines
-
-### Test Coverage
-
-- **Target**: 80%+ code coverage
-- **Location**: Co-located `*.test.ts` files
-- **Framework**: Vitest
-
-### Test Structure
-
-```typescript
-import { describe, it, expect } from 'vitest';
-import { MySchema } from './my-schema.zod';
-
-describe('MySchema', () => {
-  describe('validation', () => {
-    it('should accept valid data', () => {
-      const result = MySchema.safeParse({
-        propertyName: 'valid value',
-      });
-      expect(result.success).toBe(true);
-    });
-
-    it('should reject invalid data', () => {
-      const result = MySchema.safeParse({
-        propertyName: 123, // wrong type
-      });
-      expect(result.success).toBe(false);
-    });
-  });
-
-  describe('type inference', () => {
-    it('should infer correct TypeScript types', () => {
-      type MyType = z.infer<typeof MySchema>;
-      const data: MyType = {
-        propertyName: 'value',
-      };
-      expect(data.propertyName).toBe('value');
-    });
-  });
-});
-```
-
-## Documentation Guidelines
-
-### MDX Documentation
-
-Create documentation in `content/docs/references/` matching the source structure:
-
-```markdown
----
-title: MySchema
-description: Schema description for SEO and navigation
----
-
-# MySchema
-
-Brief description of what this schema represents.
-
-## Overview
-
-Detailed explanation of the schema's purpose and use cases.
-
-## Schema Definition
-
-\`\`\`typescript
-import { MySchema } from '@objectstack/spec';
-
-const config = {
-  propertyName: 'value',
-};
-
-const validated = MySchema.parse(config);
-\`\`\`
-
-## Properties
-
-### propertyName
-
-- **Type**: `string`
-- **Required**: Yes
-- **Description**: Description of this property
-
-## Examples
-
-### Basic Usage
-
-\`\`\`typescript
-const basic = {
-  propertyName: 'simple value',
-};
-\`\`\`
-
-### Advanced Usage
-
-\`\`\`typescript
-const advanced = {
-  propertyName: 'complex value',
-  anotherProperty: 42,
-};
-\`\`\`
-
-## Related
-
-- [RelatedSchema](./related-schema)
-- [AnotherSchema](./another-schema)
-```
-
-### Bilingual Support
-
-Provide both English and Chinese versions:
-- English: `my-schema.mdx`
-- Chinese: `my-schema.cn.mdx`
+AGENTS.md (*Documentation Guardrails*) has the rules for every docs path, including what a
+new page needs before it shows up in the navigation.
 
 ## Pull Request Process
 
 ### Before Submitting
 
-- [ ] All tests pass (`pnpm test`)
-- [ ] Code builds successfully (`pnpm build`)
-- [ ] Documentation is updated
-- [ ] Naming conventions are followed
-- [ ] JSDoc comments are complete
-- [ ] No unrelated changes included
+- [ ] The tests and type-check for what your change reaches pass
+- [ ] `pnpm lint` passes
+- [ ] Documentation is updated where behaviour changed
+- [ ] A changeset is included if the change publishes
+- [ ] No unrelated changes are included
 - [ ] If the PR changes the auth/audience **defaults** or the **accept/reject behaviour** of
       the unauthenticated surface, label it `needs:pack-smoke` — that runs the packed-install
       smoke on the merge preview before you merge, instead of finding out at release time.
 
-### PR Checklist
+### Opening the Pull Request
 
-Use this template for your PR description:
-
-```markdown
-## Description
-Brief description of changes
-
-## Type of Change
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Breaking change
-- [ ] Documentation update
-
-## Changes Made
-- Item 1
-- Item 2
-
-## Testing
-- [ ] Unit tests added/updated
-- [ ] All tests passing
-- [ ] Manual testing completed
-
-## Documentation
-- [ ] JSDoc comments added
-- [ ] MDX documentation created/updated
-- [ ] Examples provided
-
-## Checklist
-- [ ] Zod schema follows naming conventions
-- [ ] Comprehensive JSDoc comments with @description
-- [ ] Unit tests with 80%+ coverage
-- [ ] Documentation with examples
-- [ ] JSON schema generated successfully
-- [ ] All existing tests pass
-```
+Push your branch to your fork and open a pull request against `main`. Its first line
+names the issue it fixes (`Fixes #1234`). The body says what changed, why, and how you
+verified it.
 
 ### Review Process
 
-1. **Automated Checks** - CI/CD runs tests and builds
-2. **Code Review** - Maintainers review your code
-3. **Feedback** - Address review comments
-4. **Approval** - At least one maintainer approval required
-5. **Merge** - Maintainers will merge when ready
+1. **Automated checks:** CI runs the repository gates, the type-check, the tests and the
+   builds.
+2. **Code review:** maintainers review your change.
+3. **Feedback:** address the review comments.
+4. **Merge:** maintainers land the pull request through the merge queue.
 
 ## Community
 
-### Communication Channels
-
-- **GitHub Discussions** - General questions and discussions
-- **GitHub Issues** - Bug reports and feature requests
-- **Pull Requests** - Code contributions
-
-### Getting Help
-
-- Review [PLANNING_INDEX.md](./internal/planning/PLANNING_INDEX.md) for documentation navigation
-- Check [ARCHITECTURE.md](./ARCHITECTURE.md) for system design
-- Read [QUICK_START_IMPLEMENTATION.md](./QUICK_START_IMPLEMENTATION.md) for implementation examples
-
-### Recognition
-
-Contributors will be:
-- Listed in release notes
-- Mentioned in the CHANGELOG
-- Credited in documentation (where applicable)
+- **[GitHub Discussions](https://github.com/objectstack-ai/objectstack/discussions)** —
+  questions and ideas
+- **[GitHub Issues](https://github.com/objectstack-ai/objectstack/issues)** — bug reports
+  and feature requests
+- **[Documentation](https://objectstack.ai/docs)** — the published docs site
 
 ## License
 
 By contributing, you agree that your contributions will be licensed under the
-Apache License, Version 2.0.
-
----
-
-**Questions?** Open a [GitHub Discussion](https://github.com/objectstack-ai/spec/discussions)
-
-**Need Help?** Check the [documentation](./content/docs/) or ask in discussions
+Apache License, Version 2.0 (see [LICENSE](./LICENSE) and [LICENSING.md](./LICENSING.md)).
 
 **Thank you for contributing to ObjectStack! 🚀**

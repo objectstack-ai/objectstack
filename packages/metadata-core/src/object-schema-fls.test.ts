@@ -15,6 +15,7 @@ import {
     normalizeIfNoneMatch,
     objectFieldVisibilityFingerprint,
     resolveObjectSchemaMaskPosture,
+    resolveObjectSchemaRuntimeView,
     OBJECT_SCHEMA_MASK_DISABLE_ENV,
     OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES,
     OBJECT_SCHEMA_MASK_UNDETERMINED_METRIC,
@@ -164,7 +165,10 @@ describe('[#7020] the D4 read exemption is derived from the write gate', () => {
             security: { getMetadataReadableFields: () => { asked++; throw new Error('must not be consulted'); } },
             enabled: true,
         });
-        expect(posture).toEqual({ kind: 'passthrough', reason: 'exempt' });
+        // [#22250] The posture carries the LAZY runtime question — resolving the
+        // posture still asks nothing, and the definition still passes through.
+        expect(posture).toMatchObject({ kind: 'passthrough', reason: 'exempt' });
+        expect(posture.kind === 'passthrough' && typeof posture.runtime).toBe('function');
         expect(asked).toBe(0);
     });
 
@@ -289,5 +293,138 @@ describe('[ADR-0106 D7] the metadata-plane query is preferred when the service o
             security: { getReadableFields: () => ['id'] },
         });
         expect(posture).toMatchObject({ kind: 'project', readable: new Set(['id']) });
+    });
+});
+
+/**
+ * [#22250] D4 exempts the DEFINITION (Studio/Setup authoring needs the whole
+ * schema), not the runtime projections served beside it: those follow the
+ * caller's own field permission, which the data route enforces for every
+ * class. Pinned per caller class, with the member as the control.
+ */
+describe('[#22250] the D4 exemption covers the definition, not the runtime view', () => {
+    const CLASSES = {
+        'platform admin': { userId: 'u_platform_admin', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'] },
+        'organization admin': { userId: 'u_org_admin', systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'] },
+        member: { userId: 'u_member', systemPermissions: [] as string[] },
+    } as const;
+
+    const resolveFor = (context: unknown, readable: () => string[] | undefined, telemetry?: Parameters<typeof resolveObjectSchemaMaskPosture>[0]['telemetry']) => {
+        let asked = 0;
+        const security = { getMetadataReadableFields: () => { asked++; return readable(); } };
+        return {
+            posture: resolveObjectSchemaMaskPosture({ objectName: 'account', context, security, enabled: true, telemetry }),
+            asked: () => asked,
+        };
+    };
+
+    for (const [label, context] of Object.entries(CLASSES)) {
+        it(`${label}: the runtime view holds only the readable fields, whatever the definition serves`, async () => {
+            const { posture: pending } = resolveFor(context, () => ['id']);
+            const posture = await pending;
+            const served = applyObjectSchemaMask(OBJECT, posture).document;
+            const view = await resolveObjectSchemaRuntimeView(served, posture);
+
+            expect(Object.keys(view.document.fields)).toEqual(['id']);
+            if (label === 'member') {
+                // Control: the definition mask already projects a member, so the
+                // runtime view IS the served document — same reference, nothing
+                // withheld on top, no second fingerprint.
+                expect(posture.kind).toBe('project');
+                expect(Object.keys(served.fields)).toEqual(['id']);
+                expect(view.document).toBe(served);
+                expect(view.withheld).toEqual([]);
+                expect(view.fingerprint).toBe('');
+            } else {
+                // The exempt definition stays whole, for authoring...
+                expect(posture).toMatchObject({ kind: 'passthrough', reason: 'exempt' });
+                expect(served).toBe(OBJECT);
+                expect(Object.keys(served.fields)).toEqual(['id', 'salary_grade']);
+                // ...and only the runtime view drops what the caller cannot read.
+                expect(view.withheld).toEqual(['salary_grade']);
+                expect(view.fingerprint).not.toBe('');
+            }
+        });
+    }
+
+    it('one field permission, one runtime view, whatever the class', async () => {
+        const views = await Promise.all(Object.values(CLASSES).map(async (context) => {
+            const posture = await resolveFor(context, () => ['id']).posture;
+            return (await resolveObjectSchemaRuntimeView(applyObjectSchemaMask(OBJECT, posture).document, posture)).document;
+        }));
+        for (const view of views) expect(view.fields).toEqual(views[2].fields);
+    });
+
+    it('never shares a validator with the definition mask over the same denied set', async () => {
+        const admin = await resolveFor(CLASSES['platform admin'], () => ['id']).posture;
+        const member = await resolveFor(CLASSES.member, () => ['id']).posture;
+        const adminView = await resolveObjectSchemaRuntimeView(OBJECT, admin);
+        const memberMask = applyObjectSchemaMask(OBJECT, member);
+        // Same denied field, different served bodies (the admin's carries the
+        // field in `item`): the two fingerprints must differ or a 304 crosses over.
+        expect(memberMask.fingerprint).toBe(objectFieldVisibilityFingerprint(['salary_grade']));
+        expect(adminView.fingerprint).not.toBe(memberMask.fingerprint);
+    });
+
+    it('an unrestricted exempt caller: same reference, empty fingerprint (D3 byte-identity)', async () => {
+        const posture = await resolveFor(CLASSES['platform admin'], () => ['id', 'salary_grade']).posture;
+        const view = await resolveObjectSchemaRuntimeView(OBJECT, posture);
+        expect(view.document).toBe(OBJECT);
+        expect(view.fingerprint).toBe('');
+    });
+
+    it('asks the service lazily and at most once per posture, and never for a document without `fields`', async () => {
+        const { posture: pending, asked } = resolveFor(CLASSES['platform admin'], () => ['id']);
+        const posture = await pending;
+        expect(asked()).toBe(0);
+        await resolveObjectSchemaRuntimeView({ name: 'not_an_object_schema' }, posture);
+        expect(asked()).toBe(0);
+        await resolveObjectSchemaRuntimeView(OBJECT, posture);
+        await resolveObjectSchemaRuntimeView(OBJECT, posture);
+        expect(asked()).toBe(1);
+        // The input is never mutated.
+        expect(Object.keys(OBJECT.fields)).toEqual(['id', 'salary_grade']);
+    });
+
+    it('`undefined` settles undetermined: the view is the served document, warned and counted once', async () => {
+        const warns: unknown[] = [];
+        const counters: unknown[] = [];
+        const posture = await resolveFor(CLASSES['platform admin'], () => undefined, {
+            warn: (m, meta) => warns.push([m, meta]),
+            counter: (n, labels) => counters.push([n, labels]),
+        }).posture;
+        const view = await resolveObjectSchemaRuntimeView(OBJECT, posture);
+        expect(view.document).toBe(OBJECT);
+        expect(view.fingerprint).toBe('');
+        expect(warns).toHaveLength(1);
+        expect(counters).toEqual([[OBJECT_SCHEMA_MASK_UNDETERMINED_METRIC, { object: 'account' }]]);
+    });
+
+    it('a throwing service never faults the exempt caller (D4) — the view settles undetermined, warned', async () => {
+        const warns: unknown[] = [];
+        const posture = await resolveObjectSchemaMaskPosture({
+            objectName: 'account',
+            context: CLASSES['platform admin'],
+            security: { getMetadataReadableFields: () => { throw new Error('security down'); } },
+            enabled: true,
+            telemetry: { warn: (m, meta) => warns.push([m, meta]) },
+        });
+        const view = await resolveObjectSchemaRuntimeView(OBJECT, posture);
+        expect(view.document).toBe(OBJECT);
+        expect(view.fingerprint).toBe('');
+        expect(warns).toHaveLength(1);
+    });
+
+    it('`isSystem` and a deployment with no security service carry no runtime question', async () => {
+        const system = await resolveFor({ isSystem: true }, () => ['id']);
+        const systemPosture = await system.posture;
+        expect(systemPosture).toEqual({ kind: 'passthrough', reason: 'exempt' });
+        expect((await resolveObjectSchemaRuntimeView(OBJECT, systemPosture)).document).toBe(OBJECT);
+        expect(system.asked()).toBe(0);
+
+        const noService = await resolveObjectSchemaMaskPosture({
+            objectName: 'account', context: CLASSES['platform admin'], security: undefined, enabled: true,
+        });
+        expect(noService).toEqual({ kind: 'passthrough', reason: 'exempt' });
     });
 });

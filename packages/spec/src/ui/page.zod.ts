@@ -785,6 +785,310 @@ const PAGE_AUDIENCE_WRONG_LAYER =
   + 'permission sets, and bind those sets to people through positions '
   + '(`sys_position_permission_set`), never on the page itself.';
 
+// ─── The print page (#22158: card ① of the #8346 ruling) ───────────────────
+//
+// The ruling of record is 6051470224 on #8346 (letter B′, the maintainer's
+// 「8346 B′」 of 2026-10-08): "A document is a page with a print declaration;
+// no new template type." A printable document (an invoice, a weighbridge
+// ticket, a delivery order, a letter, a monthly report) is authored as an
+// ordinary `page`, in the page's own block vocabulary, and the page gains one
+// optional `print` declaration: paper, margins, the running header and footer,
+// page numbering, and page-break hints, each mapped to print CSS. A printable
+// block subset is defined beside it and enforced at the authoring doors.
+//
+// What this card does NOT ship, and why the declaration is honest anyway: the
+// browser print mapping, the printable rendering of each block and the record
+// page's print action are card ② (objectui), the headless-Chromium render
+// service and the archive are card ③, and the record-page "generate PDF"
+// action is card ④. Until ② lands, nothing reads `print`. The key is therefore
+// declared with its consumer named in every `.describe()` and carried in the
+// liveness ledger as `planned` with `authorWarn` (`liveness/page.json`), so an
+// author who writes it is told the layout is validated but not yet applied.
+// The REFUSALS are live from this card: the parse refuses a print declaration
+// on a page that does not print its own authored blocks
+// ({@link checkPagePrintComposition}), and `os validate` / `os build` /
+// `os lint` and the metadata save door refuse a block outside the subset
+// inside a print page (`@objectstack/lint`'s `validatePrintPageBlocks`).
+//
+// The running header and footer are the page's OWN `header` and `footer`
+// regions, not a second component tree under `print`. A second tree would be
+// a new composition root that every page walker (lint's `walkPageComponents`,
+// the ADR-0087 conversion walker, the exported `walkAddressedPageComponents`
+// behind `translatePage` and objectui's validator) would have to learn in
+// lockstep; the regions are already walked by all of them, already designed in
+// Studio's page designer, and already placed at the top and bottom of the page
+// on screen, so the printed sheet and the on-screen preview agree.
+
+/**
+ * The printable block subset (ruling B′ on #8346): the page-component types a
+ * page that declares {@link PagePrintSchema | `print`} may hold, at any depth.
+ *
+ * Closed on purpose — an ALLOW list, not a deny list. A block is printable when
+ * it draws everything it declares, in full, laid out the same at any width:
+ * containers that draw every child, field blocks, a child-record table with no
+ * pagination, text, images and single values. Every other type is refused
+ * inside a print page with the reason {@link PRINT_REFUSED_PAGE_COMPONENT_TYPES}
+ * records for it, and a type the platform vocabulary does not declare at all (a
+ * plugin's own widget, an SDUI layout block) is refused because nothing
+ * answers for how it prints. Widening the set is additive and needs the block's
+ * printed rendering to exist; narrowing it is a breaking change.
+ *
+ * Read by `@objectstack/lint`'s `validatePrintPageBlocks` (the authoring
+ * doors) and, from card ②, by the console's print rendering — one list for
+ * both ends.
+ */
+export const PRINTABLE_PAGE_COMPONENT_TYPES: ReadonlySet<string> = new Set([
+  // Containers that draw every child they hold.
+  'page:section',
+  'page:card',
+  'page:footer',
+  // Field blocks — the bound record's own values.
+  'record:details',
+  'record:highlights',
+  // The child-record table: no pagination, every line up to its `limit` cap.
+  'record:line_items',
+  // Content.
+  'element:text',
+  'element:image',
+  'element:divider',
+  'element:definition-list',
+  'element:repeater',
+  // Single values.
+  'element:number',
+  'object-metric',
+]);
+
+/**
+ * Why each other type in the platform's component vocabulary is refused inside
+ * a print page — keyed by type, worded as the clause that follows "it" in the
+ * authoring refusal. Every type the vocabulary declares and does not retire is
+ * either in {@link PRINTABLE_PAGE_COMPONENT_TYPES} or here, never both (pinned
+ * in `page-print.test.ts`, so a new vocabulary member has to be classified the
+ * day it lands). The retired types are refused by name at the parse already
+ * ({@link RETIRED_PAGE_COMPONENT_TYPES}) and are not repeated here.
+ *
+ * Three reasons, from the ruling's own two plus the ones its measurement found:
+ * the block draws a WINDOW of its rows (a page, a `limit`, the nodes a viewer
+ * expanded), so a printed copy carries only part of the data; the block LAYS
+ * ITSELF OUT to the screen (docked panels, boards, canvases sized to the
+ * viewport); or the block has no printable content of its own (a control, an
+ * input, shell chrome, a panel switcher, per-viewer state).
+ */
+export const PRINT_REFUSED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = new Map([
+  // Draws a window of its rows.
+  ['record:related_list', 'draws only the first `limit` related records (5 unless set) behind a "View all" link, so a printed copy carries a window of the rows, never all of them'],
+  ['record:history', 'draws a window of the history feed (`limit`, 50 unless set), so a printed copy carries only part of it'],
+  ['record:activity', 'draws a window of the activity feed (`limit`) with comment and reaction controls, so a printed copy carries only part of it'],
+  ['object-grid', 'pages its rows (`pagination` / `pageSize`), so a printed copy carries only the page on screen'],
+  ['object-timeline', 'draws a window of its items (`limit`) along a time axis scrolled to the visible range'],
+  ['object-tree', 'draws only the nodes a viewer has expanded, so a printed copy depends on who expanded what'],
+  // Lays itself out to the screen.
+  ['page:sidebar', 'is a side column laid out beside the main region on a wide screen and folded away on a narrow one'],
+  ['page:header', 'lays its action bar out to the screen width (`maxVisible` / `mobileMaxVisible`) and carries the record chrome (star, copy id)'],
+  ['record:chatter', 'is a docked side panel laid out to the screen (`position`, `width`, `collapsible`) around a live feed'],
+  ['record:discussion', 'is a docked side panel laid out to the screen (`position`, `width`, `collapsible`) around a live feed'],
+  ['record:reference_rail', 'is a rail docked beside the record and laid out to the screen'],
+  ['object-kanban', 'is a board of columns that runs sideways past the screen edge'],
+  ['object-calendar', 'is a calendar grid sized to the screen, showing one period at a time'],
+  ['object-gantt', 'is a timeline canvas sized to the screen and scrolled to the visible range'],
+  ['object-map', 'is an interactive tile map sized to the screen'],
+  // No printable content of its own.
+  ['page:tabs', 'shows one panel at a time, so the panels not on screen never reach paper'],
+  ['page:accordion', 'folds its panels, so a closed panel never reaches paper'],
+  ['record:path', 'is an interactive stage control; the current stage is a field value, which `record:details` prints'],
+  ['record:alert', 'is a banner each viewer can dismiss, so what prints would depend on who prints it'],
+  ['record:quick_actions', 'is a row of action controls, with nothing to print'],
+  ['element:button', 'is an action control, with nothing to print'],
+  ['element:record_picker', 'is an input control, with nothing to print'],
+  ['element:text_input', 'is an input control, with nothing to print'],
+  ['element:metadata_viewer', 'is an interactive metadata browser, not document content'],
+  ['action:button', 'is an action control, with nothing to print'],
+  ['action:group', 'is a group of action controls, with nothing to print'],
+  ['action:menu', 'is an action menu, with nothing to print'],
+  ['action:icon', 'is an action control, with nothing to print'],
+  ['object-form', 'is an input form, laid out to the screen (`mobile`); print a record\'s values with `record:details`'],
+  ['object-master-detail-form', 'is an input form; print a record\'s values with `record:details` and its lines with `record:line_items`'],
+  ['app:launcher', 'is shell navigation chrome, not document content'],
+  ['nav:menu', 'is shell navigation chrome, not document content'],
+  ['nav:breadcrumb', 'is shell navigation chrome, not document content'],
+  ['global:search', 'is shell chrome, not document content'],
+  ['global:notifications', 'is shell chrome, not document content'],
+  ['cloud-connection:panel', 'is a console administration widget, not document content'],
+  ['marketplace:installed-list', 'is a console administration widget, not document content'],
+  ['mcp:connect-agent', 'is a console administration widget, not document content'],
+  ['ai:suggestion', 'is an AI suggestion generated for each viewer, not document content'],
+]);
+
+/**
+ * Page `print` declaration (ruling B′ on #8346) — the paper a page prints on.
+ * Its presence makes the page a PRINT PAGE: the printable block subset applies
+ * to every block in it ({@link PRINTABLE_PAGE_COMPONENT_TYPES}), and the page
+ * must print its own authored blocks ({@link checkPagePrintComposition}).
+ *
+ * Minimal by ruling: paper size and orientation, margins, the running header
+ * and footer, page numbering and the page-break hints, and nothing else. Every
+ * key names its print-CSS mapping and its consumer. Until the console's print
+ * rendering lands (card ② of the ruling), nothing reads any of them — the
+ * liveness ledger carries each as `planned`.
+ */
+export const PagePrintSchema = lazySchema(() => strictObject({
+  surface: 'this print declaration',
+  history: 'A key a print declaration does not declare would otherwise be dropped in silence, and the page would print without the setting.',
+  aliases: {
+    paper: 'paperSize', size: 'paperSize', format: 'paperSize', pageSize: 'paperSize',
+    layout: 'orientation', direction: 'orientation',
+    margin: 'margins', padding: 'margins',
+    numbering: 'pageNumbers', pageNumbering: 'pageNumbers', showPageNumbers: 'pageNumbers',
+    repeatTableHeader: 'repeatTableHeaders', repeatHeaders: 'repeatTableHeaders',
+    keepTogether: 'avoidBreakInside', avoidBreaks: 'avoidBreakInside',
+  },
+  guidance: {
+    header: 'the running header is the page\'s own `header` region — author its blocks in `regions` under `name: \'header\'` and set `repeatHeader: true` to repeat it on every sheet',
+    footer: 'the running footer is the page\'s own `footer` region — author its blocks in `regions` under `name: \'footer\'` and set `repeatFooter: true` to repeat it on every sheet',
+    template: 'a print page IS the template — there is no separate template key; the page\'s own blocks are the document body',
+  },
+}, {
+  paperSize: z.enum(['A4', 'A5', 'Letter', 'Legal']).optional()
+    .describe("Paper size — the size keyword of the print CSS `@page { size }` rule (A4 when omitted). Consumer: the console's browser print rendering, and later the server-side PDF renderer; until it ships, nothing applies it."),
+  orientation: z.enum(['portrait', 'landscape']).optional()
+    .describe("Sheet orientation — the orientation keyword of the `@page { size }` rule (portrait when omitted). Consumer: the console's browser print rendering, and later the server-side PDF renderer; until it ships, nothing applies it."),
+  margins: strictObject({
+    surface: 'these print margins',
+    history: 'A side these margins do not declare would otherwise be dropped in silence, and the sheet would print with the default margin there.',
+    aliases: { up: 'top', down: 'bottom', start: 'left', end: 'right' },
+  }, {
+    top: z.number().min(0).optional().describe('Top margin, in millimetres'),
+    right: z.number().min(0).optional().describe('Right margin, in millimetres'),
+    bottom: z.number().min(0).optional().describe('Bottom margin, in millimetres'),
+    left: z.number().min(0).optional().describe('Left margin, in millimetres'),
+  }).optional()
+    .describe("Sheet margins in MILLIMETRES, one number per side — the `@page { margin }` rule; a side left out takes the renderer's default. Consumer: the console's browser print rendering, and later the server-side PDF renderer; until it ships, nothing applies it."),
+  repeatHeader: z.boolean().optional()
+    .describe("Repeat the page's `header` region (its `regions` entry named `header`) at the top of every printed sheet — the running header. The parse refuses it on a page with no `header` region. Off when omitted: the region prints once, at the top of the first sheet. Consumer: the console's browser print rendering; until it ships, nothing applies it."),
+  repeatFooter: z.boolean().optional()
+    .describe("Repeat the page's `footer` region (its `regions` entry named `footer`) at the bottom of every printed sheet — the running footer. The parse refuses it on a page with no `footer` region. Off when omitted: the region prints once, after the body. Consumer: the console's browser print rendering; until it ships, nothing applies it."),
+  pageNumbers: z.boolean().optional()
+    .describe("Print the sheet number and the sheet count in the bottom margin of every sheet — the `@page` margin box with `counter(page)` and `counter(pages)`. Off when omitted. Consumer: the console's browser print rendering; until it ships, nothing applies it."),
+  repeatTableHeaders: z.boolean().optional()
+    .describe("Page-break hint: repeat a table's column headings at the top of every sheet the table runs onto (`thead { display: table-header-group }`). On when omitted. Consumer: the console's browser print rendering; until it ships, nothing applies it."),
+  avoidBreakInside: z.boolean().optional()
+    .describe("Page-break hint: keep each block whole on one sheet when it fits, moving it to the next sheet instead of splitting it (`break-inside: avoid` on every block). Off when omitted. Consumer: the console's browser print rendering; until it ships, nothing applies it."),
+}).describe('Print declaration: paper size, orientation, margins, the running header and footer, page numbering and page-break hints. Its presence makes the page a print page, whose blocks must come from the printable block subset.'));
+
+/** The page kinds a print page may take: the one that prints its authored `regions` and nothing else. */
+const PRINT_PAGE_KINDS: readonly string[] = ['full'];
+
+/**
+ * The page types a print page may take — a record page (the document bound to
+ * one record: an invoice, a delivery order) and a home or app page (a document
+ * bound to no single record: a letter, a monthly report). `list` draws a paged
+ * grid and `utility` is a floating panel; neither is a document.
+ */
+const PRINT_PAGE_TYPES: readonly string[] = ['record', 'home', 'app'];
+
+/** The admitted page types, spelled once for every refusal that names them. */
+const PRINT_PAGE_TYPES_PHRASE = "of `type: 'record'`, `'home'` or `'app'` with its blocks in `regions`";
+
+/**
+ * The print-page composition check attached to {@link PageSchema} (ruling B′
+ * on #8346): a page that declares `print` must print exactly the blocks it
+ * authors, because the printable block subset is judged on those blocks.
+ *
+ * Refused, each at its own path:
+ *  - `print` on a `slotted` page — every slot it does not override is drawn
+ *    from the synthesized default layout (related lists, the discussion feed),
+ *    which the subset refuses and no author ever wrote;
+ *  - `print` on an `html` / `jsx` / `react` page — its blocks are compiled (or,
+ *    for `react`, executed) from `source`, so there are no authored blocks to
+ *    judge;
+ *  - `print` on a `list` page — it draws its records through `interfaceConfig`
+ *    as a paged grid; the list's own print control is `allowPrinting`;
+ *  - `print` on a `utility` page — a floating panel, not a document (the
+ *    admitted types are {@link PRINT_PAGE_TYPES});
+ *  - `print` on a `full` page with no `regions` — it draws the synthesized
+ *    default layout instead;
+ *  - `print.repeatHeader` / `print.repeatFooter` on a page with no region of
+ *    that name — the running header and footer ARE those regions.
+ *
+ * A `kind` that is absent is the spec default, `full`, and `regions` absent is
+ * the default `[]`, so a `.shape` mirror without the defaults gets the same
+ * answer. Exported for the reason {@link checkPageSourceCompleteness} is, and
+ * attached by identifier — pinned in `object-refinement-check-exports.test.ts`.
+ */
+export function checkPagePrintComposition(
+  page: { kind?: string; type?: string; regions?: unknown; print?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const print = page.print;
+  if (print === undefined || print === null || typeof print !== 'object') return;
+  const kind = page.kind ?? 'full';
+  if (!PRINT_PAGE_KINDS.includes(kind)) {
+    const why = kind === 'slotted'
+      ? 'a slotted page draws every slot it does not override from the synthesized default layout '
+        + '(related lists, the discussion feed), which no author wrote and the printable block subset refuses'
+      : `${kind === 'html' ? 'an' : 'a'} \`${kind}\` page's blocks are ${kind === 'react' ? 'executed' : 'compiled'} from \`source\`, so there are `
+        + 'no authored blocks for the printable block subset to judge';
+    ctx.addIssue({
+      code: 'custom',
+      path: ['print'],
+      message: `\`print\` is refused on a \`kind: '${kind}'\` page: a print page prints exactly the blocks it `
+        + `authors, and ${why}. Author the document as a \`kind: 'full'\` page ${PRINT_PAGE_TYPES_PHRASE}.`,
+    });
+    return;
+  }
+  if (page.type === 'list') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['print'],
+      message: '`print` is refused on a `type: \'list\'` page: a list page draws its records through '
+        + '`interfaceConfig` as a paged grid, not as authored blocks. To let users print a list as shown, '
+        + `set \`interfaceConfig.allowPrinting: true\`; to print a document, declare \`print\` on a page ${PRINT_PAGE_TYPES_PHRASE}.`,
+    });
+    return;
+  }
+  // `type` absent is the spec default, `record` — admitted.
+  const type = page.type ?? 'record';
+  if (!PRINT_PAGE_TYPES.includes(type)) {
+    const why = type === 'utility'
+      ? 'a utility page is a floating panel beside the page a user is on (notes, a phone dialer), not a document'
+      : `a \`${type}\` page is not a document page`;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['print'],
+      message: `\`print\` is refused on a \`type: '${type}'\` page: ${why}. To print a document, declare `
+        + `\`print\` on a page ${PRINT_PAGE_TYPES_PHRASE}.`,
+    });
+    return;
+  }
+  const regions = Array.isArray(page.regions) ? page.regions : [];
+  if (regions.length === 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['print'],
+      message: '`print` needs the document\'s blocks in `regions`: a `kind: \'full\'` page with no regions '
+        + 'draws the synthesized default layout, which no author wrote and the printable block subset '
+        + 'refuses. Author the document\'s blocks in `regions`.',
+    });
+    return;
+  }
+  const regionNames = new Set(
+    regions
+      .map((r) => (r && typeof r === 'object' ? (r as { name?: unknown }).name : undefined))
+      .filter((n): n is string => typeof n === 'string'),
+  );
+  const declaration = print as { repeatHeader?: unknown; repeatFooter?: unknown };
+  for (const [key, region] of [['repeatHeader', 'header'], ['repeatFooter', 'footer']] as const) {
+    if (declaration[key] !== true || regionNames.has(region)) continue;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['print', key],
+      message: `\`print.${key}\` repeats the page's \`${region}\` region on every printed sheet, and this page `
+        + `declares no region named \`${region}\`. Add a \`{ name: '${region}', components: [...] }\` region `
+        + `holding the ${region === 'header' ? 'letterhead' : 'footer'} blocks, or delete \`${key}\`.`,
+    });
+  }
+}
+
 export const PageSchema = lazySchema(() => strictObject({
   surface: 'this page',
   history: PAGE_HISTORY,
@@ -800,6 +1104,7 @@ export const PageSchema = lazySchema(() => strictObject({
     default: 'isDefault',
     jsx: 'source', html: 'source', code: 'source', content: 'source',
     dependencies: 'requires', plugins: 'requires',
+    printLayout: 'print', printSettings: 'print', printConfig: 'print', pdf: 'print', paper: 'print',
   },
   guidance: {
     // The removals this file's own comments record. Each was a page type or a
@@ -914,6 +1219,18 @@ export const PageSchema = lazySchema(() => strictObject({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 
   /**
+   * Print declaration (ruling B′ on #8346, card ① #22158) — makes this page a
+   * PRINT PAGE: a document (an invoice, a delivery order, a letter, a report)
+   * authored in the page's own blocks. See {@link PagePrintSchema} for the
+   * keys and their print-CSS mapping, {@link PRINTABLE_PAGE_COMPONENT_TYPES}
+   * for the blocks a print page may hold, and {@link checkPagePrintComposition}
+   * for the pages that may carry it. `planned` in the liveness ledger until the
+   * console's print rendering (card ②) reads it.
+   */
+  print: PagePrintSchema.optional()
+    .describe("Print declaration — makes this page a print page, a document authored in the page's own blocks: paper size and orientation, margins in millimetres, the running header and footer (the page's own `header` / `footer` regions), page numbers and page-break hints, each mapped to print CSS. A print page is a `kind: 'full'` page of `type: 'record'`, `'home'` or `'app'` with its blocks in `regions`, and every block in it must come from the printable block subset: containers that draw every child (`page:section`, `page:card`, `page:footer`), field blocks (`record:details`, `record:highlights`), the child-record table `record:line_items`, `element:text`, `element:image`, `element:divider`, `element:definition-list`, `element:repeater`, `element:number` and `object-metric`; `os validate` / `os build` / `os lint` and the metadata save door refuse any other block inside it. Consumer: the console's browser print rendering, and later the server-side PDF renderer; until it ships, the declaration is validated but nothing applies it. A list view's print button is `allowPrinting`, not this."),
+
+  /**
    * Override semantics for record pages.
    *
    * - `"full"` (default): the schema fully describes the page.
@@ -1024,11 +1341,15 @@ export const PageSchema = lazySchema(() => strictObject({
   // ADR-0080 §5 (`requires`): the key exists only on the kinds whose source is
   // compiled at save (#21459, ruling A). Attached by identifier for the same
   // reason as the check above.
-  .superRefine(checkPageRequiresKind));
-// PageSchema's cross-field rules are the two `kind` checks above: the
-// ADR-0080/0081 source completeness check and the compiled-kind `requires`
-// check. It once also required `recordReview`/`blankLayout` and `slots` (all
-// removed — unrendered roadmap / "required-but-unauthorable" Studio traps).
+  .superRefine(checkPageRequiresKind)
+  // Ruling B′ on #8346 (#22158): a print page prints exactly the blocks it
+  // authors. Attached by identifier for the same reason as the checks above.
+  .superRefine(checkPagePrintComposition));
+// PageSchema's cross-field rules are the three checks above: the
+// ADR-0080/0081 source completeness check, the compiled-kind `requires`
+// check and the print-page composition check. It once also required
+// `recordReview`/`blankLayout` and `slots` (all removed — unrendered roadmap /
+// "required-but-unauthorable" Studio traps).
 
 export type Page = z.input<typeof PageSchema>;
 /** Post-parse shape of {@link Page} — defaults applied, transforms run (ADR-0122). */
@@ -1064,4 +1385,10 @@ export type ElementDataSourceParsed = z.infer<typeof ElementDataSourceSchema>;
 export type InterfacePageConfig = z.input<typeof InterfacePageConfigSchema>;
 /** Post-parse shape of {@link InterfacePageConfig} — defaults applied, transforms run (ADR-0122). */
 export type InterfacePageConfigParsed = z.infer<typeof InterfacePageConfigSchema>;
+/**
+ * The page `print` declaration. One shape: the schema has no defaults and no
+ * transforms, so the author state and the parsed state coincide (pinned in
+ * `type-alias-convention.pin.test.ts`, ADR-0122).
+ */
+export type PagePrint = z.input<typeof PagePrintSchema>;
 export type PageComponentType = z.input<typeof PageComponentType>;

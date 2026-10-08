@@ -5,10 +5,11 @@
  * `getReadableFields`.
  *
  * The two differ in exactly one place: what a caller resolving to ZERO
- * permission sets gets. On the DATA plane, falling open is the drift-free
- * answer — the engine middleware skips its whole gate for such a caller, and
- * reporting a narrowing the data path would not enforce is its own kind of
- * drift. On the METADATA plane the question is disclosure, and D7 rules that a
+ * permission sets gets. On the DATA plane `getReadableFields` keeps its
+ * fall-open answer, written when the engine middleware skipped its whole gate
+ * for such a caller (the middleware now refuses it: ADR-0056 D2's deny
+ * baseline at object admission, and ADR-0096 D5 outright for a principal-less
+ * one). On the METADATA plane the question is disclosure, and D7 rules that a
  * guest/public deployment's schema exposure must be a deliberate
  * permission-set decision rather than an accidental everything-default. So the
  * zero-set caller goes through the same fallback resolution
@@ -81,7 +82,8 @@ describe('[ADR-0106 D7] SecurityPlugin.getMetadataReadableFields', () => {
     const dataPlane = await plugin.getReadableFields('deal', context);
     const metadataPlane = await plugin.getMetadataReadableFields('deal', context);
 
-    // The data plane keeps its middleware-mirroring fall-open — unchanged.
+    // The data plane keeps its fall-open answer — unchanged (the middleware it
+    // once mirrored refuses this principal-less caller since ADR-0096 D5).
     expect(dataPlane).toEqual(['id', 'name', 'secret']);
     // The metadata plane does not.
     expect(metadataPlane).toEqual(['id', 'name']);

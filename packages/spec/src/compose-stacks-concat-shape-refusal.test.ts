@@ -72,7 +72,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('#19784 — composeStacks refuses a non-array concatenated collection', () => {
+describe('composeStacks refuses a non-array concatenated collection', () => {
   it('covers every concat key the composer declares (the table is the census, not a transcription)', () => {
     expect(CONCAT_KEYS).toContain('permissions');
     expect(CONCAT_KEYS).toContain('data');

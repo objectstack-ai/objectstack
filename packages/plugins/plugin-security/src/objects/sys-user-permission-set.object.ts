@@ -83,8 +83,10 @@ export const SysUserPermissionSet = ObjectSchema.create({
     // VALIDATION_FAILED, `invalid_value` here). Same width and shape as the
     // sibling assignment's `sys_user_position.position` (a `sys_*.name`, 100).
     // Not required: a grant written before this column existed carries NULL
-    // until the backfill stage rewrites it, and no reader consults the column
-    // yet — readers keep reading the id until they are switched.
+    // until the backfill stage rewrites it. The grant readers of
+    // plugin-security and plugin-auth read this column, and a grant with no
+    // name grants nothing through them (`grantSetNameOf`); the resolver in
+    // @objectstack/core still reads the id until its own stage switches it.
     permission_set: Field.text({
       label: 'Permission Set Name',
       required: false,
@@ -102,9 +104,18 @@ export const SysUserPermissionSet = ObjectSchema.create({
       description: 'Optional organization scope. NULL = applies in every org context.',
     }),
 
+    // Provenance, not a business link: the platform writes it, a caller does
+    // not. A non-system insert is stamped with its writer by the
+    // DelegatedAdminGate whatever the payload carried, and a system writer
+    // (the organization-admin reconcile, the platform-admin promotion) keeps
+    // the id or null it wrote (ADR-0118 D1 — never a sentinel). `readonly`
+    // makes the update strip drop a non-system caller's value, and it is what
+    // files a granter that no longer resolves under the integrity audit's
+    // `provenance` bucket rather than as a broken business reference.
     granted_by: Field.lookup('sys_user', {
       label: 'Granted By',
       required: false,
+      readonly: true,
       description: 'User who granted this permission set.',
     }),
 

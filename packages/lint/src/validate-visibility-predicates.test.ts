@@ -249,7 +249,11 @@ describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
       const stack = {
         views: [{ name: 'f', sections: [{ fields: [{ field: 'x', visibleWhen: "my_record.x == 1" }] }] }],
       };
-      expect(validateVisibilityPredicates(stack, { layer: 'metadata' })).toEqual([]);
+      // The subject is the mis-layer verdict: `my_record.` is not `record.`.
+      // Since #22212 the predicate is not clean either — `my_record` binds on no
+      // layer — but that is the unbound-root finding, never this rule's.
+      expect(validateVisibilityPredicates(stack, { layer: 'metadata' }).map((f) => f.rule))
+        .toEqual([VISIBILITY_BARE_IDENTIFIER]);
     });
   });
 
@@ -796,13 +800,13 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
       expect(validateVisibilityPredicates(formStack(predicate))).toEqual([]);
     });
 
-    it('an UNKNOWN root is left to the wrong-root rules — this one only judges rootless refs', () => {
-      // `my_record` resolves to nothing either, but it is a root-shaped defect:
-      // ADR-0089 D3b owns the two directions the spec states, and the legal-root
-      // list is not yet trustworthy enough to gate on (#6146). Widening here
-      // would also make the D3b fixture below a false positive of this rule.
-      expect(bareFindings(formStack('my_record.x == 1'))).toEqual([]);
+    it('a wrong-but-BOUND root is left to the ADR-0089 rules — only an unbound one is judged here', () => {
+      // `record.data` reads a FIELD named `data` through the bound `record`
+      // root: legal, and not this rule's business. `data.x` on a runtime view
+      // is the mis-layer advisory's (a root the metadata layer binds).
       expect(bareFindings(formStack("record.data == 1"))).toEqual([]);
+      expect(validateVisibilityPredicates(formStack('data.x == 1')).map((f) => f.rule))
+        .toEqual([VISIBILITY_ROOT_MISLAYERED]);
     });
 
     it('a predicate that does not parse yields no BARE-IDENTIFIER verdict (the syntax rule owns it)', () => {
@@ -820,6 +824,76 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
     it('an absent / empty predicate is not a finding', () => {
       expect(validateVisibilityPredicates(formStack(undefined))).toEqual([]);
       expect(validateVisibilityPredicates(formStack('   '))).toEqual([]);
+    });
+  });
+
+  describe('a namespace no layer binds is the same defect (#22212)', () => {
+    // The firing control beside the probe, on one view form field, byte for
+    // byte the reporting app's spelling apart from the root.
+    it('the firing control: the bare spelling gates', () => {
+      const findings = bareFindings(formStack('duplicate_of_type == "crm_lead"'));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('error');
+    });
+
+    it('the probe: an unbound root behind a has() guard gates too, and names the root', () => {
+      const findings = bareFindings(
+        formStack('has(record.duplicate_of_type) && foo.duplicate_of_type == "crm_lead"'),
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].path).toBe('views[0].sections[0].fields[0]');
+      expect(findings[0].message).toContain('`foo.`');
+      expect(findings[0].hint).toContain('`record.<field>`');
+    });
+
+    it.each([
+      ['foo.x == 1', 'a plain member read'],
+      ["foo['x'] == 1", 'an index read'],
+      ['foo.items.exists(t, t == 1)', 'a macro receiver'],
+      ["app.name == 'x'", 'a root the console stopped binding'],
+    ])('%s — %s', (predicate) => {
+      expect(bareFindings(formStack(predicate))).toHaveLength(1);
+    });
+
+    it('reaches a page component on the same terms', () => {
+      const stack = {
+        pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', visibleWhen: "foo.stage == 'won'" }] }] }],
+      };
+      expect(bareFindings(stack).map((f) => f.path)).toEqual(['pages[0].regions[0].components[0]']);
+    });
+
+    it.each([
+      ['current_user.id == record.owner_id'],
+      ["page.selectedProjectId != ''"],
+      ['previous.status != record.status'],
+      ["parent.status == 'paid'"],
+      ['features.multiOrgEnabled'],
+      ["user.id != '' && ctx.user.id != '' && os.user.id != ''"],
+      ['record.items.exists(i, i.qty > 0)'],
+      ['type(record.x) == string'],
+    ])('a root some layer binds stays clean: %s', (predicate) => {
+      expect(bareFindings(formStack(predicate))).toEqual([]);
+    });
+
+    it('stands down for a dotted chain on the RIGHT of a metadata-editing form (#7696)', () => {
+      // There the right slot is a literal slot and `predicate-rhs-path-shaped`
+      // owns a path in it; a second, different prescription for the same token
+      // is the walk #7696 closed.
+      const metaForm = (predicate: string) => ({
+        views: [{
+          name: 'field_editor',
+          data: { provider: 'schema', schemaId: 'field' },
+          sections: [{ fields: [{ field: 'notes', visibleWhen: predicate }] }],
+        }],
+      });
+      expect(bareFindings(metaForm('data.type == foo.bar'))).toEqual([]);
+      // ...and only there: on the LEFT the same root is still judged,
+      const left = bareFindings(metaForm("foo.type == 'grid'"));
+      expect(left).toHaveLength(1);
+      expect(left[0].hint).toContain('`data.<field>`');
+      // ...and a runtime view (real CEL, a path on the right is legal) is untouched.
+      expect(bareFindings(formStack('record.type == foo.bar'))).toHaveLength(1);
     });
   });
 
@@ -841,13 +915,16 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
       expect(bareFindings(formStack('record.done && overdue'))[0].message).toContain('`overdue`');
     });
 
-    it('an unknown root does not mask a real bare identifier alongside it', () => {
-      // The declare-then-check order matters: `my_record` is declared as a
-      // namespace first, so the checker's verdict lands on `status` rather than
-      // stopping at the root it is not this rule's job to judge.
+    it('an unbound root and a bare identifier are both defects — the first is reported, the fix reveals the next', () => {
+      // Until #22212 `my_record` was declared as a namespace first so the
+      // verdict landed on `status`. Both resolve to nothing now, and the
+      // checker reports one undeclared reference per predicate — the first.
       const findings = bareFindings(formStack("my_record.x == 1 && status == 'a'"));
       expect(findings).toHaveLength(1);
-      expect(findings[0].message).toContain('`status`');
+      expect(findings[0].message).toContain('`my_record.`');
+      const fixed = bareFindings(formStack("record.x == 1 && status == 'a'"));
+      expect(fixed).toHaveLength(1);
+      expect(fixed[0].message).toContain('`status`');
     });
   });
 

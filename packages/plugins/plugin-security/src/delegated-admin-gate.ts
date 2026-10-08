@@ -45,6 +45,7 @@ import {
   rowOrganizationId,
   seedCtx as organizationScopedCtx,
 } from './per-organization-catalog.js';
+import { GRANT_SET_ID_FIELD, grantSetNameOf, readGrantSetRows } from './grant-permission-set-name.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 /**
@@ -81,9 +82,11 @@ const DEFAULT_DELEGATION_CEILING_MS = 30 * 24 * 60 * 60 * 1000;
  * any other organization pairs an authority minted in one tenant with a tree
  * owned by another — which is what an unscoped by-name read did.
  *
- * Undefined for a `single`-posture caller, and for any context carrying no
- * organization at all: the organization-less surface that posture correctly
- * has, where a by-name anchor is unambiguous and nothing here changes.
+ * Under the `single` posture this is the Default Organization: since ADR-0131
+ * C1 it exists from boot, and every session on a stock `single` deployment —
+ * the administrator's and a delegate's alike — carries it as its active
+ * organization. Undefined only for a context carrying no organization at all,
+ * where a by-name anchor is read organization-less and nothing here changes.
  *
  * Under the `group` posture (ADR-0105 D2) this is the ACTIVE organization, not
  * the caller's whole membership set. That is the narrower of the two, which is
@@ -101,7 +104,7 @@ function callerOrganizationId(context: any): string | undefined {
  * The runtime resolver's own answer (`resolveAuthzContext` step 4, in
  * `@objectstack/core`): a holding stamped with a DIFFERENT organization grants
  * nothing there; an organization-less holding grants in every organization;
- * `organizationId` undefined (a `single`-posture caller) drops nothing.
+ * `organizationId` undefined (a context carrying no organization) drops nothing.
  *
  * Every holding the gate reasons about goes through this, because
  * `sys_user_position.position` is a position NAME and `sys_position.name` is
@@ -147,6 +150,40 @@ const GOVERNED_OBJECTS = new Set([
 ]);
 const GOVERNED_OPERATIONS = new Set(['insert', 'update', 'delete', 'transfer', 'restore', 'purge']);
 const ANCHOR_POSITIONS = new Set(['everyone', 'guest']);
+
+/**
+ * The governed objects whose rows record their writer in `granted_by` — a
+ * `readonly` provenance column on both (ADR-0090 D12's dual audit: `granted_by`
+ * = writer, `delegated_from` = authority source, `reason` = why).
+ *
+ * The writer is the value, so a caller does not get to name one: every
+ * non-system insert that this gate admits is stamped with its own `userId`,
+ * whatever the payload carried — tenant-level admins, delegates and
+ * self-delegations alike. The stamp is assigned in place on the payload rows
+ * BEFORE the engine's insert pipeline snapshots them; the engine's create-side
+ * `readonly` strip does not judge `sys_` objects, so the stamp is what lands.
+ * A non-system UPDATE gets no stamp: the column is `readonly`, so the engine's
+ * update strip drops a caller's value and the row keeps its writer.
+ *
+ * System writers never reach this gate (`isSystem` short-circuits the security
+ * middleware first) and keep the id or null they wrote: invitation placement
+ * writes its issuer, the organization-admin reconcile the attributed human or
+ * null, the platform-admin promotion null (ADR-0118 D1 — never a sentinel).
+ */
+const GRANTED_BY_OBJECTS = new Set(['sys_user_position', 'sys_user_permission_set']);
+
+/**
+ * Stamp the writer into `granted_by` on every row of an admitted non-system
+ * insert into a {@link GRANTED_BY_OBJECTS} table. Unconditional on purpose:
+ * keeping a supplied value would let a caller name any user as the granter.
+ */
+function stampWriter(opCtx: any, userId: unknown): void {
+  if (opCtx?.operation !== 'insert' || !GRANTED_BY_OBJECTS.has(opCtx?.object)) return;
+  if (userId == null || userId === '') return;
+  for (const row of rowsOf(opCtx)) {
+    if (row && typeof row === 'object') row.granted_by = userId;
+  }
+}
 
 export interface DelegatedAdminGateDeps {
   /** ObjectQL engine handle (system-context reads for pre-images/lookups). */
@@ -242,6 +279,14 @@ export class DelegatedAdminGate {
     if (!GOVERNED_OBJECTS.has(opCtx?.object)) return;
     if (!GOVERNED_OPERATIONS.has(opCtx?.operation)) return;
 
+    // Authority first: a refused write throws here and is never stamped.
+    await this.authorize(opCtx);
+    // Then provenance, on every admitted path — see {@link GRANTED_BY_OBJECTS}.
+    stampWriter(opCtx, opCtx.context?.userId);
+  }
+
+  /** The authority decision for a governed write: returns when admitted, throws when refused. */
+  private async authorize(opCtx: any): Promise<void> {
     const ctx = opCtx.context ?? {};
     // Every business-unit anchor this call resolves is resolved in the
     // caller's own organization — see {@link callerOrganizationId}.
@@ -346,9 +391,9 @@ export class DelegatedAdminGate {
 
     switch (opCtx.object) {
       case 'sys_user_position':
-        return this.assertAssignmentWrite(opCtx, ctx, held, organizationId);
+        return this.assertAssignmentWrite(opCtx, held, organizationId);
       case 'sys_user_permission_set':
-        return this.assertDirectGrantWrite(opCtx, ctx, held);
+        return this.assertDirectGrantWrite(opCtx, held);
       case 'sys_position_permission_set':
         return this.assertBindingWrite(opCtx, held);
       case 'sys_permission_set':
@@ -536,8 +581,9 @@ export class DelegatedAdminGate {
    *  7. [cloud#830 follow-up] if the delegation carries a `business_unit_id`
    *     anchor, that anchor falls inside the delegator's OWN effective anchor
    *     for the position — a delegation may NARROW visibility, never widen it.
-   * The writer is stamped into `granted_by` (dual audit: `granted_by` = writer,
-   * `delegated_from` = authority source).
+   * The writer is stamped into `granted_by` by {@link DelegatedAdminGate.assert}
+   * once this returns (dual audit: `granted_by` = writer, `delegated_from` =
+   * authority source).
    */
   private async assertSelfDelegation(opCtx: any, ctx: any, organizationId?: string): Promise<void> {
     const now = this.now();
@@ -640,9 +686,6 @@ export class DelegatedAdminGate {
           deny(`position '${positionName}' distributes the admin set '${b.name}' — administration cannot be self-delegated (D12 containment)`, { position: positionName, permissionSet: b.name });
         }
       }
-
-      // Dual audit: stamp the writer (never overwrite an explicit value).
-      if (row.granted_by == null) row.granted_by = ctx.userId;
     }
   }
 
@@ -737,7 +780,6 @@ export class DelegatedAdminGate {
 
   private async assertAssignmentWrite(
     opCtx: any,
-    ctx: any,
     held: HeldScope[],
     organizationId?: string,
   ): Promise<void> {
@@ -777,26 +819,22 @@ export class DelegatedAdminGate {
           { operation: opCtx.operation, object: opCtx.object, position: positionName },
         );
       }
-      // Audit stamp: who granted this (insert only; never overwrite an explicit value).
-      if (opCtx.operation === 'insert' && t.next && t.next.granted_by == null && ctx.userId) {
-        t.next.granted_by = ctx.userId;
-      }
     }
   }
 
   // ── sys_user_permission_set: direct user ↔ set grants ───────────────
 
-  private async assertDirectGrantWrite(opCtx: any, ctx: any, held: HeldScope[]): Promise<void> {
+  private async assertDirectGrantWrite(opCtx: any, held: HeldScope[]): Promise<void> {
     const targets = await this.materializeTargets(opCtx, 'sys_user_permission_set');
     for (const t of targets) {
       const row = t.next ?? t.prev ?? {};
-      const setRow = await this.loadSetRowById(row.permission_set_id);
-      const setName = String(setRow?.name ?? row.permission_set_id ?? '');
+      const { setRow, setName, unresolved } = await this.directGrantSet(t, row);
       const targetUserId = row.user_id ? String(row.user_id) : null;
       const userBUs = targetUserId ? await this.businessUnitsOfUser(targetUserId) : new Set<string>();
 
       const failure = this.firstApprovalFailure(held, (s) => {
         if (!s.scope.manageAssignments) return 'the scope does not grant manageAssignments';
+        if (unresolved) return unresolved;
         if (!s.scope.assignablePermissionSets.includes(setName)) {
           return `permission set '${setName}' is not in the scope's allowlist`;
         }
@@ -816,9 +854,6 @@ export class DelegatedAdminGate {
           `[Security] Access denied: delegated '${opCtx.operation}' on sys_user_permission_set rejected — ${failure}.`,
           { operation: opCtx.operation, object: opCtx.object, permissionSet: setName },
         );
-      }
-      if (opCtx.operation === 'insert' && t.next && t.next.granted_by == null && ctx.userId) {
-        t.next.granted_by = ctx.userId;
       }
     }
   }
@@ -1229,6 +1264,61 @@ export class DelegatedAdminGate {
         .filter((r: any) => r.name);
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * [ADR-0131 D4] The permission set a direct-grant write is judged on.
+   *
+   * - **The grant's own set** — a delete, or an update that keeps the grant's
+   *   set: read BY NAME from the grant's `permission_set` (the pre-image's, or
+   *   the name the update supplies), through {@link readGrantSetRows}. A grant
+   *   that names nothing, or names a set with no catalog row it applies to,
+   *   is not one a delegate can be shown to hold authority over, so the write
+   *   is refused (`unresolved`) — fail closed; a tenant admin is not judged
+   *   here at all.
+   * - **The set the write points the grant AT** — an insert, or an update that
+   *   re-points `permission_set_id`: the caller's own reference, read by that
+   *   id as before. The name is not the caller's to supply (the platform
+   *   derives it from that id after this gate), so there is no name to read.
+   */
+  private async directGrantSet(
+    t: { next: any | null; prev: any | null },
+    row: any,
+  ): Promise<{ setRow: any | null; setName: string; unresolved?: string }> {
+    const repointed = !!t.next
+      && (!t.prev || String(t.next[GRANT_SET_ID_FIELD] ?? '') !== String(t.prev[GRANT_SET_ID_FIELD] ?? ''));
+    if (repointed) {
+      const setRow = await this.loadSetRowById(row[GRANT_SET_ID_FIELD]);
+      return { setRow, setName: String(setRow?.name ?? row[GRANT_SET_ID_FIELD] ?? '') };
+    }
+    const name = grantSetNameOf(row);
+    if (!name) {
+      return {
+        setRow: null,
+        setName: '',
+        unresolved: 'the grant names no permission set (it is not yet named, or could not be) — only a tenant admin may change it',
+      };
+    }
+    const setRow = await this.loadSetRowForGrant(row);
+    if (!setRow) {
+      return {
+        setRow: null,
+        setName: name,
+        unresolved: `permission set '${name}' has no catalog row this grant applies to — only a tenant admin may change it`,
+      };
+    }
+    return { setRow, setName: String(setRow.name ?? name) };
+  }
+
+  /** The catalog row a stored grant names, by its name (`null` when none applies or the read fails). */
+  private async loadSetRowForGrant(grant: any): Promise<any | null> {
+    if (!this.deps.ql?.find) return null;
+    try {
+      const setRowOf = await readGrantSetRows(this.deps.ql, [grant]);
+      return setRowOf(grant) ?? null;
+    } catch {
+      return null;
     }
   }
 

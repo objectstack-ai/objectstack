@@ -118,6 +118,7 @@
     "ui/PageContainerProps",
     "ui/PageHeaderProps",
     "ui/PageNavItem",
+    "ui/PagePrint",
     "ui/PageRegion",
     "ui/PageTabsProps",
     "ui/PageType",

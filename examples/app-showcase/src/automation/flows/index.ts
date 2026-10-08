@@ -112,7 +112,10 @@ export const ReassignWizardFlow = defineFlow({
       config: {
         objectName: 'showcase_task',
         filter: { id: '{recordId}' },
-        fields: { assignee: '{new_assignee}' },
+        // A CEL value envelope — the `{…}` template dialect is retired from
+        // value slots. `new_assignee` is a required screen field, so it is
+        // always bound here.
+        fields: { assignee: { dialect: 'cel', source: 'new_assignee' } },
       },
     },
     { id: 'end', type: 'end', label: 'End' },
@@ -1232,7 +1235,9 @@ export const ResilientSyncFlow = defineFlow({
               config: {
                 objectName: 'showcase_task',
                 filter: { id: '{record.id}' },
-                fields: { sync_status: 'failed', sync_error: '{$error.message}' },
+                // `$error` (this try_catch's `errorVariable`) is not a CEL
+                // identifier, so the envelope reads it through `vars`.
+                fields: { sync_status: 'failed', sync_error: { dialect: 'cel', source: 'vars["$error"].message' } },
               },
             },
           ],
@@ -1576,9 +1581,11 @@ export const InboundTaskWebhookFlow = defineFlow({
   type: 'api',
   status: 'active',
   // An inbound webhook has no authenticated user, so the create must run as the
-  // system principal (#1888 runAs is now enforced). Without this it relies on the
-  // "no identity → security-skipped" fall-through, which breaks the moment the
-  // target object carries row-level security.
+  // system principal (#1888 runAs is now enforced). Without this the run is
+  // user-less under the default `runAs:'user'`, so its create is refused
+  // (`AUTOMATION_UNSCOPED_RUN_DATA_ACCESS`); the "no identity → security-skipped"
+  // fall-through it once relied on is gone (ADR-0096 D5 refuses a principal-less
+  // context in the security middleware too).
   runAs: 'system',
   nodes: [
     {
@@ -1598,10 +1605,14 @@ export const InboundTaskWebhookFlow = defineFlow({
       label: 'Create Task',
       config: {
         objectName: 'showcase_task',
+        // CEL value envelopes — the `{…}` template dialect is retired from
+        // value slots. A webhook body may leave `assignee` / `project` out, and
+        // CEL refuses an absent key where the template wrote nothing, so those
+        // two are guarded with `has()` and write `null` instead.
         fields: {
-          title: '{record.title}',
-          assignee: '{record.assignee}',
-          project: '{record.project}',
+          title: { dialect: 'cel', source: 'record.title' },
+          assignee: { dialect: 'cel', source: 'has(record.assignee) ? record.assignee : null' },
+          project: { dialect: 'cel', source: 'has(record.project) ? record.project : null' },
           status: 'todo',
         },
         outputVariable: 'taskId',

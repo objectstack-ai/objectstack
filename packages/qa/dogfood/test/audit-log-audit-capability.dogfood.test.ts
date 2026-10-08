@@ -367,8 +367,10 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
 //
 // `PLATFORM_CAPABILITIES` declares the capability `scope: 'org'`. That is a
 // statement about the runtime: the capability lifts the parent-record gate
-// only, so under a wall-enforcing tenancy posture the tenant wall still bounds
-// a holder to its own organization's ledger rows. A real `isolated` boot, two
+// only, so under a wall-enforcing tenancy posture the ledger's organization row
+// scope (`sys_audit_log_org` on the attribution field `tenant_id`, ADR-0131 D7:
+// the ledger has no organization column) still bounds a holder to its own
+// organization's ledger rows. A real `isolated` boot, two
 // organizations each created by its owner, each writing and deleting one
 // record; the owner of the first holds the capability.
 
@@ -422,7 +424,7 @@ describe('[#21260] the ledger audit capability is bounded by its holder’s orga
           const tenancy = await stack.kernel.getServiceAsync<any>('tenancy');
           const orgOf = async (id: string) =>
             [...new Set((await ql.find(LEDGER, { where: { object_name: OBJ, record_id: id }, context: { ...SYS } }))
-              .map((r: Row) => r.organization_id))];
+              .map((r: Row) => r.tenant_id))];
           return { posture: tenancy?.posture, active: tenancy?.isolationActive, a: await orgOf(gone.a), b: await orgOf(gone.b) };
         },
         armed: (o) => o.posture === 'isolated' && o.active === true && org.a !== org.b &&
@@ -446,7 +448,7 @@ describe('[#21260] the ledger audit capability is bounded by its holder’s orga
     expect(await servedAbout('b', gone.a)).toBe(0);
   });
 
-  it('platform administrator: is served both, through its own wall bypass', async () => {
+  it('platform administrator: is served both, through its superuser read bypass', async () => {
     expect(await servedAbout('admin', gone.a)).toBe(2);
     expect(await servedAbout('admin', gone.b)).toBe(2);
   });

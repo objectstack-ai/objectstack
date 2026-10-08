@@ -42,8 +42,7 @@ await kernel.use(
 );
 ```
 
-`readAudit` is the only key `AuditPluginOptions` declares, and it accepts
-exactly those three:
+`readAudit` accepts exactly those three:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -58,6 +57,10 @@ tables, auth/session objects, and ADR-0057 telemetry plumbing such as `sys_job`
 object** rather than silently accepted. An empty — or fully excluded — set
 registers no hook, so a deployment that opts nothing in pays nothing on its read
 path.
+
+`AuditPluginOptions` declares one other key, `getLocale`, a host locale resolver
+for the language activity summaries are written in; it does not change what is
+audited.
 
 <Callout type="warn">
 **There is no object-metadata key and no environment variable.** `enable.auditReads`

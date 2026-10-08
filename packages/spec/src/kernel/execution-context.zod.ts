@@ -441,6 +441,31 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
   preserveAudit: z.boolean().optional().describe('Historical import: preserve the ORIGINAL audit timeline for this write instead of stamping it "now". Opt-in and server-constructed only, never client-supplied. On the UPDATE path it admits a whitelist — the audit/timestamp family (created_at / created_by / updated_at / updated_by) plus author-declared business `readonly` fields — while platform-managed `system` columns (tenancy, generated) stay stripped. On INSERT the exemption does NOT apply: the create-side static `readonly` strip runs inside `engine.insert` itself (after the `beforeInsert` hooks, before validation — the 2026-09-03 ruling; the DataProtocol ingress copy it replaced is deleted) and reads only `context.isSystem`, so a non-system create carrying `preserveAudit` still has those fields stripped and is warned (WARN) that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. Permissions / RLS / field-level security are unaffected.'),
 
   /**
+   * The option values a data import KEPT for this write, by field name (#22183)
+   * — the other half of `ImportRequest.createMissingOptions`.
+   *
+   * With that option on, the import's cell coercion keeps a `select` / `radio`
+   * / `multiselect` cell that matches none of the field's options instead of
+   * failing the row, and the import runner puts exactly the kept values here:
+   * one entry per field, listing the unmatched cells (each unmatched item of a
+   * multi-value cell). The engine's write-path option check admits a value
+   * outside the field's options when it is listed here for that field, on this
+   * write only, and still refuses every other value outside them. A field bound
+   * to a shared picklist that did not resolve stays refused: that is a list
+   * that failed to load, not a value the list lacks.
+   *
+   * Nothing else changes: the field's option list is not written, permissions /
+   * RLS / field-level security are unaffected, and a LATER write that sends the
+   * field is judged against the options again (one that leaves the field out is
+   * not judged on it at all).
+   *
+   * Server-constructed only, never client-supplied — the import runner sets it
+   * from the cells it kept, exactly like {@link skipStateMachine} and
+   * {@link preserveAudit} from `treatAsHistorical`.
+   */
+  keptOptionValues: z.record(z.string(), z.array(z.string())).optional().describe('Import with `createMissingOptions`: per field name, the option values the import kept because they matched none of the field\'s options. The write-path option check admits exactly these values on this write (and still refuses every other value outside the options); the field\'s options are not changed, and a later write that sends the field is judged against them again. Server-constructed only (set by the import runner), never client-supplied.'),
+
+  /**
    * OAuth 2.1 scopes granted to the access token that authenticated this
    * request, when the principal was resolved from an OAuth bearer token
    * (the MCP surface's human-client track, #2698). UNDEFINED for every

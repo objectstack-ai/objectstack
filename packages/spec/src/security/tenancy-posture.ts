@@ -114,20 +114,37 @@ export function postureUsesUnionScope(posture: TenancyPosture): boolean {
 export interface OrgScopingEntitlement {
   readonly supportedPostures?: readonly TenancyPosture[];
   /**
-   * Objects THIS deployment declares platform-global: Layer 0 must not wall
-   * them here, exactly as if the object had declared
-   * `tenancy: { enabled: false }` — but only on this deployment. Consumed by
-   * plugin-security when arming the Layer 0 organization wall; it composes
-   * with (never replaces) the object-level authoring channel.
+   * Objects THIS deployment declares platform-global: on this deployment each
+   * one gets NO organization column (ADR-0131 D7 — the #12699 declaration
+   * made total). The injected-columns plan reads the declaration
+   * (`resolveInjectedSystemColumns`' deployment input, `@objectstack/spec/data`),
+   * so the engine's schema registry neither injects nor provisions
+   * `organization_id` for a declared object and registers it as declaring
+   * `systemFields.tenant: false`: Layer 0 and the driver agree by having
+   * nothing to scope, and the object is governed by object permission, not by
+   * the wall. The same object keeps its column, and walls, on every
+   * deployment that does not declare it. It composes with (never replaces)
+   * the object-level authoring channel.
+   *
+   * Read by the ObjectQL plugin at `start()`, before the first schema sync:
+   * every `init()` has run by then (ADR-0116, the Phase 1/2 split), so a
+   * provider that registers `org-scoping` in its `init()` — and declares it in
+   * `providesServices` — has always registered. An object registered earlier
+   * is re-planned there, before its table is created.
    *
    * Entries are exact object machine names ({@link PlatformGlobalObjectsSchema}
-   * — no wildcards: a pattern would let one declaration unwall an open-ended
-   * set, and the whole point of the seam is an explicit, auditable carve-out).
+   * — no wildcards: a pattern would let one declaration drop the column from
+   * an open-ended set, and the whole point of the seam is an explicit,
+   * auditable carve-out). An object that DECLARES its own `organization_id`
+   * keeps that column (it is the author's, not the platform's), walls on it,
+   * and is reported once at boot.
    *
-   * Fail closed: absent ⇒ every object walls exactly as its own declaration
-   * says; a junk shape is refused loudly at the consuming seam (the
+   * Fail closed: absent ⇒ every object's plan is byte-identical to a runtime
+   * predating the key; a junk shape is refused loudly at the reading seam (the
    * `MembershipPolicy` precedent — never coerced), which also resolves to
-   * "absent".
+   * "absent". Existing rows' column on a declaring deployment is not touched
+   * by any boot step (ADR-0131 D14): schema sync is additive, and the column
+   * stays as an orphan until the operator removes it.
    */
   readonly platformGlobalObjects?: readonly string[];
   /**
@@ -137,9 +154,9 @@ export interface OrgScopingEntitlement {
    * `organization_admin_no_bypass` (the de-VAMA'd variant) instead, on walled
    * postures too. The ADR-0105 D4 rationale for granting the unbounded set
    * under a wall — "Layer 0 bounds it" — stops holding on a deployment that
-   * carves platform-global objects OUT of the wall with
-   * {@link platformGlobalObjects}, so the same runtime that declares the
-   * carve-out declares this suppression.
+   * declares objects platform-global with {@link platformGlobalObjects} (they
+   * carry no organization column there, so no wall bounds them), so the same
+   * runtime that declares the carve-out declares this suppression.
    *
    * Fail closed: absent or `false` ⇒ today's posture-keyed grant; junk is
    * refused loudly and resolves to "absent".
@@ -167,8 +184,8 @@ export type PlatformGlobalObjects = z.infer<typeof PlatformGlobalObjectsSchema>;
  * object schema: the `org-scoping` service is usually a live plugin instance
  * carrying service machinery alongside the declaration, and unknown keys are
  * not junk. Consumers validate PER KEY (each key fails closed independently)
- * rather than all-or-nothing — see plugin-security's
- * `readDeploymentOrgScopingEntitlement`.
+ * rather than all-or-nothing — see `readDeploymentOrgScopingEntitlement`
+ * (`@objectstack/core`).
  */
 export const OrgScopingEntitlementSchema = z.object({
   supportedPostures: z.array(TenancyPostureSchema).readonly().optional(),

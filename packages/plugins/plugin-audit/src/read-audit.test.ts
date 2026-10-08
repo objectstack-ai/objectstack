@@ -142,10 +142,14 @@ const invoiceObject = {
   label: 'Invoice',
 };
 
-/** The ledger, declared with the columns the writer conditionally stamps. */
+/**
+ * The ledger, declared with the column the writer conditionally stamps
+ * (`actor`) and, like the shipped object, no organization column (ADR-0131 D7).
+ */
 const auditLogObject = {
   name: 'sys_audit_log',
   label: 'Audit Log',
+  systemFields: { tenant: false },
   fields: {
     id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
     created_at: { name: 'created_at', label: 'At', type: 'datetime' as const },
@@ -157,7 +161,6 @@ const auditLogObject = {
     old_value: { name: 'old_value', label: 'Old', type: 'textarea' as const },
     new_value: { name: 'new_value', label: 'New', type: 'textarea' as const },
     tenant_id: { name: 'tenant_id', label: 'Tenant', type: 'text' as const },
-    organization_id: { name: 'organization_id', label: 'Org', type: 'text' as const },
   },
 };
 
@@ -489,7 +492,7 @@ describe('#8992 who the row names — and who it deliberately does not', () => {
   it("the row is stamped with the RECORD's organization, not just the viewer's", async () => {
     const writer = installReadAuditWriter(engine, { objects: ['contact'], timers: makeManualTimers() })!;
     // #8287's ruling, carried onto the read row: stamped with the VIEWER's
-    // active org, a row about an org_a record would land behind org_b's wall —
+    // active org, a row about an org_a record would land in org_b's scope —
     // invisible to the one tenant admin it concerns.
     await engine.findOne(
       'contact',
@@ -499,7 +502,8 @@ describe('#8992 who the row names — and who it deliberately does not', () => {
 
     const rows = await ledgerRows(engine);
     expect(rows[0].tenant_id).toBe('org_a');
-    expect(rows[0].organization_id).toBe('org_a');
+    // [ADR-0131 D7] The attribution field is the row's only organization column.
+    expect(rows[0].organization_id).toBeUndefined();
   });
 });
 

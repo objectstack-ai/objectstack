@@ -23,7 +23,7 @@ import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact
 import { stackFilterJudge } from '../utils/authoring-filter-judge.js';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manifest.js';
-import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
+import { preflightDeclaredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
 import { collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
 import {
   printHeader,
@@ -33,6 +33,8 @@ import {
   printStep,
   formatConversionNotice,
   printAuthoringRuleErrors,
+  authoringFindingDetailLines,
+  type AuthoringRuleFinding,
   printDocIssueErrors,
   JSON_FULL_LIST_REMEDY,
   createTimer,
@@ -279,9 +281,15 @@ export default class Validate extends Command {
       // carries the key the author actually wrote. Computed here rather than
       // down in the warnings section so the `--json` path reports it too — the
       // "computed, then discarded" shape this file already had to fix once.
+      //
+      // The item walk reads the package-union stack (#22238): a multi-package
+      // `preserve` artifact carries its collections only in `packages[]`, so
+      // the top level alone held no item to walk. The stack-key lint stays on
+      // the top level on purpose: it judges the envelope's own keys, and a
+      // package body is a closed shape the parse refuses an unknown key on.
       unknownKeyWarnings = [
         ...lintUnknownStackKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
-        ...lintUnknownAuthoringKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
+        ...lintUnknownAuthoringKeys(authoringRuleUnionStack(normalized as Record<string, unknown>), ObjectStackDefinitionSchema),
       ].map(formatUnknownAuthoringKey);
       // 2b. [#16544] Lower inline `function` handlers (Hook.handler, action
       //     `target`, top-level `functions`) to a metadata `body` + string ref
@@ -687,10 +695,12 @@ export default class Validate extends Command {
       }
 
       if (!flags.json) printStep('Checking that every required capability has a provider installable in this edition...');
-      const capProviderPreflight = preflightRequiredCapabilities({
-        requires: Array.isArray((config as { requires?: unknown[] }).requires)
-          ? ((config as { requires?: unknown[] }).requires as unknown[])
-          : [],
+      // [#22189] Every place the stack declares `requires`: its top level, or
+      //     each `packages[]` body, naming the package. A multi-package
+      //     `preserve` artifact carries `requires` only in its bodies.
+      const capProviderPreflight = preflightDeclaredCapabilities({
+        requires: (config as { requires?: unknown }).requires,
+        packages: packageEntries,
         projectDir: dirname(absolutePath),
       });
       const capProviderErrors = capProviderPreflight.errors;
@@ -838,7 +848,14 @@ export default class Validate extends Command {
       // before, roughly half were printed inline and invisible to it, so
       // `--strict` failed or passed depending on which gate happened to raise
       // the finding — a second, quieter version of the same coverage drift.
+      //
+      // [#22161] Each one also remembers its finding, so the text face below
+      // prints its `fix:` and `rule:` lines (with the `os explain` pointer) the
+      // way `os build` does — the warning line itself is one verdict sentence
+      // now, and the rule id is how an author reaches the rest.
+      const registryFindingAt = new Map<number, AuthoringRuleFinding>();
       for (const f of ruleAdvisories) {
+        registryFindingAt.set(warnings.length, f);
         warnings.push(`${f.where}: ${f.message}`);
       }
       for (const w of docWarnings) {
@@ -941,8 +958,12 @@ export default class Validate extends Command {
 
       if (warnings.length > 0) {
         console.log('');
-        for (const w of warnings) {
+        for (const [i, w] of warnings.entries()) {
           console.log(chalk.yellow(`  ⚠ ${w}`));
+          const finding = registryFindingAt.get(i);
+          if (finding) {
+            for (const line of authoringFindingDetailLines(finding)) console.log(chalk.dim(`    ${line}`));
+          }
         }
         // The text face's half of the `--strict` gate. Its JSON counterpart is
         // the `CliExitCode` argument at the `emitJson` call above, reading this

@@ -285,7 +285,7 @@ describe('the refusal set is derived from ObjectSchema.shape — pinned in both 
     expect(derived).toEqual([...COLLECTION_KEYS_IN_SHAPE_ORDER]);
   });
 
-  it('the config-object literal list equals the shape walk, in shape order (#16075)', () => {
+  it('the config-object literal list equals the shape walk, in shape order', () => {
     expect(derivedConfigObjects).toEqual([...CONFIG_OBJECT_KEYS_IN_SHAPE_ORDER]);
   });
 

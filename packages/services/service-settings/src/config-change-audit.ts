@@ -131,13 +131,12 @@ export const CONFIG_CHANGE_ACTION = 'config_change';
  * of that row, and publishing it would widen this module's exported surface for
  * nothing.
  *
- * ⛔ The two pre-existing spellings below — the `organization_id` field probe
- * and the insert itself — are deliberately left INLINE rather than folded onto
- * this constant. They are counted sites in `content/docs/permissions/tenant-audit-census.mdx`
- * ("object name spelled inline" vs "named through a const"), so folding them
- * moves a corpus-scale ratchet and a hand-written prose count in a docs tree
- * this change has no business in. The consolidation is worth doing; it is not
- * worth doing here.
+ * ⛔ The pre-existing spelling below — the insert itself — is deliberately left
+ * INLINE rather than folded onto this constant. It is a counted site in
+ * `content/docs/permissions/tenant-audit-census.mdx` ("object name spelled
+ * inline" vs "named through a const"), so folding it moves a corpus-scale
+ * ratchet and a hand-written prose count in a docs tree this change has no
+ * business in. The consolidation is worth doing; it is not worth doing here.
  */
 const AUDIT_LEDGER_OBJECT_NAME = 'sys_audit_log';
 
@@ -170,48 +169,6 @@ type ConfigChangeLogger = SettingsDiagnosticsLogger & {
 };
 
 /**
- * Whether the registered `sys_audit_log` schema declares `field`.
- *
- * `organization_id` is auto-injected by the SchemaRegistry ONLY in multi-tenant
- * mode, so it is present on some deployments and absent on others.
- * Unconditionally stamping it made every audit INSERT fail on a single-tenant
- * stack ("table sys_audit_log has no column named organization_id"); never
- * stamping it makes the SecurityPlugin's RLS predicate
- * (`organization_id = current_user.organization_id`) hide every row from
- * non-platform-admin readers on a multi-tenant one — which would leave the
- * `config_changes` view exactly as empty as the defect this card fixes, one
- * layer further down. `plugin-audit`'s own writer resolves it the same way, off
- * the same lazily-read schema.
- *
- * Best-effort: an engine that exposes no `getSchema` simply skips the stamp,
- * which is the pre-#8145 behaviour of every other explicit `sys_audit_log`
- * writer in the repo.
- */
-function makeFieldProbe(engine: IDataEngine): (field: string) => boolean {
-  let fields: Set<string> | null | undefined;
-  return (field: string): boolean => {
-    if (fields === undefined) {
-      fields = null;
-      try {
-        // `getSchema` is not on `IDataEngine`; it is an ObjectQL member every
-        // real engine carries. Guarded rather than declared, so a lean engine
-        // double stays assignable.
-        const schema: any = (engine as any).getSchema?.('sys_audit_log');
-        const declared = schema?.fields;
-        if (declared && typeof declared === 'object' && !Array.isArray(declared)) {
-          fields = new Set<string>(Object.keys(declared));
-        } else if (Array.isArray(declared)) {
-          fields = new Set<string>(declared.map((f: any) => f?.name).filter(Boolean));
-        }
-      } catch {
-        /* best-effort — absence just means we skip the stamp */
-      }
-    }
-    return fields != null && fields.has(field);
-  };
-}
-
-/**
  * [#18368] Is the platform audit ledger MOUNTED on this deployment?
  *
  * Three answers, and the third is the one a two-valued predicate would have
@@ -221,9 +178,8 @@ function makeFieldProbe(engine: IDataEngine): (field: string) => boolean {
  *  - `false` — the engine answered and it is not. This host declined to have a
  *              ledger; skip, and say so on `debug` only.
  *  - `undefined` — the engine could not be ASKED. `getSchema` is an ObjectQL
- *              member, not an `IDataEngine` one (the same guarded reach
- *              {@link makeFieldProbe} documents), so a lean engine double may
- *              not carry it, and a host engine may throw out of it. ⛔ Never
+ *              member, not an `IDataEngine` one (a guarded reach, never a
+ *              declared one), so a lean engine double may not carry it, and a host engine may throw out of it. ⛔ Never
  *              read as "absent": an unanswerable probe must leave the write
  *              attempted, which is this file's pre-#18368 behaviour, so a fault
  *              on such an engine stays reported exactly as it was.
@@ -270,7 +226,6 @@ export function buildConfigChangeAuditSink(
   logger?: ConfigChangeLogger,
 ): SettingsAuditSink {
   const eng: any = engine;
-  const declares = makeFieldProbe(engine);
   let failureReported = false;
 
   return {
@@ -323,7 +278,15 @@ export function buildConfigChangeAuditSink(
                 scope: entry.scope,
                 digest: entry.valueDigest,
               }),
-          tenant_id: entry.tenantId ?? null,
+          // [ADR-0131 D7] The organization this row is ABOUT — the ledger's
+          // attribution field and its only organization column (it has no
+          // `organization_id`). A GLOBAL-scope change is a deployment-level
+          // action about no organization, so its row carries none, whatever
+          // organization the writing session has active; organization readers
+          // are scoped on this field, so stamping it would show one
+          // organization a deployment-wide change. Tenant- and user-scope
+          // changes keep the caller's organization.
+          tenant_id: entry.scope === 'global' ? null : entry.tenantId ?? null,
           metadata: safeStringify({
             event: isReset ? 'settings.reset' : 'settings.set',
             namespace: entry.namespace,
@@ -333,7 +296,6 @@ export function buildConfigChangeAuditSink(
             ...(entry.requestId ? { requestId: entry.requestId } : {}),
           }),
         };
-        if (declares('organization_id')) row.organization_id = entry.tenantId ?? null;
 
         await eng.insert('sys_audit_log', row, { context: SYSTEM_CTX });
       } catch (err: any) {

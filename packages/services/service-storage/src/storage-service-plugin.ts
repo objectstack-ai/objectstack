@@ -57,6 +57,12 @@ import {
   movesStorageLocation,
   type StorageTarget,
 } from './storage-target.js';
+import {
+  readStorageLimits,
+  sameStorageLimits,
+  describeStorageLimits,
+  type StorageLimitsSnapshot,
+} from './storage-limits.js';
 
 /**
  * Configuration options for the StorageServicePlugin.
@@ -91,11 +97,18 @@ export interface StorageServicePluginOptions {
   basePath?: string;
   /**
    * Default presigned URL TTL in seconds.
+   *
+   * [#22283] A value SAVED in the `storage` settings (`presigned_ttl`, an admin
+   * save or an env override) wins over this one; the namespace's manifest
+   * default does not. Same precedence as the adapter keys.
    * @default 3600
    */
   presignedTtl?: number;
   /**
    * Default chunked upload session TTL in seconds.
+   *
+   * [#22283] A value SAVED in the `storage` settings (`session_ttl`) wins over
+   * this one; the namespace's manifest default does not.
    * @default 86400
    */
   sessionTtl?: number;
@@ -534,6 +547,20 @@ export class StorageServicePlugin implements Plugin {
               values[k] = v?.value;
               if (v?.source) sources[k] = String(v.source);
             }
+
+            // [#22283] The Limits group — `presigned_ttl`, `session_ttl`,
+            // `max_upload_mb` — read on EVERY pass, ahead of the adapter gate
+            // below: that gate returns early on an unauthored adapter, and a
+            // save that touched only a limit must still reach the doors. Held
+            // on the swappable service the doors are composed over, where they
+            // resolve it per request against their own options (saved value >
+            // host option > manifest default, `storage-limits.ts`).
+            const limits = readStorageLimits(values, sources, (m) => ctx.logger.warn(m));
+            const previousLimits = this.storage.getLimitsSnapshot();
+            this.storage.setLimitsSnapshot(limits);
+            if (!sameStorageLimits(previousLimits, limits)) {
+              ctx.logger.info(`StorageServicePlugin: storage limits read — ${describeStorageLimits(limits)}`);
+            }
             // [#5536] Only an AUTHORED value (an admin-saved row or an env
             // override) may override the constructor-built adapter. The old
             // gate asked "is any value non-empty?", but the manifest defaults
@@ -880,7 +907,13 @@ export function toGateRegistry(kernel: StorageRouteKernel): StorageGateRegistry 
 
 /** The inputs {@link composeStorageRoutes} binds the door over. Package-internal. */
 export interface StorageRoutesComposition {
-  /** The `storage` service the routes serve bytes through. */
+  /**
+   * The `storage` service the routes serve bytes through. When it is the
+   * plugin's {@link SwappableStorageService} it also carries the `storage`
+   * namespace's Limits group (#22283), which the composition binds for the
+   * upload doors — so a host's mount honours a save exactly as the plugin's
+   * own mount does.
+   */
   storage: IStorageService;
   /** The data engine `sys_file` / `sys_upload_session` live in; `null` ⇒ in-memory metadata (bare kernel). */
   engine: IDataEngine | null;
@@ -959,10 +992,21 @@ export function composeStorageRoutes(
       ? (file: FileRecord) => findFileHolder(engine as any, file.id, file as any)
       : undefined;
 
+  // [#22283] The saved Limits group travels on the `storage` service itself —
+  // the same object an adapter save swaps — so both mounts read it from the
+  // one place it is written. Duck-typed like the routes' `verifyToken`: a host
+  // whose `storage` is a bare adapter (no plugin, no settings) has no Limits
+  // group, and its doors keep their options and no size limit.
+  const limitsCarrier = composition.storage as { getLimitsSnapshot?: () => StorageLimitsSnapshot | undefined };
+  const limitsSnapshot = typeof limitsCarrier.getLimitsSnapshot === 'function'
+    ? () => limitsCarrier.getLimitsSnapshot!()
+    : undefined;
+
   registerStorageRoutes(http, composition.storage, store, {
     basePath,
     presignedTtl: composition.presignedTtl,
     sessionTtl: composition.sessionTtl,
+    limitsSnapshot,
     downloadTtl: composition.downloadTtl,
     resolveSession,
     authorizeFileRead,

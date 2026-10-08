@@ -5483,6 +5483,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'drops it. The D3 records are the seven `sys-*-organization-column-retired` semantic entries.',
   },
   {
+    id: 'document-schemas-retired',
+    order: 88,
+    text:
+      'It also retires the document family WHOLE (ADR-0049 enforce-or-remove; the ruling of record on '
+      + 'PDF and print documents, letter B′, 2026-10-08: "A document is a page with a print '
+      + 'declaration; no new template type"): the four defs of `data/document.zod.ts` — '
+      + '`data/DocumentTemplate` (a docx template with placeholders), `data/Document`, '
+      + '`data/ESignatureConfig` and the orphaned `data/DocumentVersion` — exported from '
+      + '`@objectstack/spec/data`, mounted by no stack key, registered as no metadata type and read by '
+      + 'nothing in this repository, objectui or hotcrm, leave via RETIRED_DEFS_BY_MAJOR with one D3 '
+      + 'semantic entry, so that "template" means one thing: a printable document is a page that '
+      + 'declares `print`. The `ESignatureConfig` deadline-key tombstones leave with their def\'s source '
+      + 'and their RETIRED_KEYS_BY_MAJOR[18] entries stay as history.',
+  },
+  {
     id: 'duration-keys-unit-in-key',
     order: 24,
     text:
@@ -5634,6 +5649,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`flow-approval-node-config-contract-refused`.',
   },
   {
+    id: 'flow-builtin-node-config-undeclared-keys-refused',
+    order: 89,
+    text:
+      'Then the builtin key arm covers every builtin whose contract registration could judge: a key the '
+      + 'executor contract of a `get_record`, `create_record`, `update_record`, `delete_record`, `notify`, '
+      + '`http`, `screen`, `map`, `loop` or `parallel` node does not declare is refused at parse, at '
+      + '`nodes.N.config.<key>`, with the same `node-config-refused-by-contract` code, closed with the '
+      + 'rename-or-remove remedy. Registration\'s descriptor walk refused those keys already, after '
+      + '`objectstack validate` and `objectstack compile` had passed them, and it now stands aside for those '
+      + 'types, so each has one judge; the declared key sets were measured equal first, so registration '
+      + 'refuses what it refused before. `try_catch` stays registration\'s: its contract\'s `retry` strips an '
+      + 'unknown key where its descriptor closes it. No key is removed, so there is no tombstone, and no D2 '
+      + 'conversion exists. Its D3 record is the semantic entry '
+      + '`flow-builtin-node-config-undeclared-keys-refused`.',
+  },
+  {
     id: 'flow-builtin-node-config-values-refused',
     order: 85,
     text:
@@ -5700,6 +5731,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'removed, so there is no tombstone, and no D2 conversion exists: the platform cannot know what '
       + 'an undeclared key was meant to be. Its D3 record is the semantic entry '
       + '`flow-script-subflow-config-undeclared-keys-refused`.',
+  },
+  {
+    id: 'flow-value-slot-template-dialect-refused',
+    order: 88,
+    text:
+      'It retires the single-brace `{…}` template dialect from the flow VALUE slots (the C half of the '
+      + 'maintainer\'s ruling D on the flow expression dialects): the `assignment` node\'s values, in all '
+      + 'three shapes, and the `fields` map of `create_record` and `update_record`, where a CEL value '
+      + 'envelope is already the expression form. A string there is now the literal '
+      + 'text it spells, and one carrying a `{…}` token is refused — by `FlowValueSlotSchema`, '
+      + '`registerFlow`, `objectstack validate` and the executor alike — with the CEL spelling of each token. '
+      + 'No D2 conversion exists: every authored spelling was measured lossy (an absent key writes nothing '
+      + 'under the template and fails under CEL; CEL divides two integers as integers), so which value an '
+      + 'absent key should write is the author\'s judgment. The date macros and the `$User` paths keep their '
+      + 'meaning until CEL can spell them. Its D3 record is the semantic entry '
+      + '`flow-value-slot-template-dialect-refused`.',
   },
   {
     id: 'flow-write-node-stored-metadata-target-refused',
@@ -6151,6 +6198,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`permission-rls-tags-retired`.',
   },
   {
+    id: 'platform-global-object-organization-column-retired',
+    order: 89,
+    text:
+      'It also makes the deployment\'s platform-global declaration total (ADR-0131 D7): an object a deployment '
+      + 'declares platform-global in its `org-scoping` service\'s `platformGlobalObjects` gets no '
+      + 'organization column on that deployment, because the injected-columns plan reads the declaration, '
+      + 'so the organization wall and the driver agree by having nothing to scope. The engine reads it at '
+      + 'its plugin start, before the first schema sync, once every plugin init has run, and re-plans the '
+      + 'objects registered before it; the security layer\'s stand-down for such an object retires with '
+      + 'it. An absent declaration changes nothing, and a malformed one is refused and declares nothing. '
+      + 'Nothing moves automatically: a declaring deployment\'s existing table keeps the column as an '
+      + 'orphan the boot drift report names. The D3 record is the '
+      + '`platform-global-object-organization-column-retired` semantic entry.',
+  },
+  {
     id: 'plugin-manifest-contributes-dead-members-retired',
     order: 16,
     text:
@@ -6226,6 +6288,23 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'rather than mechanical: an authored palette has no lossless target (N themes vs '
       + 'M apps is a judgment), so the entry prescribes the hand move instead of deleting '
       + 'authored content silently.',
+  },
+  {
+    id: 'sys-audit-log-organization-column-retired',
+    order: 88,
+    text:
+      'It also takes the injected organization column off the compliance ledger, `sys_audit_log` '
+      + '(ADR-0131 D7): some of its rows are about deployment-level actions no organization owns, so the '
+      + 'organization a row is about stays in the attribution field `tenant_id`, which every writer '
+      + 'already stamps, and never becomes the tenancy anchor. With no column there is no wall, so a '
+      + 'platform administrator now reads the rows about no organization too; an organization reader is '
+      + 'scoped to the rows about its active organization by the platform row policy '
+      + '`sys_audit_log_org`, stripped when no wall is enforced, and `organization_admin` names the '
+      + 'ledger without the superuser bits so its wildcard bypass cannot skip that policy. Per-tenant '
+      + 'retention partitions on `tenant_id`. Nothing moves automatically: an existing database keeps '
+      + 'the column as an orphan the boot drift report names, for the v18 ceremony to drop once its '
+      + 'values are confirmed in `tenant_id`. The D3 record is the '
+      + '`sys-audit-log-organization-column-retired` semantic entry.',
   },
   {
     id: 'sys-setting-global-rung-moved',
@@ -10809,6 +10888,64 @@ const step18: MigrationStep = {
         + 'exactly as `interval` did — the value and its unit are unchanged, only the key name moves.',
     },
     {
+      id: 'document-schemas-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'the document family, retired whole: the four defs data/DocumentTemplate, data/Document, '
+        + 'data/ESignatureConfig and data/DocumentVersion, and every name data/document.zod.ts '
+        + 'exported from @objectstack/spec/data (DocumentTemplateSchema, DocumentSchema, '
+        + 'ESignatureConfigSchema, DocumentVersionSchema, their z.input aliases and their Parsed '
+        + 'aliases)',
+      replacement:
+        'a printable document is a PAGE that declares `print` — no separate template type. Author '
+        + 'the document (an invoice, a delivery order, a letter, a report) as an ordinary `page` '
+        + 'with `kind: \'full\'`, its blocks in `regions` drawn from the printable block subset '
+        + '(`record:details`, `record:highlights`, `record:line_items`, `element:text`, '
+        + '`element:image` and the rest of PRINTABLE_PAGE_COMPONENT_TYPES), and a `print` block for '
+        + 'the paper, margins, running header and footer, page numbers and page-break hints. A '
+        + 'docx-with-placeholders template, a stored document with versions, and an e-signature '
+        + 'workflow have no replacement, because nothing on the platform ever merged, stored or '
+        + 'sent any of them; a document record the organisation keeps is ordinary object data, and '
+        + 'its files are `sys_file` attachments',
+      reason:
+        'ADR-0049 enforce-or-remove, by the ruling of record on the PDF / print document card '
+        + '(letter B′, 2026-10-08): "A document is a page with a print declaration; no new template '
+        + 'type", and "The zero-reader DocumentTemplateSchema, DocumentSchema and '
+        + 'ESignatureConfigSchema retire in v18 under ADR-0049 with ADR-0087 entries, so that '
+        + '\'template\' means one thing." Four defs sat on the exported surface and in the generated '
+        + 'reference docs — a docx template with typed placeholders, a document with versioning, '
+        + 'access control and an e-signature block, and the signer workflow — and were read by '
+        + 'NOTHING: they were exported from `@objectstack/spec/data`, mounted by no `stack.zod.ts` '
+        + 'key, registered as no metadata type and absent from every liveness ledger, and the '
+        + 'reader census over every package, app and example outside `packages/spec` (generated '
+        + 'reference docs, release notes and changelogs aside), over objectui at its pin and its '
+        + 'main, and over hotcrm returned zero hits for every exported name, against lit controls. '
+        + 'Keeping them would have given an author two meanings of "template" — the dead docx one '
+        + 'and the print page — and an AI that imports DocumentTemplateSchema a schema no runtime '
+        + 'reads. DocumentVersionSchema had one carrier, DocumentSchema.versioning, and leaves with '
+        + 'it. The ESignatureConfig deadline-key tombstones (RETIRED_KEYS_BY_MAJOR[18], D3 '
+        + '`esignature-config-deadline-keys-retired`) leave with their def\'s source; their registry '
+        + 'entries stay as history. Why D3 semantic and not a D2 conversion: the chain walks a '
+        + 'normalized STACK and `applyConversionsToStoredItem` maps a metadata type onto one of its '
+        + 'collections; none of these schemas is either, so a conversion would be a transform with no '
+        + 'seam that ever runs (the `kernel/MetadataPluginConfig:additionalTypes` precedent), and '
+        + 'with no carrier key there is no shape on which a tombstone could sit. `cloud` and real '
+        + 'customer code are UNMEASURED.',
+      acceptanceCriteria:
+        'No code imports DocumentTemplateSchema, DocumentSchema, ESignatureConfigSchema or '
+        + 'DocumentVersionSchema — or any of their type aliases — from @objectstack/spec or '
+        + '@objectstack/spec/data: every such import is TS2305 after upgrade. A printable document '
+        + 'is authored as a page with a `print` block, which `os validate` checks: the parse refuses '
+        + '`print` on a page that does not print its own authored blocks, and the printable block '
+        + 'subset refuses any other block inside it. `data/DocumentSchemaValidation` (the NoSQL '
+        + 'driver\'s schema-validation block, a different declaration) is unaffected. The four defs '
+        + 'are absent from `json-schema.manifest/data.json`, the api-surface / declaration-map / '
+        + 'export-origins shards and the generated reference docs. ⚠️ Runtime behaviour is '
+        + 'deliberately UNCHANGED and must be verified as such: nothing ever parsed or read these '
+        + 'shapes, so removing them removes no behaviour.',
+    },
+    {
       id: 'driver-options-timeout-to-timeout-ms',
       surface: '`DriverOptions.timeout` (data/driver.zod.ts) — the per-call options argument of every `IDataDriver` method',
       replacement: '`DriverOptions.timeoutMs` (milliseconds) — rename the key; the value is unchanged',
@@ -13347,6 +13484,86 @@ const step18: MigrationStep = {
         + 'row that exists only in `sys_metadata`. An approval node the contract accepts parses and '
         + 'registers byte-identically to before.',
     },
+    // #21982 — the D3 entry for the build doors refusing an UNDECLARED KEY on the
+    // builtin node types whose undeclared keys only `registerFlow` judged until
+    // now: `get_record`, `create_record`, `update_record`, `delete_record`,
+    // `notify`, `http`, `screen`, `map`, `loop` and `parallel`. It completes the
+    // key half of the executor-contract arm of `flowNodeConfigRefusals` that
+    // `flow-script-subflow-config-undeclared-keys-refused` opened for `script` and
+    // `subflow`, and makes that arm the one judge of a builtin's undeclared key:
+    // `registerFlow`'s descriptor walk stands aside for these types. It narrows the
+    // build doors' accept set to what registration already refused; no key is
+    // removed, so there is no tombstone and no RETIRED_KEYS_BY_MAJOR row, and no D2
+    // conversion exists: the platform cannot know what an undeclared key was meant
+    // to be.
+    //
+    // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+    // inside a code span and a table cell.
+    {
+      id: 'flow-builtin-node-config-undeclared-keys-refused',
+      surface:
+        'a get_record, create_record, update_record, delete_record, notify, http, screen, map, loop or parallel '
+        + 'flow node whose config carries a key its executor contract does not declare — a typo (titl), a key '
+        + 'the walk at registration already named (fieldValues on a write node, bulk on update_record, visibleIf '
+        + 'on a screen field), a key copied from another node type (outputVariable on an http node, flowName on a '
+        + 'loop), or a key nothing reads (bogusKey) — at the config itself, or on a screen field or one of its '
+        + 'options, a body-less legacy loop included. Never a key inside a free-form map (a filter, fields, '
+        + 'headers, defaults, input, payload or templateData key is author data), never a key on a region object '
+        + '(a loop body, a parallel branch) or on its nodes and edges (the region check at registration owns '
+        + 'those), and never a '
+        + 'try_catch key, which registration keeps judging against its descriptor. Reachable wherever a flow is '
+        + 'authored or stored: defineStack({ flows }) sources, defineFlow(), an exported stack passed to '
+        + 'objectstack validate or objectstack compile, a flow saved from the Studio flow designer, and a flow row '
+        + 'already sitting in sys_metadata',
+      replacement:
+        'the key the contract declares, or no key: rename a typo to the declared key it meant (the refusal '
+        + 'carries the contract\'s did-you-mean for a near miss), follow the contract\'s own prescription for a '
+        + 'known slip (`fieldValues` → `fields`, `bulk` / `all` / `multiple` → `multi: true`, `options: { multi }` → '
+        + 'a top-level `multi`, a screen field\'s `visibleIf` → `visibleWhen`, a loop\'s `itemVariable` → '
+        + '`iteratorVariable`), and delete a key nothing reads (an `http` node\'s `outputVariable` among them: the '
+        + 'http executor binds no output variable)',
+      reason:
+        'Each of these executors (`service-automation` `builtin/crud-nodes.ts`, `notify-node.ts`, '
+        + '`http-nodes.ts`, `screen-nodes.ts`, `map-node.ts`, `loop-node.ts`, `parallel-node.ts`) parses the '
+        + 'node\'s `config` against a strict contract before it acts. Until now the build doors\' executor-contract '
+        + 'arm held key membership back on these types, on the premise that registration judges it: '
+        + '`registerFlow`\'s undeclared-key walk (`validateNodeConfigKeys`) refuses such a key against the node '
+        + 'type descriptor\'s `configSchema`. So a `notify` node carrying `bogusKey` passed `FlowSchema.parse`, '
+        + '`objectstack validate` and `objectstack compile` (which copied it into the artifact), and then '
+        + 'registration refused the whole flow: at boot it was skipped with a warn, and a flow saved from Studio '
+        + 'was stored and then silently not registered. The one judge `FlowSchema.parse`, '
+        + '`AutomationEngine.registerFlow` (which parses first), `objectstack validate` and the metadata save door '
+        + 'share (`flowNodeConfigRefusals`) now refuses such a key on these types as `node-config-refused-by-contract`, '
+        + 'anchored at the key, one refusal per key, in the contract\'s own words and closed with the '
+        + 'rename-or-remove remedy, and the descriptor walk stands aside for every type that judge covers '
+        + '(`builtinNodeConfigKeysJudged`), so each type has one judge. Measured before the move: on each of '
+        + 'these types the descriptor\'s declared key sets, at every position the walk descends to, equal the '
+        + 'keys the contract accepts there, so registration refuses exactly what it refused before. ⚠️ '
+        + '`try_catch` is the one builtin not moved: its contract\'s `retry` is the shared `RetryPolicySchema`, '
+        + 'which strips an unknown key, while its descriptor closes `retry` to five keys, so its undeclared keys '
+        + 'stay registration\'s. ⚠️ A body-less legacy `loop` is not parsed at run time, and it is judged here on '
+        + 'key membership alone, which is what registration refused there already. ⚠️ A spelling an ADR-0087 D2 '
+        + 'conversion still rewrites at load (`object` and `filters` on a CRUD node, `to` / `subject` / `body` / '
+        + '`url` on a `notify`, `flow` on a `map`) is converted before the judge at every door that converts '
+        + 'first; met by a direct `FlowSchema.parse` or `defineFlow()` it is refused like any other undeclared '
+        + 'key. ⚠️ No D2 conversion: the platform cannot know what an undeclared key was meant to be. ⚠️ Where '
+        + 'such a node already sits the whole flow is refused, as registration already refused it: from the '
+        + 'metadata registry or `sys_metadata` at boot it is skipped with a `warn` naming it, its trigger not '
+        + 'armed, while the flows beside it register; a `defineStack({ flows })` source throws '
+        + '`StackSchemaInvalidError` for the whole stack; an artifact file is refused whole at load; a save from '
+        + 'Studio answers 422 naming the key. ADR-0087, ADR-0031.',
+      acceptanceCriteria:
+        'Run `objectstack validate` over every stack authored in config files, and boot every deployed '
+        + 'stack. Each refusal names the node and the key: `FlowSchema.parse` anchors a `custom` issue at '
+        + '`nodes.N.config.<key>` (`nodes.N.config.bogusKey`, `nodes.N.config.fields.0.visibleIf`, or the region '
+        + 'path `nodes.N.config.body.nodes.M.config…`), `objectstack validate` prints the same path, and '
+        + '`validateStackExpressions` phrases it as `node \'n\' (notify) config.bogusKey`. For each hit rename or '
+        + 'delete the key per the replacement. Two proofs. (1) For a stack authored in config files, '
+        + '`objectstack validate` is clean. (2) Boot the stack and confirm each flow REGISTERS: no `failed to '
+        + 'register flow` warn for it — that warn line is the locator for a row that exists only in '
+        + '`sys_metadata`. A node of these types whose keys its contract declares parses and registers '
+        + 'byte-identically to before.',
+    },
     // #21898 — the D3 entry for the build doors refusing a VALUE a builtin flow
     // node's executor contract refuses: the value half of the executor-contract arm
     // of `flowNodeConfigRefusals` (`flow-node-config-refusals.ts`), beside the
@@ -13967,6 +14184,42 @@ const step18: MigrationStep = {
         + 'expecting the stored value; a flow that needs a credential obtains it through a privileged '
         + 'binder; a start or edge condition that compared such a field against a literal is rewritten to '
         + 'test whether it is set (not null).',
+    },
+    // The template dialect leaves the flow value slots: one dialect for a computed
+    // value, CEL. Semantic-only — every token spelling authored in flows was
+    // measured lossy under conversion, so no D2 conversion rewrites any of them,
+    // and the date macros and run-user paths CEL cannot write yet are kept.
+    {
+      id: 'flow-value-slot-template-dialect-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'flows[].nodes[].config of an assignment node (the assignments map, the legacy assignments array and the '
+        + 'legacy bare config) and of create_record and update_record nodes (the fields map) — a string value, or a '
+        + 'string anywhere inside an array or object value, carrying a single-brace template token',
+      replacement:
+        'a CEL value envelope, { dialect: "cel", source: "…" }, evaluated to the value: a path is the same path '
+        + '(record.owner; a numeric segment becomes an index, list[0]; a variable whose name starts with $ is read '
+        + 'through vars, vars["$error"].message), arithmetic is the same arithmetic with every integer divisor written '
+        + 'as a double (round(x * 100) / 100.0), and text with holes is one concatenation (\'Hello \' + o.name). A '
+        + 'string with no token is the literal text it spells, and braces meant literally are a CEL string literal',
+      reason:
+        'The interpolator and the CEL engine answer differently for every token spelling authored in flows, so no '
+        + 'conversion is lossless (ADR-0087 D2) and none is applied. A path, an absent variable, key or list index '
+        + 'wrote nothing under the template and fails the run under CEL; text with a null hole rendered nothing and '
+        + 'CEL refuses + null; CEL divides two integers as integers, so round(x * 100) / 100 truncates 123.46 to 123. '
+        + 'Where a value may be absent, which of nothing, null or a default the field should take is the author\'s '
+        + 'decision — the template decided it silently. Two spellings are kept with their old meaning, because CEL '
+        + 'cannot write them yet: the date macros NOW() and TODAY() with a day offset (CEL yields a Timestamp, not the '
+        + 'ISO text, and has no string form for one) and the run-user paths beginning $User. (the flow CEL scope binds '
+        + 'no user). A flow carrying a refused value is refused at registration, by objectstack validate and by the '
+        + 'executor; a stored flow carrying one is skipped at boot with a warn naming it.',
+      acceptanceCriteria:
+        'Run objectstack validate: it reports each refused value as expression-invalid at the node and the value\'s '
+        + 'path, with the CEL spelling of its tokens. Rewrite each as that envelope; where a variable or key may be '
+        + 'absent, guard it (has(record.owner) ? record.owner : null, has(vars.x) ? vars.x : null for a variable) or '
+        + 'route around the node. Re-run the flow paths that write those fields and compare the stored values with '
+        + 'the ones the template wrote.',
     },
     // #21654 — the D3 entry for `FlowSchema`'s refusal of a write node aimed at a
     // stored-metadata table: the save-time half of #21624, which applies #21520's
@@ -16857,6 +17110,52 @@ const step18: MigrationStep = {
         + 'audience has that audience in `positions`, and every compliance report, audit filter or '
         + 'review process that assumed policy tags names the mechanism it actually uses instead.',
     },
+    // #15207 (ADR-0131 D7, C6 item 4) — the #12699 deployment declaration made
+    // total: an object a deployment declares platform-global
+    // (OrgScopingEntitlement.platformGlobalObjects) loses its injected organization
+    // column ON THAT DEPLOYMENT. A column retirement keyed on a deployment fact, not
+    // a spec-key retirement: no authorable key moves, so nothing lands in
+    // RETIRED_KEYS_BY_MAJOR and no D2 conversion exists to pair with. The stand-down
+    // semantics it replaces retire with it. Existing rows keep the orphaned column
+    // until the operator removes it (ADR-0131 D14; C7's inventory and the
+    // declarer's own backfill), which this entry does not perform.
+    {
+      id: 'platform-global-object-organization-column-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'OrgScopingEntitlement.platformGlobalObjects — an object a deployment declares platform-global no '
+        + 'longer keeps its injected organization_id column with the organization wall stood down over it; on '
+        + 'that deployment the injected-columns plan withholds the column, and the engine registers the object '
+        + 'with no organization_id and declaring systemFields.tenant false',
+      replacement:
+        'Nothing to rewrite where no deployment declares the object. On the declaring deployment, the declared '
+        + 'object has no `organization_id`: rewrite any authored filter, list-view column, report grouping, '
+        + 'formula or seed key that names `organization_id` on it, or drop it; a write naming it is refused '
+        + '`INVALID_FIELD` and a filter `INVALID_FILTER`. The object is governed by object permission, not by '
+        + 'the organization wall',
+      reason:
+        'ADR-0131 D7: "an object a deployment declares platform-global gets no organization column on that '
+        + 'deployment (the injected-columns plan reads the declaration), so Layer 0 and the driver agree by '
+        + 'having nothing to scope". Before this, the declaration stood the security layer\'s organization '
+        + 'wall down for the object while the column stayed, so the SQL driver went on scoping a read by the '
+        + 'caller organization that the wall had stopped scoping — measured on a booted kernel with a fixture '
+        + 'provider, before the change. ADR-0131 retires that stand-down ("replaced by D7\'s no-column"). The '
+        + 'engine reads the declaration at its plugin start(), before the first schema sync: every plugin '
+        + 'init() has completed by then (ADR-0116, the Phase 1/2 split) and the org-scoping provider registers '
+        + 'the service in its init(), declared in providesServices, so an object registered earlier is '
+        + 're-planned before its table is created. An absent declaration leaves every object\'s plan '
+        + 'byte-identical; a malformed one is refused loudly and declares nothing. An object that declares its '
+        + 'own organization_id keeps it and stays walled on it. Existing databases: schema sync is additive, so '
+        + 'the physical column stays on a declaring deployment and the boot drift report names it orphaned; '
+        + 'the operator removes it, and nothing moves at boot.',
+      acceptanceCriteria:
+        'On a deployment whose org-scoping service declares an object platform-global, the object is registered '
+        + 'and provisioned with no `organization_id`, the security layer composes no organization wall on it, '
+        + 'and a read carrying the caller organization reaches every row of its table; a non-declared object '
+        + 'on the same deployment keeps its column and its wall. With no declaration, or a malformed one, every '
+        + 'object keeps its column.',
+    },
     {
       id: 'platform-timezone-columns-iana-domain-refused',
       surface:
@@ -18991,6 +19290,58 @@ const step18: MigrationStep = {
         + 'for a row, so the key cannot separate the old IdP\'s subjects from the new one\'s, and the '
         + '`sys_sso_provider` update door refuses an issuer change while accounts are still bound to '
         + 'that provider.',
+    },
+    // #15207 (ADR-0131 D7, C6 item 2) — the compliance ledger loses its injected
+    // organization column, and the organization a row is ABOUT stays in the
+    // existing attribution field tenant_id. A platform-object COLUMN retirement,
+    // not a spec-key retirement: no authorable spec key moves, so nothing lands in
+    // RETIRED_KEYS_BY_MAJOR and no D2 conversion exists to pair with. Existing
+    // rows keep the orphaned column until the v18 operator ceremony (ADR-0131 D14,
+    // D10 fate 1), which this entry does not perform.
+    {
+      id: 'sys-audit-log-organization-column-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'sys_audit_log.organization_id — the injected organization column left the compliance ledger '
+        + '(packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts, which now declares '
+        + 'systemFields.tenant false); the organization a row is about stays in the attribution field '
+        + 'tenant_id, and an organization reader is scoped on it by a platform row policy',
+      replacement:
+        '`sys_audit_log.tenant_id`, the attribution field every writer stamps. Rewrite any authored '
+        + 'filter, list-view column, report grouping, formula or seed key that names `organization_id` on '
+        + '`sys_audit_log` to name `tenant_id`. A row about a deployment-level action leaves it empty. '
+        + 'Under an organization wall an organization reader is scoped to the rows about its active '
+        + 'organization by the platform row policy `sys_audit_log_org`, and a platform administrator '
+        + 'reads every row',
+      reason:
+        'ADR-0131 D7: the audit ledger may hold rows about deployment-level actions, so the organization '
+        + 'a row is about becomes a plain attribution field under a name the tenant-field resolver does not '
+        + 'claim, never the tenancy anchor, and the object is governed by object permission, not by the '
+        + 'wall. Writer census at commit 3ae59661dc of this repository\'s main branch: the record mirror, '
+        + 'the record-view writer and the sign-in writer in plugin-audit, and the settings change writer in '
+        + 'service-settings, stamp tenant_id and stamped the injected column with the same value; the '
+        + 'platform-admin standing writer in plugin-security stamps both NULL, by ruling; the two '
+        + 'administrative user writers in plugin-auth stamp neither. So the attribution field already '
+        + 'carries every organization the column did. Under a walled posture the tenant wall compared the '
+        + 'column to the caller organization, which hid every row about no organization from every reader, '
+        + 'platform administrators included. The read scope moves to the security layer, where the '
+        + 'engine computes it once: the platform row policy tenant_id equal to the caller organization, '
+        + 'shipped in organization_admin, member_default and viewer_readonly and stripped when no wall is '
+        + 'enforced, plus an explicit organization_admin entry for the ledger without viewAllRecords or '
+        + 'modifyAllRecords, because the wildcard superuser bypass would otherwise skip the policy on an '
+        + 'object with no tenant column and hand each organization administrator every organization\'s '
+        + 'rows. Per-tenant retention windows partition on tenant_id. Existing databases: schema sync is '
+        + 'additive, so the physical column stays and the boot drift report names it orphaned; once its '
+        + 'values are confirmed equal to tenant_id, the operator drops it with os migrate apply '
+        + '--allow-destructive, and any row where they differ is reported rather than dropped.',
+      acceptanceCriteria:
+        'No authored metadata names `organization_id` on `sys_audit_log`: the field resolver (lint and the '
+        + 'data door) answers it as an unknown field. A row about a deployment-level action is written '
+        + 'with `tenant_id` empty and no refusal. Under an organization wall an organization administrator '
+        + 'lists the rows whose `tenant_id` is its active organization and no other, and a platform '
+        + 'administrator lists every row, the rows with no `tenant_id` included. Under `single` the policy '
+        + 'is stripped and the organization administrator lists every row, as before.',
     },
     // #15207 (ADR-0131 D7, C6) — one D3 entry per removed column, as the card
     // requires. A platform-object COLUMN retirement, not a spec-key retirement: no
@@ -28008,6 +28359,87 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // the cloud repo's own declarations, not an open-source protocol). Prescription: the
     // `cloud-subpath-retired` semantic entry of this major.
     'cloud/VersionRelease',
+    // #22158 — `data/Document` — a stored document with versioning, a template,
+    // an e-signature block and access control, which no document store ever kept —
+    // leaves whole with the document family under ADR-0049 enforce-or-remove, by
+    // the ruling of record on #8346 (letter B′, maintainer 「8346 B′」 2026-10-08):
+    // "The zero-reader `DocumentTemplateSchema`, `DocumentSchema` and
+    // `ESignatureConfigSchema` retire in v18 under ADR-0049 with ADR-0087 entries,
+    // so that 'template' means one thing" — a printable document is a page that
+    // declares `print`. It was exported from `@objectstack/spec/data`
+    // (`data/document.zod.ts`), mounted by no `stack.zod.ts` key, registered as no
+    // metadata type, absent from every liveness ledger, and read by NOTHING: on
+    // objectstack `fec87e7e0` every hit for the family's exported names outside
+    // `packages/spec` was generated reference docs, release notes or a changelog;
+    // objectui (the `.objectui-sha` pin `a58626c88` and main `cef0eee`) and hotcrm
+    // (`1e88edc`) returned zero, against lit controls on the same pattern. No carrier
+    // key, so no `retiredKey()` tombstone and no D2 conversion (none of these
+    // schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning): RETIRED_DEFS_BY_MAJOR
+    // plus the D3 semantic entry `document-schemas-retired` ARE the declaration.
+    'data/Document',
+    // #22158 — `data/DocumentTemplate` — a docx template URL with typed
+    // placeholders (`fileUrl` / `fileType` / `placeholders[]`), which no template
+    // engine ever merged —
+    // leaves whole with the document family under ADR-0049 enforce-or-remove, by
+    // the ruling of record on #8346 (letter B′, maintainer 「8346 B′」 2026-10-08):
+    // "The zero-reader `DocumentTemplateSchema`, `DocumentSchema` and
+    // `ESignatureConfigSchema` retire in v18 under ADR-0049 with ADR-0087 entries,
+    // so that 'template' means one thing" — a printable document is a page that
+    // declares `print`. It was exported from `@objectstack/spec/data`
+    // (`data/document.zod.ts`), mounted by no `stack.zod.ts` key, registered as no
+    // metadata type, absent from every liveness ledger, and read by NOTHING: on
+    // objectstack `fec87e7e0` every hit for the family's exported names outside
+    // `packages/spec` was generated reference docs, release notes or a changelog;
+    // objectui (the `.objectui-sha` pin `a58626c88` and main `cef0eee`) and hotcrm
+    // (`1e88edc`) returned zero, against lit controls on the same pattern. No carrier
+    // key, so no `retiredKey()` tombstone and no D2 conversion (none of these
+    // schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning): RETIRED_DEFS_BY_MAJOR
+    // plus the D3 semantic entry `document-schemas-retired` ARE the declaration.
+    'data/DocumentTemplate',
+    // #22158 — `data/DocumentVersion` — one immutable version of a stored
+    // document, whose only carrier was `DocumentSchema.versioning.versions` (the
+    // orphan-value-schema rule takes it with its carrier) —
+    // leaves whole with the document family under ADR-0049 enforce-or-remove, by
+    // the ruling of record on #8346 (letter B′, maintainer 「8346 B′」 2026-10-08):
+    // "The zero-reader `DocumentTemplateSchema`, `DocumentSchema` and
+    // `ESignatureConfigSchema` retire in v18 under ADR-0049 with ADR-0087 entries,
+    // so that 'template' means one thing" — a printable document is a page that
+    // declares `print`. It was exported from `@objectstack/spec/data`
+    // (`data/document.zod.ts`), mounted by no `stack.zod.ts` key, registered as no
+    // metadata type, absent from every liveness ledger, and read by NOTHING: on
+    // objectstack `fec87e7e0` every hit for the family's exported names outside
+    // `packages/spec` was generated reference docs, release notes or a changelog;
+    // objectui (the `.objectui-sha` pin `a58626c88` and main `cef0eee`) and hotcrm
+    // (`1e88edc`) returned zero, against lit controls on the same pattern. No carrier
+    // key, so no `retiredKey()` tombstone and no D2 conversion (none of these
+    // schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning): RETIRED_DEFS_BY_MAJOR
+    // plus the D3 semantic entry `document-schemas-retired` ARE the declaration.
+    'data/DocumentVersion',
+    // #22158 — `data/ESignatureConfig` — an e-signature workflow (`provider` /
+    // `enabled` / `signers[]`), which no e-signature integration ever sent. Its
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries (`expirationDays` /
+    // `reminderDays`, the #14477 tombstones) stay as history — gate (b2) of
+    // build-schemas.ts accepts an entry naming a key the build no longer emits —
+    // leaves whole with the document family under ADR-0049 enforce-or-remove, by
+    // the ruling of record on #8346 (letter B′, maintainer 「8346 B′」 2026-10-08):
+    // "The zero-reader `DocumentTemplateSchema`, `DocumentSchema` and
+    // `ESignatureConfigSchema` retire in v18 under ADR-0049 with ADR-0087 entries,
+    // so that 'template' means one thing" — a printable document is a page that
+    // declares `print`. It was exported from `@objectstack/spec/data`
+    // (`data/document.zod.ts`), mounted by no `stack.zod.ts` key, registered as no
+    // metadata type, absent from every liveness ledger, and read by NOTHING: on
+    // objectstack `fec87e7e0` every hit for the family's exported names outside
+    // `packages/spec` was generated reference docs, release notes or a changelog;
+    // objectui (the `.objectui-sha` pin `a58626c88` and main `cef0eee`) and hotcrm
+    // (`1e88edc`) returned zero, against lit controls on the same pattern. No carrier
+    // key, so no `retiredKey()` tombstone and no D2 conversion (none of these
+    // schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning): RETIRED_DEFS_BY_MAJOR
+    // plus the D3 semantic entry `document-schemas-retired` ARE the declaration.
+    'data/ESignatureConfig',
     // Commit 2c86fe3ea — identity/identity.zod.ts `ApiKeySchema`, retired whole (ADR-0049
     // enforce-or-remove; maintainer ruling 2026-08-15, disposition B: delete).
     // The schema documented better-auth's `apiKey` PLUGIN shape — a plugin this
