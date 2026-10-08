@@ -45,6 +45,7 @@ import {
   rowOrganizationId,
   seedCtx as organizationScopedCtx,
 } from './per-organization-catalog.js';
+import { GRANT_SET_ID_FIELD, grantSetNameOf, readGrantSetRows } from './grant-permission-set-name.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 /**
@@ -825,13 +826,13 @@ export class DelegatedAdminGate {
     const targets = await this.materializeTargets(opCtx, 'sys_user_permission_set');
     for (const t of targets) {
       const row = t.next ?? t.prev ?? {};
-      const setRow = await this.loadSetRowById(row.permission_set_id);
-      const setName = String(setRow?.name ?? row.permission_set_id ?? '');
+      const { setRow, setName, unresolved } = await this.directGrantSet(t, row);
       const targetUserId = row.user_id ? String(row.user_id) : null;
       const userBUs = targetUserId ? await this.businessUnitsOfUser(targetUserId) : new Set<string>();
 
       const failure = this.firstApprovalFailure(held, (s) => {
         if (!s.scope.manageAssignments) return 'the scope does not grant manageAssignments';
+        if (unresolved) return unresolved;
         if (!s.scope.assignablePermissionSets.includes(setName)) {
           return `permission set '${setName}' is not in the scope's allowlist`;
         }
@@ -1261,6 +1262,61 @@ export class DelegatedAdminGate {
         .filter((r: any) => r.name);
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * [ADR-0131 D4] The permission set a direct-grant write is judged on.
+   *
+   * - **The grant's own set** — a delete, or an update that keeps the grant's
+   *   set: read BY NAME from the grant's `permission_set` (the pre-image's, or
+   *   the name the update supplies), through {@link readGrantSetRows}. A grant
+   *   that names nothing, or names a set with no catalog row it applies to,
+   *   is not one a delegate can be shown to hold authority over, so the write
+   *   is refused (`unresolved`) — fail closed; a tenant admin is not judged
+   *   here at all.
+   * - **The set the write points the grant AT** — an insert, or an update that
+   *   re-points `permission_set_id`: the caller's own reference, read by that
+   *   id as before. The name is not the caller's to supply (the platform
+   *   derives it from that id after this gate), so there is no name to read.
+   */
+  private async directGrantSet(
+    t: { next: any | null; prev: any | null },
+    row: any,
+  ): Promise<{ setRow: any | null; setName: string; unresolved?: string }> {
+    const repointed = !!t.next
+      && (!t.prev || String(t.next[GRANT_SET_ID_FIELD] ?? '') !== String(t.prev[GRANT_SET_ID_FIELD] ?? ''));
+    if (repointed) {
+      const setRow = await this.loadSetRowById(row[GRANT_SET_ID_FIELD]);
+      return { setRow, setName: String(setRow?.name ?? row[GRANT_SET_ID_FIELD] ?? '') };
+    }
+    const name = grantSetNameOf(row);
+    if (!name) {
+      return {
+        setRow: null,
+        setName: '',
+        unresolved: 'the grant names no permission set (it is not yet named, or could not be) — only a tenant admin may change it',
+      };
+    }
+    const setRow = await this.loadSetRowForGrant(row);
+    if (!setRow) {
+      return {
+        setRow: null,
+        setName: name,
+        unresolved: `permission set '${name}' has no catalog row this grant applies to — only a tenant admin may change it`,
+      };
+    }
+    return { setRow, setName: String(setRow.name ?? name) };
+  }
+
+  /** The catalog row a stored grant names, by its name (`null` when none applies or the read fails). */
+  private async loadSetRowForGrant(grant: any): Promise<any | null> {
+    if (!this.deps.ql?.find) return null;
+    try {
+      const setRowOf = await readGrantSetRows(this.deps.ql, [grant]);
+      return setRowOf(grant) ?? null;
+    } catch {
+      return null;
     }
   }
 
