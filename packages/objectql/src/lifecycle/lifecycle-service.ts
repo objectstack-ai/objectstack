@@ -229,6 +229,25 @@ const DEFAULT_GOVERNANCE: GovernanceSnapshot = {
 const TENANT_SCAN_LIMIT = 200;
 
 /**
+ * [#15207, ADR-0131 D7] Deployment-level ledgers whose rows name the
+ * organization they are ABOUT in a plain attribution field, never the tenancy
+ * anchor: the object carries no `organization_id`, so per-tenant retention
+ * windows (ADR-0057 §3.2) partition on this field instead. Honoured only where
+ * the author really declares the field ({@link LifecycleService} asks its
+ * provenance). `sys_audit_log` (plugin-audit) is the one such object: every
+ * writer stamps `tenant_id`, and a deployment-level row leaves it NULL.
+ */
+const ATTRIBUTION_PARTITION_COLUMNS: Readonly<Record<string, string>> = Object.freeze({
+  sys_audit_log: 'tenant_id',
+});
+
+/** One object's per-tenant windows and the column they partition its rows on. */
+interface TenantPartition {
+  column: string;
+  windows: Array<{ tenantId: string; maxAge?: string; expireAfter?: string }>;
+}
+
+/**
  * [#5195] A **retention floor**: the shortest window a consumer's own contract
  * can survive on an object it does not own.
  *
@@ -1478,12 +1497,13 @@ export class LifecycleService {
     //
     // [#21918] Which tenants get a pass of their own is {@link tenantWindowsFor},
     // the one decision `reap()` asks too.
-    const tenantWindows = this.tenantWindowsFor(obj, overrideKey);
+    const partition = this.tenantWindowsFor(obj, overrideKey);
     let archived = 0;
-    if (tenantWindows.length === 0) {
+    if (partition === null) {
       archived += await archivePass({ [dueField]: { $lt: cutoff } });
     } else {
-      for (const t of tenantWindows) {
+      const { column, windows } = partition;
+      for (const t of windows) {
         // [#5195] A tenant-scoped override goes through the same floor — the
         // identical side door, one scope down. Its fallback is the
         // already-resolved global window, which has itself passed the floor.
@@ -1496,13 +1516,13 @@ export class LifecycleService {
           report,
         );
         const tCutoff = new Date(this.now() - tMs).toISOString();
-        archived += await archivePass({ [dueField]: { $lt: tCutoff }, organization_id: t.tenantId });
+        archived += await archivePass({ [dueField]: { $lt: tCutoff }, [column]: t.tenantId });
       }
       archived += await archivePass({
         [dueField]: { $lt: cutoff },
         $or: [
-          { organization_id: { $nin: tenantWindows.map((t) => t.tenantId) } },
-          { organization_id: null },
+          { [column]: { $nin: windows.map((t) => t.tenantId) } },
+          { [column]: null },
         ],
       });
     }
@@ -1547,7 +1567,7 @@ export class LifecycleService {
    * both ask, so the two cannot partition the same object differently.
    *
    * A partition is a predicate on the row's `organization_id`, the column the
-   * passes below name. On a federated (ADR-0015 `external`) object that column
+   * passes name by default. On a federated (ADR-0015 `external`) object that column
    * is the registry's injection and the remote does not provision it
    * ({@link isFederatedUnprovisionedInjectedColumn}, which reads the #7865
    * provenance), so every partitioned pass was refused by the driver as an
@@ -1566,16 +1586,34 @@ export class LifecycleService {
    * plan honours) and the author declared none, so the provenance answers
    * `'absent'`. Its table has no such column, so a partitioned pass is the
    * same unknown-column refusal, and no row of it belongs to an organization.
+   *
+   * [ADR-0131 D7] …unless it is a deployment-level ledger whose rows name the
+   * organization they are ABOUT in an attribution field the author declared
+   * ({@link ATTRIBUTION_PARTITION_COLUMNS}): that field is then the partition,
+   * and a tenant's override selects the rows about that tenant. The global
+   * pass's NULL arm keeps the rows about no organization in the global window.
+   *
+   * Answers `null` when there is no partition: no override, or no column.
    */
   private tenantWindowsFor(
     obj: LifecycleObjectLike,
     overrideKey: 'maxAge' | 'expireAfter',
-  ): Array<{ tenantId: string; maxAge?: string; expireAfter?: string }> {
-    if (isFederatedUnprovisionedInjectedColumn(obj, 'organization_id')) return [];
-    if (resolveInjectedColumnProvenance(obj, 'organization_id') === 'absent') return [];
-    return (this.governance.tenantOverrides.get(obj.name) ?? []).filter(
+  ): TenantPartition | null {
+    const windows = (this.governance.tenantOverrides.get(obj.name) ?? []).filter(
       (t) => typeof t[overrideKey] === 'string',
     );
+    if (windows.length === 0) return null;
+    if (
+      !isFederatedUnprovisionedInjectedColumn(obj, 'organization_id')
+      && resolveInjectedColumnProvenance(obj, 'organization_id') !== 'absent'
+    ) {
+      return { column: 'organization_id', windows };
+    }
+    const attribution = ATTRIBUTION_PARTITION_COLUMNS[obj.name];
+    if (attribution !== undefined && resolveInjectedColumnProvenance(obj, attribution) === 'author') {
+      return { column: attribution, windows };
+    }
+    return null;
   }
 
   private async reap(
@@ -1591,7 +1629,7 @@ export class LifecycleService {
     const object = obj.name;
     const cutoff = new Date(this.now() - windowMs).toISOString();
     const overrideKey = policy === 'ttl' ? 'expireAfter' : 'maxAge';
-    const tenantWindows = this.tenantWindowsFor(obj, overrideKey);
+    const partition = this.tenantWindowsFor(obj, overrideKey);
     // `retention.onlyWhen` / `ttl.onlyWhen` [commit 801296050] narrow every delete to
     // the declared row filter — rows outside it (live workflow state, audit
     // tombstones) are retained regardless of age/expiry.
@@ -1630,12 +1668,13 @@ export class LifecycleService {
         ? this.batchedReap(engine, object, guards, where)
         : countDeleted(await engine.delete(object, { where, multi: true, context: { ...SYSTEM_CTX } }));
 
-    if (tenantWindows.length === 0) {
+    if (partition === null) {
       accumulate(await reapWhere({ [field]: { $lt: cutoff }, ...scope }));
     } else {
       // Tenant-level windows (P4): each overriding tenant gets its own
       // cutoff on its own rows…
-      for (const t of tenantWindows) {
+      const { column, windows } = partition;
+      for (const t of windows) {
         // [#5195] Tenant-scoped overrides go through the same floor: a
         // per-tenant `maxAge: '1h'` is the identical side door, one scope down.
         const tMs = this.effectiveWindowMs(
@@ -1647,7 +1686,7 @@ export class LifecycleService {
           report,
         );
         const tCutoff = new Date(this.now() - tMs).toISOString();
-        accumulate(await reapWhere({ [field]: { $lt: tCutoff }, organization_id: t.tenantId, ...scope }));
+        accumulate(await reapWhere({ [field]: { $lt: tCutoff }, [column]: t.tenantId, ...scope }));
       }
       // …and the global pass covers everyone else, INCLUDING rows with no
       // organization (a bare `$nin` would silently skip NULL-org rows).
@@ -1655,8 +1694,8 @@ export class LifecycleService {
         await reapWhere({
           [field]: { $lt: cutoff },
           $or: [
-            { organization_id: { $nin: tenantWindows.map((t) => t.tenantId) } },
-            { organization_id: null },
+            { [column]: { $nin: windows.map((t) => t.tenantId) } },
+            { [column]: null },
           ],
           ...scope,
         }),
