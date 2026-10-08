@@ -53,13 +53,13 @@
  * subject.
  *
  * The settings plugin is a NAME-ONLY stub rather than the real
- * `SettingsServicePlugin`: `@objectstack/service-settings` is not a dependency
- * of `@objectstack/plugin-auth`, and adding one so a test could import it
- * would both create a workspace edge that exists for nothing else and force a
- * new entry into the shrink-only registry above. `resolvePluginOrder` reads
- * only the `OrderablePlugin` surface — `name`, `dependencies`,
- * `optionalDependencies` — and the property under test is `AuthPlugin`'s
- * declaration, so the stub is the whole of what the resolver would see.
+ * `SettingsServicePlugin`: `resolvePluginOrder` reads only the
+ * `OrderablePlugin` surface — `name`, `dependencies`, `optionalDependencies` —
+ * and the property under test is `AuthPlugin`'s declaration, so the stub is
+ * the whole of what the resolver would see. The real plugin is composed where
+ * its bind hook is the subject: `auth-settings-seeded-boot.pin.test.ts` boots
+ * it (a devDependency, aliased to `src/` in this package's `vitest.config.ts`)
+ * and pins the read that this edge does NOT order — a Phase-2 `app:seeded`.
  */
 
 import { describe, it, expect } from 'vitest';

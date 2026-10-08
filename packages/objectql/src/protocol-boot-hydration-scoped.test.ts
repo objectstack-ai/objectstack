@@ -23,7 +23,7 @@ import { describe, it, expect } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { MetadataManager } from '@objectstack/metadata';
 import { createSecurityCatalogReader } from '@objectstack/core';
-import { SchemaRegistry } from './registry.js';
+import { SchemaRegistry, NAMESPACE_CONFLICT_CODE } from './registry.js';
 import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
 import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
 
@@ -204,55 +204,69 @@ describe('loadMetaFromDb — ADR-0048 package-scoped protection graft at boot (#
 /**
  * ADR-0131 D4 — which body the security catalog read
  * (`createSecurityCatalogReader`, `@objectstack/core`) resolves for a name two
- * installed packages both ship. TODAY'S answer, pinned until the maintainer
- * rules on shared catalog names: a change here is that ruling landing, never a
- * refactor.
+ * installed packages both ship. RULED (maintainer, Q4 = A on #15196): there is
+ * never a second body to choose between. Positions, permission sets and
+ * capabilities each hold one name per deployment, so the second package to
+ * register a held name is refused at registration, naming both holders
+ * (`security-catalog-namespace.ts`; the doors are pinned in
+ * `registry-security-catalog-namespace.test.ts`).
  *
- * It lives beside the #4624 cases because it is their consequence: the row a
- * package stored for itself is hydrated into the bare slot, and the catalog
- * read asks the registry's by-name precedence first. An assignment carries
- * only the NAME (ADR-0131 D4), so there is no package context to prefer one
- * package's body over another's:
+ * This describe was the S1 stage's pin of the pre-ruling answer — the
+ * FIRST-registered package's body with no stored override, a stored override
+ * for every caller with one, and the LATER registration for a position two
+ * stacks declared — kept "until the maintainer rules on shared catalog names".
+ * It now pins the ruled answer at the same seams: an assignment carries only
+ * the NAME, and with one holder every reader answers that holder.
  *
- *  - no stored override: the FIRST-registered package's body;
- *  - an override one package stored, bound to itself and hydrated at boot:
- *    that override, for every caller.
- *
- * The metadata door's by-name read (`getMetaItem`) is asserted beside each
- * answer, so the pin cannot drift from what the door serves. A name the
- * registry does not hold falls to the metadata service, where two stacks
- * declaring one position name share ONE in-memory slot: the later
- * registration holds it.
+ * It lives beside the #4624 cases because the override case is their
+ * consequence: the row the holder stored for itself is hydrated into the bare
+ * slot, and the catalog read asks the registry's by-name precedence first. The
+ * metadata door's by-name read (`getMetaItem`) is asserted beside each answer,
+ * so the pin cannot drift from what the door serves.
  */
-describe('security catalog read — a name two packages ship (ADR-0131 D4, today\'s answer)', () => {
-    /** The package whose stored override the second case hydrates. */
-    const OVERRIDE_PACKAGE = PKG_B;
-
+describe('security catalog read — a name two packages ship (ADR-0131 D4, ruled: one holder per name)', () => {
     /** A body each catalog type's schema accepts, so hydration reports it valid. */
     const catalogBody = (type: 'permission' | 'position', name: string, label: string) =>
         type === 'permission' ? { name, label, objects: {} } : { name, label };
 
-    function bootWithSharedName(type: 'permission' | 'position', name: string, rows: Row[]) {
+    type Refusal = Error & { code?: string; status?: number; incomingPackageId?: string; existingHolder?: unknown };
+    const refusalOf = (fn: () => unknown): Refusal | undefined => {
+        try {
+            fn();
+            return undefined;
+        } catch (e) {
+            return e as Refusal;
+        }
+    };
+
+    function bootWithHolder(type: 'permission' | 'position', name: string, rows: Row[]) {
         const registry = new SchemaRegistry({ multiTenant: false });
         registry.logLevel = 'silent';
-        // Package A registers FIRST.
+        // Package A registers FIRST, and holds the name.
         registry.registerItem(type, catalogBody(type, name, `${PKG_A} body`), 'name', PKG_A);
-        registry.registerItem(type, catalogBody(type, name, `${PKG_B} body`), 'name', PKG_B);
         const protocol = new ObjectStackProtocolImplementation(makeEngine(registry, rows));
         const reader = createSecurityCatalogReader({
             registry,
             metadata: new MetadataManager({ formats: ['json'], loaders: [] }),
         });
-        return { protocol, reader };
+        return { registry, protocol, reader };
     }
 
     describe.each(['permission', 'position'] as const)('%s', (type) => {
         const name = `shared_${type}`;
 
-        it('no stored override: the first-registered package\'s body', async () => {
-            const { protocol, reader } = bootWithSharedName(type, name, []);
-            expect(await protocol.loadMetaFromDb()).toMatchObject({ loaded: 0, errors: 0, invalid: 0 });
+        it('a second package registering the name is refused, naming both holders; every reader answers the one holder', async () => {
+            const { registry, protocol, reader } = bootWithHolder(type, name, []);
 
+            const refusal = refusalOf(() =>
+                registry.registerItem(type, catalogBody(type, name, `${PKG_B} body`), 'name', PKG_B),
+            );
+            expect(refusal?.code).toBe(NAMESPACE_CONFLICT_CODE);
+            expect(refusal?.status).toBe(422);
+            expect(refusal?.incomingPackageId).toBe(PKG_B);
+            expect(refusal?.existingHolder).toEqual({ kind: 'package', packageId: PKG_A });
+
+            expect(await protocol.loadMetaFromDb()).toMatchObject({ loaded: 0, errors: 0, invalid: 0 });
             const entry = await reader.resolve(type, name);
             expect(entry).toMatchObject({ name, source: 'registry', packageId: PKG_A });
             expect(entry?.definition.label).toBe(`${PKG_A} body`);
@@ -263,41 +277,51 @@ describe('security catalog read — a name two packages ship (ADR-0131 D4, today
             expect(door.item?.label).toBe(`${PKG_A} body`);
         });
 
-        it('an override one package stored for itself: that override, for every caller', async () => {
+        it('an override the holder stored for itself: that override, for every caller', async () => {
             const rows = [
                 overlayRow({
                     type,
                     name,
-                    package_id: OVERRIDE_PACKAGE,
+                    package_id: PKG_A,
                     metadata: JSON.stringify(catalogBody(type, name, 'stored override')),
                 }),
             ];
-            const { protocol, reader } = bootWithSharedName(type, name, rows);
+            const { protocol, reader } = bootWithHolder(type, name, rows);
             expect(await protocol.loadMetaFromDb()).toMatchObject({ loaded: 1, errors: 0, invalid: 0 });
 
             const entry = await reader.resolve(type, name);
-            expect(entry).toMatchObject({ name, source: 'registry', packageId: PKG_B });
+            expect(entry).toMatchObject({ name, source: 'registry', packageId: PKG_A });
             expect(entry?.definition.label).toBe('stored override');
             expect((await reader.list(type)).filter((e) => e.name === name)).toEqual([entry]);
 
             const door: any = await protocol.getMetaItem({ type, name });
             expect(door.item?.label).toBe('stored override');
-            expect(door.item?._packageId).toBe(PKG_B);
+            expect(door.item?._packageId).toBe(PKG_A);
         });
     });
 
-    it('a position name two stacks declare: one metadata-service slot, the later registration holds it', async () => {
+    it('a position name two packages declare: the package door refuses the second, so one stack\'s declaration reaches the metadata service', async () => {
         const registry = new SchemaRegistry({ multiTenant: false });
         registry.logLevel = 'silent';
         const metadata = new MetadataManager({ formats: ['json'], loaders: [] });
-        // What two app stacks declaring the same position name do at boot.
+        // What two app stacks declaring the same position name do at boot: each
+        // package is installed (Phase 1, `AppPlugin.init` → `registerApp`) before
+        // its in-memory registrar runs (Phase 2, `AppPlugin.start`).
+        const stack = (id: string, label: string) =>
+            ({ id, name: id, version: '1.0.0', type: 'app', positions: [{ name: 'regional_manager', label }] }) as never;
+        registry.installPackage(stack(PKG_A, 'first stack'));
         metadata.registerInMemory('position', 'regional_manager', { name: 'regional_manager', label: 'first stack' });
-        metadata.registerInMemory('position', 'regional_manager', { name: 'regional_manager', label: 'second stack' });
-        const reader = createSecurityCatalogReader({ registry, metadata });
 
+        const refusal = refusalOf(() => registry.installPackage(stack(PKG_B, 'second stack')));
+        expect(refusal?.code).toBe(NAMESPACE_CONFLICT_CODE);
+        expect(refusal?.status).toBe(422);
+        expect(refusal?.incomingPackageId).toBe(PKG_B);
+        expect(refusal?.existingHolder).toEqual({ kind: 'package', packageId: PKG_A });
+
+        const reader = createSecurityCatalogReader({ registry, metadata });
         const entry = await reader.resolve('position', 'regional_manager');
         expect(entry).toMatchObject({ name: 'regional_manager', source: 'metadata' });
-        expect(entry?.definition.label).toBe('second stack');
+        expect(entry?.definition.label).toBe('first stack');
         expect(await reader.list('position')).toEqual([entry]);
     });
 });

@@ -3,7 +3,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { isAppPluginLike } from './graft-runtime-hooks.js';
-import { stackDeclaresMetadata } from './stack-collections.js';
+import { stackDeclaredCapabilities, stackDeclaresMetadata } from './stack-collections.js';
 
 /**
  * The object set a SCHEMA migration is planned against (#12938).
@@ -1450,7 +1450,12 @@ export async function buildSchemaMigrationPlugins(opts: {
       const { loadConfig } = await import('./config.js');
       const { config } = await loadConfig(hostConfigPath);
 
-      loadedRequires = config?.requires;
+      // [#22288] `serve`'s rule for the tokens, as well as its lookup: the
+      // top-level `requires`, otherwise each package body's. A multi-package
+      // config carries `requires` only in the declaring package's body, so a
+      // top-level read left a plugin's hard dependency on that provider
+      // unordered and the plan exited 1.
+      loadedRequires = stackDeclaredCapabilities(config);
       const hostPlugins: unknown[] = Array.isArray(config?.plugins) ? config.plugins : [];
       for (const plugin of hostPlugins) {
         if (plugin && typeof plugin === 'object') plugins.push(composeForDeclarations(plugin, lifecycle));

@@ -25,10 +25,10 @@
  *  3. a plain `member` still cannot invite at all — so it is the ROLE that
  *     opened the endpoint, not some unrelated loosening.
  *
- * Harness note: `bootStack` disables the default-org bootstrap, so this file
- * mints the Default Organization itself (system context — exactly what the
- * bootstrap would do) and sets membership roles the same way, which is the
- * only writer better-auth-managed tables accept (ADR-0092).
+ * Harness note: `bootStack` boots the production `single` shape, so the
+ * Default Organization exists from the boot (ADR-0131 D3); this file sets
+ * membership roles in system context, which is the only writer
+ * better-auth-managed tables accept (ADR-0092).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -66,16 +66,16 @@ describe('#3697: delegated_admin may invite — as `member` only', () => {
     adminToken = await stack.signIn(); // the seeded dev admin
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 
-    const org = await ql.insert(
-      'sys_organization',
-      { name: 'Default Organization', slug: 'default' },
-      { context: SYSTEM_CTX },
-    );
+    // [ADR-0131 D3] The Default Organization is a boot invariant under
+    // `single`: the boot created it before the seeds loaded. Read it — minting
+    // a second `slug: 'default'` row is refused as a duplicate.
+    const [org] = await findRows(ql, 'sys_organization', { slug: 'default' }, 1);
+    expect(org?.id, 'the boot created the Default Organization').toBeTruthy();
     orgId = String(org.id);
 
-    // The dev admin predates the org row, so give them the owner membership the
-    // single-org bootstrap would have. They are who PROVISIONS a delegate, and
-    // the reference for "an org owner's behavior is unchanged by any of this".
+    // The owner bind made the dev admin the Default Organization's owner; this
+    // re-asserts it. They are who PROVISIONS a delegate, and the reference for
+    // "an org owner's behavior is unchanged by any of this".
     const [adminUser] = await findRows(ql, 'sys_user', { email: 'admin@objectos.ai' }, 1);
     const adminMembers = await findRows(ql, 'sys_member', { user_id: adminUser.id }, 5);
     if (adminMembers.length > 0) {

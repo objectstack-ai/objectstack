@@ -105,6 +105,8 @@ import {
   shouldAutoRegisterStorageDriver,
   stackDeclaresMetadata,
   bundleDeclaresTranslations,
+  resolveStackCollection,
+  stackDeclaredCapabilities,
 } from '../utils/stack-collections.js';
 import { redactConnectionUrl, describeDriverConnection, describeDriverSqliteFile } from '../utils/connection-display.js';
 import { captureServedDatabaseFile, watchServedDatabaseFile } from '../utils/served-database-file.js';
@@ -2844,9 +2846,15 @@ export default class Serve extends Command {
       // `aiStudio`/`aiSeat` alias canonicalization was removed in framework#3308
       // — legacy spellings are now unknown tokens (warned below, rejected at
       // authoring by defineStack).
-      const rawRequires: string[] = Array.isArray((config as any).requires)
-        ? (config as any).requires.filter((c: unknown) => typeof c === 'string')
-        : [];
+      //
+      // [#22288] Read by `resolveStackCollection`'s rule: the top-level list
+      // when the config carries one, otherwise each package body's. A
+      // multi-package `preserve` config carries `requires` only in the body of
+      // the package that declared it, so a top-level read mounted none of its
+      // providers on a config boot with no compiled artifact. (An artifact boot
+      // already answered here: `createStandaloneStack` resolves the artifact's
+      // packages and `mergeBootConfig` lays its `requires` over the top level.)
+      const rawRequires: string[] = stackDeclaredCapabilities(config);
       const requires: string[] = [...new Set(rawRequires)];
       // Snapshot the app's EXPLICIT capability declarations BEFORE the platform
       // appends its own convenience defaults (auth→email, mcp, pinyin-search,
@@ -2915,10 +2923,12 @@ export default class Serve extends Command {
       const requiredTiers = requires
         .map((c) => CAPABILITY_TO_TIER[c])
         .filter((t): t is string => typeof t === 'string');
-      const baseTiers =
-        Array.isArray((config as any).tiers) && (config as any).tiers.length > 0
-          ? (config as any).tiers
-          : presetTiers;
+      // [#22288] `tiers` is package-owned like `requires`, and no boot path
+      // lays it over the top level (`createStandaloneStack` does not carry it),
+      // so a package's own `tiers` were ignored on `os serve`, `os dev` and
+      // `os start` alike. Same rule as `requires` above.
+      const declaredTiers = resolveStackCollection(config, 'tiers') as string[];
+      const baseTiers = declaredTiers.length > 0 ? declaredTiers : presetTiers;
       const tiers: Set<string> = new Set([...baseTiers, ...requiredTiers]);
       const tierEnabled = (t: string) => tiers.has(t);
       const requiresCapability = (c: string) => requires.includes(c);
@@ -4790,7 +4800,13 @@ export default class Serve extends Command {
             // this root by the automation service's package file loader.
             arg = { packageRoot: path.dirname(absolutePath) };
           } else if (spec.configKey === 'analyticsCubes') {
-            const cubes = (config as any).analyticsCubes ?? (config as any).cubes ?? [];
+            // [#22288] The top level first, as before (its own array, then the
+            // legacy `cubes` spelling), and only then the package bodies: a
+            // multi-package config carries a package's `analyticsCubes` in that
+            // body alone, and `analytics` is always on, so its cubes were
+            // dropped on every boot of such an app (`os dev` included).
+            const cubes = (config as any).analyticsCubes ?? (config as any).cubes
+              ?? resolveStackCollection(config, 'analyticsCubes');
             arg = { cubes };
           } else if (cap === 'email') {
             // Throws on a mail configuration that cannot deliver (#5087,
@@ -5303,9 +5319,12 @@ export default class Serve extends Command {
       // read off the live engine. Collect it here (after restore) and surface it
       // in the banner: declared-but-engine-missing, unbound triggered flows, and
       // bound-but-dead (unknown object) flows.
+      // [#22288] Counted by `resolveStackCollection`'s rule, so a flow a
+      // package declares is counted: the "declared but the automation engine is
+      // not enabled" line used to stay silent for every multi-package app.
       const automationSummary = collectAutomationSummary(
         kernel,
-        Array.isArray((config as any)?.flows) ? (config as any).flows.length : 0,
+        resolveStackCollection(config, 'flows').length,
       );
 
       // ── Seed outcome summary (#3415/#3430) ─────────────────────────

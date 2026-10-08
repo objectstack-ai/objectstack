@@ -248,41 +248,40 @@ export interface BootOptions {
    */
   multiTenant?: boolean | 'posture-only';
   /**
-   * Bind the harness admin to a real organization, so the execution context
-   * every request of theirs resolves CARRIES an `organizationId`. Default
-   * `false`.
+   * ASSERT that the harness admin is bound to an organization, so the execution
+   * context every request of theirs resolves CARRIES an `organizationId` — and
+   * refuse the boot when it is not. Default `false`.
    *
-   * Mechanically it is one flip: `AuthPlugin`'s cloud ADR-0081 D1 default-org
-   * bootstrap (`autoDefaultOrganization`), which the harness otherwise pins
-   * OFF (see the AuthPlugin registration below). The bootstrap mints a
-   * `sys_organization` and binds the platform admin to it as `owner`; the
-   * `session.create.before` hook then stamps that org onto the session as
-   * `activeOrganizationId`, which is the ONE wire field
-   * `resolveAuthzContext` reads into `tenantId` → `ExecutionContext`. Same
-   * path `objectstack dev` / `serve` give a real single-tenant deployment —
-   * nothing here is simulated.
+   * [ADR-0131 D3] The bind itself is no longer opt-in: every `single` boot has
+   * the Default Organization (`AuthPlugin.start()` creates it before the seeds
+   * load), the membership reconciler makes every sign-up its member, and the
+   * owner bind makes the platform admin its owner — the production shape
+   * `objectstack dev` / `serve` boot, which `bootStack` boots too. The
+   * `session.create.before` hook stamps that organization onto the session as
+   * `activeOrganizationId`, the ONE wire field `resolveAuthzContext` reads into
+   * `tenantId` → `ExecutionContext`. This flag adds the vacuity guard below:
+   * a fixture whose subject IS the org-bound caller fails loudly at boot if a
+   * future composition stops binding, instead of asserting nothing.
    *
-   * ## What it buys
+   * ## What the bound caller buys
    *
    * Application-level `organization_id`-scoped READS engage their filter,
    * because they read the org id off the resolved context directly. Before
-   * this flag, no fixture in the open core could reach that branch over HTTP:
+   * #7762, no fixture in the open core could reach that branch over HTTP:
    * `bootStack`'s admin resolved org-less, so a filtered read returned
    * whatever the UNfiltered one did and a test asserting on the difference
-   * asserted nothing (#7762). `sys_sharing_rule` listing (#7676),
+   * asserted nothing. `sys_sharing_rule` listing (#7676),
    * `sys_business_unit` approver expansion (#3807) and `sys_metadata`
    * pending-draft listing are the same shape.
    *
    * ## ⛔ It performs NO tenant isolation whatsoever
    *
-   * It stamps the CALLER's org; it does not stand up an organization wall.
-   * With no `org-scoping` service registered — and this flag registers none —
-   * `SecurityPlugin` STRIPS the wildcard `organization_id` RLS policies that
-   * ship in the default permission sets (`collectRLSPolicies`; see the
-   * `multiTenant` doc block above). So a fixture asserting "tenant B cannot
-   * read tenant A's rows" and booting this way would assert nothing and pass:
-   * the #4700 constant-false capability probe wearing the opposite mask, and
-   * the precise trap this option's NAME is chosen to stay clear of.
+   * A bound caller is not an organization wall. With no `org-scoping` service
+   * registered — and nothing here registers one — `SecurityPlugin` STRIPS the
+   * wildcard `organization_id` RLS policies that ship in the default
+   * permission sets (`collectRLSPolicies`; see the `multiTenant` doc block
+   * above). So a fixture asserting "tenant B cannot read tenant A's rows" on a
+   * `single` boot asserts nothing and passes.
    *
    * Cross-tenant isolation has exactly one honest proof in this repo:
    * `multiTenant: true` with the real `@objectstack/organizations` installed
@@ -305,15 +304,13 @@ export interface BootOptions {
    *
    *  - with `multiTenant: true`, the enterprise `@objectstack/organizations`
    *    package OWNS the org bootstrap and already binds the admin — this flag
-   *    would be a second, competing owner of one invariant;
-   *  - with `multiTenant: 'posture-only'`, it would be a NO-OP that looks like
-   *    a feature. That mode requests the `isolated` posture, and the open
+   *    would assert on a second owner's invariant;
+   *  - with `multiTenant: 'posture-only'`, it would assert something that
+   *    cannot hold. That mode requests the `isolated` posture, and the open
    *    default-org bootstrap deliberately abstains under every WALLED posture
    *    (`postureEnforcesWall`, cloud ADR-0081 D1) — the open package never
    *    bootstraps an organization for a deployment whose multi-organization
-   *    runtime it does not provide. The admin would resolve org-less while the
-   *    fixture read as org-bound: vacuity, which is the whole defect class
-   *    #7762 exists to close.
+   *    runtime it does not provide. The admin resolves org-less there.
    *
    * A posture-gated seam that ALSO needs an org-bound caller therefore has no
    * harness answer today; it needs the real enterprise package.
@@ -544,31 +541,24 @@ export async function bootStack(
   const cryptoProvider = harnessCryptoProvider();
   await kernel.use(new SettingsServicePlugin({ cryptoProvider }));
   await kernel.use(opts.analytics ?? new AnalyticsServicePlugin());
-  // `autoDefaultOrganization: false` (cloud ADR-0081 D1): the harness proves the two
-  // ENDS of the isolation spectrum — pure single-tenant (no org, no scoping)
-  // and, via `opts.multiTenant`, full multi-org (the enterprise plugin owns
-  // the org bootstrap). AuthPlugin's single-org default-org bootstrap is a
-  // product onboarding convenience for `objectstack dev`/`serve`; letting it
-  // run here would mint a Default Organization + bind the dev admin as owner,
-  // giving every "single-tenant" fixture an active org — which turns on
-  // org-scoped RLS and reparents seeded rows, silently breaking the pure
-  // single-tenant baseline these dogfood proofs assert (ADR-0057 identity
-  // create, ADR-0062 federation, ADR-0086 two-doors). The bootstrap itself is
-  // covered by plugin-auth unit tests + browser E2E.
+  // [ADR-0131 D3 / D11] The production `single` shape, as `objectstack dev` /
+  // `serve` boot it: `AuthPlugin`'s defaults, owner bind included. Under
+  // `single` the Default Organization is a boot invariant — `AuthPlugin.start()`
+  // creates it before any seed loads, whatever `autoDefaultOrganization` says —
+  // so every seed row and system write is owned by it, every sign-up is its
+  // member, and the platform admin is its owner. There is no organization-less
+  // `single` deployment to model any more, so the harness does not pin one:
+  // `autoDefaultOrganization: false` would leave only a harness-only admin who
+  // is a `member` and not the owner, a standing no deployment has. Full
+  // multi-org stays `opts.multiTenant` (the enterprise plugin owns the walled
+  // bootstrap; the open one abstains under every walled posture).
   //
   // [ADR-0108 / #3723] Nothing to wire: the organization-role vocabulary is
   // closed, and a stack's declared `position` / `permission` names are
   // positions, not org roles. `membership-role-vocabulary.dogfood.test.ts`
   // boots through this harness and asserts exactly that.
-  //
-  // [#7762] `opts.orgContext` is the one thing that turns that bootstrap back
-  // on — the harness's ONLY way to mint an admin whose resolved execution
-  // context carries an `organizationId`. It is the SAME bootstrap `objectstack
-  // dev`/`serve` run, not a harness-local imitation, and it lights up no
-  // organization wall (see BootOptions.orgContext). Default stays `false`.
   await kernel.use(new AuthPlugin({
     secret: opts.authSecret ?? DEFAULT_AUTH_SECRET,
-    autoDefaultOrganization: !!opts.orgContext,
   }));
 
   // ADR-0062 — datasource connection service (registers 'datasource-connection'),
@@ -764,7 +754,7 @@ export async function bootStack(
 
   const admin = opts.admin ?? { email: DEFAULT_ADMIN_EMAIL, password: DEFAULT_ADMIN_PASSWORD };
 
-  // [#7762] The vacuity guard for `orgContext`. `ensureDefaultOrganization` is
+  // [#7762] The vacuity guard for `orgContext`. The owner bind is
   // deliberately best-effort — it swallows every failure so a login can never
   // break on org bookkeeping — which means a fixture that asked for an
   // org-bound admin and silently got an org-LESS one is exactly the shape this

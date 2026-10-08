@@ -225,6 +225,37 @@ export async function resolveAuthzFor(stack: VerifyStack, token: string): Promis
 }
 
 /**
+ * [ADR-0131 D3] Take a signed-up user OUT of the organization, the way a real
+ * `single` deployment produces a principal outside the `org_member` domain: an
+ * administrator removed them. Every `bootStack` boot now has the Default
+ * Organization and the membership reconciler binds every sign-up to it, so an
+ * org-less BOOT no longer exists to provide that principal (ADR-0131 D11); a
+ * user with no `sys_member` row does.
+ *
+ * Deletes the user's memberships in system context, then signs in again: the
+ * fresh session is minted with no membership to read, so it carries no active
+ * organization. Returns that session's token; the user's earlier token is not
+ * reused. Throws when a membership survives — a principal still inside the
+ * domain would make the "outside" class measure the inside one.
+ */
+export async function leaveOrganization(
+  stack: VerifyStack,
+  email: string,
+  password = 'Member-Pass-123',
+): Promise<string> {
+  const ql = await stack.kernel.getServiceAsync<any>('objectql');
+  const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : []);
+  const user = await ql.findOne('sys_user', { where: { email }, context: SYS });
+  if (!user?.id) throw new Error(`leaveOrganization: no sys_user for ${email}`);
+  for (const m of rowsOf(await ql.find('sys_member', { where: { user_id: user.id }, limit: 20, context: SYS }))) {
+    await ql.delete('sys_member', { where: { id: m.id }, context: SYS });
+  }
+  const left = rowsOf(await ql.find('sys_member', { where: { user_id: user.id }, limit: 1, context: SYS }));
+  if (left.length > 0) throw new Error(`leaveOrganization: ${email} still holds a membership`);
+  return stack.signIn(email, password);
+}
+
+/**
  * A principal is inside the domain the policy under test is gated to.
  *
  * This is #8023's precondition. The wildcard row-level write floor is gated to

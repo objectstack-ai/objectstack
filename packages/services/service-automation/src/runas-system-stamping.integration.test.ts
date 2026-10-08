@@ -263,6 +263,17 @@ describe('the #5494 admission flip: row content, not caller, decides (real Secur
     ql.registerDriver(driver, true);
     ql.registry.registerObject(crmTask as any, 'stamping-test', 'stamping-test');
     await ql.syncSchemas();
+    // [ADR-0131 D3] A production `single` boot holds the Default Organization
+    // before any flow runs: the auth plugin's boot invariant, which this rig
+    // (identity objects, no auth plugin) does not compose. It is the member's
+    // organization, `org_1`, the deployment's one organization. Without it the
+    // user-less run's system insert is refused (D9): this composition
+    // registers `sys_organization`, and the install would hold none.
+    await ql.insert(
+      'sys_organization',
+      { id: 'org_1', name: 'Default Organization', slug: 'default' },
+      { context: { isSystem: true } },
+    );
   }
 
   const SYS = { isSystem: true } as const;
@@ -304,6 +315,10 @@ describe('the #5494 admission flip: row content, not caller, decides (real Secur
     expect(res.success).toBe(true);
     const row = await rowByTitle('flip B');
     expect(row!.created_by ?? null).toBeNull();
+    // [ADR-0131 D9] The user-less system insert derives the install's one
+    // organization, the member's own, so the denial below is decided by the
+    // stamp columns alone and not by an organization boundary.
+    expect(row!.organization_id).toBe('org_1');
 
     // The SAME member context that succeeded above is denied here: the only
     // difference between the two attempts is the row's stamp columns — the

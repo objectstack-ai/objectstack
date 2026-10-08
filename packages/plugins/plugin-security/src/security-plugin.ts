@@ -3960,12 +3960,29 @@ export class SecurityPlugin implements Plugin {
       // cross-tenant `organization_id` change-set is caught too (the check inspects
       // the change-set value here, and [#20013] every stored row in the engine).
       //
-      // Scope: only a SUPPLIED `organization_id` is validated — an ABSENT value on
-      // insert is the organizations-plugin auto-stamp's responsibility, and an
-      // update that doesn't touch `organization_id` carries no value here, so
-      // ordinary writes are unaffected. [#20013] "Supplied" includes a value the
-      // engine's `beforeInsert` / `beforeUpdate` chain wrote: that half is judged
-      // on the stored row, below. A pure plugin-security deployment has no
+      // [#22278] The invariant, stated whole: wherever the wall applies to a
+      // non-system UPDATE, the row's organization after the write is one the
+      // wall admits. So an update that EMPTIES the column (`null` or `''`) is
+      // refused as well — a re-point to NO tenant, not only to another one.
+      // Judging only a value that NAMES an organization left that move
+      // unjudged on both halves below, and an organization-less row is not
+      // inert: on an ordinary tenant object it drops out of every reader's
+      // scope, and on the organization-scoped grant tables
+      // (`sys_user_position`, `sys_user_permission_set`) `@objectstack/core`'s
+      // `grantAppliesInTenant` reads it as a grant that applies in EVERY
+      // organization. The stored organization is judged on every non-system
+      // update path — the payload as sent here, and the row the engine is
+      // about to store (by id and by predicate) below.
+      //
+      // Scope: on INSERT only a SUPPLIED `organization_id` is validated — an
+      // ABSENT or empty value is the organizations-plugin auto-stamp's
+      // responsibility, and INSERT keeps that rule. On UPDATE nothing stamps an
+      // emptied value back, so there the column is judged whenever the write
+      // sets it, empty included; an update that doesn't touch `organization_id`
+      // carries no value here, so ordinary writes are unaffected. [#20013]
+      // "Supplied" includes a value the engine's `beforeInsert` /
+      // `beforeUpdate` chain wrote: that half is judged on the stored row,
+      // below. A pure plugin-security deployment has no
       // isolation active (Layer 0 → null), so this is ordering-independent w.r.t.
       // the auto-stamp middleware. System / boot writes carry `isSystem` and
       // short-circuited the whole middleware above, so legitimate cross-org moves
@@ -4079,6 +4096,15 @@ export class SecurityPlugin implements Plugin {
         const namesOrganization = (r: Record<string, unknown>): boolean =>
           r.organization_id != null && r.organization_id !== '';
         const suppliedRows = writeRows.filter(namesOrganization);
+        // [#22278] …except on UPDATE, where no stamp runs: a row that SETS the
+        // column to `null` or `''` empties the organization of a row that has
+        // one, and that is refused wherever the wall applies. Own-property, so
+        // an update that never names the column is untouched; an `undefined`
+        // value is a column the statement leaves alone, not an emptied one.
+        const emptiesOrganization = (r: Record<string, unknown>): boolean =>
+          opCtx.operation === 'update' &&
+          Object.prototype.hasOwnProperty.call(r, 'organization_id') &&
+          (r.organization_id === null || r.organization_id === '');
         // The wall is computed when a payload names an organization (as
         // before) or when a walled posture may have a hook name one ([#20013]
         // below). The `single` posture composes no Layer 0 at all, so it pays
@@ -4114,9 +4140,29 @@ export class SecurityPlugin implements Plugin {
             { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
           );
         };
+        // [#22278] The refusal of an emptied organization, shared by both
+        // halves the same way. Its own sentence: the row is not placed in
+        // another tenant, it is left in none.
+        const denyOrganizationRemoval = (source: string): never => {
+          this.logger.warn?.(
+            `[Security] Layer 0 tenant CHECK FAILED on ${opCtx.operation} '${opCtx.object}' — write denied ` +
+              `(fail-closed); ${source} organization_id is empty`,
+          );
+          throw new PermissionDeniedError(
+            `[Security] Access denied: the ${opCtx.operation} would leave '${opCtx.object}' with no organization ` +
+              `(an organization-scoped row keeps an organization on update)`,
+            { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+            `[ADR-0095 D1] tenancy posture '${this.tenancyPosture}' walls '${opCtx.object}', so a non-system update ` +
+              `must leave the row in an organization the Layer 0 wall admits. An empty organization_id is in none: ` +
+              `the row would drop out of every reader's scope, and an organization-scoped grant row would apply in ` +
+              `every organization. System contexts and platform operators on posture-permitting objects are unaffected.`,
+          );
+        };
         // EVERY supplied row must clear the wall — one forged row in a bulk
         // payload denies the whole write (fail closed, no partial landing).
         if (tenantParts.length > 0 && !suppliedRows.every(clearsWall)) denyTenantPlacement('a supplied');
+        // [#22278] …and no row of an UPDATE payload may empty the column.
+        if (tenantParts.length > 0 && writeRows.some(emptiesOrganization)) denyOrganizationRemoval('a supplied');
 
         // ── [#20013] The wall on the STORED row, after the hooks ─────────────
         //
@@ -4158,6 +4204,13 @@ export class SecurityPlugin implements Plugin {
         //
         // Array UPDATE payloads are left as step 3.6 leaves them: the engine
         // takes one payload per update, so the seam judges a single payload.
+        //
+        // [#22278] On an UPDATE the stored row is held to the whole invariant:
+        // an image whose organization a hook (or the payload) EMPTIED is
+        // refused, not skipped as "names no organization". An update that
+        // leaves the column alone hands over the row's own organization — the
+        // one the pre-image or the composed AST selected it under — so it
+        // clears this exactly as before.
         if (tenantParts.length > 0 && (opCtx.operation === 'insert' || !Array.isArray(opCtx.data))) {
           const businessCheck = writeImageCheckSeam;
           writeImageCheckSeam = {
@@ -4166,6 +4219,7 @@ export class SecurityPlugin implements Plugin {
               for (const row of rows) {
                 if (!row || typeof row !== 'object') continue;
                 if (namesOrganization(row) && !clearsWall(row)) denyTenantPlacement("the stored row's");
+                if (emptiesOrganization(row)) denyOrganizationRemoval("the stored row's");
               }
             },
           };

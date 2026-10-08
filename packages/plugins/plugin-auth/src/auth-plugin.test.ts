@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthPlugin } from './auth-plugin';
 import { AuthManager } from './auth-manager';
 import type { PluginContext } from '@objectstack/core';
-import { assertEngineFindOnePredicate } from '@objectstack/objectql';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
 
 describe('AuthPlugin', () => {
   let mockContext: PluginContext;
@@ -1339,6 +1339,14 @@ describe('AuthPlugin', () => {
           (tables[object] ??= []).push(data);
           return data;
         }),
+        update: vi.fn(async (object: string, data: any, options?: any) => {
+          // Pinned to ObjectQL.update's dispatch predicate: the promotion is a
+          // by-id update, and a looser fake would pass one the engine refuses.
+          assertEngineUpdateDispatch(data, options);
+          const row = (tables[object] ?? []).find((r) => r.id === data.id);
+          if (row) Object.assign(row, data);
+          return row ?? null;
+        }),
       };
     };
 
@@ -1425,6 +1433,11 @@ describe('AuthPlugin', () => {
 
     it('multi-org: bootstrap is NOT wired (the organizations package owns it)', async () => {
       process.env.OS_MULTI_ORG_ENABLED = 'true';
+      // The organizations runtime is present, so the wall is IN FORCE — the
+      // realistic walled shape. (Without it the request is degraded, which
+      // behaves as `single` and gets the Default Organization: see below.)
+      const getService = mockContext.getService;
+      mockContext.getService = vi.fn((name: string) => (name === 'org-scoping' ? {} : getService(name)));
       // [#11184] A walled posture now declares its platform owner or refuses
       // to boot; this fixture's subject is the default-org wiring, so declare
       // one (the boot-refusal itself is pinned in
@@ -1442,11 +1455,106 @@ describe('AuthPlugin', () => {
       }
     });
 
-    it('autoDefaultOrganization: false opts out', async () => {
+    // ── [ADR-0131 D3] the Default Organization is a BOOT INVARIANT under `single` ──
+
+    it('[ADR-0131 D3] single: the Default Organization exists after start(), before kernel:ready, with no admin yet', async () => {
+      // A fresh deployment: nobody has signed up, so there is no platform admin
+      // for the owner bind to find — the organization must not wait for one.
+      ql.tables.sys_user_permission_set = [];
+      await boot();
+      // Before `kernel:ready` — i.e. before `AppPlugin.start()`'s seed (ordered
+      // after this plugin) and before `kernel:listening`.
+      expect(ql.tables.sys_organization).toHaveLength(1);
+      expect(ql.tables.sys_organization[0]).toMatchObject({ slug: 'default', name: 'Default Organization' });
+      // Nobody is bound: there is nobody to bind.
+      expect(ql.tables.sys_member).toHaveLength(0);
+    });
+
+    it('[ADR-0131 D3] autoDefaultOrganization: false turns off only the OWNER BIND, not the organization', async () => {
       await boot({ autoDefaultOrganization: false });
       await hookCapture.trigger('kernel:ready');
-      expect(ql.tables.sys_organization).toHaveLength(0);
+      expect(ql.tables.sys_organization).toHaveLength(1);
       expect(ql.tables.sys_member).toHaveLength(0);
+    });
+
+    it('[ADR-0131 D3] an existing Default Organization is reused, never duplicated', async () => {
+      ql.tables.sys_organization = [{ id: 'org_existing', slug: 'default' }];
+      await boot();
+      expect(ql.tables.sys_organization).toEqual([{ id: 'org_existing', slug: 'default' }]);
+    });
+
+    it('[ADR-0131 D3] several organizations and none is the default: nothing is created', async () => {
+      ql.tables.sys_organization = [{ id: 'org_a', slug: 'a' }, { id: 'org_b', slug: 'b' }];
+      await boot();
+      expect(ql.tables.sys_organization.map((o: any) => o.id)).toEqual(['org_a', 'org_b']);
+    });
+
+    it('[ADR-0131 D3] a failed Default Organization insert FAILS start() — a boot error, never warn-only', async () => {
+      ql.insert.mockImplementation(async (object: string) => {
+        throw new Error(`driver refused the insert into ${object}`);
+      });
+      await expect(boot()).rejects.toThrow(/BOOT REFUSED: the Default Organization could not be created/);
+      expect(ql.tables.sys_organization).toHaveLength(0);
+    });
+
+    it('[ADR-0131 D3] an unreadable store FAILS start() rather than minting a second organization', async () => {
+      // An unreadable store is not an empty one: reading it as empty would
+      // create an organization beside the one it could not see.
+      ql.find.mockImplementation(async () => { throw new Error('connection reset'); });
+      await expect(boot()).rejects.toThrow(/connection reset/);
+      expect(ql.insert).not.toHaveBeenCalled();
+    });
+
+    it('[ADR-0131 D3] a walled posture in force gets no Default Organization from this plugin', async () => {
+      process.env.OS_MULTI_ORG_ENABLED = 'true';
+      const oldOwner = process.env.OS_PLATFORM_OWNER_EMAIL;
+      process.env.OS_PLATFORM_OWNER_EMAIL = 'operator@corp.example';
+      const getService = mockContext.getService;
+      mockContext.getService = vi.fn((name: string) => (name === 'org-scoping' ? {} : getService(name)));
+      try {
+        await boot();
+        expect(ql.tables.sys_organization).toHaveLength(0);
+      } finally {
+        if (oldOwner === undefined) delete process.env.OS_PLATFORM_OWNER_EMAIL;
+        else process.env.OS_PLATFORM_OWNER_EMAIL = oldOwner;
+      }
+    });
+
+    // ── [ADR-0131 D3 / ADR-0093 D7] the first admin is the OWNER ──
+
+    it('[ADR-0131 D3] the first admin, bound as `member` by the reconciler, is promoted to owner', async () => {
+      // The organization exists before the first sign-up now, so the
+      // reconciler binds the new user as `member` before this bootstrap learns
+      // they are the platform admin (u1 holds the first-user grant).
+      await boot();
+      const orgId = ql.tables.sys_organization[0].id;
+      ql.tables.sys_member.push({ id: 'mem_reconciled', organization_id: orgId, user_id: 'u1', role: 'member' });
+      await hookCapture.trigger('kernel:ready');
+      // Promoted in place — one row, now `owner` — not a second membership.
+      expect(ql.tables.sys_member).toEqual([
+        { id: 'mem_reconciled', organization_id: orgId, user_id: 'u1', role: 'owner' },
+      ]);
+    });
+
+    it('[ADR-0131 D3] no promotion when the Default Organization already has an owner', async () => {
+      await boot();
+      const orgId = ql.tables.sys_organization[0].id;
+      ql.tables.sys_member.push(
+        { id: 'mem_owner', organization_id: orgId, user_id: 'someone_else', role: 'owner' },
+        { id: 'mem_reconciled', organization_id: orgId, user_id: 'u1', role: 'member' },
+      );
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_member.find((m: any) => m.id === 'mem_reconciled').role).toBe('member');
+    });
+
+    it('[ADR-0131 D3] no promotion of a membership in another organization', async () => {
+      await boot();
+      ql.tables.sys_organization.push({ id: 'org_other', slug: 'other' });
+      ql.tables.sys_member.push({ id: 'mem_elsewhere', organization_id: 'org_other', user_id: 'u1', role: 'member' });
+      await hookCapture.trigger('kernel:ready');
+      expect(ql.tables.sys_member).toEqual([
+        { id: 'mem_elsewhere', organization_id: 'org_other', user_id: 'u1', role: 'member' },
+      ]);
     });
   });
 
@@ -1533,10 +1641,15 @@ describe('AuthPlugin', () => {
     });
 
     it('app:seeded runs the one-time pass when kernel:ready had no target organization yet', async () => {
-      // No platform admin at kernel:ready ⇒ no default organization ⇒ the
-      // pass has no target, decides nothing and records nothing.
+      // No default organization at kernel:ready ⇒ the pass has no target,
+      // decides nothing and records nothing. [ADR-0131 D3] `start()` now
+      // creates that organization on every `single` boot, so the state is
+      // reached the way it still can be: the organization is gone by
+      // kernel:ready (deleted), and reappears before the seed settles.
       ql.tables.sys_user_permission_set = [];
       await boot();
+      expect(ql.tables.sys_organization).toHaveLength(1);
+      ql.tables.sys_organization.length = 0;
       await hookCapture.trigger('kernel:ready');
       expect(ql.tables.sys_organization).toHaveLength(0);
       expect(ql.tables.sys_migration).toHaveLength(0);
@@ -1582,11 +1695,15 @@ describe('AuthPlugin', () => {
     };
 
     it('the default-org-created trigger runs the one-time pass', async () => {
-      // No platform admin at kernel:ready: no organization, the pass has no
-      // target and records nothing.
+      // No organization at kernel:ready: the pass has no target and records
+      // nothing. [ADR-0131 D3] `start()` creates the organization on every
+      // `single` boot, so the case is the one that remains: it was deleted
+      // before kernel:ready, and the bootstrap RE-creates it.
       ql.tables.sys_user_permission_set = [];
       ql.tables.sys_user.push({ id: 'early_u5' });
       await boot();
+      expect(ql.tables.sys_organization).toHaveLength(1);
+      ql.tables.sys_organization.length = 0;
       await hookCapture.trigger('kernel:ready');
       expect(ql.tables.sys_organization).toHaveLength(0);
       expect(ql.tables.sys_migration).toHaveLength(0);
