@@ -146,7 +146,6 @@
     "FlowNodeSchema (const)",
     "FlowNodeTextSlot (interface)",
     "FlowNodeTextSlotSource (interface)",
-    "FlowNodeTextTemplateRefusal (interface)",
     "FlowNodeValueTemplateRefusal (interface)",
     "FlowParsed (type)",
     "FlowRegion (type)",
@@ -285,7 +284,6 @@
     "flowForm (const)",
     "flowNodeConfigRefusals (function)",
     "flowNodeTextSlotSources (function)",
-    "flowNodeTextTemplateRefusals (function)",
     "flowNodeValueTemplateRefusals (function)",
     "getApprovalNodeConfigJsonSchema (function)",
     "getBuiltinNodeConfigContracts (function)",
@@ -302,7 +300,6 @@
     "resolveFlowTriggerKind (function)",
     "resolveScheduleOrganization (function)",
     "structuralConditionRefusal (function)",
-    "textSlotSource (function)",
     "textSlotTemplateRefusal (function)",
     "validateControlFlow (function)",
     "valueSlotTemplateRefusals (function)"
