@@ -3009,11 +3009,15 @@ export class SchemaRegistry {
     }
     for (const contributors of this.objectContributors.values()) {
       for (const contributor of contributors) {
-        const name = (contributor.definition as { name?: unknown })?.name;
-        if (typeof name !== 'string' || !this.deploymentPlatformGlobalObjects.has(name)) continue;
         const before = contributor.definition;
+        const name = (before as { name?: unknown })?.name;
+        if (typeof name !== 'string') continue;
         const orgField = (before.fields as Record<string, unknown> | undefined)?.organization_id;
-        if (orgField !== undefined && !isInjectedColumnDefinition(orgField, TENANT_SCOPE_FIELD_DEF)) {
+        const authoredColumn = orgField !== undefined && !isInjectedColumnDefinition(orgField, TENANT_SCOPE_FIELD_DEF);
+        // Asked of the body WITHOUT its column: the plan decides whether the
+        // deployment withholds one, and the column's presence is not an input.
+        if (!this.deploymentWithholdsTenant(withoutField(before, 'organization_id'))) continue;
+        if (authoredColumn) {
           keptAuthoredColumn.add(name);
           continue;
         }
@@ -3066,12 +3070,10 @@ export class SchemaRegistry {
    * exits ({@link materializeServedObjectOnto}) reach the same answer.
    */
   private applyDeploymentTenancy(schema: ServiceObject): ServiceObject {
-    const name = (schema as { name?: unknown })?.name;
-    if (typeof name !== 'string' || !this.deploymentPlatformGlobalObjects.has(name)) return schema;
+    if (!this.deploymentWithholdsTenant(schema)) return schema;
     const fields = schema.fields as Record<string, unknown> | undefined;
     const orgField = fields?.organization_id;
     if (orgField !== undefined && !isInjectedColumnDefinition(orgField, TENANT_SCOPE_FIELD_DEF)) return schema;
-    if (orgField === undefined && !resolveInjectedSystemColumns(schema).tenant) return schema;
     const sf = (schema as { systemFields?: unknown }).systemFields;
     const out = withoutField(schema, 'organization_id') as ServiceObject & { systemFields?: unknown };
     return {
@@ -3101,8 +3103,6 @@ export class SchemaRegistry {
    */
   private stripDeploymentTenancyFrom<T>(base: T): T {
     if (base === null || typeof base !== 'object') return base;
-    const name = (base as { name?: unknown }).name;
-    if (typeof name !== 'string' || !this.deploymentPlatformGlobalObjects.has(name)) return base;
     const sf = (base as { systemFields?: unknown }).systemFields;
     if (!sf || typeof sf !== 'object' || Array.isArray(sf)) return base;
     if ((sf as { tenant?: unknown }).tenant !== false) return base;
@@ -3110,7 +3110,24 @@ export class SchemaRegistry {
     const out = { ...(base as Record<string, unknown>) };
     if (Object.keys(restSystemFields).length === 0) delete out.systemFields;
     else out.systemFields = restSystemFields;
-    return out as unknown as T;
+    // Redundant with the derivation only where the deployment's plan withholds
+    // the column from the body without the record — i.e. on a declared object.
+    return this.deploymentWithholdsTenant(out as unknown as ServiceObject) ? (out as unknown as T) : base;
+  }
+
+  /**
+   * [ADR-0131 D7] Does the deployment's declaration — and nothing else — plan
+   * this body with no tenant column? The ONE reading of the declaration in
+   * this registry: the spec's plan answers it, with and without the
+   * deployment input, so the registry never re-derives which objects are
+   * declared.
+   */
+  private deploymentWithholdsTenant(schema: ServiceObject): boolean {
+    if (this.deploymentPlatformGlobalObjects.size === 0) return false;
+    return (
+      resolveInjectedSystemColumns(schema).tenant &&
+      !resolveInjectedSystemColumns(schema, { platformGlobalObjects: this.deploymentPlatformGlobalObjects }).tenant
+    );
   }
 
   /**
