@@ -472,8 +472,7 @@ function nullOrderingComparandMessage(op: string): string {
     + 'stored null as equal to it, so {"$gte": null} admits that row; driver-sql compares '
     + 'against SQL NULL and admits no row). State absence '
     + 'with the null predicate instead: {"$eq": null} is "has no value", {"$ne": null} is '
-    + '"has a value". Ruled 2026-09-01: a null ordering comparand is refused at the validation '
-    + 'entrance.'
+    + '"has a value".'
   );
 }
 
@@ -547,8 +546,9 @@ function isFieldReferenceShape(value: unknown): boolean {
  * path whose answer is a wrong row set rather than an error. So this message
  * keeps the literal-value escape, replaces the in-memory escape with the
  * position that genuinely works (the reference as the WHOLE comparand of a
- * scalar comparison, which #5222 compiles), and states the ruling that removed
- * the position so the change is attributable from the error alone.
+ * scalar comparison, which #5222 compiles). The ruling that removed the
+ * position is recorded in the comment inside the builder, not in the message
+ * (#22093): the author acts on the rule and the repair, not on its provenance.
  */
 function listPositionFieldReferenceMessage(position: string): string {
   return (
@@ -557,11 +557,10 @@ function listPositionFieldReferenceMessage(position: string): string {
     + 'unresolved and compares the raw reference OBJECT, so it silently matches nothing, and '
     + 'both SQL drivers refuse the position with INVALID_FILTER / 400. Write a literal value '
     + 'here, or move the reference to a scalar comparison operator '
-    + '($eq/$ne/$gt/$gte/$lt/$lte), whose WHOLE comparand a { $field } reference may be. '
-    // The removal ruling of 2026-08-11 lives on the tracker (#7596) — internal
-    // readers get the id here; the customer-facing sentence keeps the date and
-    // the customer-resolvable ADR anchor only.
-    + 'Ruled 2026-08-11: declared = enforced (ADR-0049).'
+    + '($eq/$ne/$gt/$gte/$lt/$lte), whose WHOLE comparand a { $field } reference may be.'
+    // The removal was ruled 2026-08-11 on the tracker (#7596) under ADR-0049's
+    // declared = enforced. The id, the date and the anchor live here; the
+    // customer-facing sentence states the rule and the repair only (#22093).
   );
 }
 
@@ -585,8 +584,7 @@ function nullListComparandMemberMessage(position: string): string {
     + 'unconditionally; the JS matchers split over the two readings of "no value"). State '
     + 'absence explicitly with the null predicate instead: '
     + '{"$or": [{"$in": […]}, {"$null": true}]} is "one of […] OR has no value", and '
-    + '{"$null": false} is the has-a-value half. '
-    + 'Ruled 2026-08-31: a null list member is refused at the validation entrance.'
+    + '{"$null": false} is the has-a-value half.'
   );
 }
 
@@ -797,8 +795,7 @@ function blankRangeBoundMessage(index: 0 | 1): string {
     + 'range stops bounding on that side while still reading as a complete range. Write the '
     + 'bound you meant; and if only ONE side is genuinely bounded, that is not a range at all '
     + '— drop $between and write the side you have as a scalar comparison '
-    + '({"$gte": min} for a lower bound, {"$lte": max} for an upper one). '
-    + 'Ruled 2026-09-17: a blank $between bound is refused at the validation entrance.'
+    + '({"$gte": min} for a lower bound, {"$lte": max} for an upper one).'
   );
 }
 

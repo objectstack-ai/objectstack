@@ -641,7 +641,9 @@ describe('RangeOperatorSchema', () => {
       const message = issuesOf(RangeOperatorSchema.safeParse({ $between: ['2026-01-01', ''] }))[0]?.message ?? '';
       expect(message).toContain('{"$gte": min}');
       expect(message).toContain('{"$lte": max}');
-      expect(message).toContain('Ruled 2026-09-17');
+      // The ruling's date lives in the code comment, not in the refusal an
+      // author reads (#22093).
+      expect(message).not.toMatch(/\bRuled\b|\bruling\b|\b20\d\d-\d\d-\d\d\b/i);
     });
 
     it('refuses an ABSENT bound with the pointed message, not zod\'s generic union text', () => {
@@ -658,7 +660,7 @@ describe('RangeOperatorSchema', () => {
       // would be sent to a scalar comparison instead of the null predicate.
       const message = issuesOf(RangeOperatorSchema.safeParse({ $between: [null, '2026-12-31'] }))[0]?.message ?? '';
       expect(message).toContain('{"$null": true}');
-      expect(message).not.toContain('Ruled 2026-09-17');
+      expect(message).not.toContain('A blank value is not a valid $between endpoint');
     });
 
     it('is matched by the enforced copy and by the whole-filter face', () => {

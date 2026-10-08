@@ -345,16 +345,18 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
       expect(templateDoc).toMatch(/per recipient/);
       expect(templateDoc).toContain('`sys_user.locale`');
       expect(templateDoc).toMatch(/deployment default/);
-      expect(templateDoc).toContain('II18nService.getDefaultLocale()');
+      // Studio renders this describe as form help: the rung is named in product
+      // words, never as the service interface that implements it (#22093).
+      expect(templateDoc).not.toMatch(/\bI[A-Z]\w*Service\b/);
       expect(templateDoc).not.toMatch(/not one per recipient/);
       expect(templateDoc).not.toMatch(/one value for the whole notification/i);
       // The producer's pre-ruling knob is named as NOT consulted, so an author
       // who still writes `payload.locale` learns from the contract that it is
       // inert rather than from a recipient who got the wrong language.
       expect(templateDoc).toMatch(/`payload\.locale` is not consulted/);
-      // The ruling is dated, so the text carries its own provenance rather
-      // than reading as a permanent limitation of the design.
-      expect(templateDoc).toContain('2026-09-01');
+      // The ruling's provenance lives in the code comment above the key, not
+      // in the help text an author reads (#22093).
+      expect(templateDoc).not.toMatch(/\bruling\b|\b20\d\d-\d\d-\d\d\b/i);
       // …and it is a RAW cross-reference, like topic/channels.
       expect(templateDoc).toMatch(/no `\{token\}` interpolation/i);
 

@@ -301,9 +301,13 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
    *
    * Read RAW like `topic`/`channels`: a static metadata cross-reference, never
    * interpolated. Mutually exclusive with inline `title`/`message`.
+   *
+   * The describe below is form help an author reads: it states the behaviour
+   * and carries neither the service interface nor the ruling date — both live
+   * in this comment only (#22093).
    */
   template: z.string().optional()
-    .describe('Email template name (`sys_email_template.name`, e.g. `crm.large_deal_won`) — the localizable content path: the delivery path resolves `(name, locale)` against sys_email_template at delivery time and renders subject/body from that row. The locale is resolved per recipient, after fan-out: the recipient\'s own `sys_user.locale` when set, else the deployment default (`II18nService.getDefaultLocale()`) — so recipients whose personal languages differ receive different rows of the same bundle (maintainer ruling 2026-09-01). A producer-set `payload.locale` is not consulted. Mutually exclusive with inline `title`/`message`, which are the non-localizable path. Read raw — no `{token}` interpolation.'),
+    .describe('Email template name (`sys_email_template.name`, e.g. `crm.large_deal_won`) — the localizable content path: the delivery path resolves `(name, locale)` against sys_email_template at delivery time and renders subject/body from that row. The locale is resolved per recipient, after fan-out: the recipient\'s own `sys_user.locale` when set, else the deployment default locale — so recipients whose personal languages differ receive different rows of the same bundle. The node\'s `payload.locale` is not consulted. Mutually exclusive with inline `title`/`message`, which are the non-localizable path. Read raw — no `{token}` interpolation.'),
   /**
    * Render context for the referenced template's `{{var}}` holes. Values are
    * interpolated per run (`{record.x}` resolves), so flow state can feed the

@@ -2180,7 +2180,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       identity: {
         label: "基础信息",
-        description: "模板标识符，由 IEmailService.sendTemplate({ template: name, locale, ... }) 解析。"
+        description: "发送方按名称引用此模板；语言区域决定发送哪个语言版本。"
       },
       subject: {
         label: "主题",

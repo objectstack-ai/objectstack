@@ -63,11 +63,12 @@ function expectFeaturesRefusal(
   expect(issue, `expected a refusal at ${JSON.stringify(path)}, got ${JSON.stringify(issues)}`).toBeDefined();
   expect(issue!.code).toBe('custom');
   // The identity an author (and an AI author's retry loop) acts on: the root,
-  // the surface, the fail-open reason, the ruling, and the prescription.
+  // the surface, the fail-open reason, and the prescription.
   expect(issue!.message).toContain('Form-view predicates may not name the `features.*` scope root');
-  expect(issue!.message).toContain('ruled 2026-08-27');
-  // The negative twin of the citation pin: the ruling is cited by DATE, never
-  // by a tracker id a refused author cannot resolve (commit fd289be45's strip).
+  // Its provenance is not part of that identity: neither the ruling's date
+  // (#22093) nor a tracker id a refused author cannot resolve (commit
+  // fd289be45's strip) is in the sentence — both live in the code comment.
+  expect(issue!.message).not.toMatch(/\bruled\b|\bruling\b|\b20\d\d-\d\d-\d\d\b/i);
   expect(issue!.message).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
   expect(issue!.message).toContain('UNBOUND');
   expect(issue!.message).toContain('fails OPEN');

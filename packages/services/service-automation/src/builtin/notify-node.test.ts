@@ -98,6 +98,11 @@ describe('notify (baseline node)', () => {
         expect(description).toMatch(/payload\.locale is not consulted/);
         expect(description).not.toMatch(/not one per recipient/);
         expect(description).not.toMatch(/ONE value for the whole notification/);
+        // Form help reads as product guidance (#22093): the deployment-default
+        // rung is named in product words, not as the service interface behind
+        // it, and the ruling's date stays in the code comment beside the key.
+        expect(description).not.toMatch(/\bI[A-Z]\w*Service\b/);
+        expect(description).not.toMatch(/\bruling\b|\b20\d\d-\d\d-\d\d\b/i);
     });
 
     describe('with a messaging service registered', () => {

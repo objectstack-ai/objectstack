@@ -30,8 +30,21 @@
  * The protocol-level half — the same verdict through the real `saveMetaItem`
  * and `publishMetaItem` — is the #22032 block of
  * `packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts`.
+ *
+ * ## #22042 — one level down
+ *
+ * A `conditional` rule's `then` / `otherwise` is a rule the evaluator runs,
+ * yet only the null-guard gate reached its predicates: the same unregistered
+ * function or bare field the top level refuses published clean one level
+ * down, in `os build` and at this door alike. The pass now runs the same
+ * `check()` on every nested predicate, at the location the null-guard gate
+ * already gives it (`validation rule 'outer' then → 'inner'`), with the
+ * relationship-traversal checks on a nested `condition` (ObjectQL hydrates it)
+ * and not on a nested `when` (it does not). The second describe block below
+ * pins it; its protocol half is the #22042 block of the same protocol file.
  */
 import { describe, expect, it } from 'vitest';
+import { ObjectSchema } from '@objectstack/spec/data';
 import { EXPRESSION_INVALID, runAuthoringRules } from './authoring-rules.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
 
@@ -169,6 +182,151 @@ describe('#22032 pass 1 — the object door gives the build\'s validation-rule v
       item: fxRule(VALID),
       context: { objects: [sibling] },
     });
+
+    expect(expressionFindings(result.errors), dump(result)).toEqual([]);
+  });
+});
+
+/** #22042 — the card's two bodies, one level down: an unregistered function in `then`, a bare field in `otherwise`. */
+const NESTED_REFUSED = {
+  type: 'conditional',
+  name: 'outer',
+  when: "record.status == 'open'",
+  message: 'x',
+  then: { type: 'script', name: 'inner', condition: 'sqrt(record.amount) > 1', message: 'y' },
+  otherwise: { type: 'script', name: 'other', condition: 'amont > 1', message: 'z' },
+};
+const THEN_WHERE = "object 'fx_rule' · validation rule 'outer' then → 'inner'";
+const OTHERWISE_WHERE = "object 'fx_rule' · validation rule 'outer' otherwise → 'other'";
+
+/** Two levels: a bare field in a nested `conditional`'s own `when`, an unregistered function one level below it. */
+const TWO_LEVEL = {
+  type: 'conditional',
+  name: 'outer',
+  when: "record.status == 'open'",
+  message: 'x',
+  then: {
+    type: 'conditional',
+    name: 'mid',
+    when: 'amount > 1',
+    message: 'y',
+    then: { type: 'script', name: 'deep', condition: 'sqrt(record.amount) > 1', message: 'z' },
+  },
+};
+
+/** Valid, guarded predicates in both branches and two levels down. */
+const NESTED_VALID = {
+  type: 'conditional',
+  name: 'outer',
+  when: "record.status == 'open'",
+  message: 'x',
+  then: {
+    type: 'conditional',
+    name: 'mid',
+    when: 'record.amount != null',
+    message: 'y',
+    // Guarded in its own source: the null-guard gate does not credit the enclosing `when`.
+    then: { type: 'script', name: 'deep', condition: 'record.amount != null && record.amount > 100', message: 'z' },
+  },
+  otherwise: { type: 'script', name: 'other', condition: 'record.amount != null && record.amount < 0', message: 'w' },
+};
+
+/** A probe object with a reference field, for the per-slot traversal checks. */
+const fxRef = (validations: unknown[]) => {
+  const base = fxRule(validations);
+  return { ...base, fields: { ...base.fields, account: { type: 'lookup', label: 'Account', reference: 'fx_rule' } } };
+};
+/** Reads more than one relationship hop — a shape `checkPredicate` refuses, and `checkConditional` never judges. */
+const MULTI_HOP = 'record.account.owner.email != null';
+const HYDRATION = {
+  type: 'conditional',
+  name: 'outer',
+  when: "record.status == 'open'",
+  message: 'x',
+  then: { type: 'script', name: 'inner', condition: MULTI_HOP, message: 'y' },
+  otherwise: {
+    type: 'conditional',
+    name: 'mid',
+    when: MULTI_HOP,
+    message: 'z',
+    then: { type: 'script', name: 'deep', condition: 'record.amount != null', message: 'w' },
+  },
+};
+
+describe('#22042 — a `conditional` rule\'s nested predicates meet the same verdict, at the build and at the door', () => {
+  it('the fixtures are spec-valid: each refusal below is the expression verdict, not the schema\'s', () => {
+    for (const body of [fxRule([NESTED_REFUSED]), fxRule([TWO_LEVEL]), fxRule([NESTED_VALID]), fxRef([HYDRATION])]) {
+      const parsed = ObjectSchema.safeParse(body);
+      expect(parsed.success, dump(parsed.error?.issues)).toBe(true);
+    }
+  });
+
+  it('⭐ LIT — an unregistered function in `then` and a bare field in `otherwise` are REFUSED by `os build`, located at the nested rule', () => {
+    const atBuild = buildFindings(fxRule([NESTED_REFUSED]));
+
+    expect(atBuild.map((f) => f.where), dump(atBuild)).toEqual([THEN_WHERE, OTHERWISE_WHERE]);
+    for (const f of atBuild) expect(f).toMatchObject({ severity: 'error', path: f.where });
+    expect(atBuild[0]!.message).toContain('`sqrt` is not a callable name here');
+    expect(atBuild[1]!.message).toContain('bare reference `amont`');
+  });
+
+  it('⭐ LIT — the object door REFUSES the same body, and its findings ARE the build\'s', () => {
+    const result = gateObject(fxRule([NESTED_REFUSED]));
+
+    expect(result.rulesRun).toContain('validateStackExpressions');
+    const atDoor = expressionFindings(result.errors);
+    expect(atDoor.map((f) => f.where), dump(result)).toEqual([THEN_WHERE, OTHERWISE_WHERE]);
+    expect(atDoor).toEqual(buildFindings(fxRule([NESTED_REFUSED])));
+  });
+
+  it('⭐ LIT — two levels down: a nested `conditional`\'s `when` and the rule below it are judged', () => {
+    const atBuild = buildFindings(fxRule([TWO_LEVEL]));
+
+    expect(atBuild.map((f) => f.where), dump(atBuild)).toEqual([
+      "object 'fx_rule' · validation rule 'outer' then → 'mid' when-predicate",
+      "object 'fx_rule' · validation rule 'outer' then → 'mid' then → 'deep'",
+    ]);
+    expect(atBuild[0]!.message).toContain('bare reference `amount`');
+    expect(atBuild[1]!.message).toContain('`sqrt` is not a callable name here');
+    expect(expressionFindings(gateObject(fxRule([TWO_LEVEL])).errors)).toEqual(atBuild);
+  });
+
+  it('⭐ CONTROL — valid nested predicates publish clean, two levels down and in `otherwise`', () => {
+    const result = gateObject(fxRule([NESTED_VALID]));
+
+    expect(expressionFindings(result.errors), dump(result)).toEqual([]);
+    expect(expressionFindings(result.advisories), dump(result)).toEqual([]);
+    expect(buildFindings(fxRule([NESTED_VALID]))).toEqual([]);
+  });
+
+  it('each predicate is judged ONCE: the rule\'s own `condition` / `when` keep their location and are not re-judged as nested', () => {
+    // A top-level `condition` — one finding, at the rule's own location only.
+    const top = buildFindings(fxRule([UNREGISTERED]));
+    expect(top.map((f) => f.where), dump(top)).toEqual(["object 'fx_rule' · validation 'amount_root'"]);
+    // A faulting top-level `when` beside a faulting nested `then` — one finding each.
+    const both = buildFindings(fxRule([{ ...WHEN, then: NESTED_REFUSED.then }]));
+    expect(both.map((f) => f.where), dump(both)).toEqual([
+      "object 'fx_rule' · validation 'gate' when",
+      "object 'fx_rule' · validation rule 'gate' then → 'inner'",
+    ]);
+  });
+
+  it('the traversal checks follow the evaluator per slot: ON for a nested `condition`, OFF for a nested `when`', () => {
+    const atBuild = buildFindings(fxRef([HYDRATION]));
+
+    // `checkPredicate` refuses a read deeper than one hop at any depth, so the build says so…
+    expect(atBuild.map((f) => f.where), dump(atBuild)).toEqual(["object 'fx_rule' · validation rule 'outer' then → 'inner'"]);
+    expect(atBuild[0]!.message).toContain('ONE hop');
+    // …and `checkConditional` never hydrates a `when`, so the same source there earns no
+    // traversal prescription — exactly as the top-level `when` site is opted out.
+    const topWhen = buildFindings(fxRef([{ ...HYDRATION, when: MULTI_HOP, then: NESTED_VALID.otherwise, otherwise: undefined }]));
+    expect(topWhen, dump(topWhen)).toEqual([]);
+    expect(expressionFindings(gateObject(fxRef([HYDRATION])).errors)).toEqual(atBuild);
+  });
+
+  it('a stored sibling\'s nested fault is not this write\'s to answer for (the differential)', () => {
+    const sibling = { ...fxRule([NESTED_REFUSED, TWO_LEVEL]), name: 'fx_sibling' };
+    const result = runRuntimeAuthoringRules({ type: 'object', item: fxRule([NESTED_VALID]), context: { objects: [sibling] } });
 
     expect(expressionFindings(result.errors), dump(result)).toEqual([]);
   });
