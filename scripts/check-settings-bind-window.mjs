@@ -43,16 +43,28 @@
  *    and the three shipped always-on readers (`plugin-email`, `service-sms`,
  *    `service-storage`) carry exactly it.
  *
- *  - `init-body` / `start-body` / `ready-hook-from-init` — NOT FIXABLE BY
- *    DECLARATION, and the reason is worth stating because a gate that printed
- *    the declaration remedy here would be giving advice that cannot work: the
- *    bind happens in the settings plugin's OWN `kernel:ready` hook, which is
- *    strictly after every plugin's `init()` and `start()` and after every
- *    handler registered during `init()`. No ordering edge can move a read in
- *    those phases out of the window. The repair is to move the read to
- *    `kernel:bootstrapped` (the earliest safe phase — the same one
+ *  - `init-body` / `start-body` / `ready-hook-from-init` /
+ *    `<hook>-hook-from-<phase>` — NOT FIXABLE BY DECLARATION, and the reason is
+ *    worth stating because a gate that printed the declaration remedy here
+ *    would be giving advice that cannot work: the bind happens in the settings
+ *    plugin's OWN `kernel:ready` hook, which is strictly after every plugin's
+ *    `init()` and `start()`, after every handler registered during `init()`,
+ *    and after every handler of a hook those phases FIRE. No ordering edge can
+ *    move a read in those phases out of the window. The repair is to move the
+ *    read to `kernel:bootstrapped` (the earliest safe phase — the same one
  *    `reportPreBindRead`'s message names) or to make it lazy so it resolves at
  *    first use.
+ *
+ * The fired hooks are the third sub-window, and the one this gate was blind to
+ * until #22316: `AppPlugin.start()` fires `app:seeded` when its inline seed
+ * lands, so an `app:seeded` handler registered from `start()` ran during Phase
+ * 2 — and `plugin-auth`'s did, reading the `auth` namespace from the manifest
+ * defaults on every seeded boot while this gate printed green. Which hooks
+ * belong here is DERIVED from the fire sites and pinned in
+ * {@link PRE_BIND_HOOKS}; a handler of one of them registered from inside a
+ * `kernel:ready` handler inherits THAT handler's window instead, because it
+ * cannot exist before the registering handler runs — which is also the
+ * structural way to keep such a handler out of the window.
  *
  * A plugin the settings plugin itself depends on gets a third verdict,
  * `cycle`: it can never be ordered after the settings plugin, because the
@@ -87,11 +99,19 @@
  *     `this.ensureAuthSettingsBound(ctx)` which calls `this.bindAuthSettings(ctx)`
  *     which does the read — depth 3. A depth-0 walker reports zero for it.
  *     `--self-test` case "transitive" is written so that a depth-0-only walker
- *     FAILS it.
+ *     FAILS it. `runBackfill` has since come to serialize its runs through
+ *     `backfillChain.then(async () => { … })`, which puts that call inside a
+ *     promise continuation — see the next paragraph for why it is entered.
  *
- * Nested function bodies are deliberately NOT entered: a closure defined inside
- * a hook and handed to a collaborator runs when that collaborator calls it, not
- * during the hook. `plugin-audit`'s `getLocale`
+ * Nested function bodies are deliberately NOT entered — with ONE exception, a
+ * promise continuation: the callback of `.then` / `.catch` / `.finally`
+ * ({@link PROMISE_CONTINUATIONS}) runs when a promise the phase started
+ * settles, and the kernel awaits each handler before the next, so it runs in
+ * the window the walk is in. Measured at `4e4111ca0`, entering continuations
+ * adds exactly one read to the population — `plugin-auth`'s `app:seeded` path
+ * above, the read `[SettingsService] Pre-bind READ` logged — and no other.
+ * Any OTHER closure defined inside a hook and handed to a collaborator runs
+ * when that collaborator calls it, not during the hook. `plugin-audit`'s `getLocale`
  * (`packages/plugins/plugin-audit/src/audit-plugin.ts`, line 200 as measured)
  * is the measured case — it is passed to `installAuditWriters` and invoked from
  * `packages/plugins/plugin-audit/src/audit-writers.ts#resolveWriteLocale` on
@@ -130,10 +150,13 @@ const READY_HOOK = 'kernel:ready';
 
 /**
  * The hooks a PLUGIN fires during Phase 1 / Phase 2 — from its own `init()` or
- * `start()` — and therefore strictly before the kernel triggers {@link READY_HOOK}
- * at all. Every handler of one of these runs before the settings bind under
- * EVERY composition order, so its settings reads are part of this gate's
- * population exactly as an `init()` / `start()` body is.
+ * `start()` — and therefore before the kernel triggers {@link READY_HOOK} at
+ * all. A handler of one of these registered from `init()` / `start()` runs
+ * before the settings bind whenever the hook fires in that phase, under every
+ * composition order (`app:seeded` fires there for an in-budget seed and after
+ * `kernel:ready` for one that overran its budget; the rest fire there always),
+ * so its settings reads belong to this gate's population exactly as an
+ * `init()` / `start()` body does.
  *
  * The kernel never fires these; plugins do, so the list is not knowable from
  * `packages/core`. It is NOT hand-trusted either: `audit()` re-derives the set
@@ -145,6 +168,10 @@ const READY_HOOK = 'kernel:ready';
  * no longer fired before the bind (a stale pin, and the anti-vacuity limb — a
  * scan that finds no emit at all stales every row). Each value is the emit site
  * the derivation found, so a reader can check the row without re-running it.
+ * All eight were derived from Phase 1/2 bodies at `4e4111ca0`; a hook fired
+ * from a `kernel:ready` handler would be derived too and is judged the same
+ * way — conservatively, since it precedes the bind only when its emitter's
+ * handler does.
  */
 const PRE_BIND_HOOKS = Object.freeze({
   'app:registered':
@@ -158,15 +185,21 @@ const PRE_BIND_HOOKS = Object.freeze({
   'analytics:ready':
     'packages/services/service-analytics/src/plugin.ts — AnalyticsServicePlugin.start() → ctx.trigger(\'analytics:ready\', this.service)',
   'datasource-admin:ready':
-    'packages/services/service-datasource/src/datasource-admin-plugin.ts — start() → ctx.trigger(\'datasource-admin:ready\', this.service)',
+    'packages/services/service-datasource/src/datasource-admin-plugin.ts — DatasourceAdminServicePlugin.start() → ctx.trigger(\'datasource-admin:ready\', this.service)',
   'external-datasource:ready':
-    'packages/services/service-datasource/src/plugin.ts — start() → ctx.trigger(\'external-datasource:ready\', this.service)',
+    'packages/services/service-datasource/src/plugin.ts — ExternalDatasourceServicePlugin.start() → ctx.trigger(\'external-datasource:ready\', this.service)',
   'mcp:ready':
-    'packages/mcp/src/plugin.ts — MCPPlugin.start() → ctx.trigger(\'mcp:ready\', this.runtime)',
+    'packages/mcp/src/plugin.ts — MCPServerPlugin.start() → ctx.trigger(\'mcp:ready\', this.runtime)',
 });
 
 /** The method a plugin context fires a hook through. */
 const EMIT_CALLEE = 'trigger';
+
+/**
+ * The promise methods whose callback argument is a CONTINUATION of the phase
+ * the walk is in — see "Nested function bodies" in the header.
+ */
+const PROMISE_CONTINUATIONS = new Set(['then', 'catch', 'finally']);
 
 /**
  * The accessors that RESOLVE A NAMED SERVICE out of the kernel registry.
@@ -577,8 +610,16 @@ function preBindReads(unit, src, hookNames = new Set([READY_HOOK, ...Object.keys
               (ts.isPropertyAccessExpression(callee.expression) && callee.expression.name.text === EMIT_CALLEE))) {
             recordEmit(node.arguments[1], node);
           }
-          if (process.env.PROBE_THEN === '1' && ['then', 'catch', 'finally'].includes(callee.name.text)) {
-            for (const a of node.arguments) { const t = resolveCallable(a); if (t) walk(t, origin, visited, onHook, new Map()); }
+          // `<promise>.then(cb)` / `.catch(cb)` / `.finally(cb)` → `cb` is a
+          // CONTINUATION, the one nested function this walk does enter: it runs
+          // when a promise the phase started settles, and the kernel awaits
+          // every handler in turn, so it runs inside the same window. A closure
+          // handed to any OTHER callee still runs at that callee's discretion.
+          if (PROMISE_CONTINUATIONS.has(callee.name.text)) {
+            for (const arg of node.arguments) {
+              const continuation = resolveCallable(arg);
+              if (continuation) walk(continuation, origin, visited, onHook);
+            }
           }
           // `this.m(...)` → same-class method or function-valued property.
           if (callee.expression.kind === ts.SyntaxKind.ThisKeyword) {
@@ -747,6 +788,7 @@ function auditUnits(units, providerOverride) {
 
     if (judged.verdict === 'unfixable-by-declaration') {
       const first = judged.reads[0];
+      const hook = Object.keys(PRE_BIND_HOOKS).find((h) => first.origin.startsWith(`${h}-hook-from-`));
       problems.push({
         plugin: unit.pluginName ?? unit.anchor,
         verdict: 'unfixable-by-declaration',
@@ -755,11 +797,19 @@ function auditUnits(units, providerOverride) {
           `    ${first.accessor}('${SETTINGS_SERVICE}') runs in [${first.origin}], which is inside the\n` +
           `    pre-bind window under EVERY composition order: '${provider.pluginName}' binds its\n` +
           `    engine from its own '${READY_HOOK}' hook, strictly after every plugin's init() and\n` +
-          `    start() and after every handler registered during init(). No dependency edge can\n` +
-          `    move this read out of the window — do not add one and call it fixed.\n` +
+          `    start(), after every handler registered during init(), and after every handler of\n` +
+          `    a hook those phases fire. No dependency edge can move this read out of the window —\n` +
+          `    do not add one and call it fixed.\n` +
           `    Move the read to 'kernel:bootstrapped' (the earliest safe phase, and the one\n` +
           `    SettingsService.reportPreBindRead names), or make it lazy so it resolves at\n` +
-          `    first use rather than at boot.`,
+          `    first use rather than at boot.` +
+          (hook
+            ? `\n    '${hook}' fires before '${READY_HOOK}' — ${PRE_BIND_HOOKS[hook]}.\n` +
+              `    If the handler is only meant to act after the bind, register it from this plugin's own\n` +
+              `    start()-registered '${READY_HOOK}' handler (with the ordering on '${provider.pluginName}'\n` +
+              `    declared): it then cannot exist before the bind, and this gate can see that. A runtime\n` +
+              `    flag that makes the early calls no-ops is invisible to it.`
+            : ''),
       });
     }
   }
@@ -836,6 +886,42 @@ function audit() {
     process.exit(1);
   }
 
+  // The population's hook list is held equal to the fire sites BEFORE any
+  // verdict is trusted: a hook missing from it is a set of handlers this run
+  // never walked, so a green below would be a green over an unnamed hole.
+  const derived = derivePreBindHooks(units);
+  const drift = reconcilePreBindHooks(derived);
+  if (drift.missing.length || drift.stalePins.length || drift.unresolved.length) {
+    console.error('✗ settings bind-window guard: PRE_BIND_HOOKS does not match the hooks the source fires before the bind\n');
+    for (const name of drift.missing) {
+      for (const s of derived.fired.get(name)) {
+        console.error(`  ${s.file}:${s.line} — ${s.anchor} fires '${name}' in [${s.origin}]`);
+      }
+      console.error(
+        `    '${name}' fires before '${READY_HOOK}', so its handlers run before the settings bind, and it is\n` +
+        '    not in PRE_BIND_HOOKS — none of its handlers is in this gate\'s population. Add it, with\n' +
+        '    the fire site above as its value.\n',
+      );
+    }
+    for (const name of drift.stalePins) {
+      console.error(
+        `  '${name}' is pinned in PRE_BIND_HOOKS (${PRE_BIND_HOOKS[name]}),\n` +
+        '    but no plugin\'s init() / start() fires it any more. Delete the row if the emit moved\n' +
+        '    out of Phase 1/2 or was removed. If EVERY pinned row reads stale, the walk stopped\n' +
+        '    seeing fire sites at all, and the population this run judged is empty.\n',
+      );
+    }
+    for (const s of drift.unresolved) {
+      console.error(
+        `  ${s.file}:${s.line} — ${s.anchor} fires a hook named by \`${s.text}\` in [${s.origin}]\n` +
+        '    The name is neither a string literal nor a parameter its caller bound to one, so this\n' +
+        '    gate cannot tell whether its handlers belong to the population. Pass the name as a\n' +
+        '    literal at the call site.\n',
+      );
+    }
+    process.exit(1);
+  }
+
   const { remaining, stale, ledgered } = applyLedger(problems);
 
   if (stale.length) {
@@ -860,7 +946,8 @@ function audit() {
   const self = findings.filter((f) => f.verdict === 'self').length;
   console.log(
     `✓ settings bind-window: ${declared} declared / ${self} self / ${cycle} structurally upstream / ` +
-    `${ledgered} ledgered (${units.length} plugin unit(s) scanned, provider '${provider.pluginName}').`,
+    `${ledgered} ledgered (${units.length} plugin unit(s) scanned, ${derived.fired.size} pre-bind hook(s) ` +
+    `fired = pinned, provider '${provider.pluginName}').`,
   );
 }
 
@@ -1206,6 +1293,204 @@ function selfTest() {
   {
     const { stale } = auditSource(PROVIDER, [{ plugin: 'plugin.gone', verdict: 'undeclared', issue: '#0' }]);
     assert(stale.length === 1, 'a ledger entry with no matching problem is stale');
+  }
+
+  // 17. POSITIVE CONTROL — the reader this gate missed: `plugin-auth` before
+  //     its fix, reduced. The `app:seeded` handler is registered in start(),
+  //     the plugin DECLARES the ordering, and the read sits inside a
+  //     `backfillChain.then(async () => …)` continuation, three calls down.
+  //     It needs BOTH arms to go red: a walker without `app:seeded` in its
+  //     population scores it 'declared' (the kernel:ready path), and a walker
+  //     that does not enter continuations finds no read at all.
+  {
+    const { problems, units } = auditSource(PROVIDER + `
+      export class AuthPlugin implements Plugin {
+        name = 'com.objectstack.auth';
+        optionalDependencies = ['com.objectstack.service.settings'];
+        private ensureAuthSettingsBound(ctx: PluginContext) {
+          this.authSettingsBinding ??= this.bindAuthSettings(ctx);
+          return this.authSettingsBinding;
+        }
+        private async bindAuthSettings(ctx: PluginContext) {
+          const settings = ctx.getService<SettingsReadSurface>('settings');
+          await settings.getNamespace('auth');
+        }
+        async start(ctx: PluginContext) {
+          let backfillChain: Promise<void> = Promise.resolve();
+          const runBackfill = (source: string): Promise<void> => {
+            backfillChain = backfillChain.then(async () => {
+              await this.ensureAuthSettingsBound(ctx);
+            });
+            return backfillChain;
+          };
+          ctx.hook('kernel:ready', () => runBackfill('kernel:ready'));
+          ctx.hook('app:seeded', () => runBackfill('app:seeded'));
+        }
+      }
+    `);
+    assert(problems.length === 1, `the pre-fix plugin-auth app:seeded reader is red (got ${problems.length})`);
+    assert(problems[0].verdict === 'unfixable-by-declaration', 'a pre-bind-hook read is not repaired by the declaration it already has');
+    const auth = units.find((u) => u.anchor === 'AuthPlugin');
+    assert(auth.reads.some((r) => r.origin === 'app:seeded-hook-from-start'), 'the read is attributed to the app:seeded handler');
+    assert(auth.reads.some((r) => r.origin === 'ready-hook-from-start'), 'the kernel:ready path through the continuation is seen too');
+    assert(problems[0].text.includes("'app:seeded' fires before 'kernel:ready'"), 'the message names the hook and its fire site');
+  }
+
+  // 17b. Each arm on its own, so a regression in one cannot hide behind the
+  //      other: the hook population with a direct call path, and a
+  //      continuation inside a plain kernel:ready handler.
+  {
+    const { problems } = auditSource(PROVIDER + `
+      export class SeededDirectPlugin implements Plugin {
+        name = 'plugin.seeded-direct';
+        optionalDependencies = ['com.objectstack.service.settings'];
+        private readPolicy(ctx: PluginContext) { return ctx.getService('settings'); }
+        async start(ctx: PluginContext) { ctx.hook('app:seeded', () => this.readPolicy(ctx)); }
+      }
+    `);
+    assert(problems.length === 1, `an app:seeded handler with a direct read is red (got ${problems.length})`);
+  }
+  {
+    const { problems } = auditSource(PROVIDER + `
+      export class ContinuationPlugin implements Plugin {
+        name = 'plugin.continuation';
+        async start(ctx: PluginContext) {
+          ctx.hook('kernel:ready', () => warmUp().then(async () => { ctx.getService('settings'); }));
+        }
+      }
+    `);
+    assert(problems.length === 1, `a read in a .then continuation is a read in the handler (got ${problems.length})`);
+    assert(problems[0].verdict === 'undeclared', 'and it keeps the handler\'s own sub-window');
+  }
+
+  // 18. NEGATIVE CONTROL — a reader after the bind stays green.
+  //     `kernel:bootstrapped` fires once every kernel:ready handler, the bind
+  //     included, has settled; it is not in the population at all.
+  {
+    const { problems, findings } = auditSource(PROVIDER + `
+      export class AfterBindPlugin implements Plugin {
+        name = 'plugin.after-bind';
+        async start(ctx: PluginContext) {
+          ctx.hook('kernel:bootstrapped', async () => { await ctx.getService('settings').getNamespace('auth'); });
+        }
+      }
+    `);
+    assert(problems.length === 0 && findings.length === 0, 'a kernel:bootstrapped reader is outside the window');
+  }
+
+  // 18b. The structural repair the message prescribes: the app:seeded handler
+  //      registered from the plugin's own start()-registered kernel:ready
+  //      handler inherits THAT window — green with the declaration, the
+  //      declarable verdict without it.
+  {
+    const shape = (decl) => PROVIDER + `
+      export class ArmedPlugin implements Plugin {
+        name = 'plugin.armed';
+        ${decl}
+        async start(ctx: PluginContext) {
+          ctx.hook('kernel:ready', () => {
+            ctx.hook('app:seeded', async () => { ctx.getService('settings'); });
+          });
+        }
+      }
+    `;
+    const declared = auditSource(shape("optionalDependencies = ['com.objectstack.service.settings'];"));
+    assert(declared.problems.length === 0, 'an app:seeded handler registered from a declared ready handler is green');
+    assert(declared.findings.some((f) => f.verdict === 'declared'), 'and it is reported as declared, not dropped');
+    const undeclared = auditSource(shape(''));
+    assert(undeclared.problems.length === 1 && undeclared.problems[0].verdict === 'undeclared',
+      'without the declaration it is the declarable verdict');
+  }
+
+  // 19. Every pinned hook name is live in the population — enumerated from the
+  //     pin itself, so a row added there is exercised here with no edit — and
+  //     the row this gate once missed cannot be deleted quietly.
+  {
+    const pinned = Object.keys(PRE_BIND_HOOKS);
+    assert(pinned.includes('app:seeded'), "PRE_BIND_HOOKS still names 'app:seeded'");
+    for (const hook of pinned) {
+      for (const phase of ['init', 'start']) {
+        const { problems, units } = auditSource(PROVIDER + `
+          export class HookReaderPlugin implements Plugin {
+            name = 'plugin.hook-reader';
+            optionalDependencies = ['com.objectstack.service.settings'];
+            async ${phase}(ctx: PluginContext) {
+              ctx.hook('${hook}', async () => { ctx.getService('settings'); });
+            }
+          }
+        `);
+        assert(problems.length === 1 && problems[0].verdict === 'unfixable-by-declaration',
+          `a '${hook}' handler registered from ${phase}() is in the population (got ${problems.length})`);
+        assert(units.find((u) => u.anchor === 'HookReaderPlugin').reads[0].origin === `${hook}-hook-from-${phase}`,
+          `its read is attributed to ${hook}-hook-from-${phase}`);
+      }
+    }
+  }
+
+  // 20. A hook outside the pin is outside the population: `metadata:reloaded`
+  //     is fired by an artifact watcher after boot.
+  {
+    const { problems, findings } = auditSource(PROVIDER + `
+      export class ReloadPlugin implements Plugin {
+        name = 'plugin.reload';
+        async start(ctx: PluginContext) {
+          ctx.hook('metadata:reloaded', async () => { ctx.getService('settings'); });
+        }
+      }
+    `);
+    assert(problems.length === 0 && findings.length === 0, 'an unpinned, post-boot hook is not in the population');
+  }
+
+  // 21. The DERIVATION: every fire-site spelling that ships, and the two that
+  //     must not count. `trigger.call(ctx, …)` through a local helper is
+  //     AppPlugin's app:seeded; the parameter-bound name is its
+  //     emitCatalogEvent; the continuation is the over-budget seed path.
+  {
+    const { units } = auditSource(PROVIDER + `
+      export class EmitterPlugin implements Plugin {
+        name = 'plugin.emitter';
+        private emitCatalogEvent(ctx: PluginContext, event: string, sys: any): void {
+          const trigger = (ctx as any).trigger;
+          trigger.call(ctx, event, { sys });
+        }
+        async init(ctx: PluginContext) { await ctx.trigger('x:init', {}); }
+        async start(ctx: PluginContext) {
+          await ctx.trigger('x:direct', this.service);
+          const emitSettled = (overBudget: boolean) => {
+            const trigger = (ctx as any).trigger;
+            trigger.call(ctx, 'x:call', { overBudget });
+          };
+          emitSettled(false);
+          this.emitCatalogEvent(ctx, 'x:param', {});
+          seedPromise.then(() => ctx.trigger('x:then'));
+          setTimeout(() => ctx.trigger('x:timer'), 10);
+          ctx.hook('kernel:bootstrapped', async () => { await ctx.trigger('x:late'); });
+          ctx.trigger(eventName);
+        }
+      }
+    `);
+    const derived = derivePreBindHooks(units);
+    const names = [...derived.fired.keys()].sort();
+    assert(JSON.stringify(names) === JSON.stringify(['x:call', 'x:direct', 'x:init', 'x:param', 'x:then']),
+      `the derivation reads every shipped fire-site spelling and nothing deferred (got ${names.join(', ')})`);
+    assert(derived.fired.get('x:init')[0].origin === 'init-body', 'an init() fire site is recorded as init-body');
+    assert(derived.unresolved.length === 1 && derived.unresolved[0].text === 'eventName',
+      'a hook name the walk cannot resolve is recorded, not dropped');
+  }
+
+  // 22. The RECONCILIATION, both directions, and its anti-vacuity limb: an
+  //     empty derivation stales every pinned row.
+  {
+    const derived = { fired: new Map([['app:seeded', []], ['x:new', []]]), unresolved: [] };
+    const pin = { 'app:seeded': 'site', 'x:gone': 'site' };
+    const drift = reconcilePreBindHooks(derived, pin);
+    assert(JSON.stringify(drift.missing) === '["x:new"]', 'a fired hook missing from the pin is reported');
+    assert(JSON.stringify(drift.stalePins) === '["x:gone"]', 'a pinned hook no longer fired is reported');
+    const empty = reconcilePreBindHooks({ fired: new Map(), unresolved: [] });
+    assert(empty.stalePins.length === Object.keys(PRE_BIND_HOOKS).length && empty.stalePins.length > 0,
+      'a derivation that finds nothing stales every pinned row');
+    const exact = reconcilePreBindHooks({ fired: new Map(Object.keys(PRE_BIND_HOOKS).map((k) => [k, []])), unresolved: [] });
+    assert(exact.missing.length === 0 && exact.stalePins.length === 0, 'a derivation equal to the pin reconciles clean');
   }
 
   console.log(`✓ settings bind-window guard self-test: all cases pass.`);
