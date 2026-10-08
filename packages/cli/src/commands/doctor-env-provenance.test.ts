@@ -327,11 +327,23 @@ describe('DOCTOR_ENV_INPUTS — the declaration a new env-derived check must joi
     // nothing, add it to a prose allowance here and say why; if doctor reads
     // it, declare it in DOCTOR_ENV_INPUTS so its provenance is reported.
     const PROSE_ONLY = new Set<string>();
+    // [#22163] Read by `nodeEnvSourcePosture` only to choose WHICH of the two
+    // NODE_ENV rows prints; no row reports either value. Not declared above on
+    // purpose: DOCTOR_ENV_INPUTS is attributed against the cascade doctor
+    // resolves for doctorNodeEnv() (node_env=production), while these two are
+    // read through the one `os dev` loads (node_env=development), so a line in
+    // the `Environment files` row would name the wrong file. And setting either
+    // can only move that choice back to the #5673 row, whose text does not
+    // depend on them. Every OTHER name still has to be declared.
+    const POSTURE_ONLY = new Set<string>(['OS_ARTIFACT_URL', 'OS_ARTIFACT_PATH']);
 
     for (const name of named) {
-      if (PROSE_ONLY.has(name)) continue;
+      if (PROSE_ONLY.has(name) || POSTURE_ONLY.has(name)) continue;
       expect(DOCTOR_ENV_INPUTS as readonly string[]).toContain(name);
     }
+    // The allowance cannot outlive its reader: a name doctor.ts stopped using
+    // leaves this set, rather than waving through a future read of it.
+    for (const name of POSTURE_ONLY) expect(named).toContain(name);
     // Guard the guard: a regex that matched nothing would pass vacuously.
     expect(named.size).toBeGreaterThan(0);
   });

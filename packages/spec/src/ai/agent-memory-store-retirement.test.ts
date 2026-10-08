@@ -46,7 +46,7 @@ import { defineStack, ObjectStackDefinitionSchema } from '../stack.zod';
 import { AgentSchema, type Agent } from './agent.zod';
 
 const MIGRATE_SENTENCE =
-  'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+  'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 const MEMORY_AGENT = {
   name: 'memory_agent',

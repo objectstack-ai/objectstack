@@ -55,7 +55,7 @@ const PICKER = { displayFields: ['name'], maxResults: 10, object: 'crm_contact' 
 // Unanchored, because a thrown `ZodError`'s message is the JSON of its issues;
 // the key-first house convention is asserted on the issue message itself below.
 const PRESCRIPTION =
-  /`view\.form\.sections\[\]\.fields\[\]\.publicPicker` was removed in @objectstack\/spec 17\.6\.0 \(ADR-0087 D2\).*no longer offers record search.*Delete the key.*`select` field with static `options`.*behind sign-in.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand\./s;
+  /`view\.form\.sections\[\]\.fields\[\]\.publicPicker` was removed in @objectstack\/spec 17\.6\.0 \(ADR-0087 D2\).*no longer offers record search.*Delete the key.*`select` field with static `options`.*behind sign-in.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./s;
 
 /** A ViewItem-branch form carrying the given field entries (the `saveMetaItem` door). */
 const viewItem = (fields: unknown[]) => ({

@@ -83,7 +83,7 @@ export const entry: SemanticMigration = {
     + '`mode` beside a non-empty `conditions` list, or with a `mode` outside '
     + '`\'exclusive\' | \'inclusive\'`, is refused at registration and by `os validate` with the '
     + 'schema\'s own sentence; nothing else about `conditions`-list decisions changes. '
-    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   // The edits this entry judges: every `mode: 'inclusive'` that conversion
   // writes is one decision to keep, delete or narrow, per the criteria above.
   conversionIds: ['flow-decision-mode-inclusive-explicit'],

@@ -9659,7 +9659,7 @@ const step18: MigrationStep = {
         + 'its amounts exactly as before the upgrade, because the key never changed a rendered '
         + 'amount. `os migrate meta --stored --apply` rewrites stored rows so the per-row notice '
         + 'stops. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; '
-        + 'apply them by hand.',
+        + '`--write` applies the ones it can prove, and you apply the rest by hand.',
     },
     {
       id: 'dashboard-header-modal-target-page-only',
@@ -13553,7 +13553,7 @@ const step18: MigrationStep = {
         + '`mode` beside a non-empty `conditions` list, or with a `mode` outside '
         + '`\'exclusive\' | \'inclusive\'`, is refused at registration and by `os validate` with the '
         + 'schema\'s own sentence; nothing else about `conditions`-list decisions changes. '
-        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
       // The edits this entry judges: every `mode: 'inclusive'` that conversion
       // writes is one decision to keep, delete or narrow, per the criteria above.
       conversionIds: ['flow-decision-mode-inclusive-explicit'],
@@ -22210,7 +22210,7 @@ const step18: MigrationStep = {
         + 'Census at the time of the change: zero joined reports with a chart in this repo\'s '
         + 'example apps and in the hotcrm reference app, against a lit control (non-joined reports '
         + 'carrying a chart: one and five). '
-        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
     },
     {
       id: 'ui-report-joined-container-selection-refused',

@@ -1194,8 +1194,9 @@ export interface StackExpressionOptions {
    * through by this rule's registry entry). ABSENT on `os build`, `os lint`
    * and `os validate`, which run every pass below.
    *
-   * On an `object` write exactly FOUR passes judge, each the build's own call
-   * at the build's own position in the walk:
+   * On an `object` write exactly FIVE passes judge — every pass over the
+   * object's own body — each the build's own call at the build's own position
+   * in the walk:
    *
    *  - the field-formula pass over `fields[].expression` — the build's
    *    `validateExpression('value', …)` call, with its warnings and the
@@ -1231,13 +1232,24 @@ export interface StackExpressionOptions {
    *    `formulas.mdx` covers it, and the door gave none of it either: an
    *    option whose `visibleWhen` read a bare `amount` saved with a 200, and
    *    the server's option check cannot evaluate it and fails open (logged,
-   *    allowed through), so the gate it declares is never enforced.
+   *    allowed through), so the gate it declares is never enforced;
+   *  - [#22032, pass 4] the object's own `actions[]` pass — each action's
+   *    `visible`, and its `disabled` unless that is a boolean literal, as a
+   *    `record`-scoped predicate (`checkAction` below). The same sentence of
+   *    `formulas.mdx` covers it, and the door gave none of it either: an
+   *    action whose `visible` read a bare `amount` saved with a 200, and the
+   *    action runtime's fail-closed evaluation then hides the action on every
+   *    record. One location differs from the build, never the verdict: an
+   *    action ALSO declared in the stack's top-level `actions` is located by
+   *    the build at `stack · action …` (the de-duplication in `checkAction`),
+   *    while an object write carries no top-level actions, so the door locates
+   *    the same predicate at `object '…' · action …`.
    *
-   * Every other pass is fenced off an object write, deliberately and by name:
-   * the object's own `actions[]` predicates. That is a build verdict the save
-   * door still does not give, and it would narrow the accept set further than
-   * the crossings above — a crossing of its own, measured over the stored
-   * corpus first, not a rider on any of them.
+   * The passes over the stack's OTHER collections — flows, the top-level
+   * `actions`, sharing rules and hooks — read an empty list on an object
+   * write. None of them is the object's own body, the object write's snapshot
+   * does not carry them, and each is judged at its own type's door; the claim
+   * holds by construction rather than by the snapshot's shape.
    */
   runtimeWriteType?: string;
 }
@@ -1262,12 +1274,12 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
 export function runStackExpressionPasses(stack: AnyRec, options: StackExpressionOptions): ExprIssue[] {
   const issues: ExprIssue[] = [];
   // [#22019] See {@link StackExpressionOptions.runtimeWriteType}: on an object
-  // write only the field-formula pass and (#22032) the validation-rule,
-  // field-rule-slot and per-option `visibleWhen` passes judge — the whole
-  // field walk. Every other loop below — the object's own `actions[]` loop
-  // included — reads an empty list under it, so the claim holds by
-  // construction rather than by the shape of the snapshot the gate happens to
-  // build today.
+  // write only the passes over the object's own body judge: the field-formula
+  // pass and (#22032) the validation-rule, field-rule-slot, per-option
+  // `visibleWhen` and object-action passes. Every loop below over another
+  // collection — flows, the top-level `actions`, sharing rules, hooks — reads
+  // an empty list under it, so the claim holds by construction rather than by
+  // the shape of the snapshot the gate happens to build today.
   const objectWrite = options.runtimeWriteType === 'object';
   const objects = recordsOf(stack.objects);
   const fieldIndex = buildFieldIndex(objects);
@@ -1837,16 +1849,17 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
                   ? `\`actionType: '${action}'\` named a registered function — move it to \`function: '${action}'\`. `
                   : `Use a \`notify\` node for mail, a \`connector_action\` (Slack connector) or \`http\` node ` +
                     `for Slack, and a registered function for logic. `) +
-                // #6856 route D (maintainer-ruled), reworded under #9529: the house
-                // sentence names the TOOL's behaviour, never the retired key's fate —
-                // "rewrite it" read two ways over a branch that DELETES the key
-                // (template/recipients/variables/script), and the tool never rewrote a
-                // source file at all. Plain-quoted (not a template literal)
+                // #6856 route D (maintainer-ruled), reworded under #9529 and #9591: the
+                // house sentence names the TOOL's behaviour, never the retired key's
+                // fate — "rewrite it" read two ways over a branch that DELETES the key
+                // (template/recipients/variables/script) — and claims no more than the
+                // tool does: the default run lists, `--write` writes only the edits it
+                // can prove. Plain-quoted (not a template literal)
                 // so this site is a member of `retired-key-migrate-sentence.test.ts`'s
                 // widened scan (#7030) on the same textual shape as the spec corpus — no
                 // interpolation lives in this clause, so nothing is lost switching quote style.
                 'Run `os migrate meta --from 16` to list the mechanical edits for existing '
-                  + 'sources; apply them by hand.',
+                  + 'sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
               source: JSON.stringify({ id: node.id, type: node.type, config: cfg }),
             });
           } else if (!fn) {
@@ -2079,7 +2092,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // D1), so it passes here — options resolve through
       // `resolveCascadingOptions` against the host's predicate scope, which
       // binds it (ADR-0068 / objectui#2284), and the showcase's
-      // `'admin' in current_user.positions` is the pinned legal usage — while
+      // `'org_admin' in current_user.positions` is the pinned legal usage — while
       // `checkFieldRuleRoot` above rejects it one level up, where nothing
       // binds it. Same helper, two verdicts, because the two surfaces have two
       // evaluators; neither verdict is a side effect of a shared root list.
@@ -2245,10 +2258,19 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // `$select` projection (and, through `&&` short-circuiting, on row data),
     // neither of which this pass can see. Full reasoning in the ledger.
   };
+  // The stack's top-level `actions` are not an object's own body: an object
+  // write reads an empty list here (they are judged at the `action` door). See
+  // {@link StackExpressionOptions.runtimeWriteType}.
   for (const action of objectWrite ? [] : recordsOf(stack.actions)) {
     checkAction('stack', action);
   }
-  for (const obj of objectWrite ? [] : objects) {
+  // [#22032, pass 4] NOT fenced on an object write: an object's own
+  // `actions[]` predicates are the pass the object save door runs, so the
+  // door's findings and their order are the build's for an object body. The
+  // one difference is a location, never a verdict: an action also declared
+  // top-level was claimed by the loop above in the build (`stack · action …`),
+  // and is located here on an object write.
+  for (const obj of objects) {
     const objectName = typeof obj.name === 'string' ? obj.name : undefined;
     for (const action of recordsOf(obj.actions)) {
       checkAction(`object '${objectName}'`, action, objectName);

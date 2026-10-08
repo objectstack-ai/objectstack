@@ -75,9 +75,9 @@ const CUBE = {
 // Unanchored, because a thrown `ZodError`'s message is the JSON of its issues;
 // the key-first house convention is asserted on the issue message itself below.
 const METRIC_PRESCRIPTION =
-  /`measures\.<metric>\.name` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049 enforce-or-remove\).*the record key is the metric's name.*Delete the key\..*rename its key in `measures`.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand\./s;
+  /`measures\.<metric>\.name` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049 enforce-or-remove\).*the record key is the metric's name.*Delete the key\..*rename its key in `measures`.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./s;
 const DIMENSION_PRESCRIPTION =
-  /`dimensions\.<dimension>\.name` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049 enforce-or-remove\).*the record key is the dimension's name.*Delete the key\..*rename its key in `dimensions`.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand\./s;
+  /`dimensions\.<dimension>\.name` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049 enforce-or-remove\).*the record key is the dimension's name.*Delete the key\..*rename its key in `dimensions`.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./s;
 
 /** What a 17.4-or-earlier parse emitted: the REQUIRED inner name on every member, equal to its key. */
 const persistedCube = () => ({

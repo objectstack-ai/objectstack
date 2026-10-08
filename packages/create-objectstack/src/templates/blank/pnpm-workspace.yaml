@@ -1,81 +1,17 @@
-# An explicit EMPTY workspace: this project has no member packages, so
-# this file is settings-only. The key is not decoration — pnpm 9.x and
-# 10.0–10.4 parse this file BEFORE they read `engines`, and refuse a file
-# without a `packages:` key outright ("ERROR packages field missing or
-# empty") before resolving a single dependency.
-# Not `packages: ['.']`: that would declare this project a workspace
-# MEMBER — a monorepo root, which it is not.
+# Older pnpm needs this key; empty because this project is not a monorepo.
 packages: []
 
-# pnpm does not run dependency install scripts unless they are approved here.
-# Without this file a fresh `pnpm install` on pnpm 11 exits 1 with
-# ERR_PNPM_IGNORED_BUILDS — pnpm 10 only warned, pnpm 11 made it a hard error.
-#
-# Both keys are needed; they are read by different pnpm versions:
-#   allowBuilds             pnpm >= 10.26 and pnpm 11+. pnpm 11 reads ONLY this
-#                           one — onlyBuiltDependencies alone still errors.
-#   onlyBuiltDependencies   pnpm 10.0–10.25, which do not understand allowBuilds.
-#
-# better-sqlite3 is the native sqlite driver (@objectstack/driver-sql's optional
-# dependency); esbuild compiles objectstack.config.ts. Both ship prebuilt
-# binaries, so an unapproved build degrades rather than breaks — but pnpm 11
-# fails the install before it gets that far.
-#
-# npm and yarn ignore this file; it costs them nothing.
-
+# Build-script approvals for pnpm 10.0–10.25, which do not read allowBuilds.
 onlyBuiltDependencies:
   - better-sqlite3
   - esbuild
 
+# The same approvals for pnpm 10.26 and later; pnpm 11 reads only this key.
 allowBuilds:
   better-sqlite3: true
   esbuild: true
 
-# Some third-party peer ranges resolve outside what their declaring package
-# states. `pnpm install` reports each one as an unmet peer — which would be the
-# first thing a brand-new project shows you — and none is a real
-# incompatibility:
-#
-#   better-auth peers better-sqlite3 ^12.0.0 while the tree resolves 13.x — the
-#   copy @objectstack/cli declares for its own sqlite tooling, and the one pnpm
-#   names in the report. That peer is optional and covers handing better-auth a
-#   raw better-sqlite3 `Database`; ObjectStack hands it an ObjectQL adapter
-#   instead, so nothing here goes down that path. First measured behaviourally
-#   on 1.7.1 — better-auth's own Kysely dialect, running its migrations,
-#   sign-up, sign-in and adapter find/update/delete, behaves identically on
-#   better-sqlite3 13.0.3 and on 12.11.1. Re-measured on the pinned 1.7.2 and
-#   now structural: no file in the published package references better-sqlite3
-#   at all, so no better-auth call site can depend on what moved between 12 and
-#   13. The upstream range is stale. Pinning our own declaration back to 12
-#   would clear the report only by installing a second, unused native copy.
-#
-#   (The '@better-auth/scim>better-call' entry that used to sit here retired
-#   with the scim release-candidate pin — stable @better-auth/scim 1.7.3 peers
-#   better-call 1.4.0 exactly, so the skew it declared away is gone. First
-#   measured on 1.7.1 when the entry retired; re-read 2026-09-12 on the 1.7.3
-#   pin, off the installed manifest.)
-#
-#   @better-auth/core, @better-auth/oauth-provider, @better-auth/scim and
-#   @better-auth/sso each peer an exact @better-auth/utils 0.4.2, while the
-#   tree hands them 0.5.0 — because better-call, better-auth's own HTTP layer,
-#   depends on ^0.5.0, and that is the copy your project's plugins resolve
-#   their peer against. Measured on the surface the range governs: those four
-#   import three symbols in total (base64/base64Url, createHash and, in core,
-#   createRandomStringGenerator), 0.5.0 declares all three unchanged, and on
-#   the inputs those call sites pass the two versions return identical values —
-#   checked again end to end through better-auth with the sso, oauth-provider
-#   and scim plugins, where both resolutions produce the same sign-up, sign-in,
-#   session, OAuth metadata, PKCE challenge and SCIM/SSO responses. Forcing
-#   utils back to 0.4.2 instead would push better-call off its own declared
-#   ^0.5.0 — trading four reported skews for one real one.
-#   Reported by pnpm 10.15–10.30; pnpm 10.31 changed peer resolution so all
-#   four land on 0.4.2 on their own. These four entries retire when the pnpm
-#   floor reaches 10.31, or when the four packages accept 0.5.0 upstream —
-#   NOT with the SCIM rc pin above, which the utils skew outlives.
-#
-# These suppress the report only: no resolution moves, and the lockfile is
-# byte-identical with and without this block.
-
+# Upstream peer ranges measured harmless; this only silences the warning.
 peerDependencyRules:
   allowedVersions:
     'better-auth>better-sqlite3': '13'

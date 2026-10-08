@@ -90,6 +90,7 @@ import {
   reportSeedWriteRefusals,
   type SeedWriteRefusals,
 } from './per-organization-catalog.js';
+import { reportThroughSink } from './seed-refusal-sink.js';
 import {
   resolvePlatformAdminStanding,
   type PlatformAdminStandingEntry,
@@ -778,9 +779,26 @@ export async function bootstrapPlatformAdmin(
   // One log per pass, not per refused row: a legacy platform-wide unique index
   // refuses EVERY default permission set, and a line each would bury the remedy.
   const refusals = createSeedWriteRefusals();
+  // [#22169] Names whose existence read was REFUSED, so nothing was inserted
+  // for them — reported once below, after the loop.
+  const unreadable: string[] = [];
   for (const ps of bootstrapPermissionSets) {
     if (!ps.name) continue;
-    const existing = await tryFind(ql, 'sys_permission_set', { name: ps.name }, 1);
+    // ⛔ "Refused" is not "absent". `tryFind` answers `[]` for both, and this
+    // loop used to INSERT on both: on a table without the per-organization
+    // unique index (remote tables built before its retrofit) a refused read
+    // minted a second row of a set that already existed, and a table holding
+    // such duplicates can never build that index again. The observer tells
+    // the two apart; a read that could not answer declines the insert.
+    let readRefused = false;
+    const existing = await tryFind(
+      ql, 'sys_permission_set', { name: ps.name }, 1, undefined, undefined,
+      () => { readRefused = true; },
+    );
+    if (readRefused) {
+      unreadable.push(ps.name);
+      continue;
+    }
     if (existing.length > 0 && existing[0].id) {
       const row = existing[0];
       seeded[ps.name] = row.id;
@@ -835,6 +853,21 @@ export async function bootstrapPlatformAdmin(
   // finished either way. Placing it at the end would make the diagnosis
   // conditional on how promotion happened to resolve.
   reportSeedWriteRefusals(logger, refusals);
+  if (unreadable.length > 0) {
+    // [#22169] ONCE per pass with the names, never a line per set: a refused
+    // read usually means the whole table is unreadable, and a per-name line
+    // would bury its own remedy. `warn`, through the sink derivation the
+    // sibling seeders' unreadable lines use, so it is heard with no logger
+    // injected: nothing was written, so nothing claims to have landed.
+    reportThroughSink(
+      logger,
+      '[security] platform default permission sets left untouched — their sys_permission_set rows could not ' +
+        'be read, so none was inserted: a read that did not answer is not an absent row, and inserting on it ' +
+        'duplicates a set that may already exist. A set that is genuinely absent is seeded by the next boot ' +
+        'whose read answers.',
+      { unreadable: unreadable.length, total: bootstrapPermissionSets.length, names: unreadable },
+    );
+  }
 
   const seededCount = Object.keys(seeded).length;
   // [#11532] Under a walled posture these rows are organization-less BY RULING
@@ -880,7 +913,12 @@ export async function bootstrapPlatformAdmin(
 
   const adminPsId = seeded[PLATFORM_ADMIN_PERMISSION_SET_NAME];
   if (!adminPsId) {
-    return { seeded: seededCount, adminPromoted: false, reason: 'admin_permission_set_missing', ...resyncCounts };
+    // [#22169] `unreadable`, not `missing`, when the read was what failed: the
+    // set may well exist, and the line above says so.
+    const reason = unreadable.includes(PLATFORM_ADMIN_PERMISSION_SET_NAME)
+      ? 'admin_permission_set_unreadable'
+      : 'admin_permission_set_missing';
+    return { seeded: seededCount, adminPromoted: false, reason, ...resyncCounts };
   }
 
   // ── Does this deployment ALREADY have a platform admin? (commit 1c83ca226) ─

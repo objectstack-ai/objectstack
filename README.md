@@ -222,11 +222,39 @@ to run the whole loop end-to-end.
 ```bash
 git clone https://github.com/objectstack-ai/objectstack.git
 cd objectstack
-pnpm install     # Node 22+, pnpm 10 (corepack enable)
-pnpm build       # build all packages
-pnpm dev         # showcase example: REST + Console on :3000
-pnpm test        # run the test suite
+pnpm install          # Node 22+, pnpm 10 (corepack enable)
+pnpm build            # build all packages
+pnpm objectui:build   # build the Console SPA (not part of pnpm build)
+pnpm dev              # showcase example: REST + Console on :3000
 ```
+
+`pnpm objectui:build` builds [objectui](https://github.com/objectstack-ai/objectui)
+at the commit pinned in `.objectui-sha` into `packages/console/dist`
+(gitignored). It builds from a `../objectui` checkout if one sits next to this
+repo, otherwise from a shallow clone of objectui into `.cache/`; either way it
+installs objectui's dependencies, so it needs network. Skip it and `pnpm dev`
+still serves the REST API, without the Console. Rerun it when `.objectui-sha`
+moves.
+
+A first run is slow, not stuck. Measured once on a fresh clone of `main`
+(4-vCPU container, Node 22.22, pnpm 10.31):
+
+| Command | Time | |
+|:---|---:|:---|
+| `pnpm install` | 16 s | |
+| `pnpm build` | 6 m 54 s | 72 turbo tasks |
+| `pnpm objectui:build` | 10 m 36 s | clones objectui and builds the Console |
+| `pnpm test` | 54 m 03 s | the full suite: 135 turbo tasks |
+
+For your own change, test what it reaches instead of the full suite:
+
+```bash
+pnpm turbo run test --affected          # packages your branch changes, and their dependents
+pnpm --filter @objectstack/<pkg> test   # one package
+```
+
+`--affected` compares your branch with your local `main`, so a stale `main`
+widens the set; keep it current, or set `TURBO_SCM_BASE=origin/main`.
 
 Other examples: `pnpm dev:crm`, `pnpm dev:todo`. Docs site: `pnpm docs:dev`.
 [AGENTS.md](./AGENTS.md) is the working rulebook for both humans and agents;

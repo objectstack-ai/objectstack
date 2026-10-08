@@ -167,11 +167,11 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
     // the retired key's fate. This branch can DELETE the key outright
     // (`template`/`recipients`/`variables`/`script`), so "rewrite it" read two
     // ways ("it" = the key vs. "it" = your sources); #9529 then withdrew the
-    // automatic-rewrite claim outright — the tool lists the edits and never
-    // writes a source file. Pinned here AND class-wide in
+    // automatic-rewrite claim outright, and #9591 names `--write`, which writes
+    // only the edits it can prove — never the unqualified claim. Pinned here AND class-wide in
     // `retired-key-migrate-sentence.test.ts` (widened to `packages/lint/src`).
     expect(issues[0].message).toMatch(
-      /Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand\.$/,
+      /Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\.$/,
     );
     expect(issues[0].message).not.toMatch(/rewrite it automatically/);
     expect(issues[0].message).not.toMatch(/rewrite existing sources automatically/);
