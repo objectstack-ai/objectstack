@@ -16,9 +16,9 @@
 `Executable` · `AI-writable` · `Agent-operable` · `You own it` · Apache-2.0
 
 <p align="center">
-  <a href="https://youtu.be/CX_FlOoOtr0">
-    <img src="docs/screenshots/hero-cover-dark.png" width="900" alt="ObjectStack in 90 Seconds — watch the overview on YouTube">
-  </a>
+  <img src="docs/screenshots/readme-demo.gif" alt="A 30-second recording of a real run of the showcase example app, in three beats. One: the Team object's typed definition, then pnpm dev:showcase booting it on a fresh database, then the Console listing two teams. Two: an agent's MCP tools/call create_record request to /api/v1/mcp with the dev admin's API key, the real response carrying the new Data Guild record, then the Console showing that row and its record page saying Created by Dev Admin. Three: the same call sent with a read-only Auditor key, refused with isError true and a permission message, then the Console still showing three rows. It closes on: The ontology is the software. Executable, AI-writable, Agent-operable, You own it.">
+  <br>
+  <sub><b>1</b> · One definition, and the app runs &nbsp;·&nbsp; <b>2</b> · An agent creates a record over MCP &nbsp;·&nbsp; <b>3</b> · A read-only identity is refused</sub>
   <br>
   <a href="https://youtu.be/CX_FlOoOtr0"><b>▶&nbsp; Watch: ObjectStack in 90 Seconds</b></a>
 </p>

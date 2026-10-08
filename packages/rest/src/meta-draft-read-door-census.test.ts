@@ -35,6 +35,13 @@
  * Spellings it cannot see — a switch read under another name, a draft asked
  * for by a spread of the raw query — are review questions, not rows; the
  * behaviour pins are what hold the doors it names.
+ *
+ * [#22141] `PUT /meta/:type/:name?mode=draft` — a `write` switch — is no row
+ * here because it is no longer read in this file: the door asks
+ * `metaSaveRequestOptions` (`meta-save-request.ts`), the one mapping the
+ * runtime dispatcher's `/meta` door asks too, after its write-capability gate.
+ * Its behaviour is held by `meta-compound-save-mode-parity.test.ts` and by both
+ * doors' rows in `packages/runtime/src/domains/meta-save-preconditions-parity.test.ts`.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -159,11 +166,6 @@ const LEDGER: readonly LedgerRow[] = [
         site: "GET ${metaPath}/:type/:name » req.query.preview.toLowerCase() === 'draft'",
         disposition: 'read',
         door: 'GET /meta/:type/:name?preview=draft — the draft overlaid on the active item',
-    },
-    {
-        site: "PUT ${metaPath}/:type/:name » req.query.mode.toLowerCase() === 'draft'",
-        disposition: 'write',
-        door: 'PUT /meta/:type/:name?mode=draft — SAVES a draft; admitted by the write-capability gate first',
     },
     {
         site: "DELETE ${metaPath}/:type/:name » req.query.state.toLowerCase() === 'draft'",

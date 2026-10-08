@@ -693,7 +693,9 @@ export class AnalyticsServicePlugin implements Plugin {
     //              `/data`, because that gate IS this plugin's absent
     //              middleware. The two doors still agree, which is the
     //              equivalence property the card asks for, so this ADMITS and
-    //              is reported loudly at init below.
+    //              is reported loudly, once, by the first query that finds it
+    //              (below) — not at init, where the service is usually just
+    //              not registered YET.
     //   UNUSABLE — a security service exists but cannot answer: resolving it
     //              THREW, or the object it returned carries neither
     //              `canReadObject` nor `explain`. This is a wired-but-broken
@@ -751,11 +753,40 @@ export class AnalyticsServicePlugin implements Plugin {
         }
         return { kind: 'usable', svc };
       };
+      // [#22154] Absence is judged where it is used, not where init starts
+      // (AGENTS.md "Startup registry reads"). At this plugin's init the
+      // "security" service is not registered yet on any composition that
+      // ships plugin-security: that plugin registers it in its own start(),
+      // after every init(). This bridge resolves per call, so plugin order is
+      // not significant. A WARN at init asserted a verdict the same boot
+      // contradicts; init reports the absence at `info` (below), and the WARN
+      // waits for a query that needs the gate and finds no service.
+      //
+      // Once per bridge, i.e. per plugin init: the state is the deployment's,
+      // every later query is admitted the same way, and repeating it per query
+      // buries it. Deliberately NOT a module binding — a second kernel in the
+      // same process (a test run, a `verify` harness) must get its own report.
+      // The flag records only that the report was made; it caches no verdict:
+      // every query still resolves the service afresh.
+      let admissionAbsenceReported = false;
       admitObjectRead = async (object, context) => {
         const resolved = trySecurityAdmission();
         // No security service resolved at call time → no object-level gate on
-        // this deployment, which is the state reported at init.
-        if (resolved.kind === 'absent') return true;
+        // this deployment: ADMIT, exactly as before, and say so once.
+        if (resolved.kind === 'absent') {
+          if (!admissionAbsenceReported) {
+            admissionAbsenceReported = true;
+            ctx.logger.warn(
+              '[Analytics] No admitObjectRead configured and no "security" service registered when an ' +
+              `analytics query needed one (first: "${object}") — analytics queries do NOT enforce the ` +
+              'OBJECT-LEVEL read grant. On a SQL driver that means any authenticated caller can post an ' +
+              'inline dataset and read counts and groupings for an object they hold no grant on. Supply ' +
+              'admitObjectRead or register a security service. Reported once; later queries are ' +
+              'admitted the same way.',
+            );
+          }
+          return true;
+        }
         if (resolved.kind === 'unusable') {
           ctx.logger.error(
             `[Analytics] object-level read admission could not be resolved for "${object}" — ` +
@@ -1464,12 +1495,14 @@ export class AnalyticsServicePlugin implements Plugin {
         'read grant the engine middleware asks, ahead of the strategy chain.',
       );
     } else if (autoBridgedReadAdmission) {
-      ctx.logger.warn(
-        '[Analytics] No admitObjectRead configured and no "security" service registered at init — ' +
-        'the bridge resolves per query, but if no security service ever appears, analytics ' +
-        'queries will NOT enforce the OBJECT-LEVEL read grant. On a SQL driver that means any ' +
-        'authenticated caller can post an inline dataset and read counts and groupings for an ' +
-        'object they hold no grant on. Supply admitObjectRead or register a security service.',
+      // [#22154] A heads-up, not a verdict — the same situation the read-scope
+      // sibling above logs at `info`. The bridge resolves per query, and
+      // plugin-security registers the service in its start(), after this
+      // init; a query that needs the gate and finds no service WARNs then,
+      // once (see the bridge).
+      ctx.logger.info(
+        '[Analytics] admitObjectRead bridged to the "security" service; that service is not ' +
+        'registered yet at init and will be resolved per query (plugin order is not significant).',
       );
     }
 
