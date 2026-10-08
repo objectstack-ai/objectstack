@@ -78,9 +78,8 @@ panel, a `slotted` / `html` / `react` page and a `full` page with no regions.
 `margins: { top, right, bottom, left }` in **millimetres**; `repeatHeader` /
 `repeatFooter` repeat the page's own `header` / `footer` region on every sheet
 (refused without that region; off = printed once); `pageNumbers` prints sheet
-number and count;
-the page-break hints `repeatTableHeaders` (on by default) and
-`avoidBreakInside` (keep each block whole).
+number and count; the page-break hints `repeatTableHeaders` (on by default)
+and `avoidBreakInside` (keep each block whole).
 
 Every block, at any depth, must draw all it declares, in full, the same at
 any width: the containers `page:section` / `page:card` /
