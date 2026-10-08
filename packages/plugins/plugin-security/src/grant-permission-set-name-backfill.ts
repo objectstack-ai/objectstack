@@ -35,7 +35,13 @@
  *    organization. The update hook re-derives the name from the row's stored
  *    id through its own walled read and refuses a disagreement, so a grant
  *    whose id moved between this pass's read and its write is refused, not
- *    mislabelled.
+ *    mislabelled. The hook stamps a name by itself only on a write that
+ *    carries `permission_set_id`; this write carries the verified name and no
+ *    id, so nothing keyed on the id column (the last-administrator guard's
+ *    standing keys among them) re-judges the grant. ⛔ The wall in step 1 is
+ *    this pass's own: for a SYSTEM write whose stored id the hook cannot
+ *    resolve inside the writer's wall, the hook stands down and lets the
+ *    value land, so it would not stop a name carried across organizations.
  *
  * ## Report, never guess
  *
@@ -46,7 +52,9 @@
  * - **an id whose set row belongs to another organization** (`warn`) — its
  *   name is never written: a name carries no organization, so writing another
  *   organization's name would point the grant at whatever this organization
- *   calls by that name;
+ *   calls by that name. The authorization resolver still reads a grant's set
+ *   row by id without a wall, so such a grant grants by id today; the pass
+ *   does not carry that answer into the name;
  * - **a set row whose name the catalog read does not resolve** (`error`) —
  *   the grant points at a definition the catalog does not hold, so it would
  *   fail closed once readers read the name.
@@ -76,7 +84,9 @@
  * Without a readable ledger the pass still runs — it only fills a `NULL` with
  * the name the row's own id already points at, so running it twice writes
  * nothing the first run did not — but its verdict cannot be remembered, and
- * every boot scans again.
+ * every boot scans again. This is where it departs from the membership
+ * backfill, which does not run without its ledger because a second run of
+ * that pass would decide again what the first one decided.
  *
  * ## When it runs
  *
@@ -84,7 +94,11 @@
  * `kernel:ready` handler has settled — the platform bootstrap that seeds the
  * catalog rows, and the environment metadata hydrated before it — so the
  * catalog read sees every code and environment definition this boot will
- * register.
+ * register, including one a provider registers from a `kernel:ready` handler
+ * that runs after this plugin's own. A definition that arrives later still (a
+ * package installed into the running process) cannot turn into a recorded
+ * "missing": an unresolved name leaves the verdict unrecorded, and the next
+ * boot judges it again.
  *
  * ADR anchors: ADR-0131 D4 (references by name), D10 (the id column is dropped
  * after a verified rewrite — not here), C7 (deletions — not here).

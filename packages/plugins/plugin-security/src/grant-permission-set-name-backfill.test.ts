@@ -20,6 +20,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import {
+  LiteKernel,
   assembleExecutionContext,
   createSecurityCatalogReader,
   resetPlatformAdminEmailMemo,
@@ -570,6 +571,82 @@ describe('[ADR-0131 D4] grant name backfill — the write path', () => {
     for (const g of await grants(world.engine)) {
       const [set] = (await world.engine.find('sys_permission_set', { where: { id: g.permission_set_id }, context: SYS } as any)) as any[];
       expect(g.permission_set, g.id).toBe(set.name);
+    }
+  });
+});
+
+describe('[ADR-0131 D4] grant name backfill — on a real kernel boot', () => {
+  it('a permission set a kernel:ready handler registers AFTER SecurityPlugin’s is named on the same boot, and the verdict is recorded', async () => {
+    const engine = new ObjectQL();
+    engine.registerDriver(
+      new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
+      true,
+    );
+    await engine.init();
+    engine.registerApp({
+      id: CATALOG_PACKAGE,
+      name: 'Grant name backfill',
+      version: '1.0.0',
+      type: 'plugin',
+      scope: 'system',
+      objects: [
+        SysUser, SysAccount, SysMember, SysOrganization,
+        SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet, SysMigration,
+      ],
+    } as any);
+    await engine.syncSchemas();
+    engines.push(engine);
+    vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
+    for (const ps of defaultPermissionSets) {
+      engine.registry.registerItem('permission', structuredClone(ps) as any, 'name' as any, CATALOG_PACKAGE);
+    }
+    // Stored before this boot: the set row, and a grant written before the
+    // name column existed (no SecurityPlugin has bound the name hooks yet).
+    await insertSet(engine, { id: 'ps_late', name: 'late_reviewer', label: 'Late' });
+    await insertUser(engine, 'usr_member', 'member@eq.example', '2025-03-01T00:00:00.000Z');
+    await engine.insert(
+      'sys_user_permission_set',
+      { id: 'g_late', user_id: 'usr_member', permission_set_id: 'ps_late' },
+      { context: SYS } as any,
+    );
+    expect((await grant(engine, 'g_late'))?.permission_set).toBeNull();
+
+    const metadata = {
+      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+      list: async () => [...defaultPermissionSets],
+    };
+    const kernel = new LiteKernel({ logger: { level: 'silent' } });
+    // The engine's stand-in: SecurityPlugin depends on the engine plugin by name.
+    kernel.use({
+      name: 'com.objectstack.engine.objectql',
+      init: async (ctx: any) => {
+        ctx.registerService('objectql', engine);
+        ctx.registerService('metadata', metadata);
+        ctx.registerService('manifest', { register: () => undefined });
+      },
+      start: async () => undefined,
+    } as any);
+    kernel.use(new SecurityPlugin({ fallbackPermissionSet: 'member_default' }));
+    // The late provider: its `kernel:ready` handler is registered after
+    // SecurityPlugin's own, so it runs after the platform bootstrap.
+    kernel.use({
+      name: 'com.objectstack.qa.late-catalog',
+      dependencies: ['com.objectstack.security'],
+      init: async () => undefined,
+      start: async (ctx: any) => {
+        ctx.hook('kernel:ready', async () => {
+          engine.registry.registerItem(
+            'permission', { name: 'late_reviewer', label: 'Late', objects: {} } as any, 'name' as any, CATALOG_PACKAGE,
+          );
+        });
+      },
+    } as any);
+    try {
+      await kernel.bootstrap();
+      expect((await grant(engine, 'g_late'))?.permission_set).toBe('late_reviewer');
+      expect(await ledgerRows(engine)).toHaveLength(1);
+    } finally {
+      await kernel.shutdown();
     }
   });
 });
