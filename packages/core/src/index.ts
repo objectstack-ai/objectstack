@@ -17,6 +17,14 @@ export * from './plugin-order.js';
 // because the ordering it performs is `resolvePluginOrder` directly above.
 // `@objectstack/objectql` re-exports it, so its published surface is unchanged.
 export * from './artifact-packages.js';
+// [#22301] The two halves of resolving an app's `requires` that `os serve`
+// (`@objectstack/cli`) and the verification handle (`@objectstack/verify`) both
+// read — the package-owned collection reader (ADR-0130 D4) and the token →
+// provider table with its exact identity match. Here for `artifact-packages`'
+// reason: the CLI depends on the handle, so neither reader can host them, and
+// both already depend on this package.
+export * from './stack-collections.js';
+export * from './capability-providers.js';
 export * from './lite-kernel.js';
 export * from './types.js';
 export * from './logger.js';

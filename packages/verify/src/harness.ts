@@ -38,6 +38,7 @@ import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 // THAT app, not from `packages/verify`'s own realpath inside this workspace.
 import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
 import { createHandle, type VerifyHandle } from './handle.js';
+import { constructRequiredProviders } from './required-providers.js';
 
 /** A Hono app exposes `.request(path, init)` returning a standard `Response`. */
 interface InjectableApp {
@@ -326,6 +327,9 @@ export interface BootOptions {
    * the current working directory — a programmatic harness verifying several
    * apps in one process, or a test fixture on a temp path.
    *
+   * [#22301] It is also the `packageRoot` a required `automation` service is
+   * handed — the app's root, where `objectstack serve` anchors the same token.
+   *
    * Exists because Node ESM resolves a bare `import()` against the importer's
    * own realpath: without a host anchor, `packages/verify` can only ever see the
    * framework's own `node_modules`, so an app-installed package was invisible no
@@ -352,6 +356,12 @@ export interface BootOptions {
    * #4420 grew in exactly that gap.
    *
    * Pass `{ suspendedRunStore: 'memory' }` to opt a fixture back out.
+   *
+   * [#22301] An app that DECLARES `requires: ['automation']` gets the service
+   * without this option, as it does under `objectstack serve` (see
+   * `./required-providers.ts`). Set it anyway for an app that does not declare
+   * it, or for the `suspendedRunStore` choice above: with it set, this option's
+   * instance is the one the boot keeps.
    */
   automation?: boolean | { suspendedRunStore?: 'auto' | 'memory' };
   /**
@@ -395,9 +405,14 @@ export interface BootOptions {
    * Extra plugins to register between the app/service pairs and the
    * SecurityPlugin — the slot where `objectstack dev` auto-loads optional
    * service pairs the lean harness omits (e.g. `StorageServicePlugin` +
-   * `AuditPlugin` for the attachments surface). The caller instantiates the
-   * plugins so `@objectstack/verify` gains no new dependencies. Registered in
-   * array order. Default `[]`.
+   * `AuditPlugin` for the attachments surface). Registered in array order.
+   * Default `[]`.
+   *
+   * [#22301] Not for the providers the app's `requires` names: the boot mounts
+   * those itself, by `objectstack serve`'s table (see `./required-providers.ts`).
+   * A plugin here that IS such a provider wins over the boot's own — the
+   * capability is then skipped whole, `serve`'s "an explicit instance wins"
+   * rule — so a suite that needs a provider configured its own way passes it.
    */
   extraPlugins?: unknown[];
   /**
@@ -502,6 +517,9 @@ export async function bootStack(
   };
 
   const kernel = new ObjectKernel();
+  // The host app's root — where `multiTenant` resolves the enterprise package
+  // from, and the `packageRoot` a required `automation` is handed (#22301).
+  const hostRoot = opts.hostRoot ?? process.cwd();
 
   // Data engine + in-memory SQLite (pure-JS WASM driver — no native build, CI-safe).
   // The default datasource is a DECLARED DEFINITION connected through the
@@ -539,8 +557,10 @@ export async function bootStack(
   // [#21499] The settings service seals under the harness's in-process key,
   // never under a provider of its own (see `harnessCryptoProvider`).
   const cryptoProvider = harnessCryptoProvider();
-  await kernel.use(new SettingsServicePlugin({ cryptoProvider }));
-  await kernel.use(opts.analytics ?? new AnalyticsServicePlugin());
+  const settingsPlugin = new SettingsServicePlugin({ cryptoProvider });
+  await kernel.use(settingsPlugin);
+  const analyticsPlugin = opts.analytics ?? new AnalyticsServicePlugin();
+  await kernel.use(analyticsPlugin);
   // [ADR-0131 D3 / D11] The production `single` shape, as `objectstack dev` /
   // `serve` boot it: `AuthPlugin`'s defaults, owner bind included. Under
   // `single` the Default Organization is a boot invariant — `AuthPlugin.start()`
@@ -632,7 +652,6 @@ export async function bootStack(
     // it" can hand in a name the workspace can never supply. Production callers
     // pass nothing and get `ORGANIZATIONS_PKG` — see BootOptions.organizationsPackage.
     const organizationsPkg = opts.organizationsPackage ?? ORGANIZATIONS_PKG;
-    const hostRoot = opts.hostRoot ?? process.cwd();
     let mod: any;
     try {
       mod = await createHostImporter(hostRoot, {
@@ -680,18 +699,47 @@ export async function bootStack(
   // approval e2e covered, and #4420 grew there. It now boots the plugin's own
   // `'auto'` default, the same wiring `objectstack dev`/`serve` get, and a
   // fixture that wants the old behaviour asks for it explicitly.
+  let automationPlugin: unknown;
   if (opts.automation) {
     const { AutomationServicePlugin } = await import('@objectstack/service-automation');
     const automationOpts = typeof opts.automation === 'object' ? opts.automation : {};
-    await kernel.use(new AutomationServicePlugin({
+    automationPlugin = new AutomationServicePlugin({
       ...(automationOpts.suspendedRunStore ? { suspendedRunStore: automationOpts.suspendedRunStore } : {}),
-    }));
+    });
+    await kernel.use(automationPlugin as any);
   }
 
   // Caller-supplied optional service pairs (see BootOptions.extraPlugins).
   // Before SecurityPlugin, mirroring the CLI's ordering for service pairs.
   for (const plugin of opts.extraPlugins ?? []) {
     await kernel.use(plugin as any);
+  }
+
+  // [#22301] The providers the app's `requires` names, as `objectstack serve`
+  // mounts them — same reader, same table, same "an explicit instance wins"
+  // rule (see `./required-providers.ts`). In the `extraPlugins` slot, after it,
+  // so a caller's own instance is the one that stays. The harness's sharing
+  // service is constructed here so a `requires: ['sharing']` sees it held.
+  const sharingPlugin = new SharingServicePlugin();
+  try {
+    const requiredProviders = await constructRequiredProviders({
+      config,
+      held: [
+        settingsPlugin,
+        analyticsPlugin,
+        sharingPlugin,
+        ...(automationPlugin ? [automationPlugin] : []),
+        ...(opts.extraPlugins ?? []),
+      ],
+      isRegistered: (name) => kernel.hasPlugin(name),
+      packageRoot: hostRoot,
+    });
+    for (const plugin of requiredProviders) {
+      await kernel.use(plugin as any);
+    }
+  } catch (e) {
+    restoreTenancyPosture();
+    throw e;
   }
 
   // [#7001] The app's DECLARED default profile, resolved the one way every boot
@@ -709,7 +757,7 @@ export async function bootStack(
   // Sharing service — apps that declare `requires: ['sharing']` rely on it for
   // record-share grants; without it their RLS/sharing rules are inert and the
   // verifier would under-report authorization.
-  await kernel.use(new SharingServicePlugin());
+  await kernel.use(sharingPlugin);
 
   // REST + dispatcher route surfaces (mount onto the http-server service).
   // Anonymous access to object data is denied unconditionally (#3963 retired the
