@@ -40,6 +40,11 @@
 // `PLAYWRIGHT_BROWSERS_PATH` (default `/opt/pw-browsers`); this script never
 // runs `playwright install`. ffmpeg is the system binary.
 //
+// Typography: the frames this script draws (code, terminal, MCP panels,
+// captions, the closing frame) use Inter and IBM Plex Mono from Google Fonts,
+// the hero cover's pair (`hero-cover-dark.html`); the Console screenshots carry
+// the Console's own fonts. No font file is committed for this.
+//
 // ## Honesty rules this script enforces rather than trusts
 //
 //   - Every browser frame is a screenshot of the real Console against the app
