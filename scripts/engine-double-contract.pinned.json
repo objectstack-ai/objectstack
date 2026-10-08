@@ -2322,6 +2322,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/registry-deployment-platform-global.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/registry-deployment-platform-global.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/registry-deployment-platform-global.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/registry-tenant-index-author-declared-column.test.ts",
       "verb": "delete",
       "pinned": 1
