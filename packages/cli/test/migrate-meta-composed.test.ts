@@ -17,7 +17,9 @@
  *     none at its top level.
  *  2. `--write` rewrites the file that authored the body — the input's own
  *     module, not the config — and nothing else; the re-run over the written
- *     sources applies nothing, and the strict load accepts them.
+ *     sources applies nothing, and the strict load accepts them. A body whose
+ *     input is not written as a literal is listed with its reason and left
+ *     alone, never guessed at.
  *  3. The control: a one-package project's `applied` and `write` outcome are
  *     what they were, including a conversion the load still applies
  *     (`driver: 'mongo'`), which the shim's raw hand-back keeps visible to the
@@ -227,6 +229,23 @@ describe('a composed project migrates, and the package body’s conversion is ap
     // The load every other command uses — strict, no shim — accepts it now.
     const strict = await loadConfig(join(dir, 'objectstack.config.ts'));
     expect(strict.stackProvenance).toBe(true);
+  }, RUN_TIMEOUT);
+
+  it('--write lists, and leaves alone, a body whose input the walk cannot read as a literal', async () => {
+    const dir = writeProject({
+      ...COMPOSED,
+      'src/service.stack.ts': edit(
+        edit(SERVICE_STACK, 'export const ServiceStack = defineStack({', 'const build = () => ({'),
+        '  ],\n});\n',
+        '  ],\n});\n\nexport const ServiceStack = defineStack(build());\n',
+      ),
+    });
+    const before = snapshot(dir);
+    const out = json(await runMeta(dir, ['--from', '17', '--write', '--json']));
+    expect(sites(out.applied)).toEqual([BODY_SITE]);
+    expect(out.write.files).toEqual([]);
+    expect(out.write.manual.map((m: { path: string; kind: string }) => [m.path, m.kind])).toEqual([[BODY_SITE.path, 'helper']]);
+    expect(snapshot(dir)).toEqual(before);
   }, RUN_TIMEOUT);
 });
 
