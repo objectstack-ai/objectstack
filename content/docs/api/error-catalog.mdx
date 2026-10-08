@@ -62,6 +62,18 @@ entry's cross-reference sentence so the in-process one stays findable.
 **Fix:** Check the `fields` array for specific field-level issues.  
 **Retry:** `no_retry`
 
+<Callout type="warn">
+**`VALIDATION_ERROR` is `400` with one exception: the storage upload doors answer `413` for
+an upload over the File Storage settings' `max_upload_mb`.**
+
+The presigned-upload door (the declared `size`), the chunked-upload start (the declared
+`totalSize`), the local adapter's raw upload (the body) and the chunk door (the bytes the
+upload already holds plus the chunk) refuse it before anything is stored. The message names
+the size, the limit and the setting. Raise the setting or send a smaller file; resending the
+same upload cannot succeed. The protocol page carries the same exception:
+[`VALIDATION_ERROR`](/docs/protocol/kernel/error-handling#validation_error).
+</Callout>
+
 ```json
 {
   "code": "VALIDATION_ERROR",
@@ -905,6 +917,7 @@ async function handleApiCall() {
 | 403 | `authorization` | `PERMISSION_DENIED`, `FIELD_NOT_ACCESSIBLE`, `LICENSE_REQUIRED` |
 | 404 | `not_found` | `RECORD_NOT_FOUND`, `OBJECT_NOT_FOUND`, `ENDPOINT_NOT_FOUND` |
 | 409 | `conflict` | `CONCURRENT_MODIFICATION`, `UNIQUE_VIOLATION`, `DELETE_RESTRICTED` |
+| 413 | `validation` | `VALIDATION_ERROR` on an upload over the storage settings' `max_upload_mb` (see [above](#validation_error)) — this row is an exception to the 400 row, not a second home for the code |
 | 422 | `validation` | `MISSING_REQUIRED_FIELD` on an absent `controlled_by_parent` master reference (see [above](#missing_required_field)) — this row is an exception to the 400 row, not a second home for the code |
 | 429 | `rate_limit` | `RATE_LIMIT_EXCEEDED`, `QUOTA_EXCEEDED` |
 | 500 | `server` | `INTERNAL_ERROR`, `DATABASE_ERROR` |

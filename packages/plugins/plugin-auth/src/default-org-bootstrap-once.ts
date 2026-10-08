@@ -20,8 +20,9 @@
  *    record landed — the bootstrap still (re)creates a missing default
  *    organization but binds nobody and hands over no seed ownership;
  *  - with no ledger on the kernel it binds only on the call that CREATES the
- *    default organization, so a fresh install still gets its owner and an
- *    existing organization is never re-bound;
+ *    default organization — or, now that `single` creates it at boot
+ *    (ADR-0131 D3), when this process created it — so a fresh install still
+ *    gets its owner and an existing organization is never re-bound;
  *  - with a ledger that failed to answer it binds nobody on that call (it may
  *    still create the organization) and leaves the decision to the next
  *    trigger.
@@ -46,6 +47,16 @@ export interface EnsureDefaultOrganizationOnceOptions {
   claimSeedOwnership?: EnsureDefaultOrganizationOptions['claimSeedOwnership'];
   /** The bootstrap to gate — the plugin-auth helper unless a test injects one. */
   ensure?: typeof ensureDefaultOrganization;
+  /**
+   * [ADR-0131 D3] Did THIS process create the Default Organization at boot
+   * (`ensureDefaultOrganizationExists`, `default-organization-invariant.ts`)?
+   * Under `single` the organization no longer waits for the admin, so the call
+   * that creates it is no longer this gate's — and a kernel with no ledger
+   * binds "only on the call that CREATES the default organization". An
+   * organization this process created is that fresh install, so the bind is
+   * admitted for it; one that predates the process is still never re-bound.
+   */
+  organizationCreatedByThisProcess?: () => boolean;
 }
 
 /**
@@ -80,13 +91,16 @@ export function createEnsureDefaultOrganizationOnce(
     // answer: the decision may well be recorded, so this call binds nobody —
     // it can still (re)create the organization — and the next trigger, with a
     // readable ledger, decides.
+    const bindOnlyOnCreate =
+      reading === 'unavailable' && options.organizationCreatedByThisProcess?.() !== true;
     const res =
       reading === 'unreadable'
         ? await ensure(ql, { ...base, bindOwner: false })
-        : await ensure(ql, { ...base, bindOnlyOnCreate: reading === 'unavailable' });
-    // Decided: the admin was bound now, or already held a membership.
-    // `no_admin` and the failed writes leave it open for the next trigger.
-    const actedOn = res.memberCreated || res.reason === 'admin_already_in_org';
+        : await ensure(ql, { ...base, bindOnlyOnCreate });
+    // Decided: the admin was bound now, promoted from the reconciler's own
+    // `member` row (ADR-0131 D3), or already held a membership. `no_admin` and
+    // the failed writes leave it open for the next trigger.
+    const actedOn = res.memberCreated || res.ownerPromoted === true || res.reason === 'admin_already_in_org';
     if (!actedOn) return res;
     decided = true;
     if (reading === 'absent') {
@@ -95,7 +109,7 @@ export function createEnsureDefaultOrganizationOnce(
         buildLedgerDecisionRecord(
           DEFAULT_ORG_OWNER_BIND_MIGRATION_ID,
           {
-            outcome: res.memberCreated ? 'bound' : 'admin-already-member',
+            outcome: res.memberCreated ? 'bound' : res.ownerPromoted ? 'promoted' : 'admin-already-member',
             ...(res.defaultOrgId ? { organizationId: res.defaultOrgId } : {}),
           },
           new Date().toISOString(),

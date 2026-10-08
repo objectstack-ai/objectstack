@@ -646,8 +646,9 @@ async function answerMetaItem(
     const sources: MetaItemAnswerSources = {
         ...metaItemReadGateSources(deps, context, protocol, mayWriteItem),
         requestLocale,
-        translateEnvelope: (itemEnvelope, document) =>
-            translateMetaEnvelope(translation, request.metaType, itemEnvelope, document),
+        // [#22250] `runtimeDocument` — the caller's runtime view, which `sortability` derives from.
+        translateEnvelope: (itemEnvelope, document, runtimeDocument) =>
+            translateMetaEnvelope(translation, request.metaType, itemEnvelope, document, runtimeDocument),
     };
     let answer: MetaItemAnswer;
     try {

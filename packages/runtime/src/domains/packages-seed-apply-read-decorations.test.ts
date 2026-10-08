@@ -160,6 +160,9 @@ function makeEngine() {
         if (!t) { t = []; tables.set(name, t); }
         return t;
     };
+    // [ADR-0131 D3] The install holds its Default Organization from boot; the
+    // un-pinned publish stamps every seed row with it (D9 refuses an unowned row).
+    tableOf('sys_organization').push({ id: 'org_default' });
     const engine: any = {
         registry: {
             listItems: () => [],

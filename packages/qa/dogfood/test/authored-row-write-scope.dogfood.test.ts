@@ -75,7 +75,7 @@ import { defineStack, definePermissionSet } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { resolveAuthzContext } from '@objectstack/core';
-import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
+import { SecurityPlugin } from '@objectstack/plugin-security';
 
 // ── the two objects under probe ────────────────────────────────────────────
 
@@ -205,10 +205,10 @@ describe('[#7281] checkAuthoredRowWrite answers the declaration, not the caller 
 
   beforeAll(async () => {
     stack = await bootStack(probeApp, {
-      security: new SecurityPlugin({
-        defaultPermissionSets: [...securityDefaultPermissionSets, WidenerSet as any, PlainSet as any],
-        fallbackPermissionSet: 'member_default',
-      }),
+      // The two sets are the app's own (`permissions` above); ⛔ not ALSO handed
+      // to `defaultPermissionSets`, which would declare each under a second
+      // package and refuse the boot (one holder per permission-set name).
+      security: new SecurityPlugin({ fallbackPermissionSet: 'member_default' }),
     });
     await stack.signIn();                                     // dev admin seed
     bobToken = await stack.signUp('wscope-bob@verify.test');   // holds the widener

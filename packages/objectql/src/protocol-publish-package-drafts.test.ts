@@ -523,7 +523,10 @@ describe('protocol.applySeedBodies — real loader smoke test', () => {
     const protocol = new ObjectStackProtocolImplementation({} as never);
     const inserted: Array<{ object: string; record: any }> = [];
     (protocol as any).engine = {
-      find: async () => [],
+      // [ADR-0131 D3] A `single` install holds its Default Organization from
+      // boot, and the un-pinned publish stamps every seed row with it. (With
+      // the organization object registered and none of it, D9 refuses the row.)
+      find: async (object: string) => (object === 'sys_organization' ? [{ id: 'org_default' }] : []),
       insert: async (object: string, data: any) => {
         // Mirror the real engine's array-form insert (bulk path): an array in
         // → an array of created records out, same order — see framework#2678.
@@ -556,6 +559,7 @@ describe('protocol.applySeedBodies — real loader smoke test', () => {
     );
 
     expect(inserted.map((i) => i.record.name)).toEqual(['Apollo', 'Gemini']);
+    expect(inserted.map((i) => i.record.organization_id)).toEqual(['org_default', 'org_default']);
     expect(res.success).toBe(true);
     expect(res.inserted).toBe(2);
   });

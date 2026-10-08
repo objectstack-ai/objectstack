@@ -6,7 +6,8 @@
  * Single-tenant deployments have no auto-stamp (OrgScopingPlugin is
  * multi-tenant-only), so a `required` `organization_id` made
  * sys_business_unit / sys_team uncreatable (VALIDATION_FAILED). The field is
- * now optional; this proves the create path works single-tenant.
+ * now optional; this proves the create path works single-tenant. Since
+ * ADR-0131 D3 the row is owned by the Default Organization the boot creates.
  *
  * ADR-0092 update: `sys_team` is `managedBy: 'better-auth'`, so its generic
  * data-API insert is now REJECTED fail-closed for user contexts. As of #1591
@@ -30,17 +31,26 @@ describe('ADR-0057: org-scoped identity creatable single-tenant', () => {
   let token: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {}); // single-tenant: no org-scoping, no org row
+    stack = await bootStack(showcaseStack, {}); // single-tenant: no org-scoping; the Default Organization exists from the boot
     token = await stack.signIn();
   }, 120_000);
 
   afterAll(async () => { await stack?.stop?.(); });
 
-  it('creates a sys_business_unit with no organization_id', async () => {
+  it('creates a sys_business_unit, owned by the Default Organization', async () => {
+    // ADR-0057's property — creatable single-tenant, no VALIDATION_FAILED —
+    // still holds. [ADR-0131 D3 / D11] What changed is who owns the row: under
+    // `single` the Default Organization exists from the boot and the admin's
+    // session carries it, so the business unit is that organization's, never
+    // organization-less.
     const res = await stack.apiAs(token, 'POST', '/data/sys_business_unit', { name: 'Engineering', kind: 'department' });
     expect(res.status).toBe(201);
     const body: any = await res.json();
-    expect(body.record?.organization_id ?? null).toBeNull();
+    const ql = await stack.kernel.getServiceAsync<any>('objectql');
+    const orgs = await ql.find('sys_organization', { where: { slug: 'default' }, limit: 1, context: { isSystem: true } });
+    const org = (Array.isArray(orgs) ? orgs : orgs?.records ?? [])[0];
+    expect(org?.id, 'the boot created the Default Organization').toBeTruthy();
+    expect(body.record?.organization_id).toBe(org.id);
   });
 
   it('sys_team: generic insert is guarded for users; org_id stays optional for system writes', async () => {
