@@ -235,11 +235,16 @@ describe('flow get_record serves the stored-metadata family the way the data doo
     expect(JSON.parse(output.metadata)).toEqual(JSON.parse(control.metadata));
   });
 
-  it('a projection naming the body without its type is served projected, with exactly the columns named', async () => {
+  // [#22344] The single-row branch names `id` in the projection it hands the
+  // engine (its `output.id` is read off the row), so the served row carries the
+  // columns named plus `id`; the `type` column the family's projection adds is
+  // still taken back off.
+  it('a projection naming the body without its type is served projected, with exactly the columns named and the row id', async () => {
     const control = await doorRow('sys_metadata');
     const { output } = await runFlow(familyReadFlow('fam_projection', 'sys_metadata', 'system', 'one', ['name', 'metadata', 'checksum']));
     expectServedLikeTheDoor(output, control, 'the run output');
-    expect(Object.keys(output).sort()).toEqual(['checksum', 'metadata', 'name']);
+    expect(Object.keys(output).sort()).toEqual(['checksum', 'id', 'metadata', 'name']);
+    expect(output.id).toBe('meta_pin_flow_ds');
     expect(JSON.parse(output.metadata)).toEqual(JSON.parse(control.metadata));
     expect(output.checksum).toBe(control.checksum);
   });
