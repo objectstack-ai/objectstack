@@ -14,9 +14,11 @@
 // environment-held name at a cold boot: the stored row hydrated over the
 // package's definition with a `[Registry] Collision` warning, and served in its
 // place. The same package hot-installed was refused (`422`, holder
-// `environment`). Measured on `origin/main` 28bff18d0c through this file's own
-// steps before the check: the cold boot below came up, with two collision
-// warnings, and the by-name read answered the environment's definitions.
+// `environment`). Measured on `origin/main` 28bff18d0c with the same steps, in a
+// probe that was not committed: the cold boot came up, with two collision
+// warnings, and the by-name read answered the environment's definitions. With
+// the check ablated, this file's two refusal cases go red and its two controls
+// stay green.
 //
 // The engine plugin now judges every package-held position and permission-set
 // name against the environment's items right after hydration, and refuses the
