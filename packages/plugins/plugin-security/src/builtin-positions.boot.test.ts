@@ -274,7 +274,7 @@ async function boot(scenario: Scenario): Promise<Booted> {
   }
   recording = false;
 
-  const rows = (await engine.find('sys_position', { where: {}, limit: 5000, context: SYS } as any)) as any[];
+  const rows = (await engine.find('sys_position', { where: {}, limit: 5000, context: SYS })) as any[];
   const census = rows
     .map((r) => [r.name, r.organization_id ?? '-', r.managed_by, r.active, r.is_default, r.label, r.description ?? '-'].join(' | '))
     .sort();
@@ -289,7 +289,7 @@ async function grantsByPrincipal(engine: ObjectQL, posture: 'single' | 'isolated
   // just wrote — as the name-column equivalence suite does.
   if (posture === 'isolated') {
     for (const name of ['organization_admin', 'organization_admin_no_bypass', 'viewer_readonly']) {
-      const [bucket] = await engine.find('sys_permission_set', { where: { name }, context: SYS } as any);
+      const [bucket] = await engine.find('sys_permission_set', { where: { name }, context: SYS });
       const { id: _id, created_at: _c, updated_at: _u, ...rest } = bucket as any;
       await engine.insert('sys_permission_set', { ...rest, id: `ps_${name}_${ORG}`, organization_id: ORG }, { context: orgCtx } as any);
     }
@@ -304,7 +304,7 @@ async function grantsByPrincipal(engine: ObjectQL, posture: 'single' | 'isolated
   const [viewer] = await engine.find('sys_permission_set', {
     where: { name: 'viewer_readonly', ...(posture === 'isolated' ? { organization_id: ORG } : {}) },
     context: SYS,
-  } as any);
+  });
   await engine.insert(
     'sys_user_permission_set',
     { user_id: 'usr_member', permission_set_id: (viewer as any).id },
@@ -347,7 +347,7 @@ async function grantsByPrincipal(engine: ObjectQL, posture: 'single' | 'isolated
 async function tenantPositionWrites(engine: ObjectQL): Promise<Record<string, WriteOutcome>> {
   const tenant = { userId: 'usr_orgadmin', positions: [], permissions: ['qa_admin'], tenantId: ORG };
   const own = async (name: string) => {
-    const rows = (await engine.find('sys_position', { where: { name }, limit: 5, context: { isSystem: true, tenantId: ORG } } as any)) as any[];
+    const rows = (await engine.find('sys_position', { where: { name }, limit: 5, context: { isSystem: true, tenantId: ORG } })) as any[];
     // The organization's own row when it has one (walled), else the organization-less one (`single`).
     return rows.find((r) => r.organization_id === ORG) ?? rows.find((r) => r.organization_id == null);
   };
