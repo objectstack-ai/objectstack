@@ -376,11 +376,6 @@ jobs:
               # narrower audits entry is left as the package that declared it
               # spelled it, exactly as the two narrower `skills/` entries were.
               - 'docs/**'
-              # @objectstack/spec's protocol-version-pre-mode.test.ts judges the
-              # PROTOCOL_VERSION lockstep's one exception (Changesets pre mode
-              # with a pending `major`) on `.changeset/` — verbatim per the
-              # declaration.
-              - '.changeset/**'
 
   test:
     # Sharded 6-way BY PACKAGE: a core-touching PR ran the affected suite

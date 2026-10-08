@@ -38,7 +38,6 @@
   "src/integration/connector-resilience-keys-retirement.test.ts",
   "src/integration/connector-sync-retirement.test.ts",
   "src/integration/connector-triggers-retirement.test.ts",
-  "src/kernel/protocol-version-pre-mode.test.ts",
   "src/qa/requires-plugins-retirement.test.ts",
   "src/security/rls-tags-retirement.test.ts",
   "src/shared/retired-key-migrate-sentence.test.ts",

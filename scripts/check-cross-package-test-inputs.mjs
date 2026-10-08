@@ -1410,10 +1410,6 @@ export const RECOGNISED_TOP_LEVEL_DIRECTORIES = Object.freeze([
   // input. No test names it flat today; the entry closes the hole the sentence
   // above promises rather than waiting for one to be written.
   '.claude',
-  // `.changeset/**` is a declared input of `@objectstack/spec#test:repo`: its
-  // pre-mode lockstep check reads `pre.json` and lists the directory. Its own
-  // docblock names `.changeset/pre.json` flat, rostered under that glob.
-  '.changeset',
 ]);
 
 /**
