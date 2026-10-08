@@ -153,7 +153,7 @@ const sharp = createRequire(nextManifest)('sharp');
 const log = (line) => console.log(line);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-// eslint-disable-next-line no-control-regex -- ANSI escape sequences are what this strips.
+// ANSI escape sequences (FORCE_COLOR=0 should leave none; this is the belt).
 const stripAnsi = (s) => s.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '');
 
 // ── the dev server ───────────────────────────────────────────────────────────
@@ -542,6 +542,8 @@ async function main() {
     if (afterRefusal !== afterCreate) throw new Refusal(5, `${OBJECT} went ${afterCreate} → ${afterRefusal} rows on the refused call`);
     const shotRefused = await consoleShot(page, listUrl, 'refused', { waitText: `${afterRefusal} records`, outline: footer(afterRefusal) });
 
+    log(`  create_record as ${admin.user.email}: ${created.status}, record ${createdDoc.record.id} "${createdDoc.record.name}", created_by ${createdDoc.record.created_by}`);
+    log(`  create_record as ${reader.user.email}: ${refused.status} ${refused.raw}`);
     Object.assign(story, { before, afterCreate, afterRefusal, created: created.raw, refused: refused.raw, admin: admin.user.email, reader: reader.user.email });
     await stopServer();
     log(`  server stopped; ${OBJECT}: ${before} → ${afterCreate} (create) → ${afterRefusal} (refused)`);
