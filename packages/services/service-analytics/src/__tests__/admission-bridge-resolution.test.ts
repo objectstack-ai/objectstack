@@ -8,32 +8,45 @@
  * bridge brings back, and the bridge has three outcomes that are easy to
  * collapse into one:
  *
- *   - the `security` service is ABSENT — this deployment has no object-level
- *     gate anywhere, `GET /data/<object>` included, because that gate IS the
- *     absent middleware. The two doors agree, which is the equivalence property
- *     the card asks for, so the query is ADMITTED and the state is reported
- *     once, by the first query that finds it (`admission-absence-report.test.ts`
- *     pins when, and at what level);
- *   - resolving the service THREW — a security service exists on this
- *     deployment and could not be reached;
- *   - the service resolved but exposes NEITHER `canReadObject` NOR `explain` —
- *     it exists and cannot answer.
+ *   - the lookup answers NOTHING (ABSENT) — the context returns no service for
+ *     `security`. Only a context that answers a miss with nothing reaches this
+ *     branch: this file's double does, and no in-repo kernel does. The bridge
+ *     ADMITS there and reports it once, by the first query that finds it
+ *     (`admission-absence-report.test.ts` pins when, and at what level);
+ *   - resolving the service THREW (UNUSABLE), whatever the cause: a security
+ *     service that is wired and could not be reached, or — on the in-repo
+ *     kernels, `ObjectKernel` and `LiteKernel` — a `security` service nothing
+ *     ever registered, because their synchronous `getService` throws on a miss;
+ *   - the service resolved but exposes NEITHER `canReadObject` NOR `explain`
+ *     (UNUSABLE) — it exists and cannot answer.
  *
- * The last two are wired-but-broken providers. `/data`'s middleware does not
- * fall open in either state, so admitting here would reopen exactly the
- * divergence between the two doors that this gate closes — and would do it
- * silently, which is worse than the original defect: the original at least had
- * a shape a reader could find in the code. Both DENY, and both say why at
- * `error`.
+ * Both UNUSABLE corners DENY, fail-closed, before anything is read, and both say
+ * why at `error`. For a wired-but-broken provider, `/data`'s middleware does not
+ * fall open either, so admitting here would reopen exactly the divergence
+ * between the two doors that this gate closes — and would do it silently.
  *
- * ⛔ The absent case is not a bug to be tightened away. It is the negative
- * control that keeps the two deny cases honest: a bridge that denied on absence
- * too would refuse every analytics query on every deployment that ships no
- * `plugin-security`, which is a strictly different (and wrong) answer from the
- * one `/data` gives on that same deployment.
+ * ## The declaration: no security service registered ⇒ analytics DENIES
+ *
+ * [#22235] A deployment that registers no security service gets its analytics
+ * read queries REFUSED, fail-closed: the kernel's lookup throws, the bridge
+ * takes UNUSABLE, the caller gets `PERMISSION_DENIED` / 403 naming the object,
+ * and the operator gets an `error` line naming the object and the failed
+ * lookup. That is the declared answer, not an accident of how the lookup fails,
+ * and it holds even though `/data` carries no object-level gate on such a
+ * deployment: a loud deny is preferred over a silent admit. A composition that
+ * wants analytics to answer registers a security service, or its host supplies
+ * its own `admitObjectRead`. The last block of this file pins it on both
+ * in-repo kernels.
+ *
+ * ⛔ So the ABSENT case below is not a statement about deployments. It pins
+ * what the bridge does for a context that answers a miss with nothing, and it
+ * stays the negative control for the two UNUSABLE cases: same double, same
+ * probe, only the lookup's answer differs, so a bridge that refused everything
+ * could not pass this file.
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { LiteKernel, ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
 import { DatasetSchema } from '@objectstack/spec/ui';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { AnalyticsServicePlugin } from '../plugin.js';
@@ -171,13 +184,13 @@ describe('analytics admission bridge — resolving the "security" service', () =
     );
   });
 
-  // ── The negative control: absence is a different state and still ADMITS ────
+  // ── The negative control: a lookup that answers NOTHING is a different state ─
 
-  it('ADMITS when NO "security" service is registered at all', async () => {
-    // ⛔ Not a corner to tighten. On this deployment `/data` has no
-    // object-level gate either, so the two doors still agree — which is the
-    // property being defended. Tightening this to a denial would refuse every
-    // analytics query on every deployment shipping no `plugin-security`.
+  it('ADMITS when the context answers the "security" lookup with nothing (ABSENT)', async () => {
+    // The ABSENT branch: this double answers the lookup with nothing, which no
+    // in-repo kernel does — they throw on a miss (the last block of this file).
+    // Kept as the negative control for the two deny cases above; whether this
+    // branch should deny too is a separate question, not settled here.
     const { service, reads } = await bootAnalytics(undefined);
 
     const result = await runProbe(service);
@@ -222,5 +235,64 @@ describe('analytics admission bridge — resolving the "security" service', () =
       status: 403,
     });
     expect(refused.reads).toEqual([]);
+  });
+});
+
+// ── The declaration, on the in-repo kernels: no security service ⇒ DENY ──────
+
+/**
+ * Boots a REAL kernel with a `data` provider and this plugin, and NO security
+ * service, ever: nothing registers one at init or at start. The first plugin
+ * taps the kernel's shared logger so the bridge's own lines are seen.
+ */
+async function bootKernelWithoutSecurity(kernel: ObjectKernel | LiteKernel) {
+  const errors: string[] = [];
+  const warns: string[] = [];
+  const { engine, reads } = fakeEngine();
+  const tap: Plugin = {
+    name: 'test.log-tap',
+    init: async (ctx: PluginContext) => {
+      vi.spyOn(ctx.logger, 'error').mockImplementation((message: unknown) => { errors.push(String(message)); });
+      vi.spyOn(ctx.logger, 'warn').mockImplementation((message: unknown) => { warns.push(String(message)); });
+    },
+  };
+  const data: Plugin = {
+    name: 'test.data',
+    init: async (ctx: PluginContext) => { ctx.registerService('data', engine); },
+  };
+  await kernel.use(tap);
+  await kernel.use(data);
+  await kernel.use(new AnalyticsServicePlugin({ queryCapabilities: nativeSql }));
+  await kernel.bootstrap();
+  return { kernel, service: kernel.getService<AnalyticsService>('analytics'), reads, errors, warns };
+}
+
+describe.each([
+  ['ObjectKernel', () => new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false })],
+  ['LiteKernel', () => new LiteKernel({ logger: { level: 'silent' } })],
+] as const)('analytics admission bridge — a real %s that never registers a "security" service', (_name, makeKernel) => {
+  it('DENIES the dataset query fail-closed, before any read, with an error located on the object and the lookup', async () => {
+    const { kernel, service, reads, errors, warns } = await bootKernelWithoutSecurity(makeKernel());
+
+    // The mechanism the declaration rests on: this kernel answers a lookup for
+    // a never-registered name by THROWING, never with nothing.
+    expect(() => kernel.getService('security')).toThrow(/'security'/);
+
+    // The caller's refusal: the declared envelope, naming the object.
+    await expect(runProbe(service)).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      status: 403,
+      object: 'employer_member',
+    });
+    // Refused BEFORE the statement ran.
+    expect(reads).toEqual([]);
+    // The operator's line: exactly one, from the object-level bridge, naming
+    // the object and the failed `security` lookup as the cause.
+    const bridgeErrors = errors.filter((l) => l.includes('object-level read admission'));
+    expect(bridgeErrors).toHaveLength(1);
+    expect(bridgeErrors[0]).toContain('"employer_member"');
+    expect(bridgeErrors[0]).toContain('resolving the "security" service threw');
+    // Not the ABSENT branch: that one admits, and WARNs instead.
+    expect(warns.filter((l) => l.includes('no "security" service registered'))).toEqual([]);
   });
 });

@@ -188,7 +188,7 @@ describe('the two registration seams enumerate ONE collection list (#7049)', () 
   const CANDIDATES = [
     'actions', 'views', 'pages', 'dashboards', 'reports', 'datasets', 'themes',
     'flows', 'webhooks', 'jobs',
-    'permissions', 'capabilities', 'sharingRules',
+    'positions', 'permissions', 'capabilities', 'sharingRules',
     'agents', 'tools', 'skills', 'apis',
     'hooks', 'mappings', 'analyticsCubes', 'connectors',
     'emailTemplates', 'docs', 'books',

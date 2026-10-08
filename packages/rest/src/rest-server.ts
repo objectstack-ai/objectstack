@@ -1736,8 +1736,20 @@ function mayReadPendingDrafts(caller: unknown): boolean {
  * save then judged, and a client that pinned `If-None-Match: *` on that `null`
  * was refused. ⛔ Never a third inline copy at a door: the save and publish
  * doors each carried one, and the read door had none.
+ *
+ * [#22188] …and on every other `/meta` door that reads `?package=`: the
+ * layered read, the list, the book tree and the diagnostics sweep, which each
+ * forwarded `all` to the store as a package id no item is bound to (the
+ * layered read answered `404`, the list `[]`). Without `?package=`, the list
+ * already spans every package and the env-local overlay, so "no package" is
+ * the list's "show everything". Exported from the package entry, and the
+ * runtime dispatcher's `/meta` domain reads `?package=` through it on its own
+ * copies of these doors, so the two transports cannot read `all` differently.
+ * The item read's cache bypass (`packageScoped`) is not a second reading: it
+ * asks whether the raw parameter is present to pick the uncached arm, and that
+ * arm asks this function.
  */
-function metaItemPackageBinding(raw: unknown): string | undefined {
+export function metaItemPackageBinding(raw: unknown): string | undefined {
     return typeof raw === 'string' && raw !== '' && raw !== 'all' ? raw : undefined;
 }
 
@@ -3920,7 +3932,8 @@ export class RestServer {
         // `getMetaItemLayered({ packageId: ['a','b'] })`. Gated in the helper,
         // not in its two callers, so both entry points answer identically.
         if (refuseRepeatedQueryParams(req, res, ['package'])) return;
-        const layeredPackageId = req.query?.package || undefined;
+        // [#22188] Read through {@link metaItemPackageBinding}: `all` names no package.
+        const layeredPackageId = metaItemPackageBinding(req.query?.package);
         // [#9454] State the ORG scope, exactly as the `/published` overlay read
         // already does. Without it the layered view resolved the env-wide row
         // only, so an author who had just saved an org overlay opened Studio to
@@ -5804,7 +5817,9 @@ export class RestServer {
                         const result = await (p as any).getMetaDiagnostics({
                             type: diagnosticsType,
                             severity,
-                            packageId: (req.query?.package as string | undefined) || undefined,
+                            // [#22188] The list's reading ({@link metaItemPackageBinding}):
+                            // each swept type is a list read, so `all` names no package.
+                            packageId: metaItemPackageBinding(req.query?.package),
                             // SPREAD, never `organizationId: x ?? null` — the
                             // implementation declares `organizationId?: string`
                             // (optional plain string, not nullable), and a
@@ -6045,7 +6060,9 @@ export class RestServer {
                         // `query-multiplicity.ts` for why picking one of two
                         // conflicting intents is worse than a 400.
                         if (refuseRepeatedQueryParams(req, res, ['package', 'preview', 'object', 'include', 'id'])) return;
-                        const packageId = req.query?.package || undefined;
+                        // [#22188] Read through {@link metaItemPackageBinding}:
+                        // `all`, this list's "show everything" scope, names no package.
+                        const packageId = metaItemPackageBinding(req.query?.package);
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
                         // [#9488] …and BEFORE any listing work: a `:type` that
@@ -6379,7 +6396,8 @@ export class RestServer {
                         const prot = await this.resolveProtocol(environmentId, req);
                         // [#6877] One package scopes the book lookup.
                         if (refuseRepeatedQueryParams(req, res, ['package'])) return;
-                        const packageId = req.query?.package || undefined;
+                        // [#22188] Read through {@link metaItemPackageBinding}: `all` names no package.
+                        const packageId = metaItemPackageBinding(req.query?.package);
                         // [#20408] The route's whole answer is
                         // `createMetaBookTreeAnswer` in `./meta-item-read-gate.ts`
                         // — the book and doc reads, THE `DocsAudience` (#19790: one

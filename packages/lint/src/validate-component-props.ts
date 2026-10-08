@@ -243,7 +243,20 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
       // map does not carry.
       const schema = PROPS_SCHEMAS[type];
       if (!schema) continue;
-      const props = isRec(component.properties) ? component.properties : undefined;
+      // [#22212] An ABSENT bag is judged as `{}` — what `PageComponentSchema`'s
+      // `properties` default makes it. That default only ever reaches the
+      // components the schema parses, which are the top-level ones: a NESTED
+      // component (in another's `children` / `items[].children` / `footer`) sits
+      // in a `z.array(z.unknown())` slot and keeps its `undefined`. Skipping
+      // that hid every required prop such a component omits, while the same
+      // node one level up drew `component-props-invalid`. A PRESENT bag that is
+      // not an object is still left to the parse that owns its shape.
+      const props =
+        component.properties === undefined
+          ? {}
+          : isRec(component.properties)
+            ? component.properties
+            : undefined;
       if (!props) continue;
 
       const where = `page "${pageName}" · ${type}`;

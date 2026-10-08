@@ -118,7 +118,9 @@ async function boot(opts: { walled?: boolean } = {}) {
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet, QA_INQUIRY],
+    // `sys_member` is provisioned: an organization-scoped assignment must name
+    // a member of its organization (`grant-holder-membership-refusal.ts`).
+    objects: [SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet, SysMember, QA_INQUIRY],
   } as any);
   await engine.syncSchemas();
   // [#21516] The authz resolver reads these on every grant resolution; in a
@@ -194,6 +196,12 @@ async function boot(opts: { walled?: boolean } = {}) {
 }
 
 type Harness = Awaited<ReturnType<typeof boot>>;
+
+/** Make `userId` a member of `organizationId`, so an assignment scoped there may name them. */
+async function addMember(h: Harness, userId: string, organizationId: string): Promise<void> {
+  await h.engine.insert('sys_member', { user_id: userId, organization_id: organizationId, role: 'member' },
+    { context: { isSystem: true, tenantId: organizationId } } as any);
+}
 
 /** What an account reads of `qa_inquiry`, through the real resolver and the real middleware. */
 async function rowsReadBy(h: Harness, userId: string): Promise<number> {
@@ -312,6 +320,7 @@ describe('the accepted half — a catalog NAME, active or deactivated', () => {
     // driver's `organization_id IS NULL` term keeps those rows visible.
     const h = await boot();
     const orgBound = { ...ADMIN, tenantId: 'org_a' };
+    await addMember(h, 'u_ob', 'org_a');
     const created = await h.engine.insert(
       'sys_user_position', { user_id: 'u_ob', position: 'qa_auditor' }, { context: orgBound } as any,
     );
@@ -571,6 +580,7 @@ describe("walled posture, two organizations — the predicate reads the WRITER's
     expect(await assignmentsOf(h, 'u_wb')).toHaveLength(0);
 
     // A predicate update that sets it reads the same catalog, and is refused the same way.
+    await addMember(h, 'u_wm', 'org_a');
     await h.engine.insert('sys_user_position', { id: 'upw', user_id: 'u_wm', position: 'qa_a_own' }, { context: ORG_A_ADMIN } as any);
     const multi = envelopeOf(await refusalOf(() => h.engine.update(
       'sys_user_position', { position: 'qa_b_only' }, { where: { user_id: 'u_wm' }, multi: true, context: ORG_A_ADMIN } as any,
@@ -583,6 +593,7 @@ describe("walled posture, two organizations — the predicate reads the WRITER's
 
   it("the writer's own organization's name is accepted (control for the scoped read)", async () => {
     const h = await bootTwoOrgs();
+    await addMember(h, 'u_wo', 'org_a');
     const created = await h.engine.insert(
       'sys_user_position', { user_id: 'u_wo', position: 'qa_a_own' }, { context: ORG_A_ADMIN } as any,
     );
