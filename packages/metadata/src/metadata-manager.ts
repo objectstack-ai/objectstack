@@ -1796,19 +1796,20 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
-   * The registry items that belong to `packageId`, for the two package-wide
-   * writes ({@link publishPackage}, {@link revertPackage}).
+   * [#22113] The registry items that belong to `packageId`, for
+   * {@link revertPackage}.
    *
    * An item belongs to a package when any of three keys names it:
    *
    *  - `packageId` — the publish envelope's own key, and what a caller that
    *    registers an item for a package writes;
    *  - `package` — the legacy package stamp;
-   *  - `_packageId` — the private provenance stamp `applyProtection`
-   *    (`@objectstack/spec/shared`) writes on every item a code-shipped
-   *    artifact registers here (ADR-0010 §3.7). A code-shipped item carries
-   *    ONLY this key, and it is the key the metadata protocol scopes registry
-   *    items by for every read and for `isArtifactBacked`.
+   *  - `_packageId` — the private provenance stamp. `applyProtection`
+   *    (`@objectstack/spec/shared`, ADR-0010 §3.7) writes it on every item a
+   *    code-shipped artifact registers here, and the ObjectQL object bridge
+   *    copies it onto every object it registers here. A code-shipped item
+   *    carries ONLY this key, and it is the key the metadata protocol scopes
+   *    this registry's items by when it serves a package's reads.
    *
    * Reading the first two alone made a code-shipped package's revert answer
    * 404 "No metadata items found" while every read served its items. With the
@@ -1867,8 +1868,25 @@ export class MetadataManager implements IMetadataService {
     const shouldValidate = options?.validate !== false;
     const publishedBy = options?.publishedBy;
 
-    // Collect all items belonging to this package
-    const packageItems = this.collectPackageMembers(packageId);
+    // Collect all items belonging to this package.
+    //
+    // [#22113] Deliberately NOT `collectPackageMembers`: these two keys miss a
+    // code-shipped item, which carries only the `_packageId` stamp, and that
+    // miss is what keeps this method from publishing a read-only code package
+    // (ADR-0070 D2). With the stamp read here, nothing below refuses one: a
+    // platform package's objects validate, are snapshotted and are
+    // re-registered as published (measured on a showcase boot). How publish
+    // answers a read-only package is a decision this method does not make by
+    // changing its member set.
+    const packageItems: Array<{ type: string; name: string; data: any }> = [];
+    for (const [type, typeStore] of this.registry) {
+      for (const [name, data] of typeStore) {
+        const meta = data as any;
+        if (meta?.packageId === packageId || meta?.package === packageId) {
+          packageItems.push({ type, name, data: meta });
+        }
+      }
+    }
 
     if (packageItems.length === 0) {
       return {

@@ -822,6 +822,70 @@ describe('MetadataManager — IMetadataService Contract', () => {
         message: expect.stringContaining('has never been published'),
       });
     });
+
+    // [#22113] A code-shipped item carries ONLY the private `_packageId`
+    // stamp — `applyProtection` writes it on every item an artifact registers,
+    // and the ObjectQL object bridge copies it onto every object. Collecting
+    // members by `packageId` / `package` alone answered 404 "No metadata items
+    // found" for a package every read serves.
+    it('finds a code-shipped package by the _packageId stamp: never published ⇒ 409, not 404', async () => {
+      await manager.register('object', 'code_item', {
+        name: 'code_item', label: 'Code Item', _packageId: 'com.acme.code', _provenance: 'package',
+      });
+
+      await expect(manager.revertPackage('com.acme.code')).rejects.toMatchObject({
+        code: 'RESOURCE_CONFLICT',
+        status: 409,
+        message: "Package 'com.acme.code' has never been published",
+      });
+    });
+
+    it('membership is any of packageId, package or _packageId: each member with a snapshot is restored', async () => {
+      const snapshot = (label: string) => ({ label });
+      await manager.register('object', 'by_package_id', {
+        name: 'by_package_id', packageId: 'com.acme.keys', publishedDefinition: snapshot('A'), state: 'draft',
+      });
+      await manager.register('object', 'by_package', {
+        name: 'by_package', package: 'com.acme.keys', publishedDefinition: snapshot('B'), state: 'draft',
+      });
+      await manager.register('object', 'by_stamp', {
+        name: 'by_stamp', _packageId: 'com.acme.keys', publishedDefinition: snapshot('C'), state: 'draft',
+      });
+      // Control: a different package's item is not a member.
+      await manager.register('object', 'other_pkg', {
+        name: 'other_pkg', _packageId: 'com.acme.other', publishedDefinition: snapshot('D'), state: 'draft',
+      });
+
+      await manager.revertPackage('com.acme.keys');
+
+      for (const [name, label] of [['by_package_id', 'A'], ['by_package', 'B'], ['by_stamp', 'C']] as const) {
+        const item = await manager.get('object', name) as any;
+        expect({ name, state: item.state, metadata: item.metadata }).toEqual({ name, state: 'active', metadata: { label } });
+      }
+      const other = await manager.get('object', 'other_pkg') as any;
+      expect(other.state).toBe('draft');
+      expect(other.metadata).toBeUndefined();
+    });
+  });
+
+  // [#22113] `publishPackage` deliberately keeps the two-key lookup: with the
+  // stamp read, nothing in it refuses a read-only code package (ADR-0070 D2),
+  // so a code package's items would be snapshotted and re-registered as
+  // published. This pins that an item carrying only the stamp is NOT
+  // published by this method until that decision is made.
+  describe('publishPackage — an item carrying only the _packageId stamp', () => {
+    it('is not a member: nothing is snapshotted', async () => {
+      await manager.register('object', 'code_item', {
+        name: 'code_item', label: 'Code Item', _packageId: 'com.acme.code', _provenance: 'package',
+      });
+
+      const result = await manager.publishPackage('com.acme.code', { validate: false });
+
+      expect(result).toMatchObject({ success: false, itemsPublished: 0 });
+      const item = await manager.get('object', 'code_item') as any;
+      expect(item.publishedDefinition).toBeUndefined();
+      expect(item.state).toBeUndefined();
+    });
   });
 
   describe('getPublished', () => {
