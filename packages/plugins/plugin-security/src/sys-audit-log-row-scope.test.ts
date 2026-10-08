@@ -185,6 +185,21 @@ describe('[ADR-0131 D7] sys_audit_log: the organization scope rides tenant_id, u
     expect(await r.read(VIEWER_A)).toEqual(['a1']);
   });
 
+  it('a global settings change is not served to an organization admin; a tenant-scope change is', async () => {
+    // The two `config_change` shapes the settings writer produces since
+    // ADR-0131 D7: a GLOBAL-scope change is about no organization, so it
+    // carries no `tenant_id` whatever organization the writer had active; a
+    // tenant-scope change carries the writer's organization.
+    const r = await boot({ posture: 'isolated' });
+    await r.engine.insert(LEDGER, [
+      { id: 'g1', action: 'config_change', object_name: 'sys_platform_setting', tenant_id: null },
+      { id: 't1', action: 'config_change', object_name: 'sys_setting', tenant_id: 'org_a' },
+    ], SYS);
+    const settingsRows = (ids: string[]) => ids.filter((id) => id === 'g1' || id === 't1');
+    expect(settingsRows(await r.read(ORG_ADMIN_A))).toEqual(['t1']);
+    expect(settingsRows(await r.read(PLATFORM_ADMIN))).toEqual(['g1', 't1']);
+  });
+
   it('a platform admin reads every row, the deployment-level row included', async () => {
     const r = await boot({ posture: 'isolated' });
     expect(await r.read(PLATFORM_ADMIN)).toEqual(['a1', 'b1', 'd1']);
