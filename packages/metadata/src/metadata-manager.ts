@@ -1796,8 +1796,8 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
-   * [#22113] The registry items that belong to `packageId`, for
-   * {@link revertPackage}.
+   * [#22113] The registry items that belong to `packageId`, for the two
+   * package-wide writes ({@link publishPackage}, {@link revertPackage}).
    *
    * An item belongs to a package when any of three keys names it:
    *
@@ -1811,12 +1811,17 @@ export class MetadataManager implements IMetadataService {
    *    carries ONLY this key, and it is the key the metadata protocol scopes
    *    this registry's items by when it serves a package's reads.
    *
-   * Reading the first two alone made a code-shipped package's revert answer
-   * 404 "No metadata items found" while every read served its items. With the
-   * members found, the per-item branches answer as they do for any package:
-   * a code package nothing was ever published for is refused with the
-   * declared 409 "has never been published", never a silent no-op success
-   * (ADR-0070 D2: a code package is read-only).
+   * Reading the first two alone made a package's publish and revert miss
+   * every item that carries only the stamp ("No metadata items found" while
+   * every read served them).
+   *
+   * ⛔ Not a writability check. This class has no package-kind concept, so it
+   * cannot tell a read-only code package (ADR-0070 D2) from a writable one,
+   * and with the stamp read it would publish a code package's items like any
+   * other. The refusal belongs to the caller that holds the predicate: the
+   * `POST /packages/:id/publish` and `/revert` doors (`@objectstack/runtime`)
+   * refuse a non-writable package with `422 WRITABLE_PACKAGE_REQUIRED` before
+   * calling either method.
    */
   private collectPackageMembers(packageId: string): Array<{ type: string; name: string; data: any }> {
     const members: Array<{ type: string; name: string; data: any }> = [];
@@ -1868,25 +1873,10 @@ export class MetadataManager implements IMetadataService {
     const shouldValidate = options?.validate !== false;
     const publishedBy = options?.publishedBy;
 
-    // Collect all items belonging to this package.
-    //
-    // [#22113] Deliberately NOT `collectPackageMembers`: these two keys miss a
-    // code-shipped item, which carries only the `_packageId` stamp, and that
-    // miss is what keeps this method from publishing a read-only code package
-    // (ADR-0070 D2). With the stamp read here, nothing below refuses one: a
-    // platform package's objects validate, are snapshotted and are
-    // re-registered as published (measured on a showcase boot). How publish
-    // answers a read-only package is a decision this method does not make by
-    // changing its member set.
-    const packageItems: Array<{ type: string; name: string; data: any }> = [];
-    for (const [type, typeStore] of this.registry) {
-      for (const [name, data] of typeStore) {
-        const meta = data as any;
-        if (meta?.packageId === packageId || meta?.package === packageId) {
-          packageItems.push({ type, name, data: meta });
-        }
-      }
-    }
+    // Collect all items belonging to this package — the same membership
+    // `revertPackage` reads. A read-only code package never gets here through
+    // the publish door, which refuses it first (see `collectPackageMembers`).
+    const packageItems = this.collectPackageMembers(packageId);
 
     if (packageItems.length === 0) {
       return {

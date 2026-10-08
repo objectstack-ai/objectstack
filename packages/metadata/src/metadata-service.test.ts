@@ -823,12 +823,13 @@ describe('MetadataManager — IMetadataService Contract', () => {
       });
     });
 
-    // [#22113] A code-shipped item carries ONLY the private `_packageId`
-    // stamp — `applyProtection` writes it on every item an artifact registers,
-    // and the ObjectQL object bridge copies it onto every object. Collecting
-    // members by `packageId` / `package` alone answered 404 "No metadata items
-    // found" for a package every read serves.
-    it('finds a code-shipped package by the _packageId stamp: never published ⇒ 409, not 404', async () => {
+    // [#22113] An item can carry ONLY the private `_packageId` stamp —
+    // `applyProtection` writes it on every item an artifact registers, and the
+    // ObjectQL object bridge copies it onto every object. Collecting members by
+    // `packageId` / `package` alone answered 404 "No metadata items found" for a
+    // package every read serves. (Whether the package may be reverted at all is
+    // the door's question — it refuses a read-only one with 422 first.)
+    it('finds a package by the _packageId stamp: never published ⇒ 409, not 404', async () => {
       await manager.register('object', 'code_item', {
         name: 'code_item', label: 'Code Item', _packageId: 'com.acme.code', _provenance: 'package',
       });
@@ -868,23 +869,23 @@ describe('MetadataManager — IMetadataService Contract', () => {
     });
   });
 
-  // [#22113] `publishPackage` deliberately keeps the two-key lookup: with the
-  // stamp read, nothing in it refuses a read-only code package (ADR-0070 D2),
-  // so a code package's items would be snapshotted and re-registered as
-  // published. This pins that an item carrying only the stamp is NOT
-  // published by this method until that decision is made.
+  // [#22113] `publishPackage` reads the same membership as `revertPackage`:
+  // an item carrying only the stamp is a member. (Flipped from the pin that
+  // held it OUT while nothing refused a read-only code package; the
+  // `POST /packages/:id/publish` door now refuses one with
+  // `422 WRITABLE_PACKAGE_REQUIRED` before this method runs.)
   describe('publishPackage — an item carrying only the _packageId stamp', () => {
-    it('is not a member: nothing is snapshotted', async () => {
-      await manager.register('object', 'code_item', {
-        name: 'code_item', label: 'Code Item', _packageId: 'com.acme.code', _provenance: 'package',
+    it('is a member: it is snapshotted and published', async () => {
+      await manager.register('object', 'stamped_item', {
+        name: 'stamped_item', label: 'Stamped Item', _packageId: 'com.acme.stamped', _provenance: 'package',
       });
 
-      const result = await manager.publishPackage('com.acme.code', { validate: false });
+      const result = await manager.publishPackage('com.acme.stamped', { validate: false });
 
-      expect(result).toMatchObject({ success: false, itemsPublished: 0 });
-      const item = await manager.get('object', 'code_item') as any;
-      expect(item.publishedDefinition).toBeUndefined();
-      expect(item.state).toBeUndefined();
+      expect(result).toMatchObject({ success: true, itemsPublished: 1, version: 1 });
+      const item = await manager.get('object', 'stamped_item') as any;
+      expect(item.state).toBe('active');
+      expect(item.publishedDefinition).toMatchObject({ name: 'stamped_item', label: 'Stamped Item' });
     });
   });
 
