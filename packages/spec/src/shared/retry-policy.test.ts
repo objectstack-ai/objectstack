@@ -162,10 +162,25 @@ describe('RetryPolicySchema refuses a key it does not declare', () => {
       const issues = result.success ? [] : result.error.issues;
       expect(issues.map((issue) => ({ code: issue.code, path: issue.path, keys: (issue as { keys?: unknown }).keys })))
         .toEqual([{ code: 'unrecognized_keys', path: [], keys: ['maxRetry'] }]);
-      // The did-you-mean's subject: the declared key, never the tombstone.
-      expect(issues[0]!.message).toContain('`maxRetries`');
+      // The did-you-mean's subject: the rename pair to the declared key, never to the tombstone.
+      expect(issues[0]!.message).toContain('`maxRetry` → `maxRetries`');
       expect(issues[0]!.message).not.toContain('`retryDelayMs`');
     }
+  });
+
+  it('a neighbouring retry vocabulary is answered with the declared key; maxAttempts with the off-by-one', () => {
+    for (const [key, target] of [
+      ['initialDelayMs', 'backoffMs'], ['baseDelayMs', 'backoffMs'], ['maxDelayMs', 'maxRetryDelayMs'],
+      ['retries', 'maxRetries'], ['attempts', 'maxRetries'],
+    ] as const) {
+      const result = RetryPolicySchema.safeParse({ [key]: 1 });
+      expect(result.success, key).toBe(false);
+      expect(result.success ? '' : result.error.issues[0]!.message, key).toContain(`\`${key}\` → \`${target}\``);
+    }
+    const attempts = RetryPolicySchema.safeParse({ maxAttempts: 3 });
+    const message = attempts.success ? '' : attempts.error.issues[0]!.message;
+    expect(message).toContain('`maxRetries: <maxAttempts - 1>`');
+    expect(message).not.toContain('`maxAttempts` → ');
   });
 
   it('job.retryPolicy refuses it at the job\'s own path', () => {

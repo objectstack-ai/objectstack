@@ -310,7 +310,9 @@ describe('try_catch: its retry is closed, so the spec judges its keys like every
     expect(issues[0]!.message).toBe(refusals[0]!.message);
     // The contract's own sentence, carrying the did-you-mean's subject: the declared key.
     expect(refusals[0]!.message).toContain(contractSentence('try_catch', NEAR_MISS));
-    expect(contractSentence('try_catch', NEAR_MISS)).toContain('`maxRetries`');
+    // The did-you-mean's subject is the rename pair — a curated alias, since `maxRetry` is three edits from
+    // `maxRetries`, past the distance fallback's budget of two.
+    expect(contractSentence('try_catch', NEAR_MISS)).toContain('`maxRetry` → `maxRetries`');
     expect(refusals[0]!.message).toMatch(/Rename the key .* or remove it/);
   });
 

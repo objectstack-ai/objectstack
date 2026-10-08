@@ -189,7 +189,7 @@ describe('try_catch: its retry closed, so its undeclared key is the spec\'s, ref
       { path: 'nodes.1.config.retry.maxRetry', code: 'node-config-refused-by-contract' },
     ]);
     expect(refusals[0]!.message).toBe(refusals[0]!.judgedMessage);
-    expect(refusals[0]!.message).toContain('`maxRetries`');
+    expect(refusals[0]!.message).toContain('`maxRetry` → `maxRetries`');
     const err = rejectionOf(engineWith(recordingLogger().logger), 'try_catch', config);
     expect(err.message).not.toContain('undeclared config key(s)');
     await expect(engine.getFlow('f')).resolves.toBeNull();

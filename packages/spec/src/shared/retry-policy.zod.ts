@@ -208,8 +208,33 @@ export function retryPolicyShape() {
 export const RetryPolicySchema = lazySchema(() => strictObject(
   {
     surface: 'this retry policy',
+    aliases: {
+      // The slip the closing card measured, and one the edit-distance fallback
+      // cannot reach: `maxRetry` is THREE edits from `maxRetries` (y → i, +e,
+      // +s) against a budget of two for an eight-letter key.
+      maxRetry: 'maxRetries',
+      // The rest are real, in-repo spellings of the same knob on a NEIGHBOURING
+      // retry surface — the table `Flow.errorHandling` already carries for the
+      // same reason (`automation/flow.zod.ts`): the connector RetryConfig's
+      // `initialDelayMs` / `maxDelayMs`, the datasource policy's `baseDelayMs`,
+      // and the plain-English `retries` / `attempts`.
+      initialDelayMs: 'backoffMs',
+      baseDelayMs: 'backoffMs',
+      maxDelayMs: 'maxRetryDelayMs',
+      retries: 'maxRetries',
+      attempts: 'maxRetries',
+    },
+    guidance: {
+      // NOT an alias, as on `Flow.errorHandling`: `maxAttempts` counts the
+      // FIRST attempt and `maxRetries` the ones after it, so a bare rename
+      // would quietly change the number's meaning by one.
+      maxAttempts:
+        '`maxAttempts` is the connector RetryConfig spelling and INCLUDES the first attempt; this policy ' +
+        'counts retries AFTER it. Write `maxRetries: <maxAttempts - 1>` — renaming the key alone would ' +
+        'quietly run one attempt more than you asked for.',
+    },
     history:
-      'Until this shape was closed, an undeclared key here was dropped silently — the policy parsed with that knob at its default, so a misspelt `maxRetries` meant no retry at all.',
+      'Until this shape was closed, an undeclared key here was dropped silently — the policy parsed with that knob at its default, so a misspelt retry count meant no retry at all.',
   },
   retryPolicyShape(),
 ));
