@@ -210,13 +210,20 @@ describe('#9261 a non-benign probe failure no longer becomes "no organizations"'
 });
 
 describe('#9261 the benign causes still answer the empty probe', () => {
-  it('[cause 2] an unprovisioned `sys_organization` table proceeds unstamped', async () => {
+  it('[cause 2] an unprovisioned `sys_organization` table answers ZERO — not an outage', async () => {
     // Schema sync has not run; the table cannot hold a row, so zero IS the
-    // measurement and first boot must not be refused.
+    // measurement — the probe's own failure does NOT propagate (that is the
+    // #9261 distinction this case pins). [ADR-0131 D9] What zero then means
+    // changed: the Default Organization is a boot invariant under `single`
+    // (it exists before anything writes), so a registered organization object
+    // holding none is a write with no owner — refused by name, not landed
+    // org-less as it was when "zero" meant "first boot".
     const { engine, observed } = await makeEngine({ organizationFind: () => { throw missingTable(); } });
-    await systemInsert(engine, 'first boot');
-    expect(lastWrite(observed, 'dispatch_order')?.method).toBe('create');
-    expect(lastWrite(observed, 'dispatch_order')?.options?.tenantId).toBeUndefined();
+    const refusal = await systemInsert(engine, 'first boot').then(() => undefined, (e) => e);
+    expect(refusal?.code).toBe('ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED');
+    expect(refusal?.status).toBe(500);
+    expect(refusal?.reason).toBe('no-organization');
+    expect(lastWrite(observed, 'dispatch_order')).toBeUndefined();
   });
 
   it('an UNROUTABLE organization object never reaches the probe, so it needs no predicate', async () => {

@@ -57,7 +57,7 @@ const loopAround = (inner: Node): Node => ({
   id: 'sweep',
   type: 'loop',
   label: 'Sweep',
-  config: { collection: '{items}', itemVariable: 'item', body: { nodes: [inner], edges: [] } },
+  config: { collection: '{items}', iteratorVariable: 'item', body: { nodes: [inner], edges: [] } },
 });
 
 function issuesOf(flow: unknown) {
