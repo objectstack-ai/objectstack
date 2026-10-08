@@ -41,12 +41,12 @@ function pluginCtx(): any {
 /** The parent's own completion toast — it must never ride an item's refusal. */
 const PARENT_TOAST = 'Batch complete!';
 /**
- * The authored refusal template. `{val}` is the child's own declared INPUT
+ * The authored refusal template. `{{ val }}` is the child's own declared INPUT
  * variable (the mapped item, handed down as `params.val`) — what makes the
- * rendered reason per-item. ⛔ Not the parent's `{item}` iterator: that lives in
+ * rendered reason per-item. ⛔ Not the parent's `item` iterator: that lives in
  * the PARENT's variable map and resolves to the empty string down here.
  */
-const REFUSAL_TEMPLATE = 'Refused: {val} is not eligible';
+const REFUSAL_TEMPLATE = 'Refused: {{ val }} is not eligible';
 /** Per-item #4354 work, so the rollup on the refusal path is assertable. */
 const ITEM_METRICS = { selected: 2, acted: 1 } as const;
 

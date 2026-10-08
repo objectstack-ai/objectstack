@@ -43,8 +43,8 @@ function createTestLogger(): any {
 
 /** The flow author's completion toast — must never ride a refusal. */
 const SUCCESS_TEXT = 'Account created — the owner has been notified.';
-/** The authored refusal template. `{record.name}` is what makes it per-record. */
-const REFUSAL_TEMPLATE = 'Refused: {record.name} is a confirmed duplicate';
+/** The authored refusal template. `{{ record.name }}` is what makes it per-record. */
+const REFUSAL_TEMPLATE = 'Refused: {{ record.name }} is a confirmed duplicate';
 
 /**
  * A two-node flow whose `end` node carries the config under test.
@@ -115,7 +115,7 @@ describe('#15788 — the defect: a refusing `end` ran as a plain completion', ()
         expect(second.refusalMessage).toBe('Refused: Globex Industries is a confirmed duplicate');
         // The template itself never reaches a caller — that is the whole point
         // of rendering it here rather than on the wire.
-        expect(first.refusalMessage).not.toContain('{record.name}');
+        expect(first.refusalMessage).not.toContain('{{');
     });
 
     it('the run RECORD carries the outcome and the rendered message', async () => {
@@ -315,29 +315,27 @@ describe('#15788 — the boundary: what must NOT change', () => {
     });
 });
 
-describe('#15788 — one interpolator, not a second template engine', () => {
+describe('#15788 — one text renderer, not a second template engine', () => {
     /**
      * The ruling: the refusal message goes through *the same interpolation a
-     * screen `description` gets*. Asserting "it substitutes `{record.name}`" is
-     * far too weak — a hand-rolled `replace` would pass it. These drive both
-     * slots with templates whose behaviour is SPECIFIC to
-     * `builtin/template.ts`, and compare the two renderings for equality.
+     * screen `description` gets* — since #22110 the formula template engine's
+     * `{{ }}` holes, through `renderTextSlot`. Asserting "it substitutes
+     * `{{ record.name }}`" is far too weak — a hand-rolled `replace` would pass
+     * it. These drive both slots with templates whose behaviour is SPECIFIC to
+     * that engine, and compare the two renderings for equality.
      */
     const PROBES = [
         // Dotted path walk.
-        '{record.name}',
-        // Numeric segment indexing into an array.
-        'first={record.tags.0}',
-        // Context token, resolved from `AutomationContext`, not from variables.
-        'by {$User.Id}',
-        // The CEL-mirrored numeric stdlib (commit 815585513) — nothing a naive
-        // substitution implements.
-        'score {round(record.score)}',
-        // Unresolvable embedded token renders as the empty string, not the
-        // literal token and not `undefined`.
-        'missing[{record.nope}]',
-        // Object-valued token is JSON-serialized, never `[object Object]` (#3450).
-        'blob {record.meta}',
+        '{{ record.name }}',
+        // Numeric segment indexing into an array, both spellings.
+        'first={{ record.tags.0 }} second={{ record.tags[1] }}',
+        // A whitelisted formatter (ADR-0032 §3) — nothing a naive substitution implements.
+        'score {{ record.score | number:2 }} {{ record.name | upper }}',
+        // Unresolvable embedded hole renders as the empty string, not the
+        // literal hole and not `undefined`.
+        'missing[{{ record.nope }}]',
+        // Object-valued hole is JSON-serialized, never `[object Object]` (#3450).
+        'blob {{ record.meta }}',
     ];
 
     it('renders a refusal `message` byte-identically to a screen `description`', async () => {
