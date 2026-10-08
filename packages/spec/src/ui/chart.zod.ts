@@ -751,7 +751,7 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
     'renderer lowers onto the chart graphic as `role="img"` plus `aria-label`. The shared ' +
     '`AriaProps` shape is NOT gone — `ariaLabel` / `ariaDescribedBy` / `role` stay live in ' +
     'the `aria` block on `page.aria`, `page.components[].aria` and the list view `aria`. ' +
-    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   },
 ));

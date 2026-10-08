@@ -1841,7 +1841,7 @@ describe('ElementTextPropsSchema', () => {
    * for) and the house `os migrate meta` sentence.
    */
   const MIGRATE_SENTENCE =
-    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
   it.each([
     ['heading', 'h2'],
@@ -2127,7 +2127,7 @@ describe('Interactive Elements — element:filter (retired, no renderer)', () =>
   // sentence (the D2 conversion `element-filter-removed` strips it).
   it('rejects the retired `targetVariable` with its prescription', () => {
     expect(() => ElementFilterPropsSchema.parse({ targetVariable: 'active_filter' }))
-      .toThrow(/`element:filter` property `targetVariable`.*removed.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand/s);
+      .toThrow(/`element:filter` property `targetVariable`.*removed.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand/s);
   });
 
   // The migrated shape — `element-filter-removed` strips all six keys and
@@ -2180,7 +2180,7 @@ describe('Interactive Elements — element:form (retired, no renderer)', () => {
     expect(() => ElementFormPropsSchema.parse({ onSubmit: 'navigate_to("page_detail")' }))
       .toThrow(/`element:form` property `onSubmit`.*removed/s);
     expect(() => ElementFormPropsSchema.parse({ aria: { label: 'Form' } }))
-      .toThrow(/`element:form` property `aria`.*removed.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand/s);
+      .toThrow(/`element:form` property `aria`.*removed.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand/s);
   });
 
   // The migrated shape — `element-form-removed` strips all six keys and

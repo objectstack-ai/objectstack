@@ -62,7 +62,7 @@ describe('`currencyConfig.precision` is removed: refused with the prescription, 
     expect(issue.message).toContain('Do not move the number to the field-level `precision`');
     expect(issue.message).toContain('Delete the key.');
     expect(issue.message).toContain(
-      'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+      'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
     );
   });
 

@@ -126,7 +126,7 @@ export function retryPolicyShape() {
       "a `try_catch` node's `retry` and `flow.errorHandling`. " +
       'Rename the key to `backoffMs`; the value (milliseconds before the first retry) ' +
       'is unchanged. ' +
-      'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
+      'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
     ),
   };
 }
