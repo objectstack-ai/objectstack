@@ -84,8 +84,7 @@ interface SeedOptions {
 }
 
 /**
- * Read the items of a type the engine's SchemaRegistry holds — one of the two
- * sources {@link readDeclaredPositions} unions.
+ * Read declared metadata items of a type from the engine's SchemaRegistry.
  *
  * [#8378] No `{ name, content }` unwrap: the registered item IS the authoring
  * document. `PositionSchema` declares no `content` key and rejects one as
@@ -102,50 +101,48 @@ function readDeclared(engine: any, type: string): any[] {
   return [];
 }
 
+/** A declared position this seeder owns: any name but the six built-ins. */
+function isSeededHere(item: any): boolean {
+  return !isBuiltinPositionName(item?.name);
+}
+
 /**
- * The positions this seeder projects into rows: every declared position the
- * engine registry or the metadata service holds, one entry per name, MINUS the
- * six built-ins.
+ * The positions this seeder projects into rows: the engine registry's, else
+ * the metadata service's — the same two-step as before — with the six built-in
+ * positions taken out of both the decision and the result.
  *
- * ## A union, not "the registry, else the metadata service"
+ * ## Why the six are taken out (ADR-0131 C2 stage S2)
  *
- * Neither source holds every declared position. The metadata service holds the
- * stack-declared ones an app registers in memory; the engine registry holds the
- * built-ins this plugin declares (`builtin-positions.ts`) and every position a
- * metadata author saved through the metadata door. This read used to take the
- * registry ALONE whenever it held any position, and consult the metadata
- * service only when the registry was empty — so the first position to reach
- * the registry silenced every stack-declared one. Measured at objectstack
- * `51290bca2c`, walled showcase: after one `PUT /api/v1/meta/position/<name>`,
- * an organization created next was seeded the six built-ins and the
- * door-authored position, and none of the stack's ten. A name both sources
- * hold takes the registry's body, the order the security catalog read
- * (`createSecurityCatalogReader`) answers in.
+ * The six are declared position metadata of this plugin now
+ * (`builtin-positions.ts`), registered with the engine registry on every boot.
+ * Left in, they would change this read twice over:
  *
- * ## Why the six built-ins are skipped
+ *  - **the decision.** The registry is read first and the metadata service only
+ *    when the registry holds no position, so six registered names would make
+ *    the registry answer every boot — and the stack-declared positions, which
+ *    only the metadata service holds, would never be read again.
+ *  - **the result.** Their rows are `bootstrapBuiltinRoles`'s, seeded from the
+ *    same list with the `platform` provenance this seeder never writes. Taking
+ *    them here would put a copy without that provenance ahead of the built-in
+ *    pass on a fresh organization (refused outright for a reserved identity
+ *    name), which the built-in pass then restamps: a second writer for six rows
+ *    that have one.
  *
- * They are declared metadata now, so they are among the registry's positions —
- * but their rows are `bootstrapBuiltinRoles`'s, seeded from the same list with
- * the `platform` provenance this seeder never writes. Taking them here would
- * insert a copy without that provenance ahead of the built-in pass on a fresh
- * organization (refused outright for a reserved identity name), which the
- * built-in pass then restamps: a second writer for six rows that have one.
+ * So the registry "holds a position" only when it holds one besides the six,
+ * and the six never reach the loop. With the six out, both the decision and the
+ * result are exactly what they were before the six were declared — that is the
+ * whole of this change; the two-step itself is not touched.
  */
 async function readDeclaredPositions(engine: any, metadataService: any): Promise<any[]> {
   const registered = readDeclared(engine, 'position');
-  let listed: any[] = [];
-  try {
-    const result = metadataService?.list?.('position');
-    const resolved = typeof (result as any)?.then === 'function' ? await result : result;
-    listed = Array.isArray(resolved) ? resolved : [];
-  } catch { listed = []; }
-  const byName = new Map<string, any>();
-  for (const item of [...registered, ...listed]) {
-    const name = item?.name;
-    if (typeof name !== 'string' || name === '' || byName.has(name)) continue;
-    byName.set(name, item);
+  let positions: unknown = registered;
+  if (!registered.some(isSeededHere)) {
+    try {
+      const listed = metadataService?.list?.('position');
+      positions = typeof (listed as any)?.then === 'function' ? await listed : (listed ?? []);
+    } catch { positions = []; }
   }
-  return [...byName.values()].filter((item) => !isBuiltinPositionName(item.name));
+  return Array.isArray(positions) ? positions.filter(isSeededHere) : [];
 }
 
 /**

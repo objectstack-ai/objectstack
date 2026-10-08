@@ -9,7 +9,7 @@
  *
  * {@link securityBuiltinPositions} is the only place the six are listed:
  *
- *  1. `SecurityPlugin.init` declares them to the engine registry
+ *  1. `SecurityPlugin.start` declares them to the engine registry
  *     ({@link registerBuiltinPositions}), under this plugin's package id, so
  *     the security catalog read (`createSecurityCatalogReader`,
  *     `@objectstack/core`) and the metadata door (`GET /api/v1/meta/position`)
@@ -22,23 +22,31 @@
  *     `is_default: false`.
  *
  * And one exclusion: `bootstrapDeclaredPositions` skips every name here
- * ({@link isBuiltinPositionName}). The six are declared now, so they appear
- * among the declared positions; their rows belong to `bootstrapBuiltinRoles`,
- * and a second seeder taking them would write a copy without the `platform`
- * provenance before the built-in pass restamps it.
+ * ({@link isBuiltinPositionName}), in its registry-first decision and in its
+ * result. The six are declared now, so they appear among the registry's
+ * positions; counted there, they would make the registry answer alone and
+ * silence the stack-declared positions only the metadata service holds, and
+ * taken there, they would get a copy without the `platform` provenance ahead
+ * of the built-in pass, which then restamps it.
  *
  * ## Why the engine registry, and not the manifest's `positions` key
  *
  * The manifest registration carries `permissions` into the engine registry,
  * but a manifest `positions` key reaches no reader: the engine's stack-collection
  * loop has no `positions` entry (a waived row in `check:stack-collection-maps`),
- * and `ManifestSchema` declares no such key. Measured on a booted showcase in
- * three postures: a `positions` list on this plugin's manifest left the engine
- * registry, the metadata service, the metadata door and the catalog read
- * without a single one of its names. So the declarations go to the registry by
- * the registry's own seam (`registerItem`), with this plugin as the owning
- * package — the provenance the manifest stamps on the platform's permission
- * sets.
+ * and `ManifestSchema` declares no such key. Measured: `registerApp` with a
+ * `positions` and a `permissions` list registers the permission set under the
+ * package's id and no position at all; on a booted showcase a `positions` list
+ * on this plugin's manifest left the engine registry, the metadata service, the
+ * metadata door and the catalog read without a single one of its names. So the
+ * declarations go to the registry by the registry's own seam (`registerItem`),
+ * with this plugin as the owning package — the provenance the manifest stamps
+ * on the platform's permission sets.
+ *
+ * That provenance is also what keeps the six un-repurposable at the metadata
+ * door: a packaged item of a type with no organization overlay (`position`) is
+ * refused an in-place `PUT /api/v1/meta/position/:name` there, as the
+ * platform's packaged permission sets are.
  *
  * ## What a declaration here does NOT carry
  *

@@ -109,36 +109,37 @@ describe('bootstrapDeclaredPositions (#2909 T2 — seed-only semantics locked)',
 });
 
 /**
- * [ADR-0131 C2 S2] What the seeder reads: the engine registry AND the metadata
- * service, one entry per name, minus the six built-in positions.
+ * [ADR-0131 C2 S2] What the seeder reads now that the six built-in positions
+ * are declared metadata: the same registry-first two-step as before, with the
+ * six taken out of both its decision and its result.
  *
- * The plugin declares the six to the engine registry, so the registry now
- * holds positions on every boot. Two things must survive that: the
- * stack-declared positions the metadata service holds still seed (a read that
- * took the registry ALONE whenever it held anything dropped them all), and the
- * six stay `bootstrapBuiltinRoles`'s rows — this seeder writes no copy of
- * them and refreshes none of their columns.
+ * The plugin registers the six with the engine registry on every boot. Two
+ * things must survive that: the stack-declared positions the metadata service
+ * holds still seed (six registered names must not make the registry "hold a
+ * position" and silence them), and the six stay `bootstrapBuiltinRoles`'s rows
+ * — this seeder writes no copy of them and refreshes none of their columns.
  */
-describe('bootstrapDeclaredPositions — its input is both sources, minus the built-ins', () => {
+describe('bootstrapDeclaredPositions — the six built-in positions are not this seeder’s', () => {
   const builtins = () => securityBuiltinPositions.map((p) => ({ ...p }));
   const metadataListing = (items: any[]) => ({
     list: async (type: string) => (type === 'position' ? items.map((i) => ({ ...i })) : []),
   });
 
-  it('seeds the metadata service’s positions while the registry holds the built-ins and a door-authored one', async () => {
-    const ql = makeQl([...builtins(), { name: 'door_authored', label: 'Door Authored' }]);
+  it('reads the metadata service when the registry holds the six and nothing else', async () => {
+    const ql = makeQl(builtins());
     const r = await bootstrapDeclaredPositions(
       ql,
       metadataListing([{ name: 'field_rep', label: 'Field Rep' }, { name: 'auditor', label: 'Auditor' }]),
     );
-    expect(ql.rows.map((row) => row.name).sort()).toEqual(['auditor', 'door_authored', 'field_rep']);
-    expect(r).toEqual({ seeded: 3, updated: 0, unchanged: 0, unreadable: 0 });
+    expect(ql.rows.map((row) => row.name).sort()).toEqual(['auditor', 'field_rep']);
+    expect(r).toEqual({ seeded: 2, updated: 0, unchanged: 0, unreadable: 0 });
   });
 
-  it('a name both sources hold is seeded once, from the registry’s body', async () => {
-    const ql = makeQl([{ name: 'field_rep', label: 'Field Rep (registry)' }]);
-    await bootstrapDeclaredPositions(ql, metadataListing([{ name: 'field_rep', label: 'Field Rep (metadata)' }]));
-    expect(ql.rows.map((row) => [row.name, row.label])).toEqual([['field_rep', 'Field Rep (registry)']]);
+  it('keeps the two-step otherwise: a registry holding another position answers alone, minus the six', async () => {
+    const ql = makeQl([...builtins(), { name: 'door_authored', label: 'Door Authored' }]);
+    const r = await bootstrapDeclaredPositions(ql, metadataListing([{ name: 'field_rep', label: 'Field Rep' }]));
+    expect(ql.rows.map((row) => row.name)).toEqual(['door_authored']);
+    expect(r).toEqual({ seeded: 1, updated: 0, unchanged: 0, unreadable: 0 });
   });
 
   it('writes nothing for the six on a fresh organization — no copy ahead of the built-in pass', async () => {
@@ -156,10 +157,10 @@ describe('bootstrapDeclaredPositions — its input is both sources, minus the bu
     }));
     // …and a declaration of each name whose display text differs from them.
     const drifted = securityBuiltinPositions.map((p) => ({ name: p.name, label: `${p.label} (redeclared)` }));
-    const ql = makeQl(drifted);
+    const ql = makeQl([...drifted, { name: 'door_authored', label: 'Door Authored' }]);
     ql.rows.push(...seeded.map((row) => ({ ...row })));
     const r = await bootstrapDeclaredPositions(ql, metadataListing(drifted));
-    expect(ql.rows).toEqual(seeded);
-    expect(r).toEqual({ seeded: 0, updated: 0, unchanged: 0, unreadable: 0 });
+    expect(ql.rows.filter((row) => row.name !== 'door_authored')).toEqual(seeded);
+    expect(r).toEqual({ seeded: 1, updated: 0, unchanged: 0, unreadable: 0 });
   });
 });
