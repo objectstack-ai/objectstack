@@ -229,20 +229,30 @@ describe('[ADR-0131 D7] the rank table is unchanged — only the global rung mov
 describe('[ADR-0131 D14] no dual read: sys_setting is not a second source for the global rung', () => {
   it('a scope=global row still in sys_setting is NOT read — the control row at scope=tenant is', async () => {
     const { svc, seed } = await boot();
-    // The shape a pre-v18 database holds until the v18 ceremony moves it.
-    seed('sys_setting', { id: 'legacy', namespace: 'relay_probe', key: 'host', scope: 'global', user_id: null, value: 'legacy.example.com' });
+    // The shape a pre-v18 database holds until the v18 ceremony moves it. The
+    // key is user-declared, so every rung — global, tenant, user — is consulted.
+    seed('sys_setting', { id: 'legacy', namespace: 'prefs_probe', key: 'theme', scope: 'global', user_id: null, value: 'legacy-theme' });
 
-    const got = await svc.get('relay_probe', 'host');
-    expect(got.value).toBe('localhost');
+    const got = await svc.get('prefs_probe', 'theme', { userId: 'u1' });
+    expect(got.value).toBe('system');
     expect(got.source).toBe('default');
     expect(got.cascadeChain?.map((e) => e.scope)).toEqual(['default']);
 
     // Control: the identical row one rung down IS visible to the same read,
     // so the silence above is the exclusion and not a read that sees nothing.
-    seed('sys_setting', { id: 'legacy', namespace: 'relay_probe', key: 'host', scope: 'tenant', user_id: null, value: 'legacy.example.com' });
-    const control = await svc.get('relay_probe', 'host');
-    expect(control.value).toBe('legacy.example.com');
+    seed('sys_setting', { id: 'legacy', namespace: 'prefs_probe', key: 'theme', scope: 'tenant', user_id: null, value: 'legacy-theme' });
+    const control = await svc.get('prefs_probe', 'theme', { userId: 'u1' });
+    expect(control.value).toBe('legacy-theme');
     expect(control.source).toBe('tenant');
+  });
+
+  it('a global-scope key never consults sys_setting at all — the legacy row is not its value either', async () => {
+    const { svc, seed } = await boot();
+    seed('sys_setting', { id: 'legacy', namespace: 'relay_probe', key: 'host', scope: 'global', user_id: null, value: 'legacy.example.com' });
+
+    const got = await svc.get('relay_probe', 'host');
+    expect(got.value).toBe('localhost');
+    expect(got.source).toBe('default');
   });
 });
 
