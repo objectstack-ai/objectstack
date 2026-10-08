@@ -10,7 +10,7 @@ export default defineConfig({
     // fix (#7668/#7778); registering the package in that gate's unaliased
     // ledger is explicitly NOT — the ledger is shrink-only.
     //
-    // The three entries, and why each one is a VALUE reach rather than a type
+    // Some of the entries, and why each one is a VALUE reach rather than a type
     // reach (a `import type` is erased before anything resolves and needs no
     // alias):
     //   - `@objectstack/plugin-auth` — `organizations-plugin.ts` imports
@@ -27,6 +27,11 @@ export default defineConfig({
     //     `walled-default-org-self-registrant.pin.test.ts`, whose subject is
     //     exactly which principal the default-org bootstrap treats as the
     //     declared owner.
+    //   - `@objectstack/service-storage` and `@objectstack/verify` — the
+    //     `StorageServicePlugin` and `bootStack` that
+    //     `storage-upload-door-ownership.wall.test.ts` boots the walled stack
+    //     with (#22046). The storage upload doors ARE that file's subject, so a
+    //     `dist/` copy behind the source would measure an older door.
     //
     // ANCHORED regex, array form, deliberately: a bare string `find` matches by
     // PREFIX, so with a FILE replacement it would also swallow a subpath and
@@ -88,6 +93,14 @@ export default defineConfig({
         find: /^@objectstack\/driver-sqlite-wasm$/,
         replacement: path.resolve(__dirname, '../../drivers/driver-sqlite-wasm/src/index.ts'),
       },
+      {
+        find: /^@objectstack\/service-storage$/,
+        replacement: path.resolve(__dirname, '../../services/service-storage/src/index.ts'),
+      },
+      {
+        find: /^@objectstack\/verify$/,
+        replacement: path.resolve(__dirname, '../../verify/src/index.ts'),
+      },
     ],
   },
   test: {
@@ -100,5 +113,11 @@ export default defineConfig({
     disableConsoleIntercept: true,
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // #13517: quiet the registry's per-item registration chatter — the
+    // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
+    // default. Enforced by scripts/check-registry-log-declared.mjs, since
+    // `storage-upload-door-ownership.wall.test.ts` boots a stack through
+    // `@objectstack/verify`'s `bootStack`.
+    env: { OS_REGISTRY_LOG: 'warn' },
   },
 });

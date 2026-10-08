@@ -69,11 +69,7 @@ import { runSetInitialPassword } from './set-initial-password.js';
 import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
 import type { CounterStore } from './rate-limit-storage.js';
-import {
-  authIdentityObjects,
-  authObjectExtensions,
-  authPluginManifestHeader,
-} from './manifest.js';
+import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
 import {
   devSeedAdminEmail,
@@ -643,22 +639,21 @@ export class AuthPlugin implements Plugin {
     this.tenancy = tenancy;
 
     ctx.getService<{ register(m: any): void }>('manifest').register({
-      ...authPluginManifestHeader,
-      ...(this.options.manifestDatasource
-        ? { defaultDatasource: this.options.manifestDatasource }
-        : {}),
-      // [ADR-0108 / #3723] Registered as authored: nothing widens the
-      // `sys_invitation.role` / `sys_member.role` selects at boot. The closed
-      // four-name vocabulary those objects declare statically
-      // (`BUILTIN_MEMBERSHIP_ROLE_OPTIONS`) is the whole list, and it is the
-      // write-side guardrail that keeps an ungoverned capability grant
-      // unrepresentable.
-      objects: authIdentityObjects,
-      // [#8009] `sys_sso_provider.oidc_client_secret` — the encrypted home of the
-      // OIDC client secret that used to sit in cleartext inside `oidc_config`.
-      // See `manifest.ts` for why the field is declared here and not on the
-      // object file.
-      objectExtensions: authObjectExtensions,
+      // The header, `objects` and `objectExtensions`, from the ONE builder
+      // `IdentityObjectsPlugin` registers on its own in a reduced kernel, so the
+      // two paths cannot carry different lists. In it:
+      // - [ADR-0108 / #3723] `objects` registered as authored: nothing widens
+      //   the `sys_invitation.role` / `sys_member.role` selects at boot. The
+      //   closed four-name vocabulary those objects declare statically
+      //   (`BUILTIN_MEMBERSHIP_ROLE_OPTIONS`) is the whole list, and it is the
+      //   write-side guardrail that keeps an ungoverned capability grant
+      //   unrepresentable.
+      // - [#8009] `objectExtensions` carries
+      //   `sys_sso_provider.oidc_client_secret`, the encrypted home of the OIDC
+      //   client secret that used to sit in cleartext inside `oidc_config`. See
+      //   `manifest.ts` for why the field is declared there and not on the
+      //   object file.
+      ...authIdentityManifest({ datasource: this.options.manifestDatasource }),
       // ADR-0048 — Setup/Studio/Account apps (and the Setup nav contributions)
       // moved to their own one-app packages (@objectstack/{setup,studio,account}),
       // each registering under its own package id so /apps/<packageId> resolves

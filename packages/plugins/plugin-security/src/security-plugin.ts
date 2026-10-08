@@ -39,6 +39,7 @@ import {
   registerGrantPermissionSetNameHooks,
   unregisterGrantPermissionSetNameHooks,
 } from './grant-permission-set-name.js';
+import { runOneTimeGrantPermissionSetNameBackfill } from './grant-permission-set-name-backfill.js';
 import {
   explainAccess,
   buildContextForUser,
@@ -96,7 +97,7 @@ import {
   PLATFORM_OWNER_WALL_BYPASS_EVENT,
   isVerifiedPlatformOwnerRow,
 } from './platform-owner-wall-bypass.js';
-import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim } from '@objectstack/core';
+import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim, createSecurityCatalogReader } from '@objectstack/core';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
 import {
   isPlatformOwnershipFloorPolicy,
@@ -1071,6 +1072,59 @@ function readSeedSettlementSnapshot(ctx: PluginContext): SeedSettlementSnapshot 
   }
 }
 
+/**
+ * The identity objects this plugin's authorization store READS — declared here,
+ * enforced at boot by {@link refuseMissingAuthzIdentityObjects}, and ⛔ never
+ * registered by this plugin: they belong to `@objectstack/plugin-auth`.
+ *
+ * Measured from the reads, not guessed: permission resolution runs through
+ * `@objectstack/core`'s `resolveUserAuthzGrants` (per request, and for this
+ * plugin's explain engine and scoped-invitation placement). Its reads are
+ * `sys_user` and `sys_member`, which plugin-auth registers, plus
+ * `sys_user_position`, `sys_user_permission_set`, `sys_position`,
+ * `sys_position_permission_set` and `sys_permission_set`, which are this
+ * plugin's own `securityObjects`, registered in `init()`. The engine refuses a
+ * read of a name its registry does not hold (`OBJECT_NOT_FOUND`), and that
+ * resolver reports the refusal as `AuthzStoreUnavailableError` (503) on every
+ * authenticated request: a missing dependency that reads as an outage.
+ */
+const AUTHZ_STORE_IDENTITY_OBJECTS: readonly string[] = ['sys_user', 'sys_member'];
+
+/**
+ * The boot refusal for a kernel that mounts this plugin without the identity
+ * objects its authorization store reads. `missingObjects` names exactly the
+ * ones absent from the engine's registry.
+ */
+export class AuthzIdentityObjectsMissingError extends Error {
+  readonly missingObjects: readonly string[];
+
+  constructor(missingObjects: readonly string[]) {
+    super(
+      `SecurityPlugin cannot boot: its authorization store reads ${AUTHZ_STORE_IDENTITY_OBJECTS.join(', ')}, `
+        + `and this kernel does not register ${missingObjects.join(', ')}. Without them every `
+        + 'authenticated request fails its permission read with AuthzStoreUnavailableError (503), '
+        + 'which reads as an outage. @objectstack/plugin-auth registers these objects: mount '
+        + 'AuthPlugin, or, on a kernel without authentication such as a test kit, mount '
+        + 'createIdentityObjectsPlugin() from @objectstack/plugin-auth.',
+    );
+    this.name = 'AuthzIdentityObjectsMissingError';
+    this.missingObjects = [...missingObjects];
+  }
+}
+
+/**
+ * Run from a `kernel:ready` handler: every plugin's `init()` and `start()` has
+ * registered its manifests by then, and a throw there fails `bootstrap()` on
+ * both kernels. That is the boot-gate moment the kernel documents; during
+ * `init()` the registry is still filling. The question asked is the one the
+ * read itself will ask: does the engine's registry resolve the name.
+ */
+function refuseMissingAuthzIdentityObjects(ctx: PluginContext): void {
+  const ql = ctx.getService<IObjectQLEngine>('objectql');
+  const missing = AUTHZ_STORE_IDENTITY_OBJECTS.filter((name) => !ql.getSchema(name));
+  if (missing.length > 0) throw new AuthzIdentityObjectsMissingError(missing);
+}
+
 export class SecurityPlugin implements Plugin {
   name = 'com.objectstack.security';
   /**
@@ -1591,6 +1645,17 @@ export class SecurityPlugin implements Plugin {
 
   async start(ctx: PluginContext): Promise<void> {
     ctx.logger.info('Starting Security Plugin...');
+
+    // The identity objects the authorization store reads must be registered by
+    // the time the boot completes: a kernel without them is refused at
+    // `kernel:ready`, by name, instead of at its first permission read.
+    // Subscribed at the head of `start()`, so it runs ahead of this plugin's own
+    // `kernel:ready` bootstraps, and above both bail-outs below. A boot that
+    // composes this plugin for its declarations only (`os migrate`, which
+    // suppresses `start()`) arms nothing that reads the store, and is not refused.
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('kernel:ready', () => refuseMissingAuthzIdentityObjects(ctx));
+    }
 
     // [#10706] Bind the report sink FIRST — above the two bail-outs below.
     // Both of them `return` before the "capture handles" block, so binding the
@@ -4832,6 +4897,34 @@ export class SecurityPlugin implements Plugin {
       (ctx as any).hook('kernel:ready', runBootstrap);
     } else {
       void runBootstrap();
+    }
+
+    // [ADR-0131 D4] Name the permission set on every grant written before
+    // `sys_user_permission_set.permission_set` existed — once per deployment,
+    // recorded in `sys_migration`. At `kernel:bootstrapped`, not `kernel:ready`:
+    // every `kernel:ready` handler has settled by then (the bootstrap above that
+    // seeds the catalog rows among them), so the security catalog read each
+    // name is verified through sees every definition this boot registers. A
+    // name it still does not resolve leaves the verdict unrecorded, so the next
+    // boot tries again. See `grant-permission-set-name-backfill.ts`.
+    const runGrantNameBackfill = async (): Promise<void> => {
+      try {
+        await runOneTimeGrantPermissionSetNameBackfill(ql as any, {
+          catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
+          logger: ctx.logger,
+        });
+      } catch (e) {
+        ctx.logger.warn(
+          '[security] the sys_user_permission_set name backfill did not run — grants written before the ' +
+            'permission_set column existed keep no name until a later boot runs it',
+          { error: (e as Error)?.message },
+        );
+      }
+    };
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('kernel:bootstrapped', runGrantNameBackfill);
+    } else {
+      void runGrantNameBackfill();
     }
 
     // ── Project the permission sets of a package that arrives AFTER the boot ──

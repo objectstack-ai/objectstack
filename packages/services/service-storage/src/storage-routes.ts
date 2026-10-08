@@ -17,6 +17,15 @@ import type {
   StorageWriteContext,
 } from './metadata-store.js';
 import type { LocalStorageAdapter } from './local-storage-adapter.js';
+// [#22046] The ONE upload ownership rule. Declared in its own module and only
+// CALLED here — the three doors below share it rather than each carrying a
+// copy of the comparison.
+import {
+  isFileUploader,
+  NOT_UPLOADER_CODE,
+  NOT_UPLOADER_MESSAGE,
+  NOT_UPLOADER_STATUS,
+} from './upload-ownership.js';
 // Type only. The PREDICATE is never re-implemented in this file (#10246): it
 // arrives through `opts.resolveFileHolder`, which the plugin binds to the reap
 // guard's own `findFileHolder`.
@@ -67,8 +76,11 @@ export interface StorageRoutesOptions {
    * presigned/complete/chunked upload routes reject anonymous requests with
    * 401 `AUTH_REQUIRED`, and new sys_file rows are stamped with
    * `owner_id = session.userId` and — since #12745 — with the session's active
-   * `organizationId`. When absent (bare kernels, tests), the
-   * routes stay open — back-compat, logged once. Download routes are NOT
+   * `organizationId`. Since #22046 the commit, chunked-completion and
+   * progress doors also refuse a caller who is not the file's uploader
+   * (`isFileUploader`, `403 PERMISSION_DENIED`). When absent (bare kernels,
+   * tests), the routes stay open — back-compat, logged once — and there is no
+   * caller identity for the ownership rule to compare. Download routes are NOT
    * gated here (capability URLs embedded in <img src>/<a href>; gating them
    * is a tracked follow-up needing cookie sessions or signed links).
    */
@@ -305,6 +317,32 @@ export function registerStorageRoutes(
     return session;
   };
 
+  // ── Upload ownership gate (#22046, ruling B) ─────────────────────────
+  // The commit, chunked-completion and progress doors act on an id the
+  // caller NAMES. Each calls this right after its by-id read and before any
+  // write or disclosure; `false` ⇒ the refusal was already sent and the
+  // handler must stop. The rule itself is `isFileUploader`
+  // (`upload-ownership.ts`) — the caller must be the file's uploader, an
+  // empty owner and a missing file row are refused, no administrator
+  // exception — and the answer is the same body whoever is refused.
+  //
+  // `authSession === null` is the OPEN mode `requireUploadSession` returns
+  // when no session resolver is wired (bare kernels, tests): there is no
+  // caller identity to compare, every upload in that mode lands with no
+  // owner, and the routes stay open exactly as `resolveSession` declares.
+  // Any wired resolver yields a session with a user id, and the rule then
+  // applies without exception.
+  const requireUploader = (
+    authSession: StorageUploadSession | null,
+    file: FileRecord | null,
+    res: IHttpResponse,
+  ): boolean => {
+    if (authSession === null) return true;
+    if (isFileUploader(authSession.userId, file)) return true;
+    sendError(res, NOT_UPLOADER_STATUS, NOT_UPLOADER_CODE, NOT_UPLOADER_MESSAGE);
+    return false;
+  };
+
   // ── Terminal upload-session statuses (#7667) ─────────────────────────────
   // `sys_upload_session.status` declares `failed` and `expired`, the retention
   // backstop reaps on them (`onlyWhen: { status: { $in: ['completed',
@@ -468,6 +506,9 @@ export function registerStorageRoutes(
         sendError(res, 404, 'FILE_NOT_FOUND', 'File not found');
         return;
       }
+      // [#22046] Only the uploader commits — before the write below and
+      // before anything about the row is answered.
+      if (!requireUploader(session, file, res)) return;
 
       const updated = await store.updateFile(
         fileId,
@@ -690,6 +731,10 @@ export function registerStorageRoutes(
         sendError(res, 404, 'UPLOAD_SESSION_NOT_FOUND', 'Upload session not found');
         return;
       }
+      // [#22046] The session row names no user; it reaches its uploader
+      // through `file_id`. Asked before the expiry stamp, the status writes
+      // and the completion answer below.
+      if (!requireUploader(authSession, await store.getFile(session.file_id), res)) return;
 
       const live = await expireIfPastDeadline(session, writeContext);
       if (live.status === 'expired') {
@@ -762,6 +807,9 @@ export function registerStorageRoutes(
         sendError(res, 404, 'UPLOAD_SESSION_NOT_FOUND', 'Upload session not found');
         return;
       }
+      // [#22046] Same rule, same place: after the by-id read, before the
+      // expiry write below and before the progress answer discloses the row.
+      if (!requireUploader(authSession, await store.getFile(stored.file_id), res)) return;
 
       // Progress REPORTS the expiry rather than refusing it: `expired` is a
       // declared member of `UploadProgressSchema.status`, and a resuming client

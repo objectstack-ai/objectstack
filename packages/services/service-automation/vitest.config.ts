@@ -72,6 +72,15 @@ export default defineConfig({
         find: /^@objectstack\/metadata-protocol$/,
         replacement: path.resolve(__dirname, '../../metadata-protocol/src/index.ts'),
       },
+      {
+        // The two integration suites that boot the real `SecurityPlugin` mount
+        // plugin-auth's identity preset (`createIdentityObjectsPlugin()`):
+        // `SecurityPlugin` refuses a kernel without the `sys_user` / `sys_member`
+        // its authorization store reads. Read from source for the reason the
+        // entries above give. Same anchored-regex rule.
+        find: /^@objectstack\/plugin-auth$/,
+        replacement: path.resolve(__dirname, '../../plugins/plugin-auth/src/index.ts'),
+      },
     ],
   },
 });
