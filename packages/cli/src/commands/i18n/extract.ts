@@ -30,6 +30,7 @@ import {
   type FillStrategy,
   type TranslationModuleKind,
 } from '../../utils/i18n-extract.js';
+import { authoringRuleUnionStack } from '../../utils/stack-collections.js';
 
 const FILL_STRATEGIES: FillStrategy[] = ['empty', 'default', 'todo'];
 
@@ -285,7 +286,12 @@ export default class I18nExtract extends Command {
         }
       }
 
-      const result = extractTranslations(normalized, {
+      // [#22238] Over the package-union stack, as `os i18n check` reads it: a
+      // multi-package `preserve` artifact carries its collections and
+      // `translations` only in `packages[]`, so the top level alone yielded no
+      // key to extract. The `i18n` read above stays on the top level, where
+      // that artifact keeps it.
+      const result = extractTranslations(authoringRuleUnionStack(normalized as Record<string, unknown>), {
         defaultLocale,
         locales,
         previousSourceHashes,
