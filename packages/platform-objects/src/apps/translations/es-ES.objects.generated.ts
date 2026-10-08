@@ -2500,7 +2500,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       headers_json: {
         label: "Cabeceras (JSON)",
-        help: "Cabeceras personalizadas facilitadas a IEmailService.send, como un objeto JSON de nombre → valor. Se escriben en ambos modos de entrega (son tanto evidencia de auditoría como entrada de la entrega). Ausentes en las filas escritas antes de que existiera esta columna, que se leen como «sin cabeceras personalizadas»."
+        help: "Cabeceras personalizadas facilitadas con el mensaje al enviarlo, como un objeto JSON de nombre → valor. Se escriben en ambos modos de entrega (son tanto evidencia de auditoría como entrada de la entrega). Ausentes en las filas escritas antes de que existiera esta columna, que se leen como «sin cabeceras personalizadas»."
       },
       attachments_json: {
         label: "Adjuntos (JSON)",
@@ -2508,7 +2508,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       status: {
         label: "Estado",
-        help: "Estado del ciclo de vida; se pone en cola mediante IEmailService.send antes de la llamada al transporte.",
+        help: "Estado del ciclo de vida; queda en cola al solicitarse el envío del mensaje, antes del primer intento de entrega.",
         options: {
           queued: "En cola",
           sent: "Enviado",

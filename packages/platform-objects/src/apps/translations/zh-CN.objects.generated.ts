@@ -2500,7 +2500,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       headers_json: {
         label: "邮件头（JSON）",
-        help: "传给 IEmailService.send 的自定义邮件头，以 name → value 的 JSON 对象存储。两种投递模式下都会写入（它既是投递输入，也是审计证据）。在该列出现之前写入的行没有此值，读回时按「无自定义邮件头」处理。"
+        help: "发送邮件时随附的自定义邮件头，以 name → value 的 JSON 对象存储。两种投递模式下都会写入（它既是投递输入，也是审计证据）。在该列出现之前写入的行没有此值，读回时按「无自定义邮件头」处理。"
       },
       attachments_json: {
         label: "附件（JSON）",
@@ -2508,7 +2508,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       status: {
         label: "状态",
-        help: "生命周期状态——在调用传输层之前由 IEmailService.send 排队",
+        help: "生命周期状态——邮件提交发送时即进入排队，早于首次投递尝试",
         options: {
           queued: "排队中",
           sent: "已发送",
