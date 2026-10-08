@@ -135,9 +135,11 @@ function itemName(item: unknown): string | undefined {
  * nested `plugins[]` entry's (a nested plugin contributes under its parent
  * package — `ObjectQL.registerPlugin`), one level deep, arrays only.
  *
- * `positions` is read although the engine's collection loop does not register
- * it: the in-memory registrars (`AppPlugin`'s security block, the artifact
- * door) do, for the very same package, so the package's claim covers it.
+ * `positions` is read like the other two collections. The engine's collection
+ * loop registers a package's positions under the package
+ * (`ObjectQL.registerApp`), and the in-memory registrars (`AppPlugin`'s
+ * security block, the artifact door) register them for the very same package;
+ * the package's claim covers them either way.
  *
  * ⚠️ A non-array `permissions` is skipped, not misread: at the manifest stage
  * that key is the ADR-0025 capability GRANT (`{ services, hooks, … }`), not a

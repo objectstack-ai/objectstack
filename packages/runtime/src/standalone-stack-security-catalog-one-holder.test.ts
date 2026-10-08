@@ -7,10 +7,10 @@
 //
 // ## Why the refusal is asserted at the boot, not inside the in-memory registrars
 //
-// Positions reach no engine registry slot: `AppPlugin`'s security block
+// Positions also reach the metadata service: `AppPlugin`'s security block
 // (`registerInMemory`, the `'app-plugin'` registrar) and the artifact door
 // (`MetadataPlugin._registerArtifactBodyCollections`, the `'artifact-door'`
-// registrar) write them to the metadata service, in `start()`. But neither runs
+// registrar) write them there, in `start()`. But neither runs
 // for a package the engine has not installed first: `AppPlugin.init()` registers
 // every package of the bundle through the `manifest` service in Phase 1 — a
 // multi-package artifact package by package — and the engine's package door

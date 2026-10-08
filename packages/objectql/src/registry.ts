@@ -2254,13 +2254,13 @@ export class SchemaRegistry {
    * {@link refuseSecurityCatalogNameConflicts}, forgotten by
    * {@link uninstallPackage}.
    *
-   * The registry's item store answers "who holds this name?" for every item it
-   * registered — but it does not register every catalog item a package
-   * declares: the engine's collection loop has no `positions` entry, so a
-   * package's positions reach only the metadata service's in-memory registrars
-   * (`AppPlugin`'s security block, the artifact door). The claim is how the
-   * package door remembers them, so a second package declaring one of them is
-   * refused like any other second holder.
+   * The registry's item store answers who holds a name only for items
+   * something registered into it, and `installPackage` registers none: a
+   * package's collections reach the item store through `ObjectQL.registerApp`'s
+   * collection loop (positions only where that loop carries them), never
+   * through a bare `installPackage`. The claim is how the package door
+   * remembers every name a package declared, so a second package declaring one
+   * of them is refused like any other second holder.
    */
   private securityCatalogClaims = new Map<SecurityCatalogType, Map<string, string>>();
 
@@ -4653,8 +4653,8 @@ export class SchemaRegistry {
       this.debug(`[Registry] Overwriting package: ${manifest.id}`);
     }
     collection.set(manifest.id, pkg);
-    // The names this package now holds — positions included, which the
-    // engine's collection loop never registers (see `securityCatalogClaims`).
+    // The names this package now holds, recorded whether or not an item store
+    // entry will carry them (see `securityCatalogClaims`).
     if (selfId !== undefined) this.recordSecurityCatalogClaims(selfId, manifest);
     this.log(`[Registry] Installed package: ${manifest.id} (${manifest.name})`);
     return pkg;
