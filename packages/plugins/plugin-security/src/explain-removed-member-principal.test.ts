@@ -156,11 +156,12 @@ async function boot(makeDriver: () => Driver, posture: TenancyPosture) {
   // Grant rows, each scoped to org_alpha. Removing a member deletes their
   // `sys_member` row, not their grants.
   await e.insert('sys_user_permission_set', {
-    id: `ups_admin_${n}`, user_id: USER_ADMIN, permission_set_id: `ps_user_admin_${n}`, organization_id: ALPHA,
+    id: `ups_admin_${n}`, user_id: USER_ADMIN, permission_set_id: `ps_user_admin_${n}`, permission_set: 'qa_user_admin',
+    organization_id: ALPHA,
   }, SYS);
   for (const u of [USER_MEMBER, USER_REMOVED]) {
     await e.insert('sys_user_permission_set', {
-      id: `ups_${u}_${n}`, user_id: u, permission_set_id: `ps_probe_${n}`, organization_id: ALPHA,
+      id: `ups_${u}_${n}`, user_id: u, permission_set_id: `ps_probe_${n}`, permission_set: PROBE_SET, organization_id: ALPHA,
     }, SYS);
   }
   await e.insert(PROBE, { id: 'p1', name: 'probe row' }, SYS);

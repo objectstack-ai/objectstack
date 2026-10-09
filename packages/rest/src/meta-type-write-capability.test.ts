@@ -307,7 +307,7 @@ const SETS: Record<string, string[]> = {
 
 const GRANT_TABLES: Record<string, any[]> = {
     sys_user_permission_set: Object.values(PRINCIPALS).flatMap((p) => p.sets.map((setId) => ({
-        id: `ups_${p.userId}_${setId}`, user_id: p.userId, permission_set_id: setId, organization_id: null,
+        id: `ups_${p.userId}_${setId}`, user_id: p.userId, permission_set_id: setId, permission_set: setId, organization_id: null,
     }))),
     sys_permission_set: Object.entries(SETS).map(([id, caps]) => ({
         id, name: id, system_permissions: JSON.stringify(caps), object_permissions: '{}',
@@ -322,6 +322,8 @@ const grantsEngine = {
             Object.entries(where).every(([k, v]) => {
                 if (k.startsWith('$')) throw new Error(`grants double: unsupported operator ${k}`);
                 if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
+                // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+                if (v === null) return (r[k] ?? null) === null;
                 return r[k] === v;
             }),
         );

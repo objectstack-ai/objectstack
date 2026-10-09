@@ -141,8 +141,8 @@ function makeQl() {
             { id: 'u_exmember', email: 'u_exmember@example.com' },
         ],
         sys_user_permission_set: [
-            { user_id: 'u_member', permission_set_id: 'ps_shared' },
-            { user_id: 'u_exmember', permission_set_id: 'ps_shared' },
+            { user_id: 'u_member', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
+            { user_id: 'u_exmember', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
         ],
         sys_permission_set: [
             { id: 'ps_shared', name: 'shared_access', system_permissions: ['manage_metadata', 'studio.access'] },
@@ -162,6 +162,8 @@ function makeQl() {
             }
             return (cond as any).$in.includes(row[field]);
         }
+        // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+        if (cond === null) return (row[field] ?? null) === null;
         return row[field] === cond;
     });
     return {
