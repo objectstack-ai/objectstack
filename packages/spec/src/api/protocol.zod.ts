@@ -2208,7 +2208,11 @@ export const ValidateDataRequestSchema = lazySchema(() => z.object({
   ]).describe('A candidate record, or an array of them. Nothing is persisted.'),
   mode: z.enum(['insert', 'update']).optional().describe(
     "Which write the verdict should predict. `insert` (default) walks every declared field, so a " +
-    "missing required field is a finding; `update` judges only the supplied keys, matching a PATCH.",
+    "missing required field is a finding; `update` checks only the supplied keys, matching a PATCH. " +
+    "An `update` row that carries its `id` is judged as the by-id update judges it: its rules read the " +
+    "stored row that id names, merged with the supplied keys. The stored row is read with the caller's " +
+    "own read access, so a row the caller cannot read is judged on the supplied keys alone, as a row " +
+    "with no `id` is.",
   ),
 }));
 
@@ -2222,9 +2226,10 @@ export const ValidateDataRequestSchema = lazySchema(() => z.object({
  * `readonly` and runtime-owned fields (`isSystem`-gated), records what each
  * takes from each row, and reports it on a row the verdict accepts;
  * `validateData` relays it. An `update`-mode preview does not run the
- * `readonlyWhen` or primary-key strips, which judge a prior record and an
- * update dispatch the preview does not have, so it can report fewer drops than
- * the update it predicts.
+ * `readonlyWhen` or primary-key strips, which the update runs against its prior
+ * record and its dispatch, so it can report fewer drops than the update it
+ * predicts — including for a row whose stored row it reads (see `mode` on the
+ * request).
  * The element IS {@link DroppedFieldsEventSchema} — the same shape and `reason`
  * vocabulary the write reports, ⛔ never a second enum — so a preview and the
  * write it predicts answer in one vocabulary, exactly as `errors` / `warnings`
