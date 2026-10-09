@@ -923,8 +923,10 @@ describe('dashboard widget dataset bindings at the runtime publish gate (#7529)'
     expect(f!.severity).toBe('warning');
     expect(f!.path).toBe('dashboards[0].widgets[0]');
     expect(f!.message).toMatch(/not_a_dim/);
-    // The message names the refusal, not a query that never runs.
-    expect(f!.message).toContain('ignores an authored axis `field`');
+    // The message names the refusal, not a query that never runs. [#22161]
+    // The one-line verdict says the key is ignored; HOW the renderer strips
+    // it is `os explain chart-field-unknown`.
+    expect(f!.message).toContain('is ignored anyway');
     expect(f!.message).not.toContain('will not contain');
     // And the rule genuinely ran, rather than the door skipping the type.
     expect(result.rulesRun).toContain('validateWidgetBindings');
