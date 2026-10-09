@@ -319,7 +319,7 @@ function boot() {
          */
         plantLegacyOrgRow: async (type: string, name: string, label = MARKER, organizationId = ORG_A) => {
             const repo = new SysMetadataRepository({ engine, organizationId, orgLabel: organizationId });
-            const ref = { org: organizationId, type, name };
+            const ref = { org: organizationId, type, name } as Parameters<typeof repo.get>[0];
             const head = await repo.get(ref);
             return repo.put(ref, bodyFor(type, name, label), { parentVersion: head?.hash ?? null, actor: null });
         },
