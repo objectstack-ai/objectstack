@@ -111,7 +111,10 @@ function grantRows(shape: Shape): Record<string, any[]> {
         sys_position: [],
         sys_position_permission_set: [],
         sys_user_permission_set: held.length
-            ? [{ id: 'ups1', user_id: `usr_${shape}`, permission_set_id: 'ps1', organization_id: null }]
+            ? [{
+                id: 'ups1', user_id: `usr_${shape}`, permission_set_id: 'ps1',
+                permission_set: shape === 'operator' ? 'admin_full_access' : 'organization_admin', organization_id: null,
+            }]
             : [],
         sys_permission_set: held.length
             ? [{

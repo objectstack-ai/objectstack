@@ -73,6 +73,8 @@ function makeQl(tables: Tables) {
         Object.entries(where ?? {}).every(([k, v]) => {
             if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
             if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(row[k]);
+            // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+            if (v === null) return (row[k] ?? null) === null;
             return row[k] === v;
         });
     return {
@@ -130,7 +132,7 @@ const REMEDIES: readonly Remedy[] = [
         arrange: () => {
             const tables = userOnly('usr_granted', 'legacy@corp.example');
             tables.sys_user_permission_set = [
-                { id: 'ups_1', user_id: 'usr_granted', permission_set_id: 'pst_1', organization_id: null },
+                { id: 'ups_1', user_id: 'usr_granted', permission_set_id: 'pst_1', permission_set: ADMIN_FULL_ACCESS, organization_id: null },
             ];
             tables.sys_permission_set = [{ id: 'pst_1', name: ADMIN_FULL_ACCESS, active: true }];
             return { userId: 'usr_granted', email: 'legacy@corp.example', tables, declared: undefined };

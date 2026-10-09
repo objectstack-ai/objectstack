@@ -254,6 +254,7 @@ describe('#10349 — through AuthManager.handleRequest on the real vendor pipeli
     await engine.insert('sys_user_permission_set', {
       user_id: adminId,
       permission_set_id: PS_ADMIN,
+      permission_set: 'admin_full_access',
       organization_id: null,
     });
 

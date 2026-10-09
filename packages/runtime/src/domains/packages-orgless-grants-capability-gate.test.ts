@@ -61,6 +61,8 @@ function matchesWhere(row: any, where: any): boolean {
             }
             return (cond as any).$in.includes(row[field]);
         }
+        // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+        if (cond === null) return (row[field] ?? null) === null;
         return row[field] === cond;
     });
 }
@@ -87,11 +89,11 @@ const TABLES: Record<string, any[]> = {
     sys_user: ['u_member', 'u_exmember', 'u_gone', 'u_global', 'u_admin', 'u_posex', 'u_posmember', 'u_orgless']
         .map((id) => ({ id, email: `${id}@example.com` })),
     sys_user_permission_set: [
-        { user_id: 'u_member', permission_set_id: 'ps_meta', organization_id: ALPHA },
-        { user_id: 'u_exmember', permission_set_id: 'ps_meta', organization_id: ALPHA },
-        { user_id: 'u_gone', permission_set_id: 'ps_meta', organization_id: ALPHA },
-        { user_id: 'u_global', permission_set_id: 'ps_meta', organization_id: null },
-        { user_id: 'u_admin', permission_set_id: 'ps_admin', organization_id: null },
+        { user_id: 'u_member', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
+        { user_id: 'u_exmember', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
+        { user_id: 'u_gone', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
+        { user_id: 'u_global', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: null },
+        { user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
     ],
     sys_permission_set: [
         { id: 'ps_meta', name: 'alpha_metadata_editors', system_permissions: ['manage_metadata', 'studio.access'] },
