@@ -1317,7 +1317,8 @@ describe('translation unknown-key strictness', () => {
       expect(result.success).toBe(false);
       const issue = result.error!.issues[0]!;
       expect(issue.path).toEqual(['flows', 'quote_generation', 'refusals', 'refuse_held', 'message']);
-      expect(firstSentence(issue.message)).toBe(firstSentence(TEXT_SLOT_TEMPLATE_REFUSAL));
+      // The judge's lead sentence is the whole of `TEXT_SLOT_TEMPLATE_REFUSAL`.
+      expect(firstSentence(issue.message)).toBe(TEXT_SLOT_TEMPLATE_REFUSAL);
       // …and the remedy names the hole spelling of the very token.
       expect(issue.message).toContain('{{ record.name }}');
     });
