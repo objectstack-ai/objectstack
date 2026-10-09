@@ -491,6 +491,13 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   },
   {
     kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'attachedOnRead',
+    why: "not a form's to offer, by ruling (ruling record 6070963704, #22211 A): the blocks a service attaches to the rows it serves, computed per caller and never stored, which the ruling says no form reads; a block is declared in code beside the service that attaches it (plugin-approvals' `viewer` on `sys_approval_request`), because nothing authored in a designer can make a service attach a block, and its one reader is the expression validator",
+  },
+  {
+    kind: 'omit',
     type: 'app',
     path: ROOT_PATH,
     key: 'contextSelectors',

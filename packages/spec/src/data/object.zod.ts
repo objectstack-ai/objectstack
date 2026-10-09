@@ -1737,6 +1737,11 @@ const ATTACHED_ON_READ_NAME = /^[a-z_][a-z0-9_]*$/;
  * existing `unknown-field` refusal — so `record.viewer.can_actt` is refused and
  * the refusal names the leaves `viewer` declares. An object without this key
  * keeps exactly the verdicts it had.
+ *
+ * The validator judges names only. The leaf TYPES are for the declaring
+ * package's conformance test to read: it pins that the keys its service emits,
+ * and the runtime type of each emitted value, equal this declaration
+ * (plugin-approvals' `viewer`, #22387).
  */
 const AttachedOnReadSchema = z.record(
   z.string().regex(ATTACHED_ON_READ_NAME, {

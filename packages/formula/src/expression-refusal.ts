@@ -96,8 +96,21 @@ export interface ExpressionRefusalParams {
   };
   /** The CEL engine refused a source that holds a template brace `{ref}`. */
   'cel-template-brace': { readonly role: CelFieldRole; readonly detail: string; readonly ref: string };
-  /** `record.<field>` naming no field of the object. */
-  'unknown-field': { readonly field: string; readonly objectName?: string; readonly suggestion?: string };
+  /**
+   * `record.<field>` naming no field of the object — or, for a declared read
+   * attachment (`ExprSchemaHint.attachedOnRead`), `record.<block>.<leaf>`
+   * naming no leaf of the block: then `field` is the dotted path as written
+   * and `suggestion` the nearest declared leaf, also dotted. `block` and
+   * `leaves` are present together, exactly when the message carries the clause
+   * naming the leaves the block declares.
+   */
+  'unknown-field': {
+    readonly field: string;
+    readonly objectName?: string;
+    readonly suggestion?: string;
+    readonly block?: string;
+    readonly leaves?: readonly string[];
+  };
   /** A role-membership test naming a role outside the catalog; `catalog` is every valid role. */
   'unknown-role': { readonly name: string; readonly suggestion?: string; readonly catalog: readonly string[] };
   /** `name.…` one typo away from a root the surface binds; `roots` are the surface's declared roots. */
