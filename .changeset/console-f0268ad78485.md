@@ -117,6 +117,38 @@ Derived from the changesets objectui declared over the range — 173 releasing o
 - _(no changeset)_ feat(app-shell): Studio Interfaces pillar creates a page and opens it on source plus live preview (objectui#11823 step 3) (#11932) (objectui `f3a0488c9`)
 - _(no changeset)_ feat(app-shell): Studio's validation New menu opens on common rules, with the rule types under Advanced (part of objectui#11861) (#11931) (objectui `19a734866`)
 
-<!-- adr-0087: TODO — the pin bump cannot answer this; a human must (objectstack#6494) -->
+<!-- adr-0087: not-required (no-migration-prescription)
+     This diff moves `.objectui-sha` and the artefacts that travel with it: this console
+     changeset, the regenerated `sdui.manifest.json` and its record
+     `scripts/sdui-manifest.record.json`, the re-recorded
+     `packages/sdui-parser/objectui-lockstep.json` (its grammar region, diagnostic codes and
+     containment predicate are unchanged across the range) and the re-measured pin citations
+     in `packages/spec/src`, which carry their own `@objectstack/spec` patch changeset. It
+     adds, removes or renames no ObjectStack-authorable key: no Zod schema, no spec
+     declaration and no stored `sys_metadata` shape moves in it, so `objectstack migrate meta`
+     has nothing here to rewrite, and this body carries no FROM/TO prescription of its own.
+     The range carries four declared-breaking objectui changes, each by its author's breaking
+     annotation and none by a declared `major`. Each is answered here:
+     (1) objectui#11070 (`18d7b489c`): objectui's `@object-ui/types` form-field faces take
+     `scale` and `currencyConfig` by reference to `@objectstack/spec`'s `FieldSchema`, so
+     objectui's tolerant face now refuses the values the spec already refuses (including
+     `scale` on a `currency` field). It follows this repo's existing declaration; nothing here
+     moves.
+     (2) objectui#11070 (`172acc313`): objectui's `sidebar` node declares `side` as `left` or
+     `right`. `sidebar` has no `@objectstack/spec` row; it is objectui's own node type.
+     (3) objectui#11389 (`d92b2a15d`): the metric sub-caption is retired on the reader side.
+     The ObjectStack half shipped in `@objectstack/spec` 17.7.0 with its own records, the
+     conversion `translation-widget-sub-caption-removed` and the semantic entry
+     `translation-widget-sub-caption-retired`; this repo's `sdui-parser` copy already drops
+     `description` from `CONSUMED_WIDGET_OPTION_KEYS`, so the renderer now agrees with it.
+     (4) objectui#11880 (`74add0c12`): `element:record_picker` and `element:number` read their
+     query from the node-level `dataSource` only. The flat keys they no longer read are still
+     declared by `@objectstack/spec`; their retirement, with its ADR-0087 conversion onto
+     `dataSource` and its D3 entries, is objectstack#11509, which the ruling on that card
+     sequences after this pin bump and ships in the same release. The ledger entries belong
+     to that `packages/spec` PR, never to the pin bump.
+     Scope of the claim, stated rather than implied: it is a claim about THIS diff, not a
+     per-entry re-measurement of the upstream declared-breaking entries.
+-->
 
 objectui range: `a58626c88dc8...f0268ad78485`
