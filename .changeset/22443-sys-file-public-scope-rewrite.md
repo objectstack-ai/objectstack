@@ -1,5 +1,6 @@
 ---
 '@objectstack/service-storage': minor
+'@objectstack/spec': patch
 ---
 
 feat(service-storage)!: the `sys_file` scope option `public` is retired, and rows already stored with it are rewritten to `user` by a one-time operator sweep (#22443)
@@ -28,9 +29,15 @@ Clause-②: no (narrowing)
 
 Until the sweep has run on a deployment that stored `public` rows, a record write that names a `public` file another field already owns is refused. The field-reference copy path copies the file into a new row with the source row's scope, the engine refuses `public` there, and the write fails with `ERR_FILE_REFERENCE_COPY`. The data REST doors answer that `500 INTERNAL_ERROR` ("Internal server error"); the server log carries the full sentence, which ends `Scope must be one of: user, tenant, private, temp, attachments`. Reads, downloads and updates that do not write `scope` are unaffected.
 
-The sweep is `packages/services/service-storage/src/backfill-sys-file-public-scope.ts`, an operator module in the shape of the `sys_file` organization backfill. Like that module it is not exported from the package index and is not in the published `dist`, so run it from a source checkout of this release, server-side, from a context that holds the engine. It is a dry run first, and by default:
+The sweep ships in `@objectstack/service-storage` itself: `planSysFilePublicScopeBackfill`, `applySysFilePublicScopeBackfill`, `runSysFilePublicScopeBackfill` and `formatSysFilePublicScopeBackfillReport` are exported from the package, with their report types. It has the shape of the `sys_file` organization backfill: an operator step, never a boot hook. Import it from the package you upgraded to and run it server-side, from a context that holds the engine. It is a dry run first, and by default:
 
 ```ts
+import {
+  planSysFilePublicScopeBackfill,
+  applySysFilePublicScopeBackfill,
+  formatSysFilePublicScopeBackfillReport,
+} from '@objectstack/service-storage';
+
 const plan = await planSysFilePublicScopeBackfill(engine);            // counts, writes nothing
 console.log(formatSysFilePublicScopeBackfillReport(plan));
 const applied = await applySysFilePublicScopeBackfill(engine, plan);  // one scope write per row
@@ -43,4 +50,6 @@ It counts before it writes (`scanned`), writes nothing where the count is zero, 
 
 The inverse is `user` back to `public` on exactly the ids the applied report lists. This release cannot write it through the engine, which refuses `public` like any undeclared option. So the inverse goes with a code rollback: on the previous release, which still declares the option, write `scope = 'public'` back to those ids, through the engine there or as one raw driver statement against `sys_file` filtered to them.
 
-The earlier note of `storage-scope-public-retired` that files already stored with scope `public` are not touched no longer holds for the `scope` column: after the sweep they read `user`. They still download exactly as before.
+### The step-18 entry says so too (`@objectstack/spec`)
+
+The D3 entry `storage-scope-public-retired`, which the protocol upgrade guide is built from, said that files already stored with scope `public` are not touched. That no longer holds for the `scope` column: after the sweep they read `user`. Its reason now names the `sys_file` option's retirement and the operator sweep above, and says that the rewrite changes no access: the storage key and the bytes stay as they are, and those files still download exactly as before. Its acceptance criteria add the sweep's end state: a dry run on each deployment scans zero `sys_file` records with scope `public`.
