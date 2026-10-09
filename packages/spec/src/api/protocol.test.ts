@@ -2351,7 +2351,6 @@ describe('MetadataProtocol.deleteMetaItem types against the caught-up request sc
     const good: DeleteMetaItemRequest = {
       type: 'view',
       name: 'account_list',
-      organizationId: 'org_alpha',
       parentVersion: 'sha256:abc123',
       actor: 'admin',
       state: 'draft',
@@ -2361,6 +2360,9 @@ describe('MetadataProtocol.deleteMetaItem types against the caught-up request sc
     // @ts-expect-error `environmentId` is transport-level (commit 2a29caa53) — not a declared request member; the REST door layers it on via TransportScopedMetaRequest.
     const withEnv: DeleteMetaItemRequest = { type: 'view', name: 'account_list', environmentId: 'env_a' };
     expect(withEnv.name).toBe('account_list');
+    // @ts-expect-error `organizationId` is retired (ADR-0131 D6): no metadata write is organization-scoped.
+    const withOrg: DeleteMetaItemRequest = { type: 'view', name: 'account_list', organizationId: 'org_alpha' };
+    expect(withOrg.name).toBe('account_list');
     // @ts-expect-error an undeclared (here: misspelt) key is refused at the call shape.
     const misspelt: DeleteMetaItemRequest = { type: 'view', name: 'account_list', dropstorage: true };
     expect(misspelt.name).toBe('account_list');
@@ -2531,7 +2533,6 @@ describe('MetadataProtocol.saveMetaItem types against the caught-up request sche
       type: 'view',
       name: 'account_list',
       item: { label: 'Account list' },
-      organizationId: 'org_alpha',
       parentVersion: null,
       actor: 'admin',
       force: true,
@@ -2543,6 +2544,9 @@ describe('MetadataProtocol.saveMetaItem types against the caught-up request sche
     // @ts-expect-error `environmentId` is transport-level (commit 2a29caa53) — not a declared request member; the REST door layers it on via TransportScopedMetaRequest.
     const withEnv: SaveMetaItemRequest = { type: 'view', name: 'account_list', environmentId: 'env_a' };
     expect(withEnv.name).toBe('account_list');
+    // @ts-expect-error `organizationId` is retired (ADR-0131 D6): no metadata write is organization-scoped.
+    const withOrg: SaveMetaItemRequest = { type: 'view', name: 'account_list', item: {}, organizationId: 'org_alpha' };
+    expect(withOrg.name).toBe('account_list');
     // @ts-expect-error `source` is implementation-internal provenance — no producer on this contract sends it, and the REST layer never reads it off the wire.
     const withSource: SaveMetaItemRequest = { type: 'view', name: 'account_list', source: 'studio' };
     expect(withSource.name).toBe('account_list');
