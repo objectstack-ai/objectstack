@@ -1286,7 +1286,8 @@ function optionVisibleWhenMemberIssue(
         `its ADR-0068 aliases \`user\`, \`ctx\` and \`os\`), and under \`${root}\` it binds the ` +
         `\`user\` member and nothing else, so ${path} is unbound there. ` +
         `${FIELD_TRAVERSAL_CONSEQUENCE['option visibleWhen']}; a \`has()\` test or an optional read ` +
-        `of it finds it unset on every write. ${prescription}`,
+        `of it never finds it set, so the option is refused on every write instead, or admitted on ` +
+        `every write when the test is negated or the read's default passes. ${prescription}`,
     };
   }
   return null;

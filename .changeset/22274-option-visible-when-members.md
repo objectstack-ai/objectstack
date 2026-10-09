@@ -1,5 +1,6 @@
 ---
 "@objectstack/lint": minor
+"@objectstack/metadata-protocol": minor
 ---
 
 fix(lint)!: `os build` and the object save door refuse a select option's `visibleWhen` that reads a member of `ctx` or `os` the server's option check never binds, such as `os.org.id`, `os.env` or `ctx.locale` (#22274)
