@@ -24,7 +24,7 @@
  *     row of a predicate write, and this is its hot path.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { installAuditWriters } from './audit-writers.js';
 
@@ -73,10 +73,12 @@ const bizQuiet = {
   fields: { id: f('id', 'text', { primaryKey: true }), title: f('title', 'text') },
 };
 
-/** Copy-returning, read-counting store — the shape `audit-lookup-summary.test.ts` measures with. */
+/**
+ * A copy-returning store that holds the caller's bound. Reads are counted by a
+ * spy on `find`, outside the double, so the double itself stays a plain query.
+ */
 function makeCountingDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
-  const reads: Record<string, number> = {};
   const storeFor = (o: string) => {
     let s = stores.get(o);
     if (!s) { s = new Map(); stores.set(o, s); }
@@ -101,18 +103,18 @@ function makeCountingDriver() {
     }
     return true;
   };
+  const select = (object: string, where: any, limit?: number) => {
+    const rows = Array.from(storeFor(object).values()).filter((r) => matches(r, where));
+    // The caller's bound, after the filter, by presence.
+    const page = typeof limit === 'number' ? rows.slice(0, limit) : rows;
+    return page.map(copy);
+  };
   const driver: any = {
     name: 'memory', version: '0.0.0', supports: {} as any,
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async execute() { return null; },
-    async find(object: string, ast: any) {
-      reads[object] = (reads[object] ?? 0) + 1;
-      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where)).map(copy);
-    },
-    async findOne(object: string, ast: any) {
-      for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return copy(r);
-      return null;
-    },
+    async find(object: string, ast: any) { return select(object, ast?.where, ast?.limit); },
+    async findOne(object: string, ast: any) { return select(object, ast?.where, 1)[0] ?? null; },
     async create(object: string, data: Record<string, unknown>) {
       nextId += 1;
       const id = (data.id as string) ?? `r_${nextId}`;
@@ -153,7 +155,10 @@ function makeCountingDriver() {
     async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; },
     async commit() {}, async rollback() {},
   };
-  return { driver, reads, storeFor };
+  const findSpy = vi.spyOn(driver, 'find');
+  /** How many `find` calls have read `object` so far. */
+  const readsOf = (object: string) => findSpy.mock.calls.filter(([o]) => o === object).length;
+  return { driver, readsOf, storeFor };
 }
 
 const OWNER_PACKAGE = 'com.objectstack.test.activity-actor-name';
@@ -229,8 +234,8 @@ describe('[#22510] sys_activity.actor_name — the acting user\'s name, written 
   });
 
   it('a write with no user leaves actor_name empty (ADR-0118 D1: the system actor is null) and reads no user', async () => {
-    const { engine, storeFor, reads } = await boot();
-    const before = reads.sys_user ?? 0;
+    const { engine, storeFor, readsOf } = await boot();
+    const before = readsOf('sys_user');
 
     await engine.insert('biz_task', { id: 't5', title: 'Nightly', status: 'open' }, { context: { isSystem: true } } as any);
     // A service principal on `actor` is not a user either (ADR-0118 D5: user or system).
@@ -245,36 +250,36 @@ describe('[#22510] sys_activity.actor_name — the acting user\'s name, written 
       expect(row.actor_id).toBeNull();
       expect(row.actor_name ?? null).toBeNull();
     }
-    expect((reads.sys_user ?? 0) - before).toBe(0);
+    expect(readsOf('sys_user') - before).toBe(0);
   });
 });
 
 describe('[#22510] the name costs one read per user, not one per row', () => {
   it('a predicate update over three rows reads sys_user ONCE, and a later write by the same user not at all', async () => {
-    const { engine, storeFor, reads } = await boot();
+    const { engine, storeFor, readsOf } = await boot();
     for (const id of ['p1', 'p2', 'p3']) {
       await engine.insert('biz_task', { id, title: id, status: 'open' });
     }
-    const before = reads.sys_user ?? 0;
+    const before = readsOf('sys_user');
 
     await engine.update('biz_task', { status: 'done' }, { where: { status: 'open' }, multi: true, ...as(ADA) } as any);
 
     const updated = Array.from(storeFor('sys_activity').values()).filter((r) => r.type === 'updated');
     expect(updated).toHaveLength(3);
     for (const row of updated) expect(row.actor_name).toBe('Ada Lovelace');
-    expect((reads.sys_user ?? 0) - before).toBe(1);
+    expect(readsOf('sys_user') - before).toBe(1);
 
     await engine.update('biz_task', { title: 'renamed' }, { where: { id: 'p1' }, ...as(ADA) } as any);
-    expect((reads.sys_user ?? 0) - before).toBe(1);
+    expect(readsOf('sys_user') - before).toBe(1);
   });
 
   it('an object with `enable.activities: false` writes no activity row and reads no user', async () => {
-    const { engine, storeFor, reads } = await boot();
-    const before = reads.sys_user ?? 0;
+    const { engine, storeFor, readsOf } = await boot();
+    const before = readsOf('sys_user');
 
     await engine.insert('biz_quiet', { id: 'q1', title: 'Quiet' }, as(ADA) as any);
 
     expect(activityFor(storeFor, 'q1')).toHaveLength(0);
-    expect((reads.sys_user ?? 0) - before).toBe(0);
+    expect(readsOf('sys_user') - before).toBe(0);
   });
 });
