@@ -201,7 +201,10 @@ function mount({
         sys_member: [{ user_id: USER, organization_id: ACTIVE_ORG, role: 'member' }],
         sys_user_position: [],
         sys_user_permission_set: explicitGrant
-            ? [{ id: 'ups1', user_id: USER, permission_set_id: grantedSetId, organization_id: ACTIVE_ORG }]
+            ? [{
+                id: 'ups1', user_id: USER, permission_set_id: grantedSetId,
+                permission_set: grantedSetId === 'ps_baseline' ? BASELINE : EXPLICIT, organization_id: ACTIVE_ORG,
+            }]
             : [],
         // Deliberately EMPTY: nothing binds the baseline to `everyone`, so the
         // service channel is the only way it can reach the response.

@@ -399,25 +399,38 @@
         "isSystem": true
       },
       {
-        "object": "sys_permission_set",
-        "where": {
-          "id": {
-            "$in": [
-              "ps_admin",
-              "ps_org",
-              "ps_dead"
-            ]
-          }
-        },
-        "limit": 500,
-        "isSystem": true
-      },
-      {
         "object": "sys_user",
         "where": {
           "id": "u_ps"
         },
         "limit": 1,
+        "isSystem": true
+      },
+      {
+        "object": "sys_permission_set",
+        "where": {
+          "name": {
+            "$in": [
+              "admin_full_access",
+              "org_tools",
+              "dead_set"
+            ]
+          },
+          "organization_id": null
+        },
+        "limit": 500,
+        "isSystem": true
+      },
+      {
+        "object": "sys_permission_set",
+        "where": {
+          "name": {
+            "$in": [
+              "org_tools"
+            ]
+          }
+        },
+        "limit": 500,
         "isSystem": true
       }
     ]
@@ -506,24 +519,36 @@
         "isSystem": true
       },
       {
-        "object": "sys_permission_set",
-        "where": {
-          "id": {
-            "$in": [
-              "ps_low",
-              "ps_oa"
-            ]
-          }
-        },
-        "limit": 500,
-        "isSystem": true
-      },
-      {
         "object": "sys_user",
         "where": {
           "id": "u_ta"
         },
         "limit": 1,
+        "isSystem": true
+      },
+      {
+        "object": "sys_permission_set",
+        "where": {
+          "name": {
+            "$in": [
+              "low"
+            ]
+          },
+          "organization_id": null
+        },
+        "limit": 500,
+        "isSystem": true
+      },
+      {
+        "object": "sys_permission_set",
+        "where": {
+          "id": {
+            "$in": [
+              "ps_oa"
+            ]
+          }
+        },
+        "limit": 500,
         "isSystem": true
       }
     ]
@@ -738,11 +763,12 @@
       {
         "object": "sys_permission_set",
         "where": {
-          "id": {
+          "name": {
             "$in": [
-              "ps_x"
+              "extra"
             ]
-          }
+          },
+          "organization_id": null
         },
         "limit": 500,
         "isSystem": true

@@ -22,6 +22,8 @@ import { lowerCallables } from '../utils/lower-callables.js';
 
 // Module scope — exactly what a lowered body cannot reach.
 const SLA_MATRIX: Record<string, number> = { high: 4, low: 48 };
+// Module scope, spelled like a `ctx` key — a reference to THIS is free.
+const previous = { rank: 1 };
 
 const freeIdentifierHook = {
   name: 'case_sla',
@@ -136,6 +138,56 @@ describe('checkHookBodyLowering', () => {
       const [issue] = checkHookBodyLowering({ hooks: [freeIdentifierHook] });
       expect(issue.message).toContain('Inline the value(s) into the handler, or reach them through `ctx`.');
       expect(issue.message).not.toContain('provided by the Node host');
+    });
+  });
+
+  describe('a hook that destructures a renamed key off `ctx` reaches its value through `ctx`', () => {
+    // `previous` is a property READ OFF ctx — exactly what this rule's own
+    // remedy prescribes — and `prev` is the only name the pattern binds. The
+    // scan used to count the key as a free identifier, so lint refused the
+    // hook (advising what it already did) and the build bundled it.
+    const renamedKeyHook = {
+      name: 'carry_rank',
+      object: 'task',
+      events: ['beforeInsert', 'beforeUpdate'],
+      handler: (ctx: any) => {
+        const { event, input, previous: prev } = ctx;
+        if (event === 'beforeUpdate' && prev) input.rank = prev.rank;
+      },
+    };
+    // The control: the same spelling, but read from module scope — not `ctx`.
+    const freePreviousHook = {
+      name: 'carry_rank_free',
+      object: 'task',
+      events: ['beforeUpdate'],
+      handler: (ctx: any) => {
+        const prev = previous;
+        ctx.input.rank = prev.rank;
+      },
+    };
+
+    it('lint reports nothing, and the build lowers it to a body', () => {
+      expect(checkHookBodyLowering({ hooks: [{ ...renamedKeyHook }] })).toEqual([]);
+
+      const lowering = lowerCallables({ hooks: [{ ...renamedKeyHook }] });
+      expect(lowering.bodyExtractionWarnings).toEqual([]);
+      expect(lowering.bodyExtracted).toBe(1);
+      const [hook] = lowering.lowered.hooks as Array<{ body?: { source: string } }>;
+      expect(hook.body?.source).toContain('previous: prev');
+    });
+
+    it('a genuinely free `previous` is still refused, by both', () => {
+      const issues = checkHookBodyLowering({ hooks: [{ ...freePreviousHook }] });
+      expect(issues).toHaveLength(1);
+      expect(issues[0].severity).toBe('error');
+      expect(issues[0].rule).toBe(NOT_LOWERABLE_RULE);
+      expect(issues[0].path).toBe('hooks[0].handler');
+
+      const lowering = lowerCallables({ hooks: [{ ...freePreviousHook }] });
+      expect(lowering.bodyExtracted).toBe(0);
+      expect(lowering.bodyExtractionWarnings.map((w) => [w.kind, w.freeIdentifiers])).toEqual([
+        ['free-identifiers', ['previous']],
+      ]);
     });
   });
 
