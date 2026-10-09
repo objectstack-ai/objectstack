@@ -19,9 +19,14 @@ describe('ObjectStackProtocolImplementation - destructive change detection', () 
 
     beforeEach(() => {
         registry = new SchemaRegistry({ multiTenant: false });
+        // [ADR-0131 D6] A TENANT-AUTHORED object (`_provenance: 'org'`, the
+        // stamp the server writes on every object authored in this
+        // environment): its in-place write is an ordinary environment edit,
+        // which is the population this detector guards.
         registry.registerObject({
             name: 'account',
             label: 'Account',
+            _provenance: 'org',
             fields: {
                 name: { name: 'name', type: 'text' },
                 amount: { name: 'amount', type: 'number' },
@@ -39,16 +44,12 @@ describe('ObjectStackProtocolImplementation - destructive change detection', () 
             count: vi.fn().mockResolvedValue(0),
             aggregate: vi.fn().mockResolvedValue([]),
         };
-        // `account` is a packaged object (`'pkg'`), and `object` has no
-        // per-org overlay channel, so the package door refuses its in-place
-        // write before the destructive check on every kernel topology. This
-        // suite used to reach the check by leaving `environmentId` unset,
-        // which skipped that door; the door is now asked on every topology,
-        // so the suite opens the documented operator hatch instead — the one
-        // route by which a packaged object's write reaches the check.
-        process.env.OS_METADATA_WRITABLE = 'object';
-        // Two memoised readers of the same env var — the protocol's gate and
-        // the repository's `assertAllowed`. Both are reset.
+        // This suite used to register `account` as a PACKAGED object and open
+        // the `OS_METADATA_WRITABLE=object` hatch, the one route by which a
+        // packaged object's in-place write reached this check. [ADR-0131 D6]
+        // Managed content is sealed now — no door writes a packaged object in
+        // place, hatch or not — so the object above is tenant-authored, the
+        // one population whose in-place write still reaches the detector.
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         resetEnvWritableMetadataTypes();
         protocol = new ObjectStackProtocolImplementation(mockEngine);

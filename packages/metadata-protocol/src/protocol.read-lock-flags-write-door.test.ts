@@ -354,15 +354,20 @@ describe('[#21670] every metadata type: the read envelope agrees with its write 
 });
 
 describe('[#21670] controls', () => {
-    it('the operator hatch opens the packaged base, and the read says so — the same predicate the door reads', async () => {
+    it('[ADR-0131 D6] the operator hatch does not open the packaged base, and the read says so — the same predicate the door reads', async () => {
+        // Was `the operator hatch opens the packaged base`: the read answered
+        // `lock: 'none'`, editable and deletable, and the save was admitted.
+        // Managed content is sealed now, so with the hatch open the read and
+        // the door give the shut hatch's answers, and still agree.
         process.env.OS_METADATA_WRITABLE = 'flow,action';
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         resetEnvWritableMetadataTypes();
         for (const type of ['flow', 'action']) {
             const name = nameFor(type, 'packaged');
             const { layered } = await readFlags(harness(ENV_ID), type, name);
-            expect(layered).toEqual({ lock: 'none', editable: true, deletable: true });
-            expect(await environmentDoor(harness(ENV_ID), type, name, 'save')).toBe('admitted');
+            expect(layered).toEqual({ lock: 'full', editable: false, deletable: false });
+            expect(await environmentDoor(harness(ENV_ID), type, name, 'save')).toBe('refused');
+            expect(await environmentDoor(harness(ENV_ID), type, name, 'delete')).toBe('refused');
         }
     });
 

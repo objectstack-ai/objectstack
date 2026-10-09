@@ -27,6 +27,29 @@ vi.mock('node:crypto', async (importOriginal) => {
 const PASSWORD = 'Ünïcödé pass 21839';
 const nodeScrypt = vi.mocked(nodeCrypto.scrypt);
 
+/**
+ * [#22418] Explicit budgets, sized to the measured work. Every case here
+ * derives scrypt keys at the production parameters (N=16384, r=16) on purpose,
+ * the pure-JS path at several times the native cost, so a case's wall time is
+ * its derivation count times what one derivation costs on the shard that runs
+ * it. vitest's 5000 ms default is a number nobody chose for that work.
+ *
+ * The rule: a case whose slowest `Test Core` reading is over half the default
+ * gets 3x that reading, rounded up to the next second. 3x clears the largest
+ * spread one case showed between two CI runs (1.88x) with room for a heavier
+ * shard. The two cases with one derivation per path (slowest reading 1435 ms)
+ * keep the default, which already leaves them 3.4x. When a case's derivation
+ * count changes, re-size it from a fresh reading, never by lowering the
+ * parameters.
+ */
+/** 3 pure-JS + 3 native derivations; CI readings 4136 and 3688 ms. */
+const CROSS_VERIFY_BUDGET_MS = 13_000;
+/**
+ * 4 pure-JS + 4 native; CI timed out at 5030 and 5039 ms, so the reading is
+ * projected: 4/3 of the 3 + 3 case's 4136 ms in the same run, 5515 ms.
+ */
+const NFKC_BUDGET_MS = 17_000;
+
 function onWebContainer(on: boolean) {
   vi.stubEnv('STACKBLITZ', on ? '1' : '');
   vi.stubEnv('SHELL', on ? '/bin/jsh' : '/bin/bash');
@@ -67,7 +90,7 @@ describe('[#21839] share-link password: node:crypto and pure-JS scrypt are inter
     expect(await verifyShareLinkPassword(PASSWORD, nativeHash)).toBe(true);
     expect(await verifyShareLinkPassword('wrong 21839', nativeHash)).toBe(false);
     expect(nodeScrypt).not.toHaveBeenCalled();
-  });
+  }, CROSS_VERIFY_BUDGET_MS);
 
   it('a password whose NFKC form differs from its input is one password on both paths', async () => {
     // A decomposed e + combining acute, and a fullwidth A: NFKC rewrites both.
@@ -93,7 +116,7 @@ describe('[#21839] share-link password: node:crypto and pure-JS scrypt are inter
     expect(await verifyShareLinkPassword(normalised, nativeHash)).toBe(true);
     expect(await verifyShareLinkPassword('cafe A 21839', nativeHash)).toBe(false);
     expect(nodeScrypt).not.toHaveBeenCalled();
-  });
+  }, NFKC_BUDGET_MS);
 
   it('the pure-JS key is byte-identical to node:crypto for the same password and salt', async () => {
     onWebContainer(true);

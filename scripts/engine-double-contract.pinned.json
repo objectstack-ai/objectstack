@@ -3962,6 +3962,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/meta-managed-content-seal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/meta-managed-content-seal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/meta-managed-content-seal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/meta-overlay-read-your-writes.test.ts",
       "verb": "delete",
       "pinned": 1
