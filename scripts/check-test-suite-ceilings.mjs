@@ -28,10 +28,14 @@
  *   provisional" and is not red. A package `uncapped` as `carried` (a cache HIT
  *   re-confirmed it, but no run of the window executed it) is not red either:
  *   it is in the dataset, and the next refresh that executes it gives it one.
- * - ONLY a package absent from the dataset is red for having no ceiling -- the
- *   new-package shape. A package that has never landed is never measured by a
- *   refresh, so for a new package that red is lifted by a ruled raise below,
- *   not by waiting.
+ * - A package absent from the dataset is a NEW package: it prints "no
+ *   ceiling: new package" and is not red, and the first refresh after it lands
+ *   enters it in the dataset under the formula above. A package the dataset
+ *   KNOWS but that lost its row is not new and stays red: a weight with neither
+ *   a ceiling nor an `uncapped` reason, or a ceiling, an `uncapped` reason or a
+ *   `provisional` mark with no weight, is a table the generator did not write,
+ *   and readCeilingTable refuses it. Ruling (Q2 B):
+ *   https://github.com/objectstack-ai/objectstack/issues/16468#issuecomment-6082629070
  * - A ceiling rises only by a ruling: RULED_CEILING_RAISES, each entry naming
  *   the ruling's comment URL. Nothing else in this file moves a ceiling.
  *
@@ -44,10 +48,10 @@
  * hand-typed one is exactly what the generator exists to prevent. Until the
  * first refresh after this check landed writes `ceilings`, a dataset WITHOUT
  * the key is read as NOT MEASURED ("no ceiling table yet") and exits 0. That
- * is distinct from a package absent from a dataset that HAS the key (red), and
- * the reading is printed as a warning annotation on every run, because a
- * persistent NOT MEASURED is a defect: it means the refresh stopped writing
- * ceilings.
+ * is distinct from a package absent from a dataset that HAS the key (a new
+ * package), and the reading is printed as a warning annotation on every run,
+ * because a persistent NOT MEASURED is a defect: it means the refresh stopped
+ * writing ceilings.
  *
  * ## Where it runs, and why the CLI's slices are SUMMED
  *
@@ -89,9 +93,11 @@
  *
  * ## Exit codes
  *
- *   0  OK, or NOT MEASURED (no table yet; nothing executed; no captures)
- *   1  a package over its ceiling, a package absent from the dataset, or a
- *      refusal (a malformed ceiling table or raise record)
+ *   0  OK, or NOT MEASURED (no table yet; nothing executed; no captures); a
+ *      new package alone never makes it 1
+ *   1  a package over its ceiling, or a refusal (a malformed ceiling table --
+ *      a package the dataset knows that lost its row among them -- or raise
+ *      record)
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -120,9 +126,9 @@ export const SLOWEST_FILES_NAMED = 5;
 // raise is reviewable only if the words that authorised it can be read. The
 // effective ceiling is the larger of the generated one and the raise, so a raise
 // below the generated ceiling changes nothing and is reported as stale. An entry
-// for a package absent from the dataset gives a new package its first ceiling --
-// the only way a package that has never landed can get one, since a refresh only
-// measures what runs on `main`.
+// for a package absent from the dataset gives that new package a ceiling, graded
+// from then on, before the first refresh after it lands could; without one it
+// prints "no ceiling: new package" and is not red.
 //
 // ⛔ Never raise a ceiling by editing `ceilings` in scripts/test-shard-timings.json:
 // that file is generated, and the next refresh holds whatever it finds.
@@ -198,6 +204,21 @@ export function readCeilingTable(dataset) {
         'the dataset rather than editing it.'
     );
   }
+  // And the other direction: the generator writes a ceiling, an `uncapped`
+  // reason or a `provisional` mark only beside a weight, so a package named by
+  // one of them without a weight is a package the dataset KNOWS that lost its
+  // row. Graded, it would read as a new package and pass; refused, it stays red.
+  const weightless = [...new Set([...Object.keys(ceilings), ...Object.keys(uncapped), ...provisional])]
+    .filter((n) => !Object.hasOwn(packages, n))
+    .sort((a, b) => String(a).localeCompare(String(b), 'en'));
+  if (weightless.length > 0) {
+    throw new Error(
+      `${DATASET_REL}: ${weightless.length} package(s) carry a ceiling, an \`uncapped\` reason or a ` +
+        `\`provisional\` mark but no weight (${weightless.join(', ')}). The generator writes those only beside a ` +
+        'weight, so each is a package the dataset knows that lost its row, not a new package; regenerate the ' +
+        'dataset rather than editing it.'
+    );
+  }
   return {
     table: {
       packages,
@@ -221,8 +242,8 @@ export function readCeilingTable(dataset) {
  * `status`:
  *
  *   over         graded, over its effective ceiling          RED
- *   absent       not in the dataset, and no ruled raise       RED
  *   ok           graded, within its effective ceiling
+ *   new          not in the dataset, and no ruled raise       no ceiling, not red
  *   provisional  in the dataset's `provisional` list          no ceiling, not red
  *   uncapped     `uncapped` with a reason (`carried`)         no ceiling, not red
  *   partial      a sliced package missing a part this run     NOT MEASURED
@@ -268,7 +289,7 @@ export function gradeCeilings({ merged, dataset, raises = RULED_CEILING_RAISES }
     row.raise = raise;
     if (generated === null && raise === null) {
       if (!inDataset) {
-        row.status = 'absent';
+        row.status = 'new';
       } else {
         row.status = 'uncapped';
         row.reason = table.uncapped[name];
@@ -285,7 +306,9 @@ export function gradeCeilings({ merged, dataset, raises = RULED_CEILING_RAISES }
 
 // ── Rendering ─────────────────────────────────────────────────────────────
 
-const RED_STATUSES = new Set(['over', 'absent']);
+// A new package is not among them (ruling Q2 B): it is red only once a ceiling
+// exists for it and it runs over.
+const RED_STATUSES = new Set(['over']);
 
 function sliceNote(row) {
   if (!row.slices) return '';
@@ -357,8 +380,11 @@ export function renderCeilingVerdict(report, label) {
         return `  --    ${r.name}: ${r.seconds.toFixed(2)}s -- no ceiling: ${r.reason}`;
       case 'partial':
         return `  --    ${r.name}: NOT MEASURED -- a part of its suite is missing from this run${sliceNote(r)}; a part is never graded as the whole`;
-      case 'absent':
-        return `  NEW   ${r.name}: ${r.seconds.toFixed(2)}s -- no ceiling: not in ${DATASET_REL} (a new package)`;
+      case 'new':
+        return (
+          `  --    ${r.name}: ${r.seconds.toFixed(2)}s -- no ceiling: new package (not in ${DATASET_REL}; ` +
+          'the first refresh after it lands enters it)'
+        );
       default:
         throw new Error(`unknown row status ${r.status}`);
     }
@@ -385,13 +411,10 @@ export function renderCeilingVerdict(report, label) {
   }
 
   const detail = red
-    .map((r) =>
-      r.status === 'over'
-        ? `  ${r.name}: ${r.seconds.toFixed(2)}s measured against its ${r.ceiling.toFixed(2)}s ceiling ` +
-          `(${(r.seconds / r.ceiling).toFixed(2)}x; ${ceilingText(r)})${sliceNote(r)}. Its slowest test files:\n${filesText(r)}`
-        : `  ${r.name}: ${r.seconds.toFixed(2)}s and no ceiling -- it is not in ${DATASET_REL}, so it is a new package. ` +
-          'It stays red until a ruled raise gives it a first ceiling (a refresh only measures what runs on main). ' +
-          `Its slowest test files:\n${filesText(r)}`
+    .map(
+      (r) =>
+        `  ${r.name}: ${r.seconds.toFixed(2)}s measured against its ${r.ceiling.toFixed(2)}s ceiling ` +
+        `(${(r.seconds / r.ceiling).toFixed(2)}x; ${ceilingText(r)})${sliceNote(r)}. Its slowest test files:\n${filesText(r)}`
     )
     .join('\n');
   return {
@@ -400,14 +423,12 @@ export function renderCeilingVerdict(report, label) {
     out: red.map(
       (r) =>
         `::error title=Suite-duration ceiling::${escapeWorkflowCommandMessage(
-          r.status === 'over'
-            ? `${r.name}: ${r.seconds.toFixed(2)}s, over its ${r.ceiling.toFixed(2)}s ceiling. Slowest file: ` +
-                `${r.files[0] ? `${r.files[0].file} ${(r.files[0].ms / 1000).toFixed(2)}s` : '(none captured)'}.`
-            : `${r.name}: ${r.seconds.toFixed(2)}s and no ceiling -- a package absent from ${DATASET_REL}.`
+          `${r.name}: ${r.seconds.toFixed(2)}s, over its ${r.ceiling.toFixed(2)}s ceiling. Slowest file: ` +
+            `${r.files[0] ? `${r.files[0].file} ${(r.files[0].ms / 1000).toFixed(2)}s` : '(none captured)'}.`
         )}`
     ),
     err: [
-      `${head}: OVER -- ${label}: ${red.length} package(s) over their suite-duration ceiling or without one.\n` +
+      `${head}: OVER -- ${label}: ${red.length} package(s) over their suite-duration ceiling.\n` +
         `${detail}\n` +
         `  ${basis}.\n` +
         '  Make the suite faster, or take the raise to a ruling: a ceiling rises only by an entry in\n' +
@@ -515,10 +536,10 @@ let selfTestReachedVerdict = false;
 const SELF_TEST_BATTERIES = Object.freeze({
   'over the ceiling is red, naming the package and its slowest files': 6,
   'provisional prints "no ceiling: provisional" and is not red': 3,
-  'a package absent from the dataset is red; an uncapped one is not': 4,
+  'a new package prints "no ceiling: new package" and is not red; a known one that lost its row is refused': 10,
   'no ceiling table yet is NOT MEASURED, never red': 5,
   'file-sliced packages are summed across shards': 6,
-  'a ruled raise lifts a ceiling, and only a well-formed one does': 7,
+  'a ruled raise lifts a ceiling, and only a well-formed one does': 8,
   'a malformed ceiling table is refused, never read as a pass': 4,
 });
 
@@ -630,14 +651,35 @@ function selfTest() {
     if (held.exitCode !== 0 || status(held, 'prov') !== 'provisional') throw new Error(`provisional: a held ceiling overrode the provisional exemption (${held.verdict})`);
   });
 
-  battery('a package absent from the dataset is red; an uncapped one is not');
-  const fresh = run([capture('2/6', [['brand-new', 5], ['a', 10]], [file('brand-new', 'n.test.ts', 4_000)])]);
+  battery('a new package prints "no ceiling: new package" and is not red; a known one that lost its row is refused');
   check(() => {
-    if (fresh.exitCode !== 1 || status(fresh, 'brand-new') !== 'absent') throw new Error(`absent: exit ${fresh.exitCode}, ${status(fresh, 'brand-new')}`);
+    // Absent from the dataset, beside a package within its ceiling: the run is OK.
+    const fresh = run([capture('2/6', [['brand-new', 9999], ['a', 10]], [file('brand-new', 'n.test.ts', 4_000)])]);
+    if (fresh.exitCode !== 0 || fresh.verdict !== 'OK' || status(fresh, 'brand-new') !== 'new') {
+      throw new Error(`new: exit ${fresh.exitCode}, verdict ${fresh.verdict}, ${status(fresh, 'brand-new')}`);
+    }
   });
   check(() => {
-    if (!fresh.err[0].includes('brand-new: 5.00s and no ceiling') || !fresh.err[0].includes('n.test.ts')) {
-      throw new Error(`absent: the package or its files are not named:\n${fresh.err[0]}`);
+    const fresh = run([capture('2/6', [['brand-new', 5], ['a', 10]])]);
+    if (!fresh.err[0].includes('brand-new: 5.00s -- no ceiling: new package')) throw new Error(`new: the line is wrong:\n${fresh.err[0]}`);
+  });
+  check(() => {
+    // Beside a package over its ceiling, only that one is red and named.
+    const both = run([capture('2/6', [['brand-new', 9999], ['a', 151]])]);
+    if (
+      both.exitCode !== 1 ||
+      !both.err[0].includes('1 package(s) over their suite-duration ceiling') ||
+      both.out.length !== 1 ||
+      both.out.some((l) => l.includes('brand-new'))
+    ) {
+      throw new Error(`new: a new package was counted red beside an over one:\n${both.err[0]}\n${JSON.stringify(both.out)}`);
+    }
+  });
+  check(() => {
+    // Alone, it grades nothing: NOT MEASURED, exit 0.
+    const alone = run([capture('2/6', [['brand-new', 9999]])]);
+    if (alone.exitCode !== 0 || alone.verdict !== 'NOT MEASURED' || status(alone, 'brand-new') !== 'new') {
+      throw new Error(`new: a new package alone read ${alone.verdict}, exit ${alone.exitCode}`);
     }
   });
   check(() => {
@@ -647,6 +689,38 @@ function selfTest() {
   check(() => {
     const carried = run([capture('2/6', [['carried', 9999], ['a', 1]])]);
     if (!carried.err[0].includes('carried: 9999.00s -- no ceiling: carried')) throw new Error(`uncapped: the reason is not named:\n${carried.err[0]}`);
+  });
+  // A package the dataset KNOWS that lost its row is not new: it is refused, so
+  // it stays red rather than passing as "no ceiling: new package".
+  const refusal = (fn) => {
+    try {
+      fn();
+      return null;
+    } catch (err) {
+      return err?.message ?? String(err);
+    }
+  };
+  check(() => {
+    // A weight with neither a ceiling nor an `uncapped` reason (`b` lost its ceiling row).
+    const why = refusal(() => run([capture('1/6', [['b', 1]])], dataset({ ceilings: { a: 150, cli: 2000 } })));
+    if (why === null || !why.includes('neither a ceiling nor an `uncapped`') || !why.includes('(b)')) {
+      throw new Error(`lost row: a weighed package without a ceiling row was graded (${why})`);
+    }
+  });
+  check(() => {
+    // A held ceiling with no weight (`b` lost its weight row).
+    const why = refusal(() => run([capture('1/6', [['b', 1]])], dataset({ packages: { a: 100, prov: 10, carried: 20, cli: 1500 } })));
+    if (why === null || !why.includes('but no weight (b)')) throw new Error(`lost row: a ceiling with no weight was graded as new (${why})`);
+  });
+  check(() => {
+    // An `uncapped` reason with no weight.
+    const why = refusal(() => run([capture('1/6', [['carried', 1]])], dataset({ packages: { a: 100, b: 50, prov: 10, cli: 1500 } })));
+    if (why === null || !why.includes('but no weight (carried)')) throw new Error(`lost row: an uncapped reason with no weight was graded as new (${why})`);
+  });
+  check(() => {
+    // A `provisional` mark with no weight.
+    const why = refusal(() => run([capture('1/6', [['ghost', 1]])], dataset({ provisional: ['prov', 'ghost'] })));
+    if (why === null || !why.includes('but no weight (ghost)')) throw new Error(`lost row: a provisional mark with no weight was graded as new (${why})`);
   });
 
   battery('no ceiling table yet is NOT MEASURED, never red');
@@ -727,9 +801,16 @@ function selfTest() {
     if (r.exitCode !== 1 || !r.err[0].includes(raiseUrl)) throw new Error(`raise: over the raise was not red, or the ruling not named:\n${r.err[0]}`);
   });
   check(() => {
-    // A new package's first ceiling, before any refresh could give it one.
+    // A ruled ceiling for a new package grades it before the first refresh after it lands could.
     const r = run([capture('1/6', [['brand-new', 5]])], dataset(), { 'brand-new': { seconds: 30, ruling: raiseUrl } });
-    if (r.exitCode !== 0 || status(r, 'brand-new') !== 'ok') throw new Error(`raise: a ruled first ceiling did not lift the new-package red (${status(r, 'brand-new')})`);
+    if (r.exitCode !== 0 || status(r, 'brand-new') !== 'ok') throw new Error(`raise: a ruled ceiling did not grade a new package (${status(r, 'brand-new')})`);
+  });
+  check(() => {
+    // ...and one it can run over: a ruled ceiling is a ceiling, new package or not.
+    const r = run([capture('1/6', [['brand-new', 31]])], dataset(), { 'brand-new': { seconds: 30, ruling: raiseUrl } });
+    if (r.exitCode !== 1 || status(r, 'brand-new') !== 'over' || !r.err[0].includes('brand-new: 31.00s measured against its 30.00s ceiling')) {
+      throw new Error(`raise: a new package over its ruled ceiling was not red (${status(r, 'brand-new')}):\n${r.err[0]}`);
+    }
   });
   check(() => {
     // A raise at or under the generated ceiling changes nothing, and says so.

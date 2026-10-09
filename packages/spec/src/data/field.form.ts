@@ -128,6 +128,15 @@ export const fieldForm = defineForm({
         { field: 'language', visibleWhen: "data.type == 'code'", helpText: 'Editor language for syntax highlighting (e.g. javascript, python, sql).' },
         { field: 'autonumberFormat', visibleWhen: "data.type == 'autonumber'", helpText: 'Literal text plus a {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens in the business time zone, and {field_name} interpolation. The counter resets per rendered prefix. Omitted on an autonumber field it defaults to {0000}.' },
         { field: 'referenceVia', visibleWhen: "data.type == 'text'", helpText: 'Makes this text field the id half of a polymorphic pointer: names the SIBLING field on the same object that holds the target object name, per row (ADR-0052 §5). snake_case; text fields only, and mutually exclusive with `reference`.' },
+        // #22227 (objectui#11815 ruling D) — the deadline semantic. Unlike the
+        // meaningfulness gates above, these two ARE parse gates: `FieldSchema`
+        // refuses both keys outside date / datetime (DEADLINE_FIELD_TYPES in
+        // field.zod.ts) and `settledWhen` without `dueLike: true`, so each row
+        // shows exactly where its key parses. `settledWhen` copies the
+        // field-level predicate rows' face below (`type: 'code'`,
+        // `language: 'expression'`) — it is the same CEL family.
+        { field: 'dueLike', label: 'Deadline', visibleWhen: "data.type in ['date','datetime']", helpText: "Marks this date as a deadline: once it has passed, views may show it as overdue (relative wording and an overdue colour). Off or unset: not a deadline, and nothing is guessed from the field's name." },
+        { field: 'settledWhen', label: 'Settled When', type: 'code', language: 'expression', visibleWhen: "data.type in ['date','datetime'] && data.dueLike == true", helpText: "CEL predicate over the record (e.g. record.status == 'done') — while it is TRUE the deadline is settled, and no overdue wording or colour applies to that record. Display only." },
         // Select field options
         {
           field: 'options',

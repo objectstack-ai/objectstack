@@ -144,6 +144,11 @@ function matchesWhere(row: any, where: any): boolean {
       if (!(cond as any).$in.includes(row[field])) return false;
       continue;
     }
+    // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+    if (cond === null) {
+        if ((row[field] ?? null) !== null) return false;
+        continue;
+    }
     if (row[field] !== cond) return false;
   }
   return true;
@@ -177,10 +182,10 @@ const PERMISSION_TABLES: Record<string, any[]> = {
   sys_position: [],
   sys_position_permission_set: [],
   sys_user_permission_set: [
-    { id: 'ups_member', user_id: 'u_member', permission_set_id: 'ps_settings', organization_id: null },
-    { id: 'ups_exmember', user_id: 'u_exmember', permission_set_id: 'ps_settings', organization_id: null },
-    { id: 'ups_orgless', user_id: 'u_orgless', permission_set_id: 'ps_settings', organization_id: null },
-    { id: 'ups_session', user_id: 'u_session_exmember', permission_set_id: 'ps_settings', organization_id: null },
+    { id: 'ups_member', user_id: 'u_member', permission_set_id: 'ps_settings', permission_set: 'settings_admin', organization_id: null },
+    { id: 'ups_exmember', user_id: 'u_exmember', permission_set_id: 'ps_settings', permission_set: 'settings_admin', organization_id: null },
+    { id: 'ups_orgless', user_id: 'u_orgless', permission_set_id: 'ps_settings', permission_set: 'settings_admin', organization_id: null },
+    { id: 'ups_session', user_id: 'u_session_exmember', permission_set_id: 'ps_settings', permission_set: 'settings_admin', organization_id: null },
   ],
   sys_permission_set: [
     { id: 'ps_settings', name: 'settings_admin', system_permissions: ['setup.access', 'setup.write'] },

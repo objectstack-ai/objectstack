@@ -1,5 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { P } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 /**
@@ -68,7 +69,10 @@ export const Task = ObjectSchema.create({
     estimate_hours: Field.number({ label: 'Estimate (h)', min: 0, max: 1000 }),
     progress: { type: 'progress', label: 'Progress', min: 0, max: 100, defaultValue: 0 },
     done: Field.boolean({ label: 'Done', defaultValue: false }),
-    due_date: Field.date({ label: 'Due Date' }),
+    // A deadline, declared (objectui#11815 ruling D): past it the date reads
+    // as overdue, until the task is done — `status` is the completion signal
+    // the board, the state machine and the milestone below all key on.
+    due_date: Field.date({ label: 'Due Date', dueLike: true, settledWhen: P`record.status == 'done'` }),
     start_date: Field.date({ label: 'Start Date' }),
     end_date: Field.date({ label: 'End Date' }),
     created_at: Field.datetime({ label: 'Created At' }),

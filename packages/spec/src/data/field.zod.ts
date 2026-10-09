@@ -240,6 +240,25 @@ const MULTILINE_EDITOR_FIELD_TYPES: ReadonlySet<string> = new Set([
 ] as const satisfies readonly FieldType[]);
 
 /**
+ * Field types whose value is a calendar instant that can PASS — the set on
+ * which the deadline semantic (`dueLike` / `settledWhen`) is authorable
+ * (objectui#11815, maintainer ruling D: declared-only overdue).
+ *
+ * The two types the overdue affordance is drawn for: objectui's date and
+ * datetime cells are the one consumer, and they share one overdue predicate
+ * at day granularity. Deliberately NOT here: `time` (a time of day has no
+ * calendar day to fall behind), and every type that merely CARRIES a date
+ * somewhere — a `formula` returning `date` is computed per read, so a deadline
+ * belongs on the stored column it derives from. `FieldSchema` refuses both
+ * keys outside this set (the superRefine below, the #11566 template), so a
+ * deadline declared on a `text` field is refused loudly instead of parsing and
+ * painting nothing.
+ */
+const DEADLINE_FIELD_TYPES: ReadonlySet<string> = new Set([
+  'date', 'datetime',
+] as const satisfies readonly FieldType[]);
+
+/**
  * Field types whose stored value the RUNTIME owns outright — issued by the
  * engine (or the driver's persistent sequence), never supplied by a caller on
  * either write path. Today exactly `autonumber` (#5503).
@@ -1843,6 +1862,34 @@ export const FieldSchema = lazySchema(() => {
   ),
 
   /**
+   * Deadline semantic — `date` / `datetime` only (DEADLINE_FIELD_TYPES).
+   * objectui#11815, maintainer ruling D: overdue is DECLARED, never guessed.
+   *
+   * `dueLike` says this date is a deadline, so a renderer may show relative
+   * overdue wording and an overdue colour once it has passed; absent means not
+   * a deadline, and nothing is inferred from the field's name. `settledWhen`
+   * says when the deadline stops mattering for one record — a per-record CEL
+   * predicate in the `visibleWhen` / `readonlyWhen` / `requiredWhen` family,
+   * judged at authoring by the same field-rule pass in `@objectstack/lint`
+   * (`validate-expressions.ts`: it parses, it reads `record.<field>` and never
+   * a bare field, and only the roots that family binds). While it holds, no
+   * overdue wording or colour applies — "finished" stays local to the deadline
+   * that cares, so no select option carries a terminal marker for it.
+   *
+   * Declared = enforced (ADR-0049), both halves at this seam: either key on a
+   * type outside the set is refused, and `settledWhen` without `dueLike: true`
+   * is refused — a settle condition on a field that is no deadline would parse
+   * and settle nothing. Neither key has a default, so `undefined` always means
+   * "not authored" and a field without them never fires either check.
+   *
+   * Display only: nothing on the write path reads either key. The consumer is
+   * the renderer — objectui's date and datetime cells, where the host
+   * evaluates `settledWhen` against the row and hands the cell one boolean.
+   */
+  dueLike: z.boolean().optional().describe("Deadline semantic (`date` / `datetime` only): TRUE declares this date a deadline, so a renderer may show relative overdue wording (\"Overdue 3d\") and an overdue colour once it has passed. Absent or FALSE: not a deadline — nothing is inferred from the field's name. Pair with `settledWhen` to say when the deadline is settled for a record. Refused on any other type. Display only: nothing on the write path reads it."),
+  settledWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — the deadline is SETTLED while TRUE: no overdue wording or colour applies to this record, e.g. P`record.status == 'done'`. Evaluated per record like `visibleWhen`, reading the record's own columns as `record`. Requires `dueLike: true` on a `date` / `datetime` field; refused otherwise. Display only: nothing on the write path reads it."),
+
+  /**
    * Form widget override. Names a registered field/UI component to render this
    * field with, overriding the default widget derived from `type`. Honored by
    * the generic object form (objectui `ObjectForm`/`form.tsx` resolve
@@ -2420,6 +2467,54 @@ export const FieldSchema = lazySchema(() => {
         'editor surface, so the declaration would parse and change nothing. ' +
         'Drop the key, or use a multiline editor type.',
     });
+  }
+
+  // objectui#11815 (maintainer ruling D — declared-only overdue): the deadline
+  // semantic is authorable only on the types whose value can PASS
+  // (DEADLINE_FIELD_TYPES — its docblock carries the measured consumer), and
+  // `settledWhen` only beside `dueLike: true`. ADR-0049: a declared key is
+  // enforced, so each shape that would parse and change nothing is refused at
+  // the authoring seam, where the fix is one keystroke away. Neither key has a
+  // schema default, so `undefined` here always means "not authored" — a field
+  // without them can never fire these. Off-type `settledWhen` gets the TYPE
+  // refusal alone: telling that author to add `dueLike: true` would send them
+  // straight into the `dueLike` refusal. The messages enumerate the set ITSELF
+  // rather than a prose copy of it (#12017 two-copies failure shape).
+  const deadlineTypes = [...DEADLINE_FIELD_TYPES].map((t) => `'${t}'`).join(', ');
+  if (field.dueLike !== undefined && !DEADLINE_FIELD_TYPES.has(field.type)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['dueLike'],
+      message:
+        `\`dueLike\` is only valid on field types whose value is a calendar date that can pass — ` +
+        `${deadlineTypes} — and this field is \`${field.type}\`: it declares the field a deadline ` +
+        'whose passing a renderer shows as overdue, and this type holds no date to fall behind, so ' +
+        'the declaration would parse and change nothing. Drop the key, or declare the deadline on a ' +
+        '`date` / `datetime` field.',
+    });
+  }
+  if (field.settledWhen !== undefined) {
+    if (!DEADLINE_FIELD_TYPES.has(field.type)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['settledWhen'],
+        message:
+          `\`settledWhen\` is only valid on field types whose value is a calendar date that can pass — ` +
+          `${deadlineTypes} — and this field is \`${field.type}\`: it says when a deadline declared ` +
+          'by `dueLike` is settled, and only those types carry one. Drop the key, or move the deadline ' +
+          'and its `settledWhen` to a `date` / `datetime` field.',
+      });
+    } else if (field.dueLike !== true) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['settledWhen'],
+        message:
+          `\`settledWhen\` says when this field's deadline is settled, but the field declares no ` +
+          `deadline (\`dueLike\` is ${field.dueLike === false ? '`false`' : 'absent'}), so the ` +
+          'predicate would parse and settle nothing (ADR-0049: a declared key is enforced). Add ' +
+          '`dueLike: true` if this date is a deadline, or delete `settledWhen`.',
+      });
+    }
   }
 
   // #19629 (maintainer ruling 5791803339 — batch #215 item 1, letter B,

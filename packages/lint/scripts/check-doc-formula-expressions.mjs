@@ -635,7 +635,12 @@ function scan(files) {
  * same rule would fail the build on correct docs. The loudness requirement is
  * met by the skip list instead — printed, counted, and pinned by the self-test.
  */
-const FIELD_RULE_SLOTS = ['visibleWhen', 'readonlyWhen', 'requiredWhen'];
+// `settledWhen` (#22227) is the deadline's settle predicate, judged by the
+// metadata walk exactly as `visibleWhen` is — so a docs example of it gets the
+// same verdict here. Keep this list and FIELD_RULE_TEXT_RE below in step: the
+// text tripwire reconciles against the parse, so a slot in one and not the
+// other is either an invisible site or a phantom skip.
+const FIELD_RULE_SLOTS = ['visibleWhen', 'readonlyWhen', 'requiredWhen', 'settledWhen'];
 
 /** The property key of a property assignment, when it is a plain name. */
 function keyText(p) {
@@ -751,7 +756,7 @@ function fieldRuleSkipReason(prop) {
  * `docs/adr/0089-unify-visibility-predicate-naming.md` quotes the SCHEMA rather
  * than authoring a predicate — three text hits that are not sites at all.
  */
-const FIELD_RULE_TEXT_RE = /\b(visibleWhen|readonlyWhen|requiredWhen)\s*:\s*(?:[A-Za-z_$][\w$]*\s*)?["'`]/g;
+const FIELD_RULE_TEXT_RE = /\b(visibleWhen|readonlyWhen|requiredWhen|settledWhen)\s*:\s*(?:[A-Za-z_$][\w$]*\s*)?["'`]/g;
 
 export function textFieldRuleSites(code) {
   const out = [];
@@ -1741,6 +1746,23 @@ const FIELD_RULE_SELF_TEST_CASES = [
     name: 'RED — the raw arm-D spelling reaches the same verdict as the factory',
     code: "ObjectSchema.create({ fields: { due_date: { type: 'date', requiredWhen: 'stage == \"closed\"' } } })",
     expect: { admitted: 1, errors: 1, match: /bare reference `stage`/ },
+  },
+  {
+    // #22227 — the deadline's settle predicate is a field-rule slot, so a docs
+    // example of it is root-judged exactly as `visibleWhen` is.
+    name: 'RED — `settledWhen` on a deadline is the same field-rule slot: a bare reference is refused',
+    code: "due_date: Field.date({ dueLike: true, settledWhen: P`status == 'done'` }),",
+    expect: { admitted: 1, errors: 1, match: /bare reference `status`/ },
+  },
+  {
+    name: 'RED — `settledWhen` reading `current_user` gets the family\'s root verdict',
+    code: "due_date: Field.date({ dueLike: true, settledWhen: \"current_user.profile == 'admin'\" }),",
+    expect: { admitted: 1, errors: 1, match: /`settledWhen` reads `current_user`/ },
+  },
+  {
+    name: 'GREEN — the `fields.mdx` deadline example: a record-scoped `settledWhen`',
+    code: "due_date: Field.date({ label: 'Due Date', dueLike: true, settledWhen: P`record.status == 'done'` }),",
+    expect: { admitted: 1, errors: 0 },
   },
   {
     name: 'GREEN — the canonical record-scoped predicate',

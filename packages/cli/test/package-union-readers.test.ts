@@ -83,7 +83,7 @@ const PER_PACKAGE = /^package '[^']+' — /;
 const PIECES = `
 import { defineStack, composeStacks } from '@objectstack/spec';
 const I18N = { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'], fallbackLocale: 'en' };
-const engines = { protocol: '^17' };
+const engines = { protocol: '^18' };
 const svcManifest = { id: '${SVC_ID}', name: 'Union Service', namespace: 'unr', version: '1.0.0', type: 'module', engines };
 const appManifest = { id: '${APP_ID}', name: 'Union App', namespace: 'unr', version: '1.0.0', type: 'app', engines };
 const ticket = { name: 'unr_ticket', label: 'Ticket', pluralLabel: 'Tickets', sharingModel: 'private',

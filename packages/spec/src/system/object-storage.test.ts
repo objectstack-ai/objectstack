@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { z } from 'zod';
 import {
   StorageScopeSchema,
   FileMetadataSchema,
@@ -42,11 +43,48 @@ describe('StorageScopeSchema', () => {
     expect(() => StorageScopeSchema.parse('data')).not.toThrow();
     expect(() => StorageScopeSchema.parse('logs')).not.toThrow();
     expect(() => StorageScopeSchema.parse('config')).not.toThrow();
-    expect(() => StorageScopeSchema.parse('public')).not.toThrow();
   });
 
   it('should reject invalid storage scopes', () => {
     expect(() => StorageScopeSchema.parse('invalid')).toThrow();
+  });
+
+  // #22443 (ADR-0049): `public` never made a file public — anonymous download
+  // is a file's `acl: 'public_read'` (ADR-0104) — so the member was retired.
+  describe('retired member `public`', () => {
+    it('is refused at parse with the prescription naming acl public_read', () => {
+      const result = StorageScopeSchema.safeParse('public');
+      expect(result.success).toBe(false);
+      const message = result.error!.issues[0]!.message;
+      expect(message).toMatch(/`public` was removed from `StorageScope`.*ADR-0049/s);
+      expect(message).toContain("acl: 'public_read'");
+      expect(message).toContain('ADR-0104');
+    });
+
+    it('is refused where it is authored, on ObjectStorageConfig.scope', () => {
+      const result = ObjectStorageConfigSchema.safeParse({
+        name: 'assets_storage',
+        label: 'Assets Storage',
+        provider: 's3',
+        scope: 'public',
+        connection: {},
+      });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'scope');
+      expect(issue?.message).toContain("acl: 'public_read'");
+    });
+
+    it('leaves an unknown value on zod\'s own message (control)', () => {
+      const result = StorageScopeSchema.safeParse('publik');
+      expect(result.success).toBe(false);
+      expect(result.error!.issues[0]!.message).not.toContain('was removed');
+    });
+
+    it('is no longer a StorageScope at compile time', () => {
+      // @ts-expect-error — `public` left the enum (tsc channel of the retirement)
+      const retired: z.input<typeof StorageScopeSchema> = 'public';
+      expect(retired).toBe('public');
+    });
   });
 });
 
