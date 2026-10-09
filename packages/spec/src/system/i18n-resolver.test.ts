@@ -1724,8 +1724,12 @@ describe('translatePage', () => {
     // widened to the open bag it is: the overlay adds keys the literal does
     // not spell out, and inferring it as `{title}` alone would make reading
     // the result a type error.
+    // `label` is `PageSchema`'s required key, and the header title restates
+    // it, exactly as on `homePage()`: that is the shape whose title the
+    // page-name route answers from `pages.<name>.label` (#22508).
     const regionHeaderWithId = () => ({
       name: 'sales_home_page',
+      label: 'Sales Home',
       regions: [{
         name: 'header',
         components: [{
