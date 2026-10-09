@@ -10,7 +10,7 @@ the seed loader replaying package fixtures, a plugin's boot reconciler, a
 service self-write, a migration.
 
 This page is **the authority** for what that flag actually does. It exists
-because the flag is not one concept: it is a single boolean read at **118
+because the flag is not one concept: it is a single boolean read at **119
 distinct sites across 20 packages**, and knowing three of those behaviours gives
 no hint that the other hundred-and-four exist. Every documented app-side bug
 traced to `isSystem` had the same shape — the metadata was complete and correct,
@@ -141,7 +141,7 @@ that silently does not happen.
 
 ### 3. Sharing (`plugin-sharing`)
 
-The largest single consumer — **17 of the 118 sites**.
+The largest single consumer — **17 of the 119 sites**.
 
 | # | Behaviour when `isSystem` | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|
@@ -180,7 +180,7 @@ The largest single consumer — **17 of the 118 sites**.
 | 53 | Package REST route capability gate bypassed | rest | Get: a marketplace publish over REST (`POST /packages/publish`, the one route the REST registrar mounts since #14503) without `manage_metadata`; the package read cohort (`studio.access` / `setup.access`) is enforced by the dispatcher `/packages` domain's own read gate, where the reads are served | `packages/rest/src/package-routes.ts#refusePackageRequest` |
 | 54 | Package domain capability gates bypassed | runtime | Get: package management and package-inventory reads without the capability | `packages/runtime/src/domains/packages.ts#requireManageMetadata`, `#requireReadCapability` |
 | 55 | Activation write / authoring refusals do not fire | runtime | Get: activation artifacts writable and authorable without the activation-authoring capability | `packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationWrite`, `#refuseUngrantedActivationAuthoring` |
-| 56 | Automation run-state read, flow-authoring write, the paused-run caller gate (screen read and resume) and the two operator run-lifecycle writes all pass | runtime | Get: run state, flow writes, a paused run's screen and its resume with no grant and without being the run's starter — and cancelling or restoring a suspension without the platform-operator rung. The screen read and the resume ask one predicate, so this is one bypass for both. The lifecycle bypass is the in-process owner's door: plugin-approvals' revise-window recall (ADR-0044) cancels on behalf of a decision it already authorized and recorded | `packages/runtime/src/domains/automation.ts#mayReadRunState`, `#refuseUngrantedFlowWrite`, `#isRunStarterOrRunStateReader`, `#refuseUngrantedRunLifecycleWrite` |
+| 56 | Automation run-state read, flow-authoring write, the paused-run caller gate (screen read and resume), the two operator run-lifecycle writes and the trigger door's elevated self-triggered start all pass | runtime | Get: run state, flow writes, a paused run's screen and its resume with no grant and without being the run's starter — and cancelling or restoring a suspension without the platform-operator rung. The screen read and the resume ask one predicate, so this is one bypass for both. The lifecycle bypass is the in-process owner's door: plugin-approvals' revise-window recall (ADR-0044) cancels on behalf of a decision it already authorized and recorded. And starting, through the trigger door, a flow declared `runAs: 'system'` whose type is self-triggered (`autolaunched`, `record_change`, `schedule`), which every other caller is refused `403 PERMISSION_DENIED` (the maintainer's ruling, letter B). That bypass is the in-process caller's, such as a job: inbound HTTP never carries the flag | `packages/runtime/src/domains/automation.ts#mayReadRunState`, `#refuseUngrantedFlowWrite`, `#isRunStarterOrRunStateReader`, `#refuseUngrantedRunLifecycleWrite`, `#refusesElevatedSelfTriggeredStart` |
 | 57 | Audience-binding suggestion recording skipped | plugin-security | Lose: install-time suggestions are not recorded for system callers | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts#assertTenantAdmin` |
 | 58 | Email-template organization door passes; webhook provenance stamp skipped | plugin-email, plugin-webhooks | Get (`sys_email_template`): a create or update of a template row. The door refuses every other write that names a caller, `403 PERMISSION_DENIED` (ADR-0131 D6), so the seeds, the boot sweep and the projection of a Studio save are the only writers. Lose (`sys_webhook`): the row is not marked as an admin customization | `packages/plugins/plugin-email/src/email-template-door.ts#isOrganizationWrite`, `packages/plugins/plugin-webhooks/src/webhook-provenance.ts#bindWebhookProvenanceStamp` |
 | 59 | **Automation flow data nodes re-add the `owner_id` stamp** (the one place row 2's gap is compensated inline) | service-automation | Get: a flow-authored INSERT under system elevation still lands owned, when the run resolved a user. Fill-only — flow-authored values win | `packages/services/service-automation/src/runtime-identity.ts#stampSystemInsertOwner`, called from `packages/services/service-automation/src/builtin/crud-nodes.ts#registerCrudNodes` |
@@ -284,7 +284,7 @@ Ownership injection, `readonly` bypass and sharing materialisation are
 independent decisions, and a seed loader plausibly wants the first two but not
 the third. The concept is nevertheless **staying as one boolean**:
 
-- **Shipped semantics.** `isSystem` is a published contract with 118 read sites
+- **Shipped semantics.** `isSystem` is a published contract with 119 read sites
   in 20 packages. Splitting it is a breaking contract change across all of them.
   (The ruling was taken when the census read 80 sites in 18 packages; the count
   has grown, which strengthens rather than weakens the argument.)
@@ -358,16 +358,16 @@ still holds equal to the census on every pull request:
 | Appearances of the bare identifier `isSystem` in non-test sources | 813 | — |
 | — parsed as a declaration | 27 | ✅ |
 | — parsed as an object-literal / type key (producers and option objects) | 310 | — |
-| — parsed as a property **read** | 124 | ✅ |
+| — parsed as a property **read** | 125 | ✅ |
 | — parsed in some other syntactic position (a local, a cast, a conditional) | 9 | ✅ |
 | — the remainder: text inside comments and string literals | 358 | — |
 | Of those reads: reads of one of the unrelated metadata fields | 6 | ✅ |
-| Of those reads: reads of `ExecutionContext.isSystem` | **118** | ✅ |
-| — behaviour-bearing (rows 1–61 above) | 115 | ✅ |
+| Of those reads: reads of `ExecutionContext.isSystem` | **119** | ✅ |
+| — behaviour-bearing (rows 1–61 above) | 116 | ✅ |
 | — carry the flag onward only (rows 62–64 above) | 3 | ✅ |
 | Packages containing at least one elevation read | **20** | ✅ |
 | Files containing at least one elevation read | 55 | ✅ |
-| — the distinct symbols those reads live in — what this page anchors | 101 | ✅ |
+| — the distinct symbols those reads live in — what this page anchors | 102 | ✅ |
 | — of those files, the ones holding more than one read in one symbol | 8 | ✅ |
 
 The six rows marked — are a **dated decomposition, not a live claim**: they were
