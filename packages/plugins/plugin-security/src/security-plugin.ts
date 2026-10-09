@@ -6058,11 +6058,14 @@ export class SecurityPlugin implements Plugin {
    * `/auth/me/permissions` uses ({@link fallbackPermissionSet}, default
    * `member_default`) instead of falling open to the full field set.
    *
-   * Why the two differ rather than converge. `getReadableFields` mirrors the
-   * engine middleware, which skips its grant-based gates for a caller with no
-   * permission sets — reporting a narrowing the data path would not enforce is
-   * its own kind of drift, so on the DATA plane falling open is the correct,
-   * drift-free answer. What reaches that caller is the object's posture
+   * Why the two differ rather than converge. `getReadableFields` keeps the
+   * answer it gave when the engine middleware skipped its grant-based gates for
+   * a caller with no permission sets — reporting a narrowing the data path did
+   * not enforce was its own kind of drift, so on the DATA plane falling open was
+   * the drift-free answer. The middleware no longer serves that caller: object
+   * admission refuses it (ADR-0056 D2's deny baseline) and a principal-less one
+   * is refused outright (ADR-0096 D5), so no data-plane read reaches the fields
+   * named here. What reaches that caller is the object's posture
    * ({@link resolveCallerPosture}): [#20995] its masking rules, and a masked
    * field is a served column, so it stays; [#21063] its per-field capability
    * contract, and a capability-gated field is not served, so it leaves. The

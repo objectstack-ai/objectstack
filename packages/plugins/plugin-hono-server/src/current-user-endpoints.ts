@@ -57,6 +57,7 @@ import type {
     Logger,
 } from '@objectstack/spec/contracts';
 import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
+import { inProcessSessionReadInput } from '@objectstack/types';
 
 /** API prefix these endpoints mount under unless the host overrides it. */
 export const DEFAULT_CURRENT_USER_PREFIX = '/api/v1';
@@ -403,7 +404,12 @@ export function makeExecutionContextResolver(
                 api = await authService.getApi();
             }
             if (!api?.getSession) return undefined;
-            const session = await api.getSession({ headers: c.req.raw.headers });
+            // [#22258] The in-process session-read rule: these routes answer
+            // with their own response, so a renewal here would move the
+            // session's expiry while its renewed cookie is discarded. A request
+            // carrying a session cookie reads without renewal; a bearer-only
+            // request renews as before.
+            const session = await api.getSession(inProcessSessionReadInput(c.req.raw.headers));
             if (!session?.user?.id) return undefined;
             const userId = session.user.id;
             const tenantId = session.session?.activeOrganizationId ?? undefined;

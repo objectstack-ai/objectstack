@@ -368,6 +368,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       updated_at: {
         label: "Updated At"
       }
+    },
+    _validations: {
+      validity_window_order: {
+        message: "Valid Until must be later than Valid From. The grant is active from Valid From up to, but not including, Valid Until, so a window that ends at or before it starts grants nothing. Leave either one empty for an open-ended window."
+      }
     }
   },
   sys_position_permission_set: {

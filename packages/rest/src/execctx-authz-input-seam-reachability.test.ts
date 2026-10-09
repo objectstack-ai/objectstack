@@ -257,7 +257,10 @@ describe('[#13906] §0 — the two seams are LIVE on today\'s tree, by symbol', 
     expect(body).toMatch(/isAuthGateActive === 'function'\s*\n?\s*&& authService\.isAuthGateActive\(\) === true/);
     // The re-read is loud, and it is the RAW api call — ⛔ not the swallowing
     // `getSession` closure, which would re-collapse the very same two facts.
-    expect(body).toMatch(/gatedSession = await api\.getSession\(\{ headers \}\);/);
+    // [#22258] Its argument is the in-process session-read rule's input (a
+    // cookie request reads without renewal); the call itself is still the raw,
+    // throwing one this pin exists for.
+    expect(body).toMatch(/gatedSession = await api\.getSession\(inProcessSessionReadInput\(headers\)\);/);
     expect(body).toMatch(/throw new AuthzStoreUnavailableError\('auth_gate', err\);/);
     // ⛔ NARROWNESS CONTROL: the probe-throws leg must STAY absorbed — a host
     // whose probe faults never declared a gate. If this ever flips, the repair

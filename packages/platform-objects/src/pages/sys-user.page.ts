@@ -212,6 +212,14 @@ export const SysUserDetailPage: Page = {
             // its id (linkField: 'permission_set_id'); server-side gates
             // (audience-anchor D5/D9, delegated-admin D12) surface their denial
             // reason in the Add dialog.
+            //
+            // [ADR-0091 D1/D2] `valid_from` / `valid_until` are listed because
+            // they decide whether the grant confers anything: the resolver drops
+            // an assignment outside its half-open window at every evaluation, so
+            // a row showing only the set would read as a live grant when it is
+            // not. The Add affordance writes the two link keys alone; the window
+            // is set by editing the assignment row, whose object refuses a
+            // window whose end is not after its start.
             label: { en: 'Permission Sets', 'zh-CN': '权限集', 'ja-JP': '権限セット', 'es-ES': 'Conjuntos de permisos' },
             icon: 'lock',
             children: [
@@ -220,7 +228,7 @@ export const SysUserDetailPage: Page = {
                 properties: {
                   objectName: 'sys_user_permission_set',
                   relationshipField: 'user_id',
-                  columns: ['permission_set_id', 'organization_id', 'granted_by', 'created_at'],
+                  columns: ['permission_set_id', 'organization_id', 'valid_from', 'valid_until', 'granted_by', 'created_at'],
                   sort: [{ field: 'created_at', order: 'desc' }],
                   limit: 25,
                   showViewAll: true,

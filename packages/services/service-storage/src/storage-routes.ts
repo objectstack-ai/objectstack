@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { IHttpServer, IHttpRequest, IHttpResponse, IStorageService } from '@objectstack/spec/contracts';
-import type { StandardErrorCode } from '@objectstack/spec/api';
+import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
 // [#15999] The BRAND predicate, never `instanceof` — this error crosses package
@@ -77,15 +77,21 @@ const ORGANIZATION_CHANGED_MESSAGE =
  * written.
  *
  * `413` because that is the condition (RFC 9110, content too large).
- * `VALIDATION_ERROR` because it is the standard-catalog member the platform
- * itself derives for a `413` (`standardErrorCodeForHttpStatus`, ADR-0112): the
- * catalog names no `413` member, and the ledger's `PAYLOAD_TOO_LARGE` row is
- * registered under `@objectstack/rest` alone, so stamping it here would be an
- * unregistered emitter (`check:error-code-provenance`). The status carries the
- * specific condition; the message names the limit and where it is set.
+ * `PAYLOAD_TOO_LARGE` because it is the one registered code for that condition
+ * (ADR-0112 ledger, listed under this package's owner key beside
+ * `@objectstack/rest`, which answers it for its import row ceilings): a client
+ * branches on "too large" by the code alone, at every door that refuses it.
+ * Not `VALIDATION_ERROR`, the bucket `standardErrorCodeForHttpStatus` derives
+ * for a `413`: the standard catalog names no `413` member, so that code would
+ * say only "malformed request" and leave the client to read the status.
+ *
+ * Typed `RegisteredErrorCode` so a misspelling, or the code leaving the
+ * ledger, fails to compile; that this package's own owner key lists it is
+ * `check:error-code-provenance`'s to hold. The message names the limit and
+ * where it is set.
  */
 const UPLOAD_TOO_LARGE_STATUS = 413;
-const UPLOAD_TOO_LARGE_CODE: StandardErrorCode = 'VALIDATION_ERROR';
+const UPLOAD_TOO_LARGE_CODE: RegisteredErrorCode = 'PAYLOAD_TOO_LARGE';
 
 /** The refusal's message: what was measured, the limit, and the one setting that moves it. */
 function uploadTooLargeMessage(measured: string, maxUploadBytes: number): string {
