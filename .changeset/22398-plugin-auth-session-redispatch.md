@@ -1,5 +1,5 @@
 ---
-'@objectstack/plugin-auth': patch
+'@objectstack/plugin-auth': minor
 ---
 
 fix(auth): the plugin-auth doors that re-dispatch to better-auth or call its endpoints in-process no longer renew a browser session behind its cookie (#22398)
