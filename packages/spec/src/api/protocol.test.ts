@@ -2573,20 +2573,35 @@ import {
 } from './protocol.zod';
 
 describe('ListDraftsResponseSchema declares the pending-drafts body', () => {
-  /** A verbatim-shaped capture of a real `listDrafts` return (one org draft). */
+  /**
+   * A verbatim-shaped capture of a real `listDrafts` return: a plain-string
+   * label, an inline-locale-map label (the `I18nLabel` form the UI types
+   * author), and a draft whose body declares no label at all.
+   */
   const realResponse = {
     drafts: [
       {
         type: 'view',
         name: 'account_pipeline',
+        label: 'Account Pipeline',
         organizationId: 'org_01',
         packageId: 'com.example.crm',
         updatedAt: '2026-08-27T09:12:44.000Z',
         updatedBy: 'admin@objectos.ai',
       },
       {
+        type: 'app',
+        name: 'field_service',
+        label: { en: 'Field Service', 'zh-CN': '现场服务' },
+        organizationId: null,
+        packageId: 'com.example.fsm',
+        updatedAt: '2026-08-27T09:13:02.000Z',
+        updatedBy: 'admin@objectos.ai',
+      },
+      {
         type: 'object',
         name: 'lead_source',
+        label: null,
         organizationId: null,
         packageId: null,
         updatedAt: null,
@@ -2599,6 +2614,23 @@ describe('ListDraftsResponseSchema declares the pending-drafts body', () => {
     const result = ListDraftsResponseSchema.safeParse(realResponse);
     expect(result.success).toBe(true);
     if (result.success) expect(result.data).toEqual(realResponse);
+  });
+
+  it('a draft whose body declares no label reads `null` — never the item name standing in for it', () => {
+    const result = ListDraftsResponseSchema.safeParse(realResponse);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const unlabelled = result.data.drafts.find((d) => d.name === 'lead_source');
+    expect(unlabelled?.label).toBeNull();
+  });
+
+  it('`label` is required on the wire: a row that omits it is refused at the member', () => {
+    const { label: _omitted, ...withoutLabel } = realResponse.drafts[2]!;
+    const result = ListDraftsResponseSchema.safeParse({ drafts: [withoutLabel] });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((i) => i.path.join('.'))).toContain('drafts.0.label');
+    }
   });
 
   it('the honest-empty answer parses — {drafts: []} is a declared, legal body', () => {
