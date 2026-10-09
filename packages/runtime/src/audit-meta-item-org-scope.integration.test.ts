@@ -93,20 +93,30 @@ const viewBody = (name: string) => ({
 });
 
 /**
- * Three saves of ONE view name through the real `saveMetaItem` write path —
- * two tenant overlays and one env-wide package write. Rows are seeded by the
- * production writer, not hand-inserted, so the stamps under test are the
- * stamps production produces.
+ * Three audit-bearing rows on ONE view name: two tenant overlays and one
+ * env-wide package write.
+ *
+ * [ADR-0131 D6] The protocol now refuses every organization-scoped write, so
+ * the two tenant overlays — and the audit rows that recorded them — are
+ * planted AT REST as the legacy rows a release before D6 left behind, shaped
+ * as `SysMetadataRepository.put` and `recordMetadataAudit` wrote them. The
+ * env-wide row is still written by the production writer (`saveMetaItem`),
+ * so the discriminating control keeps the stamp production produces. The
+ * organization-scoped READ this file pins is S5's to re-premise.
  */
-async function seedThreeOrgs(protocol: any) {
-  await protocol.saveMetaItem({
-    type: 'view', name: NAME, item: viewBody(NAME),
-    organizationId: ORG_A, actor: ACTOR_A, source: 'studio',
-  });
-  await protocol.saveMetaItem({
-    type: 'view', name: NAME, item: viewBody(NAME),
-    organizationId: ORG_B, actor: ACTOR_B, source: 'studio',
-  });
+async function seedThreeOrgs(protocol: any, engine: any) {
+  for (const [org, actor] of [[ORG_A, ACTOR_A], [ORG_B, ACTOR_B]] as const) {
+    await engine.insert('sys_metadata', {
+      type: 'view', name: NAME, organization_id: org, package_id: null, state: 'active',
+      metadata: JSON.stringify(viewBody(NAME)), checksum: `legacy_${org}`, version: 1,
+    }, { context: { isSystem: true } });
+    await engine.insert('sys_metadata_audit', {
+      occurred_at: new Date().toISOString(), actor, source: 'studio',
+      type: 'view', name: NAME, organization_id: org,
+      operation: 'save', outcome: 'allowed', code: 'ok',
+      lock_state: 'none', lock_overridden: false, note: 'active',
+    }, { context: { isSystem: true } });
+  }
   await protocol.saveMetaItem({
     type: 'view', name: NAME, item: viewBody(NAME),
     actor: ACTOR_ENV, source: 'package',
@@ -118,7 +128,7 @@ const actorsOf = (result: any) => (result.events as any[]).map((e) => e.actor).s
 describe('#8747 auditMetaItem organization scope (real engine + real SqlDriver)', () => {
   it('seeds three organizations onto one (type, name) — the precondition the scope is judged against', async () => {
     const { engine, protocol } = await boot();
-    await seedThreeOrgs(protocol);
+    await seedThreeOrgs(protocol, engine);
 
     const raw = (await engine.find('sys_metadata_audit', { where: {} })) as any[];
     const stamps = raw
@@ -136,8 +146,8 @@ describe('#8747 auditMetaItem organization scope (real engine + real SqlDriver)'
   });
 
   it('BOTH DIRECTIONS: an org-scoped read sees its own rows AND env-wide rows, and NOT a third org', async () => {
-    const { protocol } = await boot();
-    await seedThreeOrgs(protocol);
+    const { engine, protocol } = await boot();
+    await seedThreeOrgs(protocol, engine);
 
     const result = await (protocol as any).auditMetaItem({
       type: 'view', name: NAME, organizationId: ORG_A,
@@ -156,8 +166,8 @@ describe('#8747 auditMetaItem organization scope (real engine + real SqlDriver)'
   });
 
   it('is symmetric — org_beta sees its own rows plus env-wide, never org_alpha', async () => {
-    const { protocol } = await boot();
-    await seedThreeOrgs(protocol);
+    const { engine, protocol } = await boot();
+    await seedThreeOrgs(protocol, engine);
 
     const actors = actorsOf(await (protocol as any).auditMetaItem({
       type: 'view', name: NAME, organizationId: ORG_B,
@@ -168,8 +178,8 @@ describe('#8747 auditMetaItem organization scope (real engine + real SqlDriver)'
   });
 
   it('an organization with no rows of its own still sees the env-wide rows, and only those', async () => {
-    const { protocol } = await boot();
-    await seedThreeOrgs(protocol);
+    const { engine, protocol } = await boot();
+    await seedThreeOrgs(protocol, engine);
 
     // A tenant that has never overlaid this item must still see the package
     // install that put it there — and nobody else's overlays.
@@ -181,8 +191,8 @@ describe('#8747 auditMetaItem organization scope (real engine + real SqlDriver)'
   });
 
   it('an org-less read is fail-closed: env-wide rows only, never every tenant\'s', async () => {
-    const { protocol } = await boot();
-    await seedThreeOrgs(protocol);
+    const { engine, protocol } = await boot();
+    await seedThreeOrgs(protocol, engine);
 
     // This is the exact call shape that leaked before the fix — the production
     // route omitted `organizationId` entirely. It must no longer be a skeleton
@@ -198,8 +208,8 @@ describe('#8747 auditMetaItem organization scope (real engine + real SqlDriver)'
   });
 
   it('an explicit organizationId: null reads env-wide rows, same as omitting it', async () => {
-    const { protocol } = await boot();
-    await seedThreeOrgs(protocol);
+    const { engine, protocol } = await boot();
+    await seedThreeOrgs(protocol, engine);
 
     const actors = actorsOf(await (protocol as any).auditMetaItem({
       type: 'view', name: NAME, organizationId: null,
@@ -209,8 +219,8 @@ describe('#8747 auditMetaItem organization scope (real engine + real SqlDriver)'
   });
 
   it('scoping does not disturb the (type, name) key — a different item is still excluded', async () => {
-    const { protocol } = await boot();
-    await seedThreeOrgs(protocol);
+    const { engine, protocol } = await boot();
+    await seedThreeOrgs(protocol, engine);
     await (protocol as any).saveMetaItem({
       type: 'view', name: 'other_grid', item: viewBody('other_grid'),
       organizationId: ORG_A, actor: 'carol@alpha.example', source: 'studio',

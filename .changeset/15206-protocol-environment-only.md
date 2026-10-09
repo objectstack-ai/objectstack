@@ -27,13 +27,14 @@ ADR-0131 D6 retires the per-organization overlay axis. The `/meta` doors already
 
 | From | To |
 |:--|:--|
-| `organizationId` on a `SaveMetaItem` / `PublishMetaItem` / `DeleteMetaItem` request (`@objectstack/spec`) | drop it: the write lands environment-wide; a request still naming one is refused `403 NOT_OVERRIDABLE` |
+| `organizationId` on a `SaveMetaItem` / `PublishMetaItem` / `DeleteMetaItem` request (`@objectstack/spec`) | drop it: the write lands environment-wide. The key is stripped at a spec parse (the schemas are not strict) and refused at the protocol: a request still naming one answers `403 NOT_OVERRIDABLE` |
 | `organizationId` on any other protocol write verb's request | drop it, same refusal |
 | `deletePackage({ packageId, organizationId })` or `deletePackage({ packageId, allTenants: true })` | `deletePackage({ packageId })`; either retired key answers `400 INVALID_REQUEST` and removes nothing |
 | `DeletePackageRequest.organizationId` / `.allTenants` (`@objectstack/metadata-protocol`) | gone from the type |
 | `UninstallCleanup`'s `organizationId` argument | gone; a cleanup receives `{ packageId, actor? }` |
 | `TENANT_SCOPE_REQUIRED` in the error-code ledger | retired; no producer emits it |
 | `findPlatformScheduleOrgGaps`' `organizationId` input | gone: every write is platform-level |
+| a `seed` draft whose records carry no `organization_id`, relying on the publisher's active organization under `group` | set `organization_id` on each record (ADR-0131 D12, item 12); under `group` a seed record that names no organization is refused at load, and under `single` the loader still derives the Default Organization |
 
 **What a deployment observes.**
 
