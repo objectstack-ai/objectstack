@@ -248,7 +248,14 @@ async function boot(options: { faultOn?: string } = {}) {
     }
   };
   const member = (context: any, object: string, id: string) => serve(object, id, context);
-  return { store, ctx, patch, member };
+  /**
+   * [ADR-0055] `security/explain`'s record-grained update verdict through the
+   * registered service (`explainAccessForCaller`). `userId` explains another
+   * user, as the REST route does; the caller is the second argument.
+   */
+  const explainUpdate = (callerContext: any, object: string, recordId: string, userId?: string) =>
+    security.explain({ object, operation: 'update', recordId, ...(userId ? { userId } : {}) }, callerContext);
+  return { store, ctx, patch, member, explainUpdate };
 }
 
 const rep = () => ({ userId: REP, tenantId: 'org-1', positions: [], permissions: ['cbpm_rep'] });
@@ -373,5 +380,42 @@ describe('[ADR-0055] checkControlledByParentWrite rejects where the write path r
     );
     expect(rejection).toBeInstanceOf(DatasourceUnavailable);
     expect(rejection).toMatchObject({ code: 'ERR_DATASOURCE_UNAVAILABLE', status: 503 });
+  });
+});
+
+describe('[ADR-0055] security/explain answers an update as the PATCH does, from this same check', () => {
+  const sharingDetailOf = (d: any): string => String(d.layers.find((l: any) => l.layer === 'sharing')?.record?.detail ?? '');
+
+  it('a refused update is explained refused on the leg the PATCH names; an admitted one is explained writable', async () => {
+    const h = await boot();
+    for (const [context, object, id, leg] of [
+      [rep(), 'cbpm_contact', 'c_other', 'record_sharing'],
+      [rep(), 'cbpm_region_note', 'rn_eu', 'row_level_security'],
+      [viewer(), 'cbpm_contact', 'c_own', 'object_permission'],
+      [rep(), 'cbpm_line', 'line_above_dangling', 'master_chain'],
+    ] as const) {
+      expect(await h.patch(context, object, id), `PATCH ${object}/${id} by ${context.userId}`).not.toBe('admitted');
+      const d = await h.explainUpdate(context, object, id);
+      expect(d.record, `explain ${object}/${id} by ${context.userId}`).toEqual({ recordId: id, visible: false, decidedBy: 'sharing' });
+      expect(sharingDetailOf(d)).toContain(`refuses this update on its '${leg}' leg`);
+    }
+    for (const [object, id] of [['cbpm_contact', 'c_own'], ['cbpm_contact', 'c_shared'], ['cbpm_region_note', 'rn_us'], ['cbpm_line', 'line_ok']] as const) {
+      expect(await h.patch(rep(), object, id), `PATCH ${object}/${id}`).toBe('admitted');
+      const d = await h.explainUpdate(rep(), object, id);
+      expect(d.record, `explain ${object}/${id}`).toMatchObject({ recordId: id, visible: true });
+      expect(sharingDetailOf(d)).not.toContain('master-detail write check');
+    }
+  });
+
+  it('explaining ANOTHER user asks the check for THAT user: the system caller would be admitted, the viewer it explains is not', async () => {
+    const h = await boot();
+    // Asked with the CALLER's context, the check would admit: a system context answers `allow`.
+    expect(await h.member({ isSystem: true }, 'cbpm_contact', 'c_own')).toEqual({ outcome: 'allow' });
+    // The viewer, explained by user id, resolves to the fallback set — READ only on the master.
+    expect(await h.patch(viewer(), 'cbpm_contact', 'c_own')).not.toBe('admitted');
+    const d = await h.explainUpdate({ isSystem: true }, 'cbpm_contact', 'c_own', VIEWER);
+    expect(d.principal.userId).toBe(VIEWER);
+    expect(d.record).toEqual({ recordId: 'c_own', visible: false, decidedBy: 'sharing' });
+    expect(sharingDetailOf(d)).toContain("refuses this update on its 'object_permission' leg");
   });
 });
