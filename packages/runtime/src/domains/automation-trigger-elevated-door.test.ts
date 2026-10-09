@@ -46,7 +46,7 @@ const DOOR_TYPES = ['screen', 'api'] as const;
  */
 function makeDispatcher(flows: Array<{ name: string; type: string; runAs?: string }>, opts: { omitGetFlow?: boolean } = {}) {
     const byName = new Map(flows.map((f) => [f.name, f]));
-    const execute = vi.fn(async () => ({ success: true, output: {} }));
+    const execute = vi.fn(async (_name: string, _context?: unknown) => ({ success: true, output: {} }));
     const getFlow = vi.fn(async (name: string) => byName.get(name) ?? null);
     const automation: Record<string, unknown> = opts.omitGetFlow ? { execute } : { execute, getFlow };
     const services: Record<string, unknown> = { automation };
