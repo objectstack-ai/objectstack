@@ -13,7 +13,7 @@ export type { VerifyStack, BootOptions } from './harness.js';
 // The in-process handle on the booted stack (hotcrm#1579 step 5a): every
 // `VerifyStack` carries it; these are its types and its one predicate.
 export { isVerifyRefusal } from './handle.js';
-export type { VerifyHandle, VerifyRefusal, AsUser, FlowRun, FlowRunRef, EngineRow } from './handle.js';
+export type { VerifyHandle, VerifyRefusal, AsUser, AsSystem, FlowRun, FlowRunRef, EngineRow } from './handle.js';
 
 export { deriveCrudCases, fillRelationalRefs } from './derive.js';
 export type { CrudCase, DerivedAssert, AssertKind, RelationalRef } from './derive.js';

@@ -14,14 +14,18 @@
 // call to the door that owns the semantics, and returns what that door
 // returned (or rethrows what it threw). The doors, per method:
 //
-//   hooks.run · validate · seed · rows   → the ObjectQL engine (`insert` /
-//     `update` / `delete` / `validate` / `find`), the SAME calls
-//     `@objectstack/rest`'s data ingress makes (`protocol.createData` →
+//   hooks.run · hooks.updateWhere · validate · seed · rows → the ObjectQL
+//     engine (`insert` / `update` / `delete` / `validate` / `find`), the SAME
+//     calls `@objectstack/rest`'s data ingress makes (`protocol.createData` →
 //     `engine.insert(object, data, { context })`, and so on). The bound hook
 //     chain, the validation pass, the SecurityPlugin middleware (object
 //     grants, RLS, FLS) all live INSIDE those calls, so they run here exactly
 //     as they run for a REST write. `handle.test.ts` pins that parity on the
-//     same row AND the same refusal.
+//     same row AND the same refusal. [#22301] The two update doors also take
+//     the system principal by name (`{ system: true }` → `{ isSystem: true }`,
+//     the context a system job's write carries), and `hooks.updateWhere` is
+//     the engine's predicate path (`multi: true`), which no REST door reaches:
+//     `handle.update-doors.test.ts` pins both.
 //   flows.run / flows.resume · actions.run → the runtime's `HttpDispatcher`,
 //     driven in-process (no Hono, no socket, no JSON round-trip). The REST
 //     `/automation` and `/actions` routes are the only doors that carry the
@@ -51,7 +55,7 @@ import { SEED_WRITE_EXECUTION_CONTEXT, type ExecutionContext } from '@objectstac
 import type { ValidateDataResponse } from '@objectstack/spec/api';
 import type { AutomationResult } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
-import type { ObjectQL } from '@objectstack/objectql';
+import { resolveEngineUpdateDispatch, type ObjectQL } from '@objectstack/objectql';
 import type { TenancyService } from '@objectstack/plugin-auth';
 
 /** Any row the engine hands back. Untyped on purpose: the engine's, not the handle's. */
@@ -86,6 +90,24 @@ export function isVerifyRefusal(e: unknown): e is VerifyRefusal {
 export interface AsUser {
   /** A bearer token minted by `signIn()` / `signUp()` on the same stack. */
   as: string;
+}
+
+/**
+ * [#22301] Identify the caller as the platform's own SYSTEM principal: no
+ * user, no session. The write runs under `{ isSystem: true }`, the context a
+ * system job, an integration or the platform's own automation writes under,
+ * so it passes no permission gate, and it is still a real write: the bound
+ * hooks see `session.isSystem` and no `userId`, declared validations run, and
+ * the record-change trigger fires its flows with no trigger user. (`seed` is
+ * the other system door, and it is not this one: it also sets `skipTriggers`
+ * and `seedReplay`, because a fixture is end-state data, not an event.)
+ *
+ * Accepted by the UPDATE doors only: `hooks.run(object, 'update', …)` and
+ * `hooks.updateWhere`. Named, never defaulted: a write that names no caller
+ * is refused, so a forgotten `as` can never become a system write.
+ */
+export interface AsSystem {
+  system: true;
 }
 
 /**
@@ -141,6 +163,39 @@ export interface VerifyHandle {
       input: EngineRow,
       opts: AsUser,
     ): Promise<EngineRow>;
+    /**
+     * [#22301] The same by-id `update` as the SYSTEM principal ({@link AsSystem}):
+     * `update(object, { ...input, id }, { where: { id }, context: { isSystem:
+     * true } })`. No permission gate; the hooks, the declared validations and
+     * the record-change trigger run as they do for any system write.
+     *
+     * Only `update` takes `{ system: true }`. A system insert of fixture rows
+     * is `seed`; a system insert or delete that fires record triggers has no
+     * door here, and asking for one is refused (`INVALID_REQUEST` / `400`).
+     */
+    run(object: string, operation: 'update', input: EngineRow, opts: AsSystem): Promise<EngineRow>;
+    /**
+     * [#22301] A PREDICATE update: one payload written to every row `where`
+     * selects. This is the engine's own predicate path, `update(object, data,
+     * { where, multi: true, context })`, and no REST door reaches it (`POST
+     * /data/:object/updateMany` writes by id, one row at a time). The engine
+     * dispatches the `beforeUpdate` and `afterUpdate` hooks once per matched
+     * row, each bound to THAT row's pre-image as `previous` (ADR-0058's bulk
+     * addendum), so the record-change trigger evaluates and fires per row.
+     * Resolves with the affected-row count the engine answers.
+     *
+     * `where` is the engine's object-form filter (`{ name: 'x' }`, `{ stage:
+     * { $ne: 'won' } }`); `{}` matches every row. The caller is a person
+     * (`{ as }`) or the system (`{ system: true }`).
+     *
+     * Refused before the engine is touched (`INVALID_REQUEST` / `400`): a
+     * `where` that is not an object, and a call the engine's own dispatch
+     * would route to its by-id path instead (an `id` in `data`, or a `where`
+     * that names only an `id`). One row by id is `hooks.run(object, 'update',
+     * { id, ...fields }, opts)`. Every other refusal (permission, validation,
+     * a hook's throw) is the engine's own error, rethrown unchanged.
+     */
+    updateWhere(object: string, where: EngineRow, data: EngineRow, opts: AsUser | AsSystem): Promise<number>;
   };
 
   /**
@@ -246,6 +301,24 @@ const API_PREFIX = '/api/v1';
 const SEED_CONTEXT: ExecutionContext = SEED_WRITE_EXECUTION_CONTEXT;
 const SYSTEM_CONTEXT: ExecutionContext = { isSystem: true } as ExecutionContext;
 
+/**
+ * [#22301] A call the handle refuses for its own SHAPE, before any caller is
+ * resolved or the engine is touched. The ADR-0112 pair is the assertion
+ * surface (`statusCode` mirrors `status`, as on a `VerifyRefusal`).
+ */
+function callShapeRefusal(message: string): Error & { code: string; status: number; statusCode: number } {
+  return Object.assign(new Error(message), { code: 'INVALID_REQUEST', status: 400, statusCode: 400 });
+}
+
+/** `true` when `opts` names the system principal; refuses a call that names two callers. */
+function namesSystem(opts: AsUser | AsSystem, door: string): boolean {
+  const system = (opts as Partial<AsSystem> | undefined)?.system === true;
+  if (system && (opts as Partial<AsUser>).as !== undefined) {
+    throw callShapeRefusal(`verify: ${door} takes ONE caller: { as: token } or { system: true }, not both`);
+  }
+  return system;
+}
+
 function refusalFrom(status: number, body: unknown, fallback: string): VerifyRefusal {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const b = body as any;
@@ -335,15 +408,27 @@ export async function createHandle(kernel: ObjectKernel, origin: string): Promis
     contextFor,
 
     hooks: {
-      async run(object, operation, input, opts) {
+      async run(
+        object: string,
+        operation: 'insert' | 'update' | 'delete',
+        input: EngineRow,
+        opts: AsUser | AsSystem,
+      ): Promise<EngineRow> {
         // The call's own shape is judged before anyone is resolved: a
         // malformed call is refused for its own reason, not for whatever the
         // identity resolver says about the token.
         if (operation !== 'insert' && operation !== 'update' && operation !== 'delete') {
           throw new Error(`verify: hooks.run operation must be 'insert' | 'update' | 'delete', got '${String(operation)}'`);
         }
+        const system = namesSystem(opts, 'hooks.run');
+        if (system && operation !== 'update') {
+          throw callShapeRefusal(
+            `verify: hooks.run takes { system: true } on 'update' only, got '${operation}'. ` +
+              'A system insert of fixture rows is seed(object, rows); a system insert or delete that fires record triggers has no handle door.',
+          );
+        }
         const id = operation === 'insert' ? undefined : requireId(input, operation);
-        const context = await contextFor(opts.as);
+        const context = system ? { ...SYSTEM_CONTEXT } : await contextFor((opts as AsUser).as);
         const ql = await engine();
         switch (operation) {
           case 'insert':
@@ -355,6 +440,28 @@ export async function createHandle(kernel: ObjectKernel, origin: string): Promis
           case 'delete':
             return ql.delete(object, { where: { id }, context });
         }
+      },
+
+      async updateWhere(object, where, data, opts) {
+        if (where === null || typeof where !== 'object' || Array.isArray(where)) {
+          throw callShapeRefusal(
+            'verify: hooks.updateWhere(object, where, data, opts) takes `where` as an object filter; `{}` matches every row',
+          );
+        }
+        // The engine's OWN dispatch ladder (the one `ObjectQL.update` resolves
+        // first), asked rather than re-derived: a call it would route to the
+        // by-id path is not a predicate update, and answering it here would
+        // hand back a row where this door promises a count.
+        if (resolveEngineUpdateDispatch(data, { where, multi: true }).kind === 'by-id') {
+          throw callShapeRefusal(
+            "verify: hooks.updateWhere is the engine's predicate path, but this call addresses one row by id " +
+              "(an id in `data`, or a `where` naming only an id), which the engine writes by id. " +
+              "Update one row through hooks.run(object, 'update', { id, ...fields }, opts).",
+          );
+        }
+        const context = namesSystem(opts, 'hooks.updateWhere') ? { ...SYSTEM_CONTEXT } : await contextFor((opts as AsUser).as);
+        const ql = await engine();
+        return (await ql.update(object, data, { where, multi: true, context })) as number;
       },
     },
 
