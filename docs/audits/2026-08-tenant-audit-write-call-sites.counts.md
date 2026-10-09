@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 237 |
-| Object name statically decidable | 157 |
-| Object name chosen at run time | 80 |
-| Against a tenancy-enabled object | 156 |
+| Write call sites | 240 |
+| Object name statically decidable | 159 |
+| Object name chosen at run time | 81 |
+| Against a tenancy-enabled object | 158 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 176 |
+| Threading a tenant context | 179 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 53 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 125 |
+| Threading a decidably elevated context | 128 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 104 |
 
@@ -90,12 +90,12 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-08 at `8e432893f`.
+Measured on 2026-10-08 at `715ba6f44`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 621 |
-| engine-shaped types recognised | 70 |
+| tracked non-test sources scanned | 623 |
+| engine-shaped types recognised | 71 |
 | declared objects in the registry | 117 |
 | same-named calls subtracted as non-engine | 162 |
 
@@ -177,6 +177,9 @@ Measured on 2026-10-08 at `8e432893f`.
 | `packages/plugins/plugin-security/src/permission-set-projection.ts` | `insert` | `object` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/permission-set-projection.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/permission-set-projection.ts` | `delete` | `sys_permission_set` | enabled | elevated | 1 |
+| `packages/plugins/plugin-security/src/position-environment-backfill.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-security/src/position-write-through.ts` | `delete` | `sys_position` | enabled | elevated | 1 |
+| `packages/plugins/plugin-security/src/position-write-through.ts` | `update` | `sys_position` | enabled | elevated | 1 |
 | `packages/plugins/plugin-security/src/security-plugin.ts` | `insert` | `sys_position_permission_set` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `delete` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 2 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
