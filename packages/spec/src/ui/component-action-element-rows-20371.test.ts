@@ -30,7 +30,7 @@ import {
   hasReservedComponentNamespace,
   isKnownComponentType,
 } from './component-type-vocabulary';
-import { PageComponentSchema, PageComponentType } from './page.zod';
+import { ElementDataSourceSchema, PageComponentSchema, PageComponentType } from './page.zod';
 
 type Issue = { code: string; path: PropertyKey[]; message: string; keys?: string[]; errors?: Issue[][] };
 
@@ -281,14 +281,20 @@ describe('what the measurement decided, pinned', () => {
     expect(ElementDefinitionListPropsSchema.safeParse({}).success).toBe(true);
   });
 
-  it('repeater `object` is required — without it the list never queries', () => {
-    const issues = issuesOf(ElementRepeaterPropsSchema.safeParse({ fields: ['name'] }));
+  it('repeater: its object is the binding\'s since v18 — the props bag requires none, and refuses a flat one', () => {
+    // The measurement made the flat `object` REQUIRED (without it the list
+    // never queries). #11509 moved the list onto the node-level `dataSource`,
+    // so the requirement moved with it: the component-props lint reports a
+    // repeater with no `dataSource.object`, and the props bag refuses `object`.
+    expect(ElementRepeaterPropsSchema.safeParse({ fields: ['name'] }).success).toBe(true);
+    const issues = issuesOf(ElementRepeaterPropsSchema.safeParse({ object: 'task', fields: ['name'] }));
     expect(issues.map((i) => [i.code, i.path.join('.')])).toEqual([['invalid_type', 'object']]);
+    expect(issues[0]!.message).toContain('`dataSource.object`');
   });
 
   it('repeater `fields` takes a name or `{ field }`; the unrendered `label` is refused inside the union', () => {
-    expect(ElementRepeaterPropsSchema.safeParse({ object: 't', fields: ['a', { field: 'b' }] }).success).toBe(true);
-    const [union] = issuesOf(ElementRepeaterPropsSchema.safeParse({ object: 't', fields: [{ field: 'b', label: 'B' }] }));
+    expect(ElementRepeaterPropsSchema.safeParse({ fields: ['a', { field: 'b' }] }).success).toBe(true);
+    const [union] = issuesOf(ElementRepeaterPropsSchema.safeParse({ fields: [{ field: 'b', label: 'B' }] }));
     expect(union!.code).toBe('invalid_union');
     expect(union!.path).toEqual(['fields', 0]);
     // Exactly one arm judged keys, and only keys — the shape the props gate
@@ -298,18 +304,25 @@ describe('what the measurement decided, pinned', () => {
     expect(keyArms[0]!.map((i) => i.keys)).toEqual([['label']]);
   });
 
-  it('repeater `filter` / `sort` are the family\'s one orthography — the record form is refused', () => {
-    const ok = ElementRepeaterPropsSchema.safeParse({
+  it('repeater `filter` / `sort` / `limit` are the binding\'s since v18, in the family\'s one orthography', () => {
+    // Born on the rule array and the sort array; #11509 moved all three onto
+    // the node-level `dataSource`, which carries the same shapes.
+    const ok = ElementDataSourceSchema.safeParse({
       object: 'task',
       filter: [{ field: 'status', operator: 'equals', value: 'open' }],
       sort: [{ field: 'due_date', order: 'asc' }],
       limit: 10,
     });
     expect(ok.success).toBe(true);
-    const record = issuesOf(ElementRepeaterPropsSchema.safeParse({ object: 'task', filter: { status: 'open' } }));
+    const record = issuesOf(ElementDataSourceSchema.safeParse({ object: 'task', filter: { status: 'open' } }));
     expect(record.map((i) => [i.code, i.path.join('.')])).toEqual([['invalid_type', 'filter']]);
-    const limit = issuesOf(ElementRepeaterPropsSchema.safeParse({ object: 'task', limit: 0 }));
+    const limit = issuesOf(ElementDataSourceSchema.safeParse({ object: 'task', limit: 0 }));
     expect(limit.map((i) => [i.code, i.path.join('.')])).toEqual([['too_small', 'limit']]);
+    // …and the flat keys are refused at the props bag, with the prescription.
+    for (const key of ['filter', 'sort', 'limit']) {
+      const flat = issuesOf(ElementRepeaterPropsSchema.safeParse({ [key]: [] }));
+      expect(flat.map((i) => [i.code, i.path.join('.')]), key).toEqual([['invalid_type', key]]);
+    }
   });
 
   it('`objectName` is declared where the renderer forwards it — on the action, never on a container', () => {

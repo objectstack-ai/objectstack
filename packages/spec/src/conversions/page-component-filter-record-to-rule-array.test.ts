@@ -558,7 +558,15 @@ describe('§6 the reach is the family, read off the schema', () => {
     // #11509 retired `object-grid.defaultFilters` (the one block that had it):
     // the row answers every value with its removal prescription, never the
     // rule-array one, and no block keeps a record form there after the chain.
-    expect(TYPES.filter((t) => refusesRecordWithPrescription(ComponentPropsMap[t], 'defaultFilters'))).toEqual([]);
+    // (Its tombstone quotes the rule form as the value to move, so the probe
+    // is the removal sentence, not the rule-array prescription's form text.)
+    const retired = TYPES.filter((t) => {
+      const parse = (ComponentPropsMap[t] as unknown as { safeParse: (v: unknown) => { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; message: string }> } } }).safeParse;
+      const r = parse.call(ComponentPropsMap[t], { defaultFilters: { status: 'active' } });
+      return !r.success && r.error!.issues.some((i) => i.path[0] === 'defaultFilters' && i.message.includes('was removed'));
+    });
+    expect(retired).toEqual(['object-grid']);
+    expect(TYPES.filter((t) => refusesRecordWithPrescription(ComponentPropsMap[t], 'defaultFilters') && !retired.includes(t))).toEqual([]);
     expect(TYPES.filter((t) => converts(t, 'defaultFilters'))).toEqual([]);
   });
 

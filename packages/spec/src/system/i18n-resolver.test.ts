@@ -1605,7 +1605,7 @@ describe('translatePage', () => {
           { type: 'page:card', id: 'quick_create', properties: { title: 'Quick Create', icon: 'plus' } },
           { type: 'element:kpi', id: 'kpi_revenue_won', properties: { label: 'Revenue (Won)', value: 42 } },
           { type: 'page:card', id: 'ai_briefing', properties: { title: 'Ask the AI Assistant', description: 'Open the assistant panel from the right edge…' } },
-          { type: 'element:record_picker', id: 'lead_picker', properties: { object: 'lead', placeholder: 'Search leads…', emptyText: 'No records' } },
+          { type: 'element:record_picker', id: 'lead_picker', dataSource: { object: 'lead' }, properties: { placeholder: 'Search leads…', emptyText: 'No records' } },
           // Was `element:form` until #9249 retired that element whole, then a
           // bespoke type carrying the `submitLabel` pin until commit d173125fb, whose
           // ruling retired the key from the copy face, so the node now pins
