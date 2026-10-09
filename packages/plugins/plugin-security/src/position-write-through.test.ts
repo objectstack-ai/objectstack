@@ -401,7 +401,10 @@ describe('[ADR-0131 D3] Q2 = A — a name a package or a built-in holds stands t
   // stamp says, because it reads the name's holder from the engine registry.
   it('the write-through passes a write on a package-held or built-in name to the next step, and writes nothing to metadata', async () => {
     const b = await boot();
-    const door = { saveMetaItem: vi.fn(async () => undefined), deleteMetaItem: vi.fn(async () => undefined) };
+    const door = {
+      saveMetaItem: vi.fn(async (_request: Record<string, unknown>) => undefined),
+      deleteMetaItem: vi.fn(async (_request: Record<string, unknown>) => undefined),
+    };
     const writeThrough = createPositionWriteThrough({
       ql: b.engine, getProtocol: () => door, getPosture: () => 'single', logger: b.logger,
     });
