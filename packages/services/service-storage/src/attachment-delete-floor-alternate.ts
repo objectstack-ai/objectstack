@@ -31,7 +31,9 @@ import type { AttachmentLifecycleLogger } from './attachment-lifecycle.js';
  *  - `id != null` is every row of `sys_attachment`, said plainly. The
  *    parent-editor rule is not expressible as a row predicate (the authority
  *    lives on the PARENT record, resolved through the sharing service's
- *    `canEdit`, and RLS has no join), so the policy does not re-implement the
+ *    `checkEdit` and, on a `controlled_by_parent` parent, the security
+ *    service's master-detail write check, and RLS has no join), so the
+ *    policy does not re-implement the
  *    rule — it stops the floor answering for this object on this limb, and the
  *    gate keeps deciding. A non-uploader who cannot edit the parent is still
  *    refused, by the gate, with `ATTACHMENT_DELETE_DENIED`.
