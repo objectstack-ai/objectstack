@@ -42,8 +42,8 @@ function pluginCtx(): any {
 
 /** The parent's own completion toast — it must never ride a child's refusal. */
 const PARENT_TOAST = 'Parent completed!';
-/** The authored refusal template. `{record.name}` is what makes it per-record. */
-const REFUSAL_TEMPLATE = 'Refused: {record.name} is a confirmed duplicate';
+/** The authored refusal template. `{{ record.name }}` is what makes it per-record. */
+const REFUSAL_TEMPLATE = 'Refused: {{ record.name }} is a confirmed duplicate';
 const ACME = { id: 'rec_1', name: 'Acme Corp' } as const;
 
 /**

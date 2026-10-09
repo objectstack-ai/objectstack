@@ -315,6 +315,19 @@ describe('storage error envelope (#3675)', () => {
       },
     },
     {
+      // #22431: a file with neither an attachments scope nor a field owner
+      // needs a signed-in caller — the same pair as the two 401s above.
+      name: 'anonymous download of a file with neither an attachments scope nor a field owner',
+      status: 401,
+      code: 'AUTH_REQUIRED',
+      run: async () => {
+        const store = new StorageMetadataStore(null);
+        await committedAttachment(store, 'u1', { scope: 'user', key: 'user/u1.png' });
+        const routes = mount(await tmpAdapter(), store, { resolveSession: async () => null });
+        return drive(routes, 'GET', `${BASE}/files/:fileId`, { params: { fileId: 'u1' } });
+      },
+    },
+    {
       name: 'raw upload against an adapter with no token support',
       status: 501,
       code: 'NOT_IMPLEMENTED',

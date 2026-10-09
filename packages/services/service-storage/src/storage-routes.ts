@@ -221,9 +221,19 @@ export interface StorageRoutesOptions {
    * progress doors also refuse a caller who is not the file's uploader
    * (`isFileUploader`, `403 PERMISSION_DENIED`). When absent (bare kernels,
    * tests), the routes stay open — back-compat, logged once — and there is no
-   * caller identity for the ownership rule to compare. Download routes are NOT
-   * gated here (capability URLs embedded in <img src>/<a href>; gating them
-   * is a tracked follow-up needing cookie sessions or signed links).
+   * caller identity for the ownership rule to compare.
+   *
+   * [#22431] The two DOWNLOAD routes ask it too, for one file class: a file
+   * with neither an attachments scope nor a field owner (an upload no record
+   * has claimed — an avatar or an organization logo stored as a URL, a pick
+   * not yet saved, a released file). Such a file has no parent record to
+   * derive access from, so the one thing its download requires is a
+   * signed-in caller; none ⇒ `401 AUTH_REQUIRED`, the answer the upload
+   * routes give. A file marked `acl: 'public_read'` stays anonymous
+   * (ADR-0104). A browser's `<img src>` / `<a href>` reaches this resolver
+   * with the session cookie its sign-in set, which reads the same as a bearer
+   * header, so a signed-in page keeps rendering these files. Absent: these
+   * downloads stay open as before — logged once.
    */
   resolveSession?: (req: IHttpRequest) => Promise<StorageUploadSession | null | undefined>;
    /**
@@ -241,11 +251,14 @@ export interface StorageRoutesOptions {
    * `SERVICE_UNAVAILABLE` rather than flattened into the `deny` 403 — the
    * store was unreadable, so no verdict was ever reached. Every other throw
    * still fails closed to `deny`.
-   * A file with neither an attachments scope nor a field owner — an unclaimed
-   * upload, an org logo — keeps the stable anonymous capability URL, as does
-   * any file explicitly marked `acl: 'public_read'` (the opt-in for genuinely
-   * public embedding, since `<img src>` cannot carry a bearer token).
-   * When absent (bare kernels, tests), all downloads stay open (back-compat).
+   * A file with neither an attachments scope nor a field owner is not this
+   * authorizer's to judge — it has no parent record — and needs only a
+   * signed-in caller ({@link StorageRoutesOptions.resolveSession}, #22431).
+   * Any file explicitly marked `acl: 'public_read'` keeps the stable
+   * anonymous capability URL (ADR-0104: the opt-in for genuinely public
+   * embedding, which no sign-in precedes).
+   * When absent (bare kernels, tests), parent-governed downloads stay open
+   * (back-compat).
    */
   authorizeFileRead?: (file: FileRecord, req: IHttpRequest) => Promise<FileReadVerdict>;
   /**
@@ -338,19 +351,59 @@ export function registerStorageRoutes(
     return false;
   };
 
+  // ── Download session gate (#22431) ───────────────────────────────────
+  // The one refusal both download doors give a caller with no session —
+  // for a file of the unclaimed class below, and for a parent-governed file
+  // whose authorizer answers `unauthenticated`. `401` / `AUTH_REQUIRED`, the
+  // pair the upload gate answers too, so a client branches on one answer.
+  const refuseAnonymousDownload = (res: IHttpResponse): false => {
+    sendError(res, 401, 'AUTH_REQUIRED', 'Authentication required to download this file');
+    return false;
+  };
+
+  // `true` ⇒ the caller is signed in, or no resolver is wired (bare kernels,
+  // tests: open, as before — said once, here, because the upload gate's own
+  // notice names only the upload routes). `false` ⇒ the 401 was already sent.
+  // A resolver that throws fails closed, exactly as the upload gate does.
+  let warnedOpenDownloads = false;
+  const requireDownloadSession = async (req: IHttpRequest, res: IHttpResponse): Promise<boolean> => {
+    if (!opts.resolveSession) {
+      if (!warnedOpenDownloads) {
+        warnedOpenDownloads = true;
+        opts.logger?.info(
+          '[storage] no session resolver wired — a file with neither an attachments scope nor a field owner ' +
+            'downloads without a signed-in caller (bare-kernel mode)',
+        );
+      }
+      return true;
+    }
+    let session: StorageUploadSession | null | undefined;
+    try {
+      session = await opts.resolveSession(req);
+    } catch {
+      session = null;
+    }
+    return session?.userId ? true : refuseAnonymousDownload(res);
+  };
+
   // ── Download authorization gate (#2970 item 2, ADR-0104 D3 wave 2) ───
   // Two kinds of file are gated, both deriving access from a PARENT record:
   //   - `attachments`-scope files, via their sys_attachment join rows;
   //   - field-owned files, via the single record whose field owns them
   //     (`ref_object`/`ref_id`, ADR-0104 D3 wave 2).
-  // `acl: 'public_read'` opts a file back out to the stable anonymous
-  // capability URL — needed for genuinely public embedding (`<img src>`
-  // cannot carry a bearer token), and now an explicit declaration rather
-  // than the silent default it used to be for every field file.
+  // [#22431] Every OTHER file — neither an attachments scope nor a field
+  // owner: an upload no record has claimed — has no parent record to derive
+  // access from, and needs a signed-in caller instead
+  // (`requireDownloadSession` below). It used to be the one class still
+  // served as an anonymous capability URL by default.
+  // `acl: 'public_read'` opts any file back out to the stable anonymous
+  // capability URL — the explicit declaration for genuinely public
+  // embedding, which no sign-in precedes (ADR-0104). A signed-in browser
+  // needs no such opt-out: its `<img src>` carries the session cookie.
   //
   // Dual-mode safe: a legacy field holds an inline blob or an external URL,
   // never a `sys_file` id, so no legacy file has `ref_object` set and none of
-  // them start being gated by this change.
+  // them start being gated by the parent-derived arm.
   //
   // Returns the signed-URL TTL to use, or `false` if a response was already
   // sent (401/403, and since #15999 the `503 SERVICE_UNAVAILABLE` an
@@ -360,9 +413,14 @@ export function registerStorageRoutes(
     req: IHttpRequest,
     res: IHttpResponse,
   ): Promise<number | false> => {
+    if (file.acl === 'public_read') return currentLimits().presignedTtl;
     const fieldOwned = !!file.ref_object && file.ref_id != null && file.ref_id !== '';
     const gated = file.scope === 'attachments' || fieldOwned;
-    if (!gated || file.acl === 'public_read' || !opts.authorizeFileRead) {
+    if (!gated) {
+      if (!(await requireDownloadSession(req, res))) return false;
+      return currentLimits().presignedTtl;
+    }
+    if (!opts.authorizeFileRead) {
       return currentLimits().presignedTtl;
     }
     let verdict: FileReadVerdict;
@@ -399,10 +457,7 @@ export function registerStorageRoutes(
       }
       verdict = 'deny'; // a failed authz check must never fall open
     }
-    if (verdict === 'unauthenticated') {
-      sendError(res, 401, 'AUTH_REQUIRED', 'Authentication required to download this file');
-      return false;
-    }
+    if (verdict === 'unauthenticated') return refuseAnonymousDownload(res);
     if (verdict === 'deny') {
       if (fieldOwned) {
         sendError(res, 403, 'FILE_DOWNLOAD_DENIED', 'You do not have access to the record this file belongs to');
@@ -1248,7 +1303,10 @@ export function registerStorageRoutes(
   //   - serves the bytes directly when followed
   // The `/url` endpoint above returns JSON. This sibling endpoint resolves
   // to the same short-lived signed URL and 302-redirects so it can be used
-  // verbatim in any browser context.
+  // verbatim in any browser context. It answers exactly as `/url` does
+  // (`authorizeDownload`): a browser following it is judged by the session
+  // cookie it carries, and only an `acl: 'public_read'` file is served to
+  // a caller with none (#22431).
   // ---------------------------------------------------------------------------
   httpServer.get(`${basePath}/files/:fileId`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
