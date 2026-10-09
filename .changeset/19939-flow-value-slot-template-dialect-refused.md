@@ -30,7 +30,7 @@ A string whose tokens include one of these is not refused. Text slots (`notify` 
 | you wrote | write instead | what changes |
 |:--|:--|:--|
 | `'{record.owner}'`, `'{x}'` | `{ dialect: 'cel', source: 'record.owner' }` | CEL refuses an absent variable or key where the template wrote nothing — guard one that may be absent: `has(record.owner) ? record.owner : null`, `has(vars.x) ? vars.x : null` (writes `null`) |
-| `'{list.0}'` | `{ dialect: 'cel', source: 'list[0]' }` | an empty list fails the run |
+| `'{items.0}'` | `{ dialect: 'cel', source: 'items[0]' }` | an empty list fails the run |
 | `'{$error.message}'` | `{ dialect: 'cel', source: 'vars["$error"].message' }` | a `$`-named variable is read through `vars` |
 | `'{round(x * 100) / 100}'` | `{ dialect: 'cel', source: 'round(x * 100) / 100.0' }` | CEL divides two integers as integers: keep a decimal operand on every division, or `123.46` becomes `123` |
 | `'Renewal — {contract.number}'` | `{ dialect: 'cel', source: "'Renewal — ' + contract.number" }` | wrap a non-string hole in `string(…)`, one that may be null in `coalesce(…, '')` |

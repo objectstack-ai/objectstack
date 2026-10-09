@@ -79,11 +79,73 @@ export function templateTokensOf(value: string): TemplateToken[] {
   return out;
 }
 
-/** A template path as CEL: `a.b.0` → `a.b[0]`; a `$`-named variable is read through `vars`. */
+/**
+ * The CEL keywords an identifier-shaped path segment can collide with: the
+ * lexer reads each as a literal (`true`, `false`, `null`) or an operator
+ * (`in`), never as a name — so neither `in[0]` nor `record.in` reaches the
+ * variable or the key. Part of {@link CEL_CLAIMED_IDENTIFIERS}.
+ */
+export const CEL_KEYWORDS: ReadonlySet<string> = new Set(['true', 'false', 'null', 'in']);
+
+/**
+ * **Every identifier CEL claims before a flow variable can** — a variable of
+ * one of these names is unreachable as a bare identifier, so {@link celPath}
+ * reads a path whose HEAD is one through the flow scope's `vars` map, the route
+ * it already takes for a `$`-named head (`{list.0}` → `vars["list"][0]`).
+ *
+ * Read off the CEL implementation the formula engine builds,
+ * `@marcbachmann/cel-js` 8.0.0 (what `@objectstack/formula` resolves), not off
+ * the CEL language definition — a set from memory would be the wrong set: the
+ * definition's `timestamp`, `duration` and `dyn` are functions here, not
+ * bindings, and a variable of those names reads fine. Four groups:
+ *
+ *  - **the type identifiers** — `lib/registry.js`'s `TYPES`, which the
+ *    registry binds as constants of type `type` when an environment is built
+ *    (`for (const n in TYPES) this.registerConstant(n, 'type', TYPES[n])`): a
+ *    variable named `list` evaluates to the CEL type `list`, and `list[0]`
+ *    fails `Cannot index type 'type' with type 'int'`;
+ *  - **the namespace constants** — `google` (`lib/functions.js`, the
+ *    `google.protobuf.*` type names), `cel` (`lib/macros.js`, `cel.bind`) and
+ *    `optional` (`lib/optional.js`, bound because the engine builds with
+ *    `enableOptionalTypes: true`);
+ *  - **the reserved words** — `lib/globals.js`'s `RESERVED`, which the parser
+ *    refuses as an identifier (`Reserved identifier: for`);
+ *  - **the keywords** — {@link CEL_KEYWORDS}.
+ *
+ * The first two groups are exactly what the built environment's
+ * `getDefinitions().variables` lists. Pinned name by name, through the built
+ * engine, by `value-slot-template-grammar.test.ts` in `service-automation`.
+ */
+export const CEL_CLAIMED_IDENTIFIERS: ReadonlySet<string> = new Set([
+  'bool', 'bytes', 'double', 'int', 'list', 'map', 'null_type', 'string', 'type', 'uint',
+  'cel', 'google', 'optional',
+  'as', 'break', 'const', 'continue', 'else', 'for', 'function', 'if', 'import', 'let', 'loop', 'namespace',
+  'package', 'return', 'var', 'void', 'while', '__proto__', 'prototype',
+  ...CEL_KEYWORDS,
+]);
+
+/**
+ * Whether a path's head is read through `vars` — a `$`-named variable (CEL has
+ * no identifier spelling for one) or one of {@link CEL_CLAIMED_IDENTIFIERS}.
+ */
+export function celHeadReadsThroughVars(head: string): boolean {
+  return head.startsWith('$') || CEL_CLAIMED_IDENTIFIERS.has(head);
+}
+
+/**
+ * A template path as CEL: `a.b.0` → `a.b[0]`. A head CEL cannot read as the
+ * variable is read through `vars` ({@link celHeadReadsThroughVars}:
+ * `vars["$error"].message`, `vars["list"][0]`), and a later segment that is a
+ * keyword is indexed by name (`record["in"]`).
+ */
 export function celPath(path: string): string {
   const [head, ...rest] = path.split('.');
-  let out = head!.startsWith('$') ? `vars["${head}"]` : head!;
-  for (const segment of rest) out += /^\d+$/.test(segment) ? `[${segment}]` : `.${segment}`;
+  let out = celHeadReadsThroughVars(head!) ? `vars["${head}"]` : head!;
+  for (const segment of rest) {
+    if (/^\d+$/.test(segment)) out += `[${segment}]`;
+    else if (CEL_KEYWORDS.has(segment)) out += `["${segment}"]`;
+    else out += `.${segment}`;
+  }
   return out;
 }
 
