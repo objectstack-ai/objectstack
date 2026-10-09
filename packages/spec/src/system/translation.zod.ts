@@ -1349,7 +1349,10 @@ const appTranslationDataShape = () => ({
           + 'label. Translate `message`; a `title` belongs to a screen (`screens.<node_id>.title`).',
       },
     }, {
-      message: z.string().min(1)
+      // No `.min(1)`, like every sibling leaf: an empty string is the
+      // untranslated slot `os i18n extract` writes into a skeleton, and the
+      // engine reads it as no translation (the authored message renders).
+      message: z.string()
         // The one text-slot judge, applied to the translation exactly as
         // `EndConfigSchema` applies it to the message it translates.
         .superRefine((value, ctx) => {
