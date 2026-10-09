@@ -188,9 +188,23 @@ interface TemplateRef {
 }
 
 /**
- * Extract the dotted `{root.<path>}` references from a template string. Mirrors
- * the runtime interpolator's token grammar (service-automation
- * builtin/template.ts): a `{...}` token whose body is a plain dotted path.
+ * Extract the dotted `{root.<path>}` references from a template string, in
+ * either of the two dialects a flow config string carries:
+ *
+ *  - a single-brace `{...}` token — the grammar of the flow interpolator that
+ *    still renders every value-like position (service-automation
+ *    `builtin/template.ts`, `interpolate`): a token whose body is a plain
+ *    dotted path;
+ *  - a `{{ ... }}` hole — the formula template engine's grammar, which the
+ *    text slots render since #22110 (a notify `title` / `message`, a screen
+ *    `title` / `description`, an `end` `message`): a path with an optional
+ *    `| formatter[:arg]`, whose segments may be bracket-indexed
+ *    (`{{ rows[0].subject }}`). The path before the pipe, with each `[i]`
+ *    read as `.i` the way the engine resolves it, is judged exactly like a
+ *    bare one, so neither a formatter nor an index hides a misspelt field —
+ *    before #22110 a text slot had neither syntax, and every path in one was
+ *    judged.
+ *
  * Arithmetic / function tokens (`{NOW()}`, `{a + b}`) are ignored, and so is a
  * single-segment token — there is no `.<field>` hop in it to judge.
  *
@@ -203,7 +217,15 @@ function templateRefsIn(text: string): TemplateRef[] {
   const tokenRe = /\{([^{}]+)\}/g;
   let m: RegExpExecArray | null;
   while ((m = tokenRe.exec(text)) !== null) {
-    const body = m[1].trim();
+    let body = m[1].trim();
+    // Inside a `{{ }}` hole — a brace on both sides — the path is the text
+    // before an optional `| formatter`. (In a single-brace token a `|` is the
+    // interpolator's arithmetic, so it stays unjudged there, as before.)
+    const inHole = text[m.index - 1] === '{' && text[m.index + m[0].length] === '}';
+    if (inHole && body.includes('|')) body = body.slice(0, body.indexOf('|')).trim();
+    // …and an index segment is the engine's `[i]` → `.i` (formula's
+    // `template-engine.ts` `resolvePath` normalises the same way).
+    if (inHole) body = body.replace(/\[(\w+)\]/g, '.$1');
     // Pure dotted path only (same shape the interpolator's fast path accepts):
     // identifier head, then identifier-or-numeric segments. Anything with
     // operators / spaces / quotes is an arithmetic token — not a bare field ref.

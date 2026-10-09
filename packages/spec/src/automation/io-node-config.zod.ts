@@ -22,9 +22,10 @@
  * config against its schema before running (`service-automation`'s
  * `parse-config.ts`), so type and `required` violations refuse the node as a
  * guard (not routable via `fault` edges). `notify` parses the RAW stored
- * config — its slots are string-typed or template-typed, so `{token}`
- * templates pass and the post-interpolation guards still own "resolved to
- * nothing". `http` parses the INTERPOLATED config, because that is the shape
+ * config — its slots are string-typed or template-typed, so templates pass
+ * (`{{ }}` holes in its two text slots, `{token}` in the rest) and the
+ * post-rendering guards still own "resolved to nothing". `http` parses the
+ * INTERPOLATED config, because that is the shape
  * its executor reads — a `{token}` in a typed slot (`timeoutMs`, `durable`)
  * resolves to its real type first.
  *
@@ -61,6 +62,7 @@ import { strictObject } from '../shared/strict-object';
 // The package-internal constructor `TemplateExpressionInputSchema` itself is
 // built with — never re-exported, so the notify sentences add no public surface.
 import { templateExpressionInput, type TypedExpressionRefusals } from '../shared/typed-expression-input';
+import { textSlotTemplateRefusal } from './flow-text-slot-template';
 
 /**
  * What a rejected key on these contracts silently did before #4001 批 9.
@@ -122,30 +124,24 @@ const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
 
 /**
  * The placeholder every notify `title` / `message` refusal prescribes — the
- * ONE place it is written. The notify executor renders both slots with the
- * flow's `interpolate()`, which substitutes single-brace `{token}` only (a
- * `{{var}}` keeps its outer braces), and the build's
- * `flow-double-brace-interpolation` rule flags a doubled brace on a flow node
- * value; so this is the spelling both read today. The shared
- * `TemplateExpressionInputSchema` prescribes `{{record.name}}` instead, which
- * is why these two slots take the same input from `templateExpressionInput`
- * (`shared/typed-expression-input.ts`, package-internal) and carry the
- * sentences below (#22081).
- *
- * The 17.x prescription, ⛔ not an end-state ruling on braces: executing
- * ADR-0032 D3 on the v18 line (#22110) flips the notify convention, and this
- * constant is the prescription that flips with it.
+ * ONE place it is written. Since protocol 18 (#22110, executing ADR-0032 D3)
+ * the notify executor renders both slots through the formula template
+ * engine, whose holes are `{{ }}`; a single-brace `{token}` is refused at
+ * every door (`flow-text-slot-template.ts`). These two slots still take their
+ * input from `templateExpressionInput` (`shared/typed-expression-input.ts`,
+ * package-internal) rather than `TemplateExpressionInputSchema`, because the
+ * sentences below name the slot ("A notify node's title …") where the
+ * shared ones cannot (#22081).
  */
-const NOTIFY_TEMPLATE_PLACEHOLDER = '{record.name}';
+const NOTIFY_TEMPLATE_PLACEHOLDER = '{{ record.name }}';
 
 /**
- * Why the notify prescription is single-brace, in the words every notify
- * template refusal ends on. Spelled without a doubled brace, so the refusal
- * carries no spelling the build would flag.
+ * Why the notify prescription is a `{{ }}` hole, in the words every notify
+ * template refusal ends on.
  */
 const NOTIFY_TEMPLATE_RENDERER =
-  'the notify executor interpolates single-brace `{token}` placeholders, and a doubled brace is not one — '
-  + 'its inner `{token}` resolves and the outer braces stay in the sent text.';
+  'the notify executor renders `{{ }}` template holes (ADR-0032 §3) — a variable path with an optional formatter, '
+  + '`{{ amount | currency }}` — and a single-brace token is not one.';
 
 /**
  * The two sentences a notify `title` / `message` refuses a malformed value
@@ -173,8 +169,7 @@ function notifyTemplateRefusals(key: 'title' | 'message'): TypedExpressionRefusa
  * The refusal for a `title` / `message` template envelope that carries no
  * non-blank `source` — what the slot's executor renders. It names the key and
  * the fix, and prescribes the slot's own placeholder spelling
- * ({@link NOTIFY_TEMPLATE_PLACEHOLDER}), not the `{{var}}` the shared template
- * prose shows: this slot's renderer is the flow's `interpolate()`.
+ * ({@link NOTIFY_TEMPLATE_PLACEHOLDER}).
  */
 function notifyTemplateSourceRequired(key: 'title' | 'message'): string {
   const consequence = key === 'title'
@@ -182,7 +177,7 @@ function notifyTemplateSourceRequired(key: 'title' | 'message'): string {
     : 'the notification would go out with an empty body';
   return (
     `\`${key}\` is a template envelope with no non-blank \`source\`. The notify executor renders \`source\` — `
-    + 'interpolating its `{token}` placeholders per run — and has nothing to render from `ast` alone or from a '
+    + 'filling its `{{ }}` holes per run — and has nothing to render from `ast` alone or from a '
     + `blank \`source\`, so ${consequence}. Put the text in \`source\` `
     + `(\`{ dialect: 'template', source: 'Deal ${NOTIFY_TEMPLATE_PLACEHOLDER} won' }\`), or write it as a bare string.`
   );
@@ -231,8 +226,10 @@ function notifyTemplateSourceRequired(key: 'title' | 'message'): string {
  *    runtime precedence would silently ignore one of them, so the ambiguous
  *    combination is unrepresentable instead — the same posture as
  *    `objectNavTargetExclusivity` (`ui/app.zod.ts`).
- *  - `recipients`, `title`, `message`, `actionUrl` and `payload` pass through
- *    `interpolate()`, so `{record.x}` templates are legal in them. So do
+ *  - `title` and `message` render through the formula template engine, so
+ *    `{{ record.x }}` holes are legal in them (below). `recipients`,
+ *    `actionUrl` and `payload` pass through the flow's `interpolate()`, so
+ *    `{record.x}` templates are legal in them. So do
  *    `templateData` VALUES (they are per-run render inputs). `channels`,
  *    `topic`, `severity` and `template` are read RAW — a `{token}` in those is
  *    forwarded verbatim, never resolved (channel ids are static routing,
@@ -246,15 +243,16 @@ function notifyTemplateSourceRequired(key: 'title' | 'message'): string {
  *    a bare string, or a `{ dialect: 'template', source }` envelope — what the
  *    `tmpl` helper builds. The parse normalizes the bare string to that
  *    envelope, so the executor reads one shape and interpolates its `source`;
- *    both spellings of one text render the same notification. The renderer
- *    here is the flow's `interpolate()`, so the placeholder spelling is its
- *    single-brace `{token}` (`{record.name}`). A `{{var}}` is not a placeholder
- *    in these two slots: the inner `{var}` resolves and the outer braces stay
- *    in the text. So the input is built with `templateExpressionInput` (the
- *    package-internal constructor of `TemplateExpressionInputSchema`) rather
- *    than taken as `TemplateExpressionInputSchema`, whose refusals prescribe
- *    `{{record.name}}`: a malformed value here is refused with sentences that
- *    prescribe `{record.name}` ({@link NOTIFY_TEMPLATE_PLACEHOLDER}).
+ *    both spellings of one text render the same notification. Since protocol
+ *    18 (#22110, ADR-0032 D3) the renderer is the formula template engine,
+ *    so the placeholder spelling is a `{{ }}` hole — a variable path with an
+ *    optional formatter (`{{ record.name }}`, `{{ amount | currency }}`). A
+ *    single-brace `{token}` is no placeholder any more and is refused by the
+ *    `superRefine` below, through the one text-slot judge
+ *    (`flow-text-slot-template.ts`), with the hole spelling of each token.
+ *    The input is built with `templateExpressionInput` (the package-internal
+ *    constructor of `TemplateExpressionInputSchema`) so its refusals name the
+ *    slot; they prescribe {@link NOTIFY_TEMPLATE_PLACEHOLDER}.
  *    An envelope must carry a non-blank `source` (the `superRefine` below) —
  *    the executor renders `source` and has nothing to render from `ast` alone,
  *    which the shared schema's envelope arm would otherwise admit.
@@ -281,10 +279,10 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
    * (the superRefine below owes one of the two).
    */
   title: templateExpressionInput(ExpressionSchema, notifyTemplateRefusals('title')).optional()
-    .describe('Notification title — a template: a bare string, or a `{ dialect: \'template\', source }` envelope (the `tmpl` helper) carrying the same text. It is interpolated per run with the flow\'s single-brace `{token}` placeholders (`{record.name}`); a `{{var}}` is not a placeholder here — its inner `{var}` resolves and the outer braces stay in the text. One text for every recipient (not localizable — use `template` for per-locale content). Either this or `template` is required; the two are mutually exclusive.'),
+    .describe('Notification title — a template: a bare string, or a `{ dialect: \'template\', source }` envelope (the `tmpl` helper) carrying the same text. It is rendered per run with `{{ }}` holes over the flow\'s variables — a variable path with an optional formatter (`{{ record.name }}`, `{{ record.amount | currency }}`); a single-brace `{token}` is refused. One text for every recipient (not localizable — use `template` for per-locale content). Either this or `template` is required; the two are mutually exclusive.'),
   /** Notification body (inline path only) — the same template input as `title`. */
   message: templateExpressionInput(ExpressionSchema, notifyTemplateRefusals('message')).optional()
-    .describe('Notification body — the same template input as `title` (a bare string or a `{ dialect: \'template\', source }` envelope), interpolated per run with single-brace `{token}` placeholders; not localizable. Only valid with inline `title`, never with `template`.'),
+    .describe('Notification body — the same template input as `title` (a bare string or a `{ dialect: \'template\', source }` envelope), rendered per run with `{{ }}` holes like `title`; not localizable. Only valid with inline `title`, never with `template`.'),
   /**
    * The localizable content path (#9205): name of a `sys_email_template`
    * bundle. Resolved by `(name, locale)` AT DELIVERY TIME —
@@ -398,18 +396,27 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
     });
   }
   // The two template slots render `source` (see the docblock): the executor
-  // interpolates it per run and has no renderer for `ast`. The shared template
+  // renders it per run and has no renderer for `ast`. The shared template
   // input (`templateExpressionInput`) is the persistence contract, so its
   // envelope arm admits an `ast`-only envelope and a whitespace `source` —
   // shapes that parse and then render nothing (a `title` failing every run, a
   // `message` going out empty). The slot states what its executor needs
   // instead, in the same notion of blank as the bare-string arm. Reached only
   // once both values parsed, so `source` is read off a template envelope.
+  //
+  // [#22110] And the text it carries is a `{{ }}` template: a single-brace
+  // `{token}` left from the 17.x dialect would go out as literal text, so it
+  // is refused here — the same judge, and the same words, as `registerFlow`
+  // and `objectstack validate` (`flow-text-slot-template.ts`).
   for (const key of ['title', 'message'] as const) {
     const value = cfg[key];
-    if (value !== undefined && !(typeof value.source === 'string' && NON_BLANK_STRING(value.source))) {
+    if (value === undefined) continue;
+    if (!(typeof value.source === 'string' && NON_BLANK_STRING(value.source))) {
       ctx.addIssue({ code: 'custom', path: [key], message: notifyTemplateSourceRequired(key) });
+      continue;
     }
+    const refusal = textSlotTemplateRefusal(value.source);
+    if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: [key], message: refusal });
   }
 }));
 
