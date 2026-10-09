@@ -8,8 +8,11 @@
  * ## What was measured broken
  *
  * Since #16344 the update path HIDES a caller-supplied static `readonly` value
- * from `before*` hooks (`readonlyHiddenFromHooks`, engine.ts). The hook's view
- * of that key is a plain `undefined`, so a body reaching through it —
+ * from `before*` hooks (`readonlyHiddenFromHooks`, engine.ts), and since
+ * #22306 the insert path withholds the same kind of value from `beforeInsert`
+ * (`withholdInsertReadonlyFromHooks`, engine.ts), which composes its own
+ * prescription below because a create has no `ctx.previous` to read. The
+ * hook's view of that key is a plain `undefined`, so a body reaching through it —
  * `ctx.input.locked_meta.who = 'hook'` — throws, and a `body` hook's default
  * `onError: abort` refuses the caller's whole write.
  *
@@ -190,6 +193,25 @@ export function withheldReadonlyHookFault(
 
   const one = keys.length === 1;
   const named = keys.map(fence).join(', ');
+  // [#22306] A create has no stored row, so the update prescription
+  // (`ctx.previous`) would name a source that is not there. On `beforeInsert`
+  // the hide runs BEFORE the defaults, so a withheld key holds whatever the
+  // create will store for it: its `defaultValue`, or nothing. The sentence
+  // says that, and points the author at the one channel that DOES store a
+  // read-only value on a create — the hook assigning it.
+  if (event === 'beforeInsert') {
+    const insertMessage =
+      `A \`${event}\` hook faulted while ${named} ${one ? 'was' : 'were'} withheld from it. ` +
+      `${one ? 'That field is' : 'Those fields are'} read-only, and the engine withholds a ` +
+      `caller-supplied value for a read-only field from \`${event}\` hooks, so ` +
+      `${keys.map((k) => `\`ctx.input.${k}\``).join(', ')} ` +
+      `${one ? 'holds' : 'hold'} only what the create will store — the field's \`defaultValue\`, or nothing — ` +
+      `withheld by the platform, not missing by accident. ` +
+      `A create never stores a caller's value for a read-only field, so derive nothing from it; ` +
+      `a hook that owns the field assigns it. ` +
+      `Original fault: ${messageOf(err)}`;
+    return new HookWithheldReadonlyFaultError(insertMessage, keys, { cause: err });
+  }
   const message =
     `A \`${event}\` hook faulted while ${named} ${one ? 'was' : 'were'} withheld from it. ` +
     `${one ? 'That field is' : 'Those fields are'} \`readonly: true\`, and the engine withholds a ` +

@@ -209,6 +209,11 @@ describe('#4521 — read-your-writes between saveMeta and the dispatch path', ()
         // shadow/restore machinery pinned here is exactly what an operator
         // behind the hatch exercises. (Every other case in this file writes
         // brand-new names, which ride `allowRuntimeCreate` untouched.)
+        //
+        // [ADR-0131 D6] Managed content is sealed: the hatch no longer opens a
+        // write onto an action a managed package ships, so this case now pins
+        // the seal at the dispatch path — the save is refused and the SHIPPED
+        // declaration keeps resolving, never shadowed.
         process.env.OS_METADATA_WRITABLE = 'action';
         (ObjectStackProtocolImplementation as any).resetEnvWritableCache();
         resetEnvWritableMetadataTypes();
@@ -216,11 +221,11 @@ describe('#4521 — read-your-writes between saveMeta and the dispatch path', ()
         registry.registerItem('action', { name: 'shipped_probe', label: 'Shipped', type: 'script', target: 'showcase.shipped' }, 'name', 'showcase');
         expect((await resolve('shipped_probe')).action?.label).toBe('Shipped');
 
-        await saveAction({ name: 'shipped_probe', label: 'Customized', objectName: 'showcase_task', type: 'script', target: 'showcase.probe' });
-        expect((await resolve('shipped_probe')).action?.label).toBe('Customized');
-
-        await protocol.deleteMetaItem({ type: 'action', name: 'shipped_probe' });
+        const refused: any = await saveAction({ name: 'shipped_probe', label: 'Customized', objectName: 'showcase_task', type: 'script', target: 'showcase.probe' })
+            .then(() => null, (e: unknown) => e);
+        expect({ code: refused?.code, status: refused?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
         expect((await resolve('shipped_probe')).action?.label).toBe('Shipped');
+        expect(engine.getRows().filter((r: any) => r.name === 'shipped_probe' && 'metadata' in r)).toEqual([]);
     });
 
     afterEach(() => {
@@ -369,6 +374,13 @@ describe('#5079 — list / get / dispatch agree immediately after deleteMeta', (
         // as the sibling `#4521` case above does. (Every other case in this
         // block writes brand-new names, which ride `allowRuntimeCreate`
         // untouched, so only this one needs the hatch.)
+        //
+        // [ADR-0131 D6] Managed content is sealed: the hatch no longer opens the
+        // customization this case used to write first, so no overlay row
+        // exists to reset. The boundary still holds and is pinned on what is
+        // left: a DELETE of the shipped name never retires it — this
+        // host-config kernel answers the no-op receipt, and the shipped value
+        // stays listed and dispatchable.
         process.env.OS_METADATA_WRITABLE = 'action';
         (ObjectStackProtocolImplementation as any).resetEnvWritableCache();
         resetEnvWritableMetadataTypes();
@@ -379,11 +391,12 @@ describe('#5079 — list / get / dispatch agree immediately after deleteMeta', (
             'name',
             'showcase',
         );
-        await saveAction({ name: 'shipped_probe', label: 'Customized', objectName: 'showcase_task', type: 'script', target: 'showcase.probe' });
-        expect((await surfaces('shipped_probe')).item?.label).toBe('Customized');
+        const refused: any = await saveAction({ name: 'shipped_probe', label: 'Customized', objectName: 'showcase_task', type: 'script', target: 'showcase.probe' })
+            .then(() => null, (e: unknown) => e);
+        expect({ code: refused?.code, status: refused?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
 
         const deleted = await protocol.deleteMetaItem({ type: 'action', name: 'shipped_probe' });
-        expect(deleted.message).toContain('reset to artifact default');
+        expect(deleted.message).toContain('already at artifact default');
 
         const after = await surfaces('shipped_probe');
         expect(after.listedNames).toContain('shipped_probe');

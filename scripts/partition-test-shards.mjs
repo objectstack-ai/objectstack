@@ -126,7 +126,61 @@ export const SHARD_COUNT = 6;
 // suite grows -- and what makes "just add more shards" the wrong reflex, since
 // more shards shrink the denominator while the heaviest package holds the
 // numerator up.
+//
+// Since #22075 the quantity it grades is each shard's predicted WALL time
+// (shardWalls() below, under TEST_CONCURRENCY), not its bin's summed weight.
+// The two were the same number only while nothing ran concurrently; see
+// TEST_CONCURRENCY for the measurement that separated them.
 export const MAX_SHARD_OVER_MEAN = 1.3;
+
+// How many test tasks one Test Core shard runs at once: the `--concurrency=4`
+// on the whole-package leg of ci.yml's "Run this shard's tests" step. The
+// self-test reads that flag back and fails on drift, as it does SHARD_COUNT.
+//
+// ── WHY A BIN'S SUM IS NOT ITS WALL (#22075) ─────────────────────────────
+//
+// Every weight in the dataset is ONE package's execution window. A shard runs
+// its whole packages in ONE turbo run, up to four tasks at a time, and then
+// each file-level slice in a turbo run of its own, after that one. So a shard
+// of many packages finishes in about its summed weight divided by four, or in
+// its heaviest single task if that is longer, while a shard holding ONE big
+// package runs that package's whole window with nothing to overlap it. Graded
+// on sums, the split read balanced while the walls were not. Measured on the
+// runs after the 21-run dataset refresh (040184752c), bins as this script
+// computes them on each run's own affected set, against the jobs API's
+// `Run this shard's tests` step:
+//
+//   merge_group 37875522518, 48 packages
+//     bin sums   1739 / 1397 / 1399 / 1403 / 1400 / 1398 s   max/mean 1.19x  (inside 1.3)
+//     test step  1880 /  548 /  478 /  375 /  556 /  481 s   shard 1 = 3.9x the others' mean
+//   pull_request 37872770181, the full 76-package list
+//     bin sums   1767 / 1768 / 1769 / 1766 / 1767 / 1766 s   max/mean 1.00x
+//     test step  1932 /  905 /  737 /  704 /  668 /  388 s   shard 1 = 2.8x the others' mean
+//
+// Shard 2/6 of the first run: six packages, 1036.6s of summed windows, and a
+// turbo `Time: 9m8.239s` that is its heaviest single task (`@objectstack/spec`
+// `test:repo`, 547.04s). Shard 1/6 was `@objectstack/cli` alone, 1867.26s.
+// On all 14 runs sampled (6 pull_request, 8 merge_group) the slowest Test Core
+// job ran 2.3-7.6x the mean of the other five; on the 10 of them whose
+// affected set filled all six bins, the bin sums read 1.00-1.47x.
+//
+// So a shard's wall is predicted as
+//
+//   max(heaviest serial task among its whole packages, their summed weight / TEST_CONCURRENCY)
+//     + the summed weight of its slices
+//
+// where a package that runs its suite as two concurrent turbo tasks (`test`
+// and `test:repo`) counts half its weight as its heaviest serial task -- the
+// dataset holds their sum, not the split. At a concurrency of 1 the formula IS
+// the bin sum, so the model this replaces is this one at 1, which is how the
+// fixtures written for it keep their meaning (they pass 1 explicitly).
+//
+// ⚠ It is a LOWER bound on a whole-package leg, and the bias is measured, not
+// assumed: on run 37872770181 the five whole-package shards predicted
+// 573/442/442/442/491s and stepped 905/737/704/668/388s. A slice's window is
+// exact (it runs alone), so the bias leans the split toward loading whole
+// packages; the ratio pins below grade the same model the split is placed by.
+export const TEST_CONCURRENCY = 4;
 
 // The factor a shard's MEASURED test total may exceed its PREDICTED total by
 // before `--check-drift` reds. The durable half of #16173.
@@ -219,48 +273,51 @@ export const WARN_MEASURED_OVER_PREDICTED = 1.3;
 //
 // HOW n IS DERIVED, AND WHAT HOLDS EACH HALF. n is the SMALLEST integer for
 // which the split meets the acceptance bound against the mean the committed
-// dataset produces. Meeting it is pins 2 and 3 below, on the configured split.
-// Smallest is pin 3c: every slice past the first costs the shard that carries
-// it a turbo leg of its own and a build of the package's whole closure (ci.yml,
-// "Build the sliced package's dependency closure"), and buys nothing once the
-// bound is met, so an n that n - 1 could replace is refused -- n = 2 that 1
-// could replace means retire the entry.
+// dataset produces, graded on predicted shard WALL (TEST_CONCURRENCY). Meeting
+// it is pins 2 and 3 below, on the configured split. Smallest is pin 3c: every
+// slice past the first costs the shard that carries it a turbo leg of its own
+// and a build of the package's whole closure (ci.yml, "Build the sliced
+// package's dependency closure"), and buys nothing once the bound is met, so an
+// n that n - 1 could replace is refused -- n = 2 that 1 could replace means
+// retire the entry.
 //
-// THE MAP IS EMPTY, BY THAT DERIVATION. `@objectstack/cli` was sliced at n = 2
-// on a reading of 1231.52s (run 34009395649 attempt 2, job 101427282674)
-// against a 458.15s dataset entry: the mean was then ~800s, the bound ~1041s,
-// and the whole CLI stood at 1.54x of the mean. Until a refresh landed, pin 3c
-// substituted that reading into the stale dataset.
+// THE HISTORY, IN ONE LINE PER TURN. Sliced at 2 on a reading of 1231.52s
+// against a stale 458.15s entry (run 34009395649); retired (#21487, #21758) and
+// re-derived on the refresh that measured the CLI whole (#21826, run
+// 37262126122: 1702.69s against a 1630.22s mean, "fits whole until ~2234s").
+// Every one of those derivations solved the bound on BIN SUMS.
 //
-// ⚠ THE ENTRY WAS FIRST RETIRED ON A FIGURE THAT WAS NOT THE CLI'S WHOLE COST
-// (#21758). The refresh of run 36380128221 (72 packages, 7430.00s) recorded the
-// CLI at 733.33s -- its two slice windows summed within that ONE run, the only
-// sample that refresh had -- and this block solved the bound against it,
-// C <= (1.3/6)(6696.67 + C), to "fits whole until ~1852s". Once the CLI ran
-// whole, its windows read 1659.03s and 1667.97s (runs 37199214385 and
-// 37212954836), 2.26-2.27x that entry. The conclusion survived, since both sit
-// under ~1852s; the figure it was argued from did not.
+// RE-DERIVED ON SHARD WALLS (#22075), on the 21-run dataset (040184752c; the
+// CLI's median 1738.88s over 15 executed runs), with this script's own
+// partition() and shardWalls():
 //
-// RE-DERIVED on the refresh that measured the CLI WHOLE (#21826): run
-// 37262126122, 72 packages, 9781.33s, the CLI at 1702.69s and now the heaviest
-// item. The other 71 packages total 8078.64s, so the mean is 1630.22s and the
-// bound 2119.29s, and on that dataset
+//   model                    CLI whole       at 2            at 3
+//   bin sums (concurrency 1)  1.00x  meets    1.00x  meets    1.00x  meets
+//   shard walls (4)           2.52x           1.31x           1.01x  meets
 //
-//   CLI whole, as measured there (1702.69s)   max/mean 1.044x   heaviest 1703s (cli)
-//   CLI sliced at 2                           max/mean 1.002x   heaviest 1135s (spec)
-//   CLI whole at its worst since (1753.66s)   max/mean 1.070x   heaviest 1754s (cli)
+// The sum model said the CLI fits whole, and it was the reading the empty map
+// rested on; every PR and queue build then spent ~31 minutes on a shard holding
+// the CLI alone while the other five finished in 6-15. On walls the whole CLI
+// is 2.52x the mean and 2 slices still read 1.31x, so 3 is the smallest count
+// that meets 1.3x, and pin 3c holds it there.
 //
-// -- all inside 1.3x. Whole, the CLI fills bin 1 alone and the other five bins
-// sit at 1614.77-1616.73s. Slicing would lower the maximum, but the bound is
-// already met at n = 1, which is exactly the refusal pin 3c makes of a
-// `{ '@objectstack/cli': 2 }` entry ("Retire the entry"). Solving
-// C <= (1.3/6)(8078.64 + C) for the CLI's whole cost C, it fits whole until it
-// reaches ~2234s: 1.31x its dataset entry, 1.27x its worst reading since
-// (run 37415122516). n = 1 is the derived answer, so the entry stays retired.
-// The MECHANISM stays, and its pins run on fixtures: the item grammar,
-// expandSlices, the vitest file-count floor, the OS_TEST_SHARD wiring judge and
-// the generator's slice reassembly. The next package pin 3 names is one entry
-// here, plus its own OS_TEST_SHARD wiring, away from being sliced.
+// ⛔ THE COUNT IS CONFIGURED; WHETHER A RUN SLICES IS DECIDED BY THAT RUN. A PR
+// or queue build splits its own affected set, so planShards() below asks, of
+// each run's own split, whether a configured package is the item past the
+// bound (its whole suite heavier than 1.3x the larger of the mean wall and the
+// heaviest other serial task) and whether its slices spread across the run's
+// shard count; it slices only when both hold, and runs the package whole
+// otherwise. Measured on the 14 runs sampled above: 12 carried the CLI and
+// all 12 slice at 3; the 2 without it change nothing. The nightly tier run
+// splits the CLI alone across 2 shards, which cannot spread 3 slices, so it
+// keeps running it whole as it does today.
+//
+// Why a configured count and not a count derived per run: the generator decodes
+// a slice from the sha256 of its `OS_TEST_SHARD` value against the counts this
+// map names (measure-test-shard-timings.mjs `sliceOfEnvironment`), so a free
+// per-run count would make every count up to SHARD_COUNT decodable. A per-run
+// derivation also returns 3 on every one of those 12 runs: 4 slices never
+// spread on six shards there.
 //
 // ⛔ Slicing is a SCHEDULING fact, not a measurement one: the dataset keeps
 // holding each package's WHOLE cost, and the division by n happens here. That
@@ -269,7 +326,9 @@ export const WARN_MEASURED_OVER_PREDICTED = 1.3;
 // records one -- see `sliceOfCliArguments` there. A change to this map is also
 // a change to what that generator can DECODE, which is why the map it replaced
 // is kept below.
-export const FILE_SHARDED_PACKAGES = Object.freeze({});
+export const FILE_SHARDED_PACKAGES = Object.freeze({
+  '@objectstack/cli': 3,
+});
 
 // THE MAP AS IT STOOD BEFORE ITS LAST CHANGE, read only by the generator's
 // slice-digest matcher (measure-test-shard-timings.mjs `sliceOfEnvironment`).
@@ -294,9 +353,9 @@ export const FILE_SHARDED_PACKAGES = Object.freeze({});
 // Its only readers are run summaries, which ci.yml keeps for one day
 // (`retention-days: 1` on `test-core-run-summary-*`), so a day after that PR
 // lands no retained summary predates the change and this map decodes nothing.
-export const PREVIOUS_FILE_SHARDED_PACKAGES = Object.freeze({
-  '@objectstack/cli': 2,
-});
+// The outgoing map of #22075 was empty -- no run before it carried a slice --
+// so this one is empty too.
+export const PREVIOUS_FILE_SHARDED_PACKAGES = Object.freeze({});
 
 // The item grammar. A shard item is a package (`@objectstack/cli`) or a SLICE
 // of one (`@objectstack/cli 1/2`), and this pair of functions is the only place
@@ -456,12 +515,17 @@ export function sliceWiringProblems(root = REPO_ROOT, sliced = FILE_SHARDED_PACK
 // balanceOf, the balancing pins -- sees one flat list of `{name, weight}` whose
 // `name` is the item's printed label, so nothing below has to know that some
 // items are slices.
+//
+// `tasks` rides along for shardWalls(): how many concurrent turbo tasks the
+// package's suite runs as (testTaskCount). A slice leg runs `test` alone, so a
+// slice is one task. A caller that knows no manifest -- the fixtures -- passes
+// none and is weighed as the single-task suite every package was until #16466.
 export function expandSlices(items) {
   const out = [];
   for (const it of items) {
     const count = it.sliceCount ?? sliceCountFor(it.name);
     if (count === 1) {
-      out.push({ name: it.name, weight: it.weight, pkg: it.name, slice: null });
+      out.push({ name: it.name, weight: it.weight, pkg: it.name, slice: null, tasks: it.tasks ?? 1 });
       continue;
     }
     for (let index = 1; index <= count; index++) {
@@ -471,10 +535,27 @@ export function expandSlices(items) {
         weight: it.weight / count,
         pkg: it.name,
         slice,
+        tasks: 1,
       });
     }
   }
   return out;
+}
+
+// How many turbo tasks a package's suite runs as on a Test Core shard: 2 for a
+// package that declares a `test:repo` script beside `test` (ci.yml runs
+// `turbo run test test:repo`, and the two schedule concurrently), 1 otherwise.
+// The dataset holds their SUM per package (measure-test-shard-timings.mjs
+// SAMPLED_TASKS), so this is what lets shardWalls() see that such a package's
+// heaviest serial task is shorter than its weight.
+export function testTaskCount(manifest) {
+  return manifest?.scripts && Object.hasOwn(manifest.scripts, 'test:repo') ? 2 : 1;
+}
+
+// testTaskCount() for every workspace package, by name: the dataset-level pins
+// have names and weights only, and must weigh the split the way a real run does.
+export function workspaceTestTaskCounts(root = REPO_ROOT) {
+  return new Map(workspacePackages(root).map(({ manifest }) => [manifest?.name, testTaskCount(manifest)]));
 }
 
 // Two slices of the same package must never share a bin, and this asserts it
@@ -506,11 +587,11 @@ export function assertSlicesSpread(bins) {
 }
 
 // Whether a split of `items` meets the acceptance bound, in the two halves pins
-// 2 and 3 grade on the committed dataset: the heaviest bin within
-// MAX_SHARD_OVER_MEAN x the mean, and no single item heavier than that, because
-// no split can put a bin below its heaviest item.
-function meetsBound(items, shardCount, bound) {
-  const b = balanceOf(partition(items, shardCount), items);
+// 2 and 3 grade on the committed dataset: the slowest predicted shard wall
+// within MAX_SHARD_OVER_MEAN x the mean wall, and no single serial task heavier
+// than that, because no split can put a shard below its heaviest serial task.
+function meetsBound(items, shardCount, bound, concurrency = TEST_CONCURRENCY) {
+  const b = shardWalls(partition(items, shardCount, concurrency), items, concurrency);
   return { ...b, meets: b.ratio <= bound && b.floor <= bound * b.mean };
 }
 
@@ -534,7 +615,8 @@ export function sliceCountProblems(
   packages,
   sliced = FILE_SHARDED_PACKAGES,
   shardCount = SHARD_COUNT,
-  bound = MAX_SHARD_OVER_MEAN
+  bound = MAX_SHARD_OVER_MEAN,
+  concurrency = TEST_CONCURRENCY
 ) {
   const weights = new Map(packages.map((p) => [p.name, p.weight]));
   const problems = [];
@@ -560,15 +642,16 @@ export function sliceCountProblems(
       packages.map((p) => ({
         name: p.name,
         weight: p.weight,
+        tasks: p.tasks,
         sliceCount: p.name === name ? fewer : Object.hasOwn(sliced, p.name) ? sliced[p.name] : 1,
       }))
     );
-    const at = meetsBound(items, shardCount, bound);
+    const at = meetsBound(items, shardCount, bound, concurrency);
     if (at.meets) {
       problems.push(
         `${name}: sliced ${n} ways at ${weights.get(name)}s, but at ${fewer} the split already meets ` +
-          `${bound}x (max/mean ${at.ratio.toFixed(2)}x, heaviest item ${at.floor.toFixed(0)}s against a ` +
-          `${at.mean.toFixed(0)}s mean). ${fewer === 1 ? 'Retire the entry' : `Lower it to ${fewer}`}: ` +
+          `${bound}x (max/mean wall ${at.ratio.toFixed(2)}x, heaviest serial task ${at.floor.toFixed(0)}s against a ` +
+          `${at.mean.toFixed(0)}s mean wall). ${fewer === 1 ? 'Retire the entry' : `Lower it to ${fewer}`}: ` +
           'a slice count a smaller one could replace is one no pin can hold.'
       );
     }
@@ -720,34 +803,163 @@ export function weighItems(items, excluded, timings, label = 'package list', sli
     const sliceCount = Object.hasOwn(sliced, it.name)
       ? sliceCountFor(it.name, countTestFiles(dir), sliced)
       : 1;
-    weighed.push({ name: it.name, weight: seconds, sliceCount });
+    weighed.push({ name: it.name, weight: seconds, sliceCount, tasks: testTaskCount(readManifest(dir)) });
   }
-  return { weighted: expandSlices(weighed), estimated, packages: weighed.length };
+  // `weighed` carries each package's CONFIGURED slice count; whether this run
+  // uses it is planShards()' call, so main() hands `weighed` there. `weighted`
+  // is the configured expansion, kept for callers that grade the map itself.
+  return { weighed, weighted: expandSlices(weighed), estimated, packages: weighed.length };
 }
 
-// LPT greedy: heaviest package into the currently lightest bin. Deterministic:
-// input order never matters because both the package sort and the bin choice
+// A package directory's manifest, or null where there is none to read -- the
+// same missing-locally case countTestFiles() weighs as 0 and still assigns.
+function readManifest(dir) {
+  try {
+    return JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+// ── WHETHER THIS RUN SLICES: THE SPLIT OF THE RUN'S OWN PACKAGE LIST (#22075) ─
+//
+// FILE_SHARDED_PACKAGES says how many slices a package is cut into; this says
+// whether THIS run cuts it. A pull_request or merge_group run splits its
+// affected set, which is not the dataset, so the question is asked of the run's
+// own packages, in the two halves pins 3 and 3b grade on the dataset:
+//
+//   NEEDED   the package, whole, is the item past the bound -- its heaviest
+//            serial task above bound x the larger of the run's mean shard wall
+//            and the heaviest serial task of any OTHER package (past that one,
+//            slicing cannot lower the run's wall, because that one becomes it);
+//   SPREADS  its slices land on distinct shards at this run's shard count, which
+//            is what makes them run in parallel at all (assertSlicesSpread).
+//
+// Both hold => sliced at the configured count. Either fails => whole, and the
+// decision says which. Packages are decided in name order, each against the
+// decisions already made. Returns the items to partition and one decision per
+// configured package present in the run, printed by main().
+export function planShards(
+  weighed,
+  shardCount,
+  { bound = MAX_SHARD_OVER_MEAN, concurrency = TEST_CONCURRENCY } = {}
+) {
+  const chosen = new Map(weighed.map((p) => [p.name, 1]));
+  const expandAt = (name, n) =>
+    expandSlices(weighed.map((p) => ({ ...p, sliceCount: p.name === name ? n : chosen.get(p.name) })));
+  const decisions = [];
+  const configured = weighed
+    .filter((p) => (p.sliceCount ?? 1) > 1)
+    .sort((a, b) => a.name.localeCompare(b.name, 'en'));
+  for (const pkg of configured) {
+    const wholeItems = expandAt(pkg.name, 1);
+    const whole = shardWalls(partition(wholeItems, shardCount, concurrency), wholeItems, concurrency);
+    const own = serialFloorOf(wholeItems.find((i) => i.pkg === pkg.name));
+    const otherFloor = Math.max(0, ...wholeItems.filter((i) => i.pkg !== pkg.name).map(serialFloorOf));
+    const target = bound * Math.max(whole.mean, otherFloor);
+    const needed = own > target;
+    let spreads = false;
+    if (needed) {
+      const slicedItems = expandAt(pkg.name, pkg.sliceCount);
+      try {
+        assertSlicesSpread(partition(slicedItems, shardCount, concurrency));
+        spreads = true;
+      } catch {
+        spreads = false;
+      }
+    }
+    const count = needed && spreads ? pkg.sliceCount : 1;
+    chosen.set(pkg.name, count);
+    decisions.push({ name: pkg.name, configured: pkg.sliceCount, count, needed, spreads, own, target });
+  }
+  return { items: expandSlices(weighed.map((p) => ({ ...p, sliceCount: chosen.get(p.name) }))), decisions };
+}
+
+// One line per decision, for the shard log: what the run chose and why.
+export function renderSliceDecision(d) {
+  const why = !d.needed
+    ? `whole fits: ${d.own.toFixed(0)}s is within ${d.target.toFixed(0)}s`
+    : d.spreads
+      ? `whole would be ${d.own.toFixed(0)}s against ${d.target.toFixed(0)}s`
+      : `whole is ${d.own.toFixed(0)}s against ${d.target.toFixed(0)}s, but ${d.configured} slices cannot spread across this run's shards`;
+  return `${d.name}: ${d.count > 1 ? `sliced x${d.count}` : 'whole'} (${why})`;
+}
+
+// LPT greedy: heaviest item into the currently lightest bin. Deterministic:
+// input order never matters because both the item sort and the bin choice
 // break ties explicitly (by name / by lowest bin index).
-export function partition(items, shardCount) {
+//
+// "Heaviest" and "lightest" are in task-slot seconds (#22075): a whole package
+// costs its bin its weight, but a file-level SLICE costs its weight times
+// `concurrency`, because a slice runs as its own turbo leg after the shard's
+// whole-package leg and holds the runner for its entire window -- every slot of
+// it. Weighed as a plain weight, a slice drew the same share of whole packages
+// as any other bin, and those ran in front of it, serially. A bin's load is
+// then about `concurrency` x its predicted wall (shardWalls), which is what
+// the split is balancing. `total` stays the plain sum of weights: it is the
+// quantity `--check-drift` predicts and the line main() prints. With no slices,
+// or at a concurrency of 1, the placement is the plain LPT it always was.
+export function partition(items, shardCount, concurrency = TEST_CONCURRENCY) {
+  const loadOf = (it) => (it.slice ? it.weight * concurrency : it.weight);
   const sorted = [...items].sort(
-    (a, b) => b.weight - a.weight || a.name.localeCompare(b.name, 'en')
+    (a, b) => loadOf(b) - loadOf(a) || a.name.localeCompare(b.name, 'en')
   );
-  const bins = Array.from({ length: shardCount }, () => ({ total: 0, names: [] }));
+  const bins = Array.from({ length: shardCount }, () => ({ total: 0, load: 0, names: [] }));
   for (const it of sorted) {
     let best = 0;
     for (let i = 1; i < bins.length; i++) {
-      if (bins[i].total < bins[best].total) best = i;
+      if (bins[i].load < bins[best].load) best = i;
     }
     bins[best].names.push(it.name);
     bins[best].total += it.weight;
+    bins[best].load += loadOf(it);
   }
   return bins;
 }
 
-// The one summary statistic #10472's acceptance criterion is written in.
-// `floor` is the heaviest single package: sharding is BY PACKAGE, so no split
-// at any shard count can put max below it, and comparing it to the mean says
-// whether the bound is even reachable before anyone tries to reach it.
+// The longest single task an item can put on a shard's critical path. A slice
+// is one task of its own; a whole package is its weight split across the turbo
+// tasks its suite runs as (testTaskCount), evenly, because the dataset records
+// only their sum.
+export function serialFloorOf(item) {
+  return item.slice ? item.weight : item.weight / (item.tasks ?? 1);
+}
+
+// Each shard's predicted WALL time, and the ratio MAX_SHARD_OVER_MEAN grades
+// (#22075): the whole-package leg as max(heaviest serial task, summed weight /
+// concurrency), then every slice leg after it. TEST_CONCURRENCY's docblock has
+// the measurement and the bias. `floor` is the heaviest serial task of the
+// split: no shard can finish faster, at any shard count.
+export function shardWalls(bins, items, concurrency = TEST_CONCURRENCY) {
+  const byName = new Map(items.map((i) => [i.name, i]));
+  const walls = bins.map((bin) => {
+    let whole = 0;
+    let serial = 0;
+    let sliced = 0;
+    for (const name of bin.names) {
+      const it = byName.get(name);
+      if (!it) throw new Error(`shardWalls: bin item ${JSON.stringify(name)} is not in the item list it was split from`);
+      if (it.slice) {
+        sliced += it.weight;
+      } else {
+        whole += it.weight;
+        serial = Math.max(serial, serialFloorOf(it));
+      }
+    }
+    return Math.max(serial, whole / concurrency) + sliced;
+  });
+  const sum = walls.reduce((a, b) => a + b, 0);
+  const mean = sum / walls.length;
+  const max = Math.max(...walls);
+  const floor = Math.max(0, ...items.map(serialFloorOf));
+  return { walls, mean, max, ratio: mean === 0 ? 1 : max / mean, floor };
+}
+
+// The bins' summed WEIGHTS -- the quantity `--check-drift` predicts per shard
+// and main() prints beside the walls. It was the statistic #10472's acceptance
+// criterion was graded in until #22075; that criterion is graded on
+// shardWalls() now, because a bin's sum is not its wall (TEST_CONCURRENCY).
+// `floor` is the heaviest single item.
 export function balanceOf(bins, items = null) {
   const totals = bins.map((b) => b.total);
   const sum = totals.reduce((a, b) => a + b, 0);
@@ -1013,11 +1225,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'drift warning tier under the red (#16465)': 12,
   'file-level slice items (#16173)': 20,
   'file-level slices reach vitest through OS_TEST_SHARD (#19278)': 11,
+  'shard walls and the per-run slice decision (#22075)': 13,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 12;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1221,15 +1434,22 @@ function selfTest() {
     if (ciExcludes.size === 0) throw new Error('ci.yml: no --exclude found for the partitioner invocation');
   });
   const timings = loadTimings();
-  // Through expandSlices, because that is the item list CI bins. Reading the
+  // Through planShards(), because that is the item list CI bins. Reading the
   // dataset's packages straight into the pin would grade a shape no shard runs:
-  // after #16173 the CLI reaches the partitioner as file-level slices, and a pin
-  // that still weighs it whole would red on the refresh that fixes it and go
-  // green on a revert that removes the slicing.
+  // the CLI reaches the partitioner as file-level slices whenever a run's own
+  // split needs them (#22075), and a pin that still weighs it whole would red
+  // on the change that slices it and go green on a revert that removes the
+  // slicing. The task counts come from the workspace manifests, as weighItems()
+  // reads them in a real run.
+  const taskCounts = workspaceTestTaskCounts();
   const datasetPackages = Object.entries(timings.packages)
     .filter(([name]) => !ciExcludes.has(name))
-    .map(([name, weight]) => mk(name, weight));
-  const datasetItems = expandSlices(datasetPackages);
+    .map(([name, weight]) => ({ ...mk(name, weight), tasks: taskCounts.get(name) ?? 1 }));
+  const datasetPlan = planShards(
+    datasetPackages.map((p) => ({ ...p, sliceCount: sliceCountFor(p.name) })),
+    SHARD_COUNT
+  );
+  const datasetItems = datasetPlan.items;
   check(() => {
     if (datasetItems.length < 20) {
       throw new Error(`dataset: only ${datasetItems.length} package(s) measured -- that is not the workspace`);
@@ -1237,28 +1457,30 @@ function selfTest() {
   });
   const real = partition(datasetItems, SHARD_COUNT);
   const balance = balanceOf(real, datasetItems);
+  const walls = shardWalls(real, datasetItems);
   check(() => {
-    if (balance.ratio > MAX_SHARD_OVER_MEAN) {
+    if (walls.ratio > MAX_SHARD_OVER_MEAN) {
       throw new Error(
-        `balance: at ${SHARD_COUNT} shards the heaviest bin is ${balance.ratio.toFixed(2)}x the mean ` +
-          `(${balance.max.toFixed(0)}s vs ${balance.mean.toFixed(0)}s), past the ${MAX_SHARD_OVER_MEAN}x bound. ` +
-          'Bins: ' + balance.totals.map((t) => t.toFixed(0)).join('/') + 's.'
+        `balance: at ${SHARD_COUNT} shards the slowest predicted shard wall is ${walls.ratio.toFixed(2)}x the mean ` +
+          `(${walls.max.toFixed(0)}s vs ${walls.mean.toFixed(0)}s), past the ${MAX_SHARD_OVER_MEAN}x bound. ` +
+          'Walls: ' + walls.walls.map((t) => t.toFixed(0)).join('/') + 's at concurrency ' + TEST_CONCURRENCY + '; ' +
+          'slicing: ' + (datasetPlan.decisions.map(renderSliceDecision).join('; ') || 'none configured') + '.'
       );
     }
   });
 
   // 3. The bound is REACHABLE at this shard count -- the arithmetic #10472
-  //    asked about when it floated 6 -> 8. No split can put the heaviest bin
-  //    below the heaviest single package, so once that package exceeds
-  //    1.3x the mean, raising the shard count cannot help and every further
+  //    asked about when it floated 6 -> 8. No split can put a shard's wall
+  //    below the heaviest serial task it carries, so once that task exceeds
+  //    1.3x the mean wall, raising the shard count cannot help and every further
   //    shard makes it worse by shrinking the mean. Pinning it here means the
   //    next person to reach for more shards gets the answer from a failing
   //    assertion naming the floor, not from a CI run that quietly misses the
   //    target.
   check(() => {
-    if (balance.floor > MAX_SHARD_OVER_MEAN * balance.mean) {
+    if (walls.floor > MAX_SHARD_OVER_MEAN * walls.mean) {
       throw new Error(
-        `balance: the heaviest single package is ${balance.floor.toFixed(0)}s against a ${balance.mean.toFixed(0)}s mean, ` +
+        `balance: the heaviest serial task is ${walls.floor.toFixed(0)}s against a ${walls.mean.toFixed(0)}s mean shard wall, ` +
           `so NO split at ${SHARD_COUNT} shards can meet ${MAX_SHARD_OVER_MEAN}x. Splitting that suite below package ` +
           'granularity, not a different shard count, is the only thing that moves this.'
       );
@@ -1267,17 +1489,20 @@ function selfTest() {
 
   // 3b. THE SLICES A SPLIT CARRIES ARE SPREAD (#16173). main() asserts it on
   //     every real run; the first case grades the committed dataset as CI
-  //     splits it. While the live map slices nothing that case has no slice to
-  //     look at, so the second cuts the dataset's heaviest package in two and
-  //     grades THAT split -- real weights, a real slice pair, whatever the map
-  //     says -- and first proves the pair is there to grade.
+  //     splits it, and first proves that split carries a slice to look at. The
+  //     second cuts the dataset's heaviest package in two and grades THAT split
+  //     -- real weights, a real slice pair, whatever the map says.
   check(() => {
+    if (!datasetItems.some((i) => i.slice)) {
+      throw new Error(
+        'slice spread: the committed dataset, split as CI splits it, carries no slice -- ' +
+          (datasetPlan.decisions.map(renderSliceDecision).join('; ') || 'FILE_SHARDED_PACKAGES configures none')
+      );
+    }
     assertSlicesSpread(real);
   });
   const heaviest = datasetPackages.reduce((m, p) => (p.weight > m.weight ? p : m));
-  const cutItems = expandSlices(
-    datasetPackages.map((p) => ({ ...p, sliceCount: p === heaviest ? 2 : sliceCountFor(p.name) }))
-  );
+  const cutItems = expandSlices(datasetPackages.map((p) => ({ ...p, sliceCount: p === heaviest ? 2 : 1 })));
   check(() => {
     const cut = partition(cutItems, SHARD_COUNT);
     const halves = [1, 2].map((index) => formatShardItem(heaviest.name, { index, count: 2 }));
@@ -1294,15 +1519,13 @@ function selfTest() {
   //     is how a slicing outlives its reason. sliceCountProblems() re-splits
   //     with each sliced package at n - 1 and refuses an n that n - 1 could
   //     replace -- the counterfactual this pin used to hard-code for the CLI,
-  //     now asked of the committed dataset for every entry.
+  //     now asked of the committed dataset for every entry, on shard walls.
   //
-  //     The live map is EMPTY by this pin's own arithmetic (see
-  //     FILE_SHARDED_PACKAGES), so the live case judges zero entries, and that
-  //     zero is the true reading rather than a skipped one: the empty map's
-  //     claim is that every package fits WHOLE, and pin 3 above is the case
-  //     that fails the day one stops fitting, naming slicing as the remedy.
   //     The fixtures after it hold every refusal sliceCountProblems() makes, in
-  //     both directions, on numbers that do not move with a refresh.
+  //     both directions, on numbers that do not move with a refresh. They pass
+  //     a concurrency of 1, where a shard's wall IS its bin's sum -- the model
+  //     they were written against (TEST_CONCURRENCY) -- so their arithmetic
+  //     below reads exactly as it did.
   const derivation = sliceCountProblems(datasetPackages);
   check(() => {
     const expected = Object.keys(FILE_SHARDED_PACKAGES).length;
@@ -1319,7 +1542,7 @@ function selfTest() {
   // 134.3s, so whole it already fits -- today's CLI, in miniature.
   const fixture = (big) => [mk('big', big), ...Array.from({ length: 10 }, (_, i) => mk(`filler${i}`, 50))];
   check(() => {
-    const r = sliceCountProblems(fixture(300), { big: 2 });
+    const r = sliceCountProblems(fixture(300), { big: 2 }, SHARD_COUNT, MAX_SHARD_OVER_MEAN, 1);
     if (r.judged !== 1 || r.problems.length > 0) {
       throw new Error(
         `slice derivation: a count of 2 that 1 cannot replace was refused (judged ${r.judged}; ` +
@@ -1328,25 +1551,25 @@ function selfTest() {
     }
   });
   check(() => {
-    const r = sliceCountProblems(fixture(120), { big: 2 });
+    const r = sliceCountProblems(fixture(120), { big: 2 }, SHARD_COUNT, MAX_SHARD_OVER_MEAN, 1);
     if (!r.problems.some((m) => m.includes('Retire the entry'))) {
       throw new Error('slice derivation: a package that fits whole kept its slicing with no refusal');
     }
   });
   check(() => {
-    const r = sliceCountProblems(fixture(300), { big: 3 });
+    const r = sliceCountProblems(fixture(300), { big: 3 }, SHARD_COUNT, MAX_SHARD_OVER_MEAN, 1);
     if (!r.problems.some((m) => m.includes('Lower it to 2'))) {
       throw new Error('slice derivation: a count of 3 where 2 meets the bound was accepted');
     }
   });
   check(() => {
-    const r = sliceCountProblems(fixture(300), { ghost: 2 });
+    const r = sliceCountProblems(fixture(300), { ghost: 2 }, SHARD_COUNT, MAX_SHARD_OVER_MEAN, 1);
     if (r.judged !== 0 || !r.problems.some((m) => m.includes('carries no weight'))) {
       throw new Error('slice derivation: an entry the dataset never measured was accepted');
     }
   });
   check(() => {
-    const r = sliceCountProblems(fixture(300), { big: 1 });
+    const r = sliceCountProblems(fixture(300), { big: 1 }, SHARD_COUNT, MAX_SHARD_OVER_MEAN, 1);
     if (!r.problems.some((m) => m.includes('at least 2 ways'))) {
       throw new Error('slice derivation: an entry of fewer than 2 slices was accepted');
     }
@@ -1970,6 +2193,139 @@ function selfTest() {
     }
   });
 
+  // -- SHARD WALLS AND THE PER-RUN SLICE DECISION (#22075) -----------------
+  //
+  // The balancing pins above grade the committed dataset; these hold the model
+  // they grade it with and the decision every run makes on its own package
+  // list. The case the rest of this battery exists for is the measured shape:
+  // bin sums inside the bound, one shard holding one serial suite at ~3x the
+  // others' walls -- whole under the sum model, sliced under the wall model.
+  battery('shard walls and the per-run slice decision (#22075)');
+
+  // The concurrency is spelled in ci.yml too: the whole-package leg's flag.
+  // A model dividing by a number the runner does not use predicts walls no
+  // shard has, with every step green.
+  check(() => {
+    const m = /pnpm turbo run test test:repo \$FILTERS --concurrency=(\d+)/.exec(ciYml);
+    if (!m || Number(m[1]) !== TEST_CONCURRENCY) {
+      throw new Error(
+        `ci.yml: the whole-package test leg runs at --concurrency=${m ? m[1] : '(not found)'}, ` +
+          `this script models ${TEST_CONCURRENCY}`
+      );
+    }
+  });
+
+  // At a concurrency of 1 a shard's wall IS its bin's sum: the model this one
+  // generalises, recovered exactly, on the committed dataset as CI splits it.
+  check(() => {
+    const atOne = partition(datasetItems, SHARD_COUNT, 1);
+    const w = shardWalls(atOne, datasetItems, 1).walls;
+    const sums = balanceOf(atOne, datasetItems).totals;
+    if (w.some((x, i) => Math.abs(x - sums[i]) > 1e-6)) {
+      throw new Error(`walls at concurrency 1 are not the bin sums: ${w.join('/')} vs ${sums.join('/')}`);
+    }
+  });
+
+  // The arithmetic, on one hand-built bin: whole leg max(serial, sum / 4), then
+  // the slice leg after it; a two-task package's serial task is half its weight.
+  const wallOf = (items) => shardWalls([{ total: 0, names: items.map((i) => i.name) }], items).walls[0];
+  const slice300 = { name: 's 1/2', weight: 300, slice: { index: 1, count: 2 }, tasks: 1 };
+  check(() => {
+    const w = wallOf([{ ...mk('a', 400), tasks: 1 }, mk('b', 100), mk('c', 100), slice300]);
+    if (w !== 700) throw new Error(`wall: max(400, 600/4) + 300 should be 700, got ${w}`);
+  });
+  check(() => {
+    const w = wallOf([{ ...mk('a', 400), tasks: 2 }, mk('b', 100), mk('c', 100), slice300]);
+    if (w !== 500) throw new Error(`wall: a two-task 400s suite should put 200s on the path (max(200, 150) + 300 = 500), got ${w}`);
+  });
+
+  // A slice costs its bin weight x concurrency: three 100s slices land on three
+  // bins and nothing else does, because whole packages ahead of a slice leg
+  // would run in front of it, serially.
+  const fillers = (n, w, prefix = 'f') => Array.from({ length: n }, (_, i) => mk(`${prefix}${String(i).padStart(2, '0')}`, w));
+  check(() => {
+    const items = expandSlices([{ name: 'big', weight: 300, sliceCount: 3 }, ...fillers(12, 50)]);
+    const bins = partition(items, 6);
+    const sliceBins = bins.filter((b) => b.names.some((n) => parseShardItem(n).slice));
+    if (sliceBins.length !== 3 || sliceBins.some((b) => b.names.length !== 1)) {
+      throw new Error(`slot load: slice bins came out as ${sliceBins.map((b) => b.names.join('+')).join(' | ')}`);
+    }
+  });
+
+  // THE MEASURED SHAPE, in miniature (merge_group 37875522518: 1739s alone
+  // against five ~1400s bins of many packages). Sums: 1700 vs a 1450 mean,
+  // 1.17x, inside the bound -- so the sum model keeps it whole, which is the
+  // reading every PR and queue build paid ~31 minutes for. Walls: 1700 vs 350,
+  // so the wall model slices it, and the sliced split meets the bound.
+  const measuredShape = [{ name: 'big', weight: 1700, sliceCount: 3, tasks: 1 }, ...fillers(70, 100)];
+  check(() => {
+    const [d] = planShards(measuredShape, SHARD_COUNT, { concurrency: 1 }).decisions;
+    if (d.needed || d.count !== 1) {
+      throw new Error(`measured shape: at concurrency 1 (bin sums) it should fit whole, got ${renderSliceDecision(d)}`);
+    }
+  });
+  check(() => {
+    const plan = planShards(measuredShape, SHARD_COUNT);
+    const [d] = plan.decisions;
+    if (!d.needed || !d.spreads || d.count !== 3) {
+      throw new Error(`measured shape: one serial suite at ~5x the other shards' walls was not sliced: ${renderSliceDecision(d)}`);
+    }
+  });
+  check(() => {
+    const { items } = planShards(measuredShape, SHARD_COUNT);
+    const b = shardWalls(partition(items, SHARD_COUNT), items);
+    if (b.ratio > MAX_SHARD_OVER_MEAN) {
+      throw new Error(`measured shape: sliced, the walls still read ${b.ratio.toFixed(2)}x (${b.walls.map((w) => w.toFixed(0)).join('/')}s)`);
+    }
+  });
+
+  // Per run, not per dataset: a run without the package decides nothing, and
+  // a run where another, unsliceable task is the floor keeps it whole --
+  // slicing cannot take the run below that task.
+  check(() => {
+    const plan = planShards(fillers(30, 100), SHARD_COUNT);
+    if (plan.decisions.length !== 0 || plan.items.some((i) => i.slice)) {
+      throw new Error('per run: a run without the configured package sliced something');
+    }
+  });
+  check(() => {
+    const plan = planShards([{ name: 'big', weight: 400, sliceCount: 3 }, mk('heavy', 1000), ...fillers(8, 100)], SHARD_COUNT);
+    const [d] = plan.decisions;
+    if (d.needed || d.count !== 1) {
+      throw new Error(`per run: slicing a 400s suite beside an unsliceable 1000s one was chosen: ${renderSliceDecision(d)}`);
+    }
+  });
+
+  // Slices that cannot spread do not run in parallel, so they are not taken:
+  // three slices across two shards (the nightly tier run's shape) stay whole.
+  check(() => {
+    const [d] = planShards([{ name: 'big', weight: 1700, sliceCount: 3 }], 2).decisions;
+    if (!d.needed || d.spreads || d.count !== 1 || !renderSliceDecision(d).includes('cannot spread')) {
+      throw new Error(`spread: 3 slices over 2 shards were not refused by name: ${renderSliceDecision(d)}`);
+    }
+  });
+
+  // The committed dataset, split as CI splits a full run, takes the configured
+  // count for every configured package it carries.
+  check(() => {
+    const wrong = datasetPlan.decisions.filter((d) => d.count !== FILE_SHARDED_PACKAGES[d.name]);
+    if (datasetPlan.decisions.length !== Object.keys(FILE_SHARDED_PACKAGES).length || wrong.length > 0) {
+      throw new Error(`dataset plan: ${datasetPlan.decisions.map(renderSliceDecision).join('; ') || 'no decision made'}`);
+    }
+  });
+
+  // The path main() runs, on the real CLI: weighItems() reads its configured
+  // count and test-file floor from the tree, planShards() takes the count, and
+  // partition() receives slices rather than one package-shaped lump.
+  check(() => {
+    const { weighed } = weighItems([{ name: '@objectstack/cli', path: 'packages/cli' }], new Set(), timings, 'plan pin');
+    const { items, decisions } = planShards(weighed, SHARD_COUNT);
+    const n = FILE_SHARDED_PACKAGES['@objectstack/cli'];
+    if (items.length !== n || !items.every((i) => i.slice && i.pkg === '@objectstack/cli')) {
+      throw new Error(`plan: the CLI alone on ${SHARD_COUNT} shards reached partition() as ${items.map((i) => i.name).join(', ')} (${decisions.map(renderSliceDecision).join('; ')})`);
+    }
+  });
+
   // -- The floor: every declared battery RAN, and ran its cases (#13489) ----
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -2020,9 +2376,10 @@ function selfTest() {
   console.log(
     `partition-test-shards: self-test OK (${datasetPackages.length} measured packages ` +
       `-> ${datasetItems.length} shard items, ${SHARD_COUNT} shards, ` +
-      `max/mean ${balance.ratio.toFixed(2)}x <= ${MAX_SHARD_OVER_MEAN}x, floor ${balance.floor.toFixed(0)}s, ` +
-      `bins ${balance.totals.map((t) => t.toFixed(0)).join('/')}s, file-level slices: ` +
-      `${Object.entries(FILE_SHARDED_PACKAGES).map(([name, n]) => `${name} x${n}`).join(', ') || 'none'})`
+      `wall max/mean ${walls.ratio.toFixed(2)}x <= ${MAX_SHARD_OVER_MEAN}x at concurrency ${TEST_CONCURRENCY}, ` +
+      `floor ${walls.floor.toFixed(0)}s, walls ${walls.walls.map((t) => t.toFixed(0)).join('/')}s, ` +
+      `bins ${balance.totals.map((t) => t.toFixed(0)).join('/')}s of test windows, file-level slices: ` +
+      `${datasetPlan.decisions.filter((d) => d.count > 1).map((d) => `${d.name} x${d.count}`).join(', ') || 'none'})`
   );
 
   return SELF_TEST_VERDICT;
@@ -2124,21 +2481,27 @@ function main() {
   const parsed = JSON.parse(readFileSync(listPath, 'utf8'));
   const items = readPackageItems(parsed, listPath);
   const timings = loadTimings();
-  const { weighted, estimated, packages } = weighItems(items, excluded, timings, listPath);
+  const { weighed, estimated, packages } = weighItems(items, excluded, timings, listPath);
+  const { items: weighted, decisions } = planShards(weighed, shardCount);
   const bins = assertSlicesSpread(partition(weighted, shardCount));
   const mine = bins[shardIndex - 1];
-  const { max, mean, ratio } = balanceOf(bins);
+  const walls = shardWalls(bins, weighted);
   // Printed on every shard, not just the imbalanced one, and printed as the
   // RATIO the acceptance bound is written in: the per-shard numbers alone never
   // said whether the split was balanced, which is why #10472's imbalance had to
-  // be found by reading six job durations side by side after the fact.
+  // be found by reading six job durations side by side after the fact. Both
+  // quantities are printed: the summed weight is what `--check-drift` compares
+  // against, the predicted wall is what the bound grades (#22075).
   console.error(
     `shard ${shardSpec}: ${mine.names.length}/${weighted.length} items ` +
       `(${weighted.length - packages} of them file-level slices of ${packages} package(s)), ` +
-      `${mine.total.toFixed(1)}s predicted (all bins: ${bins.map((b) => b.total.toFixed(0)).join('/')}s; ` +
-      `max/mean ${ratio.toFixed(2)}x of the ${MAX_SHARD_OVER_MEAN}x bound, max ${max.toFixed(0)}s, mean ${mean.toFixed(0)}s; ` +
-      `${packages - estimated} measured, ${estimated} estimated from test-file count)`
+      `${mine.total.toFixed(1)}s of test windows predicted, ${walls.walls[shardIndex - 1].toFixed(0)}s of wall ` +
+      `(all bins: ${bins.map((b) => b.total.toFixed(0)).join('/')}s of windows, ` +
+      `${walls.walls.map((w) => w.toFixed(0)).join('/')}s of wall at concurrency ${TEST_CONCURRENCY}; ` +
+      `wall max/mean ${walls.ratio.toFixed(2)}x of the ${MAX_SHARD_OVER_MEAN}x bound, max ${walls.max.toFixed(0)}s, ` +
+      `mean ${walls.mean.toFixed(0)}s; ${packages - estimated} measured, ${estimated} estimated from test-file count)`
   );
+  for (const d of decisions) console.error(`  slicing: ${renderSliceDecision(d)}`);
   for (const name of mine.names) console.log(name);
 }
 

@@ -219,8 +219,10 @@ export function doctorNodeEnv(env: NodeJS.ProcessEnv = process.env): string {
  *
  * What the posture does NOT change: {@link doctorNodeEnv} and the `.env*`
  * cascade doctor resolves (still `production`, which the `Environment files`
- * row keeps saying), the `/discovery` default, and how `os serve`, `os start`
- * and `os dev` resolve the mode. Only what this row says, and when.
+ * row keeps saying — in this posture naming `os serve` / `os start` as the
+ * loaders of that cascade, #22249), the `/discovery` default, and how
+ * `os serve`, `os start` and `os dev` resolve the mode. Only what this row
+ * says, and when.
  *
  * ── Deliberately NOT in `DOCTOR_ENV_INPUTS`, and not read through the overlay ─
  *
@@ -277,7 +279,8 @@ export function nodeEnvCheck(
  * [#22163] Is `cwd` the source checkout `os dev` serves — a cwd
  * `objectstack.config.ts` that boots as itself, with no artifact from anywhere
  * else? The posture {@link nodeEnvCheck} reads an unset `NODE_ENV` as
- * development in.
+ * development in, and {@link environmentSourcesCheck} names the loaders of the
+ * cascade it reports in (#22249). `run()` asks once and hands both the answer.
  *
  * Answered by THE precedence (`utils/artifact-precedence.ts`), never by a copy
  * of it: {@link resolveArtifactBootSource} for the artifact rungs, then
@@ -640,18 +643,41 @@ function revertDotenvOverlay(overlay: Record<string, string>, applied: string[])
  * `DOCTOR_ENV_INPUTS`, so they are not enumerated here — but the files that
  * supplied them are, which is what makes the wider overlay a reported fact
  * rather than the silent merge #5387 refused.
+ *
+ * ── In the source checkout `os dev` serves, the row says whose cascade (#22249) ─
+ *
+ * The cascade itself does not move with the posture: #5387's ruling stands,
+ * doctor resolves it exactly as `os serve` does, so {@link doctorNodeEnv} and
+ * every env-derived verdict are the same in every posture. What moves is the
+ * reader. Beside a config `os dev` serves, the `NODE_ENV` row just below says
+ * the project runs as development under `os dev` (#22163), and `os dev` loads
+ * the `node_env=development` cascade — so an unattributed `node_env=production`
+ * one row above it reads to a newcomer as "my dev project is production". There
+ * the row names its loaders, `os serve` and `os start`, both of which resolve
+ * the cascade doctor resolved (`start.ts` and `serve.ts` derive the same mode
+ * from `NODE_ENV`, and `os start` forces `production` only when it is unset).
+ * In every other posture the row is what it was, byte for byte.
+ *
+ * @param opts.sourcePosture {@link nodeEnvSourcePosture}'s answer for the
+ *   directory doctor runs in — the same answer {@link nodeEnvCheck} is given,
+ *   computed once by the caller. Defaults to `false`, the unchanged row.
  */
 export function environmentSourcesCheck(
   reading: DotenvReading,
   env: NodeJS.ProcessEnv = process.env,
+  opts: { sourcePosture?: boolean } = {},
 ): HealthCheckResult {
   const loaded = reading.files.map((file) => displayEnvFile(reading, file));
   const provenances = DOCTOR_ENV_INPUTS.map((name) => provenanceOf(reading, name, env));
   const set = provenances.filter((p) => p.source !== 'unset');
 
+  const cascade = `node_env=${reading.nodeEnv}`;
+  const loader = opts.sourcePosture ? '`os serve` / `os start` load' : '`os serve` loads';
   const where = loaded.length > 0
-    ? `${loaded.join(', ')} (node_env=${reading.nodeEnv}), the cascade \`os serve\` loads`
-    : `No .env* files here (node_env=${reading.nodeEnv}) — environment read from this process only`;
+    ? `${loaded.join(', ')} (${cascade}), the cascade ${loader}`
+    : opts.sourcePosture
+      ? `No .env* files here (${cascade}, the cascade ${loader}) — environment read from this process only`
+      : `No .env* files here (${cascade}) — environment read from this process only`;
   const attribution = set.length > 0
     ? ` — ${set.map((p) => describeProvenance(reading, p)).join(', ')}`
     : ' — no environment input set';
@@ -2181,7 +2207,12 @@ export default class Doctor extends Command {
     // derived from it. Unconditional: an env-derived verdict whose inputs are
     // not attributed is a verdict the operator cannot check, and after this
     // change every such verdict has four possible sources.
-    results.push(environmentSourcesCheck(dotenvReading));
+    //
+    // #22163 / #22249 — the source checkout `os dev` serves, asked ONCE: the
+    // sources row and the NODE_ENV row below both read this one answer, so the
+    // two rows can never describe two different postures in one report.
+    const sourcePosture = nodeEnvSourcePosture(cwd);
+    results.push(environmentSourcesCheck(dotenvReading, process.env, { sourcePosture }));
 
     // #5673 / #22163 — what an unset NODE_ENV means here. Placed immediately
     // after the sources row because it answers the question that row raises:
@@ -2191,9 +2222,11 @@ export default class Doctor extends Command {
     // says that project runs as development under `os dev` and as production
     // under `os start` — and the sources row above still says
     // `node_env=production` there, because that is the cascade doctor resolved
-    // and #22163 changes only this row. Only the unset case produces a row; a
-    // configured environment's report is unchanged.
-    const nodeEnvFinding = nodeEnvCheck(process.env, { sourcePosture: nodeEnvSourcePosture(cwd) });
+    // (#5387); since #22249 it also names `os serve` / `os start` as the
+    // loaders of that cascade there, so the two rows read as one account. Only
+    // the unset case produces a row; a configured environment's report is
+    // unchanged.
+    const nodeEnvFinding = nodeEnvCheck(process.env, { sourcePosture });
     if (nodeEnvFinding) {
       results.push(nodeEnvFinding);
     }
