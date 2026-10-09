@@ -19,6 +19,11 @@
 // `enabled: false` (absent reads as the schema default, false). Both sides are
 // pinned: republishing at the same scope restores both doors, and after the
 // organization republish the row lands in that organization.
+//
+// [ADR-0131 D6] Since the per-organization overlay axis retired, the save of an
+// admin WITH an active organization is environment-wide too: the doors carry
+// no organization into a metadata write. The intake row still lands in the
+// organization the anonymous form door resolves (the Default Organization).
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
@@ -139,22 +144,24 @@ describe('showcase: withdrawing the public contact form closes every intake door
     expect(open.landed).toHaveLength(1);
   });
 
-  it('withdrawn in the admin\'s organization: both doors answer 404 FORM_NOT_FOUND and nothing lands', async () => {
+  it('withdrawn by an admin WITH an active organization: the save is environment-wide, both doors answer 404 FORM_NOT_FOUND and nothing lands', async () => {
     const orgs = await ql.find('sys_organization', { fields: ['id'], limit: 2, context: SYS });
     expect(orgs, 'the showcase boot holds exactly one organization').toHaveLength(1);
     const on = await stack.apiAs(admin, 'POST', '/auth/organization/set-active', { organizationId: orgs[0].id });
     expect(on.status).toBe(200);
 
-    expect(await save(false), 'the save is an organization overlay').toContain(`org=${orgs[0].id}`);
+    // [ADR-0131 D6] Not an organization overlay any more.
+    expect(await save(false), 'the save is environment-wide').toMatch(/env-wide/);
     const p = await probe();
     expect([p.get, p.getCode, p.submit, p.submitCode]).toEqual([404, 'FORM_NOT_FOUND', 404, 'FORM_NOT_FOUND']);
     expect(p.landed).toHaveLength(0);
   });
 
-  it('republished in the same organization (control): both doors accept and the row lands in that organization', async () => {
+  it('republished by the same admin (control): both doors accept and the row lands in the organization', async () => {
     const message = await save(true);
-    const org = /org=(\S+?),/.exec(message)?.[1];
-    expect(org, message).toBeTruthy();
+    expect(message, 'the save is environment-wide').toMatch(/env-wide/);
+    const orgs = await ql.find('sys_organization', { fields: ['id'], limit: 2, context: SYS });
+    const org = orgs[0].id;
     const p = await probe();
     expect([p.get, p.submit]).toEqual([200, 201]);
     expect(p.landed).toHaveLength(1);
