@@ -1629,8 +1629,8 @@ function coldBootConflictMessage(conflicts: readonly SecurityCatalogNameConflict
     `assignment names a position or a permission set by its bare name, so with two holders the environment's ` +
     `stored item would be served in place of the package's definition. The environment catalog loads from ` +
     `sys_metadata before this check, so the boot is refused. Rename the item in the package, or rename or ` +
-    `delete the environment's item (its environment-wide sys_metadata row: through the metadata API on a boot ` +
-    `that leaves the package out of the configuration, or in the database), then restart. ` +
+    `delete the environment's item (its environment-wide sys_metadata row: \`os migrate security-catalog-overlays\` ` +
+    `lists every such row with no server running, and with --apply deletes them), then restart. ` +
     `See ADR-0048.`
   );
 }
