@@ -29679,6 +29679,150 @@ function selfTest() {
     );
   }
 
+  // ── Every derivation path a case drives, measured before the split ────────
+  //
+  // Condition 1 of the lift that let this battery be split: before anything
+  // moved, V8 block coverage of a full run of this battery was read over the
+  // engine's own declarations (this self-test excluded) — every one of the 245
+  // declarations with code was invoked; 338 of 2,259 blocks inside them were
+  // not — and the branches below are the derivation paths among those: the
+  // marker grammars' refusals, the path matcher's floor, the tier renderer's
+  // two exits, the changed-line reading's three states, the sister-repo tier
+  // run, the claim-line reader, the argv splitter's joined and valueless
+  // forms, the repo assertion's three refusals, the absent-path verdict with
+  // no identity, and every class the run-record reconciliation can land a
+  // family in. Each case names the function and the branch it drives, so the
+  // next reading is taken against this block and not against memory. All of
+  // them are in-process on fixtures: no tree walk, no child.
+  {
+    const throwsWith = (fn, needle) => {
+      try {
+        fn();
+        return false;
+      } catch (error) {
+        return String(error.message).includes(needle);
+      }
+    };
+    // The marker grammars — the refusals a wrong key or form reaches.
+    t('markerFormKind: an unrecognised comment form throws and names the table it is added to', throwsWith(() => markerFormKind('bogus'), "unrecognised comment form 'bogus'"));
+    t('populationMarkerPattern: an unknown key throws and lists the known ones', throwsWith(() => populationMarkerPattern('not-a-key'), "unknown population marker key 'not-a-key'"));
+    const twoKeys = ['// dispatch-gates: no-path-population -- first', '// dispatch-gates: whole-tree-population -- second'];
+    t('lineFormReason: a NEW key under a declaration is a second declaration, never a cut', lineFormReason(twoKeys, 1, '//', ' first').cut === null);
+    t('lineFormReason: a declaration on the last line has nothing under it to cut it', lineFormReason(['// dispatch-gates: no-path-population -- only'], 1, '//', ' only').cut === null);
+    const cutLines = ['// dispatch-gates: no-path-population -- cut', '// off mid-sentence'];
+    const cut = lineFormReason(cutLines, 1, '//', ' cut').cut;
+    t('CONTROL: a plain continuation line IS a cut, with its line and text', cut?.kind === 'line' && cut.line === 2 && cut.text === 'off mid-sentence');
+    t('markerReasonCutRefusal: an unknown key throws before any text is built', throwsWith(() => markerReasonCutRefusal('bogus', null), "unknown marker key 'bogus'"));
+    const blockCut = markerReasonCutRefusal('inherited-population', { kind: 'block', line: 3, text: 'tail', file: 'x.mjs' }) ?? '';
+    t('markerReasonCutRefusal: a BLOCK cut gets the block repair, located', blockCut.includes('inside a block comment') && blockCut.includes('x.mjs:3') && blockCut.includes('"tail"'));
+    const lineCut = markerReasonCutRefusal('inherited-population', { kind: 'line', line: 2, text: 'more', file: 'x.mjs' }) ?? '';
+    t('…and a LINE cut gets the marker-line repair, byte for byte the older text', lineCut.includes('does not END on the marker line') && lineCut.includes('x.mjs:2'));
+    t('refuseCutMarkerReason: a read with a cut THROWS, naming the file and the key', throwsWith(() => refuseCutMarkerReason({ cut: { kind: 'line', line: 2, text: 'more' } }, 'local-env', 'y.mjs'), 'y.mjs declares local-env'));
+    t('…and a read with no cut returns quietly', refuseCutMarkerReason({ cut: null }, 'local-env', 'y.mjs') === undefined);
+    const lookalike = unparsedPopulationMarkers('// dispatch-gates: no-path-population\n', 'z.mjs');
+    t('unparsedPopulationMarkers: a declaration with no reason tail is READ but does not PARSE, and is located', lookalike.length === 1 && lookalike[0].key === 'no-path-population' && lookalike[0].line === 1 && lookalike[0].file === 'z.mjs');
+    const lookalikeRefusal = unparsedPopulationMarkerRefusal(lookalike) ?? '';
+    t('unparsedPopulationMarkerRefusal: the refusal names the row and the forms the key may be written in', lookalikeRefusal.includes('did not PARSE') && lookalikeRefusal.includes('z.mjs:1') && lookalikeRefusal.includes('no-path-population may be written in'));
+    t('…and an empty list is no refusal', unparsedPopulationMarkerRefusal([]) === null);
+    t('readPopulationDeclaration: an unknown key throws and lists the declared fields', throwsWith(() => readPopulationDeclaration({}, '', 'f.mjs', 'bogus'), "unknown population marker key 'bogus'"));
+
+    // The path matcher's floor.
+    t('hintCovers: a one-character hint covers nothing, even itself', hintCovers('x', 'x') === false);
+    t('CONTROL: a two-segment hint covers its subtree', hintCovers('scripts/pm', 'scripts/pm/x.mjs') === true);
+
+    // The tier renderer's two one-line-class exits, and the changed-line reading's three states.
+    t('tierLines: a mandated surface with the one-line exit OPEN says it drops to the default tier', tierLines(deriveTier(['.claude/agents/os-dev.md'])).join('\n').includes('drops to opus execution'));
+    t('tierLines: a mandated surface whose glob BARS the exit says so, naming the glob', tierLines(deriveTier(['skills/x/SKILL.md'])).join('\n').includes("NOT available for this surface — 'skills/**'"));
+    t('changedLineLines: no size is NOT MEASURED', changedLineLines(null).join('\n').includes('NOT MEASURED'));
+    t('changedLineLines: one line is under', changedLineLines({ additions: 1, deletions: 0 }).join('\n').includes('under.'));
+    t('changedLineLines: one over the threshold is OVER, and the threshold is the gate\'s', changedLineLines({ additions: HUMAN_MERGE_LINE_THRESHOLD + 1, deletions: 0 }).join('\n').includes(`threshold ${HUMAN_MERGE_LINE_THRESHOLD}: ⛔ OVER`));
+
+    // The sister-repo tier run, in process.
+    const pinSelf = GOVERNED_REPOS.find((r) => r.id === SELF_REPO_ID).slug;
+    const pinSister = GOVERNED_REPOS.find((r) => r.id !== SELF_REPO_ID).slug;
+    t('sisterRepoTierRun: this repo is not a sister — null, so the ordinary assertion answers', sisterRepoTierRun({ asserted: pinSelf, paths: ['x'] }) === null);
+    const sisterNoPaths = sisterRepoTierRun({ asserted: pinSister, paths: [] });
+    t('sisterRepoTierRun: a sister with no paths REFUSES — nothing to derive them from', sisterNoPaths?.ok === false && sisterNoPaths.stderr.join('\n').includes('REFUSING') && sisterNoPaths.stdout.length === 0);
+    const sisterRun = sisterRepoTierRun({ asserted: pinSister, paths: ['skills/x/SKILL.md'], identity: { head: 'abc1234' } });
+    t('sisterRepoTierRun: a sister with paths answers the tier from the globs and the changed lines as NOT MEASURED, naming the commit', sisterRun?.ok === true && sisterRun.stdout[0].startsWith('Model tier') && sisterRun.stdout[sisterRun.stdout.length - 1].includes(`NOT MEASURED`) && sisterRun.stdout[sisterRun.stdout.length - 1].includes(String(HUMAN_MERGE_LINE_THRESHOLD)) && sisterRun.stderr[0].includes('at commit abc1234'));
+
+    // The claim's model line.
+    t('readContainerModelLine: no key line is absent', readContainerModelLine('no such line here').present === false);
+    const noSlot = readContainerModelLine('Container & model: `L`, mode:subagent');
+    t('readContainerModelLine: a key line with no model slot is present and declares no tier', noSlot.present === true && (noSlot.tier ?? null) === null);
+
+    // The argv splitter's joined and valueless forms.
+    t('splitArgv: a value flag followed by another flag is malformed, naming the flag', String(splitArgv(['--repo', '--tier']).malformed).includes('--repo needs a value'));
+    t('splitArgv: the joined spelling binds the value', splitArgv(['--repo=o/r']).assertion === 'o/r' && splitArgv(['--ran=rec.list', 'p']).runRecord === 'rec.list');
+    t('splitArgv: the joined spelling with nothing after the sign is malformed', String(splitArgv(['--ran=']).malformed).includes('--ran needs a value'));
+
+    // The repo assertion's three refusals and its case-insensitive pass.
+    const idHere = { slug: 'o/r', root: '/t' };
+    t('repoAssertionVerdict: a slug that is not owner/name is refused as usage', repoAssertionVerdict({ asserted: 'nonsense', identity: idHere }).lines[0].includes('expects an owner and a repository name'));
+    t('repoAssertionVerdict: an unreadable identity refuses rather than assuming', repoAssertionVerdict({ asserted: 'o/r', identity: { slug: null, root: '/t' } }).lines[0].includes('UNKNOWN'));
+    const mismatch = repoAssertionVerdict({ asserted: 'not-an-owner/not-a-repo', identity: idHere });
+    t('repoAssertionVerdict: a mismatch REFUSES and names both repos, with no tier hint for a stranger', mismatch.ok === false && mismatch.lines[0].includes('REFUSING') && !mismatch.lines.join('\n').includes('The TIER half alone'));
+    t('…and a mismatch that names a governed sister adds the tier-half hint', repoAssertionVerdict({ asserted: pinSister, identity: idHere }).lines.join('\n').includes('The TIER half alone needs no tree'));
+    t('repoAssertionVerdict: the comparison ignores case', repoAssertionVerdict({ asserted: 'O/R', identity: idHere }).ok === true);
+
+    // The absent-path verdict with and without an identity.
+    const noRoot = { root: '/no-such-root-for-this-pin', slug: null };
+    const absentNoId = absentPathVerdict({ asserted: null, identity: noRoot, paths: ['docs/x.md'] });
+    t('absentPathVerdict: with no readable identity the copy line is marked UNVERIFIABLE', absentNoId.ok === false && absentNoId.lines.join('\n').includes('UNVERIFIABLE') && absentNoId.lines.join('\n').includes('owner/this-repo'));
+    t('absentPathVerdict: with an identity the copy line names this repo', absentPathVerdict({ asserted: null, identity: { ...noRoot, slug: 'o/r' }, paths: ['docs/x.md'] }).lines.join('\n').includes(`${REPO_FLAG} o/r`));
+    t('absentPathVerdict: an assertion settles it', absentPathVerdict({ asserted: 'o/r', identity: noRoot, paths: ['docs/x.md'] }).ok === true);
+
+    // The run record: every class the reconciliation can land a family in.
+    const floor = RUN_RECORD_KILL_EXITS.SIGNAL_FLOOR;
+    const namedCodes = Object.keys(RUN_RECORD_KILL_EXITS.SIGNAL_NAMES).map(Number);
+    const unnamed = Array.from({ length: 60 }, (_, k) => floor + k + 1).find((c) => !namedCodes.includes(c));
+    t('runRecordKillLabel: not an integer, and a code under the signal floor, are no kill', runRecordKillLabel('x') === null && runRecordKillLabel(1.5) === null && runRecordKillLabel(1) === null);
+    t('runRecordKillLabel: the timeout wrapper\'s code is named as such', String(runRecordKillLabel(RUN_RECORD_KILL_EXITS.TIMEOUT)).includes('timeout'));
+    t('runRecordKillLabel: a named signal is named, an unnamed one is numbered', runRecordKillLabel(namedCodes[0]) === `killed by ${RUN_RECORD_KILL_EXITS.SIGNAL_NAMES[namedCodes[0]]}` && runRecordKillLabel(unnamed) === `killed by signal ${unnamed - floor}`);
+    t('parseRunRecord: a separator tail that is not an exit code is malformed, read as a command in full', String(parseRunRecord('cmd :: exit abc')[0].malformed).includes('not an exit code') && parseRunRecord('cmd :: 7')[0].command === 'cmd :: 7');
+    t('parseRunRecord: a bare line has no exit code and no fault', parseRunRecord('cmd')[0].exitCode === null && parseRunRecord('cmd')[0].malformed === null);
+    t('parseRunRecord: a claim with no separator, and one with an empty reason, are each malformed by name', String(parseRunRecord('NOT-MEASURED cmd')[0].malformed).includes("no '::'") && parseRunRecord('NOT-MEASURED cmd :: ')[0].malformed === 'an empty reason');
+    t('parseRunRecord: comments, blank lines and CRLF are tolerated', parseRunRecord('# note\n\ncmd :: exit 0\r\n').length === 1 && parseRunRecord('# note\n\ncmd :: exit 0\r\n')[0].exitCode === 0);
+    const recRecord = parseRunRecord([
+      'a :: exit 0',
+      `a :: exit ${EXIT_PREREQUISITE_NOT_MET}`,
+      `b :: exit ${namedCodes[0]}`,
+      'NOT-MEASURED b :: the cap killed it',
+      `c :: exit ${namedCodes[0]}`,
+      `d :: exit ${namedCodes[0]}`,
+      'NOT-MEASURED d :: ',
+      'NOT-MEASURED e :: never reached — the box has no docker',
+      'NOT-MEASURED f',
+      'g :: exit zz',
+      'ci-only :: exit 0',
+      'not-runnable :: exit 0',
+      'pending :: exit 0',
+      'h  :: exit 0',
+      'i',
+    ].join('\n'));
+    const recon = runReconciliation({ derived: ['a', 'b', 'c', 'd', 'e', 'h', 'i'], record: recRecord, ciOnlyCommands: new Set(['ci-only']), notRunnableCommands: new Set(['not-runnable']), pendingCommands: new Set(['pending']) });
+    const landed = (cmd) => (recon.notMeasured.find((x) => x.command === cmd) ? `nm:${recon.notMeasured.find((x) => x.command === cmd).source}` : recon.unrun.find((x) => x.command === cmd) ? 'unrun' : recon.ran.includes(cmd) ? 'ran' : 'none');
+    t(`runReconciliation: two codes for one command contradict, and ${EXIT_PREREQUISITE_NOT_MET} wins — NOT-MEASURED from the exit code`, recon.exitContradictions.length === 1 && recon.exitContradictions[0].command === 'a' && landed('a') === 'nm:exit-code');
+    t('runReconciliation: a kill code with a stated reason beside it is NOT-MEASURED from the kill claim', landed('b') === `nm:${RUN_RECORD_NOT_MEASURED_KILL_SOURCE}`);
+    t('runReconciliation: a kill code with no claim is UNRUN, told how to declare it', landed('c') === 'unrun' && recon.unrun.find((x) => x.command === 'c').why.includes('declare it as'));
+    t('runReconciliation: a kill code with a reasonless claim is UNRUN — a kill without a stated reason', landed('d') === 'unrun' && recon.unrun.find((x) => x.command === 'd').why.includes('a kill without a stated reason'));
+    t('runReconciliation: a reasoned claim with no exit code is NOT-MEASURED from the claim', landed('e') === 'nm:claim');
+    t('runReconciliation: the three explained extras land in their own lists, not as unknown extras', recon.explainedCiOnly?.includes('ci-only') && recon.explainedNotRunnable?.includes('not-runnable') && recon.explainedPending?.includes('pending'));
+    t('runReconciliation: a recorded command that is derived only once trimmed is a NEAR MISS, and still an extra', recon.nearMiss?.some((n) => n.recorded === 'h ' && n.derived === 'h') && recon.extra.includes('h ') && landed('h') === 'unrun');
+    t('runReconciliation: both malformed kinds are carried, by line', recon.malformed.some((m) => m.kind === 'claim') && recon.malformed.some((m) => m.kind === 'exit'));
+    t('runReconciliation: a bare line is RAN with no code — the silent class', landed('i') === 'ran');
+    t('runReconciliation: the classes close over the derived total', recon.ran.length + recon.unrun.length + recon.notMeasured.length === 7);
+    const rendered = runReconciliationLines(recon).join('\n');
+    t('runReconciliationLines: the contradiction, the agreeing kill claim, and both malformed shapes are each rendered', rendered.includes('TWO different exit codes') && rendered.includes('The two AGREE') && rendered.includes('carries') && rendered.includes('claims NOT-MEASURED with'));
+    t('runReconciliationLines: a mixed record renders the evidence as a FLOOR', rendered.includes('a FLOOR'));
+    const claimedOnly = runReconciliation({ derived: ['x'], record: parseRunRecord('x') });
+    t('runReconciliationLines: a record with no exit codes renders the count as the RUNNER\'S CLAIM', runReconciliationLines(claimedOnly).join('\n').includes("RUNNER'S CLAIM"));
+    const derivedZero = runReconciliation({ derived: ['x'], record: parseRunRecord('x :: exit 0') });
+    t('runReconciliationLines: an all-coded record with nothing refused renders a DERIVED zero', runReconciliationLines(derivedZero).join('\n').includes('a DERIVED zero'));
+    const nothing = runReconciliation({ derived: [], record: [] });
+    t('runReconciliation: nothing derived and nothing recorded closes at zero', nothing.ran.length === 0 && nothing.unrun.length === 0 && nothing.notMeasured.length === 0);
+  }
+
   // The non-vacuity half of #15539, read at the tail because that is where
   // every call site passing a reading has already run. The card named six; the
   // assertion is a FLOOR rather than an equality, so adding a seventh is not a
