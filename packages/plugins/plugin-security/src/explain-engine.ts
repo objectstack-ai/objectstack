@@ -34,6 +34,11 @@ import {
   type MatchesFilterOptions,
 } from '@objectstack/formula';
 import { ORGANIZATION_ADMIN_GRANTS } from '@objectstack/spec';
+import type {
+  ControlledByParentWriteDenialLeg,
+  ControlledByParentWriteOutcome,
+  ControlledByParentWriteUnresolvedReason,
+} from '@objectstack/spec/contracts';
 import type { FieldMaskingRule } from '@objectstack/spec/data';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type {
@@ -365,6 +370,29 @@ export interface ExplainEngineDeps {
    * explanation for a `delete` must consult this rather than the update gate.
    */
   canDeleteRecord?: (object: string, recordId: string, context: any) => Promise<boolean>;
+  /**
+   * [ADR-0055] The master-detail write check's own answer for a by-id UPDATE
+   * of `recordId` by `context`: `ISecurityService.checkControlledByParentWrite`,
+   * the composition step 2.8 of the write path runs. On a
+   * `controlled_by_parent` record the per-record sharing gate above abstains
+   * (the object's effective model is `public`), so it cannot be the update's
+   * verdict there: this check is, and the door refuses on every outcome but
+   * `allow` and `not_applicable`.
+   *
+   * Asked for every `update` of a record that exists, with the context being
+   * EXPLAINED. The member holds the `controlled_by_parent` predicate, so the
+   * engine keeps no second copy of it: `not_applicable` leaves the report
+   * exactly as it was. A rejection (a context the write path refuses, or a
+   * store fault) is a dependency fault, reported fail-closed.
+   *
+   * Optional: a deps bag wired without it explains the update from the sharing
+   * gate alone, as before, and claims nothing about a master.
+   */
+  checkControlledByParentWrite?: (
+    object: string,
+    recordId: string,
+    context: any,
+  ) => Promise<ControlledByParentWriteOutcome>;
   /**
    * [#21771] Enforcement's own read question for an addressed by-id write:
    * would the read door, asked by this principal, NOT return the record?
@@ -869,6 +897,70 @@ function describeOwd(schema: any): { model: string; declared: boolean; effect: '
   return { model: `${String(m)} (unknown → private, fail-closed)`, declared: true, effect: 'private' };
 }
 
+/** [ADR-0055] What each refusing leg of the master-detail write check means, for the report's prose. */
+const MASTER_DENIAL_LEG_DETAIL: Record<ControlledByParentWriteDenialLeg, string> = {
+  object_permission: 'the principal holds no object-level update grant on a master',
+  row_level_security: "a master row is outside the principal's write row-level security on that master",
+  record_sharing:
+    'record sharing does not let the principal edit a master row, and no app-authored update policy on that ' +
+    'master admits it',
+  master_chain: 'the controlled_by_parent chain cannot be walked to a master that governs its own rows',
+};
+
+/** [ADR-0055] Why the master-detail write check reached no verdict, and what the update answers instead. */
+const MASTER_UNRESOLVED_DETAIL: Record<ControlledByParentWriteUnresolvedReason, string> = {
+  master_detail_relation_missing:
+    'the object declares controlled_by_parent with no master_detail relation to derive access from, and the ' +
+    'update answers 422 INVALID_METADATA',
+  record_not_found: 'the record does not exist, and the update answers 404 RECORD_NOT_FOUND',
+  master_reference_missing: "the record's master reference is empty, and the update answers 422 MISSING_REQUIRED_FIELD",
+};
+
+const MASTER_DERIVED = 'Write access to this record derives from its master (controlled_by_parent, ADR-0055)';
+
+/**
+ * [ADR-0055] The sharing layer's record attribution for an update the
+ * master-detail write check REFUSES — the check that decides an update of a
+ * `controlled_by_parent` record — or `undefined` where it does not refuse.
+ *
+ * The mapping is the door's: the update proceeds on `allow` and on
+ * `not_applicable`, and is refused on every other outcome, one outside the
+ * vocabulary included (fail closed). A proceeding outcome leaves the report
+ * exactly as the rest of the pipeline computes it. ⛔ It does not name the
+ * master on `allow`: the member answers `allow` for a system context on ANY
+ * object (the write path's first exit), so `allow` is not evidence that the
+ * record's access derives from a master at all.
+ */
+function masterWriteCheckRefusal(
+  outcome: ControlledByParentWriteOutcome,
+): { outcome: ExplainRecordAttribution['outcome']; detail: string } | undefined {
+  switch (outcome?.outcome) {
+    case 'allow':
+    case 'not_applicable':
+      return undefined;
+    case 'deny':
+      return {
+        outcome: 'excluded',
+        detail: `${MASTER_DERIVED}: the master-detail write check the by-id update runs refuses this update on its ` +
+          `'${outcome.leg}' leg — ${MASTER_DENIAL_LEG_DETAIL[outcome.leg] ?? 'a leg this report does not describe'}. ` +
+          'The update answers 403 PERMISSION_DENIED.',
+      };
+    case 'unresolvable':
+      return {
+        outcome: 'not_evaluated',
+        detail: `${MASTER_DERIVED}, and the master-detail write check reaches no verdict ('${outcome.reason}'): ` +
+          `${MASTER_UNRESOLVED_DETAIL[outcome.reason] ?? 'a reason this report does not describe'}. The record is ` +
+          'reported NOT writable (fail closed), never admitted.',
+      };
+    default:
+      return {
+        outcome: 'not_evaluated',
+        detail: `${MASTER_DERIVED}, and the master-detail write check answered an outcome this report does not ` +
+          'recognise. The record is reported NOT writable (fail closed), never admitted.',
+      };
+  }
+}
+
 /**
  * [#20431] The object's declared columns, handed to the record matcher so it
  * applies the spec's cross-field comparison class (`crossFieldComparisonVerdict`)
@@ -1339,6 +1431,21 @@ async function applyRecordAttribution(
     : undefined;
   const writeGateFault = canEditOrFault === DEPENDENCY_FAULT;
   const canEdit = canEditOrFault === DEPENDENCY_FAULT ? undefined : canEditOrFault;
+  // [ADR-0055] An update of a `controlled_by_parent` record is judged by the
+  // master-detail write check (step 2.8), which the sharing gate above cannot
+  // stand in for: it abstains on such a record, and its abstention reads as
+  // `true`. So the check is asked for every update of a record that exists,
+  // with the explained context, and it decides whether it applies: `allow` and
+  // `not_applicable` change nothing, every other outcome refuses
+  // ({@link masterWriteCheckRefusal}). A rejection is the request failing,
+  // exactly as for the gate.
+  const masterOrFault = engineOp === 'update' && recordExists && deps.checkControlledByParentWrite
+    ? await settle(deps.checkControlledByParentWrite(object, recordId, context))
+    : undefined;
+  const masterFault = masterOrFault === DEPENDENCY_FAULT;
+  const masterRefusal = masterOrFault === undefined || masterOrFault === DEPENDENCY_FAULT
+    ? undefined
+    : masterWriteCheckRefusal(masterOrFault);
   // The sharing call THIS operation's row verdict rests on: the read filter for
   // a read (the sharing middleware ANDs it into every find), the per-record gate
   // for a write (the middleware gates every by-id write on it). Either one
@@ -1353,7 +1460,11 @@ async function applyRecordAttribution(
         ? `The sharing service's per-record ${engineOp === 'delete' ? 'delete' : 'update'} gate could not be ` +
           'evaluated: it threw, and the by-id write fails on the same call — so the record is reported NOT ' +
           'writable (fail closed), never admitted.'
-        : undefined);
+        : masterFault
+          ? 'The master-detail write check (controlled_by_parent, ADR-0055) could not be evaluated: it rejected — ' +
+            'a refusal of the context or a store fault — and the by-id update fails on the same call, so the ' +
+            'record is reported NOT writable (fail closed), never admitted.'
+          : undefined);
   const anyShareAdmits = shareRules.some((r) => r.effect === 'admits');
   // ── read depth: did the depth-widened owner-match admit THIS row? ────────
   // The sharing read filter is ONE predicate carrying two grants: the
@@ -1379,6 +1490,8 @@ async function applyRecordAttribution(
     sharingOutcome = 'not_evaluated';
   } else if (sharingFaultDetail) {
     sharingOutcome = 'not_evaluated';
+  } else if (masterRefusal) {
+    sharingOutcome = masterRefusal.outcome;
   } else if (owd.effect !== 'private') {
     sharingOutcome = 'not_evaluated'; // baseline already grants the rows sharing would add
   } else if (canEdit !== undefined) {
@@ -1401,8 +1514,9 @@ async function applyRecordAttribution(
       rowFilter: sharingFaultDetail || sharingFilter === undefined ? undefined : sharingFilter,
       matchesRecord: sharingFaultDetail ? undefined : sharingMatches,
       rules: shareRules,
-      // A fault is only ever recorded against an existing record.
-      detail: sharingFaultDetail ?? (!recordExists
+      // A fault is only ever recorded against an existing record, and the
+      // master check [ADR-0055] is only ever asked of one.
+      detail: sharingFaultDetail ?? masterRefusal?.detail ?? (!recordExists
         ? 'Record not found; sharing not evaluated.'
         : owd.effect !== 'private'
           ? 'Baseline is not private — sharing adds nothing beyond it for this record.'
@@ -1592,6 +1706,10 @@ async function applyRecordAttribution(
   // pipeline calls it: the RLS composition runs before the sharing middleware.
   else if (layeredFault) { visible = false; decidedBy = 'rls'; }
   else if (sharingFaultDetail) { visible = false; decidedBy = 'sharing'; }
+  // [ADR-0055] The master check refuses after the record's own row-level
+  // security (step 2.8 runs below the pre-image gate), and names its leg on
+  // the sharing layer, the record's write gate.
+  else if (masterRefusal) { visible = false; decidedBy = 'sharing'; }
   else if (!businessRowAdmits) { visible = false; decidedBy = owd.effect === 'private' ? 'sharing' : 'owd_baseline'; }
   else {
     visible = true;

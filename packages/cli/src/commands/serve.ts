@@ -2527,22 +2527,35 @@ export default class Serve extends Command {
       // an artifact boot does. Leaving this half out would re-open the asymmetry
       // the paragraph above exists to close — `os build` producing docs that
       // `os dev` cannot show.
+      //
+      // [#22405] WHERE the flat set lands is `placeCollectedDocs`'s decision,
+      // the one `os build` makes: on a multi-package config it rides the body
+      // of the package whose id is the stack's `manifest.id`, because this boot
+      // registers package bodies and never the top level of such a config, so a
+      // flat doc left there is served by nothing and warned about by nothing.
+      // With no owner (no `packages[]`, or a `manifest.id` naming no single
+      // entry) it stays on the top level, exactly as before. Inline top-level
+      // docs never move; the name dedupe below runs only over what stays.
       if (!useArtifactFallback) {
         try {
-          const { collectDocsFromSrc, attachPackageDocs } = await import('../utils/collect-docs.js');
+          const { collectDocsFromSrc, placeCollectedDocs } = await import('../utils/collect-docs.js');
           const collected = collectDocsFromSrc(absolutePath, (config as any)?.packages);
-          if (collected.docs.length > 0) {
+          const inline = Array.isArray((config as any).docs) ? (config as any).docs : [];
+          // `collectDocsFromSrc`'s `docs` IS the flat set; the top-level set is
+          // inline first, as `collectAndLintDocs` returns it to `os build`.
+          const placed = placeCollectedDocs(config, {
+            docs: [...inline, ...collected.docs],
+            flatDocs: collected.docs,
+            packageDocs: collected.packageDocs,
+          });
+          if (collected.docs.length > 0 && placed.docs.length > 0) {
             const byName = new Map<string, any>();
-            for (const d of (Array.isArray((config as any).docs) ? (config as any).docs : [])) {
+            for (const d of placed.docs) {
               if (d?.name) byName.set(d.name, d);
             }
-            for (const d of collected.docs) byName.set(d.name, d);
             config = { ...config, docs: Array.from(byName.values()) };
           }
-          if (collected.packageDocs.length > 0) {
-            const packages = attachPackageDocs((config as any).packages, collected.packageDocs);
-            if (packages !== (config as any).packages) config = { ...config, packages };
-          }
+          if (placed.packages !== (config as any).packages) config = { ...config, packages: placed.packages };
         } catch {
           /* docs are additive — never block boot on collection */
         }

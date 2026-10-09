@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { PAGE_COMPONENT_COPY_KEYS, FLOW_SCREEN_COPY_KEYS, FLOW_SCREEN_FIELD_COPY_KEYS } from './i18n-resolver';
+import { PAGE_COMPONENT_COPY_KEYS, FLOW_SCREEN_COPY_KEYS, FLOW_SCREEN_FIELD_COPY_KEYS, flowRefusalMessageKey } from './i18n-resolver';
+import { TEXT_SLOT_TEMPLATE_REFUSAL } from '../automation/flow-text-slot-template';
 import { FlowSchema } from '../automation/flow.zod';
 import { ScreenConfigSchema, ScreenFieldConfigSchema } from '../automation/builtin-node-config.zod';
 import {
@@ -1291,6 +1292,63 @@ describe('translation unknown-key strictness', () => {
     });
   });
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // #22450 — a refused `end` node's message has a key, judged as a text slot
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('flow refusals — `flows.<flow>.refusals.<node_id>.message`', () => {
+    const parse = (flows: unknown) => TranslationDataSchema.safeParse({ flows });
+    const firstSentence = (message: string) => message.slice(0, message.indexOf('. ') + 1);
+
+    it('accepts a translated refusal that keeps the `{{ }}` holes of the message it translates', () => {
+      const result = parse({ quote_generation: { refusals: { refuse_held: { message: '须先完成资格审批:{{ record.name }}。' } } } });
+      expect(result.success).toBe(true);
+    });
+
+    it('is the address the engine asks the i18n service for', () => {
+      // The one spelling, read by the engine (`flowRefusalMessageKey`) and
+      // written by a bundle: the parsed path and the key are the same string.
+      const result = parse({ quote_generation: { refusals: { refuse_held: { message: 'x' } } } }) as { success: true; data: any };
+      expect(result.data.flows.quote_generation.refusals.refuse_held.message).toBe('x');
+      expect(flowRefusalMessageKey('quote_generation', 'refuse_held')).toBe('flows.quote_generation.refusals.refuse_held.message');
+    });
+
+    it('refuses a single-brace `{token}` in a translation, through the one text-slot judge', () => {
+      const result = parse({ quote_generation: { refusals: { refuse_held: { message: '已拒绝:{record.name}' } } } });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues[0]!;
+      expect(issue.path).toEqual(['flows', 'quote_generation', 'refusals', 'refuse_held', 'message']);
+      // The judge's lead sentence is the whole of `TEXT_SLOT_TEMPLATE_REFUSAL`.
+      expect(firstSentence(issue.message)).toBe(TEXT_SLOT_TEMPLATE_REFUSAL);
+      // …and the remedy names the hole spelling of the very token.
+      expect(issue.message).toContain('{{ record.name }}');
+    });
+
+    it('reaches the metadata-item door too', () => {
+      const flows = { quote_generation: { refusals: { refuse_held: { message: '已拒绝:{record.name}' } } } };
+      const item = TranslationItemSchema.safeParse({ locale: 'zh-CN', flows });
+      expect(item.success).toBe(false);
+      expect(item.error!.issues[0]!.path).toEqual(['flows', 'quote_generation', 'refusals', 'refuse_held', 'message']);
+    });
+
+    it('accepts an empty message — the untranslated slot `os i18n extract` writes into a skeleton', () => {
+      expect(parse({ quote_generation: { refusals: { refuse_held: { message: '' } } } }).success).toBe(true);
+    });
+
+    it('refuses a `title` with the guidance that an `end` node has no heading', () => {
+      const result = parse({ quote_generation: { refusals: { refuse_held: { title: 'Refused' } } } });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.code === 'unrecognized_keys')!;
+      expect(issue.path).toEqual(['flows', 'quote_generation', 'refusals', 'refuse_held']);
+      expect(issue.message).toContain('An `end` node has no heading');
+    });
+
+    it('names `reason` as the rename onto `message` it is', () => {
+      const result = parse({ quote_generation: { refusals: { refuse_held: { reason: 'x' } } } });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.find((i) => i.code === 'unrecognized_keys')?.message).toContain('`reason` → `message`');
+    });
+  });
+
   it('names which action surface the key landed on', () => {
     const onObject = TranslationDataSchema.safeParse({
       objects: { account: { _actions: { merge: { confirm: 'ok?' } } } },
@@ -1316,7 +1374,7 @@ describe('translation unknown-key strictness', () => {
       globalActions: { export_csv: { label: 'Export', params: { format: { label: 'Format' } } } },
       dashboards: { sales: { label: 'Sales', widgets: { rev: { title: 'Revenue', description: 'vs last quarter' } }, globalFilters: { region: { label: 'Region', options: { emea: 'EMEA' } } } } },
       pages: { home: { label: 'Home', title: 'Welcome' } },
-      flows: { lead_conversion: { label: 'Convert Lead', screens: { details: { title: 'Details', fields: { name: { label: 'Name', placeholder: 'Enter a name' } } } } } },
+      flows: { lead_conversion: { label: 'Convert Lead', screens: { details: { title: 'Details', fields: { name: { label: 'Name', placeholder: 'Enter a name' } } } }, refusals: { duplicate: { message: 'Refused: {{ record.name }} is a duplicate' } } } },
       metadataForms: { object: { label: 'Object', fields: { name: { label: 'Name' } } } },
       settingsCommon: { sourceLabels: { env: 'Env', tenant: 'Tenant' } },
     };
