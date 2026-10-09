@@ -211,9 +211,13 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     // unclassified about. The server-side enforcement itself is objectui#2284.
     id: 'cel-select-option-visible',
     summary: 'choice-field per-option gating (SelectOption.visibleWhen) — the one visibility predicate the SERVER also enforces',
-    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
+    // `fail-closed` since #22402 (ruling A): ADR-0137 D2 reaches this gate on
+    // the write path, the enforcement point (ADR-0124 D1). The render side the
+    // console evaluates stays fail-open by D3 — an option offered — which is
+    // UX, not the gate this row classifies.
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
     enforcement:
-      'objectql/src/validation/rule-validator.ts per-option enforcement → `ExpressionEngine.evaluate` against the merged `record` + `previous` + `current_user`, re-evaluated ON WRITE for the PICKED value(s) of a written select/multiselect/radio/checkboxes field: a clean FALSE pushes an `invalid_option` field error and the write is refused. Unchanged persisted values are left alone. A predicate that cannot be evaluated (missing referenced field, or an unbound `current_user` on a system write) is FAIL-OPEN — logged with the reason and allowed through — so a broken cascade predicate never bricks a write, and authorization gating depends on the engine binding `current_user`. The console evaluates the same predicate to hide the option, which is UX only: a caller can still submit a hidden value, which is why the server re-checks',
+      'objectql/src/validation/rule-validator.ts per-option enforcement → `ExpressionEngine.evaluate` against the merged `record` + `previous` + `current_user`, re-evaluated ON WRITE for the PICKED value(s) of a written select/multiselect/radio/checkboxes field: a clean FALSE pushes an `invalid_option` field error and the write is refused. Unchanged persisted values are left alone. A predicate that cannot be evaluated (an undeclared key, an unbound root or member, a read through a reference, a computed key or receiver, a `can` with no permission data) REFUSES the write too (ADR-0137 D2): the field-rule `rule_violation` envelope with `constraint.reason: \'unevaluable\'` and `constraint.rule: \'visibleWhen\'`, naming the option, the field and the fault. One fault is admitted, logged with reason `no-acting-user`: a system write with no acting user whose predicate reads the acting user, where the gate has nobody to ask about. The console evaluates the same predicate to hide the option, which is UX only: a caller can still submit a hidden value, which is why the server re-checks',
     covers: ['data/field.zod.ts:SelectOptionSchema.visibleWhen'],
     proof: 'packages/objectql/src/validation/rule-validator.option-visibility.test.ts',
   },

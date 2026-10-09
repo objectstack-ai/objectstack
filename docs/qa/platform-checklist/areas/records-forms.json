@@ -3435,7 +3435,7 @@
       "title": "Cascade clear-semantics and the server boundary: stale-child clear on parent change, the WRITTEN-value server gate, and where cascade scope is client-only",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3516,7 +3516,7 @@
         "ref": "objectui: e2e/live/cascading-options.spec.ts (client clear-on-change); packages/objectql/src/validation/rule-validator.option-visibility.test.ts (server WRITTEN-value gate)"
       },
       "source": [
-        "packages/objectql/src/validation/rule-validator.ts#evaluateOptionVisibility (evaluateOptionVisibility — WRITTEN-value only via `!(name in data) continue`; fail-open on unevaluable; invalid_option/option_unavailable)",
+        "packages/objectql/src/validation/rule-validator.ts#evaluateOptionVisibility (evaluateOptionVisibility — WRITTEN-value only via `!(name in data) continue`; a predicate that cannot be evaluated refuses the write as rule_violation / unevaluable (ADR-0137 D2), except a system write with no acting user whose predicate reads one; invalid_option/option_unavailable)",
         "packages/objectql/src/engine.ts#assertReferencesResolve (assertReferencesResolve #4441 — existence-only, 'Why the probe is unscoped')",
         "examples/app-showcase/src/data/objects/cascading-select.object.ts (2-level country→province; no 3rd level)",
         "examples/app-showcase/src/data/objects/invoice.object.ts#dependsOn (contact dependsOn ['account'], account lookupFilters)",
@@ -3529,6 +3529,12 @@
           "date": "2026-08-08",
           "change": "initial — drills the cascade EDGES cascading-options asserts shallowly: stale-child clear-on-change (client), the WRITTEN-value server gate, and the two recorded product gaps (parent-only PATCH does not revalidate an unwritten child; LOOKUP dependsOn scope is existence-only/unscoped server-side). 3-level chain recorded as a fixture gap (no showcase fixture deeper than 2 levels)",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-09",
+          "change": "source line corrected: the server option gate no longer fails open on an unevaluable predicate. Since #22402 (ruling A, ADR-0137 D2 on the write path) it refuses the write as rule_violation / unevaluable, naming the option, the field and the fault; only a system write with no acting user whose predicate reads one is still admitted. No step or oracle of this item moves: its cascade predicates evaluate cleanly on the write path (a payload without country reads null == 'cn', a clean false).",
+          "ref": "claude/issue-22402-option-gate-fails-closed"
         }
       ]
     },
