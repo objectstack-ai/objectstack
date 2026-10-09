@@ -376,7 +376,8 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * `current_user` resolves on those surfaces too. What still separates this one
    * is ENFORCEMENT, not vocabulary: per-option `visibleWhen` is the only
    * VISIBILITY predicate the SERVER also evaluates — the rule validator refuses
-   * a write of a value whose predicate is false — while a field or section
+   * a write of a value whose predicate is false, and one whose predicate cannot
+   * be evaluated (ADR-0137 D2) — while a field or section
    * predicate is a rendering rule and nothing more. So a user-gated CHOICE
    * belongs here; a user-gated FIELD belongs on a permission set. When the
    * predicate references sibling fields, declare those on the field's `dependsOn`
@@ -389,12 +390,12 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    *
    * ⛔ No read THROUGH a reference field (`record.account.tier`): the predicate
    * sees the reference's bare id, never the related record, so the read faults
-   * and the server — fail-open for an option — admits the value unchecked.
+   * and the server refuses every write that picks the option (ADR-0137 D2).
    * `objectstack validate` refuses it (#20078); a `validations[]` `script` rule
    * is the seam that reads one hop through a reference. `current_user` reads are
    * not record traversals and are unaffected.
    */
-  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`. On an OBJECT field's option it reads the record's OWN columns: the server never reads a related record there, so a read THROUGH a reference field (`record.account.tier`) would fault and be admitted unchecked, and `objectstack validate` refuses it — enforce such a restriction with a `validations[]` `script` rule, whose `condition` is read one hop through a reference.").meta({ title: 'Visible When' }),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false, or cannot be evaluated — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`. On an OBJECT field's option it reads the record's OWN columns: the server never reads a related record there, so a read THROUGH a reference field (`record.account.tier`) would fault and every write picking the option would be refused, and `objectstack validate` refuses it — enforce such a restriction with a `validations[]` `script` rule, whose `condition` is read one hop through a reference.").meta({ title: 'Visible When' }),
 }));
 
 /**

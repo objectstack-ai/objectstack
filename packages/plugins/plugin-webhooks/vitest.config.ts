@@ -49,6 +49,11 @@ export default defineConfig({
             // Anchored on the SUBPATH for the same reason the `core` entry
             // above is anchored on the root.
             { find: /^@objectstack\/platform-objects\/apps$/, replacement: path.resolve(__dirname, '../../platform-objects/src/apps/index.ts') },
+            // [#22258] `webhook-outbox-plugin.ts` takes a VALUE import on
+            // `@objectstack/types` (`inProcessSessionReadInput`, the in-process
+            // session-read rule). Same reason and the same anchoring as the
+            // `core` entry above.
+            { find: /^@objectstack\/types$/, replacement: path.resolve(__dirname, '../../types/src/index.ts') },
         ],
     },
 });

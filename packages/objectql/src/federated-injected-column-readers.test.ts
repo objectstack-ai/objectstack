@@ -245,7 +245,7 @@ const READERS: Record<string, Row> = {
     disposition: 'caller-predicate',
     why: VALIDATION_RULE,
   },
-  'validation/rule-validator.ts#unevaluableFieldRuleError :: referenceTargetOf()': {
+  'validation/rule-validator.ts#referenceReadThrough :: referenceTargetOf()': {
     disposition: 'caller-predicate',
     why: VALIDATION_RULE,
   },
