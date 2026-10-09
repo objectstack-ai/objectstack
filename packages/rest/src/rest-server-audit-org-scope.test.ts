@@ -102,13 +102,17 @@ const BUILDER = { systemPermissions: ['manage_metadata'] };
 /** The request object the route handed to `auditMetaItem`. */
 const requestFrom = (fn: any) => fn.mock.calls[0][0];
 
-describe('#8747 GET /meta/:type/:name/audit scopes the read to the caller organization', () => {
-    it('threads the execution context tenant as `organizationId`', async () => {
+describe('#8747 GET /meta/:type/:name/audit scopes the read to the environment-wide rows', () => {
+    it('[ADR-0131 D6] reads the environment-wide rows (`organizationId: null`) even for a caller with an active organization', async () => {
+        // Every `/meta` write now audits environment-wide, so that is the
+        // partition this door reads — never every tenant's rows (an absent key).
         const { auditMetaItem, drive } = boot({ ...BUILDER, userId: 'u1', tenantId: 'org_alpha' });
         await drive();
 
         expect(auditMetaItem).toHaveBeenCalledTimes(1);
-        expect(requestFrom(auditMetaItem).organizationId).toBe('org_alpha');
+        const request = requestFrom(auditMetaItem);
+        expect(request.organizationId).toBe(null);
+        expect(request).toHaveProperty('organizationId');
     });
 
     it('is fail-closed when the caller resolves no organization', async () => {

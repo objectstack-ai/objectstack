@@ -3454,7 +3454,6 @@ export class RestServer {
      * `undefined` when nothing is behind the name.
      */
     private async fetchCurrentMetaDocument(
-        environmentId: string | undefined,
         req: any,
         p: RestProtocol,
     ): Promise<any | undefined> {
@@ -3485,7 +3484,7 @@ export class RestServer {
         const metaType = RestServer.metaTypeSingular(req.params.type);
         const policy: MetaReadGatePolicy = { arms: 'per-caller', app: 'gate' };
         if (!RestServer.gatesPerCaller(metaType)) return undefined;
-        const current = await this.fetchCurrentMetaDocument(environmentId, req, p);
+        const current = await this.fetchCurrentMetaDocument(req, p);
         if (current == null) return undefined;
         const verdict = await this.metaItemReadGate(
             environmentId, req, p, metaType, req.params.name, [current], policy,
@@ -7769,7 +7768,7 @@ export class RestServer {
                     }
                     const diffGated = RestServer.gatesPerCaller(diffMetaType);
                     const diffCurrent = diffGated
-                        ? await this.fetchCurrentMetaDocument(environmentId, req, p)
+                        ? await this.fetchCurrentMetaDocument(req, p)
                         : undefined;
                     if (diffGated && diffCurrent == null) {
                         sendMetaItemAbsent(res);

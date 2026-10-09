@@ -13,8 +13,10 @@
  * boundary handed the translator a base for objects only
  * (`packagedObjectBaseOf`). What is pinned here is that plumbing, through the
  * ROUTES, over the REAL protocol and a REAL registry: the packaged items are
- * registered the way the boot registers them and the org overlay rows are
- * seeded the way a published overlay stores them, so no write verb is doubled.
+ * registered the way the boot registers them and the overlay rows are seeded
+ * the way a published overlay stores them, so no write verb is doubled. Since
+ * ADR-0131 D6 that is the ENVIRONMENT row (`organization_id` NULL): the `/meta`
+ * doors carry no organization, though both callers have an active one.
  *
  * Measured before the fix (a booted showcase, admin and member of one org): an
  * overlay on `system_overview` published, `?layers=true` reported it
@@ -162,8 +164,9 @@ function createMockServer() {
 
 /**
  * Register the packaged items the way the boot does and seed each overlay as
- * the PUBLISHED org row its write stores (`package_id: null`, the org,
- * `state: 'active'`). `overlays: []` is the state after a reset.
+ * the PUBLISHED row its write stores (`package_id: null`, environment-wide
+ * since ADR-0131 D6, `state: 'active'`). `overlays: []` is the state after a
+ * reset.
  */
 function makeHost(overlays: OverlayRow[], who: Who) {
     const registry = new SchemaRegistry({ multiTenant: false });
@@ -178,7 +181,7 @@ function makeHost(overlays: OverlayRow[], who: Who) {
         type: o.type,
         name: o.name,
         package_id: null,
-        organization_id: ORG,
+        organization_id: null,
         state: 'active',
         metadata: JSON.stringify(o.body),
     }));
@@ -299,7 +302,7 @@ describe('#20730 §1 packagedObjectBaseOf — one per-type packaged-base resolve
 // §2 — a published dashboard overlay beats the packaged catalog
 // ---------------------------------------------------------------------------
 
-describe('#20730 §2 dashboard — a published org overlay is what both /meta reads serve', () => {
+describe('#20730 §2 dashboard — a published overlay is what both /meta reads serve', () => {
     it.each(cells())('$read read, $who, $locale: the edited widget serves the edit', async ({ who, locale, read }) => {
         const host = makeHost([EDITED_DASHBOARD], who);
         expect(titleOf(await host[read]('dashboard', DASH, locale), 'widget_total_users')).toBe(EDITED_TITLE);
@@ -341,7 +344,7 @@ describe('#20730 §2 dashboard — a published org overlay is what both /meta re
 // §3 — a published view overlay beats the packaged catalog
 // ---------------------------------------------------------------------------
 
-describe('#20730 §3 view — a published org overlay on a packaged view is what both /meta reads serve', () => {
+describe('#20730 §3 view — a published overlay on a packaged view is what both /meta reads serve', () => {
     it.each(cells())('$read read, $who, $locale: the edited view serves the edit', async ({ who, locale, read }) => {
         const host = makeHost([EDITED_VIEW], who);
         expect((await host[read]('view', VIEW, locale))?.label).toBe(EDITED_LABEL);
