@@ -42,10 +42,11 @@
  *
  * The surviving one of those two builds from {@link retryPolicyShape} like the
  * named surfaces do, so the three remaining surfaces share one declaration of
- * the key set, the bounds and the defaults. The only one of them that is
- * `.strict()` — `Flow.errorHandling` — keeps its own `strictObject` curation and
- * its own extra keys (`strategy`); what is shared is the *contract*, not the
- * surface's framing of it.
+ * the key set, the bounds and the defaults. All three are closed: the named
+ * schema since #22343 (see {@link RetryPolicySchema}), and `Flow.errorHandling`,
+ * which keeps its own `strictObject` curation and its own extra keys
+ * (`strategy`); what is shared is the *contract*, not the surface's framing of
+ * it.
  *
  * ## Why this file, and why it is not in `shared/index.ts`
  *
@@ -67,13 +68,15 @@
  * schemas must not depend on each other: `automation/control-flow.zod.ts`
  * imports the whole `flow.zod` node/edge graph, and pulling that into
  * `system/job.zod.ts` to reach a five-field policy would be a real edge in the
- * package graph for no runtime need. This module depends on nothing but `zod`
- * and `lazySchema`.
+ * package graph for no runtime need. This module depends on nothing but `zod`,
+ * `lazySchema` and the two closing helpers beside it (`retiredKey`,
+ * `strictObject`), both of which the two owning schemas import already.
  */
 
 import { z } from 'zod';
 import { lazySchema } from './lazy-schema';
 import { retiredKey } from './retired-key';
+import { strictObject } from './strict-object';
 
 /**
  * The retry policy's raw Zod shape — key set, bounds, defaults and prose, in
@@ -112,14 +115,16 @@ export function retryPolicyShape() {
 
     // ── Tombstone (ADR-0087) ────────────────────────────────────────────
     // `retryDelayMs` was the automation-side spelling of `backoffMs`, on BOTH
-    // `try_catch`'s `retry` (#4661) and `Flow.errorHandling` (#4964). It is
-    // tombstoned rather than deleted because two of the three owning shapes are
-    // not `.strict()`: a plain deletion would have Zod silently strip the
-    // authored value and drop the delay back to the 1000ms default, which is
-    // precisely the quiet-failure class ADR-0049 exists to remove. On the strict
-    // surface the tombstone is still the better channel — it carries the
-    // rename, where a bare unknown-key rejection would only carry the key.
-    // `retry-policy-converged` rewrites it on the load path.
+    // `try_catch`'s `retry` (#4661) and `Flow.errorHandling` (#4964). It was
+    // tombstoned rather than deleted because two of the three owning shapes were
+    // not `.strict()` then: a plain deletion would have had Zod silently strip
+    // the authored value and drop the delay back to the 1000ms default, which is
+    // precisely the quiet-failure class ADR-0049 exists to remove. Every owning
+    // shape is strict since #22343, and the tombstone is still the better
+    // channel — it carries the rename, where a bare unknown-key rejection would
+    // only carry the key. `retry-policy-converged` rewrites it on the load path;
+    // a copy that conversion leaves (a `backoffMs` beside it with a different
+    // value, or a `null`) meets this tombstone at parse.
     retryDelayMs: retiredKey(
       '`retryDelayMs` was removed in @objectstack/spec 17.0.0 — the retry policy now ' +
       'has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, ' +
@@ -134,9 +139,9 @@ export function retryPolicyShape() {
 /**
  * Exponential-backoff retry policy — the named schema for `job.retryPolicy` and
  * a `try_catch` node's `retry` region. `Flow.errorHandling` carries the same
- * contract via {@link retryPolicyShape}, which it must, being `.strict()` (see
- * that function's note). `ETLPipeline.retry` did the same until #6414 retired
- * the L2 ETL layer.
+ * contract via {@link retryPolicyShape}, which it must, being a strict shape of
+ * its own with an extra key and its own curated table (see that function's
+ * note). `ETLPipeline.retry` did the same until #6414 retired the L2 ETL layer.
  *
  * Delay before retry *n* is `min(backoffMs * backoffMultiplier^(n-1),
  * maxRetryDelayMs)`, optionally jittered.
@@ -173,8 +178,66 @@ export function retryPolicyShape() {
  * reading is already recorded for flow-level retry in the protocol-17 migration
  * step (`flow-retry-max-retries-required`, #4247): an unstated count is
  * unambiguously 0, and "retry zero times" is a decision the author must state.
+ *
+ * ## Closed (#22343)
+ *
+ * A `strictObject`: a key the policy does not declare is refused at parse,
+ * naming the key, with a did-you-mean for a near miss (`maxRetry` →
+ * `maxRetries`). Until then this was a plain `z.object`, which stripped such a
+ * key — and the opt-in defaults above make that the expensive direction: a
+ * misspelt `maxRetries` parsed to `0`, so the policy the author declared
+ * silently became "never retry".
+ *
+ * Closed here, on the shared schema, because the census found no writer that
+ * relied on the strip. Its two parsers are `job.retryPolicy`
+ * (`system/job.zod.ts`) and a `try_catch` node's `retry`
+ * (`automation/control-flow.zod.ts`), and every writer of either in this
+ * repository (the showcase job and flows, the docs, the service READMEs, the
+ * test fixtures, the `retry-policy-converged` conversion's output) and in the
+ * pinned objectui (the job preview sample, the flow designer, whose descriptor
+ * form closes `retry` to the same five keys) writes only declared keys.
+ * `service-job`'s `runWithPolicy` and `contracts/job-service.ts` read an
+ * already-parsed policy and parse nothing.
+ *
+ * What it settled for `try_catch`: its descriptor had always closed `retry` to
+ * these five keys at `registerFlow`, so with the contract closed to the same
+ * set the spec's flow parse judges a `try_catch` node's keys like every other
+ * builtin's (`builtinNodeConfigKeysJudged`, `automation/
+ * flow-node-config-refusals.ts`), at `objectstack validate` and `compile` too.
  */
-export const RetryPolicySchema = lazySchema(() => z.object(retryPolicyShape()));
+export const RetryPolicySchema = lazySchema(() => strictObject(
+  {
+    surface: 'this retry policy',
+    aliases: {
+      // The slip the closing card measured, and one the edit-distance fallback
+      // cannot reach: `maxRetry` is THREE edits from `maxRetries` (y → i, +e,
+      // +s) against a budget of two for an eight-letter key.
+      maxRetry: 'maxRetries',
+      // The rest are real, in-repo spellings of the same knob on a NEIGHBOURING
+      // retry surface — the table `Flow.errorHandling` already carries for the
+      // same reason (`automation/flow.zod.ts`): the connector RetryConfig's
+      // `initialDelayMs` / `maxDelayMs`, the datasource policy's `baseDelayMs`,
+      // and the plain-English `retries` / `attempts`.
+      initialDelayMs: 'backoffMs',
+      baseDelayMs: 'backoffMs',
+      maxDelayMs: 'maxRetryDelayMs',
+      retries: 'maxRetries',
+      attempts: 'maxRetries',
+    },
+    guidance: {
+      // NOT an alias, as on `Flow.errorHandling`: `maxAttempts` counts the
+      // FIRST attempt and `maxRetries` the ones after it, so a bare rename
+      // would quietly change the number's meaning by one.
+      maxAttempts:
+        '`maxAttempts` is the connector RetryConfig spelling and INCLUDES the first attempt; this policy ' +
+        'counts retries AFTER it. Write `maxRetries: <maxAttempts - 1>` — renaming the key alone would ' +
+        'quietly run one attempt more than you asked for.',
+    },
+    history:
+      'Until this shape was closed, an undeclared key here was dropped silently — the policy parsed with that knob at its default, so a misspelt retry count meant no retry at all.',
+  },
+  retryPolicyShape(),
+));
 
 /**
  * What an author writes — every key optional, defaults unapplied.

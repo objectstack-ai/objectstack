@@ -52,13 +52,15 @@ function securityPackageRoot(): string {
   return resolve(dirname(require_.resolve('@objectstack/plugin-security')), '..');
 }
 
-/** The five tables the data stack alone registers — the pre-fix baseline. */
+/**
+ * The tables the data stack alone registers — the pre-fix baseline. Five until
+ * `sys_view_definition` retired as inert (ADR-0131 D13); four since.
+ */
 const ARTIFACTLESS_BASELINE_TABLES = [
   'sys_metadata',
   'sys_metadata_audit',
   'sys_metadata_commit',
   'sys_metadata_history',
-  'sys_view_definition',
 ];
 
 describe('os migrate plan/apply compose the deployment\'s own object set (#12938)', () => {
@@ -178,7 +180,7 @@ describe('os migrate plan/apply compose the deployment\'s own object set (#12938
     }
   };
 
-  it('registers the host config\'s objects — well above the five-table baseline', async () => {
+  it('registers the host config\'s objects — well above the data-stack baseline', async () => {
     // A database of its own: this case is about what a FRESH target reports as
     // pending, which is only observable before anything created the tables.
     const stack = await bootSchemaStack({
@@ -314,8 +316,8 @@ describe('an artifact-less, config-less project is unchanged (#12938 baseline pi
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
-  it('still examines exactly the five data-stack tables and composes nothing', async () => {
-    // The five-table baseline is LEGITIMATE here — there is no deployment to
+  it('still examines exactly the data-stack tables and composes nothing', async () => {
+    // The data-stack baseline is LEGITIMATE here — there is no deployment to
     // mirror — and the fix must not move it. It is also the number the
     // consumer-side coverage gate is calibrated against, so it is pinned by
     // value and by membership rather than by "greater than".

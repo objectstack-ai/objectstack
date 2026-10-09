@@ -4,7 +4,7 @@
  * platform-objects/metadata — BACK-COMPAT RE-EXPORT.
  *
  * The metadata-storage object definitions (`sys_metadata`,
- * `sys_metadata_history`, `sys_metadata_audit`, `sys_view_definition`) have
+ * `sys_metadata_history`, `sys_metadata_audit`) have
  * MOVED to `@objectstack/metadata-core` — the lowest package shared by their
  * actual consumers (the ObjectQL protocol that reads/writes them, and the
  * metadata layer's `DatabaseLoader`). They no longer live in platform-objects.
@@ -19,5 +19,4 @@ export {
   SysMetadata,
   SysMetadataHistoryObject,
   SysMetadataAuditObject,
-  SysViewDefinitionObject,
 } from '@objectstack/metadata-core';

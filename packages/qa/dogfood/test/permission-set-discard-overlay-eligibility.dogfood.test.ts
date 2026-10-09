@@ -28,22 +28,33 @@
 // legacy overlay: the action still discards that overlay and heals the record
 // to the shipped artifact.
 //
-// ## Why a booted stack, booted twice
+// ## Why a booted stack, booted twice — and the legacy overlay written after it
 //
 // The legacy overlay cannot be minted through a door any more (the lock refuses
 // both), so it is written straight into `sys_metadata` the way an older release
-// left it. The second, cold boot on the same file is what makes it a real
-// overlay: the boot's reconciliation projects it onto the record, so the record
-// enforces the overlay's grants and the boot's drift pass reports the set as
+// left it. It is written into the RUNNING second boot, not before it: since
+// ADR-0048 addendum N.3 (ruling letter A on #22307) a cold boot whose
+// environment catalog holds a package-held permission-set name is refused
+// (`security-catalog-cold-boot-environment-holder.dogfood.test.ts` pins that),
+// so a deployment carrying this row runs the action on the release before the
+// upgrade, or not at all. The two passes the boot runs for it at `kernel:ready`
+// are then run on it, by the functions the security plugin's boot calls:
+// `reconcilePermissionSetProjection` projects it onto the record, so the record
+// enforces the overlay's grants, and the drift pass reports the set as
 // `overlay_shadow` — the field shape the action exists for. The list read that
-// stamps the runtime package's id is issued after that boot, and a precondition
-// asserts the stamp before any refusal is read: without it a refusal would
-// prove nothing.
+// stamps the runtime package's id is issued after the cold boot, and a
+// precondition asserts the stamp before any refusal is read: without it a
+// refusal would prove nothing.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
-import { securityObjects, computePermissionSetDriftDiagnostics } from '@objectstack/plugin-security';
+import {
+    securityObjects,
+    computePermissionSetDriftDiagnostics,
+    persistPermissionSetDriftDiagnostics,
+    reconcilePermissionSetProjection,
+} from '@objectstack/plugin-security';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -168,8 +179,23 @@ describe('[#21860] Discard Overlay refuses every set no code package ships, with
         const cloned = await stack.apiAs(token, action.method, action.target.slice(API_BASE.length), body);
         expect(cloned.status, JSON.stringify(await cloned.clone().json().catch(() => ({})))).toBe(201);
 
+        await stack.stop();
+
+        // The cold boot.
+        stack = undefined;
+        stack = await bootStack(showcaseStack, { databaseFile: dbFile });
+        token = await stack.signIn();
+        ql = await stack.kernel.getServiceAsync('objectql');
+
+        // The producer the card names: the list read a Studio page load issues.
+        const list = await stack.apiAs(token, 'GET', '/meta/permission');
+        expect(list.status).toBe(200);
+
         // The control's legacy overlay, as an older release left it: an active,
-        // environment-wide stored definition of a name the package ships.
+        // environment-wide stored definition of a name the package ships —
+        // written into the running deployment (see the header for why not
+        // before the cold boot), and made a real overlay by the two passes the
+        // security plugin's boot runs for it.
         const now = new Date().toISOString();
         await ql.insert('sys_metadata', {
             type: 'permission',
@@ -183,17 +209,9 @@ describe('[#21860] Discard Overlay refuses every set no code package ships, with
             updated_at: now,
             metadata: JSON.stringify({ name: SHIPPED, label: 'Showcase Contributor (legacy overlay)', objects: OVERLAY_OBJECTS }),
         }, SYS);
-        await stack.stop();
-
-        // The cold boot that makes the legacy row a real overlay.
-        stack = undefined;
-        stack = await bootStack(showcaseStack, { databaseFile: dbFile });
-        token = await stack.signIn();
-        ql = await stack.kernel.getServiceAsync('objectql');
-
-        // The producer the card names: the list read a Studio page load issues.
-        const list = await stack.apiAs(token, 'GET', '/meta/permission');
-        expect(list.status).toBe(200);
+        const protocol = await stack.kernel.getServiceAsync('protocol');
+        await reconcilePermissionSetProjection(protocol, { ql, metadata: await stack.kernel.getServiceAsync('metadata') });
+        await persistPermissionSetDriftDiagnostics(ql, await computePermissionSetDriftDiagnostics(ql));
     }, 300_000);
 
     afterAll(async () => {
@@ -210,7 +228,7 @@ describe('[#21860] Discard Overlay refuses every set no code package ships, with
             .toEqual([{ _packageId: PKG, _provenance: 'org' }]);
     });
 
-    it('precondition: the shipped set\'s record enforces the legacy overlay, and the boot reported it overlay_shadow', async () => {
+    it('precondition: the shipped set\'s record enforces the legacy overlay, and the drift pass reported it overlay_shadow', async () => {
         const [record] = await ql.find('sys_permission_set', { where: { name: SHIPPED }, limit: 1 }, SYS);
         expect(grantedObjects(record)).toEqual(Object.keys(OVERLAY_OBJECTS));
         expect(shippedArtifactObjects.length).toBeGreaterThan(Object.keys(OVERLAY_OBJECTS).length);

@@ -15,8 +15,8 @@
  * and on the dialects that DO support the form the loss is silent.
  *
  * That was `ensureOverlayIndex`'s shape until #6418, and it is the exact defect
- * `view-definition-active-index.ts` was written to avoid (see its "Why it
- * PROBES before dropping anything"). The order this module implements:
+ * #5839's `sys_view_definition` migration was written to avoid (retired with
+ * its table, ADR-0131 D13). The order this module implements:
  *
  * 1. build the tighter index under a THROWAWAY probe name — nothing that is
  *    currently enforcing is touched, so a failure here costs nothing;
@@ -301,7 +301,7 @@ function indexFailureText(error: unknown): string {
  * down — was graded `failed` rather than `unsupported`.
  *
  * That gap is **not** a wording difference, which is why it was worth closing
- * rather than documenting. `view-definition-active-index.ts` disposes of the
+ * rather than documenting. `sys-setting-identity-index.ts` disposes of the
  * two verdicts identically (keep the previous index, report at `error`), but
  * `overlay-index.ts` builds the composite **fallback lookup index** on
  * `unsupported` and only there — offered precisely because a dialect that

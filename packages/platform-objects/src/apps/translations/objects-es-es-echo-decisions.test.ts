@@ -209,7 +209,6 @@ const DECISIONS: readonly Decision[] = [
     'sys_email_template',
     'sys_metadata',
     'sys_metadata_history',
-    'sys_view_definition',
     'sys_metadata_audit',
     'sys_secret',
     'sys_setting_audit',
@@ -241,10 +240,12 @@ describe('#20493 es-ES — the ledger itself (controls before verdicts)', () => 
   // [ADR-0131 D7] 47 → 46 echoes: `sys_setting.scope` no longer declares the
   // `global` option (the rung moved to `sys_platform_setting`), so its leaf left
   // the catalog with it. `sys_setting_audit.scope`'s `global` option stays.
-  it('is the size it claims: 3 pinned translations and 46 declared echoes, no path twice', () => {
-    expect(DECISIONS.length).toBe(49);
+  // [ADR-0131 D13] 46 → 45: `sys_view_definition` retired as inert, and its
+  // bare `ID` leaf left the catalog with the object.
+  it('is the size it claims: 3 pinned translations and 45 declared echoes, no path twice', () => {
+    expect(DECISIONS.length).toBe(48);
     expect(DECISIONS.filter((d) => d.verdict === 'translate').length).toBe(3);
-    expect(DECISIONS.filter((d) => d.verdict === 'echo').length).toBe(46);
+    expect(DECISIONS.filter((d) => d.verdict === 'echo').length).toBe(45);
     expect(new Set(DECISIONS.map((d) => d.path)).size).toBe(DECISIONS.length);
   });
 

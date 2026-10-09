@@ -63,10 +63,11 @@ const [row] = await engine.find('project', { where: { name }, limit: 1, context:
 ```
 
 Pass any SUBSET of the execution envelope (identity, tenant, transaction):
-`{ isSystem: true }` for a system read, `{ flowRunId }` for provenance alone. On
-the READ methods it may sit in the query bag (above) OR in the trailing options
-argument, `engine.find(obj, query, { context })`; the trailing one wins when
-both are given. Writes take only the trailing argument.
+`{ isSystem: true }` for a system read, otherwise the caller's own context
+(user, position or permission set), or `403 PERMISSION_DENIED` (ADR-0096 D5).
+On the READ methods it may sit in the query bag (above) OR in the trailing
+options argument, `engine.find(obj, query, { context })`; the trailing one wins
+when both are given. Writes take only the trailing argument.
 
 ## Removed Keys → Live Replacement
 

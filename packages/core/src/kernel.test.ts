@@ -966,10 +966,17 @@ describe('ObjectKernel', () => {
         // making progress, so the process would hang holding whatever it failed
         // to release. This behaviour is unchanged by #5274 — pinned so the
         // narrowing of the catch cannot quietly take it along.
+        //
+        // The fixture owns the process (`gracefulShutdown: true`, the default):
+        // only a kernel that installed the signal listeners itself exits on a
+        // timeout (#22335). The `false` half — no exit, the host decides — is
+        // pinned in kernel-shutdown-timeout-ownership.test.ts.
         it('still logs the timeout and still forces exit(1) when shutdown genuinely times out (#5274)', async () => {
+            const signals = ['SIGINT', 'SIGTERM', 'SIGQUIT'] as const;
+            const listenersBefore = new Map(signals.map((s) => [s, process.listeners(s)]));
             const slowKernel = new ObjectKernel({
                 logger: { level: 'error' },
-                gracefulShutdown: false,
+                gracefulShutdown: true,
                 skipSystemValidation: true,
                 shutdownTimeout: 20,
             });
@@ -1000,6 +1007,13 @@ describe('ObjectKernel', () => {
             } finally {
                 exitSpy.mockRestore();
                 errorSpy.mockRestore();
+                // A `true` kernel listens on the worker's own process; never
+                // leave its listeners behind, whatever the test did.
+                for (const s of signals) {
+                    for (const l of process.listeners(s)) {
+                        if (!listenersBefore.get(s)!.includes(l)) process.removeListener(s, l);
+                    }
+                }
             }
         }, 5000);
 
