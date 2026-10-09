@@ -379,7 +379,7 @@ describe('validateComponentProps — value verdicts', () => {
         'pages[0].regions[0].components[0].properties.object',
       ]);
       const tombstone = invalid(flat).find((f) => f.path.endsWith('.properties.object'))!;
-      expect(tombstone.message).toMatch(/`element:repeater` property `object` was removed in @objectstack\/spec 18.*`dataSource\.object`/s);
+      expect(tombstone.message).toMatch(/`element:repeater` property `object` was removed in @objectstack\/spec 17.*`dataSource\.object`/s);
     });
 
     /**
@@ -483,7 +483,7 @@ describe('validateComponentProps — value verdicts', () => {
     for (const key of ['object', 'filter', 'sort', 'limit']) {
       const at = invalid(findings).find((f) => f.path === `${base}.properties.${key}`)!;
       expect(at.message).toMatch(
-        new RegExp(`\`element:record_picker\` property \`${key}\` was removed in @objectstack/spec 18.*\`dataSource\\.${key}\``, 's'),
+        new RegExp(`\`element:record_picker\` property \`${key}\` was removed in @objectstack/spec 17.*\`dataSource\\.${key}\``, 's'),
       );
     }
     expect(unknownKeys(findings)).toEqual([]);
