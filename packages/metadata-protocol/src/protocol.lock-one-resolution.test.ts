@@ -590,10 +590,12 @@ const settle = (run: Promise<unknown>) => run.then(() => null, (e: unknown) => e
 
 type Verdict = { refused: { code: unknown; status: unknown } } | 'admitted';
 const ITEM_LOCKED: Verdict = { refused: { code: 'ITEM_LOCKED', status: 403 } };
+/** [ADR-0131 D6] Every organization-scoped write is refused first, before the `_lock` gate is reached. */
+const NOT_OVERRIDABLE: Verdict = { refused: { code: 'NOT_OVERRIDABLE', status: 403 } };
 
 /**
  * The door, end to end. Refused ⇔ the ADR-0112 `ITEM_LOCKED` / 403 envelope
- * came back. Admitted ⇔ the ADR-0010 `_lock` gate was reached and answered no
+ * came back (or, for an organization-scoped request, `NOT_OVERRIDABLE` / 403). Admitted ⇔ the ADR-0010 `_lock` gate was reached and answered no
  * refusal; whatever the write does after that is not a lock verdict.
  */
 async function door(
@@ -610,7 +612,7 @@ async function door(
                 type, name, item: { name, label: name, object: 'account' }, ...scope, ...(packageId ? { packageId } : {}),
             })
             : protocol.deleteMetaItem({ type, name, ...scope }));
-        if (outcome instanceof Error && (outcome as any).code === 'ITEM_LOCKED') {
+        if (outcome instanceof Error && ['ITEM_LOCKED', 'NOT_OVERRIDABLE'].includes((outcome as any).code)) {
             return { refused: { code: (outcome as any).code, status: (outcome as any).status } };
         }
         expect(gate, `${type}/${name} ${operation}: not refused, yet the _lock gate was never reached`).toHaveBeenCalledTimes(1);
@@ -770,7 +772,10 @@ describe('[#21738, #21803] pin 1 — the family\'s enumeration, generated from t
                     const doorAllows = row.operation === 'save'
                         ? evaluateLockForWrite(expectedLock(row, 'door')) === null
                         : evaluateLockForDelete(expectedLock(row, 'door')) === null;
-                    expect(verdict, `${at}: the door`).toEqual(doorAllows ? 'admitted' : ITEM_LOCKED);
+                    // [ADR-0131 D6] An organization-scoped request never reaches
+                    // the `_lock` gate: every org-scoped write is refused first.
+                    expect(verdict, `${at}: the door`)
+                        .toEqual(row.requestScope ? NOT_OVERRIDABLE : doorAllows ? 'admitted' : ITEM_LOCKED);
                     // …and the two agree: the door admits exactly when the envelope
                     // says it may. Except on the one declared difference
                     // (`overlayLockLayerAt`'s `otherSpelling`): a row stored under
@@ -779,7 +784,7 @@ describe('[#21738, #21803] pin 1 — the family\'s enumeration, generated from t
                     // row — so those rows flip, by name, the day the reads'
                     // fallback retires.
                     const residue = expectedLock(row, 'reads') !== expectedLock(row, 'door');
-                    if (!residue) {
+                    if (!residue && !row.requestScope) {
                         const readAllows = row.operation === 'save' ? read.editable : read.deletable;
                         expect(verdict, `${at}: the door and the read envelope (lock ${read.lock}) disagree`)
                             .toEqual(readAllows ? 'admitted' : ITEM_LOCKED);
@@ -1076,7 +1081,7 @@ describe('[#21761] pin 7 — a third package\'s row is in scope: no write the ga
         });
     }
 
-    it('an organization holding only another package\'s row: its rows are the scope, for the reads and the door alike', async () => {
+    it('an organization holding only another package\'s row: its rows are the reads\' scope, and its writes are refused', async () => {
         const protocol = harness(ENV_ID, [
             storedRow('view', ORG, 'full', 'org row of the other package', 'v_org', OTHER),
             storedRow('view', null, 'none', 'env-wide package row', 'v_org', PACKAGE_ID),
@@ -1087,8 +1092,9 @@ describe('[#21761] pin 7 — a third package\'s row is in scope: no write the ga
         // Content stays prefer-local: the organization holds no row of the
         // package or package-less, so the env-wide package row is served.
         expect(read.byName.item?.label).toBe('env-wide package row');
-        expect(await door(protocol, 'view', 'save', ORG, 'v_org', PACKAGE_ID)).toEqual(ITEM_LOCKED);
-        expect(await door(protocol, 'view', 'delete', ORG, 'v_org')).toEqual(ITEM_LOCKED);
+        // [ADR-0131 D6] The organization's writes are refused before the gate.
+        expect(await door(protocol, 'view', 'save', ORG, 'v_org', PACKAGE_ID)).toEqual(NOT_OVERRIDABLE);
+        expect(await door(protocol, 'view', 'delete', ORG, 'v_org')).toEqual(NOT_OVERRIDABLE);
     });
 
     it('the list item and the directory tile report the same lock as the item\'s envelope', async () => {
@@ -1226,9 +1232,9 @@ describe('[#21803] pin 11 — the folded position: a body served from outside th
             expect(Object.keys(read.layered.effective ?? {}).filter((k) => k.startsWith('_lock'))).toEqual([]);
             // The layered read still reports the stored layer as stored.
             expect(read.layered.overlay?._lock).toBe('full');
-            // The door agrees with the envelope.
-            expect(await door(protocol, 'view', 'save', ORG, 'v_scope', PACKAGE_ID)).toBe('admitted');
-            expect(await door(protocol, 'view', 'delete', ORG, 'v_scope')).toBe('admitted');
+            // [ADR-0131 D6] The organization's writes are refused before the gate.
+            expect(await door(protocol, 'view', 'save', ORG, 'v_scope', PACKAGE_ID)).toEqual(NOT_OVERRIDABLE);
+            expect(await door(protocol, 'view', 'delete', ORG, 'v_scope')).toEqual(NOT_OVERRIDABLE);
         });
     }
 

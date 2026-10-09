@@ -84,23 +84,24 @@ function makeEngine(rows: MetaRow[]) {
     const engine = {
         async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
             if (table !== 'sys_metadata') return [];
-            // This double implements NEITHER a `where` combinator NOR a bound,
-            // and REFUSES both rather than answering them silently. Every case
-            // in this file adopts env-wide orphans, so the producer passes
-            // `{ where: {} }` and no `limit`; the org-scoped `$or` branch and
-            // paging belong to tests that do not exist yet. A double looser
-            // than the engine it stands in for converts a green suite into no
-            // suite at all (#4434) — and the reason to refuse rather than
-            // approximate is that the approximation is invisible on the day the
-            // producer starts using the shape.
+            // This double implements ONE `where` shape — the env-wide filter
+            // `{ organization_id: null }` the producer passes (ADR-0131 D6:
+            // only env-wide orphans are adopted) — and NO bound, and REFUSES
+            // anything else rather than answering it silently. Paging belongs
+            // to tests that do not exist yet. A double looser than the engine
+            // it stands in for converts a green suite into no suite at all
+            // (#4434) — and the reason to refuse rather than approximate is
+            // that the approximation is invisible on the day the producer
+            // starts using the shape.
             const where = opts?.where ?? {};
-            if (Object.keys(where).length > 0) {
+            const keys = Object.keys(where);
+            if (keys.length !== 1 || keys[0] !== 'organization_id' || where.organization_id !== null) {
                 throw new Error(`fake engine: unsupported where ${JSON.stringify(where)}`);
             }
             if (opts?.limit !== undefined) {
                 throw new Error('fake engine: unsupported `limit` — this double holds no bound');
             }
-            return [...store.values()];
+            return [...store.values()].filter((r) => r.organization_id == null);
         },
         async update(_table: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
             assertEngineUpdateDispatch(data, opts);

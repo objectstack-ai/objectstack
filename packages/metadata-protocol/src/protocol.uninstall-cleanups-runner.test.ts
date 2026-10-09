@@ -11,7 +11,7 @@
  *
  * What this file pins:
  *   - every registered cleanup runs once, with the package id and exactly the
- *     organization / actor the request carried, and each outcome is reported;
+ *     actor the request carried, and each outcome is reported;
  *   - a cleanup's failure is an outcome, never a throw: a returned
  *     `success: false` keeps its own error, a thrown undeclared fault is
  *     reported with the withheld fallback sentence, never its driver text;
@@ -42,17 +42,17 @@ function makeProtocol() {
 }
 
 describe('#21490: runUninstallCleanups — the uninstall-cleanup registry\'s one runner', () => {
-    it('runs every registered cleanup once, with the package id, organization and actor it was given, and reports each outcome', async () => {
+    it('runs every registered cleanup once, with the package id and actor it was given, and reports each outcome', async () => {
         const protocol = makeProtocol();
         const first = vi.fn(async () => ({ success: true, removed: 3 }));
         const second = vi.fn(async () => ({ success: true, removed: 0 }));
         protocol.registerUninstallCleanup('security.package-permissions', first);
         protocol.registerUninstallCleanup('another.cleanup', second);
 
-        const outcomes = await protocol.runUninstallCleanups({ packageId: PACKAGE_ID, organizationId: 'org_1', actor: 'usr_1' });
+        const outcomes = await protocol.runUninstallCleanups({ packageId: PACKAGE_ID, actor: 'usr_1' });
 
-        expect(first.mock.calls).toEqual([[{ packageId: PACKAGE_ID, organizationId: 'org_1', actor: 'usr_1' }]]);
-        expect(second.mock.calls).toEqual([[{ packageId: PACKAGE_ID, organizationId: 'org_1', actor: 'usr_1' }]]);
+        expect(first.mock.calls).toEqual([[{ packageId: PACKAGE_ID, actor: 'usr_1' }]]);
+        expect(second.mock.calls).toEqual([[{ packageId: PACKAGE_ID, actor: 'usr_1' }]]);
         expect(outcomes).toEqual([
             { name: 'security.package-permissions', success: true, removed: 3 },
             { name: 'another.cleanup', success: true, removed: 0 },
@@ -95,7 +95,7 @@ describe('#21490: runUninstallCleanups — the uninstall-cleanup registry\'s one
         const protocol = makeProtocol();
         protocol.registerUninstallCleanup('security.package-permissions', async () => ({ success: true, removed: 4 }));
         const runner = vi.spyOn(protocol, 'runUninstallCleanups');
-        const request = { packageId: PACKAGE_ID, allTenants: true as const, actor: 'usr_1' };
+        const request = { packageId: PACKAGE_ID, actor: 'usr_1' };
 
         const res = await protocol.deletePackage(request);
 
