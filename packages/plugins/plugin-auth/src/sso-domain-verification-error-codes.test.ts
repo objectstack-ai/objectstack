@@ -27,7 +27,7 @@ import { describe, it, expect } from 'vitest';
 // root entry re-exports the schemas only. Reading it through the published
 // exports map (i.e. `dist`) is deliberate: this asserts against the surface a
 // consumer actually gets, not against a source file this test could reach.
-import { ERROR_CODE_LEDGER } from '@objectstack/spec/api';
+import { ERROR_CODE_LEDGER, HttpStatusErrorCodeMap } from '@objectstack/spec/api';
 import { runRequestDomainVerification, runVerifyDomain, type AuthRequestHandler } from './register-sso-provider.js';
 
 /** The default this package authors for both routes when the vendor gives no code. */
@@ -199,5 +199,108 @@ describe('#10859 the DISABLED condition gets ONE answer across both routes', () 
     expect(res.body.error?.code).toBe(OUR_DEFAULT);
     expect(res.body.error?.code).not.toBe(DISABLED);
     expect(res.status).toBe(502);
+  });
+});
+
+describe('[#22463] the environment’s own setting tells the two code-less 404s apart', () => {
+  /**
+   * The vendor answers two different 404s, neither with a `code`: the feature
+   * OFF (inner route unmounted, empty body) and, with it ON, an unknown
+   * provider (`checkProviderAccess`, `{"message":"Provider not found"}`). The
+   * bridges decide from the flag their caller hands in, never from the body:
+   * the vendor's wording is not a contract. The real-stack pins, through the
+   * mounted routes, are in `sso-domain-verification-unknown-provider.pin.test.ts`.
+   */
+  const ON = { domainVerificationEnabled: true } as const;
+  const OFF = { domainVerificationEnabled: false } as const;
+  const NOT_FOUND = 'RESOURCE_NOT_FOUND';
+  const DISABLED = 'DOMAIN_VERIFICATION_DISABLED';
+  /** A handle that records whether the vendor was asked at all. */
+  const counted = (status: number, body: unknown) => {
+    const calls: Request[] = [];
+    const inner = fakeHandle(status, body);
+    const handle: AuthRequestHandler = async (req) => {
+      calls.push(req);
+      return inner(req);
+    };
+    return { handle, calls };
+  };
+  const BRIDGES = [
+    { label: 'request-domain-verification', run: runRequestDomainVerification, url: REQUEST_URL },
+    { label: 'verify-domain', run: runVerifyDomain, url: VERIFY_URL },
+  ] as const;
+
+  it('the not-found answer is the envelope’s own code for 404 — reused, not invented', () => {
+    expect(HttpStatusErrorCodeMap[404]).toBe(NOT_FOUND);
+  });
+
+  for (const bridge of BRIDGES) {
+    it(`${bridge.label}: ON, the vendor’s code-less 404 → 404 RESOURCE_NOT_FOUND naming the provider`, async () => {
+      const { handle, calls } = counted(404, { message: 'Provider not found' });
+      const res = await bridge.run(handle, post(bridge.url), ON);
+
+      expect(calls).toHaveLength(1);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error?.code).toBe(NOT_FOUND);
+      expect(res.status).toBe(404);
+      expect(res.body.error?.message).toContain('"p1"');
+      expect(res.body.error?.message).not.toContain('OS_SSO_DOMAIN_VERIFICATION');
+    });
+
+    it(`${bridge.label}: ON, the decision does not read the vendor’s 404 wording`, async () => {
+      // An empty body and a reworded one get the SAME answer as the measured
+      // body: a vendor upgrade that changes the copy changes nothing here.
+      for (const body of [undefined, { message: 'Unknown provider (reworded upstream)' }]) {
+        const res = await bridge.run(fakeHandle(404, body), post(bridge.url), ON);
+        expect(res.body.error?.code, JSON.stringify(body)).toBe(NOT_FOUND);
+        expect(res.status, JSON.stringify(body)).toBe(404);
+      }
+    });
+
+    it(`${bridge.label}: OFF → 400 DOMAIN_VERIFICATION_DISABLED, and the vendor is never asked`, async () => {
+      const { handle, calls } = counted(404, undefined);
+      const res = await bridge.run(handle, post(bridge.url), OFF);
+
+      expect(res.body.error?.code).toBe(DISABLED);
+      expect(res.status).toBe(400);
+      expect(res.body.error?.message).toContain('OS_SSO_DOMAIN_VERIFICATION');
+      expect(calls).toHaveLength(0);
+    });
+
+    it(`${bridge.label}: OFF still answers a missing providerId first, as before`, async () => {
+      const { handle, calls } = counted(404, undefined);
+      const req = new Request(bridge.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      const res = await bridge.run(handle, req, OFF);
+
+      expect(res.body.error?.code).toBe('INVALID_REQUEST');
+      expect(res.status).toBe(400);
+      expect(calls).toHaveLength(0);
+    });
+
+    it(`${bridge.label}: no flag (a caller such as the cloud proxy) → the earlier mapping, for both 404 shapes`, async () => {
+      for (const body of [undefined, { message: 'Provider not found' }]) {
+        const { handle, calls } = counted(404, body);
+        const res = await bridge.run(handle, post(bridge.url));
+        expect(res.body.error?.code, JSON.stringify(body)).toBe(DISABLED);
+        expect(res.status, JSON.stringify(body)).toBe(400);
+        expect(calls, JSON.stringify(body)).toHaveLength(1);
+      }
+    });
+  }
+
+  it('verify-domain: ON, a 404 that CARRIES a vendor code is still the vendor’s answer', async () => {
+    const res = await runVerifyDomain(fakeHandle(404, { code: VENDOR_CODE, message: 'vendor copy' }), post(VERIFY_URL), ON);
+
+    expect(res.body.error?.code).toBe(VENDOR_CODE);
+    expect(res.status).toBe(404);
+    expect(res.body.error?.message).toContain('Request Domain Verification');
+  });
+
+  it('request-domain-verification: ON, the vendor’s 201 still yields the DNS record', async () => {
+    const res = await runRequestDomainVerification(fakeHandle(201, { domainVerificationToken: 'tok' }), post(REQUEST_URL), ON);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data?.dnsRecordValue).toBe('_better-auth-token-p1=tok');
   });
 });

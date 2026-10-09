@@ -3073,7 +3073,9 @@ export class AuthPlugin implements Plugin {
     // verify-domain} (so the per-provider admin gate runs) and reshape into the
     // `{ success, data }` envelope the action `resultDialog` / toast reads:
     // request returns the ready-to-paste DNS TXT record, verify returns a clear
-    // success/error. A 404 from the inner endpoint = feature OFF for this env.
+    // success/error. [#22463] Each hands the bridge this environment's own
+    // setting, so a feature-off answer and an unknown provider's are told apart
+    // (the vendor answers both with a code-less 404).
     rawApp.post(`${basePath}/admin/sso/request-domain-verification`, async (c: any) => {
       try {
         // #9653 — same ADR-0068 D4 platform-admin gate as /admin/sso/register
@@ -3084,6 +3086,7 @@ export class AuthPlugin implements Plugin {
         const { status, body } = await runRequestDomainVerification(
           (req) => this.authManager!.handleRequest(req),
           c.req.raw,
+          { domainVerificationEnabled: this.authManager!.isSsoDomainVerificationEnabled() },
         );
         return c.json(body, status as any);
       } catch (error) {
@@ -3101,6 +3104,7 @@ export class AuthPlugin implements Plugin {
         const { status, body } = await runVerifyDomain(
           (req) => this.authManager!.handleRequest(req),
           c.req.raw,
+          { domainVerificationEnabled: this.authManager!.isSsoDomainVerificationEnabled() },
         );
         return c.json(body, status as any);
       } catch (error) {
