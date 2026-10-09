@@ -51,6 +51,18 @@
 // authz-row: anonymous-deny-packages
 // authz-row: anonymous-deny-analytics
 // authz-row: anonymous-deny-api-description
+// authz-row: anonymous-deny-i18n
+//
+// ── Why the translation faces are here (#22432) ────────────────────────────
+//
+// The `/i18n` dispatcher domain was the one dispatcher domain serving the
+// application's own vocabulary without the floor: on a stock boot an
+// unauthenticated caller was served the translation bundle — the labels of
+// every object, field, app and page — while the metadata read of the same
+// objects answered it 401. Each mounted face is driven below anonymously (401
+// in the dispatcher-wrapper envelope, nothing of the bundle served) and with a
+// signed-in member as the 200 control, on this one boot, and each anonymous
+// denial is classified into the dispatcher-wrapper family.
 //
 // ── Why the API-description endpoints are here (#22430) ────────────────────
 //
@@ -161,6 +173,43 @@ interface ApiDescriptionEndpoint {
 const API_DESCRIPTION_ENDPOINTS: readonly ApiDescriptionEndpoint[] = [
   { endpoint: 'the API-description document', path: '/openapi.json' },
   { endpoint: 'the API-description viewer', path: '/docs' },
+];
+
+// ── #22432 — the translation faces (dispatcher-mounted; runtime domains/i18n.ts)
+//
+// One handler body serves every face, so the floor is its first statement. The
+// locale and the object are the showcase's own (`zh-CN` is a declared
+// supported locale with a bundle; `showcase_task` carries translated field
+// labels in it), so the member control is a real served answer and not an
+// empty one that would make the anonymous 401 vacuous. Labels name the FACE,
+// never the request.
+interface I18nFace {
+  readonly face: string;
+  readonly path: string;
+  /** What a signed-in member's `data` must carry, so the control is a real serve. */
+  readonly expectServed: (data: Record<string, any>) => void;
+}
+const I18N_FACES: readonly I18nFace[] = [
+  {
+    face: 'the locale list', path: '/i18n/locales',
+    expectServed: (data) => {
+      expect((data.locales as Array<{ code: string }>).map((l) => l.code)).toEqual(expect.arrayContaining(['en', 'zh-CN']));
+    },
+  },
+  {
+    face: 'the translation bundle', path: '/i18n/translations/zh-CN',
+    expectServed: (data) => {
+      expect(data.locale).toBe('zh-CN');
+      expect(data.translations?.objects?.showcase_task?.label).toBe('任务');
+    },
+  },
+  {
+    face: 'the field labels', path: '/i18n/labels/showcase_task/zh-CN',
+    expectServed: (data) => {
+      expect(data.object).toBe('showcase_task');
+      expect(data.labels?.title?.label).toBe('标题');
+    },
+  },
 ];
 
 // ── #11373 — the /meta WRITE doors, driven through the REAL mount ──────────
@@ -696,6 +745,35 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(await r.text(), 'the viewer points at its sibling document').toContain('data-url="/api/v1/openapi.json"');
   });
 
+  // ── the translation faces (dispatcher-mounted; runtime domains/i18n.ts) — #22432
+  //
+  // The same domain-wide shape as analytics: the floor is the handler's first
+  // statement, ahead of the provider probe and every face. The member control
+  // is the teeth: the same face, with a session, is served 200 with the
+  // showcase's own bundle, so the anonymous 401 is the floor's answer and the
+  // face is really mounted and serving on this boot.
+  it.each(I18N_FACES)('an anonymous caller on $face is denied (401) and served nothing of the bundle', async (face) => {
+    const r = await anon('GET', face.path);
+    expect(r.status, `${face.face}: an anonymous caller must be refused by the floor`).toBe(ANONYMOUS_DENY_STATUS);
+    const body = await r.json();
+    expect(declaredFamiliesOf(body), `${face.face}: the refusal is the dispatcher wrapper — got ${JSON.stringify(body)}`).toEqual(['dispatcher-wrapper']);
+    const { code } = readDenial('dispatcher-wrapper', body);
+    expect(code, `${face.face}: machine code must be ANONYMOUS_DENY_CODE`).toBe(ANONYMOUS_DENY_CODE);
+    expect(body, `${face.face}: nothing of the bundle rides on the refusal`).not.toHaveProperty('data');
+    const wire = JSON.stringify(body);
+    for (const leaked of ['translations', 'locales', 'labels', '任务', '标题']) {
+      expect(wire, `${face.face}: the refusal must not carry ${leaked}`).not.toContain(leaked);
+    }
+  });
+
+  it.each(I18N_FACES)('a signed-in member on $face is served 200 — the control', async (face) => {
+    const r = await stack.apiAs(memberToken, 'GET', face.path);
+    expect(r.status, `${face.face}: an authenticated member must clear the floor and be served`).toBe(200);
+    const body = (await r.json()) as { success?: boolean; data?: Record<string, any> };
+    expect(body.success).toBe(true);
+    face.expectServed(body.data ?? {});
+  });
+
   // ── one code, one message — two wrappers ───────────────────────────────
   it('every denied surface answers the SAME code and message (the wrappers differ)', async () => {
     const rest = await Promise.all([
@@ -710,6 +788,7 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
       anon('GET', '/packages').then((r) => r.json()),
       anon('POST', '/packages/anon-probe-pkg/discard-drafts', {}).then((r) => r.json()),
       ...ANALYTICS_FACES.map((f) => anon(f.method, f.path, f.body).then((r) => r.json())),
+      ...I18N_FACES.map((f) => anon('GET', f.path).then((r) => r.json())),
     ]);
 
     // Each family is read in ITS OWN declared shape — no `??` chain across the
@@ -762,8 +841,9 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
   //
   // Coverage, stated as measured rather than as assumed: the dispatcher
   // domains holding an anonymous gate include ai / meta / security / actions /
-  // automation / analytics (and /packages, driven above); of those six only
-  // actions, automation and analytics (#21061) are drivable on THIS boot —
+  // automation / analytics / i18n (and /packages, driven above); of those seven
+  // only actions, automation, analytics (#21061) and i18n (#22432) are drivable
+  // on THIS boot —
   // probed on the same shared showcase stack these cases use:
   //   - `GET /ai/status` answers 501 `NOT_IMPLEMENTED` (no
   //     `@objectstack/service-ai` ships in the open framework, and that
@@ -774,7 +854,7 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
   //   - `/meta` on this stack is served by `@objectstack/rest`, so it exercises
   //     the flat family, not the dispatcher's meta domain.
   // The wrapper family is therefore represented by actions + automation +
-  // analytics. Adding a row is the whole change needed the day another domain
+  // analytics + i18n. Adding a row is the whole change needed the day another domain
   // becomes reachable.
   const DENIED_SEAMS: Array<{
     seam: string;
@@ -817,6 +897,13 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
       owner: 'runtime domains/analytics.ts',
       family: 'dispatcher-wrapper' as DenyFamily,
       call: () => anon(f.method, f.path, f.body),
+    })),
+    // [#22432] Labelled by FACE, the same rule.
+    ...I18N_FACES.map((f) => ({
+      seam: f.face,
+      owner: 'runtime domains/i18n.ts',
+      family: 'dispatcher-wrapper' as DenyFamily,
+      call: () => anon('GET', f.path),
     })),
   ];
 

@@ -7,7 +7,7 @@
 // "ratchets completeness over a CURATED table of HTTP/transport entry points"
 // and that "a new ungated route there is UNCLASSIFIED ... and breaks CI". That
 // promise is true only for the entry points a probe can actually mint a key
-// for. This module measures, for EVERY one of the 14 files the `PROBES` table
+// for. This module measures, for EVERY one of the 15 files the `PROBES` table
 // names, how far that reach extends — and records the result so it cannot rot.
 //
 // ⭐ Since 2026-08-31 two of those files are the ROUTE LEDGERS, and they are
@@ -290,7 +290,11 @@ export interface ProbeTableReading {
 // [#22430] 19 / 14 / 17 -> 19 / 14 / 18: no probe and no file joined; the
 // `anonymous-deny-api-description` row covers one more key, the `openapi` REST
 // family, which left the shrink-only ledger baseline.
-export const PROBE_TABLE: ProbeTableReading = { entries: 19, files: 14, keys: 18 };
+// [#22432] 19 / 14 / 18 -> 20 / 15 / 20: the `/i18n` domain gate joined the
+// table as a GATE_PIN on `packages/runtime/src/domains/i18n.ts`, and the
+// `anonymous-deny-i18n` row covers its key plus the `/i18n` dispatcher-domain
+// key that left the shrink-only ledger baseline.
+export const PROBE_TABLE: ProbeTableReading = { entries: 20, files: 15, keys: 20 };
 
 /**
  * The probe count `authz-conformance.matrix.ts`'s header states.
@@ -311,8 +315,10 @@ export const PROBE_TABLE: ProbeTableReading = { entries: 19, files: 14, keys: 18
  *
  * [#21061] 18 -> 19, moved in the same change as the header sentence and the
  * probe it counts, which is exactly what the inverted pin asks for.
+ * [#22432] 19 -> 20, the same way: the `/i18n` gate pin and the header
+ * sentence moved together.
  */
-export const MATRIX_HEADER_PROBE_CLAIM = 19;
+export const MATRIX_HEADER_PROBE_CLAIM = 20;
 
 export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
   // ── the two LEDGER files: the population source since 2026-08-31 ───────
@@ -390,14 +396,21 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     blindSpot: 0,
     populationRule: 'ledger rows inside ROUTE_LEDGER; reachable = rows carrying a `domain` (each distinct value mints a key)',
     controls: { "route: '": 82, "domain: '": 82, RouteLedgerEntry: 2 },
+    // [#22432] Re-derived on the merged ref: the note's two counts had stood at
+    // 11 files / 5 classified / 16 baselined since before the `/analytics`
+    // domain was classified (#21061), which named one more file and moved one
+    // more key. The `/i18n` domain names a sixth file and moves a seventh key:
+    // 15 domain files declare a DomainRoute prefix, 6 of them are named by a
+    // probe (actions, automation, packages, analytics, i18n, mcp), and the
+    // baseline's dispatcher block holds 14 of the 21 domains.
     note:
       'The dispatcher half. Its machine contract is DOMAIN-level by live registry introspection ' +
       '(domainRegistry.list()), guarded in BOTH directions by route-ledger.conformance.test.ts: every ' +
       'registered domain needs a row, and every ledger domain must be a live prefix or a pinned legacy / ' +
       'non-dispatch branch. That two-way guard is what settles the FILE-SELECTION layer by ' +
       'construction — all 16 DomainRoute prefixes declared across the 15 domain files that declare one are ' +
-      'ledger domains today, including the 11 files no probe has ever named. 21 domains; 5 classified ' +
-      '(/meta, /actions, /automation, /packages, /mcp), 16 in the shrink-only baseline.',
+      'ledger domains today, including the 9 files no probe names. 21 domains; 7 classified ' +
+      '(/meta, /actions, /automation, /packages, /mcp, /analytics, /i18n), 14 in the shrink-only baseline.',
   },
   {
     file: 'packages/rest/src/rest-server.ts',
@@ -595,6 +608,23 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     blindSpot: 0,
     populationRule: '`export async function handle*Request` entry points',
     controls: { 'shouldDenyAnonymous(': 1, handleAnalyticsRequest: 3 },
+    note: 'Same shape as domains/actions.ts.',
+  },
+  {
+    // [#22432] The `/i18n` domain joined the anonymous-deny floor; the gate is
+    // the handler's first statement, so this row has the actions.ts shape. Its
+    // handler name occurs 3 times: the declaration, the DomainRoute call site
+    // and the file docblock's link to it. Its name carries digits, which is
+    // why the population rule's handler-name class admits them.
+    file: 'packages/runtime/src/domains/i18n.ts',
+    kinds: ['GATE_PIN'],
+    probes: 1,
+    keys: 1,
+    population: 1,
+    reachable: 1,
+    blindSpot: 0,
+    populationRule: '`export async function handle*Request` entry points',
+    controls: { 'shouldDenyAnonymous(': 1, handleI18nRequest: 3 },
     note: 'Same shape as domains/actions.ts.',
   },
   {
@@ -923,17 +953,24 @@ export function deriveProbeFileCensus(): {
     });
   }
 
-  // ── the five runtime domain files (GATE_PIN) ────────────────────────────
+  // ── the six runtime domain files (GATE_PIN) ─────────────────────────────
+  //
+  // [#22432] The handler-name class admits digits: `handleI18nRequest` is a
+  // `handle*Request` entry point like the others, and a letters-only class
+  // read it as zero — a population of 0 under a reach of 1. No other file's
+  // count moves with the wider class (none of their handler names carries a
+  // digit; re-derived).
   const domains: Array<[string, string, string]> = [
     ['packages/runtime/src/domains/actions.ts', 'shouldDenyAnonymous(', 'handleActionsRequest'],
     ['packages/runtime/src/domains/automation.ts', 'shouldDenyAnonymous(', 'handleAutomationRequest'],
     ['packages/runtime/src/domains/packages.ts', 'shouldDenyAnonymous(', 'handlePackagesRequest'],
     ['packages/runtime/src/domains/analytics.ts', 'shouldDenyAnonymous(', 'handleAnalyticsRequest'],
+    ['packages/runtime/src/domains/i18n.ts', 'shouldDenyAnonymous(', 'handleI18nRequest'],
   ];
   for (const [rel, gate, handler] of domains) {
     const src = read(rel);
     files.set(rel, {
-      population: occurrences(src, /^export async function handle[A-Za-z]+Request/gm),
+      population: occurrences(src, /^export async function handle[A-Za-z0-9]+Request/gm),
       reachable: 1,
       controls: {
         [gate]: occurrences(src, /shouldDenyAnonymous\s*\(/g),
@@ -944,7 +981,7 @@ export function deriveProbeFileCensus(): {
   {
     const src = read('packages/runtime/src/domains/mcp.ts');
     files.set('packages/runtime/src/domains/mcp.ts', {
-      population: occurrences(src, /^export async function handle[A-Za-z]+Request/gm),
+      population: occurrences(src, /^export async function handle[A-Za-z0-9]+Request/gm),
       reachable: 1,
       controls: {
         'buildMcpBridge(deps, context)': occurrences(src, /buildMcpBridge\(deps, context\)/g),

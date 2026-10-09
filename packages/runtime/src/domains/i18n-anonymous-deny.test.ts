@@ -115,14 +115,14 @@ const FACES: readonly Face[] = [
         face: 'the field labels (path spelling)',
         subPath: '/labels/lead/fr',
         malformed: { subPath: '/labels/lead' },
-        served: { object: 'lead', locale: 'fr', labels: { company: 'Société' } },
+        served: { object: 'lead', locale: 'fr', labels: { company: { label: 'Société' } } },
         reads: 'getTranslations',
     },
     {
         face: 'the field labels (query spelling)',
         subPath: '/labels/lead', query: { locale: 'fr' },
         malformed: { subPath: '/labels/lead', query: {} },
-        served: { object: 'lead', locale: 'fr', labels: { company: 'Société' } },
+        served: { object: 'lead', locale: 'fr', labels: { company: { label: 'Société' } } },
         reads: 'getTranslations',
     },
 ];
