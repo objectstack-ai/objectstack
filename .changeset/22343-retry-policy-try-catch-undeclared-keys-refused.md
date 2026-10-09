@@ -25,6 +25,8 @@ Clause-②: yes (narrowing: an undeclared key on the shared retry policy is refu
 - A pre-17 `retryDelayMs` alone: still renamed to `backoffMs` before the judge at every door that converts first (`defineStack`, `os validate`, `os compile`, `registerFlow`, the save door). Met by a direct `FlowSchema.parse` or `defineFlow()`, it meets its tombstone, like every other retired spelling.
 - `Flow.errorHandling`, which carries the same policy keys, was already closed; a `script` node's retired keys keep the scope they had.
 
+**Also corrected:** `Flow.errorHandling`'s refusal of a `maxAttempts` key said a bare rename to `maxRetries` would run one attempt fewer than asked for; it runs one more (`maxAttempts: 3` is 3 runs, `maxRetries: 3` is 4), and the message now says so — the prescription, `maxRetries` one lower, is unchanged.
+
 ## FROM → TO
 
 | you wrote | write instead |

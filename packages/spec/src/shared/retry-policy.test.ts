@@ -180,6 +180,8 @@ describe('RetryPolicySchema refuses a key it does not declare', () => {
     const attempts = RetryPolicySchema.safeParse({ maxAttempts: 3 });
     const message = attempts.success ? '' : attempts.error.issues[0]!.message;
     expect(message).toContain('`maxRetries: <maxAttempts - 1>`');
+    expect(message).toContain('one attempt more than you asked for');
+    expect(message).not.toMatch(/fewer/i);
     expect(message).not.toContain('`maxAttempts` → ');
   });
 

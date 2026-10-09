@@ -1191,7 +1191,7 @@ export const FlowSchema = lazySchema(() => strictObject(
       maxAttempts:
         '`maxAttempts` is the connector/RetryConfig spelling and INCLUDES the first attempt; ' +
         'flow `errorHandling` counts retries AFTER it. Write `maxRetries: <maxAttempts - 1>` ' +
-        '— renaming the key alone would quietly run one attempt fewer than you asked for.',
+        '— renaming the key alone would quietly run one attempt more than you asked for.',
       fallback:
         'There is no fallback node on `errorHandling` (`fallbackNodeId` was removed in 17 — ' +
         'the engine never read it). Draw a per-node FAULT EDGE from the failing node ' +
