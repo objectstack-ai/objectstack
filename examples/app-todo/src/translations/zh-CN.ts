@@ -109,9 +109,15 @@ export const zhCN: TranslationData = {
           title: '任务详情',
           fields: {
             subject: { label: '任务主题' },
-            priority: { label: '优先级' },
+            priority: {
+              label: '优先级',
+              options: { low: '低', normal: '普通', high: '高', urgent: '紧急' },
+            },
             dueDate: { label: '截止日期' },
-            category: { label: '分类' },
+            category: {
+              label: '分类',
+              options: { personal: '个人', work: '工作', shopping: '购物', health: '健康', finance: '财务', other: '其他' },
+            },
           },
         },
         success_screen: { title: '任务已创建' },
