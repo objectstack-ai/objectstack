@@ -1020,6 +1020,67 @@ export function fieldRuleRootIssue(
 }
 
 /**
+ * [#22228] The roots a field's cell formatting rule binds — the scope of each
+ * `FieldSchema.conditionalFormatting[].condition`: `value`, this field's value
+ * on the record, and `record`, the row the cell belongs to. Nothing else, by
+ * the card's ruling: the host styling a cell has the row and the cell's value
+ * in hand, and no write is in flight, so there is no `previous`; no inline
+ * grid header, so there is no `parent`; and the field-rule family's user-root
+ * refusal holds here for the same reason it holds there.
+ *
+ * `value` is NOT a platform root (`SCOPE_ROOTS` does not list it) and is not
+ * added there: that list is the published strict-lint accept baseline, and a
+ * root added to it stops every surface that judges bare identifiers from
+ * faulting it. This surface names it to the shared validator instead, through
+ * `ExprSchemaHint.roots` ({@link FIELD_FORMATTING_SURFACE_ROOTS}), which only
+ * ever turns a refusal into an acceptance for this one call.
+ */
+export const FIELD_FORMATTING_BOUND_ROOTS = ['value', 'record'] as const;
+/**
+ * The bound roots this surface mounts BEYOND the platform baseline — what the
+ * `check` closure hands `validateExpression` as `roots`. `record` is already a
+ * `SCOPE_ROOTS` member, so only `value` is listed.
+ */
+const FIELD_FORMATTING_SURFACE_ROOTS: readonly string[] = FIELD_FORMATTING_BOUND_ROOTS.filter(
+  (r) => !(SCOPE_ROOTS as readonly string[]).includes(r),
+);
+
+/**
+ * [#22228] The root verdict for a field's cell formatting rule: a condition
+ * that reads a root this surface does not bind — anything in
+ * {@link FIELD_RULE_JUDGED_ROOTS} other than `record` (`value` is not in that
+ * vocabulary at all). The same membership test as {@link fieldRuleRootIssue},
+ * for the same reasons (an allowlist, judged by membership rather than by
+ * declaredness), over this surface's own allowlist and in its own words: the
+ * family's message names `previous` and `parent` as bound, and here neither is.
+ *
+ * `null` = nothing to report: the source does not parse (the syntax pass owns
+ * that), or every root it reads is bound here.
+ */
+export function fieldFormattingRootIssue(
+  location: string,
+  source: string,
+): { root: string; message: string } | null {
+  const roots = collectCelRootIdentifiers(source);
+  if (!roots.ok) return null;
+  const kept = FIELD_RULE_JUDGED_ROOTS.filter(
+    (r) => !(FIELD_FORMATTING_BOUND_ROOTS as readonly string[]).includes(r) && roots.roots.includes(r),
+  );
+  if (kept.length === 0) return null;
+  // One issue per rule, user roots first (the family's tie-break), then the
+  // judged vocabulary's own order — stable, never AST walk order.
+  const root = FIELD_RULE_USER_ROOTS.find((r) => kept.includes(r)) ?? kept[0]!;
+  return {
+    root,
+    message:
+      `\`${location}\` reads \`${root}\`, but a field's conditional formatting rule binds only ` +
+      `\`value\` (this field's value on the record) and \`record\` (the row the cell belongs to) — ` +
+      `\`${root}\` is unbound where the cell is styled, so the condition faults and the rule never ` +
+      `styles the cell. Rewrite the condition against \`value\` or \`record\`.`,
+  };
+}
+
+/**
  * [#13935] Does this `@objectstack/formula` error carry the bare-reference
  * verdict for one of `roots`?
  *
@@ -1859,6 +1920,14 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      * on the fail-open seams that means the rule stops enforcing entirely.
      */
     traversalHydration?: boolean,
+    /**
+     * [#22228] Roots THIS site binds beyond the platform baseline, handed to
+     * the shared validator as `ExprSchemaHint.roots` so a read of one is not
+     * refused as a bare field. Only a field's cell formatting rule passes one
+     * (`value`, {@link FIELD_FORMATTING_SURFACE_ROOTS}); absent, the call is
+     * byte for byte what it was.
+     */
+    extraRoots?: readonly string[],
   ): void => {
     if (raw == null) return;
     const fields = objectName ? fieldIndex.get(objectName) : undefined;
@@ -1867,8 +1936,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const fieldTypes = objectName ? fieldTypeIndex.get(objectName) : undefined;
     // [#22211 ruling A] Absent for an object that declares no read attachment.
     const attachedOnRead = objectName ? attachedOnReadIndex.get(objectName) : undefined;
+    // Spread only when given, so every other site's hint is unchanged.
+    const roots = extraRoots ? { roots: extraRoots } : {};
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string },
-      objectName ? { objectName, fields, attachedOnRead, fieldTypes, scope, traversalHydration } : { scope });
+      objectName ? { objectName, fields, attachedOnRead, fieldTypes, scope, traversalHydration, ...roots } : { scope, ...roots });
     for (const e of res.errors) {
       if (fieldRuleVerdictIssued && isBareReferenceToAny(e.message, FIELD_RULE_NOWHERE_BOUND_ROOTS)) continue;
       issues.push({ where, message: e.message, source: e.source, severity: 'error' });
@@ -2541,6 +2612,34 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         check(where, raw, objectName, 'record', verdict !== null);
         if (verdict) {
           issues.push({ where, message: verdict.message, source: verdict.source, severity: 'error' });
+        }
+      }
+      // [#22228] The field's cell formatting rules — `conditionalFormatting`,
+      // each `{ condition, style }` (the list view's own rule element). Each
+      // condition is judged by the `record`-scoped `check` with `value` named
+      // as a root this surface binds (it parses, it reads `record.<field>`
+      // and never a bare field, the field exists), plus this surface's own
+      // root verdict: `value` and `record` only. Display only, like
+      // `visibleWhen`, so none of the write-path gates below (the `parent`
+      // gate, the null guard, the traversal refusal) applies. Not fenced on an
+      // object write: the object save door runs this pass too, at this
+      // position.
+      //
+      // `f.conditionalFormatting` is read LITERALLY so #5017's source scan
+      // checks it against `FieldSchema`, and so is each rule's `condition`.
+      // The index is the rule's position as authored — the location names it.
+      const cellRules: readonly unknown[] = Array.isArray(f.conditionalFormatting) ? f.conditionalFormatting : [];
+      for (const [ri, entry] of [...cellRules].entries()) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+        const cellRule = entry as AnyRec;
+        const location = `conditionalFormatting[${ri}].condition`;
+        const where = `object '${objectName}' · field '${fname}' ${location}`;
+        const raw: unknown = cellRule.condition;
+        const ruleSource = celSourceOf(raw);
+        const verdict = ruleSource ? fieldFormattingRootIssue(location, ruleSource) : null;
+        check(where, raw, objectName, 'record', verdict !== null, undefined, FIELD_FORMATTING_SURFACE_ROOTS);
+        if (verdict) {
+          issues.push({ where, message: verdict.message, source: ruleSource!, severity: 'error' });
         }
       }
       // [commit e9b526597] Per-OPTION `visibleWhen` — a `select`/`multiselect`/`radio`

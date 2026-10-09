@@ -324,6 +324,7 @@
     "data/Field:ackPlaintextMasking",
     "data/Field:allowCreate",
     "data/Field:autonumberFormat",
+    "data/Field:conditionalFormatting",
     "data/Field:conditionalRequired [RETIRED]",
     "data/Field:currencyConfig",
     "data/Field:defaultValue",
