@@ -189,11 +189,13 @@ export interface VerifyHandle {
      * (`{ as }`) or the system (`{ system: true }`).
      *
      * Refused before the engine is touched (`INVALID_REQUEST` / `400`): a
-     * `where` that is not an object, and a call the engine's own dispatch
-     * would route to its by-id path instead (an `id` in `data`, or a `where`
-     * that names only an `id`). One row by id is `hooks.run(object, 'update',
-     * { id, ...fields }, opts)`. Every other refusal (permission, validation,
-     * a hook's throw) is the engine's own error, rethrown unchanged.
+     * `where` that is not an object, and a call the engine's own update
+     * dispatch would write by id instead: a `where` that names only an `id`,
+     * or an `id` in `data` beside a `where` that selects by nothing else. One
+     * row by id is `hooks.run(object, 'update', { id, ...fields }, opts)`.
+     * Every other refusal (permission, validation, a hook's throw, the
+     * dispatch refusing an `id` in `data` beside a real predicate) is the
+     * engine's own error, rethrown unchanged.
      */
     updateWhere(object: string, where: EngineRow, data: EngineRow, opts: AsUser | AsSystem): Promise<number>;
   };
@@ -408,12 +410,10 @@ export async function createHandle(kernel: ObjectKernel, origin: string): Promis
     contextFor,
 
     hooks: {
-      async run(
-        object: string,
-        operation: 'insert' | 'update' | 'delete',
-        input: EngineRow,
-        opts: AsUser | AsSystem,
-      ): Promise<EngineRow> {
+      // Parameters annotated because the member is overloaded (an overload
+      // set gives no contextual parameter types); the return type is left to
+      // inference, as it was before the overload.
+      async run(object: string, operation: 'insert' | 'update' | 'delete', input: EngineRow, opts: AsUser | AsSystem) {
         // The call's own shape is judged before anyone is resolved: a
         // malformed call is refused for its own reason, not for whatever the
         // identity resolver says about the token.
@@ -455,7 +455,8 @@ export async function createHandle(kernel: ObjectKernel, origin: string): Promis
         if (resolveEngineUpdateDispatch(data, { where, multi: true }).kind === 'by-id') {
           throw callShapeRefusal(
             "verify: hooks.updateWhere is the engine's predicate path, but this call addresses one row by id " +
-              "(an id in `data`, or a `where` naming only an id), which the engine writes by id. " +
+              "(a `where` naming only an id, or an id in `data` beside a `where` that selects by nothing else), " +
+              'which the engine writes by id. ' +
               "Update one row through hooks.run(object, 'update', { id, ...fields }, opts).",
           );
         }
