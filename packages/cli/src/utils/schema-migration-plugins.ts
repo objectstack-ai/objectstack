@@ -1670,29 +1670,40 @@ async function composeAuthGatedSecurity(input: {
     secret: resolveAuthSecret({ isDev: process.env.NODE_ENV === 'development' }),
   });
   if (!decision.composes) {
-    return {
-      status: { composed: false, reason: decision.reason },
-      note: `Did not compose the security plugin: \`os serve\` composes none here (${describeAuthSkip(decision.reason)}), `
-        + 'so its shipped permission sets are not package-held names on this deployment\'s boot.',
-    };
+    const status = { composed: false, reason: decision.reason } as const;
+    return { status, note: describeSecurityPluginComposition(status) };
   }
   const { SecurityPlugin, appSecurityPluginOptions } = await import('@objectstack/plugin-security');
+  const status = { composed: true } as const;
   return {
     plugin: composeForDeclarations(new SecurityPlugin(appSecurityPluginOptions(config)), input.lifecycle),
-    status: { composed: true },
-    note: 'Composed the security plugin as `os serve` composes it behind its auth gate (an auth secret resolves), '
-      + 'for its declarations only: its shipped permission sets are package-held names on this deployment\'s boot.',
+    status,
+    note: describeSecurityPluginComposition(status),
   };
 }
 
-/** The gate's reason, as an operator reads it. */
-function describeAuthSkip(reason: PlatformAuthSkipReason): string {
-  switch (reason) {
-    case 'stack-supplies-auth': return 'the stack mounts its own AuthPlugin';
-    case 'auth-tier-off': return 'the `auth` tier is off';
-    case 'host-kernel': return 'a host kernel, whose auth is per project';
-    case 'no-secret': return 'no OS_AUTH_SECRET, and NODE_ENV is not development';
+/**
+ * [#22371] What {@link SchemaMigrationComposition.securityPlugin} says, as an
+ * operator reads it — the line the composition notes carry, exported so the
+ * command that asked for it can print the same sentence.
+ */
+export function describeSecurityPluginComposition(
+  status: NonNullable<SchemaMigrationComposition['securityPlugin']>,
+): string {
+  if (status.composed) {
+    return 'Composed the security plugin as `os serve` composes it behind its auth gate (an auth secret '
+      + 'resolves), for its declarations only: its shipped permission sets are package-held names on this '
+      + 'deployment\'s boot.';
   }
+  const why: Record<PlatformAuthSkipReason | 'config-unloadable', string> = {
+    'stack-supplies-auth': 'the stack mounts its own AuthPlugin',
+    'auth-tier-off': 'the `auth` tier is off',
+    'host-kernel': 'a host kernel, whose auth is per project',
+    'no-secret': 'no OS_AUTH_SECRET, and NODE_ENV is not development',
+    'config-unloadable': 'the host config could not be loaded, so the gate had nothing to read',
+  };
+  return `Did not compose the security plugin: \`os serve\` composes none here (${why[status.reason]}), so its `
+    + 'shipped permission sets are not package-held names on this deployment\'s boot.';
 }
 
 /**

@@ -16,7 +16,7 @@ import {
   isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
-import { describeUnloadableHostConfig } from '../../utils/schema-migration-plugins.js';
+import { describeSecurityPluginComposition, describeUnloadableHostConfig } from '../../utils/schema-migration-plugins.js';
 import { absentTableReads } from '../../utils/absent-table-reads.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
@@ -269,8 +269,8 @@ export default class MigrateSecurityCatalogOverlays extends Command {
       await emitJson({
         database: stack.dbLabel,
         apply,
+        hostConfig: composition.hostConfigPath,
         securityPlugin: composition.securityPlugin ?? null,
-        notes: composition.notes,
         listed: rows.length,
         deleted,
         failed,
@@ -281,8 +281,11 @@ export default class MigrateSecurityCatalogOverlays extends Command {
     }
 
     printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
+    if (composition.hostConfigPath) printInfo(`Host config: ${chalk.white(composition.hostConfigPath)}`);
     reads.notice(false);
-    for (const note of composition.notes) printInfo(note);
+    // What decided whether the platform security plugin's sets are held — the
+    // one composition fact that moves this list with the boot environment.
+    if (composition.securityPlugin) printInfo(describeSecurityPluginComposition(composition.securityPlugin));
     console.log('');
     if (rows.length === 0) {
       printSuccess(
