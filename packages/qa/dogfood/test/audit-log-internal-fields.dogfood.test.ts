@@ -22,8 +22,8 @@
 // change to it is a verdict on its last build. ⚠️ No test title states a value.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 
@@ -46,7 +46,7 @@ describe('[#21197] ledger rows about internal-declared objects carry none of tho
     ql.find(LEDGER, { where: { object_name: object, record_id: recordId }, context: { ...SYS } });
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       security: showcaseAppDefaultSecurity(),
       extraPlugins: [new AuditPlugin()],
     });

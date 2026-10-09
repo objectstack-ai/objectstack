@@ -1,10 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16525] The REST cached `/meta` door hands `getMetaItemCached` the EFFECTIVE
- * organization, already reduced by the registry read gate — so the validator's
- * scope prefix and the representation it validates agree at the only door that
- * reaches this verb in production.
+ * [#16525 · ADR-0131 D6] The REST cached `/meta` door hands `getMetaItemCached`
+ * NO organization — since the per-organization overlay axis retired, the door
+ * reads environment → code for every type — so the validator's scope prefix
+ * and the representation it validates agree at the only door that reaches this
+ * verb in production. The history below is how the door used to reduce the
+ * organization by the registry read gate; §1 and §2 now pin that nothing
+ * reaches the read, and §3 that a supplied organization WOULD move the
+ * validator (so §1's equality is not vacuous).
  *
  * ── Why this file exists ──────────────────────────────────────────────────
  *
@@ -269,7 +273,7 @@ describe('§1 two tenants reading ONE env-wide document', () => {
         expect(bb.etag).toBe(none.etag);
     });
 
-    it(`⭐ CONTROL — ${OVERRIDABLE}: the validators DIFFER, because the door forwards the organization`, async () => {
+    it(`[ADR-0131 D6] ${OVERRIDABLE}: the validators are IDENTICAL too — the door forwards no organization for any type`, async () => {
         rows.push(row(OVERRIDABLE));
         const b = boot(rows);
 
@@ -286,9 +290,11 @@ describe('§1 two tenants reading ONE env-wide document', () => {
         expect(servedLabel(bb.body)).toBe(`env ${OVERRIDABLE}`);
         expect(servedLabel(none.body)).toBe(`env ${OVERRIDABLE}`);
 
-        expect(a.etag, 'the control did not fire — the ETag ignores the organization entirely').not.toBe(none.etag);
-        expect(bb.etag).not.toBe(none.etag);
-        expect(a.etag).not.toBe(bb.etag);
+        // Non-vacuity: the cached arm ran and issued a validator. §3 is the
+        // control that the validator DOES fold a supplied organization.
+        expect(none.etag).toMatch(/^"/);
+        expect(a.etag, 'an organization reached the cached read — the per-organization axis is retired').toBe(none.etag);
+        expect(bb.etag).toBe(none.etag);
     });
 });
 
@@ -296,10 +302,8 @@ describe('§1 two tenants reading ONE env-wide document', () => {
 // §2 — the organization still reaches the BODY where it legitimately can
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('§2 the reduction is the registry gate, not a dropped organization', () => {
-    it(`${OVERRIDABLE}: an org-scoped row is still served to its tenant`, async () => {
-        // ⭐ Without this, §1 is equally consistent with a door that forwards no
-        // organization at all — which would be #9454 reopened, not a fix.
+describe('§2 [ADR-0131 D6] a legacy organization-scoped row is served to nobody', () => {
+    it(`${OVERRIDABLE}: a legacy org-scoped row is not served, not even to its own organization (environment → code)`, async () => {
         const b = boot([row(OVERRIDABLE), row(OVERRIDABLE, ORG_A)]);
 
         b.as(ORG_A);
@@ -307,9 +311,9 @@ describe('§2 the reduction is the registry gate, not a dropped organization', (
         b.as(ORG_B);
         const theirs = await b.get(OVERRIDABLE);
 
-        expect(servedLabel(mine.body)).toBe(`${ORG_A} ${OVERRIDABLE}`);
+        expect(servedLabel(mine.body)).toBe(`env ${OVERRIDABLE}`);
         expect(servedLabel(theirs.body)).toBe(`env ${OVERRIDABLE}`);
-        expect(mine.etag).not.toBe(theirs.etag);
+        expect(mine.etag).toBe(theirs.etag);
     });
 
     it(`${NON_OVERRIDABLE}: a phantom org row is served to nobody`, async () => {

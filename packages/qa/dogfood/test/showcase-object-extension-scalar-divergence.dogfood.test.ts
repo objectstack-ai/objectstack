@@ -111,7 +111,8 @@ import { join } from 'node:path';
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { MetadataPlugin } from '@objectstack/metadata';
 import { writeBuildShapedArtifact } from './build-shaped-artifact.js';
 
@@ -143,7 +144,7 @@ describe('dogfood: the object-extension fold and the i18n catalog disagree on sc
      * which this family of defects is observable at all. Over a database FILE,
      * so a second boot is a real cold start on the rows the first one left.
      */
-    const boot = () => bootStack(showcaseStack, {
+    const boot = () => bootShowcase({
         databaseFile,
         extraPlugins: [
             new MetadataPlugin({

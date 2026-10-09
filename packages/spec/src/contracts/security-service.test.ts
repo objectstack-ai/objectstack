@@ -6,6 +6,9 @@ import type {
   AuthoredRowWriteVerdict,
   AuthoredRowWriteOperation,
   OwnershipFloorAlternate,
+  ControlledByParentWriteOutcome,
+  ControlledByParentWriteDenialLeg,
+  ControlledByParentWriteUnresolvedReason,
 } from './security-service';
 
 /**
@@ -641,5 +644,135 @@ describe('Security Service Contract', () => {
       operation: 'all',
     };
     expect(notOneLimb.operation).toBe('all');
+  });
+
+  it('checkControlledByParentWrite is OPTIONAL — absence is typed, and it means no master check, not allow', async () => {
+    // A security service without the member still satisfies the contract, and
+    // a consumer cannot reach the master check without handling the absent
+    // case first.
+    const withoutIt: ISecurityService = makeService();
+    expect(typeof withoutIt.checkControlledByParentWrite).toBe('undefined');
+
+    // The unguarded call does not compile. Never invoked: its only job is to
+    // make the COMPILER prove the point.
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a consumer must feature-detect first
+      withoutIt.checkControlledByParentWrite('order_line', 'r1', { userId: 'u1' });
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+
+    // The shape a gate writes. Absence proceeds, because the parent's own
+    // update meets no master check there either, and it is reported as its own
+    // state: nothing measured the master, so it is never relabelled `allow`.
+    const gate = async (svc: ISecurityService) => {
+      if (typeof svc.checkControlledByParentWrite !== 'function') return 'no-master-check';
+      const answer = await svc.checkControlledByParentWrite('order_line', 'r1', { userId: 'u1' });
+      return answer.outcome === 'allow' || answer.outcome === 'not_applicable' ? 'proceed' : 'refuse';
+    };
+    await expect(gate(withoutIt)).resolves.toBe('no-master-check');
+
+    const seen: unknown[] = [];
+    const withIt = makeService({
+      checkControlledByParentWrite: async (object, recordId, context) => {
+        seen.push([object, recordId, context]);
+        return { outcome: 'deny', leg: 'record_sharing' };
+      },
+    });
+    await expect(gate(withIt)).resolves.toBe('refuse');
+    expect(seen).toEqual([['order_line', 'r1', { userId: 'u1' }]]);
+    await expect(gate(makeService({ checkControlledByParentWrite: async () => ({ outcome: 'allow' }) })))
+      .resolves.toBe('proceed');
+  });
+
+  it('ControlledByParentWriteOutcome: deny names its leg, unresolvable its reason, and neither arm can omit it (compile-time)', () => {
+    const everyOutcome: ControlledByParentWriteOutcome[] = [
+      { outcome: 'allow' },
+      { outcome: 'deny', leg: 'object_permission' },
+      { outcome: 'not_applicable' },
+      { outcome: 'unresolvable', reason: 'record_not_found' },
+    ];
+    expect(everyOutcome).toHaveLength(4);
+
+    // A refusal with no leg, and a non-verdict with no reason, are not
+    // outcomes: the union holds each field to its arm.
+    // @ts-expect-error a `deny` must name the leg that refused
+    const denyWithoutLeg: ControlledByParentWriteOutcome = { outcome: 'deny' };
+    // @ts-expect-error an `unresolvable` must name why no verdict was reached
+    const unresolvableWithoutReason: ControlledByParentWriteOutcome = { outcome: 'unresolvable' };
+    expect([denyWithoutLeg, unresolvableWithoutReason]).toHaveLength(2);
+
+    // `abstain` is the sharing verdict's state, not this check's: the object
+    // either has no master check (`not_applicable`) or the check answers.
+    // @ts-expect-error `abstain` is not an outcome of the master-detail check
+    const notAnOutcome: ControlledByParentWriteOutcome = { outcome: 'abstain' };
+    expect(notAnOutcome.outcome).toBe('abstain');
+
+    // Both vocabularies are closed, so a consumer branches on a value and
+    // never parses the refusal's prose.
+    const everyLeg: ControlledByParentWriteDenialLeg[] = [
+      'object_permission',
+      'row_level_security',
+      'record_sharing',
+      'master_chain',
+    ];
+    const everyReason: ControlledByParentWriteUnresolvedReason[] = [
+      'master_detail_relation_missing',
+      'record_not_found',
+      'master_reference_missing',
+    ];
+    expect(everyLeg).toHaveLength(4);
+    expect(everyReason).toHaveLength(3);
+    // A store fault is a REJECTION with its own status, never a reason here.
+    // @ts-expect-error a store fault rejects; it is not a reason the check gives
+    const faultIsNotAReason: ControlledByParentWriteUnresolvedReason = 'store_fault';
+    expect(faultIsNotAReason).toBe('store_fault');
+
+    // An exhaustive consumer: every arm is handled, and a fifth arm added to
+    // the union would stop this switch compiling at the `never` line.
+    const decide = (answer: ControlledByParentWriteOutcome): 'proceed' | 'refuse' => {
+      switch (answer.outcome) {
+        case 'allow':
+        case 'not_applicable':
+          return 'proceed';
+        case 'deny':
+        case 'unresolvable':
+          return 'refuse';
+        default: {
+          const unhandled: never = answer;
+          return unhandled;
+        }
+      }
+    };
+    expect(everyOutcome.map(decide)).toEqual(['proceed', 'refuse', 'proceed', 'refuse']);
+  });
+
+  it('checkControlledByParentWrite: a store fault REJECTS with its own status, and a gate propagates it', async () => {
+    // The check lets a read fault propagate rather than report it as an
+    // access answer, so the member rejects with the engine's own error. A gate
+    // that propagates the rejection keeps the declared 503; one that caught it
+    // into `deny` would answer an outage as a refusal, and one that caught it
+    // into `allow` would fail open.
+    const outage = Object.assign(new Error('datasource unavailable'), {
+      code: 'ERR_DATASOURCE_UNAVAILABLE',
+      status: 503,
+    });
+    const failing = makeService({
+      checkControlledByParentWrite: async () => {
+        throw outage;
+      },
+    });
+    const gate = async (svc: ISecurityService) => {
+      if (typeof svc.checkControlledByParentWrite !== 'function') return 'no-master-check';
+      const answer = await svc.checkControlledByParentWrite('order_line', 'r1', { userId: 'u1' });
+      return answer.outcome === 'allow' || answer.outcome === 'not_applicable' ? 'proceed' : 'refuse';
+    };
+    await expect(gate(failing)).rejects.toMatchObject({ code: 'ERR_DATASOURCE_UNAVAILABLE', status: 503 });
+
+    // A non-verdict is an outcome, and the gate refuses on it: a record whose
+    // access IS derived from a master and whose check reached no verdict is
+    // not a record nothing refuses.
+    const missingRow = makeService({
+      checkControlledByParentWrite: async () => ({ outcome: 'unresolvable', reason: 'record_not_found' }),
+    });
+    await expect(gate(missingRow)).resolves.toBe('refuse');
   });
 });

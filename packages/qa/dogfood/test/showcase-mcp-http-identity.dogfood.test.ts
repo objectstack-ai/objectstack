@@ -18,8 +18,8 @@
 // this test would see cross-owner rows and FAIL.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 import { MCPServerPlugin } from '@objectstack/mcp';
 
@@ -73,7 +73,7 @@ describe('showcase: MCP HTTP surface is identity-admitted (ADR-0096 / #3167)', (
     // [#5491] Under the app's OWN declared default profile — the platform
     // baseline no longer carries a `'*'` grant, so alice and bob need the
     // showcase's `showcase_private_note` declaration to own a note at all.
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       extraPlugins: [new MCPServerPlugin()],
       security: showcaseAppDefaultSecurity(),
     });

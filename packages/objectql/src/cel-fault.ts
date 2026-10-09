@@ -24,7 +24,10 @@
  *   1. What broke, in one line? (`summary`)
  *   2. Did the expression read a key the record does not carry, and which?
  *      (`missingKey` — after materialisation this can only mean an UNDECLARED
- *      key, i.e. an author typo or a retired field)
+ *      key, i.e. an author typo or a retired field; on a record that was NOT
+ *      materialised — an update judged without its stored row — it can also
+ *      be a declared key the patch did not supply, which a caller holding the
+ *      declared field set tells apart through `isDeclaredColumn`)
  *   3. Did it name a ROOT that is not in scope at all? (`unknownVariable` —
  *      the fault an unbound `previous` produces, which is a different
  *      diagnosis from a missing key on a bound root)
@@ -106,6 +109,18 @@ export interface CelFaultSubject {
   what: string;
   /** How to fix an undeclared key, e.g. `"fix the rule's condition, or declare the field"`. */
   undeclaredKeyFix: string;
+  /**
+   * [#22445] Whether a missing key is a column THIS object declares, read
+   * directly off the judged record. A record is total only when it was
+   * materialised — on insert, or on an update whose stored row was read. An
+   * update judged without its stored row (an `update`-mode preview that names
+   * no row) holds only the keys the patch supplied, so a declared column the
+   * patch omits faults as `No such key` too, and "this object does not
+   * declare" would send the author looking for a field that exists. A caller
+   * that holds the object's declared field set answers this; one that does
+   * not omits it and keeps the undeclared-key sentence.
+   */
+  isDeclaredColumn?: (key: string) => boolean;
 }
 
 export interface CelFaultDescription {
@@ -134,7 +149,11 @@ export function describeCelFault(error: CelFault, subject: CelFaultSubject): Cel
   const unknownVariable = missingKey ? undefined : unknownVariableOf(error);
   const nullOverload = isNullOverloadFault(error);
   let detail = '';
-  if (missingKey) {
+  if (missingKey && subject.isDeclaredColumn?.(missingKey) === true) {
+    detail =
+      ` The ${subject.what} reads '${missingKey}', a field this object declares, but its value was not supplied` +
+      ' and no stored row was read to supply it.';
+  } else if (missingKey) {
     detail =
       ` The ${subject.what} reads '${missingKey}', which this object does not declare` +
       ` — ${subject.undeclaredKeyFix}.`;

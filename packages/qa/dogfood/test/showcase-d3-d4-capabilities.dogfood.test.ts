@@ -20,8 +20,8 @@
 // @proof: showcase-d3-d4-capabilities
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 
@@ -54,7 +54,7 @@ describe('showcase: D3 compound sharing (#1887) + D4 RLS check', () => {
   let invId: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       security: new SecurityPlugin({
         defaultPermissionSets: [...securityDefaultPermissionSets, memberSet],
         fallbackPermissionSet: 'showcase_d34_member',

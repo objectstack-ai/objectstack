@@ -33,8 +33,8 @@
 // it tolerates other suites' data.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 const P = 'tstor'; // name prefix — every row this file owns
 
@@ -78,7 +78,7 @@ describe('dogfood: temporal storage is one shape end-to-end (#3912/#3994/#4033)'
   let masterId: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     token = await stack.signIn();
 
     // `showcase_field_zoo.f_master_detail` is a REQUIRED master_detail, so

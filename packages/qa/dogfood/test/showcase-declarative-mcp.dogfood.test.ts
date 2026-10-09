@@ -17,8 +17,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { fileURLToPath } from 'node:url';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { ConnectorMcpPlugin } from '@objectstack/connector-mcp';
 import { ConnectorOpenApiPlugin } from '@objectstack/connector-openapi';
 import { ConnectorRestPlugin } from '@objectstack/connector-rest';
@@ -44,7 +44,7 @@ describe('showcase declarative MCP connector — ADR-0097 §6 acceptance (#3056)
         // The three generic executors, exactly as objectstack.config.ts wires
         // them (bootStack does not register a stack's `plugins:` — it mirrors
         // the service pairs only — so the harness injects them here).
-        stack = await bootStack(showcaseStack, {
+        stack = await bootShowcase({
             automation: true,
             extraPlugins: [
                 new ConnectorRestPlugin(),

@@ -17,8 +17,8 @@
 // cannot rot back apart.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { getMetadataCreateSeed, listMetadataCreateSeedTypes } from '@objectstack/spec/kernel';
 
 describe('dogfood: /meta/types exposes authoritative create seeds (spec-derived create-shape contract)', () => {
@@ -27,7 +27,7 @@ describe('dogfood: /meta/types exposes authoritative create seeds (spec-derived 
   let entries: Array<Record<string, unknown>>;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     token = await stack.signIn();
     const res = await stack.apiAs(token, 'GET', '/meta/types');
     expect(res.status).toBe(200);

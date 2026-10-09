@@ -1,76 +1,23 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #13406 — `GET /meta/:type/:name/history` and `GET /meta/:type/:name/diff`
-// named no organization, so both read the ENV partition of a per-org table. An
-// item whose overlay was authored org-scoped answered `{ events: [] }` and an
-// all-empty diff while `sys_metadata_history` held its full log. Direction is
-// fail-closed — the caller's OWN org data is under-served; there is no
-// cross-org read, and the controls at the bottom of this file are what keep it
-// that way.
+// [ADR-0131 D6, C5 stage S3] `GET /meta/:type/:name/history` and
+// `GET /meta/:type/:name/diff` read the ENVIRONMENT partition of
+// `sys_metadata_history`, for every caller.
 //
-// ── Why these two doors and not "the read path" ───────────────────────────
+// History. #13406 found both doors naming no organization while the write
+// doors threaded one for the five `allowOrgOverride` types, so an org-scoped
+// overlay's log answered `{ events: [] }`; the doors then named the caller's
+// organization (gated by `organizationIdForMetaRead`). ADR-0131 D6 retires the
+// per-organization overlay axis: no `/meta` write names an organization, so
+// every log lives in the environment partition, and these doors read it — for
+// the author's organization, another one, or none. A LEGACY organization-scoped
+// log (planted straight through the protocol) is served by neither door, not
+// even to its own organization, until ADR-0131 C7 promotes it.
 //
-// Every OTHER `/meta` read door already states the scope: the single-item read
-// and the listing (#9454), `/layers` (#9454), `/published`, `/_drafts`, and the
-// audit twin (#8747). These two were the residue. `protocol.ts` is not at
-// fault and is not touched: `request.organizationId ?? null` is the legitimate
-// spelling of "env partition", and every correct caller depends on it.
-//
-// ── ⭐ Why `organizationIdForMetaRead` and NOT the audit twin's expression ──
-//
-// The audit door passes a RAW `ctx?.tenantId ?? null`, and copying that here
-// looks like the obvious repair. It is wrong twice, and both halves are
-// asserted below rather than argued:
-//
-//  1. `auditMetaItem` reads with `$or: [{organization_id: org}, {organization_id:
-//     null}]` — a UNION, so naming an org there can only add rows. These two
-//     doors read `sys_metadata_history` with strict equality
-//     (`SysMetadataRepository.history()` and `diffMetaItem`'s own `find`, both
-//     `organization_id: orgId`, no `$or`). Under strict equality a raw tenant id
-//     asks the ORG partition for the history of the types whose rows land
-//     ENV-WIDE — every `allowOrgOverride: false` type that is still
-//     runtime-writable, because `organizationIdForMetaWrite` writes those
-//     env-wide by the #6190 ruling. `object` is the measured specimen, and
-//     `serves a NON-overridable type's env-wide history to an org session` is
-//     the assertion that reddens under that ablation. Predicted before running
-//     it, and it is the whole reason this file exists in this shape.
-//  2. `HistoryMetaItemRequestSchema` declares `organizationId:
-//     z.string().optional()` — optional plain string, NOT nullable, mirroring
-//     the implementation's `organizationId?: string`. The two doors then fail
-//     DIFFERENTLY, and the asymmetry is the reason the omit-spread is on both:
-//
-//       • `/history` reddens with **TS2322** — measured: `Type 'string | null'
-//         is not assignable to type 'string | undefined'`. An ASSIGNABILITY
-//         failure. ⚠️ NOT TS2353, which is the UNDECLARED-member code:
-//         `organizationId` IS declared, so the unknown-property code cannot
-//         apply. (Both this line and the door's own comment said TS2353 when
-//         they landed, copied from a neighbouring paragraph that is about
-//         undeclared members and is correct in its own context — comment drift
-//         by adjacency, corrected and named rather than quietly fixed.)
-//
-//       • `/diff` reddens with **NOTHING**. It reaches `diffMetaItem` through
-//         `(p as any)`, so the compiler checks nothing about that literal:
-//         `?? null` type-checks there and is a silent RUNTIME no-op, since
-//         `null ?? null` is `null`. ⇒ the guard is WEAKEST exactly where the
-//         argument is most easily assumed to be strongest, and on that door
-//         the spread is the ONLY thing holding the contract.
-//
-// ── Why the harness is the REAL protocol, not a spy ───────────────────────
-//
-// A spy asserting "the door passed `organizationId`" cannot tell a fix from a
-// fix-shaped no-op. The claim is write-then-READ AGREEMENT, so the rows have to
-// land in a partition and come back out of it. These drive real REST routes
-// against a real `ObjectStackProtocolImplementation` over a stub engine whose
-// `sys_metadata_history` table HONOURS the `where` — including
-// `organization_id`. That is the load-bearing difference from
-// `rest-server-meta-read-org-scope.test.ts`, whose stub returns every history
-// row unfiltered: over that engine both doors pass with or without the fix,
-// because there is no partition to miss.
-//
-// ⭐ Every read assertion is preceded by a FIXTURE PROOF that the org-scoped
-// history row exists (`historyRowsFor`). "The read is org-scoped" is worthless
-// if the fixture never created an org-scoped row, and the card's own repro bar
-// was "confirm the pg rows exist before hitting the read door".
+// Both doors read the table by STRICT equality on `organization_id`
+// (`SysMetadataRepository.history()`, `diffMetaItem`'s own `find`), and this
+// harness's stub HONOURS that `where`, so the legacy cases below are the ones
+// that redden if a door starts naming an organization again.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
@@ -87,10 +34,9 @@ const ORG_OVERRIDABLE = ['view', 'dashboard', 'report', 'translation', 'email_te
 /**
  * `allowOrgOverride: false` **and** `allowRuntimeCreate: true` — the
  * combination that makes this the discriminating control rather than
- * decoration. Its writes land ENV-WIDE even for a session with an active org
- * (`organizationIdForMetaWrite`), so its history lives in the env partition and
- * an org-scoped read of it finds nothing. A type that could not be written at
- * runtime at all would have no history either way and would prove nothing.
+ * decoration. Its writes have always landed ENV-WIDE, even for a session with
+ * an active org, so its history lives in the env partition. A type that could
+ * not be written at runtime at all would have no history either way.
  */
 const NON_OVERRIDABLE = 'object';
 
@@ -367,6 +313,9 @@ function boot() {
     return {
         rows,
         historyRows,
+        /** A LEGACY organization-scoped write, as a door made one before ADR-0131 D6. */
+        plantLegacyOrgRow: (type: string, name: string, label = MARKER, organizationId = ORG_A) =>
+            protocol.saveMetaItem({ type, name, item: bodyFor(type, name, label), organizationId }),
         as(tenantId: string | undefined) {
             session = tenantId === undefined
                 ? { userId: 'u1', systemPermissions: ['manage_metadata'] }
@@ -392,64 +341,46 @@ function servedDocument(body: any): any {
     return body.item ?? body.data ?? body;
 }
 
-describe('#13406 the /history and /diff read doors state the org partition', () => {
+describe('#13406 · ADR-0131 D6 the /history and /diff read doors read the environment partition', () => {
     let b: ReturnType<typeof boot>;
     beforeEach(() => { b = boot(); });
 
-    describe('⭐ fixture first — the org-scoped rows exist before any door is read', () => {
+    describe('⭐ fixture first — an org-active author\'s PUT logs environment-wide', () => {
         it.each(ORG_OVERRIDABLE)(
-            '%s: a PUT under an active org appends an ORG-SCOPED history row, and none env-wide',
+            '%s: a PUT under an active org appends an ENV history row, and none org-scoped',
             async (type) => {
                 const written = await b.put(type, 'authored_at_runtime');
                 expect(written.status, `PUT /${type} was not accepted`).toBe(200);
                 expect(written.body?.state).toBe('active');
-
-                const orgRows = b.historyRowsFor(type, 'authored_at_runtime', ORG_A);
-                const envRows = b.historyRowsFor(type, 'authored_at_runtime', null);
-                expect(
-                    orgRows.length,
-                    'nothing landed in the org partition; every read assertion below would '
-                    + 'then pass or fail for a reason that has nothing to do with org scoping',
-                ).toBe(1);
-                // The other half of the premise: the rows are NOT in the env
-                // partition, which is exactly why an org-blind door missed them.
-                expect(envRows.length, 'the write also landed env-wide — the partition is not real').toBe(0);
+                expect(b.historyRowsFor(type, 'authored_at_runtime', null).length, 'nothing logged env-wide').toBe(1);
+                expect(b.historyRowsFor(type, 'authored_at_runtime', ORG_A).length, 'the write logged org-scoped').toBe(0);
             },
         );
     });
 
-    describe('/history serves the org-scoped change log', () => {
-        it.each(ORG_OVERRIDABLE)('%s: the events the org authored come back', async (type) => {
+    describe('/history serves the environment change log to every caller', () => {
+        it.each(ORG_OVERRIDABLE)('%s: the events come back for the author\'s org, another org and none', async (type) => {
             await b.put(type, 'authored_at_runtime');
             await b.put(type, 'authored_at_runtime', MARKER_2);
-            expect(b.historyRowsFor(type, 'authored_at_runtime', ORG_A).length).toBe(2);
+            expect(b.historyRowsFor(type, 'authored_at_runtime', null).length).toBe(2);
 
-            const read = await b.history(type, 'authored_at_runtime');
-            expect(read.thrown, `GET /${type}/history threw: ${read.thrown?.message}`).toBeUndefined();
-            expect(read.status).toBe(200);
-            expect(
-                read.body?.events?.length,
-                'the door answered an empty change log for an item whose org partition holds two events',
-            ).toBe(2);
-            expect(read.body.events.map((e: any) => e.version)).toEqual([1, 2]);
+            for (const who of [ORG_A, ORG_B, undefined]) {
+                b.as(who);
+                const read = await b.history(type, 'authored_at_runtime');
+                expect(read.thrown, `GET /${type}/history threw: ${read.thrown?.message}`).toBeUndefined();
+                expect(read.status).toBe(200);
+                expect(read.body?.events?.map((ev: any) => ev.version), `caller ${who ?? 'none'}`).toEqual([1, 2]);
+            }
         });
     });
 
     describe('/history honours the caller\'s bound', () => {
         it('?limit=1 over a two-revision log returns exactly the first event', async () => {
-            // Added with the `check:objectql-double-limit` repair rather than
-            // separately from it: the gate's finding was that the stub could
-            // not OBSERVE `limit`, and the honest close of that is a pin that
-            // proves the bound now travels the whole door — query string ->
-            // `historyMetaItem` -> `repo.history()`'s `yielded >= limit` break.
-            // Fixing the double alone would have satisfied the gate while
-            // leaving this contract member as untested as it was.
             await b.put('view', 'bounded');
             await b.put('view', 'bounded', MARKER_2);
-            expect(b.historyRowsFor('view', 'bounded', ORG_A).map((h) => h.version)).toEqual([1, 2]);
+            expect(b.historyRowsFor('view', 'bounded', null).map((h) => h.version)).toEqual([1, 2]);
 
-            // The CONTROL, without which "1 event came back" proves nothing:
-            // the same read with no bound must return both.
+            // The CONTROL, without which "1 event came back" proves nothing.
             const all = await b.history('view', 'bounded');
             expect(all.body?.events?.length, 'the unbounded control did not see both revisions').toBe(2);
 
@@ -457,125 +388,68 @@ describe('#13406 the /history and /diff read doors state the org partition', () 
             expect(bounded.thrown, `bounded read threw: ${bounded.thrown?.message}`).toBeUndefined();
             expect(bounded.status).toBe(200);
             expect(bounded.body?.events?.length, 'the caller\'s ?limit= was dropped').toBe(1);
-            // Oldest-first (the response contract is `seq` order, the opposite
-            // end of the log from the audit twin), so a bound of 1 keeps
-            // revision 1 — naming WHICH event guards against a bound that
-            // truncates from the wrong end.
+            // Oldest-first, so a bound of 1 keeps revision 1.
             expect(bounded.body.events[0].version).toBe(1);
         });
     });
 
-    describe('/diff resolves org-scoped versions', () => {
-        it.each(ORG_OVERRIDABLE)('%s: ?from=1&to=2 compares the two org revisions', async (type) => {
+    describe('/diff resolves the environment revisions', () => {
+        it.each(ORG_OVERRIDABLE)('%s: ?from=1&to=2 compares the two revisions, for every caller', async (type) => {
             await b.put(type, 'two_revisions');
             await b.put(type, 'two_revisions', MARKER_2);
-            expect(b.historyRowsFor(type, 'two_revisions', ORG_A).map((h) => h.version)).toEqual([1, 2]);
+            expect(b.historyRowsFor(type, 'two_revisions', null).map((h) => h.version)).toEqual([1, 2]);
 
-            const read = await b.diff(type, 'two_revisions', { from: '1', to: '2' });
-            expect(read.thrown, `GET /${type}/diff threw: ${read.thrown?.message}`).toBeUndefined();
-            expect(read.status).toBe(200);
-            expect(read.body?.fromVersion).toBe(1);
-            expect(read.body?.toVersion).toBe(2);
-            // The card's shape: bounds echoed but every bucket empty, because
-            // neither body could be resolved out of the env partition.
-            expect(
-                read.body?.changed,
-                'the diff resolved no bodies — the card\'s all-empty answer',
-            ).toContainEqual({ path: 'label', from: MARKER, to: MARKER_2 });
+            for (const who of [ORG_A, ORG_B, undefined]) {
+                b.as(who);
+                const read = await b.diff(type, 'two_revisions', { from: '1', to: '2' });
+                expect(read.thrown, `GET /${type}/diff threw: ${read.thrown?.message}`).toBeUndefined();
+                expect(read.status).toBe(200);
+                expect(read.body?.fromVersion).toBe(1);
+                expect(read.body?.toVersion).toBe(2);
+                expect(read.body?.changed, `caller ${who ?? 'none'}`).toContainEqual({ path: 'label', from: MARKER, to: MARKER_2 });
+            }
         });
     });
 
-    describe('⛔ controls — the scope is STATED, never widened', () => {
-        it('serves a NON-overridable type\'s env-wide history to an org session', async () => {
-            // ⭐ THE ABLATION TARGET, and the reason this door uses
-            // `organizationIdForMetaRead` rather than a raw `ctx?.tenantId`.
-            // `object` is `allowOrgOverride: false` + `allowRuntimeCreate: true`,
-            // so `organizationIdForMetaWrite` puts its history ENV-WIDE even
-            // though ORG_A is active. A door that named the tenant
-            // unconditionally would query the org partition and answer
-            // `{ events: [] }` — reintroducing this very card one type family
-            // over. PREDICTED DIRECTION: swap the predicate for
-            // `ctx?.tenantId ?? null` and this test, and only this test, turns
-            // red.
+    describe('⛔ controls', () => {
+        it('serves a NON-overridable type\'s env-wide history to an org session, as before', async () => {
             const written = await b.put(NON_OVERRIDABLE, 'accounts');
             expect(written.status, 'the control never wrote').toBe(200);
-            expect(
-                b.historyRowsFor(NON_OVERRIDABLE, 'accounts', null).length,
-                'a non-overridable write went org-scoped; the control no longer controls anything',
-            ).toBe(1);
-            expect(b.historyRowsFor(NON_OVERRIDABLE, 'accounts', ORG_A).length).toBe(0);
+            expect(b.historyRowsFor(NON_OVERRIDABLE, 'accounts', null).length).toBe(1);
 
             const read = await b.history(NON_OVERRIDABLE, 'accounts');
             expect(read.status).toBe(200);
+            expect(read.body?.events?.length).toBe(1);
+        });
+
+        it('⭐ a LEGACY organization-scoped log is served by neither door, not even to its own organization', async () => {
+            await b.plantLegacyOrgRow('dashboard', 'legacy_logged');
+            await b.plantLegacyOrgRow('dashboard', 'legacy_logged', MARKER_2);
             expect(
-                read.body?.events?.length,
-                'the org session lost sight of an env-wide change log it could read before',
-            ).toBe(1);
-        });
+                b.historyRowsFor('dashboard', 'legacy_logged', ORG_A).length,
+                'the legacy log was not planted; the case proves nothing',
+            ).toBe(2);
 
-        it('still serves env-scoped rows to an env-scoped caller', async () => {
-            // The other direction of the same harness: nothing about naming the
-            // org for org callers may disturb the org-less read that worked all
-            // along.
-            b.as(undefined);
-            await b.put('view', 'env_authored');
-            expect(b.historyRowsFor('view', 'env_authored', null).length).toBe(1);
-
-            const read = await b.history('view', 'env_authored');
+            const read = await b.history('dashboard', 'legacy_logged');
             expect(read.status).toBe(200);
-            expect(read.body?.events?.length, 'an env-scoped caller lost its own history').toBe(1);
-        });
+            expect(read.body?.events ?? [], 'a legacy org change log was served').toEqual([]);
 
-        it('does not serve org A history to org B on the same boot', async () => {
-            await b.put('dashboard', 'tenant_bound');
-            await b.put('dashboard', 'tenant_bound', MARKER_2);
-            expect(b.historyRowsFor('dashboard', 'tenant_bound', ORG_A).length).toBe(2);
-
-            b.as(ORG_B);
-            const read = await b.history('dashboard', 'tenant_bound');
-            expect(read.status).toBe(200);
-            expect(read.body?.events ?? [], 'org B was served org A\'s change log').toEqual([]);
-
-            const diffed = await b.diff('dashboard', 'tenant_bound', { from: '1', to: '2' });
+            const diffed = await b.diff('dashboard', 'legacy_logged', { from: '1', to: '2' });
             expect(diffed.status).toBe(200);
-            expect(diffed.body?.changed ?? [], 'org B was served a diff of org A\'s revisions').toEqual([]);
-        });
-
-        it('does not serve an org row to a caller that named no org', async () => {
-            await b.put('view', 'org_a_only');
-            expect(b.historyRowsFor('view', 'org_a_only', ORG_A).length).toBe(1);
-
-            b.as(undefined);
-            const read = await b.history('view', 'org_a_only');
-            expect(read.status).toBe(200);
-            expect(
-                read.body?.events ?? [],
-                'an org-less caller was served an org-scoped change log',
-            ).toEqual([]);
+            expect(diffed.body?.changed ?? [], 'a diff of legacy org revisions was served').toEqual([]);
         });
     });
 
-    describe('the card\'s third symptom, RE-MEASURED on today\'s main', () => {
-        it('single-item dashboard read ALREADY serves the org overlay — premise falsified', async () => {
-            // #13406 symptom 3 claimed `GET /meta/dashboard/:name` ignores an
-            // org-scoped overlay. That door was threaded by #9454/#9727 before
-            // this card was filed; the uncached arm `dashboard` takes carries
-            // `readOrganizationId` today. Pinned HERE, next to the two doors
-            // that were genuinely open, so the falsification is auditable
-            // rather than a claim in a report. (The behaviour itself is owned
-            // by `rest-server-meta-read-org-scope.test.ts`; this asserts the
-            // narrow fact the card disputes.)
+    describe('the single-item read beside them', () => {
+        it('the dashboard read serves the environment overlay an org-active author saved', async () => {
             const written = await b.put('dashboard', 'system_overview');
             expect(written.status).toBe(200);
             const row = Array.from(b.rows.values()).find((r) => r.name === 'system_overview');
-            expect(row?.organization_id, 'the overlay is not org-scoped; nothing is being measured').toBe(ORG_A);
+            expect(row?.organization_id ?? null, 'the overlay went org-scoped').toBe(null);
 
             const read = await b.get('dashboard', 'system_overview');
             expect(read.status).toBe(200);
-            expect(
-                servedDocument(read.body)?.label,
-                'the single-item dashboard read did NOT serve the org overlay — symptom 3 is live after all',
-            ).toBe(MARKER);
+            expect(servedDocument(read.body)?.label).toBe(MARKER);
         });
     });
 });

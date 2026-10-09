@@ -31,8 +31,8 @@
 //      the `allowRuntimeCreate` tier — see two-doors-permission 块2.)
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 describe('sys_permission_set pure projection (ADR-0094)', () => {
   let stack: VerifyStack;
@@ -41,7 +41,7 @@ describe('sys_permission_set pure projection (ADR-0094)', () => {
   let adminToken: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     adminToken = await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
     protocol = await stack.kernel.getServiceAsync('protocol');

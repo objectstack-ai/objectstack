@@ -5,12 +5,13 @@
 // credentialRef-based instance auth (no inline secrets), and the authoring rules
 // enforced by DeclarativeConnectorEntrySchema.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
 import {
     ConnectorSchema,
     DeclarativeConnectorEntrySchema,
     ConnectorInstanceAuthSchema,
 } from './connector.zod';
+import type { ConnectorProviderContext } from './connector-provider';
 
 describe('ADR-0097 connector schema evolution', () => {
     describe('ConnectorSchema — new fields', () => {
@@ -165,5 +166,55 @@ describe('ADR-0097 connector schema evolution', () => {
             expect(issue!.message).toMatch(/^`connector\.triggers` was removed in @objectstack\/spec 17 \(ADR-0049/);
             for (const i of result.error!.issues) expect(i.message).not.toContain('derives them from the upstream');
         });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// [#22434] `ConnectorProviderContext.resolvePackagePath` — the host-provided
+// package anchor, beside `loadPackageFile`.
+//
+// The pins here hold what the card decided at the CONTRACT layer: the member is
+// OPTIONAL — a host that does not hand it, and every context built before it
+// existed, still conforms, so its absence leaves a factory's behaviour as it
+// was — and it has exactly the signature of its sibling `loadPackageFile`. The
+// behaviour pins (resolves against the package root, `'.'` is the root, an
+// escape is refused) live with the host that implements it:
+// `packages/services/service-automation/src/connector-materialization.test.ts`.
+//
+// The optionality pin is a type alias, not `expectTypeOf`: `toEqualTypeOf<…
+// | undefined>` cannot tell an optional member from a REQUIRED one typed
+// `… | undefined`, while `{} extends Pick<…>` can. Exported for TS6196;
+// `check:test-typecheck` compiles this file.
+// ---------------------------------------------------------------------------
+
+type Eq<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+type Assert<T extends true> = T;
+
+/** Optional: a host may omit it. A required member turns this alias red. */
+export type ResolvePackagePathIsOptional = Assert<
+    {} extends Pick<ConnectorProviderContext, 'resolvePackagePath'> ? true : false
+>;
+
+/** One member family: the same `(relativePath) => Promise<string>` shape as the loader. */
+export type ResolvePackagePathMatchesLoader = Assert<
+    Eq<ConnectorProviderContext['resolvePackagePath'], ConnectorProviderContext['loadPackageFile']>
+>;
+
+describe('ConnectorProviderContext.resolvePackagePath — the host-provided package anchor', () => {
+    it('is optional: a context without it still conforms, and a factory can tell it is absent', async () => {
+        expectTypeOf<ConnectorProviderContext['resolvePackagePath']>().toEqualTypeOf<
+            ((relativePath: string) => Promise<string>) | undefined
+        >();
+
+        // The shape every host built before this member existed. This literal
+        // failing to compile is the regression.
+        const withoutAnchor: ConnectorProviderContext = { name: 'tools', label: 'Tools', type: 'api', providerConfig: {} };
+        expect(withoutAnchor.resolvePackagePath).toBeUndefined();
+
+        const withAnchor: ConnectorProviderContext = {
+            ...withoutAnchor,
+            resolvePackagePath: async (relativePath) => `/srv/app/${relativePath}`,
+        };
+        await expect(withAnchor.resolvePackagePath?.('scripts')).resolves.toBe('/srv/app/scripts');
     });
 });

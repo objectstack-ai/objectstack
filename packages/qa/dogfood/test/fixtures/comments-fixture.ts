@@ -32,7 +32,13 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 
-export const CmtOpen = ObjectSchema.create({
+/**
+ * [#22301] Builds `CmtOpen` again, every nested definition new — for a suite that
+ * keeps two stacks live at once and so boots each on a configuration of its
+ * own (`bootStack`'s instance rule; a boot keeps live references into the
+ * definitions it registers).
+ */
+export const buildCmtOpen = () => ObjectSchema.create({
   name: 'cmt_open',
   label: 'Comment Open Record',
   pluralLabel: 'Comment Open Records',
@@ -41,8 +47,15 @@ export const CmtOpen = ObjectSchema.create({
     name: Field.text({ label: 'Name', required: true }),
   },
 });
+export const CmtOpen = buildCmtOpen();
 
-export const CmtPrivate = ObjectSchema.create({
+/**
+ * [#22301] Builds `CmtPrivate` again, every nested definition new — for a suite that
+ * keeps two stacks live at once and so boots each on a configuration of its
+ * own (`bootStack`'s instance rule; a boot keeps live references into the
+ * definitions it registers).
+ */
+export const buildCmtPrivate = () => ObjectSchema.create({
   name: 'cmt_private',
   label: 'Comment Private Record',
   pluralLabel: 'Comment Private Records',
@@ -53,8 +66,15 @@ export const CmtPrivate = ObjectSchema.create({
     owner_id: Field.text({ label: 'Owner' }),
   },
 });
+export const CmtPrivate = buildCmtPrivate();
 
-export const CmtReadonly = ObjectSchema.create({
+/**
+ * [#22301] Builds `CmtReadonly` again, every nested definition new — for a suite that
+ * keeps two stacks live at once and so boots each on a configuration of its
+ * own (`bootStack`'s instance rule; a boot keeps live references into the
+ * definitions it registers).
+ */
+export const buildCmtReadonly = () => ObjectSchema.create({
   name: 'cmt_readonly',
   label: 'Comment Readonly Record',
   pluralLabel: 'Comment Readonly Records',
@@ -64,6 +84,7 @@ export const CmtReadonly = ObjectSchema.create({
     owner_id: Field.text({ label: 'Owner' }),
   },
 });
+export const CmtReadonly = buildCmtReadonly();
 
 export const CmtNoFeeds = ObjectSchema.create({
   name: 'cmt_nofeeds',

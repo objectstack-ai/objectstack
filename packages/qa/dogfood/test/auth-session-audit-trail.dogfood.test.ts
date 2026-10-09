@@ -40,8 +40,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 
 const SYSTEM_CTX = { isSystem: true };
@@ -86,7 +86,7 @@ describe('#8144: auth session events reach sys_audit_log', () => {
   let memberOrgId: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, { extraPlugins: [new AuditPlugin()], orgContext: true });
+    stack = await bootShowcase({ extraPlugins: [new AuditPlugin()], orgContext: true });
     ql = await stack.kernel.getServiceAsync<any>('objectql');
     adminToken = await stack.signIn();
 

@@ -44,6 +44,10 @@
  *   answers a question a composing caller may use to WIDEN, so its failure mode
  *   is the one that changes nothing: `abstain`. It never reports `admit` for a
  *   reason it did not measure, and it never throws outward.
+ * - **Gate outcomes refuse, and a fault rejects.** {@link ISecurityService.checkControlledByParentWrite}
+ *   answers a question a composing gate uses to REFUSE, so every outcome but
+ *   `allow` and `not_applicable` refuses. A store fault is not an outcome: it
+ *   rejects with its own status and never becomes a verdict.
  *
  * That distinction is load-bearing: the field projection is only ever a
  * cosmetic narrowing on top of enforcement that already happened (the read path
@@ -288,6 +292,104 @@ export interface OwnershipFloorAlternate {
    */
   readonly using: string;
 }
+
+/**
+ * [ADR-0055] Which leg of the master-detail write check refused, in a `deny`
+ * from {@link ISecurityService.checkControlledByParentWrite}.
+ *
+ * The check asks whether the caller may EDIT the record's master. It asks that
+ * of each master up the `controlled_by_parent` chain until it reaches a master
+ * that governs its own rows. Every value here is a refusal the check already
+ * makes, `403 PERMISSION_DENIED`, and the check tells them apart by the reason
+ * its refusal states:
+ *
+ * - `object_permission`: the principal holds no object-level `update` grant on
+ *   a master.
+ * - `row_level_security`: a master row is outside the principal's write
+ *   row-level security on that master.
+ * - `record_sharing`: record sharing does not let the principal edit a master
+ *   row, and no app-authored update policy on that master admits the row
+ *   ({@link ISecurityService.checkAuthoredRowWrite}).
+ * - `master_chain`: the chain itself cannot be walked to a master that governs
+ *   its own rows. It re-enters an object it has already visited, it exceeds
+ *   the depth bound, or a master ABOVE the record's own master has no relation
+ *   to derive from, is not present, or has an empty master reference. Above the
+ *   first hop the check answers these as refusals, not as defects of the
+ *   request, so they are a leg here and never `unresolvable`.
+ *
+ * The first three legs run on every hop, so `object_permission` can name the
+ * master's own master. A closed vocabulary: a consumer branches on it and
+ * never parses the refusal's prose.
+ */
+export type ControlledByParentWriteDenialLeg =
+  | 'object_permission'
+  | 'row_level_security'
+  | 'record_sharing'
+  | 'master_chain';
+
+/**
+ * [ADR-0055] Why the master-detail write check reached no verdict, in an
+ * `unresolvable` from {@link ISecurityService.checkControlledByParentWrite}.
+ *
+ * These are the check's three outcomes that are not answers about access. A
+ * by-id update answers each with its own code, never with the access refusal:
+ *
+ * - `master_detail_relation_missing`: the object declares `controlled_by_parent`
+ *   and has no `master_detail` relation to derive access from. A metadata
+ *   defect (`422 INVALID_METADATA`).
+ * - `record_not_found`: the record `(object, recordId)` does not exist
+ *   (`404 RECORD_NOT_FOUND`). This is the addressed record, not its master. A
+ *   missing master row is not one of these outcomes: on the first hop the legs
+ *   judge it as they judge any master row, and above the first hop it is the
+ *   `master_chain` leg.
+ * - `master_reference_missing`: the record's stored master reference is empty
+ *   (`422 MISSING_REQUIRED_FIELD`).
+ */
+export type ControlledByParentWriteUnresolvedReason =
+  | 'master_detail_relation_missing'
+  | 'record_not_found'
+  | 'master_reference_missing';
+
+/**
+ * [ADR-0055] What {@link ISecurityService.checkControlledByParentWrite}
+ * resolves with: the master-detail write check's own outcome for a by-id update
+ * of one record.
+ *
+ * - `allow`: the check does not refuse. Every leg passes on every master up the
+ *   chain for the principal (and, on an on-behalf-of context, for the delegator
+ *   too), or the context is a system one, which the write path never checks.
+ * - `deny`: the check refuses, on the {@link ControlledByParentWriteDenialLeg}
+ *   it names.
+ * - `not_applicable`: the object does not declare `controlled_by_parent`, so
+ *   no master check exists for it. Not a verdict about the record.
+ * - `unresolvable`: the check reached no verdict, for the
+ *   {@link ControlledByParentWriteUnresolvedReason} it names.
+ *
+ * A consumer that composes this into a gate proceeds on `allow` and on
+ * `not_applicable`, and refuses on every other outcome. ⛔ `unresolvable` is
+ * not `not_applicable`: no verdict was reached about a record whose access IS
+ * derived from a master, so reading it as "nothing here refuses" fails open.
+ *
+ * **A store fault is not an outcome. It is a rejection.** Wherever the check
+ * lets a fault propagate (its reads of the record and of each master up the
+ * chain do), the member rejects with the engine's own error, unchanged, so the
+ * fault keeps its declared status (a datasource outage is `503`). ⛔ It never
+ * resolves `deny` or `unresolvable` for a fault: an outage reported as
+ * "refused" or "record not found" is a false statement about the record. Two
+ * legs fail closed on their own probes by design (the row-level security leg
+ * and the record sharing leg), and their `deny` is then the check's answer,
+ * reported as it stands.
+ *
+ * A DISCRIMINATED UNION, for the reason {@link DelegationNarrowing} gives: as
+ * one shape with optional fields, a consumer that forgets to check `outcome`
+ * reads a `deny` with no `leg` as an answer. Here `leg` exists only on `deny`
+ * and `reason` only on `unresolvable`, so the compiler holds each to its arm.
+ */
+export type ControlledByParentWriteOutcome =
+  | { readonly outcome: 'allow' }
+  | { readonly outcome: 'deny'; readonly leg: ControlledByParentWriteDenialLeg }
+  | { readonly outcome: 'not_applicable' }
+  | { readonly outcome: 'unresolvable'; readonly reason: ControlledByParentWriteUnresolvedReason };
 
 /**
  * Public contract for the `security` service.
@@ -842,6 +944,71 @@ export interface ISecurityService {
     operation: AuthoredRowWriteOperation,
     context?: SecurityContext,
   ): Promise<AuthoredRowWriteVerdict>;
+
+  /**
+   * [ADR-0055] What the master-detail write check answers for an UPDATE of
+   * `recordId` on `object` by `context`.
+   *
+   * A by-id write to a `controlled_by_parent` record requires EDIT access to
+   * its master. The write path checks it on every master up the chain: the
+   * object-level `update` grant, the master's write row-level security, and
+   * record sharing (whose refusal an app-authored update policy on the master
+   * can lift, {@link checkAuthoredRowWrite}). This member exposes that check
+   * to code outside the write path, such as a gate on a record's attachments or
+   * comments that must judge the record as its own update is judged. It adds no
+   * verdict: every outcome it resolves with is one the check already reaches,
+   * as {@link ControlledByParentWriteOutcome} sets out.
+   *
+   * **The answer equals what a by-id update of the same record gets from this
+   * check.** It is computed by the write path's own composition, never
+   * re-derived. The same legs run in the same order over the same chain. For an
+   * on-behalf-of context the ADR-0090 D10 delegator leg is included: the check
+   * runs for the principal's resolved permission sets and then for the
+   * delegator's, and the first refusal is the answer. So a consumer that
+   * refuses on `deny` refuses exactly the principals this check refuses on the
+   * record's own update. It answers the master check alone: the gates the
+   * update meets on the record itself (its object-level grant, its own
+   * row-level security and sharing) are not part of the answer.
+   *
+   * The contexts around the check answer as the write path does:
+   * - A system context bypasses the write path, and answers `allow`.
+   * - A principal whose permission sets resolve to none is judged over that
+   *   empty list. It holds no `update` grant on any master, so it answers `deny`
+   *   on `object_permission` (ADR-0056 D2).
+   * - Where the write path refuses the CONTEXT before any gate runs, the member
+   *   rejects with that same refusal, `403 PERMISSION_DENIED`. Those cases are a
+   *   context with no principal at all (ADR-0096 D5), permission sets that
+   *   cannot be resolved, and an on-behalf-of link naming a delegator who does
+   *   not exist (ADR-0090 D10). They refuse the request, so they are not
+   *   answers about the master.
+   * - A store fault rejects with the engine's own error, unchanged (see
+   *   {@link ControlledByParentWriteOutcome}).
+   *
+   * Every rejection is a refusal. A consumer propagates it as it is, and ⛔
+   * never catches it into `allow`.
+   *
+   * **Absence is the absence of a master check, not a policy that admits.** A
+   * kernel whose security service omits this member composes no master-detail
+   * write check for a consumer to ask, and there the parent's own by-id update
+   * meets no master check either. A consumer that proceeds when the member is
+   * absent therefore gives the answer the parent's update gets. ⛔ It does not
+   * report that as `allow`: nothing measured the master, so a log line or an
+   * explanation must not claim the master was judged editable. An
+   * implementation whose write path runs the check serves this member from the
+   * same composition, and that is what keeps absence meaning "no master check".
+   *
+   * **OPTIONAL, so every consumer handles its absence.** A security service
+   * that predates it omits it, and consumers feature-detect
+   * (`typeof svc.checkControlledByParentWrite === 'function'`). Declaring it
+   * optional makes that a property of the type rather than a promise in prose:
+   * the unguarded call does not compile, so a consumer cannot skip the absent
+   * branch by accident.
+   */
+  checkControlledByParentWrite?(
+    object: string,
+    recordId: string,
+    context?: SecurityContext,
+  ): Promise<ControlledByParentWriteOutcome>;
 
   /**
    * Explain WHY access is granted or denied — the decision plus the layers that

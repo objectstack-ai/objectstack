@@ -537,28 +537,27 @@ describe('#8919 — the two new gates refuse BEFORE the protocol is probed', () 
 });
 
 /**
- * [#12702] `manage_org_presentation` across the door set — the org-scoped
- * presentation capability, run against EVERY enumerated door rather than one.
+ * [#12702 · ADR-0131 D6] The organization-admin authoring door is CLOSED on
+ * every enumerated door, not on one.
  *
  * The four ITEM doors (save / reset / publish / rollback) share one verdict
- * (`metaWriteCapabilityVerdict`, `@objectstack/metadata-core`): beside
- * `manage_metadata` they admit `manage_org_presentation`, ONLY for a type
- * whose registry entry declares `allowOrgOverride: true` AND a session with an
- * active organization — which is the organization each door threads, so an
- * admitted write can only land in the caller's own org partition.
- * `_migrate-stored` is the deliberate exclusion: an install-wide rewrite is
- * env-wide by definition, so the org condition can never hold there.
+ * (`metaWriteCapabilityVerdict`, `@objectstack/metadata-core`). It used to
+ * admit `manage_org_presentation` for an org-scoped write of an org-overridable
+ * type; the per-organization overlay axis is retired, so no door threads an
+ * organization any more and the arm retired with the capability. Pinned both
+ * ways per door: the holder is refused with the protocol never reached, and a
+ * `manage_metadata` caller with an active organization is admitted with NO
+ * organization on the request it sends.
  */
-describe('#12702 — `manage_org_presentation`: org-scoped tier-A admission, per door', () => {
+describe('ADR-0131 D6 — `manage_org_presentation` is refused, and no door threads an organization', () => {
     const ORG = 'org_a';
     const ORG_ADMIN = { userId: 'u_orgadmin', systemPermissions: ['manage_org_presentation'], tenantId: ORG };
-    const ORG_ADMIN_NO_ORG = { userId: 'u_orgadmin', systemPermissions: ['manage_org_presentation'] };
+    const ORG_AUTHOR = { userId: 'u_author', systemPermissions: ['manage_metadata'], tenantId: ORG };
 
-    /** The doors the org capability may open — everything but the install-wide rewrite. */
     const ITEM_DOORS = DOORS.filter((d) => d.protocolMethod !== 'migrateStoredMetadata');
     const MIGRATE_DOOR = DOORS.find((d) => d.protocolMethod === 'migrateStoredMetadata')!;
 
-    /** The same door, addressed at a tier-A type (`view` declares allowOrgOverride). */
+    /** The same door, addressed at a formerly org-overridable type (`view`). */
     const asView = (door: Door): Door => ({
         ...door,
         params: { ...door.params, type: 'view', name: 'org_grid' },
@@ -568,17 +567,13 @@ describe('#12702 — `manage_org_presentation`: org-scoped tier-A admission, per
     });
 
     it.each(ITEM_DOORS.map((d) => [d.label, d] as const))(
-        '%s → an org-active holder is admitted for a tier-A type, threaded to their OWN organization',
+        '%s → an org-active `manage_org_presentation` holder is refused a `view` write, protocol never reached',
         async (_label, door) => {
             const stack = boot(ORG_ADMIN);
             const out = await stack.knock(asView(door));
-            expect(out.status).not.toBe(403);
-            expect(out.status).not.toBe(401);
-            expect(stack.calls[door.protocolMethod]).toBe(1);
-            // The threading IS the wall: the only organization an admitted
-            // write can carry is the caller's own active one.
-            const request = (stack.protocol[door.protocolMethod] as any).mock.calls[0][0];
-            expect(request).toMatchObject({ organizationId: ORG });
+            expect(out.status).toBe(403);
+            expect(out.body).toMatchObject({ error: { code: 'FORBIDDEN' } });
+            expect(stack.calls[door.protocolMethod]).toBe(0);
         },
     );
 
@@ -594,17 +589,19 @@ describe('#12702 — `manage_org_presentation`: org-scoped tier-A admission, per
     );
 
     it.each(ITEM_DOORS.map((d) => [d.label, d] as const))(
-        '%s → the SAME holder with NO active organization is refused a tier-A write — env-wide is walled',
+        '%s → an org-active `manage_metadata` caller is admitted, and the request names NO organization',
         async (_label, door) => {
-            const stack = boot(ORG_ADMIN_NO_ORG);
+            const stack = boot(ORG_AUTHOR);
             const out = await stack.knock(asView(door));
-            expect(out.status).toBe(403);
-            expect(out.body).toMatchObject({ error: { code: 'FORBIDDEN' } });
-            expect(stack.calls[door.protocolMethod]).toBe(0);
+            expect(out.status).not.toBe(403);
+            expect(out.status).not.toBe(401);
+            expect(stack.calls[door.protocolMethod]).toBe(1);
+            const request = (stack.protocol[door.protocolMethod] as any).mock.calls[0][0];
+            expect(request?.organizationId).toBeUndefined();
         },
     );
 
-    it(`${MIGRATE_DOOR.label} → stays \`manage_metadata\`-only for an org-active holder (env-wide by definition)`, async () => {
+    it(`${MIGRATE_DOOR.label} → stays \`manage_metadata\`-only for an org-active holder`, async () => {
         const stack = boot(ORG_ADMIN);
         const out = await stack.knock(MIGRATE_DOOR);
         expect(out.status).toBe(403);

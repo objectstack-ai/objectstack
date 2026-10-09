@@ -26,8 +26,8 @@
 // Fixtures are synthetic. ⚠️ No test title states a value.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
@@ -84,7 +84,7 @@ describe('[#21388] an org peer is withheld the activity rows of a colleague’s 
   };
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack as unknown as Parameters<typeof bootStack>[0], {
+    stack = await bootShowcase({
       security: new SecurityPlugin({ defaultPermissionSets: [...securityDefaultPermissionSets, activityReadSet] }),
       extraPlugins: [new AuditPlugin()],
     });

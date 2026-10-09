@@ -54,3 +54,12 @@ describe('defineCapability (ADR-0066 D1 package declaration)', () => {
     }
   });
 });
+
+describe('ADR-0131 D6 — `manage_org_presentation` retired', () => {
+  it('is no longer a curated platform capability', () => {
+    expect(PLATFORM_CAPABILITY_NAMES.has('manage_org_presentation')).toBe(false);
+    expect(PLATFORM_CAPABILITIES.some((c) => c.name === 'manage_org_presentation')).toBe(false);
+    // Control: its platform-wide sibling stays.
+    expect(PLATFORM_CAPABILITY_NAMES.has('manage_metadata')).toBe(true);
+  });
+});

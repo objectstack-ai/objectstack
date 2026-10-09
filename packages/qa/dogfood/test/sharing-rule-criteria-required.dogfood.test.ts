@@ -23,8 +23,8 @@
 // @proof: sharing-rule-criteria-required
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 // Sharing-rule routes are anchored on the API base, not under `/data/:object`
 // (they administer rules tenant-wide) — `/api/v1/sharing/rules`.
@@ -38,7 +38,7 @@ describe('#3896 — a sharing rule POSTed without criteria is rejected, never ma
   let admin: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     admin = await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
   }, 90_000);
