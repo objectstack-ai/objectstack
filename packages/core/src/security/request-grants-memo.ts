@@ -60,8 +60,11 @@
  *         first sight of an engine, counting every write that enters it and,
  *         in a `finally` around `next()`, every write whose driver step has
  *         settled. The driver step runs INSIDE that `next()`, so a write cannot
- *         land without first moving `started` and cannot finish without moving
- *         `completed`.
+ *         be EXECUTED at the driver without first moving `started`, and cannot
+ *         finish executing without moving `completed`. The observer sees
+ *         statement execution, not commit visibility: on an
+ *         `engine.transaction()` the rows become visible to other connections
+ *         only at the driver COMMIT, outside every chain (residuals below).
  *    An entry is served only when the epoch, `started` and `completed` all read
  *    what they read at the open AND no write is inside the observer
  *    (`started === completed`). So a write that started before the open and
@@ -97,6 +100,18 @@
  * first resolution, a few milliseconds earlier than the second used to read
  * them — the same answer a write committing just after the second read always
  * got.
+ *
+ * The same holds for a write executed on an `engine.transaction()` whose
+ * COMMIT lands between the first resolution and step 2. Its statements pass
+ * the observer, which settles per statement, but the rows become visible only
+ * at the driver commit, which runs outside every middleware chain. The window
+ * is that one commit round trip after the transaction's last statement. It is
+ * reachable on driver-sql deployments (SCIM through the better-auth adapter,
+ * REST `/batch`), and not on the Turso remote face, which declares
+ * `transactionsUnsupported` and so opens no transaction. The answer is the
+ * out-of-process one: that request is authorised as of the first resolution,
+ * and the next request reads fresh. Closing it engine-side (an objectql epoch
+ * bump after an owned transaction's commit) is out of scope here.
  *
  * The cost: on an engine with a concurrent write, step 2 reads afresh. That
  * includes a session read that writes inside the request (the first request on
