@@ -30,6 +30,17 @@ export default defineConfig({
         find: /^@objectstack\/metadata-protocol$/,
         replacement: path.resolve(__dirname, '../../metadata-protocol/src/index.ts'),
       },
+      // [#22387] `sys-approval-request-attached-on-read.test.ts` runs this
+      // package's shipped action predicates through the shared validator
+      // (`validateStackExpressions`, `runAuthoringRules('build')`, the object
+      // save door), so the verdict must be the CURRENT rule's, not a `lint/dist`
+      // build's — same #7668/#7778 reason as the two entries above. Anchored:
+      // `@objectstack/lint` also exports `./runtime` and `./rule-explanations`,
+      // which a prefix match would resolve through this FILE (`ENOTDIR`).
+      {
+        find: /^@objectstack\/lint$/,
+        replacement: path.resolve(__dirname, '../../lint/src/index.ts'),
+      },
     ],
   },
   test: {
