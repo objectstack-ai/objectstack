@@ -3823,6 +3823,61 @@ function warnEmailTemplateLocaleFloor(data: ObjectStackDefinition): void {
   }
 }
 
+/**
+ * [ADR-0087 D3 · #22256] The producer's one INTERNAL parameter: the
+ * global-registry symbol under which a `defineStack` call's `options` asks for
+ * the stack AS AUTHORED — map→array normalised and its bound actions merged,
+ * as every non-strict call is, but with the load-time ADR-0087 D2 conversion
+ * pass skipped. Honoured only together with `strict: false`.
+ *
+ * ## Who asks, and why the producer has to be the one that answers
+ *
+ * `os migrate meta` replays the conversions itself, as chain steps, against
+ * the source the author wrote — that is how each rewrite is listed in
+ * `applied` and traced back to a literal `--write` can edit. A conversion the
+ * load already applied is invisible to it. On a one-package project the CLI
+ * starts the chain from the argument the stack's `defineStack` call was given.
+ * A composed project has no such argument to start from: `composeStacks`
+ * assembles each `packages[i].manifest` body from the stack its input's
+ * producer RETURNED, and that assembly is composition's rule, which lives here
+ * and nowhere else. So the CLI's authored-source load (and only it) hands
+ * `composeStacks` inputs produced again with this key: the composition then
+ * runs its own rule over what the author wrote, and nothing outside this
+ * package copies it.
+ *
+ * ## Why a symbol, and why it is not an option
+ *
+ * It is not authoring surface. An author never needs a stack whose old
+ * spellings were left in place — the load converts them so the author does not
+ * have to — and a declared `DefineStackOptions` key would advertise one. So it
+ * is neither declared on {@link DefineStackOptions} nor exported: the key
+ * crosses from the CLI to this producer the way the provenance mark crosses
+ * back (`stack-provenance.ts`), by its `Symbol.for` name, which two copies of
+ * this package resolve alike.
+ *
+ * ## What it cannot do
+ *
+ * - **Relax a strict call.** A strict call ignores it, so it can never let a
+ *   spelling the conversion pass would have repaired reach the strict parse,
+ *   and never skips a refusal: `strict: false` is what skips the judgement,
+ *   exactly as before.
+ * - **Hide what it skipped.** Nothing is converted, so the stack's conversion
+ *   record is its input's, and no `converted at load` notice is printed for a
+ *   conversion that did not happen.
+ * - **Mint a stack a non-strict call could not already mint.** The output is
+ *   marked, as every non-strict output is, and judged by nothing, as every
+ *   non-strict output is. What differs is only that an old spelling is left
+ *   where the author wrote it, which a door that reports conversions finds
+ *   with its own pass over what it loads (`stackConversionsOf`'s caveat).
+ */
+const AUTHORED_INPUT_OPTION: symbol = Symbol.for('objectstack.stack.authoredInput');
+
+/** Does this non-strict call ask for its input as authored ({@link AUTHORED_INPUT_OPTION})? */
+function asksForAuthoredInput(options: DefineStackOptions | undefined): boolean {
+  if (options === null || typeof options !== 'object') return false;
+  return (options as Record<symbol, unknown>)[AUTHORED_INPUT_OPTION] === true;
+}
+
 export function defineStack(
   config: ObjectStackDefinitionInput,
   options?: DefineStackOptions,
@@ -3889,8 +3944,11 @@ function buildDefinedStack(
   // warning below this runs in BOTH modes: a conversion happens whether or not
   // we go on to parse, so `strict: false` does not make the old shape any less
   // retiring. Each notice is pushed to the caller's record (see
-  // {@link defineStack}) as well as printed, warn-once, on stderr.
+  // {@link defineStack}) as well as printed, warn-once, on stderr. The one
+  // exception is a non-strict call carrying {@link AUTHORED_INPUT_OPTION}: the
+  // migration chain's own load, which replays the conversions itself.
   const normalized = normalizeStackInput(config as Record<string, unknown>, {
+    convert: strict || !asksForAuthoredInput(options),
     onConversionNotice: (notice) => {
       appliedConversions.push(notice);
       warnConversionNotice(notice);

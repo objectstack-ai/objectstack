@@ -86,8 +86,8 @@ export class UnscopedRunDataAccessError extends Error {
       .join(', ');
     super(
       `[runAs] refusing a data operation${where ? ` (${where})` : ''}: this run's effective runAs is ` +
-        `'user' but no trigger user could be resolved, so the operation would execute UNSCOPED ` +
-        `(elevated, RLS-bypassing) rather than restricted to a user. Declare \`runAs: 'system'\` on the ` +
+        `'user' but no trigger user could be resolved, so the operation cannot be restricted to a user. Without one it would carry no principal: ` +
+        `refused by the security plugin where one is composed, unscoped where none is. Declare \`runAs: 'system'\` on the ` +
         `flow to make the elevation explicit and intended, or arrange for the trigger to supply a user ` +
         `(a write made with a system context carries none). (ADR-0049)`,
     );

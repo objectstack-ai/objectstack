@@ -325,6 +325,25 @@ const HANDED_THROUGH_NAMESPACE = 'objectstack-authored-source-record';
 const AUTHORED_ARGUMENT_KEY = '@objectstack/cli:authored-source/accepted-argument';
 
 /**
+ * The global-registry symbol name under which a non-strict {@link STACK_PRODUCER}
+ * call's options ask the producer for its input AS AUTHORED: normalised and
+ * marked as every `strict: false` call is, with its load-time ADR-0087 D2
+ * conversion pass skipped (#22256).
+ *
+ * Owned by `@objectstack/spec`, ⛔ not by this CLI: it is the producer's one
+ * internal parameter (`stack.zod.ts`, beside `defineStack`), deliberately
+ * neither declared on `DefineStackOptions` nor exported, so this module spells
+ * its `Symbol.for` name the way the producer's provenance mark is read across
+ * two copies of the package. A drifted spelling is not silent: the producer
+ * then converts as before, and the composed pins in
+ * `test/migrate-meta-composed-load-conversions.test.ts` go red on the very
+ * conversion this key exists to keep visible.
+ *
+ * Read by the `composeStacks` wrap alone ({@link authoredSourcePlugin}).
+ */
+const SPEC_AUTHORED_INPUT_OPTION = 'objectstack.stack.authoredInput';
+
+/**
  * One strict authoring factory that is not a `define*` helper: the function
  * `member` of the exported value `owner`, which validates its argument AT THE
  * CALL and throws on a shape the current schema refuses.
@@ -448,16 +467,23 @@ async function authoredSourceHelpersOf(
  *
  * `__recordStack` is the hand-over hook the `defineStack` wrap alone passes:
  * it records the stack it hands through, with the options it was called
- * with, in the load's one hand-through record. `__composable` is what the
- * `composeStacks` wrap maps its inputs through: a recorded stack is produced
- * again by the real `defineStack` in its `strict: false` mode, and every other
- * input reaches the real `composeStacks` as it was passed.
+ * with, in the load's one hand-through record.
  *
  * `__keepAuthored` is the other `defineStack`-only hook, for the call that
  * SUCCEEDS: it keeps the argument beside the stack the real call returned,
  * under {@link AUTHORED_ARGUMENT_KEY}. It runs outside the `try`, so it can
  * never turn an accepted call into a refused one. A call takes exactly one of
  * the two arms, so no argument is both handed through and kept.
+ *
+ * `__composable` is what the `composeStacks` wrap maps its inputs through, and
+ * it gives both arms one shape: what the author wrote, produced again by the
+ * real `defineStack` in its `strict: false` mode with its conversion pass
+ * skipped ({@link SPEC_AUTHORED_INPUT_OPTION}). A recorded stack is that
+ * argument already; a kept one is followed to the end, as
+ * {@link authoredArgumentOf} follows it, so a nested `defineStack(defineStack(
+ * …))` starts from the inner literal. Every other input — a nested
+ * composition, a plain object the author never wrapped — reaches the real
+ * `composeStacks` as it was passed.
  */
 const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
   `const __refusal = (label, error) =>`,
@@ -492,9 +518,24 @@ const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
   `  if (Object.prototype.hasOwnProperty.call(built, __authoredKey)) return;`,
   `  Object.defineProperty(built, __authoredKey, { value: source, enumerable: false, writable: false, configurable: false });`,
   `};`,
-  `const __composable = (stack) => (__handedThrough.has(stack)`,
-  `  ? __specRoot.${STACK_PRODUCER}(stack, { ...__handedThrough.get(stack), strict: false })`,
-  `  : stack);`,
+  `const __authoredInput = Symbol.for(${JSON.stringify(SPEC_AUTHORED_INPUT_OPTION)});`,
+  `const __keptArgumentOf = (stack) => {`,
+  `  const seen = new Set();`,
+  `  let current = stack;`,
+  `  while (current !== null && typeof current === 'object' && !seen.has(current)`,
+  `    && Object.prototype.hasOwnProperty.call(current, __authoredKey)) {`,
+  `    seen.add(current);`,
+  `    current = current[__authoredKey];`,
+  `  }`,
+  `  return current;`,
+  `};`,
+  `const __composable = (stack) => {`,
+  `  if (__handedThrough.has(stack)) {`,
+  `    return __specRoot.${STACK_PRODUCER}(stack, { ...__handedThrough.get(stack), strict: false, [__authoredInput]: true });`,
+  `  }`,
+  `  const authored = __keptArgumentOf(stack);`,
+  `  return authored === stack ? stack : __specRoot.${STACK_PRODUCER}(authored, { strict: false, [__authoredInput]: true });`,
+  `};`,
   `const __tolerantMembers = (owner, ownerName, members) => {`,
   `  const wrapped = new Map(members.map((member) => [`,
   `    member,`,
@@ -589,14 +630,12 @@ const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
  * its argument through as it is, so the two arms leave the chain one input
  * shape: the stack the author wrote.
  *
- * ⚠️ A composed input does not get this. `composeStacks` builds each package
- * body from the stack the input's `defineStack` call RETURNED, so the body is
- * converted before the chain sees it. Recovering the authored body would mean
- * assembling it again outside the producer: a second copy of composition's
- * rule. Inside a composed project, a conversion the load still applies is
- * still applied before the chain runs.
+ * A composed input cannot be substituted this way: `composeStacks` builds each
+ * package body from the stack its input's producer RETURNED, and rebuilding the
+ * body from the argument here would be a second copy of composition's rule.
+ * The next section is how a composed project reaches the same shape.
  *
- * ## A composed project: the handed-through stack is produced again
+ * ## A composed project: every wrapped input is produced again, as authored
  *
  * `composeStacks` is not a `define*` helper, so it runs for real, and its
  * first step refuses every input no producer built (`STACK_PROVENANCE_MISSING`,
@@ -606,22 +645,25 @@ const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
  * retired spelling in ANY input was refused with a prescription the author had
  * already followed.
  *
- * So the shim records each stack it hands through for `defineStack`, and wraps
- * `composeStacks` to hand each RECORDED input to the real `defineStack` again
- * in its own `strict: false` mode before the real `composeStacks` runs. The
- * producer marks its own output (`strict: false` is a choice made inside it),
- * so nothing here writes the mark; and an input the shim did not hand through
- * — a plain object the author never wrapped, a spread of a built stack —
- * reaches the real `composeStacks` untouched and is refused there exactly as
- * before.
+ * So the shim wraps `composeStacks` to hand each input whose `defineStack` call
+ * it saw — refused and recorded, or accepted and kept — to the real
+ * `defineStack` again, before the real `composeStacks` runs, starting from
+ * what the author wrote. It asks in the producer's `strict: false` mode, with
+ * the producer's internal parameter that skips the load-time ADR-0087 D2
+ * conversion pass ({@link SPEC_AUTHORED_INPUT_OPTION}, #22256). Without that
+ * parameter a conversion the load still applies (`driver: 'mongo'`) was
+ * applied while the input was produced again, so the chain never listed it
+ * and `--write` never wrote it — the one-package defect, inside every package
+ * body. With it, composition runs its own rule over the authored inputs, and
+ * each `packages[i].manifest` body the chain reads is what input i's author
+ * wrote. The producer marks its own output (`strict: false` is a choice made
+ * inside it), so nothing here writes the mark; and an input the shim never
+ * saw a `defineStack` call build — a plain object the author never wrapped, a
+ * spread of a built stack — reaches the real `composeStacks` untouched and is
+ * refused there exactly as before.
  *
- * ⚠️ The one-package path keeps handing the authored argument through RAW,
- * on purpose. `strict: false` still runs the load-time ADR-0087 D2 conversion
- * pass, so a conversion the load still applies (`driver: 'mongo'`) would be
- * applied before the chain runs — unlisted in `applied`, unwritten by
- * `--write`. Measured on a refused one-package stack: the raw hand-back lists
- * and writes it, a `strict: false` fallback does neither. A composed input
- * pays that cost because the composer cannot take it any other way.
+ * The one-package path keeps handing the authored argument through RAW: it
+ * needs no producer at all, since nothing composes it.
  *
  * ⚠️ Deliberately NOT the default for `loadConfig()`. Every other command —
  * `os build`, `os validate`, `os serve` — must keep hearing the rejection: the

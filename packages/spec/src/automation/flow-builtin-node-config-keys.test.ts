@@ -8,17 +8,19 @@
  *
  * Pass 1 covered `script` and `subflow`, which publish no descriptor
  * `configSchema`, so no door before the run judged their keys. The remainder
- * covers every other builtin but `try_catch`: a `notify` node carrying
+ * covered every other builtin but `try_catch`: a `notify` node carrying
  * `bogusKey` passed `FlowSchema`, `objectstack validate` and `objectstack
  * compile`, and `registerFlow`'s descriptor walk then refused the whole flow at
- * boot. The spec now refuses it at every door, and the walk stands aside for
- * every type `builtinNodeConfigKeysJudged` names (pinned in
+ * boot. [#22343] `try_catch` followed once its contract's `retry` (the shared
+ * `RetryPolicySchema`) closed to the five keys its descriptor declares: a
+ * `retry.maxRetry` typo passed both build doors and was refused only when the
+ * flow registered. The spec now refuses each at every door, and the walk stands
+ * aside for every type `builtinNodeConfigKeysJudged` names (pinned in
  * `service-automation` `builtin/config-unknown-keys.test.ts`). The controls
  * hold what stays as it was:
  *
  *  - a valid node of each type, and the measured node without its extra key;
- *  - `try_catch`, whose contract's `retry` strips an unknown key where its
- *    descriptor closes it: its keys stay registration's;
+ *  - a declared `retry` block, every key of it;
  *  - a key at or under a region slot, which is `validateControlFlow`'s;
  *  - a key inside a free-form map (author data);
  *  - `decision`, schemaless with no executor contract;
@@ -35,6 +37,7 @@ import { FlowSchema } from './flow.zod';
 
 const ENTRY_ID = 'flow-script-subflow-config-undeclared-keys-refused';
 const REMAINDER_ENTRY_ID = 'flow-builtin-node-config-undeclared-keys-refused';
+const TRY_CATCH_ENTRY_ID = 'try-catch-and-retry-policy-undeclared-keys-refused';
 
 type Config = Record<string, unknown>;
 
@@ -58,7 +61,11 @@ const VALID: Readonly<Record<string, Config>> = {
   map: { collection: '{rows}', flowName: 'child_flow', input: { id: '{item.id}' } },
   loop: { collection: '{rows}', body: { nodes: [], edges: [] } },
   parallel: { branches: [{ name: 'a', nodes: [], edges: [] }, { name: 'b', nodes: [], edges: [] }] },
+  try_catch: { try: { nodes: [], edges: [] }, retry: { maxRetries: 1, backoffMs: 10 } },
 };
+
+/** A `try` region with one node in it — the measured `try_catch`'s protected region. */
+const TRY_REGION = { nodes: [{ id: 'inner', type: 'assignment', label: 'A', config: { assignments: { a: 1 } } }], edges: [] };
 
 /** start → one node of `type` → end. */
 function flowWith(type: string, config: unknown, name = 'key_probe') {
@@ -142,7 +149,7 @@ describe('the measured node: refused at save, with its location', () => {
   });
 });
 
-describe('the remainder: every other builtin but try_catch, refused at save', () => {
+describe('the remainder: every other builtin, refused at save', () => {
   it('a notify node with bogusKey is refused at nodes.1.config.bogusKey, with the rename-or-remove remedy', () => {
     const config = { ...NOTIFY, bogusKey: 1 };
     const issues = issuesOf(flowWith('notify', config));
@@ -223,18 +230,18 @@ describe('what stays as it was (lit controls)', () => {
     }
   });
 
-  it('the key-judged builtins are every executor contract but try_catch, and the predicate says so', () => {
+  it('the key-judged builtins are every executor contract, try_catch included, and the predicate says so', () => {
     const judged = [...getBuiltinNodeConfigContracts().keys()]
       .filter((type) => flowNodeConfigRefusals(type, { bogusKey: 1 }).some((r) => r.path === 'bogusKey'));
     expect(judged.sort()).toEqual([
       'create_record', 'delete_record', 'get_record', 'http', 'loop', 'map', 'notify', 'parallel', 'screen',
-      'script', 'subflow', 'update_record',
+      'script', 'subflow', 'try_catch', 'update_record',
     ]);
     // The predicate the descriptor walk reads names exactly the types the judge judges — one judge per type.
     for (const type of getBuiltinNodeConfigContracts().keys()) {
       expect(builtinNodeConfigKeysJudged(type), type).toBe(judged.includes(type));
     }
-    for (const type of ['try_catch', 'approval', 'decision', 'assignment', 'wait', 'some_plugin_node']) {
+    for (const type of ['approval', 'decision', 'assignment', 'wait', 'some_plugin_node']) {
       expect(builtinNodeConfigKeysJudged(type), type).toBe(false);
     }
   });
@@ -243,16 +250,6 @@ describe('what stays as it was (lit controls)', () => {
     for (const [type, config] of Object.entries(VALID)) {
       expect(builtinNodeConfigKeysJudged(type), type).toBe(true);
       expect(flowNodeConfigRefusals(type, config), type).toEqual([]);
-    }
-  });
-
-  it('CONTROL: try_catch keeps its undeclared key at registration — its contract\'s retry strips one', () => {
-    const tryRegion = { nodes: [{ id: 'inner', type: 'assignment', label: 'A', config: { assignments: { a: 1 } } }], edges: [] };
-    // The measured difference: the contract's `retry` accepts (strips) a key the descriptor closes.
-    expect(getBuiltinNodeConfigContracts().get('try_catch')!.schema
-      .safeParse({ try: tryRegion, retry: { maxRetries: 1, bogusKey: 1 } }).success).toBe(true);
-    for (const config of [{ try: tryRegion, bogusKey: 1 }, { try: tryRegion, retry: { maxRetries: 1, bogusKey: 1 } }]) {
-      expect(flowNodeConfigRefusals('try_catch', config)).toEqual([]);
     }
   });
 
@@ -294,6 +291,101 @@ describe('what stays as it was (lit controls)', () => {
     expect(own.success ? '' : own.error!.issues[0]!.message).toMatch(/was removed in @objectstack\/spec 17/);
     expect(flowNodeConfigRefusals('script', config)).toEqual([]);
     expect(issuesOf(flowWith('script', config))).toEqual([]);
+  });
+});
+
+describe('try_catch: its retry is closed, so the spec judges its keys like every other builtin', () => {
+  // The measured slip: a near miss of `maxRetries` under `retry`. Before the
+  // contract closed, the contract stripped it and only registration's
+  // descriptor walk refused it; the build doors passed it.
+  const NEAR_MISS = { try: TRY_REGION, retry: { maxRetry: 2 } };
+
+  it('a near miss under retry is refused at nodes.1.config.retry.maxRetry, with a did-you-mean to the declared key', () => {
+    const issues = issuesOf(flowWith('try_catch', NEAR_MISS));
+    expect(issues.map(({ code, path }) => ({ code, path }))).toEqual([{ code: 'custom', path: 'nodes.1.config.retry.maxRetry' }]);
+    const refusals = flowNodeConfigRefusals('try_catch', NEAR_MISS);
+    expect(refusals.map(({ code, params, path, source }) => ({ code, params, path, source }))).toEqual([
+      { code: 'node-config-refused-by-contract', params: { nodeType: 'try_catch', key: 'retry.maxRetry' }, path: 'retry.maxRetry', source: '' },
+    ]);
+    expect(issues[0]!.message).toBe(refusals[0]!.message);
+    // The contract's own sentence, carrying the did-you-mean's subject: the declared key.
+    expect(refusals[0]!.message).toContain(contractSentence('try_catch', NEAR_MISS));
+    // The did-you-mean's subject is the rename pair — a curated alias, since `maxRetry` is three edits from
+    // `maxRetries`, past the distance fallback's budget of two.
+    expect(contractSentence('try_catch', NEAR_MISS)).toContain('`maxRetry` → `maxRetries`');
+    expect(refusals[0]!.message).toMatch(/Rename the key .* or remove it/);
+  });
+
+  it('a key beside try / catch / errorVariable / retry is refused too, and every undeclared key once', () => {
+    expect(flowNodeConfigRefusals('try_catch', { try: TRY_REGION, bogusKey: 1, retry: { maxRetries: 1, other: 2 } })
+      .map(({ path }) => path).sort()).toEqual(['bogusKey', 'retry.other']);
+  });
+
+  it('a retryDelayMs the conversion leaves behind is refused at its own path, in the tombstone\'s words', () => {
+    // `retry-policy-converged` keeps both spellings when the values differ, and
+    // leaves a `null`: registration's walk refused both as undeclared keys.
+    for (const retry of [{ backoffMs: 500, retryDelayMs: 700 }, { retryDelayMs: null }]) {
+      const config = { try: TRY_REGION, retry };
+      const refusals = flowNodeConfigRefusals('try_catch', config);
+      expect(refusals.map(({ code, path }) => ({ code, path })), JSON.stringify(retry)).toEqual([
+        { code: 'node-config-refused-by-contract', path: 'retry.retryDelayMs' },
+      ]);
+      // The tombstone's upgrade is the remedy; no "undeclared key" closing on a key the contract declares retired.
+      expect(refusals[0]!.message).toContain('Rename the key to `backoffMs`');
+      expect(refusals[0]!.message).not.toMatch(/Rename the key to one/);
+      expect(issuesOf(flowWith('try_catch', config)).map(({ path }) => path)).toEqual(['nodes.1.config.retry.retryDelayMs']);
+    }
+  });
+
+  it('CONTROL: a declared retry block parses clean, every one of its keys', () => {
+    const config = {
+      try: TRY_REGION,
+      catch: { nodes: [{ id: 'handler', type: 'assignment', label: 'H', config: { assignments: { b: 1 } } }], edges: [] },
+      errorVariable: '$err',
+      retry: { maxRetries: 3, backoffMs: 500, backoffMultiplier: 2, maxRetryDelayMs: 10000, jitter: true },
+    };
+    expect(getBuiltinNodeConfigContracts().get('try_catch')!.schema.safeParse(config).success).toBe(true);
+    expect(flowNodeConfigRefusals('try_catch', config)).toEqual([]);
+    expect(issuesOf(flowWith('try_catch', config))).toEqual([]);
+  });
+
+  it('CONTROL: a key on the try region object stays the region check\'s', () => {
+    const config = { try: { ...TRY_REGION, bogusKey: 1 } };
+    expect(getBuiltinNodeConfigContracts().get('try_catch')!.schema.safeParse(config).success).toBe(false);
+    expect(flowNodeConfigRefusals('try_catch', config)).toEqual([]);
+  });
+
+  it('the stack parse validate and compile run, defineStack and the save door refuse it at the key', () => {
+    const stack = {
+      manifest: { id: 'com.example.retry', name: 'retry', version: '1.0.0', type: 'app', namespace: 'rty' },
+      objects: [{ name: 'rty_task', label: 'Task', fields: { title: { type: 'text', label: 'Title' } } }],
+      flows: [flowWith('try_catch', NEAR_MISS, 'retry_probe')],
+    };
+    const parsed = ObjectStackDefinitionSchema.safeParse(stack);
+    expect(parsed.success ? [] : parsed.error.issues.map((i) => i.path.join('.'))).toEqual(['flows.0.nodes.1.config.retry.maxRetry']);
+
+    let refusal: { code?: unknown; status?: unknown; issues?: Array<{ path: unknown[] }> } | undefined;
+    try {
+      defineStack(stack as never);
+    } catch (e) {
+      refusal = e as typeof refusal;
+    }
+    expect(refusal, 'defineStack must refuse the flow').toBeDefined();
+    expect({ code: refusal!.code, status: refusal!.status }).toEqual({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+    expect(refusal!.issues!.map((i) => i.path.join('.'))).toEqual(['flows.0.nodes.1.config.retry.maxRetry']);
+
+    const schema = getMetadataTypeSchema('flow') as unknown as typeof FlowSchema;
+    const saved = schema.safeParse(flowWith('try_catch', NEAR_MISS));
+    expect(saved.success ? [] : saved.error.issues.map((i) => i.path.join('.'))).toEqual(['nodes.1.config.retry.maxRetry']);
+  });
+
+  it('CONTROL: a pre-17 retryDelayMs alone is converted first where the door converts', () => {
+    const stack = {
+      manifest: { id: 'com.example.retry', name: 'retry', version: '1.0.0', type: 'app', namespace: 'rty' },
+      objects: [{ name: 'rty_task', label: 'Task', fields: { title: { type: 'text', label: 'Title' } } }],
+      flows: [flowWith('try_catch', { try: TRY_REGION, retry: { maxRetries: 1, retryDelayMs: 500 } }, 'retry_legacy')],
+    };
+    expect(() => defineStack(stack as never)).not.toThrow();
   });
 });
 
@@ -381,5 +473,12 @@ describe('the ADR-0087 ledger', () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]!.conversionIds ?? []).toEqual([]);
     expect(MIGRATIONS_BY_MAJOR[18]!.rationale).toContain(REMAINDER_ENTRY_ID);
+  });
+
+  it('registers try_catch\'s D3 entry at protocol 18, with no D2 conversion, and its rationale fragment', () => {
+    const entries = MIGRATIONS_BY_MAJOR[18]!.semantic.filter((e) => e.id === TRY_CATCH_ENTRY_ID);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.conversionIds ?? []).toEqual([]);
+    expect(MIGRATIONS_BY_MAJOR[18]!.rationale).toContain(TRY_CATCH_ENTRY_ID);
   });
 });

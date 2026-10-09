@@ -160,6 +160,7 @@ import {
   formatConsoleShaDriftRefusal,
   formatConsoleDistMissingWarning,
   createConsoleStaticPlugin,
+  createConsoleNotBuiltPlugin,
   createRuntimeAssetsPlugin,
   type ConsoleShaDrift,
 } from '../utils/console.js';
@@ -1182,7 +1183,7 @@ export default class Serve extends Command {
   static override flags = {
     port: Flags.string({ char: 'p', description: 'Server port', default: readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true }) ?? '3000' }),
     dev: Flags.boolean({ description: 'Run in development mode (load devPlugins)' }),
-    ui: Flags.boolean({ description: 'Enable the bundled Console portal at /_console/ when @object-ui/console is installed (default: true)', default: true, allowNo: true }),
+    ui: Flags.boolean({ description: 'Enable the bundled Console portal at /_console/, served from @objectstack/console (default: true)', default: true, allowNo: true }),
     console: Flags.boolean({
       description: 'Mount the Console UI at /_console/ when the package is installed (default: true).',
       default: true,
@@ -4890,12 +4891,16 @@ export default class Serve extends Command {
         });
 
         // ── Console portal ──────────────────────────────────────────
-        // The opinionated, fork-ready runtime console (`@object-ui/console`,
-        // published from the objectstack-ai/objectui monorepo) mounts under
-        // `/_console/`. When present, it owns the root `/` redirect
-        // (preferred default UI). It is optional — we only mount it when
-        // the package resolves and a pre-built `dist/` is present, and — in
-        // dev — only when that build matches the repo's objectui pin (#7752).
+        // The opinionated, fork-ready runtime console (`@objectstack/console`,
+        // the build of objectstack-ai/objectui's console app this framework
+        // vendors at its `.objectui-sha` pin) mounts under `/_console/`. When
+        // present, it owns the root `/` redirect (preferred default UI). It is
+        // optional — we only mount it when the package resolves and a
+        // pre-built `dist/` is present, and — in dev — only when that build
+        // matches the repo's objectui pin (#7752). A package that resolves
+        // with no `dist/` gets the not-built answer on those same routes, so
+        // `/_console/` names the remedy the boot warning prints instead of
+        // answering a bare 404.
         if (consolePath) {
           if (consoleWillMount) {
             if (consoleDrift) {
@@ -4908,6 +4913,8 @@ export default class Serve extends Command {
             console.error(chalk.red(formatConsoleShaDriftRefusal(consoleDrift)));
           } else {
             console.warn(chalk.yellow(formatConsoleDistMissingWarning(consolePath)));
+            await kernel.use(createConsoleNotBuiltPlugin(consolePath));
+            trackPlugin('ConsoleNotBuilt');
           }
         }
       }

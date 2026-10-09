@@ -61,7 +61,11 @@ import type { ConversionNotice } from './conversions/types.js';
  * ## The record beside the mark: the ADR-0087 conversions the producer applied
  *
  * `defineStack` runs the ADR-0087 D2 conversion layer at load, in both modes,
- * so an old spelling is already canonical in what it returns. The doors that
+ * so an old spelling is already canonical in what it returns. The one
+ * exception is a non-strict call carrying the producer's internal
+ * authored-input key (`AUTHORED_INPUT_OPTION` in `stack.zod.ts`), which only
+ * `os migrate meta` makes because it replays the conversions itself: that
+ * call converts nothing, so its record is its input's own. The doors that
  * report conversions (`os validate` / `os build`, the `--json` envelope's
  * `conversions` and `os validate --strict`) receive that returned value — and
  * a door re-running the conversion pass on it finds nothing left to convert.

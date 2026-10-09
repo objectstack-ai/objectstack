@@ -276,8 +276,16 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   // to place. ⛔ Nor is there a parity gap behind it: `os validate` emits no
   // artifact, so there is no `packages[]` for it to place them in, and every
   // issue the placement could ever raise was raised by the gate above it.
+  //
+  // [#22190] The row names `placeCollectedDocs`, the one call that now makes
+  // every docs placement `os build` performs: the per-package sets through
+  // `attachPackageDocs`, and the stack's own flat `src/docs/` onto the body of
+  // the package that owns the artifact's manifest when there is one. Same
+  // classification, for the same reasons — it raises nothing, and it hands
+  // back the `docs` array and `packages` value it was given when it has
+  // nothing to move.
   'Artifact assembly — puts already-collected, already-linted content into the bundle `os build` writes; judges nothing':
-    ['attachPackageDocs'],
+    ['placeCollectedDocs'],
   'Presentation — renders, formats or serialises a verdict something else reached; judges nothing':
     [
       'printHeader',

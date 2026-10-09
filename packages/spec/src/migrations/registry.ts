@@ -5659,8 +5659,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'rename-or-remove remedy. Registration\'s descriptor walk refused those keys already, after '
       + '`objectstack validate` and `objectstack compile` had passed them, and it now stands aside for those '
       + 'types, so each has one judge; the declared key sets were measured equal first, so registration '
-      + 'refuses what it refused before. `try_catch` stays registration\'s: its contract\'s `retry` strips an '
-      + 'unknown key where its descriptor closes it. No key is removed, so there is no tombstone, and no D2 '
+      + 'refuses what it refused before. `try_catch` waits for its contract\'s `retry` to close (below): it '
+      + 'stripped an unknown key where its descriptor closes it. No key is removed, so there is no tombstone, and no D2 '
       + 'conversion exists. Its D3 record is the semantic entry '
       + '`flow-builtin-node-config-undeclared-keys-refused`.',
   },
@@ -6402,6 +6402,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'translation items as a lossless delete of what is served, retired from the load path so '
       + 'authors are refused at parse; its D3 record is the semantic entry '
       + '`translation-widget-sub-caption-retired`.',
+  },
+  {
+    id: 'try-catch-and-retry-policy-undeclared-keys-refused',
+    order: 90,
+    text:
+      'Then the retry policy closes, and `try_catch` joins the builtin key arm: `RetryPolicySchema`, the one '
+      + 'declaration behind `job.retryPolicy` and a `try_catch` node\'s `retry`, refuses a key it does not '
+      + 'declare, naming it with a did-you-mean, where it used to strip it — and with opt-in defaults a '
+      + 'stripped `maxRetries` meant no retry at all. No writer relied on the strip. With `retry` closed to the '
+      + 'five keys the descriptor declares, a key a `try_catch` node\'s contract does not declare is refused at '
+      + 'parse, at `nodes.N.config.<key>`, with the same `node-config-refused-by-contract` code, and the '
+      + 'descriptor walk keeps plugin node types only. A `retryDelayMs` the conversion leaves beside a '
+      + 'different `backoffMs` meets its tombstone there, as it met the walk. No key is removed, so there is no '
+      + 'new tombstone, and no D2 conversion exists. Its D3 record is the semantic entry '
+      + '`try-catch-and-retry-policy-undeclared-keys-refused`.',
   },
   {
     id: 'ui-action-group-menu-member-params-array-only',
@@ -13522,7 +13537,8 @@ const step18: MigrationStep = {
         + 'headers, defaults, input, payload or templateData key is author data), never a key on a region object '
         + '(a loop body, a parallel branch) or on its nodes and edges (the region check at registration owns '
         + 'those), and never a '
-        + 'try_catch key, which registration keeps judging against its descriptor. Reachable wherever a flow is '
+        + 'try_catch key, which try-catch-and-retry-policy-undeclared-keys-refused covers once the retry policy '
+        + 'closed. Reachable wherever a flow is '
         + 'authored or stored: defineStack({ flows }) sources, defineFlow(), an exported stack passed to '
         + 'objectstack validate or objectstack compile, a flow saved from the Studio flow designer, and a flow row '
         + 'already sitting in sys_metadata',
@@ -13550,9 +13566,10 @@ const step18: MigrationStep = {
         + '(`builtinNodeConfigKeysJudged`), so each type has one judge. Measured before the move: on each of '
         + 'these types the descriptor\'s declared key sets, at every position the walk descends to, equal the '
         + 'keys the contract accepts there, so registration refuses exactly what it refused before. ⚠️ '
-        + '`try_catch` is the one builtin not moved: its contract\'s `retry` is the shared `RetryPolicySchema`, '
-        + 'which strips an unknown key, while its descriptor closes `retry` to five keys, so its undeclared keys '
-        + 'stay registration\'s. ⚠️ A body-less legacy `loop` is not parsed at run time, and it is judged here on '
+        + '`try_catch` is the one builtin not moved here: its contract\'s `retry` was the shared '
+        + '`RetryPolicySchema`, which stripped an unknown key, while its descriptor closes `retry` to five keys. '
+        + 'It moves in `try-catch-and-retry-policy-undeclared-keys-refused`, once that schema closed. ⚠️ A '
+        + 'body-less legacy `loop` is not parsed at run time, and it is judged here on '
         + 'key membership alone, which is what registration refused there already. ⚠️ A spelling an ADR-0087 D2 '
         + 'conversion still rewrites at load (`object` and `filters` on a CRUD node, `to` / `subject` / `body` / '
         + '`url` on a `notify`, `flow` on a `map`) is converted before the judge at every door that converts '
@@ -20650,6 +20667,76 @@ const step18: MigrationStep = {
         + 'lives in the widget\'s `description` and its localized values sit under the widget\'s '
         + '`description` entry for every locale the dropped strings covered — or the author has decided '
         + 'the card-header subtitle alone is enough.',
+    },
+    // #22343 — the D3 entry for closing the shared retry policy and, with it, for
+    // the build doors judging a `try_catch` node's config keys. `RetryPolicySchema`
+    // (`shared/retry-policy.zod.ts`) was a plain `z.object`, so it stripped a key it
+    // did not declare, on both of its parsers: `job.retryPolicy` and a `try_catch`
+    // node's `retry`. That strip was why `try_catch` was the one builtin
+    // `flow-builtin-node-config-undeclared-keys-refused` left on `registerFlow`'s
+    // descriptor walk. The schema is a `strictObject` now, and the spec's key arm
+    // judges `try_catch` like every other builtin. The census found no writer that
+    // relied on the strip. No key is removed, so there is no tombstone and no
+    // RETIRED_KEYS_BY_MAJOR row, and no D2 conversion exists: the platform cannot
+    // know what an undeclared key was meant to be.
+    //
+    // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+    // inside a code span and a table cell.
+    {
+      id: 'try-catch-and-retry-policy-undeclared-keys-refused',
+      surface:
+        'a retry policy carrying a key it does not declare (a typo such as maxRetry, a key borrowed from another '
+        + 'retry vocabulary such as baseDelayMs or maxAttempts, or a key nothing reads), wherever the policy is '
+        + 'written: a job retryPolicy, and the retry block of a try_catch flow node; and a try_catch flow node whose '
+        + 'config carries a key beside try, catch, errorVariable and retry that its executor contract does not '
+        + 'declare. Never a key on the try or catch region object or on its nodes and edges (the region check at '
+        + 'registration owns those). Reachable wherever a job or a flow is authored or stored: defineStack sources, '
+        + 'defineFlow(), an exported stack passed to objectstack validate or objectstack compile, a flow saved from '
+        + 'the Studio flow designer, and a flow row already sitting in sys_metadata',
+      replacement:
+        'the key the policy declares, or no key: maxRetries (retries after the first attempt), backoffMs (the base '
+        + 'delay), backoffMultiplier, maxRetryDelayMs and jitter. Rename a typo to the declared key the refusal\'s '
+        + 'did-you-mean names; write a delay borrowed from another vocabulary as backoffMs or maxRetryDelayMs; '
+        + 'write a count of total attempts as maxRetries one lower (maxAttempts 3 is maxRetries 2); delete a key '
+        + 'nothing reads. A retryDelayMs is still answered by its own tombstone: rename it to backoffMs',
+      reason:
+        '`RetryPolicySchema` was a plain `z.object`, which strips a key it does not declare. Its defaults are '
+        + 'opt-in (`maxRetries` 0, `backoffMultiplier` 1), so a stripped key falls back to "no retry" or to a flat '
+        + 'delay: a `job.retryPolicy` with `maxRetry: 3` parsed, deployed and never retried, and nothing said so. On '
+        + 'a `try_catch` node the strip also kept the flow parse from judging the node\'s keys: its descriptor '
+        + 'closes `retry` to five keys, so `registerFlow`\'s undeclared-key walk (`validateNodeConfigKeys`) refused '
+        + 'a key the contract would have accepted, and `flow-builtin-node-config-undeclared-keys-refused` left '
+        + '`try_catch` to that walk. A `retry.maxRetry` typo or a `bogusKey` beside `try` therefore passed '
+        + '`objectstack validate` and `objectstack compile` and was refused only when the flow registered. The '
+        + 'policy is now a `strictObject`: an undeclared key is refused at parse, naming the key, with a '
+        + 'did-you-mean for a near miss. Measured before closing it: every writer of either parser in this '
+        + 'repository and in the pinned objectui writes only declared keys, so it is closed on the shared schema. '
+        + 'The one judge `FlowSchema.parse`, `AutomationEngine.registerFlow` (which parses first), '
+        + '`objectstack validate` and the metadata save door share (`flowNodeConfigRefusals`) now judges '
+        + '`try_catch` keys like every other builtin\'s, as `node-config-refused-by-contract` anchored at the key '
+        + '(`nodes.N.config.retry.maxRetry`), and the descriptor walk stands aside for it, so it keeps plugin node '
+        + 'types only. The descriptor\'s declared key sets equal the contract\'s at every position the walk '
+        + 'descends to, so registration refuses what it refused before. ⚠️ The one key the walk refused that the '
+        + 'contract declares is the `retryDelayMs` tombstone. The `retry-policy-converged` conversion renames it '
+        + 'before every door that converts first, but keeps it beside a `backoffMs` holding a different value, and '
+        + 'leaves it when it is `null`. The key arm refuses what survives at `nodes.N.config.retry.retryDelayMs`, in '
+        + 'the tombstone\'s own words, so registration widens nowhere. A `script` node\'s retired keys keep the '
+        + 'scope they had. ⚠️ No D2 conversion: the platform cannot know what an undeclared key was meant to be. '
+        + '⚠️ Where such a node already sits, the whole flow is refused, as registration already refused it: from '
+        + 'the metadata registry or `sys_metadata` at boot it is skipped with a `warn` naming it, while the flows '
+        + 'beside it register; a `defineStack` source throws `StackSchemaInvalidError`; a save from Studio answers '
+        + '422 naming the key. A job whose `retryPolicy` carries such a key is new to refusal (no door judged '
+        + 'one before): its `defineStack` source throws `StackSchemaInvalidError` at `jobs.N.retryPolicy`, and an '
+        + 'artifact carrying it is refused whole at load. ADR-0087, ADR-0031.',
+      acceptanceCriteria:
+        'Run `objectstack validate` over every stack authored in config files, and boot every deployed stack. '
+        + 'Each refusal names the key: a job\'s at `jobs.N.retryPolicy` with the unrecognized key and its '
+        + 'did-you-mean, a flow\'s at `nodes.N.config.retry.<key>` or `nodes.N.config.<key>` for a `try_catch` '
+        + 'node, and `validateStackExpressions` phrases it as `node \'n\' (try_catch) config.retry.maxRetry`. For '
+        + 'each hit rename or delete the key per the replacement. Two proofs. (1) For a stack authored in config '
+        + 'files, `objectstack validate` is clean. (2) Boot the stack and confirm each flow REGISTERS: no `failed to '
+        + 'register flow` warn for it. A retry policy and a `try_catch` node whose keys the contract declares parse '
+        + 'and register byte-identically to before.',
     },
     // A forced local mode beside a remote to replicate from, refused at both doors
     // together: the datasource contract (on mode) and the turso driver's

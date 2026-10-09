@@ -172,12 +172,12 @@ export const FLOW_PAUSE_CAPABLE_NODE_TYPES: readonly string[] = [
  * build can know what the run will parse. And KEY MEMBERSHIP: the declared
  * `approval` contract is judged whole (#21850), and a key a builtin's executor
  * contract does not declare is refused (#21982) for every builtin
- * `builtinNodeConfigKeysJudged` names — all but `try_catch` — so this parse is
- * the one judge of those keys at every door, and `registerFlow`'s descriptor
- * walk stands aside for them. `try_catch`'s undeclared key is judged at
- * `registerFlow` against its descriptor (its contract's `retry` strips an
- * unknown key where the descriptor closes it), and so is a plugin type's whose
- * contract the spec does not declare; the flow parse does not judge those keys.
+ * `builtinNodeConfigKeysJudged` names — every one, `try_catch` included since
+ * its `retry` closed (#22343) — so this parse is the one judge of those keys at
+ * every door, and `registerFlow`'s descriptor walk stands aside for them. A
+ * plugin type's undeclared key, whose contract the spec does not declare, is
+ * judged at `registerFlow` against its descriptor; the flow parse does not
+ * judge those keys.
  */
 
 /**
@@ -1191,7 +1191,7 @@ export const FlowSchema = lazySchema(() => strictObject(
       maxAttempts:
         '`maxAttempts` is the connector/RetryConfig spelling and INCLUDES the first attempt; ' +
         'flow `errorHandling` counts retries AFTER it. Write `maxRetries: <maxAttempts - 1>` ' +
-        '— renaming the key alone would quietly run one attempt fewer than you asked for.',
+        '— renaming the key alone would quietly run one attempt more than you asked for.',
       fallback:
         'There is no fallback node on `errorHandling` (`fallbackNodeId` was removed in 17 — ' +
         'the engine never read it). Draw a per-node FAULT EDGE from the failing node ' +
@@ -1490,9 +1490,8 @@ export const FlowSchema = lazySchema(() => strictObject(
   //    a value carrying a `{token}`, a region slot, a ledger predicate or
   //    value slot, or `http`'s run-resolved `signingSecret`. A KEY its
   //    contract does not declare is refused too (#21982), for every builtin
-  //    `builtinNodeConfigKeysJudged` names (all but `try_catch`, whose keys
-  //    `registerFlow`'s descriptor walk keeps), a body-less legacy `loop`
-  //    included. The one plugin node contract the spec declares, `approval`
+  //    `builtinNodeConfigKeysJudged` names (every one, `try_catch` included
+  //    since #22343), a body-less legacy `loop` included. The one plugin node contract the spec declares, `approval`
   //    (#21850), is judged WHOLE — its executor refuses the node on any
   //    contract finding — so its undeclared keys are refused here too;
   //  - a `decision` branch list the executor cannot read — `conditions` not an

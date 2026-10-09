@@ -309,7 +309,7 @@ A package ships its own sets (`managedBy: 'package'` + `packageId`), seeded
 idempotently at boot and re-seeded on upgrade; environment-authored sets
 (`platform`/`user`) are never clobbered. The data layer refuses forging package
 provenance through the admin door (two-doors separation, evolved by ADR-0094 —
-ordinary edits of a packaged set become environment overlays, see below), which
+an edit of a set shipped in code is refused; clone it instead, see below), which
 is what makes package uninstall well-defined — and enforced: uninstalling a
 package (`DELETE /api/v1/packages/:id`) revokes its own sets, their
 position/user bindings, and its pending audience-binding suggestions in the
@@ -329,14 +329,16 @@ goes through the data engine) is redirected into a metadata write and the
 record is re-derived by an awaited projector, so the two can never drift. This
 has three author-visible consequences:
 
-- **Editing any declared set through Setup — packaged sets included** becomes
-  an environment overlay of that definition (the standard metadata
-  customization): it genuinely takes effect, where a record-only edit
-  previously displayed but never enforced. The row keeps its package
-  provenance; the Studio layered view diffs the shipped baseline against your
-  customization, and removing the overlay resets to the baseline. Note the
-  trade every overlay makes: while an overlay pins a set, the vendor's later
-  baseline changes don't take effect for it until you reset or re-author.
+- **A set shipped in code cannot be edited in the environment.** That is a set
+  an installed package declares (a `*.permission.ts` file, a stack's
+  `permissionSets`) or a platform default such as `member_default`. Editing it
+  through Setup or the metadata API answers `403 NOT_OVERRIDABLE` and stores
+  nothing. Clone it to a new name instead (the **Clone** action on the set, or
+  `POST /api/v1/data/sys_permission_set` with a new name) and edit the clone:
+  the clone is your organization's own set, and package upgrades keep reaching
+  the original. Every other set (one created in this environment, a clone, or
+  one saved into a writable runtime package) is edited in place: the edit
+  lands on its one stored definition, and the record follows it.
 - **The API name is immutable after creation.** It is the definition's metadata
   identity, so the create form accepts it but the edit form locks it, and a
   rename through the data door is rejected. Clone the set to a new name instead.
@@ -348,8 +350,11 @@ has three author-visible consequences:
   packaged set entirely.
 
 A cross-package job function needs no hand-authored cross-package set: bind
-each package's own sets to one **position** (the union model adds), and use an
-overlay where a packaged set must be narrowed.
+each package's own sets to one **position** (the union model adds). Where a
+packaged set grants too much, clone it, narrow the clone, and bind the clone
+in its place: restriction is done by not granting. Narrowing the packaged set
+itself is the package author's change: they edit the declaration in the
+package and re-publish it (ADR-0086 two-doors).
 
 ### Declared ≠ enforced — diagnosing a frozen package set
 
