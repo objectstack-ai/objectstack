@@ -35,7 +35,7 @@ export const entry: SemanticMigration = {
     + 'overlay member accepted `type: \'chart\'` with no block and an `options.chart` bag holding only '
     + '`chartType`, and both authoring doors accepted the block-less view. What such a view rendered was a '
     + 'dead screen: at the pin the renderer fabricated a binding nobody wrote (an aggregate over a field '
-    + 'named name and a measure named value), and objectui#6152 round 15 retired that floor, after which '
+    + 'named name and a measure named value), and objectui has since retired that floor, after which '
     + 'the chart component refuses on screen. Now refused at the view\'s own path, `chart`, or at '
     + '`options.chart.dataset` / `options.chart.values`, with the binding to declare. Ships at once, no '
     + 'grace window and no dual spelling (2026-08-27 maintainer ruling 「短期不考虑渐进」). Not convertible: '
