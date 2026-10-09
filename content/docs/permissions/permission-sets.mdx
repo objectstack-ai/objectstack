@@ -309,7 +309,7 @@ A package ships its own sets (`managedBy: 'package'` + `packageId`), seeded
 idempotently at boot and re-seeded on upgrade; environment-authored sets
 (`platform`/`user`) are never clobbered. The data layer refuses forging package
 provenance through the admin door (two-doors separation, evolved by ADR-0094 —
-ordinary edits of a packaged set become environment overlays, see below), which
+an edit of a set shipped in code is refused; clone it instead, see below), which
 is what makes package uninstall well-defined — and enforced: uninstalling a
 package (`DELETE /api/v1/packages/:id`) revokes its own sets, their
 position/user bindings, and its pending audience-binding suggestions in the
