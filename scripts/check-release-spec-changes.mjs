@@ -4,14 +4,22 @@
 /**
  * check-release-spec-changes — the ADR-0087 D4 per-release correctness gate.
  *
- *   node scripts/check-release-spec-changes.mjs --previous <dir> --published <dir>
+ *   node scripts/check-release-spec-changes.mjs --previous <dir> --published <dir> --registry <dir>
+ *   node scripts/check-release-spec-changes.mjs --no-release-section --published <dir> --registry <dir>
  *   node scripts/check-release-spec-changes.mjs --self-test
  *
- * Both arguments are the UNPACKED `package/` root of a tarball: `--previous`
- * the last published `@objectstack/spec`, `--published` the artifact this
- * release is about to publish. The gate recomputes the export-surface delta
- * from those two artifacts and refuses the release when the `release` section
- * inside the published one disagrees.
+ * `--previous` and `--published` are the UNPACKED `package/` root of a tarball:
+ * the last published `@objectstack/spec`, and the artifact this release is
+ * about to publish. The gate recomputes the export-surface delta from those two
+ * artifacts and refuses the release when the `release` section inside the
+ * published one disagrees. `--no-release-section` is the rc lane's declaration
+ * that it publishes no such section (`release-spec-changes.sh --generate`).
+ *
+ * `--registry` is a FRESH generation of the two ADR-0087 projections
+ * (`spec-changes.json`, `protocol-upgrade-guide.md`) from the registries. Since
+ * the #22449 B′ ruling both are generated at publish rather than committed, and
+ * the packed copies must equal that generation in everything that is not a
+ * publish-time delta — see `verifyRegistryProjection`.
  *
  * ## Why a gate at all
  *
@@ -462,6 +470,180 @@ export function verifyRelease(previousDir, publishedDir) {
   };
 }
 
+// ─── The registry projections (#22449 B′) ──────────────────────────────────
+//
+// Everything in the two projections that is NOT a publish-time delta is a pure
+// function of the ADR-0087 registries: the manifest's per-major records and the
+// registry half of its aggregate, and the whole upgrade guide. Since the B′
+// ruling they are generated at publish rather than committed, and "verified
+// there" means this: the copies INSIDE the artifact must equal a FRESH
+// generation from the same registries (`--registry`, written by the release
+// lane with the generators' `--out`).
+//
+// This half compares against the generator's own output on purpose — the
+// generator's output is the definition of a correct projection. What it audits
+// is everything between the generator and the tarball: a `files[]` entry that
+// stopped shipping a file, a copy edited after generation, an rc lane that
+// packed the tree's copy instead of generating one.
+
+const GUIDE = 'protocol-upgrade-guide.md';
+
+/** Stable stringify: object keys sorted, so key ORDER never reads as a content change. */
+function canonical(value) {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonical(value[k])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * The manifest minus what only a publish fills — the per-release section and the
+ * aggregate's one-release export diff. `verifyRelease` checks those against the
+ * two tarballs; a registry-only generation cannot reproduce them.
+ */
+function registryHalf(manifest) {
+  const copy = structuredClone(manifest);
+  delete copy.release;
+  if (copy.aggregate && typeof copy.aggregate === 'object') {
+    delete copy.aggregate.added;
+    delete copy.aggregate.removed;
+    delete copy.aggregate.surfaceScope;
+  }
+  return copy;
+}
+
+/** A record's registry ids, for naming what differs. */
+function recordIds(record) {
+  return {
+    conversionIds: (record?.converted ?? []).map((c) => c.conversionId),
+    migrationIds: (record?.migrated ?? []).map((m) => m.migrationId),
+  };
+}
+
+/** Name how one registry-derived record differs, id by id where ids differ. */
+function compareRecord(label, packed, fresh, problems) {
+  if (canonical(packed) === canonical(fresh)) return true;
+  const p = recordIds(packed);
+  const f = recordIds(fresh);
+  const before = problems.length;
+  compareArray(`${label}.converted`, p.conversionIds, f.conversionIds, problems);
+  compareArray(`${label}.migrated`, p.migrationIds, f.migrationIds, problems);
+  if (problems.length === before) {
+    const keys = [...new Set([...Object.keys(packed ?? {}), ...Object.keys(fresh ?? {})])].sort();
+    const differing = keys.filter((k) => canonical(packed?.[k]) !== canonical(fresh?.[k]));
+    problems.push(
+      `${label}: the registry ids agree but the record differs from a fresh generation in ` +
+        `${differing.map((k) => `\`${k}\``).join(', ')} — the packed copy is not what the registries project.`,
+    );
+  }
+  return false;
+}
+
+/**
+ * The packed projections against a fresh generation from the registries.
+ *
+ * Returns `{ ok, problems, summary }` like `verifyRelease`, so the self-test
+ * drives the same function the release lane calls.
+ */
+export function verifyRegistryProjection(registryDir, publishedDir) {
+  const problems = [];
+  const freshManifest = readManifest(registryDir);
+  const packedManifest = readManifest(publishedDir);
+  const freshGuidePath = path.join(registryDir, GUIDE);
+  const packedGuidePath = path.join(publishedDir, GUIDE);
+
+  if (!freshManifest || !fs.existsSync(freshGuidePath)) {
+    return {
+      ok: false,
+      problems: [
+        `${registryDir} holds no fresh ${!freshManifest ? MANIFEST : GUIDE} — the registries were not ` +
+          'generated, so there is nothing to verify the artifact against. Nothing was verified.',
+      ],
+      summary: null,
+    };
+  }
+
+  const freshGuide = fs.readFileSync(freshGuidePath, 'utf8');
+  let ok = true;
+  if (!packedManifest) {
+    ok = false;
+    problems.push(
+      `the artifact about to publish ships no ${MANIFEST}. ADR-0087 D4 requires it inside the tarball; ` +
+        `check that "${MANIFEST}" is still listed in packages/spec/package.json "files".`,
+    );
+  } else {
+    const packed = registryHalf(packedManifest);
+    const fresh = registryHalf(freshManifest);
+    for (const key of [...new Set([...Object.keys(packed), ...Object.keys(fresh)])].sort()) {
+      if (key === 'perMajor' || key === 'aggregate') continue;
+      if (canonical(packed[key]) === canonical(fresh[key])) continue;
+      ok = false;
+      problems.push(
+        `${MANIFEST} \`${key}\` is ${JSON.stringify(packed[key])?.slice(0, 120)} in the artifact but ` +
+          `${JSON.stringify(fresh[key])?.slice(0, 120)} from the registries.`,
+      );
+    }
+    ok = compareRecord('aggregate', packed.aggregate, fresh.aggregate, problems) && ok;
+    const byHop = (records) => new Map((records ?? []).map((r) => [`${r.from} → ${r.to}`, r]));
+    const packedHops = byHop(packed.perMajor);
+    const freshHops = byHop(fresh.perMajor);
+    for (const hop of [...new Set([...packedHops.keys(), ...freshHops.keys()])]) {
+      if (!freshHops.has(hop)) {
+        ok = false;
+        problems.push(`perMajor[${hop}] is in the artifact, but the registries project no such record.`);
+      } else if (!packedHops.has(hop)) {
+        ok = false;
+        problems.push(`perMajor[${hop}] is projected by the registries, but the artifact OMITS it.`);
+      } else {
+        ok = compareRecord(`perMajor[${hop}]`, packedHops.get(hop), freshHops.get(hop), problems) && ok;
+      }
+    }
+  }
+
+  if (!fs.existsSync(packedGuidePath)) {
+    ok = false;
+    problems.push(
+      `the artifact about to publish ships no ${GUIDE}. It is generated into the package at publish; check that ` +
+        `"${GUIDE}" is listed in packages/spec/package.json "files" and that the lane ran --prepare or --generate.`,
+    );
+  } else {
+    const packedGuide = fs.readFileSync(packedGuidePath, 'utf8');
+    if (packedGuide !== freshGuide) {
+      ok = false;
+      const a = packedGuide.split('\n');
+      const b = freshGuide.split('\n');
+      let line = 0;
+      while (line < a.length && line < b.length && a[line] === b[line]) line += 1;
+      problems.push(
+        `${GUIDE} in the artifact differs from a fresh generation from the registries, first at line ${line + 1}:`,
+        `      artifact:   ${JSON.stringify((a[line] ?? '<end of file>').slice(0, 160))}`,
+        `      registries: ${JSON.stringify((b[line] ?? '<end of file>').slice(0, 160))}`,
+      );
+    }
+  }
+
+  if (!ok) {
+    problems.push(
+      'Regenerate with: bash scripts/release-spec-changes.sh --prepare (or --generate), then --verify.',
+    );
+    return { ok, problems, summary: null };
+  }
+  const ids = recordIds(freshManifest.aggregate);
+  return {
+    ok,
+    problems,
+    summary:
+      `registry projections verified against a fresh generation: ${MANIFEST} ` +
+      `(${(freshManifest.perMajor ?? []).length} per-major record(s), ${ids.conversionIds.length} converted / ` +
+      `${ids.migrationIds.length} migrated) and ${GUIDE} (${Buffer.byteLength(freshGuide)} bytes) ` +
+      'match the artifact.',
+  };
+}
+
 // ─── Self-test ────────────────────────────────────────────────────────────
 
 const SELF_TEST_BATTERIES = Object.freeze({
@@ -488,8 +670,16 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'R15 — an export the aggregate invents in added → RED, naming it': 1,
   'R16 — a real removal the scoped aggregate omits → RED, naming it': 1,
   'R17 — an aggregate export claim the previous tarball could not produce → RED': 1,
+  'P1 — the packed projections equal a fresh generation from the registries → GREEN': 1,
+  'P2 — the release section and the aggregate export diff are outside the registry comparison → GREEN': 1,
+  'P3 — a packed per-major record carries an id the registries no longer project → RED, naming it': 1,
+  'P4 — a packed per-major record omits an id the registries project → RED, naming it': 1,
+  'P5 — a per-major record the registries project is missing from the artifact → RED, naming it': 1,
+  'P6 — the artifact ships no protocol-upgrade-guide.md → RED': 1,
+  'P7 — the packed guide differs from a fresh generation → RED, naming the line': 1,
+  'P8 — no fresh generation to compare against is never a pass → RED': 1,
 });
-const SELF_TEST_BATTERY_FLOOR = 23;
+const SELF_TEST_BATTERY_FLOOR = 31;
 
 function writeTree(root, files) {
   for (const [rel, content] of Object.entries(files)) {
@@ -818,6 +1008,128 @@ function selfTest() {
     'no export diff could have been computed',
   );
 
+  // ── The registry projections ──────────────────────────────────────────
+  const checkRegistry = (label, { fresh, packed }, expectOk, expectText) => {
+    registerCase(label);
+    const base = path.join(tmp, `case-${(seq += 1)}`);
+    const registryDir = writeTree(path.join(base, 'fresh'), fresh);
+    const publishedDir = writeTree(path.join(base, 'packed'), packed);
+    let verdict;
+    try {
+      verdict = verifyRegistryProjection(registryDir, publishedDir);
+    } catch (error) {
+      console.error(`✗ ${label}: threw ${error.message}`);
+      failed += 1;
+      return;
+    }
+    if (verdict.ok !== expectOk) {
+      console.error(
+        `✗ ${label}: expected ${expectOk ? 'GREEN' : 'RED'}, got ${verdict.ok ? 'GREEN' : 'RED'}` +
+          `${verdict.problems.length > 0 ? `\n    ${verdict.problems.join('\n    ')}` : ''}`,
+      );
+      failed += 1;
+      return;
+    }
+    const haystack = [...verdict.problems, verdict.summary ?? ''].join('\n');
+    if (expectText && !haystack.includes(expectText)) {
+      console.error(`✗ ${label}: output never names ${JSON.stringify(expectText)}\n    ${haystack}`);
+      failed += 1;
+      return;
+    }
+    console.log(`✓ ${label}`);
+  };
+  const hop = (from, to, migrationIds) => ({
+    from,
+    to,
+    added: [],
+    converted: [{ surface: 's', to: 't', conversionId: `conv-${to}`, toMajor: to }],
+    migrated: migrationIds.map((id) => ({ surface: 's', replacement: 'r', migrationId: id, toMajor: to, rationale: 'why' })),
+    removed: [],
+  });
+  const registryManifest = (perMajor = [hop(16, 17, ['mig-17']), hop(17, 18, ['mig-18'])], extra = {}) =>
+    manifest({ protocolVersion: '18.0.0', supportFloor: 16, perMajor, ...extra });
+  const GUIDE_TEXT = '# Metadata protocol upgrade guide\n\n## Protocol 17 → 18\n\n| `mig-18` |\n';
+  const projections = (manifestDoc = registryManifest(), guideText = GUIDE_TEXT) => ({
+    'package.json': { name: '@objectstack/spec', version: '18.0.0' },
+    'spec-changes.json': manifestDoc,
+    ...(guideText === null ? {} : { 'protocol-upgrade-guide.md': guideText }),
+  });
+
+  checkRegistry(
+    'P1 — the packed projections equal a fresh generation from the registries → GREEN',
+    { fresh: projections(), packed: projections() },
+    true,
+    'match the artifact',
+  );
+
+  checkRegistry(
+    'P2 — the release section and the aggregate export diff are outside the registry comparison → GREEN',
+    {
+      fresh: projections(),
+      packed: projections(
+        manifest(
+          { protocolVersion: '18.0.0', supportFloor: 16, perMajor: [hop(16, 17, ['mig-17']), hop(17, 18, ['mig-18'])], release: release() },
+          aggregateSurface(),
+        ),
+      ),
+    },
+    true,
+  );
+
+  checkRegistry(
+    'P3 — a packed per-major record carries an id the registries no longer project → RED, naming it',
+    {
+      fresh: projections(),
+      packed: projections(registryManifest([hop(16, 17, ['mig-17']), hop(17, 18, ['mig-18', 'mig-withdrawn'])])),
+    },
+    false,
+    'mig-withdrawn',
+  );
+
+  checkRegistry(
+    'P4 — a packed per-major record omits an id the registries project → RED, naming it',
+    {
+      fresh: projections(registryManifest([hop(16, 17, ['mig-17']), hop(17, 18, ['mig-18', 'mig-new-entry'])])),
+      packed: projections(),
+    },
+    false,
+    'mig-new-entry',
+  );
+
+  checkRegistry(
+    'P5 — a per-major record the registries project is missing from the artifact → RED, naming it',
+    {
+      fresh: projections(),
+      packed: projections(registryManifest([hop(16, 17, ['mig-17'])])),
+    },
+    false,
+    'perMajor[17 → 18] is projected by the registries, but the artifact OMITS it',
+  );
+
+  checkRegistry(
+    'P6 — the artifact ships no protocol-upgrade-guide.md → RED',
+    { fresh: projections(), packed: projections(registryManifest(), null) },
+    false,
+    'ships no protocol-upgrade-guide.md',
+  );
+
+  checkRegistry(
+    'P7 — the packed guide differs from a fresh generation → RED, naming the line',
+    {
+      fresh: projections(),
+      packed: projections(registryManifest(), GUIDE_TEXT.replace('| `mig-18` |', '| `mig-18-stale` |')),
+    },
+    false,
+    'first at line 5',
+  );
+
+  checkRegistry(
+    'P8 — no fresh generation to compare against is never a pass → RED',
+    { fresh: { 'package.json': { name: 'fixture', version: '0.0.0' } }, packed: projections() },
+    false,
+    'Nothing was verified',
+  );
+
   // ── Floor: what ran must be what is declared ──────────────────────────
   const floorFailure = (message) => {
     console.error(`✗ self-test floor: ${message}`);
@@ -882,15 +1194,22 @@ function main() {
 
   const previous = argValue('--previous');
   const published = argValue('--published');
-  if (!previous || !published) {
+  const registry = argValue('--registry');
+  // The rc lane publishes no per-release section, and says so — the absence of
+  // `--previous` alone is a misspelled invocation, never that declaration.
+  const noReleaseSection = process.argv.includes('--no-release-section');
+  if (!published || !registry || Boolean(previous) === noReleaseSection) {
     console.error(
       'usage: node scripts/check-release-spec-changes.mjs --previous <unpacked previous package/> ' +
-        '--published <unpacked package/ about to publish>\n' +
+        '--published <unpacked package/ about to publish> --registry <fresh registry projections/>\n' +
+        '       node scripts/check-release-spec-changes.mjs --no-release-section ' +
+        '--published <unpacked package/> --registry <fresh registry projections/>\n' +
         '       node scripts/check-release-spec-changes.mjs --self-test',
     );
     process.exit(2);
   }
-  for (const [flag, dir] of [['--previous', previous], ['--published', published]]) {
+  const dirs = [['--published', published], ['--registry', registry], ...(previous ? [['--previous', previous]] : [])];
+  for (const [flag, dir] of dirs) {
     if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
       // "Could not run" is a failure, never a skip: a release must not pass this
       // gate because its inputs were misspelled.
@@ -899,21 +1218,40 @@ function main() {
     }
   }
 
-  const verdict = verifyRelease(previous, published);
-  if (!verdict.ok) {
+  let failed = false;
+  const projections = verifyRegistryProjection(registry, published);
+  if (!projections.ok) {
+    failed = true;
     console.error(
-      "✗ spec-changes.json's export claims disagree with the two tarballs (ADR-0087 D4) — the per-release " +
-        'section, the aggregate record, or both. Each line below names which.',
+      '✗ the packed projections disagree with a fresh generation from the ADR-0087 registries — ' +
+        'spec-changes.json, the upgrade guide, or both. Each line below names which.\n',
     );
-    console.error('  A wrong change file is worse than none — a consumer gates its upgrade on this data.\n');
-    for (const line of verdict.problems) console.error(`  ${line}`);
-    process.exit(1);
+    for (const line of projections.problems) console.error(`  ${line}`);
+  } else {
+    console.log(`✓ ${projections.summary}`);
   }
-  console.log(`✓ ${verdict.summary}`);
+
+  if (noReleaseSection) {
+    console.log('✓ no per-release section is owed: this lane (--generate) publishes none.');
+  } else {
+    const verdict = verifyRelease(previous, published);
+    if (!verdict.ok) {
+      failed = true;
+      console.error(
+        "✗ spec-changes.json's export claims disagree with the two tarballs (ADR-0087 D4) — the per-release " +
+          'section, the aggregate record, or both. Each line below names which.',
+      );
+      console.error('  A wrong change file is worse than none — a consumer gates its upgrade on this data.\n');
+      for (const line of verdict.problems) console.error(`  ${line}`);
+    } else {
+      console.log(`✓ ${verdict.summary}`);
+    }
+  }
+  if (failed) process.exit(1);
 }
 
-// `verifyRelease` is exported so the self-test drives the same function the
-// release lane calls. An exported module whose top level also DISPATCHES ends
+// `verifyRelease` and `verifyRegistryProjection` are exported so the self-test
+// drives the same functions the release lane calls. An exported module whose top level also DISPATCHES ends
 // its importer's import instead — so the dispatch is behind the guard
 // (`pnpm check:entry-guard`).
 if (isEntrypoint(import.meta.url)) {
