@@ -2039,6 +2039,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D6/D12] No organization: an uninstall is environment-wide
             // by construction, and who may uninstall is the operator gate above.
             const protocol = await resolveProtocol(deps, _context);
+            const persists = Boolean(protocol && typeof protocol.deletePackage === 'function');
 
             // [#21276] Existence is READ here, never acted on. This line used to
             // be `registry.uninstallPackage(id)`, and the disable-record clear
