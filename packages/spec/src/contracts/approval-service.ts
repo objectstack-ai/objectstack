@@ -996,7 +996,7 @@ export interface IApprovalService {
   /**
    * **Operator verb — re-issue the continuation for a run an operator has
    * re-armed** (#15389; the maintainer ruling of 2026-09-09, decision batch
-   * #106 item 3, declared here exactly as #16495 declared
+   * #106 item 3, declared here exactly as the automation-service contract declared
    * `IAutomationService.cancelRun` / `restoreConsumedSuspension`).
    *
    * The missing half of `IAutomationService.restoreConsumedSuspension`, for

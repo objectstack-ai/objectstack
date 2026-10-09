@@ -2180,6 +2180,57 @@ describe('[#8613] path 4, third spelling — deactivating the admin_full_access 
   });
 });
 
+// ---------------------------------------------------------------------------
+// [ADR-0131 D4] Write shape (4), fourth spelling: MOVING the row into an
+// organization
+//
+// The resolver finds an unscoped grant's `admin_full_access` by name on the
+// ORGANIZATION-LESS row only. Stamping that row with an organization leaves it
+// named and active, and still un-makes every grant-anchored platform admin —
+// by a payload that touches neither `name` nor `active`.
+// ---------------------------------------------------------------------------
+
+describe('[ADR-0131 D4] path 4, fourth spelling — moving the admin_full_access permission set into an organization', () => {
+  let engine: ObjectQL;
+
+  beforeEach(async () => {
+    engine = await boot();
+    await seedAdminPermissionSet(engine);
+  });
+
+  const move = (id: string, organizationId: string | null) =>
+    engine.update('sys_permission_set', { id, organization_id: organizationId }, SYSTEM);
+
+  const organizationOf = async (id: string): Promise<unknown> =>
+    ((await engine.findOne('sys_permission_set', { where: { id } }, SYSTEM)) as any)?.organization_id ?? null;
+
+  it('moving it is refused and the row stays organization-less', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+
+    await expect(move(PS_ADMIN, 'org_elsewhere')).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      status: 403,
+      object: 'sys_permission_set',
+    });
+    expect(await organizationOf(PS_ADMIN)).toBeNull();
+  });
+
+  it('an org admin elsewhere keeps the move legal — the invariant is the ENVIRONMENT\'s', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+
+    await expect(move(PS_ADMIN, 'org_elsewhere')).resolves.toBeTruthy();
+  });
+
+  it('moving ANOTHER permission set, or repeating the row’s own organization-less value, is unaffected', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+
+    await expect(move('ps_member', 'org_elsewhere')).resolves.toBeTruthy();
+    await expect(move(PS_ADMIN, null)).resolves.toBeTruthy();
+    expect(await organizationOf(PS_ADMIN)).toBeNull();
+  });
+});
+
 describe('[#8613] a DEACTIVATED break-glass set is an emptied environment, not a fresh one', () => {
   /**
    * The state the third spelling leaves behind, reachable the same way #6084's

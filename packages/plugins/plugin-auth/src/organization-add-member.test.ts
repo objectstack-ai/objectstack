@@ -87,6 +87,8 @@ const createMemoryEngine = () => {
         if ('$ne' in v) return !eq(actual, v.$ne);
         if ('$in' in v) return (v.$in as any[]).some((x) => eq(actual, x));
       }
+      // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+      if (v === null) return actual === null || actual === undefined;
       return eq(actual, v);
     });
   const project = (row: any, fields?: string[]) => {
@@ -247,6 +249,7 @@ describe('#9941 POST /organization/add-member — mounted, gated, and it clears 
       id: 'ups_admin',
       user_id: admin.userId,
       permission_set_id: 'ps_admin',
+      permission_set: 'admin_full_access',
       organization_id: null,
     });
 

@@ -45,7 +45,7 @@
  * is reported as a conflict rather than resolved by a precedence rule.
  */
 
-import { parseCelToAst } from './cel-engine';
+import { parseCelToAst, type CelAstNode } from './cel-engine';
 
 /** The default scope root a record-scoped predicate traverses from. */
 export const DEFAULT_TRAVERSAL_ROOT = 'record';
@@ -73,13 +73,6 @@ export interface RelationshipTraversalAnalysis {
    * authoring layer can refuse them instead of pinning a prefix.
    */
   readonly multiHopFields: ReadonlySet<string>;
-}
-
-/** `{ op: 'id', args: '<root>' }` — a bare identifier node for `root`. */
-function isRootId(node: unknown, root: string): boolean {
-  if (!node || typeof node !== 'object') return false;
-  const { op, args } = node as { op?: unknown; args?: unknown };
-  return op === 'id' && args === root;
 }
 
 /**
@@ -133,6 +126,98 @@ function asMember(node: unknown): { receiver: unknown; name: string } | null {
 }
 
 /**
+ * One read of a member of a named scope root, as {@link readRootMembers}
+ * reports it — whatever spelling the author wrote it in.
+ */
+export interface RootMemberRead {
+  /** The scope root the read starts from — `record`, `previous`, … */
+  readonly root: string;
+  /** The member read on the root: `crm_account` in `record['crm_account'].type`. */
+  readonly field: string;
+  /**
+   * The member read in turn on `root.<field>`, when the expression reads one:
+   * `type` in `record.crm_account.?type`. Absent when `root.<field>` is used
+   * as a value — compared, handed to a function, or the receiver of a METHOD
+   * call (`record.name.startsWith('A')`), which reads the value, not a member.
+   */
+  readonly leaf?: string;
+  /** The read continues past `leaf` (`record.a.b.c`): more than one hop. */
+  readonly deeper: boolean;
+}
+
+/**
+ * Every read of a member of one of `roots` in a parsed CEL expression, in every
+ * member spelling {@link asMember} recognises — `.`, `.?`, `['…']` and
+ * `[?'…']` — in source order, one entry per occurrence.
+ *
+ * ⭐ The ONE member reader in this package. Two questions are answered from it
+ * and nothing else: which hops an expression takes through a root
+ * ({@link analyzeRelationshipTraversals}), and whether each member it names
+ * exists (`validateExpression`'s field-existence pass). One reader means the
+ * two can never disagree about which spellings name a member — a spelling one
+ * of them missed is exactly how a typo used to pass the existence check while
+ * the traversal check saw it.
+ *
+ * What is NOT a read, by construction:
+ *  - an index whose key is not a string literal (`record[someVar]`) — which
+ *    member it names is not knowable before evaluation, so there is nothing to
+ *    judge, and a check built on this reader gives no verdict for it;
+ *  - a method call on the root itself (`record.size()`), which reads the root,
+ *    not a member of it;
+ *  - a root name in member position (`vars.record.x`) — only a bare
+ *    identifier is a root.
+ *
+ * Takes the AST rather than the source so a caller asking both questions of
+ * one expression parses it once. Parse it with {@link parseCelToAst}, the
+ * platform's one answer to "what parses".
+ */
+export function readRootMembers(ast: CelAstNode, roots: readonly string[]): RootMemberRead[] {
+  const rootSet = new Set(roots);
+  const reads: RootMemberRead[] = [];
+
+  // `{ op: 'id', args: '<root>' }` — a bare identifier node naming one of `roots`.
+  const rootNameOf = (node: unknown): string | undefined => {
+    if (!node || typeof node !== 'object') return undefined;
+    const { op, args } = node as { op?: unknown; args?: unknown };
+    return op === 'id' && typeof args === 'string' && rootSet.has(args) ? args : undefined;
+  };
+
+  // `via` is the member access this node is the RECEIVER of, handed down only
+  // along a receiver edge: its name is the next segment, and `deeper` says
+  // whether that access is itself read through in turn.
+  const walk = (node: unknown, via?: { name: string; deeper: boolean }): void => {
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child);
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+
+    const member = asMember(node);
+    if (member) {
+      const root = rootNameOf(member.receiver);
+      if (root !== undefined) {
+        reads.push({
+          root,
+          field: member.name,
+          ...(via ? { leaf: via.name } : {}),
+          deeper: via?.deeper ?? false,
+        });
+        return;
+      }
+      // The receiver is read through this access. The access's other operand
+      // is its member name or a string-literal key, neither of which can hold
+      // a read.
+      walk(member.receiver, { name: member.name, deeper: via !== undefined });
+      return;
+    }
+
+    for (const value of Object.values(node as Record<string, unknown>)) walk(value);
+  };
+  walk(ast);
+  return reads;
+}
+
+/**
  * Analyse one authored CEL source for the hops it takes through `root`.
  *
  * Returns `null` when the source does not parse or blows the platform's bounds
@@ -152,61 +237,30 @@ export function analyzeRelationshipTraversals(
 ): RelationshipTraversalAnalysis | null {
   const ast = parseCelToAst(source);
   if (ast == null) return null;
+  return traversalsOf(readRootMembers(ast, [root]));
+}
 
+/**
+ * Fold one root's {@link readRootMembers} into the traversal analysis: a read
+ * with a `leaf` is a hop through `field` (and more than one when it goes
+ * `deeper`), a read without one uses `field` as a value.
+ */
+export function traversalsOf(reads: readonly RootMemberRead[]): RelationshipTraversalAnalysis {
   const traversals = new Map<string, Set<string>>();
   const bareFields = new Set<string>();
   const multiHopFields = new Set<string>();
-
-  // Member-access nodes reached AS THE RECEIVER of another member access are
-  // traversals, not values. Collect those first so the value pass can exclude
-  // them by identity rather than by re-deriving the shape.
-  const traversalReceivers = new Set<unknown>();
-
-  const walk = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const child of node) walk(child);
-      return;
+  for (const read of reads) {
+    if (read.leaf === undefined) {
+      bareFields.add(read.field);
+      continue;
     }
-    if (!node || typeof node !== 'object') return;
-
-    const outer = asMember(node);
-    if (outer) {
-      const inner = asMember(outer.receiver);
-      if (inner && isRootId(inner.receiver, root)) {
-        // root.<inner.name>.<outer.name> — one hop through `inner.name`.
-        traversalReceivers.add(outer.receiver);
-        let fields = traversals.get(inner.name);
-        if (!fields) traversals.set(inner.name, (fields = new Set()));
-        fields.add(outer.name);
-      } else if (inner) {
-        // Deeper than one hop: root.a.b.c reaches here as (root.a.b).c, whose
-        // own receiver is itself a traversal. Attribute it to the FIRST field
-        // so the refusal can name what the author wrote.
-        const base = asMember(inner.receiver);
-        if (base && isRootId(base.receiver, root)) multiHopFields.add(base.name);
-      }
-    }
-
-    for (const value of Object.values(node as Record<string, unknown>)) walk(value);
-  };
-  walk(ast);
-
-  // Second pass: every `root.<field>` node that was NOT consumed as a traversal
-  // receiver is a value use.
-  const walkValues = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const child of node) walkValues(child);
-      return;
-    }
-    if (!node || typeof node !== 'object') return;
-    const member = asMember(node);
-    if (member && isRootId(member.receiver, root) && !traversalReceivers.has(node)) {
-      bareFields.add(member.name);
-    }
-    for (const value of Object.values(node as Record<string, unknown>)) walkValues(value);
-  };
-  walkValues(ast);
-
+    let fields = traversals.get(read.field);
+    if (!fields) traversals.set(read.field, (fields = new Set()));
+    fields.add(read.leaf);
+    // Deeper than one hop: `root.a.b.c`. Attributed to the FIRST field so the
+    // refusal can name what the author wrote.
+    if (read.deeper) multiHopFields.add(read.field);
+  }
   return { traversals, bareFields, multiHopFields };
 }
 

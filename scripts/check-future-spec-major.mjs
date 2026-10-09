@@ -348,6 +348,29 @@ const QUOTATION_EXEMPTIONS = Object.freeze([
       + 'semantic entry above. A count, not a version.',
   },
   {
+    file: 'packages/spec/spec-changes.json',
+    major: 4997,
+    kind: 'measurement',
+    covers: 2,
+    witness: /controls objectstack 12966 and @objectstack\/spec 4997 on the same corpus/,
+    why:
+      'The generated copies of that same semantic entry\'s evidence sentence: '
+      + '`gen:spec-changes` projects step 18\'s semantic entries into the '
+      + 'per-major 17 → 18 record and into the aggregate record, once each, '
+      + 'from protocol 18 on. A count, not a version.',
+  },
+  {
+    file: 'docs/protocol-upgrade-guide.md',
+    major: 4997,
+    kind: 'measurement',
+    covers: 1,
+    witness: /controls objectstack 12966 and @objectstack\/spec 4997 on the same corpus/,
+    why:
+      'The generated copy of that same semantic entry\'s evidence sentence: '
+      + '`gen:upgrade-guide` renders step 18\'s semantic entries into the '
+      + 'Protocol 17 → 18 section from protocol 18 on. A count, not a version.',
+  },
+  {
     file: 'docs/adr/0021-analytics-dataset-semantic-layer.md',
     major: 6526,
     kind: 'measurement',

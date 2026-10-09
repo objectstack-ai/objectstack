@@ -8,7 +8,7 @@ import { SystemIdentifierSchema } from '../shared/identifiers.zod';
  * 
  * Unified storage protocol that combines:
  * - Object storage systems (S3, Azure Blob, GCS, MinIO)
- * - Scoped storage configuration (temp, cache, data, logs, config, public)
+ * - Scoped storage configuration (temp, cache, data, logs, config)
  * - Multi-cloud storage providers
  * - Bucket/container configuration
  * - Access control and permissions
@@ -21,24 +21,58 @@ import { SystemIdentifierSchema } from '../shared/identifiers.zod';
 // Storage Scope Protocol (formerly from scoped-storage.zod.ts)
 // ============================================================================
 
+import { lazySchema } from '../shared/lazy-schema';
+import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
+
+// ── Retired storage scope member (ADR-0049 enforce-or-remove, #22443) ───────
+//
+// `public` described "publicly accessible static assets", and no scope ever
+// made a file publicly readable: no runtime parses `ObjectStorageConfigSchema`,
+// and the scope the platform does store — `sys_file.scope`, written by the
+// `service-storage` upload doors — never decided anonymity either. The download
+// doors judge a file by its `acl`, the attachments scope and field ownership
+// alone, so a `public`-scoped file was a private file whose name said
+// otherwise. ADR-0104 makes `acl: 'public_read'` the one opt-in for anonymous
+// download; enforcing the scope instead would have opened a second door to
+// anonymity, which the triage ruling on #22443 declined. The upload doors
+// refuse the value by name too (`storage-routes.ts`).
+//
+// A VALUE-level retirement (`enumWithRetiredValues`, shared/retired-key.ts):
+// the member left the enum, so `tsc` refuses it, and the parse answers it with
+// the prescription below instead of zod's anonymous enum message. No ADR-0087
+// conversion: no metadata type carries this schema, so `os migrate meta` has
+// no authored source to rewrite. Module-private and written with `//`, never
+// `/** */`: prose an enum's error map consumes, not documented surface.
+const STORAGE_SCOPE_PUBLIC_RETIRED =
+  '`public` was removed from `StorageScope` in @objectstack/spec 17.8.0 (ADR-0049 '
+  + 'enforce-or-remove) — no storage scope ever made a file publicly readable. A file is '
+  + 'served without sign-in only when its stored file record carries `acl: \'public_read\'` '
+  + '(ADR-0104), the one opt-in for anonymous download. Name another scope, or omit `scope` '
+  + 'for the default `global`, and set `acl: \'public_read\'` on each file that must be '
+  + 'readable before sign-in.';
+
 /**
  * Storage Scope Enum
  * Defines the lifecycle and persistence guarantee of the storage area.
+ *
+ * A scope is never an access setting: `public` was retired (ADR-0049) and is
+ * answered at parse with its prescription. Anonymous download is a file's
+ * `acl: 'public_read'` (ADR-0104).
  */
-import { lazySchema } from '../shared/lazy-schema';
-import { retiredKey } from '../shared/retired-key';
-export const StorageScopeSchema = lazySchema(() => z.enum([
-  'global',     // Global application-wide storage
-  'tenant',     // Tenant-scoped storage (multi-tenant apps)
-  'user',       // User-scoped storage
-  'session',    // Session-scoped storage (ephemeral)
-  'temp',       // Ephemeral, cleared on restart
-  'cache',      // Ephemeral, survives restarts, cleared on LRU/Expiration
-  'data',       // Persistent, backed up
-  'logs',       // Append-only, rotated
-  'config',     // Read-heavy, versioned
-  'public'      // Publicly accessible static assets
-]).describe('Storage scope classification'));
+export const StorageScopeSchema = lazySchema(() => enumWithRetiredValues(
+  [
+    'global',     // Global application-wide storage
+    'tenant',     // Tenant-scoped storage (multi-tenant apps)
+    'user',       // User-scoped storage
+    'session',    // Session-scoped storage (ephemeral)
+    'temp',       // Ephemeral, cleared on restart
+    'cache',      // Ephemeral, survives restarts, cleared on LRU/Expiration
+    'data',       // Persistent, backed up
+    'logs',       // Append-only, rotated
+    'config',     // Read-heavy, versioned
+  ],
+  { public: STORAGE_SCOPE_PUBLIC_RETIRED },
+).describe('Storage scope classification'));
 
 export type StorageScope = z.input<typeof StorageScopeSchema>;
 
