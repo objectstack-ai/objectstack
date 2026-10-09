@@ -11,6 +11,10 @@ import type { TenancyPosture } from '@objectstack/spec/security';
 import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
 import type { DevLogin } from '@objectstack/spec/system';
 import { explainRule } from '@objectstack/lint/rule-explanations';
+// #22255 — the deployment's scheduled-work sentence, read as an IDENTITY: the
+// Flows section tells the policy class apart by equality with it, never by its
+// words. See `isDeploymentPolicyClass`.
+import { SCHEDULED_WORK_DISABLED_REASON } from '@objectstack/types';
 import { writeStdoutDirect } from './json-stdout.js';
 import { authoringRuleUnionStack } from './stack-collections.js';
 import { stripAnsi } from './boot-log-capture.js';
@@ -1588,6 +1592,38 @@ function unboundFlowClasses(
 }
 
 /**
+ * Whether one unbound-flow class is the deployment's scheduled-work switch
+ * (#22255) — flows refused because package-authored scheduled work is OFF,
+ * the documented default. That is an expected degradation, so its class line
+ * prints dim under `ℹ`, the way the maintainer's noise budget asks for one
+ * (「预期中的降级记 info」); every other class is the author's to fix and keeps
+ * its yellow `⚠`.
+ *
+ * Judged by IDENTITY with the producer's sentence, ⛔ never by its words. The
+ * engine records `scheduledWorkDisabledReason(policy)` of the reading that
+ * refused, and on every policy the environment resolves that is
+ * `SCHEDULED_WORK_DISABLED_REASON` byte for byte (`resolveScheduledWorkPolicy`
+ * never sets a `hostDisabledReason`). So equality is exact in both directions:
+ *
+ *  - a binding failure, a missing trigger, or any reason that merely QUOTES the
+ *    policy's words is not equal, and keeps `⚠`;
+ *  - a reworded producer is not equal either, and drifts back to `⚠` — the
+ *    loud direction. A substring or pattern match would drift the other way,
+ *    dimming a real failure that happened to share a phrase.
+ *
+ * A host-injected per-kernel policy carrying its OWN `hostDisabledReason` is
+ * not this class: its sentence is the host's, not the documented default, and
+ * the printer cannot know it — it keeps `⚠`, as before.
+ *
+ * Not `scheduledWorkDisabledReason(resolveScheduledWorkPolicy())`: on that
+ * reading it answers this same constant by construction, and the resolver
+ * throws on an unrecognised `OS_TENANCY_POSTURE` — a printer must not.
+ */
+function isDeploymentPolicyClass(reason: string): boolean {
+  return reason === SCHEDULED_WORK_DISABLED_REASON;
+}
+
+/**
  * One-glance answer to "did my flows actually arm?" — the question the
  * boot-quiet stdout window otherwise makes unanswerable (the engine's own
  * bind/registration logs are swallowed during startup).
@@ -1640,17 +1676,21 @@ function printAutomationSummary(a: AutomationReadySummary): string[] {
   // eight package-authored scheduled flows on a deployment with scheduled work
   // off used to print the same paragraph eight times here and eight more in
   // Boot diagnostics; it now prints one line.
+  //
+  // [#22255] Only the glyph and color depend on the class: the deployment's
+  // scheduled-work switch is information (dim `ℹ`), every other reason a
+  // warning (yellow `⚠`). Text, order and the records handed back are the same
+  // for both.
   let shortened = false;
   for (const c of unboundFlowClasses(a.unbound)) {
     const n = c.flowNames.length;
     const short = leadSentence(c.reason);
     if (short !== c.reason.trim().replace(/\.$/, '')) shortened = true;
-    console.error(
-      chalk.yellow(
-        `  ⚠ ${n} flow${n === 1 ? ' declares' : 's declare'} a '${c.triggerType}' trigger but ` +
-        `${n === 1 ? 'is' : 'are'} NOT bound — ${short}: ${c.flowNames.join(', ')}`,
-      ),
-    );
+    const expected = isDeploymentPolicyClass(c.reason);
+    const line =
+      `  ${expected ? 'ℹ' : '⚠'} ${n} flow${n === 1 ? ' declares' : 's declare'} a '${c.triggerType}' trigger but ` +
+      `${n === 1 ? 'is' : 'are'} NOT bound — ${short}: ${c.flowNames.join(', ')}`;
+    console.error(expected ? chalk.dim(line) : chalk.yellow(line));
     for (const flowName of c.flowNames) {
       restated.push(`[Automation] flow '${flowName}' declares a '${c.triggerType}' trigger but is NOT bound`);
     }
