@@ -49,7 +49,7 @@ Two separate questions:
    - `runAs: 'user'` (default) — runs as the triggering user; CRUD nodes respect that user's RLS. **Safer default.**
    - `runAs: 'system'` — elevated, bypasses RLS. Make elevation *explicit*, and surface it in the UI as "runs as system".
 
-   A schedule-triggered run has no user, so under `user` it runs unscoped — declare `system` to make that intentional.
+   A schedule-triggered run has no user, so under `user` its data operations are refused — declare `system` to make the elevation explicit and intended.
 
 ### Interface: gate the app, the nav, and the action
 

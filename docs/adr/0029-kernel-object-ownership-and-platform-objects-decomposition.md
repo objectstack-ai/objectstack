@@ -602,7 +602,7 @@ evidence it admits every subsequent write through the `allowRuntimeCreate` tier.
 So this is the declared contract being enforced consistently, not a new
 restriction; but a deployment that has been living in the post-first-write state
 will see writes start being refused. The documented operator hatch
-(`OS_METADATA_WRITABLE=object`, `packages/metadata-protocol/src/protocol.ts#OS_METADATA_WRITABLE`) is the same one door as
+(`OS_METADATA_WRITABLE=object`, `packages/metadata-protocol/src/sys-metadata-repository.ts#OS_METADATA_WRITABLE`) is the same one door as
 before, and it now has to stay open for the *life* of the customization rather
 than only for its first save. Deployments that cannot accept that must move the
 customization into a package — which is the position ADR-0005's whitelist has
