@@ -2355,6 +2355,121 @@ describe('runtime authoring gate on OBJECT writes — an option visibleWhen read
 });
 
 /**
+ * [#22274] The object save door refuses a field option's `visibleWhen` that
+ * reads a member of `ctx` or `os` the server's option check never binds, as
+ * `os build` does.
+ *
+ * The option check (`evaluateOptionVisibility` in ObjectQL) fills `ctx` and
+ * `os` with their `user` member only. Measured before this change: an option
+ * whose `visibleWhen` read `os.org.id`, `os.env` or `ctx.locale` saved through
+ * this door, and every write that picked the option faulted (`No such key`)
+ * and was admitted unchecked.
+ *
+ * The refusal is in `@objectstack/lint` (the option pass's member verdict); no
+ * code here moves. Pinned through the REAL `saveMetaItem`:
+ *
+ *  (a) each measured body is refused on an active save, a 422
+ *      `INVALID_METADATA` carrying the build's located finding, and nothing
+ *      lands;
+ *  (b) control: the acting user under every ADR-0068 spelling, `record`,
+ *      `previous` and `current_user.can(…)` save, and the row lands;
+ *  (c) the door's issue and the build's finding are the same finding.
+ *
+ * ⚠️ As in the blocks above: this package reaches `@objectstack/lint` through
+ * its built `dist/`, so an edit to the rule is invisible here until
+ * `pnpm --filter @objectstack/lint build` has run.
+ */
+describe('runtime authoring gate on OBJECT writes — an option visibleWhen reading an unbound ctx/os member (#22274)', () => {
+    const item = (visibleWhen: unknown) => ({
+        name: 'fx_item',
+        label: 'Item',
+        sharingModel: 'private',
+        fields: {
+            x: { type: 'text', label: 'X' },
+            tier: {
+                type: 'select',
+                label: 'Tier',
+                options: [{ label: 'Standard', value: 'standard' }, { label: 'Gold', value: 'gold', visibleWhen }],
+            },
+        },
+    });
+    /** The card's measured bodies, each with the member path the finding names. */
+    const REFUSED: Array<[string, string]> = [
+        ["os.org.id != ''", '`os.org`'],
+        ["os.env == 'prod'", '`os.env`'],
+        ["ctx.locale == 'en'", '`ctx.locale`'],
+    ];
+    /** Where the build locates it — the option the author edits. */
+    const WHERE = "object 'fx_item' · field 'tier' option 'gold' visibleWhen";
+
+    const host = () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+        return { protocol, rows };
+    };
+    const itemRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'object' && r.name === 'fx_item');
+    const save = (protocol: any, visibleWhen: unknown) =>
+        protocol.saveMetaItem({ type: 'object', name: 'fx_item', item: item(visibleWhen) });
+    const buildFindings = (visibleWhen: unknown) => {
+        const stack = { objects: [item(visibleWhen)] };
+        return runAuthoringRules('build', { normalized: stack, parsed: stack })
+            .filter((f) => f.rule === EXPRESSION_INVALID);
+    };
+
+    it.each(REFUSED)('(a) REFUSES %s on an active save with a 422 carrying the located finding, and nothing lands', async (body, path) => {
+        const { protocol, rows } = host();
+
+        const err = await save(protocol, body).catch((e: any) => e);
+
+        expect(err, 'the save resolved — the door still accepts the option predicate').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = err.issues.filter((i: any) => i.rule === EXPRESSION_INVALID);
+        expect(issues, `issues: ${JSON.stringify(err.issues)}`).toHaveLength(1);
+        expect(issues[0].path).toBe(WHERE);
+        expect(issues[0].severity).toBe('error');
+        // The named subject: the option, the field, the member, and what IS bound under its root.
+        expect(issues[0].message).toContain(`option 'gold' on field 'tier' reads ${path}`);
+        expect(issues[0].message).toContain('the `user` member and nothing else');
+        expect(itemRows(rows)).toEqual([]);
+    });
+
+    it('(b) control: the acting user under every ADR-0068 spelling, `record`, `previous` and `can` save, and the row lands', async () => {
+        for (const body of [
+            "current_user.id != ''",
+            "os.user.id != ''",
+            "'org_admin' in ctx.user.positions",
+            "user.id != ''",
+            "record.x == 'a'",
+            "previous.x == 'a'",
+            "current_user.can('fx_item', 'edit')",
+            "current_user.organizationId != ''",
+        ]) {
+            const { protocol, rows } = host();
+            const result = await save(protocol, body);
+            expect(result.success, body).toBe(true);
+            expect(itemRows(rows).map((r) => r.state), body).toEqual(['active']);
+        }
+    });
+
+    it.each(REFUSED)('(c) the door and `os build` give the SAME finding for %s', async (body) => {
+        const { protocol } = host();
+        const err = await save(protocol, body).catch((e: any) => e);
+        const atDoor = (err.issues ?? []).filter((i: any) => i.rule === EXPRESSION_INVALID);
+
+        const atBuild = buildFindings(body);
+
+        // Non-vacuous on both sides.
+        expect(atBuild).toHaveLength(1);
+        expect(atBuild[0]!.severity).toBe('error');
+        expect(atDoor).toHaveLength(1);
+        for (const key of ['rule', 'where', 'path', 'message', 'hint'] as const) {
+            expect(atDoor[0][key], `door and build disagree on '${key}'`).toBe(atBuild[0]![key]);
+        }
+    });
+});
+
+/**
  * [#22118] The object save door judges a stored sibling's finding against the
  * STORED universe — the registry's objects WITH the written object's stored
  * self — so a label-only save of a master is not refused for a detail the
