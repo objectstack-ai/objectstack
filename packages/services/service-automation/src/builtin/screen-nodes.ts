@@ -4,7 +4,7 @@ import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor, ScreenConfigSchema, ScriptConfigSchema } from '@objectstack/spec/automation';
 import type { ScreenConfigParsed, ScriptConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationEngine } from '../engine.js';
-import { interpolate, interpolateText } from './template.js';
+import { interpolate, renderTextSlot } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
 import { judgeHeadlessScreen } from '../screen-input-contract.js';
 
@@ -93,8 +93,8 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         configSchema: {
           type: 'object',
           properties: {
-            title: { type: 'string', title: 'Title', description: 'Heading shown above the screen.' },
-            description: { type: 'string', format: 'multiline', title: 'Description', description: 'Body text. Interpolates {var} references (e.g. {approval_path}).' },
+            title: { type: 'string', title: 'Title', description: 'Heading shown above the screen. Renders {{ }} placeholders (e.g. {{ record.name }}).' },
+            description: { type: 'string', format: 'multiline', title: 'Description', description: 'Body text. Renders {{ }} placeholders: a variable path with an optional formatter (e.g. {{ approval_path }}, {{ record.amount | currency }}).' },
             fields: {
               type: 'array',
               title: 'Fields',
@@ -158,17 +158,23 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         const parsedCfg = parseNodeConfig<ScreenConfigParsed>('screen', node.id, ScreenConfigSchema, node.config);
         if (!parsedCfg.ok) return parsedCfg.refusal;
         const cfg = parsedCfg.config;
-        // `{var}` tokens in screen config resolve against the live flow
-        // variables here (the engine does NOT pre-interpolate node config) — so
-        // a step's title/description/field-default/object-form-default can pull
-        // from prior nodes (e.g. `{lead_record.company}`, `{account_id}`).
+        // Screen config resolves against the live flow variables here (the
+        // engine does NOT pre-interpolate node config) — so a step's
+        // title/description/record id/field-default/object-form-default can pull
+        // from prior nodes.
         //
-        // [#15788] The body of this closure now lives in `template.ts` as
-        // {@link interpolateText}, because a second authored-text slot — the
-        // refusing `end` node's `message` (#14945 lane 2) — has to render
-        // through THE SAME implementation, not a copy of it. Same bytes in,
-        // same bytes out; the only change is where the four lines live.
-        const interp = (v: unknown): string | undefined => interpolateText(v, variables, context);
+        // [#22110] The two TEXT slots, `title` and `description`, render
+        // `{{ }}` holes (`{{ lead_record.company }}`) through
+        // {@link renderTextSlot} — the ONE text renderer the refusing `end`
+        // node's `message` and a notification share (#15788: never a copy).
+        // The rest keep the single-brace dialect (`{account_id}`): `recordId`
+        // names a record and `defaults` / a field's `defaultValue` hand their
+        // resolved values over, not text.
+        const text = (v: unknown): string | undefined => renderTextSlot(v, variables);
+        const ref = (v: unknown): string | undefined => {
+            const resolved = interpolate(v, variables, context);
+            return resolved == null ? undefined : String(resolved);
+        };
 
         // ── Object-form screen (master-detail wizards) ──────────────────────
         // When the step names an `objectName`, render that object's FULL
@@ -192,11 +198,11 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
             screen: {
               nodeId: node.id,
               kind: 'object-form',
-              title: interp(cfg.title) ?? node.label ?? objectName,
-              description: interp(cfg.description),
+              title: text(cfg.title) ?? node.label ?? objectName,
+              description: text(cfg.description),
               objectName,
               mode: cfg.mode === 'edit' ? 'edit' : 'create',
-              recordId: cfg.recordId != null ? interp(cfg.recordId) : undefined,
+              recordId: cfg.recordId != null ? ref(cfg.recordId) : undefined,
               defaults,
               idVariable,
               fields: [],
@@ -276,8 +282,8 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
           suspend: true,
           screen: {
             nodeId: node.id,
-            title: interp(cfg.title) ?? node.label ?? 'Input',
-            description: interp(cfg.description),
+            title: text(cfg.title) ?? node.label ?? 'Input',
+            description: text(cfg.description),
             fields,
           },
         };

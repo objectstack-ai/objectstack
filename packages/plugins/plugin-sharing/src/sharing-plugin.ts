@@ -59,6 +59,7 @@ import { bindBusinessUnitTreeRecompute } from './bu-tree-recompute.js';
 import { bindRecordShareCascade } from './record-share-cascade.js';
 import { bootstrapDeclaredSharingRules } from './bootstrap-declared-sharing-rules.js';
 import { normalizeTenancyPosture, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
+import { inProcessSessionReadInput } from '@objectstack/types';
 
 /**
  * How many organizations one boot-time sharing-rule seeding sweep enumerates.
@@ -937,7 +938,7 @@ export class SharingServicePlugin implements Plugin {
                     const authService = ctx.getService<IAuthService>('auth');
                     let api: AuthSessionApi | undefined = authService?.api;
                     if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
-                    return await api?.getSession?.({ headers: h });
+                    return await api?.getSession?.(inProcessSessionReadInput(h));
                   } catch {
                     return undefined;
                   }
