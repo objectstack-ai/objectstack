@@ -4,7 +4,7 @@
 
 The shared retry policy refuses a key it does not declare, and the build doors now judge a `try_catch` node's config keys like every other builtin's: a `retry.maxRetry` slip under a `try_catch` node, or on a job's `retryPolicy`, no longer passes `objectstack validate` and `objectstack compile` to be dropped or refused later.
 
-Clause-②: yes (narrowing: an undeclared key on the shared retry policy is refused at parse wherever it is written, a job's retryPolicy and a try_catch node's retry, and an undeclared try_catch config key at the build doors and the save door, where each passed)
+Clause-②: no (narrowing: an undeclared key on the shared retry policy is refused at parse wherever it is written, a job's retryPolicy and a try_catch node's retry, and an undeclared try_catch config key at the build doors and the save door, where each passed)
 
 <!-- adr-0087: registered try-catch-and-retry-policy-undeclared-keys-refused -->
 
