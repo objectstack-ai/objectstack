@@ -24,7 +24,7 @@ import { buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manifest.js';
 import { preflightDeclaredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
-import { attachPackageDocs, collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
+import { collectAndLintDocs, placeCollectedDocs, type DocIssue } from '../utils/collect-docs.js';
 import { buildRuntimeBundle, cleanupOldRuntimeBundles } from '../utils/build-runtime.js';
 import {
   printHeader,
@@ -981,9 +981,6 @@ export default class Compile extends Command {
       }
 
       const finalBundle: Record<string, unknown> = { ...(result.data as Record<string, unknown>) };
-      if (docsResult.docs.length > 0) {
-        finalBundle.docs = docsResult.docs;
-      }
       // [#18431] Docs read out of `src/<pkg>/docs/` attach to the body of the
       //     package that owns them — `packages[i].manifest`, ADR-0130 D4 option
       //     B — and ⛔ never to the top level, which is the maintainer's ruling
@@ -993,11 +990,22 @@ export default class Compile extends Command {
       //     `registerMetadataCollections` over `METADATA_ARRAY_KEYS`, which
       //     carries `docs` — so a doc on a body is served under that package
       //     and a flattened copy would buy nothing while destroying the
-      //     attribution. `attachPackageDocs` hands back the
-      //     ARGUMENT when it adds nothing, so a stack with no per-package docs
-      //     serializes from the very same references as before.
-      if (docsResult.packageDocs.length > 0) {
-        finalBundle.packages = attachPackageDocs(finalBundle.packages, docsResult.packageDocs);
+      //     attribution.
+      // [#22190] The stack's own flat `src/docs/` follows the same rule one
+      //     step up: on a multi-package artifact it rides the body of the
+      //     package that owns the artifact's manifest, because that artifact's
+      //     top level is no package's body and the metadata door warns about
+      //     every item it finds there. With no `packages[]` the top level IS
+      //     the one package, so it stays there. `placeCollectedDocs` makes both
+      //     choices; it hands back the very `docs` array and `packages` value
+      //     when it moves nothing, so a single-package stack serializes from
+      //     the same references as before.
+      const placed = placeCollectedDocs(finalBundle, docsResult);
+      if (placed.docs.length > 0) {
+        finalBundle.docs = placed.docs;
+      }
+      if (placed.packages !== finalBundle.packages) {
+        finalBundle.packages = placed.packages;
       }
 
       // 4b. Bundle handler functions into `<artifactDir>/objectstack-runtime.{hash}.mjs`

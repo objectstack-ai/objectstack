@@ -4402,8 +4402,9 @@ export class AutomationEngine implements IAutomationService {
         // validateNodeConfigKeys for why the #4045 reconciliation made this
         // safe, and for the deliberate exemptions (`assignment`, schemaless
         // types, keyValue maps). [#21982] Only for the types the spec does not
-        // judge — `try_catch` and plugin node types; every other builtin's
-        // undeclared key was refused by the `FlowSchema.parse` above.
+        // judge — plugin node types (#22343: `try_catch` was the last builtin
+        // here); every builtin's undeclared key was refused by the
+        // `FlowSchema.parse` above.
         this.validateNodeConfigKeys(name, parsed);
 
         // #15429 — parse every `decision` node's config against the spec's
@@ -10293,14 +10294,15 @@ export class AutomationEngine implements IAutomationService {
      *
      * **[#21982] One judge per node type.** For every builtin the spec judges
      * ({@link builtinNodeConfigKeysJudged} — every builtin with an executor
-     * contract but `try_catch`), the spec's key arm is the judge, at every
-     * door: `FlowSchema.parse` above already refused such a key, anchored at
-     * `nodes.N.config.<key>` in the contract's own words, before this walk
-     * runs. So this walk stands aside for those types and keeps the rest:
-     * `try_catch`, whose descriptor closes `retry` where its contract's `retry`
-     * strips an unknown key, and every PLUGIN node type, whose contract the
-     * spec does not declare and whose descriptor `configSchema` is the only
-     * declaration there is. The per-key tombstones below
+     * contract, `try_catch` included since its `retry` closed, #22343), the
+     * spec's key arm is the judge, at every door: `FlowSchema.parse` above
+     * already refused such a key, anchored at `nodes.N.config.<key>` in the
+     * contract's own words, before this walk runs. So this walk stands aside
+     * for those types and keeps the rest: every PLUGIN node type, whose
+     * contract the spec does not declare and whose descriptor `configSchema`
+     * is the only declaration there is. No builtin reaches it any more — the
+     * builtins it does not skip publish no `configSchema` (`decision`, `wait`,
+     * `connector_action`) or are exempt (`assignment`). The per-key tombstones below
      * ({@link FLOW_NODE_UNKNOWN_KEY_GUIDANCE}) live on in the contracts' own
      * unknown-key prescriptions for the types the spec now judges.
      *
