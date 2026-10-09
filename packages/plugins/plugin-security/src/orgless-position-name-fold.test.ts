@@ -157,7 +157,8 @@ async function boot(): Promise<ObjectQL> {
   await insertSet(e, 'ps_0_other_platform_ops', 'platform_ops', ORG_OTHER, ['probe.other_platform_ops']);
   await insertSet(e, 'ps_1_global_platform_ops', 'platform_ops', null, ['probe.global_platform_ops']);
   await e.insert('sys_user_permission_set', {
-    id: 'ups_global_platform_ops', user_id: USER_GLOBAL, permission_set_id: 'ps_1_global_platform_ops', organization_id: null,
+    id: 'ups_global_platform_ops', user_id: USER_GLOBAL, permission_set_id: 'ps_1_global_platform_ops',
+    permission_set: 'platform_ops', organization_id: null,
   }, SYS);
   return engine;
 }

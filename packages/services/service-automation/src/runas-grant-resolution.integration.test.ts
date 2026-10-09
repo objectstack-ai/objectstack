@@ -31,7 +31,7 @@ function fakeObjectQl(tables: Record<string, any[]>) {
   const match = (object: string, where: any): any[] =>
     (tables[object] ?? []).filter((r) =>
       Object.entries(where ?? {}).every(([k, v]) =>
-        { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return v && typeof v === 'object' && '$in' in (v as any) ? (v as any).$in.includes(r[k]) : r[k] === v; },
+        { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); if (v === null) return (r[k] ?? null) === null; /* an absent column reads as NULL, as in SQL */ return v && typeof v === 'object' && '$in' in (v as any) ? (v as any).$in.includes(r[k]) : r[k] === v; },
       ),
     );
   const engine: any = {
@@ -64,7 +64,7 @@ const AUTHZ_TABLES: Record<string, any[]> = {
   sys_user: [{ id: 'u1', email: 'u1@x.com' }],
   sys_member: [],
   sys_user_position: [{ user_id: 'u1', position: 'approver', organization_id: null }],
-  sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psE', organization_id: null }],
+  sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psE', permission_set: 'ehr_all', organization_id: null }],
   sys_permission_set: [{ id: 'psE', name: 'ehr_all', system_permissions: ['cap_ehr'] }],
   sys_position: [],
   sys_position_permission_set: [],

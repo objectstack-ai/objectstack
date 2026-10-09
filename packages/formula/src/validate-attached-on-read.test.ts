@@ -119,8 +119,40 @@ describe('ExprSchemaHint.attachedOnRead — record.<block>.<leaf>', () => {
     expect(refusalsOf('record.submitter_id.nmae == "x"', DECLARED)).toEqual([]);
   });
 
-  it('leaves a method call, an index read and a third segment unjudged — missed catches, never false refusals', () => {
-    expect(refusalsOf("record.viewer['can_actt'] == true", DECLARED)).toEqual([]);
+  it('judges the leaf in every member spelling, as it judges the dot', () => {
+    const refused = [{
+      code: 'unknown-field',
+      params: {
+        field: 'viewer.can_actt',
+        objectName: 'sys_approval_request',
+        suggestion: 'viewer.can_act',
+        block: 'viewer',
+        leaves: ['can_act', 'can_override', 'is_submitter'],
+      },
+    }];
+    for (const source of [
+      "record.viewer['can_actt'] == true",
+      "record.viewer.?can_actt.orValue(false) == true",
+      "record.viewer[?'can_actt'].orValue(false) == true",
+      "record['viewer'].can_actt == true",
+      "previous.?viewer.can_actt.orValue(false) == true",
+      'has(record.viewer.can_actt)',
+    ]) {
+      expect(refusalsOf(source, DECLARED), source).toEqual(refused);
+    }
+    // Control: the declared leaf in the same spellings.
+    for (const source of [
+      "record.viewer['can_act'] == true",
+      "record.viewer.?can_act.orValue(false) == true",
+      "record['viewer'][?'can_act'].orValue(false) == true",
+      'has(record.viewer.can_act)',
+    ]) {
+      expect(refusalsOf(source, DECLARED), source).toEqual([]);
+    }
+  });
+
+  it('leaves a computed key, a method call and a third segment unjudged — missed catches, never false refusals', () => {
+    expect(refusalsOf('record.viewer[record.status] == true', DECLARED)).toEqual([]);
     expect(refusalsOf("record.viewer.split(',') == []", DECLARED)).toEqual([]);
     expect(refusalsOf('record.viewer.can_act.foo == true', DECLARED)).toEqual([]);
   });

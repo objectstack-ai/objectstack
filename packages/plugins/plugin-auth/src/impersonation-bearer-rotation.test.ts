@@ -66,6 +66,8 @@ export const createMemoryEngine = () => {
         if ('$lte' in v) return actual <= v.$lte;
         if ('$regex' in v) return new RegExp(String(v.$regex)).test(String(actual ?? ''));
       }
+      // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+      if (v === null) return actual === null || actual === undefined;
       return eq(actual, v);
     });
   const project = (row: any, fields?: string[]) => {

@@ -39,6 +39,21 @@ export type McpTransport =
           args?: string[];
           /** Environment variables for the child process — carries credentials. */
           env?: Record<string, string>;
+          /**
+           * Working directory of the child process. A relative `command` path
+           * (one with a path separator, e.g. `./bin/server`) resolves against
+           * it, and so does a relative path the launched program resolves
+           * itself, such as the script in `node ./server.mjs`. A bare
+           * executable name (`node`, `npx`) is still looked up on `PATH`, and an
+           * absolute path is unaffected. Omitted, the child inherits the host
+           * process's current directory.
+           *
+           * The `mcp` provider factory sets it for a **declarative** instance to
+           * the root of the app that declared it (ADR-0097), so one app's
+           * relative paths resolve against one anchor wherever the server was
+           * started. A hand-wired transport keeps whatever its author passes.
+           */
+          cwd?: string;
       }
     | {
           kind: 'http';
@@ -174,6 +189,8 @@ async function defaultClientFactory(
                 command: transport.command,
                 args: transport.args,
                 env: transport.env,
+                // `undefined` inherits the host's current directory, as before.
+                cwd: transport.cwd,
             }),
         );
     } else {
