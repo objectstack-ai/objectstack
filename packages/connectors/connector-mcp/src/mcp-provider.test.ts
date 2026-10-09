@@ -191,3 +191,110 @@ describe('mcp provider declarative stdio policy (#3055)', () => {
         expect(mat.def.name).toBe('github');
     });
 });
+
+// ── #22423 — a declarative stdio transport runs in the declaring app's root ──
+//
+// One anchor for an app's relative paths: the host's
+// `ConnectorProviderContext.resolvePackagePath('.')` (the same root the
+// `openapi` provider's `providerConfig.spec` is read under) becomes the stdio
+// child's working directory. The anchor is the host's alone; an authored
+// `providerConfig.transport.cwd` never reaches the transport. A host without
+// the member gets the transport exactly as before: no `cwd` key at all.
+
+describe('mcp provider: declarative stdio working directory (#22423)', () => {
+    const ROOT = '/srv/apps/my-app';
+    const stdioCfg = { transport: { kind: 'stdio', command: 'node', args: ['./scripts/server.mjs'] } };
+
+    function recordingResolver(answer = ROOT) {
+        const asked: string[] = [];
+        const resolvePackagePath = async (relativePath: string) => {
+            asked.push(relativePath);
+            return answer;
+        };
+        return { resolvePackagePath, asked };
+    }
+
+    it("sets the stdio cwd to the host's resolvePackagePath('.'), leaving command and args as written", async () => {
+        const { factory: clientFactory, seen } = fakeClientFactory();
+        const { resolvePackagePath, asked } = recordingResolver();
+        const factory = createMcpProviderFactory({ clientFactory, declarativeStdio: ['node'] });
+
+        await factory(ctx({ providerConfig: stdioCfg, resolvePackagePath }));
+
+        expect(asked).toEqual(['.']);
+        const t = seen.transport;
+        expect(t?.kind).toBe('stdio');
+        if (t?.kind !== 'stdio') return;
+        expect(t.cwd).toBe(ROOT);
+        expect(t.command).toBe('node');
+        expect(t.args).toEqual(['./scripts/server.mjs']);
+    });
+
+    it('keeps the transport exactly as before when the host provides no resolvePackagePath', async () => {
+        const { factory: clientFactory, seen } = fakeClientFactory();
+        const factory = createMcpProviderFactory({ clientFactory, declarativeStdio: ['node'] });
+
+        await factory(ctx({ providerConfig: stdioCfg }));
+
+        expect(seen.transport?.kind).toBe('stdio');
+        expect(Object.keys(seen.transport ?? {})).not.toContain('cwd');
+    });
+
+    it('never honours an authored providerConfig.transport.cwd: the anchor is the host\'s', async () => {
+        const authored = { transport: { ...stdioCfg.transport, cwd: '/somewhere/else' } };
+
+        const withHost = fakeClientFactory();
+        const { resolvePackagePath } = recordingResolver();
+        await createMcpProviderFactory({ clientFactory: withHost.factory, declarativeStdio: ['node'] })(
+            ctx({ providerConfig: authored, resolvePackagePath }),
+        );
+        expect(withHost.seen.transport?.kind === 'stdio' && withHost.seen.transport.cwd).toBe(ROOT);
+
+        const withoutHost = fakeClientFactory();
+        await createMcpProviderFactory({ clientFactory: withoutHost.factory, declarativeStdio: ['node'] })(
+            ctx({ providerConfig: authored }),
+        );
+        expect(Object.keys(withoutHost.seen.transport ?? {})).not.toContain('cwd');
+    });
+
+    it('does not consult the resolver for an http transport', async () => {
+        const { factory: clientFactory, seen } = fakeClientFactory();
+        const { resolvePackagePath, asked } = recordingResolver();
+        const factory = createMcpProviderFactory({ clientFactory });
+
+        await factory(
+            ctx({ providerConfig: { transport: { kind: 'http', url: 'https://mcp.example.com' } }, resolvePackagePath }),
+        );
+
+        expect(asked).toEqual([]);
+        expect(Object.keys(seen.transport ?? {})).not.toContain('cwd');
+    });
+
+    it('judges the declarativeStdio policy first: a denied command never reaches the resolver', async () => {
+        const { factory: clientFactory, seen } = fakeClientFactory();
+        const { resolvePackagePath, asked } = recordingResolver();
+        const factory = createMcpProviderFactory({ clientFactory }); // default deny
+
+        await expect(factory(ctx({ providerConfig: stdioCfg, resolvePackagePath }))).rejects.toThrow(
+            /stdio transports are disabled by default/,
+        );
+        expect(asked).toEqual([]);
+        expect(seen.transport).toBeUndefined();
+    });
+
+    it('treats a resolver failure as a configuration fault (plain, not upstream-unavailable), before any connection', async () => {
+        const { factory: clientFactory, seen } = fakeClientFactory();
+        const factory = createMcpProviderFactory({ clientFactory, declarativeStdio: ['node'] });
+        const resolvePackagePath = async (): Promise<string> => {
+            throw new Error('host cannot resolve paths here');
+        };
+
+        const err: unknown = await Promise.resolve(factory(ctx({ providerConfig: stdioCfg, resolvePackagePath }))).catch(
+            (e: unknown) => e,
+        );
+
+        expect(err).toBeInstanceOf(Error);
+        expect(isConnectorUpstreamUnavailable(err)).toBe(false);
+        expect(seen.transport).toBeUndefined();
+    });
+});
