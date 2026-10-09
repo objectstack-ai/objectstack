@@ -305,7 +305,7 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
     expect(idsOf(composed)).toEqual(['com.example.crm', 'com.example.crm.cpq']);
   });
 
-  it('does not warn about an undeclared composition rule (#5005 rule 3)', () => {
+  it('does not warn about an undeclared composition rule', () => {
     composeStacks([raw({ manifest: crmManifest }), raw({ manifest: cpqManifest })], {
       manifest: 'preserve',
     });
@@ -360,7 +360,7 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
     return norm(fromBodies) === norm(flattened);
   };
 
-  it('#14512 — a multi-package artifact carries its collections ONCE, in the package bodies', () => {
+  it('a multi-package artifact carries its collections ONCE, in the package bodies', () => {
     const stacks = [withObjects(crmManifest, 'crm_account'), withObjects(cpqManifest, 'cpq_quote')];
     const preserved = composeStacks(stacks, { manifest: 'preserve' });
 
@@ -381,7 +381,7 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
   });
 
   it.each(['merge', 'override'] as const)(
-    "#14512 — keeps the flattened copy when `objectConflict: '%s'` RECONCILED two packages' object",
+    "keeps the flattened copy when `objectConflict: '%s'` RECONCILED two packages' object",
     (strategy) => {
       // ⭐ The case the first shape of this block could not see. Both packages
       // declare `crm_account`; composition reconciles them into ONE object and
@@ -409,7 +409,7 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
     },
   );
 
-  it('#14512 — keeps the flattened copy when a package binds an action onto a SIBLING package\'s object', () => {
+  it('keeps the flattened copy when a package binds an action onto a SIBLING package\'s object', () => {
     // The second way the two halves diverge without any name colliding:
     // `mergeActionsIntoObjects` binds a standalone action onto the object it
     // names, including an object another package owns. The composed object
@@ -438,7 +438,7 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
     expect(((ownerBody?.objects as Array<{ actions?: unknown[] }>)?.[0].actions ?? [])).toEqual([]);
   });
 
-  it('#14512 — keeps the flattened copy when an input has NO manifest to own its collections', () => {
+  it('keeps the flattened copy when an input has NO manifest to own its collections', () => {
     // `preservePackageEntries` contributes a body only for a stack that has a
     // manifest, and `manifest` is optional on the stack schema. Stripping here
     // would not remove a copy, it would delete the only one — so the emitter
@@ -450,7 +450,7 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
     expect(idsOf(preserved)).toEqual(['com.example.crm']);
   });
 
-  it('#14512 — keeps the flattened copy when a `packages`-carrying input declares collections of its own', () => {
+  it('keeps the flattened copy when a `packages`-carrying input declares collections of its own', () => {
     // Such a stack contributes its ENTRIES untouched (re-assembling one would
     // fold the composition's collections onto a package that does not own
     // them), so its own collections are attributed to no body either.
@@ -464,7 +464,7 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
     expect(idsOf(preserved)).toEqual(['com.example.crm', 'com.example.crm.cpq', 'com.example.crm.billing']);
   });
 
-  it('#14512 — a ONE-package artifact keeps today\'s shape (ADR-0130 D7)', () => {
+  it('a ONE-package artifact keeps today\'s shape (ADR-0130 D7)', () => {
     // D7 stated as a condition rather than trusted: an artifact that reaches a
     // single package entry by any route stays flattened, so the single-package
     // shape every customer has on disk is byte-identical to before.

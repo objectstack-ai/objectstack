@@ -163,7 +163,7 @@ The group has no `install`: ADR-0025 records the code-plugin install half (downl
 
 | Command | Description |
 |---------|-------------|
-| `os explain [schema]` | Display human-readable explanation of an ObjectStack schema |
+| `os explain [schema]` | Display a human-readable explanation of an ObjectStack schema, or of an author-time rule by its id (`os explain field-no-consumers`) |
 
 ## Configuration
 

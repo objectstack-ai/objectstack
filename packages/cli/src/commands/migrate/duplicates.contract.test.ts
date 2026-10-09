@@ -134,7 +134,7 @@ const collect = async (objectFilter?: string) =>
     client: 'better-sqlite3',
     now: () => new Date('2026-08-17T12:00:00.000Z'),
     // The real pre-flight against the real fixture — never a stand-in. This
-    // database has none of the four platform tables, so every entry is
+    // database has none of the platform tables the probes read, so every entry is
     // `table-absent`, and the `blocked` shape is pinned in its own test below
     // over a database that really carries the damage.
     runtimeIndexPreflight: await collectRuntimeIndexPreflight(exec, { client: 'better-sqlite3' }),
@@ -142,7 +142,7 @@ const collect = async (objectFilter?: string) =>
   });
 
 /**
- * The four probes, as `@objectstack/metadata-protocol` declares them.
+ * The three probes, as `@objectstack/metadata-protocol` declares them.
  *
  * Read from the producer rather than restated here: the descriptor (table,
  * index name, key parts, row scope, the two statements) is the migration's own
@@ -231,7 +231,7 @@ describe('#8928 os migrate duplicates — the report document', () => {
           organizationCounters: [{ organization: 'org_x', lastValue: 4 }],
         },
       ],
-      // One entry per index the three `kernel:ready` migrations tighten — FOUR,
+      // One entry per index the two `kernel:ready` migrations tighten — THREE,
       // because the overlay migration builds one per state and either can be
       // blocked on its own. Present whatever the outcome: an index left out
       // would make "nothing blocks it" and "it was never probed" the same
@@ -253,14 +253,13 @@ describe('#8928 os migrate duplicates — the report document', () => {
     });
   });
 
-  it('names the four kernel:ready indexes, and the migration behind each', async () => {
+  it('names the three kernel:ready indexes, and the migration behind each — none for the retired sys_view_definition (ADR-0131 D13)', async () => {
     const report = await collect();
     expect(
       report.runtimeIndexPreflight.map((p) => `${p.migration}:${p.table}:${p.index}`),
     ).toEqual([
       'ensureMetadataOverlayIndexes:sys_metadata:idx_sys_metadata_overlay_active',
       'ensureMetadataOverlayIndexes:sys_metadata:idx_sys_metadata_overlay_draft',
-      'ensureViewDefinitionActiveIndex:sys_view_definition:idx_sys_view_def_active',
       'ensureSysSettingIdentityIndex:sys_setting:uniq_sys_setting_organization_id_namespace_key_scope_user_id',
     ]);
   });

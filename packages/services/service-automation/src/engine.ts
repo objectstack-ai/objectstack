@@ -48,6 +48,11 @@ import { FlowValueSlotSchema, VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/a
 // judge, shared with `objectstack validate` (`@objectstack/lint` calls the same
 // function on the same config), so build and registration give one verdict.
 import { flowNodeValueTemplateRefusals } from '@objectstack/spec/automation';
+// [#21982] Which node types the spec judges an undeclared config key for — the
+// ONE judge of a builtin's undeclared key, met here through `FlowSchema.parse`.
+// `validateNodeConfigKeys` asks it and stands aside for every type it names,
+// so no node type has two judges.
+import { builtinNodeConfigKeysJudged } from '@objectstack/spec/automation';
 // [#17322] The EVALUATED-slot rule, IMPORTED rather than re-derived. It is the
 // rule `FlowEdgeSchema.condition` already composes since #15807, so a node's
 // `config.condition` — which no schema stands in front of — is held to the same
@@ -168,6 +173,16 @@ interface ConfigSchemaNode {
  * history is noise. The generic rejection already carries the path, the
  * did-you-mean and the declared set; an entry here adds the *mechanism* the
  * author was reaching for.
+ *
+ * ⚠️ [#21982] UNREAD today: every type keyed below (`create_record`,
+ * `update_record`, `delete_record`, `screen`) is one the spec judges
+ * ({@link builtinNodeConfigKeysJudged}), so {@link
+ * AutomationEngine.validateNodeConfigKeys} stands aside for it and never
+ * reaches this table. Each entry's prescription is carried by that type's
+ * executor contract (`builtin-node-config.zod.ts`, its strictObject
+ * `guidance`), which is what an author now meets, at every door. Kept only
+ * until the comments in that spec module stop naming this table; a plugin
+ * node type would add its own entry here.
  */
 /**
  * The bulk-intent spellings, shared by `update_record` and `delete_record`
@@ -4386,7 +4401,10 @@ export class AutomationEngine implements IAutomationService {
         // silence). Hard-fail with per-key prescriptions: see
         // validateNodeConfigKeys for why the #4045 reconciliation made this
         // safe, and for the deliberate exemptions (`assignment`, schemaless
-        // types, keyValue maps).
+        // types, keyValue maps). [#21982] Only for the types the spec does not
+        // judge — plugin node types (#22343: `try_catch` was the last builtin
+        // here); every builtin's undeclared key was refused by the
+        // `FlowSchema.parse` above.
         this.validateNodeConfigKeys(name, parsed);
 
         // #15429 — parse every `decision` node's config against the spec's
@@ -6037,8 +6055,9 @@ export class AutomationEngine implements IAutomationService {
      *
      * Also warns about the user-less case (#1888 follow-up, closed by #3760): a
      * flow whose effective `runAs` is `'user'` but whose trigger resolved no user
-     * has no identity to scope to, so its data nodes would run UNSCOPED (the data
-     * security middleware skips when there is no identity). Those data ops are now
+     * has no identity to scope to, so its data nodes used to run UNSCOPED (the
+     * data security middleware skipped a context with no identity; since
+     * ADR-0096 D5 it refuses one). Those data ops are now
      * REFUSED at `resolveRunDataContext`; the warning here fires at run SETUP,
      * before any node executes, so the refusal is diagnosable rather than a
      * surprise mid-flow. Authors declare `runAs:'system'` to make the elevation
@@ -6114,9 +6133,9 @@ export class AutomationEngine implements IAutomationService {
         if (runIsUnscopedUserMode(runContext) && flowTouchesData(flow)) {
             this.logger.warn(
                 `[runAs] flow '${flow.name}' executes with runAs:'user' but its trigger resolved no user ` +
-                `— its data operations will be REFUSED. Running them would execute UNSCOPED ` +
-                `(elevated, RLS-bypassing) rather than restricted, which is the fail-open ADR-0049 ` +
-                `forbids. Declare runAs:'system' to make the elevation explicit and intended, or arrange ` +
+                `— its data operations will be REFUSED. Without a user they would carry no principal: ` +
+                `refused by the security plugin where one is composed, unscoped where none is (the fail-open ADR-0049 forbids). ` +
+                `Declare runAs:'system' to make the elevation explicit and intended, or arrange ` +
                 `for the trigger to supply a user. Note a user-less trigger is NOT only a schedule: a ` +
                 `record-change flow fired by a system write carries no user either (ADR-0049).`,
             );
@@ -10273,6 +10292,20 @@ export class AutomationEngine implements IAutomationService {
      * keys with documented history — a per-key tombstone from
      * {@link FLOW_NODE_UNKNOWN_KEY_GUIDANCE}.
      *
+     * **[#21982] One judge per node type.** For every builtin the spec judges
+     * ({@link builtinNodeConfigKeysJudged} — every builtin with an executor
+     * contract, `try_catch` included since its `retry` closed, #22343), the
+     * spec's key arm is the judge, at every door: `FlowSchema.parse` above
+     * already refused such a key, anchored at `nodes.N.config.<key>` in the
+     * contract's own words, before this walk runs. So this walk stands aside
+     * for those types and keeps the rest: every PLUGIN node type, whose
+     * contract the spec does not declare and whose descriptor `configSchema`
+     * is the only declaration there is. No builtin reaches it any more — the
+     * builtins it does not skip publish no `configSchema` (`decision`, `wait`,
+     * `connector_action`) or are exempt (`assignment`). The per-key tombstones below
+     * ({@link FLOW_NODE_UNKNOWN_KEY_GUIDANCE}) live on in the contracts' own
+     * unknown-key prescriptions for the types the spec now judges.
+     *
      * Deliberate exemptions, unchanged from the warn era:
      *  - **`assignment` is exempt wholesale**: with no `assignments` wrapper
      *    its top-level config keys ARE the author's variable names
@@ -10305,6 +10338,9 @@ export class AutomationEngine implements IAutomationService {
                 // `assignment` config keys are the author's variable names — see the
                 // exemption note above.
                 if (node.type === 'assignment') continue;
+                // [#21982] The spec judged this type's keys in `FlowSchema.parse`:
+                // one judge per type, never two.
+                if (builtinNodeConfigKeysJudged(node.type)) continue;
                 const schema = this.actionDescriptors.get(node.type)?.configSchema as ConfigSchemaNode | undefined;
                 if (!schema) continue;
                 this.collectUndeclaredConfigKeys(node, schema, node.config, 'config', scoped);

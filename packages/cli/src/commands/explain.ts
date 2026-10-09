@@ -2,6 +2,9 @@
 
 import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
+// [#22161] The long-form author-time rule explanations, from the data-only
+// entry — `os explain object` does not pay for loading the rule engine.
+import { RULE_EXPLANATIONS, explainRule, type RuleExplanation } from '@objectstack/lint/rule-explanations';
 import {
   printHeader,
   printSuccess,
@@ -406,13 +409,50 @@ export const SCHEMAS: Record<string, SchemaInfo> = {
   },
 };
 
+// ─── Rule explanations ─────────────────────────────────────────────
+
+/** Word-wrap one paragraph to `width` columns, each line indented by `indent`. */
+function wrapParagraph(text: string, width: number, indent: string): string[] {
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    if (line && indent.length + line.length + 1 + word.length > width) {
+      lines.push(indent + line);
+      line = word;
+    } else {
+      line = line ? `${line} ${word}` : word;
+    }
+  }
+  if (line) lines.push(indent + line);
+  return lines;
+}
+
+/**
+ * [#22161] `os explain <rule-id>`: the reasoning an author-time finding no
+ * longer carries. A finding prints one verdict and one fix, and its `rule:`
+ * line points here for the rules `@objectstack/lint` explains.
+ */
+function printRuleExplanation(explanation: RuleExplanation): void {
+  printHeader(`Rule: ${explanation.rule}`);
+  for (const paragraph of explanation.paragraphs) {
+    console.log('');
+    for (const line of wrapParagraph(paragraph, 88, '  ')) console.log(line);
+  }
+  console.log('');
+}
+
 // ─── Command ────────────────────────────────────────────────────────
 
 export default class Explain extends Command {
-  static override description = 'Display human-readable explanation of an ObjectStack schema';
+  static override description =
+    'Display a human-readable explanation of an ObjectStack schema, or of an author-time rule by its id';
 
   static override args = {
-    schema: Args.string({ description: 'Schema name (e.g., object, field, view, flow, agent, app)', required: false }),
+    schema: Args.string({
+      description:
+        'Schema name (e.g., object, field, view, flow, agent, app) or author-time rule id (e.g., field-no-consumers)',
+      required: false,
+    }),
   };
 
   static override flags = {
@@ -423,7 +463,7 @@ export default class Explain extends Command {
     const { args, flags } = await this.parse(Explain);
     const schemaName = args.schema;
 
-    // ── No argument: list all schemas ──
+    // ── No argument: list all schemas, then the rules that have an explanation ──
     if (!schemaName) {
       if (flags.json) {
         await emitJson({
@@ -431,6 +471,7 @@ export default class Explain extends Command {
             name: key,
             description: s.description,
           })),
+          rules: Object.values(RULE_EXPLANATIONS).map((r) => ({ id: r.rule, covers: r.covers })),
         });
         return;
       }
@@ -442,21 +483,42 @@ export default class Explain extends Command {
         console.log(`  ${chalk.bold.cyan(key.padEnd(12))} ${chalk.dim(desc.length > 70 ? desc.slice(0, 70) + '...' : desc)}`);
       }
       console.log('');
-      printInfo(`Run ${chalk.white('objectstack explain <schema>')} for details.`);
+      printHeader('Rule Explanations');
+      console.log('');
+      for (const rule of Object.values(RULE_EXPLANATIONS)) {
+        console.log(`  ${chalk.bold.cyan(rule.rule)} ${chalk.dim(`— ${rule.covers}`)}`);
+      }
+      console.log('');
+      printInfo(`Run ${chalk.white('objectstack explain <schema>')} or ${chalk.white('objectstack explain <rule-id>')} for details.`);
       console.log('');
       return;
     }
 
-    // ── Lookup schema ──
-    const schema = SCHEMAS[schemaName.toLowerCase()];
+    // ── Lookup: a schema name first (as before), then an author-time rule id ──
+    // The two sets are disjoint (pinned in test/explain-rule-id.test.ts), so the
+    // order decides nothing today. Both are OWN-key lookups: a bare index read
+    // answered `constructor` / `__proto__` with Object's own members and the
+    // pretty printer then threw `schema.required is not iterable`.
+    const schemaKey = schemaName.toLowerCase();
+    const schema = Object.prototype.hasOwnProperty.call(SCHEMAS, schemaKey) ? SCHEMAS[schemaKey] : undefined;
+    const ruleExplanation = schema ? undefined : explainRule(schemaName);
+    if (!schema && ruleExplanation) {
+      if (flags.json) {
+        await emitJson(ruleExplanation);
+        return;
+      }
+      printRuleExplanation(ruleExplanation);
+      return;
+    }
     if (!schema) {
       if (flags.json) {
-        await emitJson({ error: `Unknown schema: ${schemaName}` }, 0, { compact: true });
+        await emitJson({ error: `Unknown schema or rule id: ${schemaName}` }, 0, { compact: true });
         process.exit(1);
       }
-      printError(`Unknown schema: "${schemaName}"`);
+      printError(`Unknown schema or rule id: "${schemaName}"`);
       console.log('');
       printInfo(`Available schemas: ${Object.keys(SCHEMAS).join(', ')}`);
+      printInfo(`Rules with an explanation: ${Object.keys(RULE_EXPLANATIONS).join(', ')}`);
       console.log('');
       process.exit(1);
     }

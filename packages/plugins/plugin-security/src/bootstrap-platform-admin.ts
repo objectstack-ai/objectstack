@@ -104,6 +104,7 @@ import {
   readRecordedStandingSnapshot,
   serializePlatformAdminStandingSnapshot,
 } from './platform-admin-standing-audit.js';
+import { GRANT_SET_NAME_FIELD, grantSetNameOf } from './grant-permission-set-name.js';
 
 /**
  * The order the standing-audit read states TO THE DRIVER.
@@ -611,11 +612,35 @@ const PLATFORM_ADMIN_PERMISSION_SET_NAME = 'admin_full_access';
  * runtime/app-plugin.ts `ensureSeedIdentity`) never counts — otherwise a DB
  * where it was wrongly promoted would block every real admin forever.
  * Ignoring it here makes the bootstrap self-healing on restart.
+ *
+ * ## By name, and the grant that names nothing yet ([ADR-0131] D4)
+ *
+ * Legs A and B ask for grants NAMING `admin_full_access`
+ * (`sys_user_permission_set.permission_set`), not for grants carrying the set
+ * row's id: a holder is a grant of the set by name.
+ *
+ * A grant written before that column existed carries no name until the
+ * one-time backfill names it — and the backfill runs at `kernel:bootstrapped`,
+ * AFTER the `kernel:ready` bootstrap that asks this question. On the first boot
+ * of an upgraded deployment, then, its platform administrator's grant names
+ * nothing yet, and a by-name scan alone would answer "nobody", promote the
+ * oldest user and hand them the seeded records: the second grant this function
+ * exists to refuse. So leg C, only when A and B found nobody, reaches the
+ * grants that name NOTHING through the set row's id, and an unscoped human one
+ * comes back as `unnamedHolder`. It only ever RESTRICTS: the bootstrap
+ * withholds the promotion on it, and it is never a holder — never an
+ * `adminUserId`, never a claim target ({@link findExistingPlatformAdmin}).
  */
 async function findPlatformAdminGrantHolder(
   ql: any,
   adminPsId: string,
-): Promise<{ holder: any | undefined; adminGrantRowsExamined: number; truncated: boolean }> {
+): Promise<{
+  holder: any | undefined;
+  /** Leg C: an unscoped human grant of the admin set row that names no set yet (restricts only). */
+  unnamedHolder: any | undefined;
+  adminGrantRowsExamined: number;
+  truncated: boolean;
+}> {
   const isUnscopedHumanHolder = (r: any) =>
     !r.organization_id && r.user_id !== SystemUserId.SYSTEM;
 
@@ -637,37 +662,49 @@ async function findPlatformAdminGrantHolder(
   const unscopedGrantRows = await tryFind(
     ql,
     'sys_user_permission_set',
-    { permission_set_id: adminPsId, organization_id: null },
+    { [GRANT_SET_NAME_FIELD]: PLATFORM_ADMIN_PERMISSION_SET_NAME, organization_id: null },
     PLATFORM_ADMIN_GRANT_PAGE_SIZE,
     ADMIN_GRANT_SCAN_ORDER,
   );
   countExamined(unscopedGrantRows);
   let holder: any | undefined = unscopedGrantRows.find(isUnscopedHumanHolder);
 
-  // Leg B — the ordered, bounded scan that still applies the exact predicate.
-  if (!holder) {
+  /**
+   * The ordered, bounded scan of one grant population, stopping at the first
+   * row `matches` accepts.
+   */
+  const scan = async (where: Record<string, unknown>, matches: (r: any) => boolean): Promise<any | undefined> => {
     const pageSize = PLATFORM_ADMIN_GRANT_PAGE_SIZE;
     const ceiling = PLATFORM_ADMIN_GRANT_SCAN_CEILING;
-    for (let offset = 0; offset < ceiling && !holder; offset += pageSize) {
+    for (let offset = 0; offset < ceiling; offset += pageSize) {
       const pageLimit = Math.min(pageSize, ceiling - offset);
-      const page = await tryFind(
-        ql,
-        'sys_user_permission_set',
-        { permission_set_id: adminPsId },
-        pageLimit,
-        ADMIN_GRANT_SCAN_ORDER,
-        offset,
-      );
+      const page = await tryFind(ql, 'sys_user_permission_set', where, pageLimit, ADMIN_GRANT_SCAN_ORDER, offset);
       if (page.length === 0) break;
       countExamined(page);
-      holder = page.find(isUnscopedHumanHolder);
-      if (holder) break;
+      const found = page.find(matches);
+      if (found) return found;
       if (page.length < pageLimit) break;
       if (offset + page.length >= ceiling) truncated = true;
     }
+    return undefined;
+  };
+
+  // Leg B — the ordered, bounded scan that still applies the exact predicate.
+  if (!holder) {
+    holder = await scan({ [GRANT_SET_NAME_FIELD]: PLATFORM_ADMIN_PERMISSION_SET_NAME }, isUnscopedHumanHolder);
   }
 
-  return { holder, adminGrantRowsExamined: examinedGrantRowIds.size, truncated };
+  // Leg C — the grants that name nothing yet, through the set row's id; it
+  // restricts only (see the function note).
+  let unnamedHolder: any | undefined;
+  if (!holder) {
+    unnamedHolder = await scan(
+      { permission_set_id: adminPsId },
+      (r) => grantSetNameOf(r) === undefined && isUnscopedHumanHolder(r),
+    );
+  }
+
+  return { holder, unnamedHolder, adminGrantRowsExamined: examinedGrantRowIds.size, truncated };
 }
 
 /**
@@ -688,7 +725,11 @@ async function findPlatformAdminGrantHolder(
  *  - no {@link PLATFORM_ADMIN_PERMISSION_SET_NAME} among the sets this plugin
  *    seeds (`admin_permission_set_missing`), or no stored row for it yet;
  *  - nobody holds the unscoped grant yet — a first boot, where the promotion
- *    that follows does its own claim.
+ *    that follows does its own claim;
+ *  - [ADR-0131 D4] the only unscoped grant of the set names nothing yet
+ *    (`unnamedHolder`): it restricts the promotion and confers nothing, so it
+ *    names no claim target — the claim of a later boot, once the backfill has
+ *    named the grant, hands the rows over.
  *
  * Read per call and never cached: the answer is final only once the grant
  * table stops moving, and a sign-up can promote someone later in this boot.
@@ -928,6 +969,7 @@ export async function bootstrapPlatformAdmin(
   // bounded and ordered is on the function.
   const {
     holder: unscopedHolder,
+    unnamedHolder,
     adminGrantRowsExamined,
     truncated: adminGrantScanTruncated,
   } = await findPlatformAdminGrantHolder(ql, adminPsId);
@@ -938,7 +980,7 @@ export async function bootstrapPlatformAdmin(
   // grant and hands it the seeded business records. So it says the number it
   // examined rather than letting the promotion below read as a statement about
   // the whole table.
-  if (adminGrantScanTruncated && !unscopedHolder) {
+  if (adminGrantScanTruncated && !unscopedHolder && !unnamedHolder) {
     const truncation =
       '[security] the existing-platform-admin check stopped at its ceiling of '
       + `${PLATFORM_ADMIN_GRANT_SCAN_CEILING} admin_full_access grant row(s) `
@@ -970,6 +1012,31 @@ export async function bootstrapPlatformAdmin(
       // has run at all, asks {@link findExistingPlatformAdmin}, which answers
       // with this same holder (see `adminUserId` above).
       ...(unscopedHolder.user_id ? { adminUserId: String(unscopedHolder.user_id) } : {}),
+      ...resyncCounts,
+      ...grantScanCounts,
+    };
+  }
+
+  // [ADR-0131 D4] An unscoped grant of the admin set row that names no set yet
+  // — on an upgraded deployment's first boot, its platform administrator's
+  // grant, which the name backfill reaches only at `kernel:bootstrapped`. It is
+  // read as an administrator who may already exist: promoting now would mint
+  // the second grant {@link findPlatformAdminGrantHolder} exists to refuse. It
+  // names no `adminUserId` — it restricts, it confers nothing — so the seed
+  // claim waits for a boot that reads the grant by its name.
+  if (!walled && unnamedHolder) {
+    const withheld =
+      '[security] platform-admin promotion WITHHELD: an unscoped admin_full_access grant exists whose '
+      + 'permission-set name (sys_user_permission_set.permission_set) is not written yet, so this pass '
+      + 'cannot read it as the holder and will not mint a second one. The one-time grant-name backfill '
+      + 'names it at kernel:bootstrapped; the next pass reads it by name. If it stays unnamed, the '
+      + 'backfill\'s own report says why.';
+    if (logger?.warn) logger.warn(withheld);
+    else logger?.info?.(withheld);
+    return {
+      seeded: seededCount,
+      adminPromoted: false,
+      reason: 'admin_grant_unnamed',
       ...resyncCounts,
       ...grantScanCounts,
     };

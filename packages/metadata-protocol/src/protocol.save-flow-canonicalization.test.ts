@@ -397,6 +397,63 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
         expect(fallbackWarnings()).toHaveLength(0);
     });
 
+    /**
+     * [#21982] On the fallback path — no canonicalizer resolved, or it threw —
+     * the gate judges the body in its ADR-0087 D2-converted spelling, for the
+     * verdict only. The flow parse refuses an undeclared config key on the
+     * builtin node types, so without the conversion a D2 spelling every other
+     * door converts first (`os validate`, `defineStack`, `registerFlow`) would
+     * be refused here, and only here: a verdict that depended on whether the
+     * host runs an automation service. What is STORED stays the raw body.
+     */
+    describe('[#21982] the fallback gate judges the D2-converted body, and stores the raw one', () => {
+        const scriptBody = (config: Record<string, unknown>) => ({
+            ...flowBody({}),
+            nodes: [{ id: 'n1', type: 'script', label: 'Triage', config }],
+        });
+        const issuesOf = async (promise: Promise<unknown>) => {
+            try {
+                await promise;
+            } catch (err) {
+                return err as { code?: unknown; status?: unknown; issues?: Array<{ path: string }> };
+            }
+            throw new Error('expected the save to be refused');
+        };
+
+        it('a legacy script `functionName` body saves on a host with no automation service, stored raw', async () => {
+            const { protocol, rows } = makeProtocol(new Map());
+
+            const result = await save(protocol, scriptBody({ functionName: 'helpdesk.triage' }));
+
+            expect(result.success).toBe(true);
+            // Judged as `function`, stored exactly as written.
+            expect(storedFlow(rows)!.body.nodes[0].config).toEqual({ functionName: 'helpdesk.triage' });
+        });
+
+        it('an undeclared key on delete_record is refused 422 INVALID_METADATA at its path — the alias beside it is not', async () => {
+            const { protocol, rows } = makeProtocol(new Map());
+
+            const err = await issuesOf(save(protocol, flowBody({ objectName: 'lead', filters: { status: 'stale' }, bogusKey: 1 })));
+
+            expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            expect((err.issues ?? []).map((i) => i.path)).toEqual(['nodes.0.config.bogusKey']);
+            expect(rows.size).toBe(0);
+        });
+
+        it('a canonicalizer throw still refuses a body the gate rejects after conversion', async () => {
+            const throwing = () => { throw new Error('cycle detected: n1 → n1'); };
+            const { protocol, rows } = makeProtocol(
+                new Map([['automation', { canonicalizeStoredFlow: throwing }]]),
+            );
+
+            const err = await issuesOf(save(protocol, flowBody({ objectName: 'lead', filters: { status: 'stale' }, bogusKey: 1 })));
+
+            expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            expect((err.issues ?? []).map((i) => i.path)).toEqual(['nodes.0.config.bogusKey']);
+            expect(rows.size).toBe(0);
+        });
+    });
+
     it('non-flow saves never consult the canonicalizer', async () => {
         const spy = vi.fn(canonicalizeStoredFlow);
         const { protocol } = makeProtocol(

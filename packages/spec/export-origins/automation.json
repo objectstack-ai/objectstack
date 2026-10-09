@@ -263,6 +263,7 @@
     "WebhookTriggerType": "src/automation/webhook.zod.ts#WebhookTriggerType (type)",
     "analyzeRegion": "src/automation/control-flow.zod.ts#analyzeRegion (function)",
     "approverTypeIsOrgScoped": "src/automation/approval.zod.ts#approverTypeIsOrgScoped (function)",
+    "builtinNodeConfigKeysJudged": "src/automation/flow-node-config-refusals.ts#builtinNodeConfigKeysJudged (function)",
     "canonicalApproverType": "src/automation/approval.zod.ts#canonicalApproverType (function)",
     "collectFlowGraphs": "src/automation/control-flow.zod.ts#collectFlowGraphs (function)",
     "defineActionDescriptor": "src/automation/node-executor.zod.ts#defineActionDescriptor (function)",

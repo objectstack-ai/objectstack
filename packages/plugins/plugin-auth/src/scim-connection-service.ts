@@ -119,7 +119,8 @@ interface CredentialEngine {
  * verifier runs BEFORE any caller is known — the bearer it is verifying is the
  * only identity on the request — so there is no principal to carry, and the
  * read must say so rather than reach the engine with no principal and no
- * opt-in (the security middleware's principal-less hand-off, ADR-0096). The
+ * opt-in (the security middleware's former principal-less hand-off, which
+ * ADR-0096 D5 replaced with a refusal). The
  * digest equality in the `where` is the whole of what the probe may match.
  */
 const CREDENTIAL_PROBE_CONTEXT = { context: { isSystem: true } } as const;

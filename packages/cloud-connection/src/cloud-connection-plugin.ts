@@ -78,6 +78,7 @@ interface Plugin {
 }
 
 import { hostname } from 'node:os';
+import { inProcessSessionReadInput } from '@objectstack/types';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
 
@@ -202,7 +203,10 @@ export class CloudConnectionPlugin implements Plugin {
 
             const sessionFromAuthService = async (authSvc: any, rawReq: Request): Promise<{ userId?: string } | null> => {
                 const api = typeof authSvc?.getApi === 'function' ? await authSvc.getApi() : authSvc?.api ?? authSvc;
-                const session = await api?.getSession?.({ headers: rawReq.headers });
+                // [#22258] The in-process session-read rule: a request carrying a
+                // session cookie reads without renewal, because this route's
+                // response never carries a renewed cookie.
+                const session = await api?.getSession?.(inProcessSessionReadInput(rawReq.headers));
                 const userId = session?.user?.id ? String(session.user.id) : undefined;
                 return userId ? { userId } : null;
             };

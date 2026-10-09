@@ -68,7 +68,7 @@ const rows: Array<{ label: string; objects: unknown }> = [
   { label: 'false', objects: false },
 ];
 
-describe('#19785 — defineStack strict: false refuses a non-array `objects` with an ADR-0112 envelope', () => {
+describe('defineStack strict: false refuses a non-array `objects` with an ADR-0112 envelope', () => {
   for (const row of rows) {
     it(`\`objects\` as ${row.label} is refused with code STACK_SCHEMA_INVALID and status 422, the issue at ['objects']`, () => {
       const refused = refusal(() => nonStrict({ objects: row.objects, actions: [bound] }));

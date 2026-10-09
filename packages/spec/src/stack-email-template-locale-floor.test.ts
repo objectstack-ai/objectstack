@@ -63,7 +63,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('#17614 — the floor tag is one named constant, not two spellings', () => {
+describe('the floor tag is one named constant, not two spellings', () => {
   it('is the schema default for `locale`, so a row that omits the key HAS the floor', () => {
     expect(EMAIL_TEMPLATE_FLOOR_LOCALE).toBe('en-US');
     const parsed = EmailTemplateDefinitionSchema.parse({
@@ -90,7 +90,7 @@ describe('#17614 — the floor tag is one named constant, not two spellings', ()
   // A published declaration promising a loud permanent refusal where the
   // runtime performs a silent fill is the defect; both call shapes must stay
   // named, so the promise cannot quietly go unconditional again.
-  it('[#18056] scopes the dead-letter promise to a call that NAMES a locale, and states the other case', () => {
+  it('scopes the dead-letter promise to a call that NAMES a locale, and states the other case', () => {
     const text = String(EmailTemplateDefinitionSchema.shape.locale.description ?? '');
     expect(text).toMatch(/NAMES a locale/);
     expect(text).toMatch(/lowest locale tag/);
@@ -99,7 +99,7 @@ describe('#17614 — the floor tag is one named constant, not two spellings', ()
   });
 });
 
-describe('#17614 — defineStack reports a bundle with no `en-US` floor', () => {
+describe('defineStack reports a bundle with no `en-US` floor', () => {
   it('reports the trap: every supportedLocales tag authored, none of them the floor', () => {
     const { warns, value } = warningsOf(stack(['en', 'zh-CN', 'ja-JP', 'es-ES'].map((l) => tpl(l)), THE_TRAP));
     const hits = floorWarns(warns);
@@ -130,7 +130,7 @@ describe('#17614 — defineStack reports a bundle with no `en-US` floor', () => 
   });
 });
 
-describe('#17614 — and stays silent where the bundle HAS a floor (the controls)', () => {
+describe('and stays silent where the bundle HAS a floor (the controls)', () => {
   // ⛔ Every case in THIS block is a bundle that genuinely carries the floor
   // row. The shapes that are floorless and silent anyway are the guard's scope
   // boundary and live in their own block below — filing them here read as
@@ -156,7 +156,7 @@ describe('#17614 — and stays silent where the bundle HAS a floor (the controls
 
 });
 
-describe('#17614 — warn-once bookkeeping', () => {
+describe('the no-floor report: warn-once bookkeeping', () => {
   it('warns once for one bundle, however many times the same stack is defined', () => {
     const first = warningsOf(stack([tpl('pt-BR')], { defaultLocale: 'pt-BR', supportedLocales: ['pt-BR'] }));
     const second = warningsOf(stack([tpl('pt-BR')], { defaultLocale: 'pt-BR', supportedLocales: ['pt-BR'] }));
@@ -176,7 +176,7 @@ describe('#17614 — warn-once bookkeeping', () => {
 // enforce-or-remove question and is not decided here; what is closed is the
 // silence being undeclared and unpinned.
 
-describe('#18056 — the guard\'s declared scope boundary', () => {
+describe('the floor guard\'s declared scope boundary', () => {
   it('early return 1: a stack with no `i18n` block is never examined, floorless or not', () => {
     const { warns, value } = warningsOf(stack([tpl('en', 'acme.scope_no_i18n')]));
     expect(floorWarns(warns)).toEqual([]);

@@ -279,6 +279,32 @@ async function serveFamilyRead<A>(
 }
 
 /**
+ * [#22344] The projection `get_record`'s single-row (`findOne`) branch hands
+ * the engine: the author's `fields`, with `id` named.
+ *
+ * That branch answers `output.id` from the row it read, and a later node reads
+ * it as `{<node>.id}`. The SQL drivers return exactly the columns a projection
+ * names, so the author's `fields` handed over unchanged read a row with no
+ * `id` whenever they left it out: `output.id` was `undefined`, with no error.
+ * Naming `id` here makes the declared output independent of the author's
+ * projection, on every driver and on the stored-metadata family path alike
+ * ({@link serveFamilyRead} takes this projection as the node's own).
+ *
+ * `record` then carries the `id` the engine returned, so `{var.id}` through the
+ * node's `outputVariable` agrees with `{<node>.id}`; it is not taken back off,
+ * which would be a second projection layer over the engine's answer.
+ *
+ * Only a non-empty projection is touched: no `fields`, or an empty list, is a
+ * whole-row read already, and a projection that names `id` is handed over as
+ * written. The `find` branch (`limit > 1`) answers rows only, with no
+ * top-level `id`, and does not come through here.
+ */
+function projectionNamingId(fields: string[] | undefined): string[] | undefined {
+    if (!fields || fields.length === 0 || fields.includes('id')) return fields;
+    return [...fields, 'id'];
+}
+
+/**
  * [#21623] Refuse a node whose filter EVALUATES the stored-metadata family's
  * body or content hash, the way the generic data door refuses the same filter.
  *
@@ -498,7 +524,9 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                             metrics: { selected: Array.isArray(records) ? records.length : 0 },
                         };
                     }
-                    const record = await serveFamilyRead(data, objectName, fields, (projection) =>
+                    // [#22344] `output.id` is read off the row, so the
+                    // projection the engine is handed names `id`.
+                    const record = await serveFamilyRead(data, objectName, projectionNamingId(fields), (projection) =>
                         data.findOne(objectName, { where: filter, fields: projection, context: dataCtx }));
                     if (outputVariable) variables.set(outputVariable, record);
                     return {

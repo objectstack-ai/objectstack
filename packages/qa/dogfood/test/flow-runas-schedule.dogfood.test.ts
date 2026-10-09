@@ -8,8 +8,9 @@
 // for a USER-triggered run; this one pins the boundary case: a run with NO
 // trigger user under an effective `runAs:'user'` (the default) resolves no
 // identity, so its CRUD nodes would present no ObjectQL context → the security
-// middleware SKIPS (it delegates auth to the auth layer) → the run would execute
-// UNSCOPED (effectively elevated), not restricted.
+// middleware used to SKIP (it delegated auth to the auth layer; since ADR-0096
+// D5 it refuses such a context) → the run would execute UNSCOPED (effectively
+// elevated), not restricted.
 //
 // Until #3760 that is exactly what happened, and THIS FILE PINNED IT — asserting
 // that a user-less run read and wrote an admin-owned record a member cannot

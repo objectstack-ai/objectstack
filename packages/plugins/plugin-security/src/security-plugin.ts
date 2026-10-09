@@ -165,7 +165,7 @@ import {
 import {
   readDeploymentOrgScopingEntitlement,
   type DeploymentOrgScopingEntitlementReading,
-} from './deployment-org-scoping-entitlement.js';
+} from '@objectstack/core';
 import { SysPositionDetailPage } from '@objectstack/platform-objects/pages';
 import {
   securityObjects,
@@ -1212,26 +1212,33 @@ export class SecurityPlugin implements Plugin {
   /**
    * [#12699] `problem` strings already warned about, so a junk
    * `OrgScopingEntitlement` key is explained once per boot rather than on
-   * every security-meta fill (the `warnedAuthoredTenantPolicies` pattern).
+   * every read (the `warnedAuthoredTenantPolicies` pattern).
    */
   private readonly warnedEntitlementRefusals = new Set<string>();
   /**
-   * [#12699] The deployment's wall-shaping declaration, read LIVE off the
-   * mounted `org-scoping` service — the same read pattern as the seam's
-   * existing consumer (plugin-auth's `probeEntitledPostures`): resolve the
-   * service per call, fail closed to "absent" on any miss. Live resolution is
-   * ordering-robust by construction: a deployment where the wall is ARMED had
-   * `org-scoping` registered before this plugin's `start()` captured the
-   * posture, so the declaration is present from the first read; a deployment
-   * where it registered too late resolves `single` and Layer 0 is inert, so
-   * the exemption decides nothing. Validation is memoized per service
-   * instance inside the reader; refusals are warned once per boot here.
+   * [#12699] The deployment's `suppressUnboundedOrgAdminGrant` declaration,
+   * read LIVE off the mounted `org-scoping` service — the same read pattern as
+   * the seam's existing consumer (plugin-auth's `probeEntitledPostures`):
+   * resolve the service per call, fail closed to "absent" on any miss.
+   * Validation is memoized per service instance inside the reader; refusals
+   * of the key this plugin consumes are warned once per boot here.
+   *
+   * [ADR-0131 D7] `platformGlobalObjects` is NOT consumed here any more, and
+   * nothing in this plugin stands Layer 0 down for a declared object. The
+   * declaration is the injected-columns plan's input, read by the engine's
+   * schema registry (`@objectstack/objectql`): a declared object is
+   * registered with no `organization_id` and declaring
+   * `systemFields.tenant: false`, so the object's own two clauses in
+   * {@link getObjectSecurityMeta} answer for it, and Layer 0 and the driver
+   * agree by having nothing to scope. The engine warns for a junk
+   * `platformGlobalObjects`; this plugin warns only for the key it reads.
    */
   private deploymentOrgScopingEntitlement(): DeploymentOrgScopingEntitlementReading {
     const reading = readDeploymentOrgScopingEntitlement(
       this.resolveKernelService?.('org-scoping'),
     );
     for (const refusal of reading.refused) {
+      if (refusal.key !== 'suppressUnboundedOrgAdminGrant') continue;
       if (this.warnedEntitlementRefusals.has(refusal.problem)) continue;
       this.warnedEntitlementRefusals.add(refusal.problem);
       this.logger?.warn?.(
@@ -1894,19 +1901,13 @@ export class SecurityPlugin implements Plugin {
             ? 'organization_id IN accessible_org_ids — union access across the caller\'s memberships'
             : 'organization_id = active organization'})`,
       );
-      // [#12699] Surface the deployment's wall-shaping declaration at arming
-      // time: the carve-out list is a security-relevant deployment fact, and
-      // this is also the boot-time seam where a junk declaration gets its
-      // warn-once (the accessor validates as a side effect), instead of
-      // surfacing on the first request.
+      // [#12699] Surface the deployment's grant-shaping declaration at arming
+      // time: it is a security-relevant deployment fact, and this is also the
+      // boot-time seam where a junk declaration gets its warn-once (the
+      // accessor validates as a side effect), instead of surfacing on the
+      // first request. [ADR-0131 D7] The platform-global list is announced by
+      // the engine, which plans the columns from it — not here.
       const entitlement = this.deploymentOrgScopingEntitlement();
-      if (entitlement.platformGlobalObjects.size > 0) {
-        ctx.logger.info(
-          `[security] deployment declares ${entitlement.platformGlobalObjects.size} platform-global ` +
-            `object(s) — Layer 0 does not wall them on THIS deployment`,
-          { objects: [...entitlement.platformGlobalObjects].sort() },
-        );
-      }
       if (entitlement.suppressUnboundedOrgAdminGrant) {
         ctx.logger.info(
           '[security] deployment suppresses the unbounded organization_admin auto-grant — ' +
@@ -6057,11 +6058,14 @@ export class SecurityPlugin implements Plugin {
    * `/auth/me/permissions` uses ({@link fallbackPermissionSet}, default
    * `member_default`) instead of falling open to the full field set.
    *
-   * Why the two differ rather than converge. `getReadableFields` mirrors the
-   * engine middleware, which skips its grant-based gates for a caller with no
-   * permission sets — reporting a narrowing the data path would not enforce is
-   * its own kind of drift, so on the DATA plane falling open is the correct,
-   * drift-free answer. What reaches that caller is the object's posture
+   * Why the two differ rather than converge. `getReadableFields` keeps the
+   * answer it gave when the engine middleware skipped its grant-based gates for
+   * a caller with no permission sets — reporting a narrowing the data path did
+   * not enforce was its own kind of drift, so on the DATA plane falling open was
+   * the drift-free answer. The middleware no longer serves that caller: object
+   * admission refuses it (ADR-0056 D2's deny baseline) and a principal-less one
+   * is refused outright (ADR-0096 D5), so no data-plane read reaches the fields
+   * named here. What reaches that caller is the object's posture
    * ({@link resolveCallerPosture}): [#20995] its masking rules, and a masked
    * field is a served column, so it stays; [#21063] its per-field capability
    * contract, and a capability-gated field is not served, so it leaves. The
@@ -7355,6 +7359,10 @@ export class SecurityPlugin implements Plugin {
    *       driver.
    *   (c) admin-authored rows (`managed_by` user/∅/admin) are untouched — the
    *       admin fully owns those (incl. a delegate's rows in their own subtree).
+   *   (d) [#22360] ONE carve-out from (b): an `update` of a PACKAGE-provided
+   *       `sys_position` row whose patch touches only ROW STATE passes — see
+   *       {@link SecurityPlugin.PACKAGE_POSITION_ROW_STATE_COLUMNS}. Platform
+   *       rows and `sys_capability` get no carve-out.
    * Fails CLOSED and never depends on the caller's grants, so a superuser with
    * modifyAllRecords cannot delete a platform position either.
    */
@@ -7391,17 +7399,27 @@ export class SecurityPlugin implements Plugin {
 
     if (!this.ql) return;
 
+    // (d) Whether this write is the row-state-only update the carve-out admits.
+    const rowStateOnly = SecurityPlugin.isPackagePositionRowStatePatch(opCtx);
+
     const targetId = this.extractSingleId(opCtx);
     if (targetId == null) {
       // Multi-row / filter write with no single id. Deny ONLY if a managed row
       // actually falls within the write's own filter — so a bulk edit that
       // targets only admin-authored rows still succeeds (no over-broad block). A
       // whole-table write (no filter) matches every managed row, so it is denied.
+      //
+      // (d) A row-state-only patch asks only about the rows the carve-out does
+      // not cover: package positions in the filter no longer refuse it, a
+      // platform position in the filter still does.
+      const guardedValues = rowStateOnly
+        ? managedValues.filter((v) => !SecurityPlugin.PACKAGE_POSITION_PROVENANCE.has(v))
+        : managedValues;
       const writeWhere = opCtx?.options?.where;
       const managedWhere =
         writeWhere && typeof writeWhere === 'object'
-          ? { $and: [writeWhere, { managed_by: { $in: managedValues } }] }
-          : { managed_by: { $in: managedValues } };
+          ? { $and: [writeWhere, { managed_by: { $in: guardedValues } }] }
+          : { managed_by: { $in: guardedValues } };
       // [#7505] No `.catch(() => null)` — see the sibling gate: a swallowed
       // fault made this asset guard answer "nothing managed matched" and admit
       // the write. Fail-closed: propagate.
@@ -7423,6 +7441,8 @@ export class SecurityPlugin implements Plugin {
       ? String((existing as Record<string, unknown>).managed_by ?? '')
       : '';
     const ownerLabel = spec.managed[existingManagedBy];
+    // (d) The carve-out: a row-state-only patch of a package-provided position.
+    if (existing && rowStateOnly && SecurityPlugin.PACKAGE_POSITION_PROVENANCE.has(existingManagedBy)) return;
     if (existing && ownerLabel) {
       const row = existing as Record<string, unknown>;
       const source = ownerLabel === 'the platform' ? 'platform definition' : 'application package';
@@ -7433,6 +7453,57 @@ export class SecurityPlugin implements Plugin {
         { operation: op, object: opCtx.object, recordId: targetId, managedBy: existingManagedBy },
       );
     }
+  }
+
+  /**
+   * [#22360] The ROW-STATE columns of `sys_position`: the one named allowlist
+   * the carve-out (d) of {@link SecurityPlugin.assertSystemRowWriteGate} admits
+   * on a package-provided position.
+   *
+   * A package position row is locked the way a packaged permission set is.
+   * `permission-set-projection.ts`'s write door (#4669) passes a bare
+   * `{ active }` patch on a packaged set straight through: switching a packaged
+   * set off is not a customization of it. Under #15196's Q2 = A,
+   * `sys_position.active` stays row-authoritative, so switching a package's
+   * position off — or making it the default for new users — is the operator's
+   * lever on the row, not an edit of the package's definition. Neither column
+   * is a `PositionSchema` key.
+   *
+   * Everything else stays refused, with the gate's own code and message:
+   * a definition column (`name`, `label`, `description`, `delegatable`), any
+   * column not named here, `delete`, and `transfer` / `restore` / `purge`.
+   * `delegatable` is deliberately NOT row state: it is declared on the position
+   * definition, and the triage ruling locks it ahead of #15196's S8b reader
+   * switch. ⛔ Widening this set is a ruling, not an edit.
+   */
+  private static readonly PACKAGE_POSITION_ROW_STATE_COLUMNS: ReadonlySet<string> = new Set(['active', 'is_default']);
+
+  /**
+   * [#22360] The `sys_position` provenance values carve-out (d) applies to:
+   * `package`, and `config`, its legacy pre-A4 spelling, which
+   * `SYSTEM_ROW_PROVENANCE` guards as the same owner ("an application
+   * package") — the two vocabularies are kept in lockstep there, so a legacy
+   * row the boot normalizer has not healed yet answers as its canonical twin.
+   * ⛔ Never `platform` / `system`: switching off a built-in such as
+   * `everyone` is not an operator lever.
+   */
+  private static readonly PACKAGE_POSITION_PROVENANCE: ReadonlySet<string> = new Set(['package', 'config']);
+
+  /**
+   * [#22360] Is this the write carve-out (d) admits: an `update` of
+   * `sys_position` whose patch is ONE object naming at least one row-state
+   * column and nothing else? `id` is the row's identifier (the single-id
+   * branch reads it from the payload), not a column the patch changes. An
+   * array payload is never admitted here: its rows are judged by the gate
+   * exactly as before.
+   */
+  private static isPackagePositionRowStatePatch(opCtx: any): boolean {
+    if (opCtx?.object !== 'sys_position' || opCtx?.operation !== 'update') return false;
+    const patch = opCtx.data;
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return false;
+    const columns = Object.keys(patch).filter((k) => k !== 'id');
+    return columns.length > 0
+      && columns.every((k) => SecurityPlugin.PACKAGE_POSITION_ROW_STATE_COLUMNS.has(k));
   }
 
   /**
@@ -9532,25 +9603,26 @@ export class SecurityPlugin implements Plugin {
     }
     const meta = {
       isPrivate: (obj as any)?.access?.default === 'private',
-      // [#12699] The deployment's `platformGlobalObjects` declaration folds in
-      // HERE, and only here — this meta is the single source every Layer 0
-      // consumer reads (the read wall and the Layer 1 wildcard-`organization_id`
-      // drop via the 'tenancyDisabled' merge in computeLayeredRlsFilter; the
-      // ADR-0123 D2 write refusal and the forge guard via
-      // computeWriteTenantCheckFilter, which IS that same layer0; the
+      // The object's own two clauses, and nothing else. This meta is the single
+      // source every Layer 0 consumer reads (the read wall and the Layer 1
+      // wildcard-`organization_id` drop via the 'tenancyDisabled' merge in
+      // computeLayeredRlsFilter; the ADR-0123 D2 write refusal and the forge
+      // guard via computeWriteTenantCheckFilter, which IS that same layer0; the
       // platform-admin `posturePermits` gate and the write-check bypass via
-      // `meta.tenancyDisabled` directly) — so a deployment-exempted object
-      // behaves exactly as if it had declared `tenancy: { enabled: false }`
-      // itself, on every one of those paths at once, on THIS deployment only.
-      // Gated on the armed wall so the `single` posture stays byte-identical
-      // (there the exemption could only perturb Layer 1 bypasses on a wall
-      // that does not exist). Fail closed: absent/junk declaration ⇒ the
-      // object's own two clauses decide, exactly as today.
+      // `meta.tenancyDisabled` directly).
+      //
+      // [ADR-0131 D7] The deployment's #12699 `platformGlobalObjects`
+      // declaration used to fold in here as a third clause — a Layer 0
+      // stand-down on an object that still carried its organization column, so
+      // the driver went on scoping what the wall had stopped scoping. That
+      // stand-down is retired, not kept beside its replacement: the
+      // declaration is now the injected-columns plan's input, and the engine's
+      // registry registers a declared object with no `organization_id` and
+      // declaring `systemFields.tenant: false` — the second clause below, read
+      // off the live schema like every other object's.
       tenancyDisabled:
         (obj as any)?.tenancy?.enabled === false ||
-        (obj as any)?.systemFields?.tenant === false ||
-        (this.orgScopingEnabled &&
-          this.deploymentOrgScopingEntitlement().platformGlobalObjects.has(object)),
+        (obj as any)?.systemFields?.tenant === false,
       // Identity-infrastructure tables managed by the auth library
       // (`managedBy: 'better-auth'`: sys_user, sys_account, sys_session,
       // sys_oauth_application, sys_sso_provider, …). Their rows are written by

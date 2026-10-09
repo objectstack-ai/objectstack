@@ -10,10 +10,13 @@
  *
  * `plugin-security` computes the Layer 0 predicate once per operation
  * (`computeTenantLayer0Filter`, `tenant-layer.ts`) from inputs that only IT
- * can see in full: the posture in force, the caller's organization scope, the
- * object's own tenancy declaration — and the DEPLOYMENT's carve-out
- * ({@link OrgScopingEntitlement.platformGlobalObjects}, #12699), which no
- * object schema carries. A producer in another package that needs to know what
+ * can see in full: the posture in force, the caller's organization scope and
+ * the object's own tenancy declaration. (The DEPLOYMENT's carve-out,
+ * {@link OrgScopingEntitlement.platformGlobalObjects} (#12699), was once a
+ * further input no object schema carried; ADR-0131 D7 made it total — a
+ * declared object is registered with no organization column and declaring
+ * `systemFields.tenant: false`, so it now arrives as the object's own
+ * declaration.) A producer in another package that needs to know what
  * the wall decided — the bulk data-event publisher in `@objectstack/objectql`,
  * which stamps `BulkDataEvent.organizationId` only when the wall named exactly
  * one organization — cannot re-derive it: every re-derivation is a MIRROR of
@@ -30,7 +33,7 @@
  *
  * | `kind`          | what the wall composed                          | when |
  * |-----------------|-------------------------------------------------|------|
- * | `none`          | nothing — Layer 0 contributed no predicate      | `single` posture; a non-tenant object (no `organization_id` column, `tenancy.enabled: false`, `systemFields.tenant: false`, or the deployment's #12699 carve-out); an exempt `PLATFORM_ADMIN` on a posture-permitting object; the #12974 verified-owner READ bypass |
+ * | `none`          | nothing — Layer 0 contributed no predicate      | `single` posture; a non-tenant object (no `organization_id` column, `tenancy.enabled: false`, `systemFields.tenant: false` — which an object the deployment declares platform-global is registered with, ADR-0131 D7); an exempt `PLATFORM_ADMIN` on a posture-permitting object; the #12974 verified-owner READ bypass |
  * | `organization`  | `organization_id = organizationId`              | `isolated` — the hard wall names exactly one organization |
  * | `organizations` | `organization_id IN organizationIds`            | `group` — the caller's membership set (ADR-0105 D2); a SET: distinct, non-empty |
  * | `deny`          | the fail-closed sentinel (zero rows / refused)  | a walled posture on a tenant object with no organization scope to enforce with |

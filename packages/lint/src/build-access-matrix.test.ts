@@ -167,10 +167,18 @@ describe('buildAccessMatrix CRUD columns — the spec fold, asked (#18785)', () 
       permissions: entries.map((e, i) => ({ name: `ps_${String(i).padStart(4, '0')}`, objects: { o: e } })),
     });
     expect(m.entries.length).toBe(entries.length);
+    // Index the rows by permission set ONCE. A `find` per entry is quadratic —
+    // 3^8 entries make ~21.5M callbacks, each rebuilding the name — which ran
+    // this case past vitest's 5 s default on a loaded CI shard. First match
+    // wins, so every lookup returns the row `find` returned.
+    const rowByPermissionSet = new Map<string, (typeof m.entries)[number]>();
+    for (const e of m.entries) {
+      if (!rowByPermissionSet.has(e.permissionSet)) rowByPermissionSet.set(e.permissionSet, e);
+    }
     const mismatches: string[] = [];
     let cells = 0;
     for (let i = 0; i < entries.length; i++) {
-      const row = m.entries.find((e) => e.permissionSet === `ps_${String(i).padStart(4, '0')}`)!;
+      const row = rowByPermissionSet.get(`ps_${String(i).padStart(4, '0')}`)!;
       for (const verb of ['create', 'read', 'edit', 'delete'] as const) {
         cells++;
         if (row[verb] !== referenceFold(entries[i], verb)) {

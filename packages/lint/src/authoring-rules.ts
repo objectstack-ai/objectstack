@@ -683,8 +683,15 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         rule: EXPRESSION_INVALID,
         where: i.where,
         path: i.where,
-        message: i.message,
-        hint: `source: \`${i.source}\``,
+        // [#22161] The authored source is a QUOTE of what the author wrote, not
+        // a fix, so it rides the verdict — `— source: \`…\`` is the spelling
+        // the flow engine's runtime refusals already use — and reaches the CLI
+        // text face and the runtime 422 issue alike. `hint` is the `fix:` line:
+        // an `ExprIssue` carries no fix of its own (its message prescribes the
+        // rewrite where there is one, e.g. "Write `record.status`"), so there is
+        // none to print rather than a quote dressed as one.
+        message: i.source.trim() ? `${i.message} — source: \`${i.source}\`` : i.message,
+        hint: '',
       })),
   },
   // ADR-0053 — `userFilters`/`quickFilters` on an object list view ("views"

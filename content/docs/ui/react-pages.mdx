@@ -359,7 +359,7 @@ by tag and through `<Block type="record:…">` alike:
 ```
   ✗ Author-time rules failed (1 issue)
   • page "showcase_renewals_pipeline" › <RecordHighlights>: <RecordHighlights> renders "record:highlights", which reads its record from the record context a record page mounts — a kind:'react' page never mounts one, so the block renders empty no matter how it is bound (its objectName/recordId are not read by the renderer).
-      On a react page bind the record yourself: <ObjectForm objectName="…" mode="view" recordId={…} fields={[…]} />, or read the record with useAdapter().findOne and lay the strip out in JSX.
+      fix: On a react page bind the record yourself: <ObjectForm objectName="…" mode="view" recordId={…} fields={[…]} />, or read the record with useAdapter().findOne and lay the strip out in JSX.
       rule: react-block-needs-record-context  at pages[27].source
 ```
 
@@ -401,7 +401,7 @@ A **missing required binding** fails the build:
 ```
   ✗ Author-time rules failed (1 issue)
   • page "showcase_renewals_pipeline" › <ObjectChart>: <ObjectChart> is missing the required prop "objectName".
-      Pass objectName={…}. See the react-tier component contract.
+      fix: Pass objectName={…}: The object this block binds to (server-connected).
       rule: react-prop-missing-required  at pages[27].source
 ```
 

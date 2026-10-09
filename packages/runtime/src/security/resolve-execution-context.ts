@@ -29,6 +29,8 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { scopesToAgentPermissionSets, MCP_OAUTH_SCOPE_ACTIONS } from '@objectstack/spec/ai';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
+// [#22258] The in-process session-read rule — see the session getter below.
+import { inProcessSessionReadInput } from '@objectstack/types';
 
 import {
   resolveAuthzContext,
@@ -157,7 +159,10 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
       const authService = await opts.getService('auth');
       let api: any = authService?.api;
       if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
-      return await api?.getSession?.({ headers: h });
+      // [#22258] A request carrying a session cookie reads without renewal:
+      // this door's response never carries a renewed cookie, so a renewal
+      // here would leave the browser's cookie to die before its session.
+      return await api?.getSession?.(inProcessSessionReadInput(h));
     } catch {
       return undefined;
     }

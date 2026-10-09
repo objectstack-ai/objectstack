@@ -702,10 +702,13 @@ function compileDocsDirectory(docsDir: string, relBase: string): { docs: DocItem
  * ADR-0130 D4; #18965 made that resolution depth-free).
  *
  * The two results stay SEPARATE and that separation is the ruling: the flat
- * directory's docs are the stack's own and keep attaching where they always
- * did (`docs` below, which `compile.ts` writes to the artifact's top level),
- * while a package's docs go to `packageDocs` and from there into that package's
- * own body — ⛔ never to the top level.
+ * directory's docs are the stack's own (`docs` below), while a package's docs
+ * go to `packageDocs` and from there into that package's own body — ⛔ never to
+ * the top level. WHERE the stack's own docs land in the artifact is not this
+ * reader's call: {@link placeCollectedDocs} makes it, once — the top level for
+ * a stack with no `packages[]`, whose top level IS its one package, and the
+ * body of the package that owns the artifact's manifest for one that has them
+ * (#22190).
  *
  * ⚠️ Called with ONE argument, this function behaves exactly as it always has:
  * `packageDocs` is empty, every `src/<pkg>/docs/` is reported by the #18170
@@ -1255,9 +1258,11 @@ function underPackage(issues: readonly DocIssue[], index: number): DocIssue[] {
  * the package that owns it.
  *
  * Returns the stack-level doc array (inline items first — they were already
- * schema-validated), which is what the artifact's TOP LEVEL carries, plus the
- * per-package sets {@link attachPackageDocs} writes into `packages[]`, plus
- * every issue found.
+ * schema-validated), the subset of it read out of the flat `src/docs/`
+ * (`flatDocs`, the same objects), the per-package sets {@link attachPackageDocs}
+ * writes into `packages[]`, and every issue found. Where each set lands in the
+ * artifact is {@link placeCollectedDocs}'s decision; this function only
+ * collects and judges.
  *
  * ## The lint partition (#18431, the ruling's clause 2)
  *
@@ -1296,7 +1301,7 @@ function underPackage(issues: readonly DocIssue[], index: number): DocIssue[] {
 export function collectAndLintDocs(
   configPath: string,
   stack: Record<string, unknown>,
-): { docs: DocItem[]; issues: DocIssue[]; packageDocs: PackageDocSet[] } {
+): { docs: DocItem[]; flatDocs: DocItem[]; issues: DocIssue[]; packageDocs: PackageDocSet[] } {
   const inline = Array.isArray(stack.docs) ? (stack.docs as DocItem[]) : [];
   const collected = collectDocsFromSrc(configPath, stack.packages);
   const namespace = (stack.manifest as { namespace?: string } | undefined)?.namespace;
@@ -1309,9 +1314,9 @@ export function collectAndLintDocs(
     return { ref, body, fromDisk, all: [...body, ...fromDisk] };
   }).filter((entry) => entry.all.length > 0);
 
-  // The top level keeps every doc it carried — the artifact shape does not
-  // move. What the ownership split changes is only which namespace each doc is
-  // JUDGED against, so the stack-level lint drops the ones a package claims.
+  // `docs` keeps every stack-level doc — this function places nothing. What
+  // the ownership split changes is only which namespace each doc is JUDGED
+  // against, so the stack-level lint drops the ones a package claims.
   const claimed = claimedDocs(owned.flatMap((entry) => entry.body));
   const stackScoped = docs.filter((doc) => !claimed.has(doc));
 
@@ -1345,7 +1350,7 @@ export function collectAndLintDocs(
     ...owned.map((entry) => ({ label: `package "${entry.ref.id}"`, docs: entry.all })),
   ]));
 
-  return { docs, issues, packageDocs: collected.packageDocs };
+  return { docs, flatDocs: collected.docs, issues, packageDocs: collected.packageDocs };
 }
 
 /**
@@ -1395,4 +1400,90 @@ export function attachPackageDocs(packages: unknown, sets: readonly PackageDocSe
     return { ...(entry as Record<string, unknown>), manifest: { ...body, docs: [...existing, ...added] } };
   });
   return changed ? out : packages;
+}
+
+/**
+ * The package a multi-package artifact's FLAT `src/docs/` belongs to (#22190):
+ * the one `packages[]` entry whose id IS the artifact's own `manifest.id`.
+ *
+ * ## Why that package
+ *
+ * The #18431 ruling keeps a single-package stack's flat docs on the top level
+ * because there the top level IS the one package. A multi-package artifact has
+ * no such package at its top level: it carries its metadata once, in
+ * `packages[]` (ADR-0130 D4, the 2026-09-22 addendum). An item found at its top
+ * level is registered by the metadata door under the artifact's own
+ * `manifest.id`, because no body claims it, and the door warns that it did so —
+ * a warning whose remedy ("rebuild the artifact so each collection it ships is
+ * carried by the package that owns it") nobody could follow, since no
+ * directory in an ADR-0130 layout names the app package. The package that id
+ * names is therefore the owner the boot ALREADY assigns. Carrying the docs on
+ * its body keeps the owner and the count every door answers, and leaves the
+ * residual sweep nothing of this producer's to find.
+ *
+ * `composeStacks(…, { manifest: 'preserve' })` picks the artifact's `manifest`
+ * from one of its inputs and that input contributes its own package entry, so
+ * an artifact this repo's composer writes always has the match — on a body
+ * whose manifest fields, `namespace` included, are the artifact manifest's.
+ *
+ * ⛔ No guess. No `manifest.id`, no entry carrying it, or MORE than one entry
+ * carrying it — this collector has no duplicate-id refusal of its own; the
+ * boot's is `resolveArtifactPackageOrder`'s `DUPLICATE_ARTIFACT_PACKAGE` —
+ * answers `undefined`, and the flat docs keep the top-level position they have
+ * always had. The entry's id is read through {@link docsPackageRefs}, which
+ * reads `artifactPackages`; ⛔ it is not re-derived here.
+ */
+export function flatDocsOwner(stack: Record<string, unknown>): DocsPackageRef | undefined {
+  const refs = docsPackageRefs(stack.packages);
+  if (refs.length === 0) return undefined;
+  const manifestId = (stack.manifest as { id?: unknown } | null | undefined)?.id;
+  if (typeof manifestId !== 'string' || manifestId === '') return undefined;
+  const owners = refs.filter((ref) => ref.id === manifestId);
+  return owners.length === 1 ? owners[0] : undefined;
+}
+
+/**
+ * Place what {@link collectAndLintDocs} collected into the artifact `os build`
+ * writes — the ONE place that decides it, for both sets:
+ *
+ *   - each package's own `src/<pkg>/docs/` set goes onto that package's body
+ *     ({@link attachPackageDocs}; the #18431 ruling, clause 1);
+ *   - the stack's own flat `src/docs/` set goes onto the body of
+ *     {@link flatDocsOwner} when the artifact has one, after that package's own
+ *     directory docs, and stays on the top level otherwise (#22190).
+ *
+ * Inline top-level `docs` never move: on a composed multi-package artifact
+ * they are either absent or copies a body already carries, and a top-level doc
+ * no body claims is exactly what the metadata door is right to warn about.
+ *
+ * Returns the artifact's `docs` and `packages` values. A stack with no
+ * `packages[]` gets back the very `docs` array it handed in and its own
+ * `packages` value untouched, so a single-package artifact is serialized from
+ * the same references as before. The doc lint is not re-run and not re-routed:
+ * it judged every flat doc against `stack.manifest.namespace` (the ruling's
+ * clause 2), which is the owner's namespace on any composed artifact.
+ */
+export function placeCollectedDocs(
+  stack: Record<string, unknown>,
+  collected: {
+    readonly docs: DocItem[];
+    readonly flatDocs: readonly DocItem[];
+    readonly packageDocs: readonly PackageDocSet[];
+  },
+): { docs: DocItem[]; packages: unknown } {
+  let packages = collected.packageDocs.length > 0
+    ? attachPackageDocs(stack.packages, collected.packageDocs)
+    : stack.packages;
+  const owner = collected.flatDocs.length > 0 ? flatDocsOwner(stack) : undefined;
+  if (owner === undefined) return { docs: collected.docs, packages };
+
+  packages = attachPackageDocs(packages, [{
+    index: owner.index,
+    id: owner.id,
+    ...(owner.namespace !== undefined ? { namespace: owner.namespace } : {}),
+    dir: `src/${COLLECTED_DOCS_DIR}`,
+    docs: [...collected.flatDocs],
+  }]);
+  const placed = new Set<DocItem>(collected.flatDocs);
+  return { docs: collected.docs.filter((doc) => !placed.has(doc)), packages };
 }

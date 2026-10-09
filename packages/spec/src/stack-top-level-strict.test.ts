@@ -47,7 +47,7 @@ const legalStack = () => ({
 
 const parseTopLevel = (raw: Record<string, unknown>) => ObjectStackDefinitionSchema.safeParse(raw);
 
-describe('#8687 — unknown top-level stack keys are refused at parse', () => {
+describe('unknown top-level stack keys are refused at parse', () => {
   it("inverts the card's measured control: the three bogus keys now FAIL parse instead of adding zero warnings", () => {
     // Measured on 17.0.0 GA: each of these parsed `success: true` with the key
     // silently dropped, and injecting all three into a real app config added
@@ -125,7 +125,7 @@ describe('#8687 — unknown top-level stack keys are refused at parse', () => {
   });
 });
 
-describe('#10485 — the `themes` carrier is retired (ADR-0049; ruled 退役授权面 2026-08-21)', () => {
+describe('the `themes` carrier is retired (ADR-0049; ruled 退役授权面 2026-08-21)', () => {
   // A theme body that parsed green on 17.0 — the exact authoring the issue
   // measured shipping end-to-end while changing nothing on screen.
   const previouslyAcceptedThemes = [
@@ -170,7 +170,7 @@ describe('#10485 — the `themes` carrier is retired (ADR-0049; ruled 退役授�
   });
 });
 
-describe('#8687 — the accept side does not move', () => {
+describe('the strict top-level door: the accept side does not move', () => {
   it('accepts every declared top-level key', () => {
     // Structural sweep: a declared key must never be refused as unknown. All
     // 40+ top-level keys are optional (tombstones included), so presence with
@@ -212,7 +212,7 @@ describe('#8687 — the accept side does not move', () => {
   });
 });
 
-describe('#8687 — one voice: the lint yields to the strict parse', () => {
+describe('one voice: the lint yields to the strict parse', () => {
   it('lintUnknownStackKeys goes quiet on the now-strict stack schema (its own posture rule)', () => {
     // The graduation day the lint's docblock always promised: a strict schema
     // rejects loudly on its own, so the lint must not become a second,
@@ -222,7 +222,7 @@ describe('#8687 — one voice: the lint yields to the strict parse', () => {
   });
 });
 
-describe('#8687 — defineStack surfaces the refusal', () => {
+describe('defineStack surfaces the unknown-top-level-key refusal', () => {
   it('throws with the curated message, did-you-mean included', () => {
     expect(() => defineStack({ objectz: [] } as never)).toThrowError(
       /Unrecognized key\(s\) on this stack definition: `objectz`\. Did you mean `objectz` → `objects`\?/,

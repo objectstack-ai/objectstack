@@ -875,6 +875,9 @@ function makeGrantQl(tables: Rows) {
       return (tables[object] ?? []).filter((row) =>
         Object.entries(where).every(([key, cond]) => { if (key.startsWith('$')) throw new Error(`fake driver: unsupported operator ${key}`); 
           const cell = row[key];
+          // `null` matches a null-valued AND a key-absent cell — the memory
+          // driver's reading, and what an organization-less row looks like here.
+          if (cond === null) return cell === null || cell === undefined;
           if (cond && typeof cond === 'object' && '$in' in (cond as any)) {
             return ((cond as any).$in as unknown[]).includes(cell);
           }
@@ -1001,8 +1004,11 @@ describe('buildContextForUser', () => {
         { user_id: 'u2', position: 'auditor', valid_from: '2026-08-01T00:00:00Z' },
       ],
       sys_user_permission_set: [
-        { user_id: 'u2', permission_set_id: 'ps1' },
-        { user_id: 'u2', permission_set_id: 'ps2', valid_until: '2026-06-01T00:00:00Z' },
+        { user_id: 'u2', permission_set_id: 'ps1', permission_set: 'payroll_reader' },
+        {
+          user_id: 'u2', permission_set_id: 'ps2', permission_set: 'quarter_close_admin',
+          valid_until: '2026-06-01T00:00:00Z',
+        },
       ],
       sys_permission_set: [
         { id: 'ps1', name: 'payroll_reader' },
@@ -1025,8 +1031,8 @@ describe('buildContextForUser', () => {
   it('reports a directly-granted permission set whose catalogue row is deactivated (ADR-0049 / #8714)', async () => {
     const qlDeactivated = makeGrantQl({
       sys_user_permission_set: [
-        { user_id: 'u2', permission_set_id: 'ps1' },
-        { user_id: 'u2', permission_set_id: 'psOff' },
+        { user_id: 'u2', permission_set_id: 'ps1', permission_set: 'payroll_reader' },
+        { user_id: 'u2', permission_set_id: 'psOff', permission_set: 'crm_full' },
       ],
       sys_permission_set: [
         { id: 'ps1', name: 'payroll_reader' },
@@ -1065,7 +1071,7 @@ describe('buildContextForUser', () => {
   it('a row both expired AND deactivated reports expired — one reason per row, resolver drop order (#8714)', async () => {
     const qlBoth = makeGrantQl({
       sys_user_permission_set: [
-        { user_id: 'u2', permission_set_id: 'psOff', valid_until: '2026-06-01T00:00:00Z' },
+        { user_id: 'u2', permission_set_id: 'psOff', permission_set: 'crm_full', valid_until: '2026-06-01T00:00:00Z' },
       ],
       sys_permission_set: [{ id: 'psOff', name: 'crm_full', active: false }],
     });
@@ -1291,9 +1297,12 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
       ],
       sys_position: [{ id: 'pos_fa', name: 'field_auditor', active: false }],
       sys_user_permission_set: [
-        { user_id: 'u2', permission_set_id: 'ps2', valid_until: '2026-06-01T00:00:00Z' },
+        {
+          user_id: 'u2', permission_set_id: 'ps2', permission_set: 'quarter_close_admin',
+          valid_until: '2026-06-01T00:00:00Z',
+        },
         // [commit 42b05af89] a held direct grant whose SET's catalogue row is switched off
-        { user_id: 'u2', permission_set_id: 'psOff' },
+        { user_id: 'u2', permission_set_id: 'psOff', permission_set: 'crm_full' },
       ],
       sys_permission_set: [
         { id: 'ps2', name: 'quarter_close_admin' },

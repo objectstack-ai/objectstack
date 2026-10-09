@@ -61,6 +61,16 @@ import { raceWithTimeout } from './timeout-guard.js';
 const DEGRADED_CAPABILITIES_SERVICE = 'kernel.degraded-capabilities';
 
 /**
+ * The three hooks `bootstrap()` dispatches once every plugin's `init()` and
+ * `start()` has run, in this order — the hooks
+ * {@link ObjectKernelConfig.bootPhaseHooks} withholds. Read only to NAME them in
+ * the line a withholding boot logs; the dispatch sites in `bootstrap()` keep
+ * their string literals, which is what `scripts/check-kernel-hook-pairs.mjs`
+ * reads.
+ */
+const BOOT_PHASE_HOOKS = ['kernel:ready', 'kernel:bootstrapped', 'kernel:listening'] as const;
+
+/**
  * Enhanced Kernel Configuration
  */
 export interface ObjectKernelConfig {
@@ -69,7 +79,31 @@ export interface ObjectKernelConfig {
     /** Default plugin startup timeout in milliseconds */
     defaultStartupTimeout?: number;
     
-    /** Whether to enable graceful shutdown */
+    /**
+     * Whether this kernel owns the process. It decides two things, always
+     * together:
+     *
+     * - **Who installs the signal listeners.** When true (the default) the
+     *   kernel listens for SIGINT, SIGTERM and SIGQUIT from construction until
+     *   it stops: a signal drains it and then exits the process. Its listeners
+     *   are removed when it reaches `stopped`, so a stopped kernel never
+     *   handles a signal. When false the kernel installs none, and the host
+     *   handles signals itself.
+     * - **Who exits the process when a teardown times out.** When `shutdown()`
+     *   overruns `shutdownTimeout`, a kernel with this option true logs the
+     *   timeout and calls `process.exit(1)`. A kernel with it false does NOT
+     *   exit the process: it logs the timeout at `error`, marks itself
+     *   `stopped`, and `shutdown()` returns to the host, which decides whether
+     *   the process exits. The hung teardown is not cancelled — it keeps
+     *   running in the background and holds whatever it has not released yet,
+     *   until it finishes or the host ends the process.
+     *
+     * Set it false when something else owns the process: a server framework
+     * that installs its own signal handlers, or a host that runs several
+     * kernels in one process and must not lose all of them when one teardown
+     * hangs. Such a host exits the process itself when it decides to.
+     * `shutdown()` never rejects under either setting.
+     */
     gracefulShutdown?: boolean;
     
     /** Graceful shutdown timeout in milliseconds */
@@ -80,6 +114,51 @@ export interface ObjectKernelConfig {
     
     /** Whether to skip strict system requirement validation (Critical for testing) */
     skipSystemValidation?: boolean;
+
+    /**
+     * Whether `bootstrap()` dispatches the three BOOT-PHASE hooks —
+     * `kernel:ready`, `kernel:bootstrapped` and `kernel:listening` — once every
+     * plugin's `init()` and `start()` has run. Default `true`: the boot is
+     * exactly what it has always been. Only an explicit `false` withholds them;
+     * absent or `undefined` is the default.
+     *
+     * `false` is for a host that needs a kernel's registered DEFINITIONS and
+     * its started services, and nothing the boot phase does — for example a
+     * repair kernel built for an environment whose normal boot cannot finish,
+     * because a boot-phase handler throws, never settles, or outlasts the
+     * host's own timeout.
+     *
+     * **What `false` withholds:** the kernel's dispatch of those three hooks,
+     * and nothing else. `PluginContext.hook` still accepts a handler for them;
+     * the handler is never called. So whatever a plugin does in such a handler
+     * does not happen on this kernel: a definition it registers there is
+     * ABSENT, the seeds, heals, reconciles, replays, schedulers and audits it
+     * runs there do not run, and an HTTP server that opens its socket on
+     * `kernel:listening` never listens. The boot logs one `warn` naming each
+     * withheld hook and how many registered handlers it left uncalled, and its
+     * completion line says the hooks were withheld.
+     *
+     * **What it guarantees:** the rest of `bootstrap()` runs unchanged —
+     * dependency ordering, every plugin's `init()`, the core-service
+     * fallbacks, every plugin's `start()` under the same timeout and rollback
+     * rules, and the system-requirement check. So every service and every
+     * definition a plugin registers in `init()` or `start()` is present, a
+     * driver it connects there included, and the kernel is `running`.
+     * `shutdown()` is unchanged: `kernel:shutdown` is dispatched, and every
+     * plugin's `destroy()` and every `onShutdown()` handler runs. The kernel
+     * itself waits on nothing a withheld hook would have done.
+     *
+     * **What it does NOT guarantee:** that the definitions equal a full boot's.
+     * A plugin may register a definition in a boot-phase handler, and that
+     * definition is absent here. That no handler does so on a given set of
+     * plugins is a reading of that set, not a property of this option —
+     * measure it for the plugins you compose. A `destroy()` or
+     * `kernel:shutdown` handler that assumes its boot-phase handler ran must
+     * tolerate that it did not. And it withholds the KERNEL's dispatch, not
+     * the names: a plugin that calls `PluginContext.trigger` with one of them
+     * itself still runs that hook's handlers.
+     */
+    bootPhaseHooks?: boolean;
 }
 
 /**
@@ -116,6 +195,23 @@ export class ObjectKernel {
      */
     private pluginStartupDurations: Map<string, number> = new Map();
     private shutdownHandlers: Array<() => Promise<void>> = [];
+    /**
+     * The process signal listeners this kernel installed (`gracefulShutdown`),
+     * kept so the kernel can take them back (#22286). Filled by
+     * `registerShutdownSignals()` and emptied by `releaseShutdownSignals()` at
+     * every transition into `stopped`. Before this map the listeners were
+     * anonymous and never removed: every kernel a process built left three of
+     * them behind, and each ran `process.exit(0)` on the next signal, so one
+     * SIGTERM in a process that had built six kernels exited it six times —
+     * the first exit landing while the live kernels were still draining.
+     */
+    private signalListeners: Map<NodeJS.Signals, () => void> = new Map();
+    /**
+     * Set by this kernel's own signal handler when IT starts the shutdown. Only
+     * that handler exits the process, and only once (a repeated signal during
+     * its drain is absorbed, not acted on).
+     */
+    private signalShutdownStarted = false;
     /**
      * Name of the plugin whose init() is currently executing (Phase 1 is
      * sequential, so at most one). Lets a getService miss during init name
@@ -485,6 +581,17 @@ export class ObjectKernel {
 
             // Phase 3: Trigger kernel:ready hook
             this.validateSystemRequirements(); // Final check before ready
+
+            // Phases 3 to 4 are the boot-phase hooks, and nothing follows them
+            // but the completion line, so a host that asked for them withheld
+            // stops here. What that does and does not guarantee is stated on
+            // `ObjectKernelConfig.bootPhaseHooks`.
+            if (this.config.bootPhaseHooks === false) {
+                this.reportWithheldBootPhaseHooks();
+                this.logger.info('✅ Bootstrap complete (boot-phase hooks withheld: bootPhaseHooks is false)');
+                return;
+            }
+
             this.logger.debug('Triggering kernel:ready hook');
             await this.context.trigger('kernel:ready');
 
@@ -513,8 +620,34 @@ export class ObjectKernel {
             this.logger.info('✅ Bootstrap complete');
         } catch (error) {
             this.state = 'stopped';
+            // A kernel whose boot failed is stopped for good (`shutdown()` on it
+            // is a no-op), so this is the only place its listeners can go.
+            this.releaseShutdownSignals();
             throw error;
         }
+    }
+
+    /**
+     * The one line a `bootPhaseHooks: false` boot owes: which boot-phase hooks
+     * this kernel did not dispatch, and how many registered handlers each one
+     * left uncalled. A boot that skips work silently reads as a full boot to
+     * whoever reads its log, so it says so once, here.
+     *
+     * `warn`, not `error`: what is missing is functional (handlers not run),
+     * visible in this very line, and asked for by the host.
+     */
+    private reportWithheldBootPhaseHooks(): void {
+        const withheldHandlers: Record<string, number> = {};
+        for (const hook of BOOT_PHASE_HOOKS) {
+            withheldHandlers[hook] = this.hooks.get(hook)?.length ?? 0;
+        }
+        const counts = BOOT_PHASE_HOOKS.map((hook) => `${hook}: ${withheldHandlers[hook]}`).join(', ');
+        this.logger.warn(
+            `Boot-phase hooks withheld (bootPhaseHooks is false); registered handlers not called: ${counts}. `
+            + 'Nothing a plugin does in those hooks ran on this kernel, so a definition registered there is absent '
+            + 'and a server that listens on kernel:listening is not listening.',
+            { withheldHandlers },
+        );
     }
 
     /**
@@ -566,19 +699,42 @@ export class ObjectKernel {
             );
 
             this.state = 'stopped';
+            this.releaseShutdownSignals();
             this.logger.info('✅ Graceful shutdown complete');
         } catch (error) {
             this.state = 'stopped';
+            this.releaseShutdownSignals();
 
             if (error === shutdownTimeoutError) {
                 // GENUINE timeout: `performShutdown()` is still running and has
-                // stopped making progress, so the process would otherwise hang
-                // holding whatever it failed to release. Hard-exit stays — it
-                // is the only branch it was ever right for.
-                this.logger.error('Shutdown timed out — forcing exit', error as Error);
-                // Flush logger then hard-exit; the process would otherwise hang
-                await this.logger.destroy();
-                process.exit(1);
+                // stopped making progress. Whether that ends the process
+                // depends on who owns it, and the test is the one the
+                // constructor uses to install the signal listeners, so a kernel
+                // exits on a timeout exactly when it took the signals itself
+                // (`ObjectKernelConfig.gracefulShutdown`).
+                if (this.config.gracefulShutdown) {
+                    // The kernel owns the process, which would otherwise hang
+                    // holding whatever the teardown failed to release.
+                    // Hard-exit stays — it is the only branch it was ever
+                    // right for.
+                    this.logger.error('Shutdown timed out — forcing exit', error as Error);
+                    // Flush logger then hard-exit; the process would otherwise hang
+                    await this.logger.destroy();
+                    process.exit(1);
+                } else {
+                    // The host owns the process. Exiting here would end every
+                    // other kernel and workload it runs over one hung
+                    // teardown, so the kernel reports, stays `stopped` and
+                    // returns. Nothing here acts on the abandoned teardown
+                    // again: `performShutdown()` changes no state when it
+                    // finishes, and the kernel's own later log lines from it
+                    // reach the console only, the file stream having been
+                    // closed in `finally`.
+                    this.logger.error(
+                        `Shutdown timed out after ${this.config.shutdownTimeout}ms — the kernel is stopped but its teardown is still running in the background and may still hold what it has not released; gracefulShutdown is false, so the host owns the process and it is NOT being exited — the host decides whether it exits`,
+                        error as Error,
+                    );
+                }
             } else {
                 // NOT a timeout. `performShutdown()` isolates every teardown
                 // step it owns (hook dispatch, each destroy(), each shutdown
@@ -899,32 +1055,64 @@ export class ObjectKernel {
         return resolvePluginOrder(this.plugins);
     }
 
+    /**
+     * Listen for the shutdown signals for as long as this kernel lives (#22286).
+     * Each listener is kept in `signalListeners`, so `releaseShutdownSignals()`
+     * can remove exactly the ones this kernel added and nobody else's.
+     */
     private registerShutdownSignals(): void {
+        if (!isNode) return;
         const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGQUIT'];
-        let shutdownInProgress = false;
-        
-        const handleShutdown = async (signal: string) => {
-            if (shutdownInProgress) {
-                this.logger.warn(`Shutdown already in progress, ignoring ${signal}`);
-                return;
-            }
-            
-            shutdownInProgress = true;
-            this.logger.info(`Received ${signal} - initiating graceful shutdown`);
-            
-            try {
-                await this.shutdown();
-                safeExit(0);
-            } catch (error) {
-                this.logger.error('Shutdown failed', error as Error);
-                safeExit(1);
-            }
-        };
-        
-        if (isNode) {
-            for (const signal of signals) {
-                process.on(signal, () => handleShutdown(signal));
-            }
+        for (const signal of signals) {
+            const listener = () => { void this.handleShutdownSignal(signal); };
+            this.signalListeners.set(signal, listener);
+            process.on(signal, listener);
+        }
+    }
+
+    /**
+     * Give the process's signals back: remove every listener this kernel added.
+     * Idempotent. Called at each transition into `stopped` and deliberately NOT
+     * when the drain begins — while the kernel is `stopping` its listener is
+     * what absorbs a repeated signal (a terminal's Ctrl-C can arrive twice: once
+     * to the process group and once from a parent that forwards it). With no
+     * listener left, Node's default action would end the process mid-drain.
+     */
+    private releaseShutdownSignals(): void {
+        for (const [signal, listener] of this.signalListeners) {
+            process.removeListener(signal, listener);
+        }
+        this.signalListeners.clear();
+    }
+
+    /**
+     * One signal, at most one exit — and only from the handler that started
+     * the drain. A kernel that is already `stopping` or `stopped` when the
+     * signal arrives was stopped by someone else (the host calling
+     * `shutdown()`), who owns what happens next: exiting here would cut that
+     * drain short, which is how the first of six exits used to land.
+     */
+    private async handleShutdownSignal(signal: NodeJS.Signals): Promise<void> {
+        if (this.signalShutdownStarted) {
+            this.logger.warn(`Shutdown already in progress, ignoring ${signal}`);
+            return;
+        }
+        if (this.state === 'stopping' || this.state === 'stopped') {
+            this.logger.warn(
+                `Received ${signal} while the kernel is already ${this.state} — whoever is stopping it decides what follows; this kernel will not exit the process`,
+            );
+            return;
+        }
+
+        this.signalShutdownStarted = true;
+        this.logger.info(`Received ${signal} - initiating graceful shutdown`);
+
+        try {
+            await this.shutdown();
+            safeExit(0);
+        } catch (error) {
+            this.logger.error('Shutdown failed', error as Error);
+            safeExit(1);
         }
     }
 

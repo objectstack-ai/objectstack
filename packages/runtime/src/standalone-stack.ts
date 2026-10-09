@@ -255,8 +255,8 @@ export const StandaloneStackConfigSchema = z.object({
     sqliteAbsentFile: z.enum(['create', 'empty-in-memory']).optional(),
     /**
      * [#9380] Does this boot arm the `kernel:ready` platform-table repair
-     * migrations (#5839's `sys_view_definition` active-row index, #8629's
-     * `sys_setting` row-identity index, #8686's seed/API tenancy backfill)?
+     * migrations (#8629's `sys_setting` row-identity index, #8686's seed/API
+     * tenancy backfill)?
      *
      * Defaults to `true`, and that default is the fix: a standalone kernel
      * OWNS its local platform tables, which is what the gate in

@@ -483,14 +483,16 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           rule: SECURITY_OWD_UNSET,
           where: `object "${objName}"`,
           path: `${objPath}.sharingModel`,
+          // [#22161] One verdict sentence and one fix. Why an unset OWD is
+          // refused although the runtime fails closed — and the incident shape
+          // it guards — is the rule's long-form explanation
+          // (`rule-explanations.ts`, `os explain security-owd-unset`).
           message:
-            `custom object "${objName}" declares no sharingModel (OWD). The runtime fails ` +
-            `CLOSED to 'private' (ADR-0090 D1), but the baseline must be an authored decision, ` +
-            `not an accident — this is the exact shape of the leave_request incident, where an object ` +
-            `with no sharingModel let an ordinary read/write grant read and edit every other user's records.`,
+            `custom object declares no sharingModel (OWD); the runtime falls back to 'private', ` +
+            `but the baseline must be an authored decision`,
           hint:
-            `Declare sharingModel explicitly: 'private' (owner + shares; recommended default), ` +
-            `'public_read', 'public_read_write', or 'controlled_by_parent' (master-detail children).`,
+            `declare sharingModel: 'private' (owner + shares; recommended), 'public_read', ` +
+            `'public_read_write', or 'controlled_by_parent' (master-detail children)`,
         });
       } else if (typeof owd === 'string' && OWD_ALIAS_FIX[owd]) {
         // Reachable ONLY through the unparsed doors (`os lint` on a raw

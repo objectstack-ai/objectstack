@@ -63,7 +63,7 @@ afterEach(() => {
 
 // ─── Conflicts — the behaviour #5051 changed ────────────────────────
 
-describe('#5051 — conflicting `i18n` declarations are a composition error', () => {
+describe('conflicting `i18n` declarations are a composition error', () => {
   it('throws instead of letting the later stack win (the issue\'s own repro)', () => {
     const a = raw({ manifest: manifestA, i18n: { defaultLocale: 'en' } });
     const b = raw({ manifest: manifestB, i18n: { defaultLocale: 'zh-CN' } });
@@ -172,7 +172,7 @@ describe('#5051 — conflicting `i18n` declarations are a composition error', ()
 
 // ─── Pass-through — CONTROL (green before and after #5051) ──────────
 
-describe('#5051 control — an `i18n` nobody disagrees about still composes', () => {
+describe('control — an `i18n` nobody disagrees about still composes', () => {
   it('keeps the only declaration, from either position', () => {
     const withI18n = { manifest: manifestA, i18n: { defaultLocale: 'en', supportedLocales: ['en'] } };
     const without = { manifest: manifestB };

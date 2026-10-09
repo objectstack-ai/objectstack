@@ -180,7 +180,13 @@ describe('FlowSchema.parse refuses a key the node\'s executor contract requires,
     });
 
     it('an undeclared key is not this rule\'s finding — no key-set closure', () => {
-      expect(issuesOf(flowWith(node('http', { url: 'https://example.com', zzz_undeclared: 1 })))).toEqual([]);
+      // [#21982] An undeclared key is the KEY arm's: its one refusal, at the key —
+      // never a `node-config-key-missing` or rule finding from this rule.
+      const undeclared = { url: 'https://example.com', zzz_undeclared: 1 };
+      expect(issuesOf(flowWith(node('http', undeclared))).map((i) => ({ code: i.code, path: i.path.join('.') })))
+        .toEqual([{ code: 'custom', path: 'nodes.1.config.zzz_undeclared' }]);
+      expect(flowNodeConfigRefusals('http', undeclared).map(({ code, path }) => ({ code, path })))
+        .toEqual([{ code: 'node-config-refused-by-contract', path: 'zzz_undeclared' }]);
     });
 
     it('a node type with no executor contract is untouched — `assignment`, a plugin type', () => {
