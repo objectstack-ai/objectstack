@@ -81,6 +81,7 @@ import type {
 } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
+import { I18nLabelSchema, type I18nLabel } from '@objectstack/spec/ui';
 import type { IObjectQLEngine } from '@objectstack/core';
 // [#7682] The read-only-package predicate, imported rather than re-spelled —
 // the same function `saveMetaItem`'s ADR-0070 D1 gate and the `/packages`
@@ -193,6 +194,41 @@ function canonicalIsoInstant(value: unknown): string | undefined {
  */
 function storedRowBody(row: any): Record<string, unknown> {
   return typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata ?? {});
+}
+
+/**
+ * [#22200] A draft row's own top-level `label`, for the `_drafts` header
+ * ({@link SysMetadataRepository.listDrafts}) — the ONE member that header
+ * reads off the stored body. The header stays a disclosure boundary (#6599):
+ * the label leaves, the body never does.
+ *
+ * Carried AS AUTHORED. Every registered metadata type that declares a display
+ * label spells it top-level `label`, as a plain string or an `I18nLabel` inline
+ * locale map; the route takes no locale to resolve a map with, so the reader
+ * resolves it. No ADR-0087 conversion rewrites a top-level `label`, so the
+ * stored spelling is already the canonical one.
+ *
+ * `null` — the declared "no label" — in three cases, and ⛔ never the item
+ * name, which would make "has a label" and "has none" one answer:
+ *   - the body declares none;
+ *   - it declares one `I18nLabelSchema` refuses (a row stored before its
+ *     type's schema was enforced on save, or a row of a type with no
+ *     registered schema). The declared field cannot carry it, and serving it
+ *     would hand the reader a shape its own type rules out;
+ *   - its stored bytes do not parse. {@link SysMetadataRepository.lockHead}
+ *     answers the same bytes the same way, for the same reason: a header
+ *     listing must not turn into a parse failure. The draft stays listed — and
+ *     so discardable — while every read of its body still fails loudly.
+ */
+function draftBodyLabel(row: any): I18nLabel | null {
+  let body: Record<string, unknown> | null;
+  try {
+    body = storedRowBody(row);
+  } catch {
+    return null;
+  }
+  const parsed = I18nLabelSchema.safeParse(body?.label);
+  return parsed.success ? parsed.data : null;
 }
 
 /**
@@ -359,13 +395,22 @@ const OVERLAY_CAPABLE_TYPES: ReadonlySet<string> = new Set(
 /**
  * Phase 3a-env-writable: parse `OS_METADATA_WRITABLE` (comma-
  * separated singular type names). Memoised; tests can reset via
- * {@link resetEnvWritableMetadataTypes}. Mirrors the same helper in
- * ObjectStackProtocolImplementation — both gates must consult the same
- * elevated set so the env-var escape hatch is applied consistently
- * regardless of which write path a caller takes.
+ * {@link resetEnvWritableMetadataTypes}.
+ *
+ * [#22411] The ONE reader of the setting. The repository's write gate and
+ * every protocol consumer of the hatch — `getMetaTypes()`'s listing,
+ * `isOverlayAllowed()` — ask this function, so the listing cannot advertise a
+ * hatch the save door then refuses. There used to be a second, hand-copied
+ * reader in `ObjectStackProtocolImplementation`. The 11.0 removal of
+ * ObjectStack's own legacy env names (`OBJECTSTACK_METADATA_WRITABLE` →
+ * `OS_METADATA_WRITABLE`, published as a breaking change) edited this copy and
+ * missed that one, which went on honouring the removed spelling: the listing
+ * said "writable", the save answered `403 NOT_CREATABLE`. ⛔ Do not add a
+ * second reader, and do not give this one a legacy alias back — the spelling
+ * is removed, and `[]` is that decision.
  */
 let _envWritableMetadataTypes: Set<string> | null = null;
-function envWritableMetadataTypes(): ReadonlySet<string> {
+export function envWritableMetadataTypes(): ReadonlySet<string> {
   if (_envWritableMetadataTypes !== null) return _envWritableMetadataTypes;
   const raw = readEnvWithDeprecation('OS_METADATA_WRITABLE', []) || '';
   const set = new Set<string>();
@@ -381,7 +426,11 @@ function envWritableMetadataTypes(): ReadonlySet<string> {
   return set;
 }
 
-/** Test hook — clear the memoised env-writable cache. */
+/**
+ * Test hook — clear the memoised env-writable cache. The one cache
+ * {@link envWritableMetadataTypes} keeps, so this and
+ * `ObjectStackProtocolImplementation.resetEnvWritableCache()` clear the same set.
+ */
 export function resetEnvWritableMetadataTypes(): void {
   _envWritableMetadataTypes = null;
 }
@@ -1319,6 +1368,12 @@ export class SysMetadataRepository implements MetadataRepository {
       type: string;
       name: string;
       /**
+       * [#22200] The draft body's own top-level `label`, as authored — `null`
+       * when it declares none (see {@link draftBodyLabel}). For a draft-only
+       * item this header is the only place a client can find a label at all.
+       */
+      label: I18nLabel | null;
+      /**
        * The scope the draft actually lives in — `null` for an env-wide draft,
        * a string for a per-org overlay draft. The `$or` below surfaces BOTH to
        * a non-null-org caller, so consumers that then act on a draft (promote /
@@ -1337,6 +1392,8 @@ export class SysMetadataRepository implements MetadataRepository {
     return (rows as any[]).map((row) => ({
       type: row.type,
       name: row.name,
+      // [#22200] Off the row this read already holds — no second query.
+      label: draftBodyLabel(row),
       organizationId: row.organization_id ?? null,
       packageId: row.package_id ?? null,
       // [commit c383352cb] `updated_at` / `created_at` are the BUILTIN audit columns,

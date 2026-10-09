@@ -202,7 +202,12 @@
  *     its default 6. Neither is ever a fall-back to direct — no outcome of an
  *     accepted dispatch is (the no-run conformance below) — and neither is 0.
  *   - a stroke carrying no body (labels, assignees, state, a transfer, the
- *     GraphQL ops) reads nothing back and its outcome is unchanged.
+ *     GraphQL ops) reads nothing back and its outcome is unchanged;
+ *   - `pr_update_branch` carries no body and is confirmed INSIDE the run — the
+ *     executor polls the pull's head off `expected_head_sha`, or measures a
+ *     422 as a no-op, before it calls the action landed — so a `success` run
+ *     IS that confirmation; the seat reads the new head with one
+ *     `GET /repos/{repo}/pulls/{n}` after, and this file reads nothing back.
  *
  * ## The no-run conformance — every sender, one answer
  *
@@ -1132,7 +1137,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the dispatch: one paced POST to the board repo with event_type and client_payload; 204 is acceptance, anything else a refusal': 7,
   'the run-poller: the run named after the request id, its completion, its conclusion': 6,
   'the ceilings: no run in the start window, no completion in the ceiling — UNCONFIRMED, never retried': 7,
-  'the read-back targets: every op the table lets carry a body — derived, each with a locator — and no other op is read back': 6,
+  'the read-back targets: every op the table lets carry a body — derived, each with a locator — and no other op is read back': 7,
   "the verdict: post-stamped's own classifier, imported — declared normalisations land, a split, lost or truncated byte is NOT STORED at its first differing byte, an unreadable body is unverified, the PR-create footer forgiven on pr_create alone": 13,
   "the round trip: the card's 41,699 bytes with a multi-byte character across every 16 KiB boundary of every stream, byte for byte through pack, the wire, the runner's env text, the validator and the executor; a per-chunk decode is NOT STORED": 8,
   'the read-back end to end: after a success run each body at its locator — a corrupted read-back exits 4 through the CLI, an unreadable or unfound one 6, a body-less stroke reads nothing, never a retry': 17,
@@ -1526,6 +1531,7 @@ export async function selfTest() {
       const mixed = { repo: 'objectstack-ai/objectstack', actions: [{ op: 'labels_add', issue: 1, labels: ['a'] }, { op: 'issue_patch', issue: 2, state: 'closed' }, { op: 'issue_patch', issue: 3, body: 'B' }, { op: 'pr_create', title: 'T', head: 'h', base: 'main' }, { op: 'pr_create', title: 'T', head: 'h2', base: 'main', body: 'P' }] };
       t('only an action that SENT a body is a target, numbered as the stroke numbers it', readBackTargets(mixed).map((x) => [x.action, x.op]), [[3, 'issue_patch'], [5, 'pr_create']]);
       t('…carrying the keys its locator needs', [readBackTargets(mixed)[0].issue, readBackTargets(mixed)[1].head, readBackTargets(mixed)[1].sent], [3, 'h2', 'P']);
+      t("pr_update_branch carries no body — not in BODY_OPS, no locator, no target: its confirmation is the executor's, inside the run", [BODY_OPS.includes('pr_update_branch'), 'pr_update_branch' in READ_BACK_LOCATORS, readBackTargets({ repo: 'objectstack-ai/objectstack', actions: [{ op: 'pr_update_branch', pull: 1, expected_head_sha: '1'.repeat(40) }] })], [false, false, []]);
       let fetched = 0;
       const none = await readBackStroke({ repo: 'objectstack-ai/objectstack', actions: [{ op: 'labels_add', issue: 1, labels: ['a'] }] }, { dispatchedAt: T0 }, {
         judge: JUDGE,

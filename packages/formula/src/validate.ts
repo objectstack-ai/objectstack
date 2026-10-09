@@ -66,6 +66,21 @@ export interface ExprSchemaHint {
   /** Known top-level field names, so `record.<field>` can be checked. */
   fields?: readonly string[];
   /**
+   * The object's read attachments (`ObjectSchema.attachedOnRead`) — block name
+   * → the leaf keys that block declares. A block is computed per caller and
+   * attached to each served row, never stored, so it is not a field; this map
+   * lets the field-existence pass judge the SECOND segment of
+   * `record.<block>.<leaf>` (and `previous.…`): a leaf the block does not
+   * declare is refused under the same `unknown-field` code, and the refusal
+   * names the leaves the block does declare.
+   *
+   * It only ADDS the second-segment judgement. Whether `record.<block>`
+   * resolves at all is still {@link fields}' question, so a caller lists each
+   * block name there too (`@objectstack/lint`'s field index does). Absent or
+   * empty ⇒ only first segments are judged, exactly as before this key.
+   */
+  attachedOnRead?: Readonly<Record<string, readonly string[]>>;
+  /**
    * #1928 tier 4 — field name → spec field type (`'text'`, `'currency'`,
    * `'boolean'`, `'date'`, …). Enables the advisory type-soundness check: a
    * text or boolean field used with an arithmetic/ordering operator against a
@@ -310,6 +325,14 @@ function typeSoundnessIssue(
 const SINGLE_BRACE_RE = /(?:^|[^{])\{\s*([A-Za-z_$][\w.$]*)\s*\}(?!\})/;
 /** `record.<field>` / `previous.<field>` head references for field-existence. */
 const RECORD_REF_RE = /\b(?:record|previous)\.([A-Za-z_$][\w$]*)/g;
+/**
+ * The member read right after a {@link RECORD_REF_RE} head — `.can_act` in
+ * `record.viewer.can_act` — matched STICKY at the head's end, so the head scan
+ * itself is untouched. A member followed by `(` is a method call, not a member
+ * read, and is not captured; the trailing `(?![\w$])` stops a backtrack from
+ * capturing a prefix of the name instead.
+ */
+const SECOND_SEGMENT_RE = /\.([A-Za-z_$][\w$]*)(?![\w$]|\s*\()/y;
 
 /** The dialect a field role expects (Decision 2). */
 export function expectedDialect(role: FieldRole): 'cel' | 'template' {
@@ -626,11 +649,22 @@ function checkFieldExistence(source: string, schema: ExprSchemaHint | undefined,
   if (!schema?.fields || schema.fields.length === 0) return;
   const known = new Set(schema.fields);
   const seen = new Set<string>();
+  const blocks = schema.attachedOnRead;
+  const seenLeaves = new Set<string>();
   let m: RegExpExecArray | null;
   RECORD_REF_RE.lastIndex = 0;
   while ((m = RECORD_REF_RE.exec(source)) !== null) {
     const field = m[1];
-    if (seen.has(field) || known.has(field)) continue;
+    if (known.has(field)) {
+      // [#22211 ruling A] A head that names a declared read attachment has a
+      // closed second segment: judge it against the block's declared leaves.
+      // Own-key test, so an inherited name (`constructor`) is never a block.
+      if (blocks && Object.prototype.hasOwnProperty.call(blocks, field)) {
+        checkAttachedLeaf(source, schema.objectName, field, blocks[field], RECORD_REF_RE.lastIndex, seenLeaves, errors);
+      }
+      continue;
+    }
+    if (seen.has(field)) continue;
     seen.add(field);
     const suggestion = nearest(field, schema.fields);
     errors.push(refusal(
@@ -645,6 +679,59 @@ function checkFieldExistence(source: string, schema: ExprSchemaHint | undefined,
         (suggestion ? ` — did you mean \`${suggestion}\`?` : ''),
     ));
   }
+}
+
+/**
+ * [#22211 ruling A] The second segment of `record.<block>.<leaf>` when
+ * `<block>` is a declared read attachment (`ExprSchemaHint.attachedOnRead`).
+ *
+ * The same `unknown-field` refusal as a first segment, with `field` naming the
+ * dotted path as written, so a consumer rendering only the first-segment params
+ * still says something true. The one addition is an optional clause naming the
+ * leaves the block declares — the remedy — carried as `block` + `leaves`,
+ * present together exactly when the message carries that clause.
+ *
+ * Unjudged, deliberately (each a missed catch, never a false refusal): index
+ * access (`record.viewer['can_act']`), a method call on the block, and any
+ * segment past the second — a leaf is a scalar, so a third segment is not this
+ * declaration's question.
+ */
+function checkAttachedLeaf(
+  source: string,
+  objectName: string | undefined,
+  block: string,
+  leaves: unknown,
+  headEnd: number,
+  seenLeaves: Set<string>,
+  errors: ExprValidationError[],
+): void {
+  if (!Array.isArray(leaves)) return;
+  SECOND_SEGMENT_RE.lastIndex = headEnd;
+  const next = SECOND_SEGMENT_RE.exec(source);
+  if (!next) return;
+  const leaf = next[1];
+  if (leaves.includes(leaf)) return;
+  const field = `${block}.${leaf}`;
+  if (seenLeaves.has(field)) return;
+  seenLeaves.add(field);
+  const declared = leaves.filter((l): l is string => typeof l === 'string');
+  const nearLeaf = nearest(leaf, declared);
+  const suggestion = nearLeaf ? `${block}.${nearLeaf}` : undefined;
+  errors.push(refusal(
+    'unknown-field',
+    {
+      field,
+      ...(objectName ? { objectName } : {}),
+      ...(suggestion ? { suggestion } : {}),
+      ...(declared.length > 0 ? { block, leaves: declared } : {}),
+    },
+    source,
+    `unknown field \`${field}\`${objectName ? ` on \`${objectName}\`` : ''}` +
+      (declared.length > 0
+        ? ` (the read attachment \`${block}\` declares ${declared.map((l) => `\`${l}\``).join(', ')})`
+        : '') +
+      (suggestion ? ` — did you mean \`${suggestion}\`?` : ''),
+  ));
 }
 
 /**

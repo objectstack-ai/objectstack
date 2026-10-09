@@ -657,8 +657,11 @@ describe('[ADR-0131 D4] grant name backfill — boot wiring', () => {
     await seedPrincipals(world, 'single');
     await clearAllNames(world.engine);
 
+    // Two `kernel:bootstrapped` handlers, in registration order: this backfill,
+    // then the row-only position backfill (ADR-0131 D3, C2 stage S7), which
+    // `position-write-through.test.ts` drives. Only the first runs here.
     const handlers = world.hooks.get('kernel:bootstrapped') ?? [];
-    expect(handlers).toHaveLength(1);
+    expect(handlers).toHaveLength(2);
     const errorsBefore = world.pluginLogger.error.mock.calls.length;
     const warningsBefore = world.pluginLogger.warn.mock.calls.length;
     await handlers[0]();

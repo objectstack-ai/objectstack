@@ -304,6 +304,458 @@ const WEBHOOK_WITHOUT_TRIGGERS_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Dashboard widget bindings (`validate-widget-bindings.ts`) ──────────────
+// A widget is bound to a semantic dataset (ADR-0021) and selects its
+// dimensions and measures by name; these entries hold what each verdict about
+// that binding no longer says.
+
+const WIDGET_LEGACY_ANALYTICS_UNRENDERABLE_EXPLANATION: RuleExplanation = {
+  rule: 'widget-legacy-analytics-unrenderable',
+  covers: 'why the legacy analytics keys render nothing',
+  paragraphs: [
+    'The ADR-0021 single-form cutover removed the inline analytics shape — `categoryField`, ' +
+      '`valueField`, `xAxisField`, `yAxisFields`, `aggregate`, `aggregation`, `rowField` and ' +
+      '`columnField`. The dashboard renderer reads a widget\'s data only through its semantic dataset ' +
+      '(`dataset`, `dimensions`, `values`, rendered by DatasetWidget), so a legacy key is dead ' +
+      'wherever it appears.',
+    'This id is the error case: the legacy keys are the widget\'s only data wiring — no `dataset`, ' +
+      'no `object`, no inline `data` (top-level or under `options`) — so the widget has no data at all ' +
+      'and renders nothing. When a data source is present the widget still renders and the legacy ' +
+      'keys are only ignored noise; that is the suppressible warning `widget-legacy-analytics-shape`.',
+    'To fix it, bind a semantic dataset and select fields by name: `dataset`, `dimensions` and ' +
+      '`values` (pivot rows and columns come from `dimensions`, cell values from `values`).',
+  ],
+};
+
+const DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'dashboard-filter-field-unknown',
+  covers: 'how a dashboard filter reaches every widget',
+  paragraphs: [
+    'A dashboard-level filter — the built-in `dateRange` (on `created_at` unless `dateRange.field` ' +
+      'says otherwise) or a `globalFilters` entry — is ANDed into EVERY bound widget\'s analytics ' +
+      'query. The field it lands on in one widget is the effective field: the filter\'s own field, ' +
+      'unless the widget re-targets it with `filterBindings` or opts out with ' +
+      '`filterBindings: { NAME: false }`.',
+    'When the effective field is not a column of the widget\'s dataset object, the query addresses a ' +
+      'column that does not exist and the widget fails at query time. That is a broken query, not ' +
+      'advice, so the rule is an error. A dotted field (`account.signed_at`) is resolved hop by hop on ' +
+      'the object graph and the verdict names the hop that failed; a bare name is judged against the ' +
+      'object\'s authored and registry-injected columns.',
+    'How the widget came to carry the filter decides the fix: an explicit `filterBindings` target is ' +
+      'a typo to correct, an inherited default is one the widget may opt out of. Not reported: a ' +
+      'widget that opts out, an object this stack does not define, and an object with no readable ' +
+      'field map (an ADR-0015 external object, an introspected datasource).',
+  ],
+};
+
+const DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION: RuleExplanation = {
+  rule: 'dashboard-filter-field-not-included',
+  covers: 'why a filter\'s relationship prefix must be included',
+  paragraphs: [
+    'ADR-0021 joins ONLY the relationship paths a dataset declares in `include`. A dashboard filter ' +
+      'lands in the same `runtimeFilter` slot as a widget\'s own filter, and the compiler\'s ' +
+      '`assertDeclared` never sees a `runtimeFilter`, so there is no runtime door in front of this ' +
+      'check: an effective field that resolves on the object graph but whose prefix is not declared ' +
+      'compiles to no join, and the column is out of the query\'s reach.',
+    'The filter is ANDed into EVERY bound widget\'s analytics query, so the whole board renders ' +
+      'empty, not one tile.',
+    'To fix it, add the prefix to the dataset\'s `include` (declaring `a.b` implicitly includes `a`), ' +
+      'filter on a field of the dataset\'s own object, or opt the widget out with ' +
+      '`filterBindings: { NAME: false }`.',
+  ],
+};
+
+const DASHBOARD_FILTER_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
+  rule: 'dashboard-filter-field-unprovisioned',
+  covers: 'why a filter on an unprovisioned anchor matches nothing',
+  paragraphs: [
+    'The registry injects system columns — the ownership and audit anchors such as `owner_id`, ' +
+      '`created_at` and `created_by` — into objects. On an ADR-0015 external object the remote ' +
+      'database owns the schema, so the platform registers these anchors without provisioning a ' +
+      'column: the name resolves, but no storage stands behind it.',
+    'A dashboard filter whose effective field lands on such an anchor is ANDed into the widget\'s ' +
+      'analytics query and can never match a real value: on SQLite it silently degrades to ' +
+      'constant-false and the widget renders empty (HTTP 200, zero rows, no error).',
+    'Only a leaf that resolved BECAUSE it is injected is judged — an author-declared column of the ' +
+      'same name is one the author vouches for — and a dotted path ending on an external object is ' +
+      'judged too. The rule is a warning, not an error, because it cannot see the remote table, only ' +
+      'that the platform provisions no storage. Opt the widget out with ' +
+      '`filterBindings: { NAME: false }`, or suppress with ' +
+      '`suppressWarnings: [\'dashboard-filter-field-unprovisioned\']` if the remote schema resolves ' +
+      'the column some other way.',
+  ],
+};
+
+const WIDGET_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'widget-filter-field-unknown',
+  covers: 'what an unresolved widget filter key does',
+  paragraphs: [
+    'A widget\'s own `filter` is ANDed into its dataset query as `runtimeFilter`. A key that names no ' +
+      'column either widens the scope (the condition is dropped) or empties it, and the widget ' +
+      'renders successfully either way: nothing reports the miss.',
+    'Each key is resolved on the object graph against the dataset\'s object — a dotted ' +
+      '`relationship.field` path hop by hop, a bare name against the authored and registry-injected ' +
+      'columns — and the verdict names the hop that failed. This rule judges the KEYS; ' +
+      '`filter-token-unknown` judges the values in the same subtree. Not reported: an object this ' +
+      'stack does not define, or one with no readable field map.',
+  ],
+};
+
+const WIDGET_FILTER_FIELD_NOT_INCLUDED_EXPLANATION: RuleExplanation = {
+  rule: 'widget-filter-field-not-included',
+  covers: 'why a filter key\'s relationship prefix must be included',
+  paragraphs: [
+    'ADR-0021 joins ONLY the paths a dataset declares in `include`, and the compiler\'s ' +
+      '`assertDeclared` never sees a `runtimeFilter`, so an undeclared prefix has no runtime door in ' +
+      'front of it: no join is compiled, the column is out of the query\'s reach, and the widget ' +
+      'renders empty.',
+    'To fix it, add the prefix to the dataset\'s `include` (declaring `a.b` implicitly includes `a`), ' +
+      'or filter on a field of the dataset\'s own object.',
+  ],
+};
+
+const WIDGET_SORTBY_UNSELECTED_EXPLANATION: RuleExplanation = {
+  rule: 'widget-sortby-unselected',
+  covers: 'why sortBy must name a column the widget selects',
+  paragraphs: [
+    '`options.sortBy` is lowered into the dataset selection\'s `order`, whose key must name a ' +
+      'dimension or measure this widget selects — the contract `DashboardWidgetOptionsSchema.sortBy` ' +
+      'states. A key that does not is either dropped in favour of the implicit ordering, silently, or ' +
+      'refused by the executor (`resolveOrdering` throws `DATASET_INVALID`). Both lose the order the ' +
+      'author wrote, and the first loses it in silence.',
+    'Ordering is applied to the query RESULT, so it can only name a column that result carries: a ' +
+      'name the dataset declares but this widget does not select is not in the result. The fix for ' +
+      'that case is a `values` or `dimensions` entry, not a spelling correction.',
+    'Judged against the AUTHORED `dimensions` and `values` arrays. An entry there that does not ' +
+      'resolve is `widget-dimension-unknown` or `widget-measure-unknown`\'s finding and is not ' +
+      'reported twice.',
+  ],
+};
+
+const CHART_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'chart-field-unknown',
+  covers: 'why chartConfig binding keys are ignored',
+  paragraphs: [
+    'On a dataset-bound widget the dashboard renderer derives every chart binding from the widget\'s ' +
+      '`dimensions` and `values`. An authored axis `field` — `chartConfig.xAxis.field` or ' +
+      '`chartConfig.yAxis[].field` — is stripped by `axisPresentation`, so the x-axis stays bound to ' +
+      'the widget\'s first dimension and the y-axis bindings stay derived from its values.',
+    'For `chartConfig.series` the renderer derives one series per selected measure and matches an ' +
+      'authored entry BY NAME, so an entry naming no selected measure pairs with no series and the ' +
+      'presentation on it (mark, colour, stack, axis side) lands on nothing.',
+    'Each is a silent no-op, not a query that fails, so the rule is a warning. A field that already ' +
+      'names an entry of the widget\'s selection is not reported, and a selection entry that does not ' +
+      'resolve is `widget-dimension-unknown` or `widget-measure-unknown`\'s error.',
+    'To fix it, delete the key: `chartConfig.xAxis`, `chartConfig.yAxis` and `chartConfig.series` are ' +
+      'refused on a dataset-bound widget (ADR-0021). Post-cutover data is keyed by the dataset\'s ' +
+      'measure NAME, not the base column. Suppress with `suppressWarnings: [\'chart-field-unknown\']` ' +
+      'if the inert key is intentional.',
+  ],
+};
+
+const CHART_MEASURES_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'chart-measures-missing',
+  covers: 'what a chart with no measures renders',
+  paragraphs: [
+    'A dataset widget whose `values` list is empty never runs a query: the renderer returns its ' +
+      'authoring placeholder, "Pick measures (values) for this dataset widget." (`DatasetWidget.tsx`), ' +
+      'before any widget-family branch, so no chart is drawn at all.',
+    'This id is the chart family\'s; `widget-measures-missing` is the same shape on a single-value or ' +
+      'tabular widget. A chart with no measures is reported once, here, even when it also selects no ' +
+      'dimensions: the placeholder returns before the renderer ever tests for dimensions. A chart ' +
+      'family still needs a dimension to plot against (`chart-dimensions-missing`).',
+    'To fix it, select at least one measure of the dataset by name in `values`. Suppress with ' +
+      '`suppressWarnings: [\'chart-measures-missing\']` while the widget is still being authored.',
+  ],
+};
+
+const WIDGET_MEASURES_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'widget-measures-missing',
+  covers: 'what a KPI or table widget with no measures renders',
+  paragraphs: [
+    'The same short-circuit as `chart-measures-missing`, on every declared widget type outside the ' +
+      'chart family: with `values` empty the renderer returns the authoring placeholder "Pick measures ' +
+      '(values) for this dataset widget." before any query runs. A single-value widget (`metric`, ' +
+      '`kpi`, `gauge`, `solid-gauge`, `bullet`) loses the one KPI number the tile exists to show; a ' +
+      'tabular one (`table`, `pivot`) loses its grid.',
+    'Such a widget needs no `dimensions`, so measures are the whole fix: select at least one measure ' +
+      'of the dataset by name in `values`. Suppress with `suppressWarnings: [\'widget-measures-missing\']` ' +
+      'while the widget is still being authored.',
+  ],
+};
+
+const CHART_DIMENSIONS_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'chart-dimensions-missing',
+  covers: 'why a chart with no dimensions draws one number',
+  paragraphs: [
+    'The renderer\'s `isMetric` test is `METRIC_TYPES.has(widgetType) || dimensions.length === 0`, so ' +
+      'a chart-family widget that selects measures but no dimensions draws a single KPI number instead ' +
+      'of its declared chart. The number is real, so nothing looks broken — the declared chart family ' +
+      'is simply gone.',
+    'To fix it, plot the chart against a dataset dimension (`dimensions`), or, if a single value IS ' +
+      'what the tile should show, declare it as a `metric` or `kpi` widget so the type matches what ' +
+      'renders. Suppress with `suppressWarnings: [\'chart-dimensions-missing\']`.',
+  ],
+};
+
+// ── Dataset references (`validate-dataset-references.ts`) ──────────────────
+
+const DATASET_INCLUDE_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'dataset-include-unknown',
+  covers: 'why an include entry must be a relationship',
+  paragraphs: [
+    'Joins are COMPILED from a dataset\'s `include` (ADR-0021): each entry must be a traversable ' +
+      'relationship path — a lookup, master_detail, user or tree field, up to three hops (ADR-0071). An entry that ' +
+      'resolves to nothing, or to a field that is not a relationship, produces no join at all, so ' +
+      'every dimension or measure written against that prefix addresses nothing.',
+    'Resolution is the shared object graph\'s, injected columns included: `owner_id` reads as the ' +
+      'lookup it is and joins, `created_at` reads as a datetime and does not. Not reported: a dataset ' +
+      'whose base object this stack does not define or cannot read the fields of.',
+    'To fix it, declare a relationship that exists on the join chain from the dataset\'s object, or ' +
+      'drop the entry. Declaring `a.b` implicitly includes `a`.',
+  ],
+};
+
+const DATASET_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'dataset-field-unknown',
+  covers: 'what an unresolved field path does to the query',
+  paragraphs: [
+    'A dimension\'s or measure\'s `field` is compiled into the analytics query as written, so a path ' +
+      'that names no column addresses one that does not exist: the surface renders successfully with ' +
+      'empty or wrong numbers, and nothing reports the miss. A dimension bound to such a column cannot ' +
+      'group by anything; a measure bound to one cannot aggregate anything.',
+    'Dashboards and reports bind a dataset\'s dimensions and measures by name, and that consumer end ' +
+      'is already guarded (`widget-dimension-unknown`, `widget-measure-unknown`), so this was the quiet ' +
+      'hole one level down: every binding resolves, the board renders, and the numbers are wrong. The ' +
+      'rule is an error for that reason.',
+    'Paths are resolved on the shared object graph — a dotted `relationship.field` path hop by hop — ' +
+      'and the verdict names the hop that failed. Not reported: an object this stack does not define, ' +
+      'an object with no readable field map (an ADR-0015 external object, an introspected ' +
+      'datasource), and a registry-injected system column, which is real at runtime.',
+  ],
+};
+
+const DATASET_FIELD_NOT_INCLUDED_EXPLANATION: RuleExplanation = {
+  rule: 'dataset-field-not-included',
+  covers: 'why a relationship prefix must be in include',
+  paragraphs: [
+    'ADR-0021 joins ONLY the relationship paths a dataset declares in `include`. A dimension, measure ' +
+      'or filter path that resolves on the object graph but whose prefix was never declared compiles ' +
+      'to no join, so the column is out of the query\'s reach however real it is.',
+    'The path is still compiled into the analytics query as written, so it addresses a column that ' +
+      'does not exist: the surface renders successfully with empty or wrong numbers, and nothing ' +
+      'reports the miss.',
+    'To fix it, add the prefix to `include` (declaring `a.b` implicitly includes `a`), or bind the ' +
+      'position to a field on the dataset\'s own object.',
+  ],
+};
+
+const DATASET_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'dataset-filter-field-unknown',
+  covers: 'what an unresolved filter key does',
+  paragraphs: [
+    'A filter KEY — on the dataset\'s scope `filter` or on a measure\'s `filter` — that names no ' +
+      'column either widens the scope (the condition is dropped) or empties it (the engine compares a ' +
+      'missing column). The path is compiled into the analytics query as written, so the surface ' +
+      'renders successfully with empty or wrong numbers, and nothing reports the miss.',
+    'All three authored filter shapes are walked — a condition object, `{ field, operator, value }` ' +
+      'rules and `[field, op, value]` triples — so a filter written one way is not judged while another ' +
+      'is skipped. This rule judges the KEYS; `filter-token-unknown` judges the values in the same ' +
+      'position.',
+  ],
+};
+
+// ── Security posture (`validate-security-posture.ts`) ──────────────────────
+
+const SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION: RuleExplanation = {
+  rule: 'security-controlled-by-parent-ambiguous-relation',
+  covers: 'how the master relation is chosen',
+  paragraphs: [
+    'A `controlled_by_parent` object derives every row\'s record-level access from a master record. ' +
+      'ADR-0055 resolves the master through three tiers, in order — a required master_detail, then any ' +
+      'master_detail, then a required lookup, each of which must also name a `reference` target — and ' +
+      'takes the FIRST match in the tier that wins.',
+    'When two or more fields tie in the winning tier, which object this one derives its access from ' +
+      'is decided by FIELD DECLARATION ORDER. Moving a field up or down the schema reads as a cosmetic ' +
+      'edit in review, and it silently moves that security boundary to another object; the runtime ' +
+      'reports nothing when it does, because it does not refuse, it picks. Author time is the only ' +
+      'place this can surface, so the rule is an error. A tie in a lower tier is masked by a higher ' +
+      'tier\'s single winner and is not reported.',
+    'To fix it, leave exactly ONE candidate in the winning tier: promote the intended master into a ' +
+      'higher tier (make it the object\'s only required master_detail), or demote the others (drop ' +
+      '`required`, or change the relation type). System objects are judged too: the ambiguity is a ' +
+      'property of the document.',
+  ],
+};
+
+const SECURITY_CBP_NO_RELATION_EXPLANATION: RuleExplanation = {
+  rule: 'security-controlled-by-parent-no-relation',
+  covers: 'why the object is unusable without a master',
+  paragraphs: [
+    'A `controlled_by_parent` object says its access comes from its master. ADR-0055 resolves the ' +
+      'master through a required master_detail, then any master_detail, then a required lookup — each ' +
+      'of which must also name a `reference` target — and an object that matches none of the three has ' +
+      'nothing to derive access from.',
+    'Both runtime halves refuse it: every read is DENIED, and every write is refused with 422 ' +
+      'INVALID_METADATA — as a metadata defect rather than a permission denial — so the object is ' +
+      'unusable rather than merely locked down. System objects are judged too, because the runtime ' +
+      'refusal does not exempt them.',
+    'To fix it, add the master relation this object is derived from, a `master_detail` field with a ' +
+      '`reference` and `required: true`. An object with no master decides its own baseline: ' +
+      '\'private\', \'public_read\' or \'public_read_write\'.',
+  ],
+};
+
+const SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
+  rule: 'security-fls-unknown-field',
+  covers: 'how the runtime resolves a field-permission key',
+  paragraphs: [
+    'The runtime resolves a field-permission (FLS) key by stripping its object prefix and looking the ' +
+      'remainder up as a column (`PermissionEvaluator.getFieldPermissions`). A remainder no column ' +
+      'answers to contributes nothing, so the key matches NOTHING: the masking it declares never ' +
+      'enforces, and the field it was meant to cover stays as readable and as editable as the ' +
+      'object-level grant leaves it — for every holder of the set. Nothing reports that at runtime.',
+    'Unlike an unqualified key (`security-fls-unqualified-key`) this one looks correct in review, and ' +
+      'it is exactly what a field rename leaves behind; an empty remainder is what a half-finished edit ' +
+      'leaves. A key with more dots is judged on its whole remainder, because FLS keys address columns, ' +
+      'never joins.',
+    'Not judged: an object this stack does not define, an object with no readable field map, and a ' +
+      'registry-injected system column, which is real and addressable. To fix it, point the key at a ' +
+      'field the object declares, or delete the entry: an entry that cannot match is not protection, ' +
+      'and if the field was renamed the mask has been off since that rename.',
+  ],
+};
+
+const SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION: RuleExplanation = {
+  rule: 'security-master-detail-ungranted',
+  covers: 'why a detail object needs its own CRUD grant',
+  paragraphs: [
+    'A master-detail child derives its RECORD-level access from the master (ADR-0055 ' +
+      '`controlled_by_parent`), but object-level CRUD is a SEPARATE gate that is never derived: a ' +
+      'permission set that grants the master and forgets the child denies role-bound non-admin users ' +
+      '(403) before the parent-derived access is ever consulted — the silent "can\'t submit the ' +
+      'subtable" trap.',
+    'A child is an object with a master_detail field, or a `controlled_by_parent` object that resolves ' +
+      'its master the way the runtime does (a required lookup included). The rule is a warning, and it ' +
+      'stays silent when the stack authors no permission sets or a `\'*\'` wildcard grant covers every ' +
+      'object; one set granting the child while another forgets it is out of scope.',
+    'To fix it, grant the object in at least one permission set that already grants its master — ' +
+      'allowRead, allowCreate and allowEdit. A table no role should ever touch is named `sys_*` or set ' +
+      '`isSystem: true`.',
+  ],
+};
+
+const SECURITY_OWD_ALIAS_EXPLANATION: RuleExplanation = {
+  rule: 'security-owd-alias',
+  covers: 'which sharing values are retired or misplaced',
+  paragraphs: [
+    'ADR-0090 D4 retired three OWD spellings: \'read\' (now \'public_read\'), \'read_write\' and ' +
+      '\'full\' (both now \'public_read_write\'). The runtime fails CLOSED to \'private\' on a value it ' +
+      'does not know, so an object meant to be readable or writable org-wide is neither, with no notice ' +
+      'on the read path.',
+    '\'public\' is not an OWD value and never was, so nothing retired it: it is legal on the ' +
+      'neighbouring keys \'access\' (its \'default\') and \'publicSharing\' (its \'allowedAudiences\'), ' +
+      'just not on \'sharingModel\' or \'externalSharingModel\'. Its fix-it offers \'public_read_write\'.',
+    'The parsed doors refuse these values at the schema enum before this rule runs; it reaches the ' +
+      'unparsed ones — `os lint` on a raw config, a direct call of the rule.',
+  ],
+};
+
+const SECURITY_DELEGATION_MISSING_REASON_EXPLANATION: RuleExplanation = {
+  rule: 'security-delegation-missing-reason',
+  covers: 'why a delegation needs a reason',
+  paragraphs: [
+    'ADR-0091 D3 makes the reason mandatory on every delegation, for the dual audit trail: ' +
+      '`granted_by` records the writer, `delegated_from` the authority source, and `reason` why. The ' +
+      'runtime delegation gate rejects a delegation without one; this rule moves the failure to ' +
+      'authoring.',
+    'Judged on `sys_user_position` seed rows only: `delegated_from` is not declared on ' +
+      '`sys_user_permission_set`, whose engine refuses it as an undeclared field.',
+  ],
+};
+
+// ── Visibility predicates (`validate-visibility-predicates.ts`) ────────────
+// The console renders an element whose predicate cannot evaluate as if it had
+// none (it falls OPEN); every entry below is a way to reach that outcome.
+
+const VISIBILITY_ROOT_MISLAYERED_EXPLANATION: RuleExplanation = {
+  rule: 'visibility-root-mislayered',
+  covers: 'which root each surface binds',
+  paragraphs: [
+    'ADR-0089 D3 binds a different root on each layer. A runtime view or page surface binds the live ' +
+      'record as `record`, plus `current_user` (and page state as `page.VAR` on a page component); a ' +
+      'metadata-editing form — a `*.form.ts` module or a schema-bound form view — binds the row under ' +
+      'edit as `data`.',
+    'A predicate rooted at the other layer\'s namespace never matches, and the element renders ' +
+      'unconditionally. The rule is a warning rather than an error because the root is at least a ' +
+      'namespace some surface binds.',
+  ],
+};
+
+const VISIBILITY_PREDICATE_OVER_BUDGET_EXPLANATION: RuleExplanation = {
+  rule: 'visibility-predicate-over-budget',
+  covers: 'why an oversized predicate never evaluates',
+  paragraphs: [
+    'The canonical CEL front end enforces the platform\'s parse budgets (`maxAstNodes`, ' +
+      '`maxListElements` and the rest). A predicate that is valid CEL but overruns one is refused, so it ' +
+      'can never evaluate, and the console falls OPEN: the element renders unconditionally and looks ' +
+      'exactly like one with no predicate at all. Failing open is the console\'s settled behaviour, so ' +
+      'this error is the only signal.',
+    'It is a SIZE fault, not a dialect mistake, so re-spelling the predicate will not fix it. Collapse ' +
+      'a long `record.f == \'a\' || record.f == \'b\'` chain into one `record.f in [\'a\', \'b\']`, which is ' +
+      'far fewer AST nodes (`maxListElements` is 64, so a very large set needs the next option), or ' +
+      'precompute the heavy part into a formula or roll-up field and test that one field. The finding ' +
+      'does not echo the predicate; its `path` locates it.',
+  ],
+};
+
+const VISIBILITY_PREDICATE_SYNTAX_EXPLANATION: RuleExplanation = {
+  rule: 'visibility-predicate-syntax',
+  covers: 'why a predicate that does not parse is an error',
+  paragraphs: [
+    'Visibility predicates are bare CEL. A predicate the canonical front end does not parse can never ' +
+      'evaluate, and the console falls OPEN: the element renders unconditionally and looks exactly like ' +
+      'one with no predicate at all (failing open is the console\'s settled behaviour). Every other ' +
+      'predicate surface already gates a syntax fault (ADR-0032), so this one does too.',
+    'Spellings from other languages do not parse: write `==` (not `===`), `!=` (not `!==` or `<>`), ' +
+      '`&&` (not `and`), `||` (not `or`), `!` (not `not`). A predicate that is flawless CEL but too ' +
+      'large is `visibility-predicate-over-budget` instead.',
+  ],
+};
+
+const VISIBILITY_PREDICATE_UNKNOWN_FUNCTION_EXPLANATION: RuleExplanation = {
+  rule: 'visibility-predicate-unknown-function',
+  covers: 'what a call to an unregistered function does',
+  paragraphs: [
+    'The predicate parses, so nothing else reports it, and it faults the moment it is evaluated. On a ' +
+      'view or page surface the console falls OPEN and the element renders unconditionally, exactly ' +
+      'like one carrying no predicate at all. On an action surface — evaluated with ' +
+      '`throwOnError: true` — it falls CLOSED and the action disappears for EVERY user, including one ' +
+      'who holds the grant, leaving one deduped `console.warn` as the only signal.',
+    'The finding quotes the engine\'s own wording and offers no "did you mean": the nearest name is ' +
+      'often an unrelated function. It is a NAME fault, so re-spelling the predicate will not fix it. ' +
+      'The callable names advertised for authoring are the `functions` list `introspectScope` returns ' +
+      '(`CEL_STDLIB_FUNCTIONS`); pick one of those, or precompute the value into a formula field on the ' +
+      'object and test that field.',
+  ],
+};
+
+const VISIBILITY_BARE_IDENTIFIER_EXPLANATION: RuleExplanation = {
+  rule: 'visibility-bare-identifier',
+  covers: 'why every value is read through a namespace',
+  paragraphs: [
+    'On a visibility surface values are bound under a namespace — `record` and `current_user` on a ' +
+      'runtime view or page (plus `page.VAR` on a page component), `data` on a metadata-editing form — ' +
+      'and never flattened to top level. A bare identifier, or a path through a namespace no binding ' +
+      'provides, resolves to nothing, so the predicate can never evaluate and the console falls OPEN: ' +
+      'the element renders unconditionally and looks exactly like one with no predicate at all ' +
+      '(failing open is the console\'s settled behaviour).',
+    'There is no reading of the metadata under which it was going to work, so the rule is an error. ' +
+      'One position is exempt: a bare word on the right of `==` or `!=` on a metadata-editing form, ' +
+      'which the console parses as a literal (a path there is `predicate-rhs-path-shaped`\'s finding).',
+  ],
+};
+
 /**
  * Every rule explanation this package ships, keyed by rule id. `os explain
  * <rule-id>` reads this table and nothing else.
@@ -320,6 +772,32 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [VIEW_ROW_COLOR_WITHOUT_COLORS_EXPLANATION.rule]: VIEW_ROW_COLOR_WITHOUT_COLORS_EXPLANATION,
   [VIEW_ROW_COLOR_UNRESOLVABLE_VALUE_EXPLANATION.rule]: VIEW_ROW_COLOR_UNRESOLVABLE_VALUE_EXPLANATION,
   [WEBHOOK_WITHOUT_TRIGGERS_EXPLANATION.rule]: WEBHOOK_WITHOUT_TRIGGERS_EXPLANATION,
+  [WIDGET_LEGACY_ANALYTICS_UNRENDERABLE_EXPLANATION.rule]: WIDGET_LEGACY_ANALYTICS_UNRENDERABLE_EXPLANATION,
+  [DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION,
+  [DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION.rule]: DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION,
+  [DASHBOARD_FILTER_FIELD_UNPROVISIONED_EXPLANATION.rule]: DASHBOARD_FILTER_FIELD_UNPROVISIONED_EXPLANATION,
+  [WIDGET_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: WIDGET_FILTER_FIELD_UNKNOWN_EXPLANATION,
+  [WIDGET_FILTER_FIELD_NOT_INCLUDED_EXPLANATION.rule]: WIDGET_FILTER_FIELD_NOT_INCLUDED_EXPLANATION,
+  [WIDGET_SORTBY_UNSELECTED_EXPLANATION.rule]: WIDGET_SORTBY_UNSELECTED_EXPLANATION,
+  [CHART_FIELD_UNKNOWN_EXPLANATION.rule]: CHART_FIELD_UNKNOWN_EXPLANATION,
+  [CHART_MEASURES_MISSING_EXPLANATION.rule]: CHART_MEASURES_MISSING_EXPLANATION,
+  [WIDGET_MEASURES_MISSING_EXPLANATION.rule]: WIDGET_MEASURES_MISSING_EXPLANATION,
+  [CHART_DIMENSIONS_MISSING_EXPLANATION.rule]: CHART_DIMENSIONS_MISSING_EXPLANATION,
+  [DATASET_INCLUDE_UNKNOWN_EXPLANATION.rule]: DATASET_INCLUDE_UNKNOWN_EXPLANATION,
+  [DATASET_FIELD_UNKNOWN_EXPLANATION.rule]: DATASET_FIELD_UNKNOWN_EXPLANATION,
+  [DATASET_FIELD_NOT_INCLUDED_EXPLANATION.rule]: DATASET_FIELD_NOT_INCLUDED_EXPLANATION,
+  [DATASET_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: DATASET_FILTER_FIELD_UNKNOWN_EXPLANATION,
+  [SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION.rule]: SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION,
+  [SECURITY_CBP_NO_RELATION_EXPLANATION.rule]: SECURITY_CBP_NO_RELATION_EXPLANATION,
+  [SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION.rule]: SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION,
+  [SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION.rule]: SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION,
+  [SECURITY_OWD_ALIAS_EXPLANATION.rule]: SECURITY_OWD_ALIAS_EXPLANATION,
+  [SECURITY_DELEGATION_MISSING_REASON_EXPLANATION.rule]: SECURITY_DELEGATION_MISSING_REASON_EXPLANATION,
+  [VISIBILITY_ROOT_MISLAYERED_EXPLANATION.rule]: VISIBILITY_ROOT_MISLAYERED_EXPLANATION,
+  [VISIBILITY_PREDICATE_OVER_BUDGET_EXPLANATION.rule]: VISIBILITY_PREDICATE_OVER_BUDGET_EXPLANATION,
+  [VISIBILITY_PREDICATE_SYNTAX_EXPLANATION.rule]: VISIBILITY_PREDICATE_SYNTAX_EXPLANATION,
+  [VISIBILITY_PREDICATE_UNKNOWN_FUNCTION_EXPLANATION.rule]: VISIBILITY_PREDICATE_UNKNOWN_FUNCTION_EXPLANATION,
+  [VISIBILITY_BARE_IDENTIFIER_EXPLANATION.rule]: VISIBILITY_BARE_IDENTIFIER_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

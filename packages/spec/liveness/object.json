@@ -70,6 +70,14 @@
       "evidence": "packages/objectql/src/engine.ts",
       "note": "engine/DDL + forms."
     },
+    "attachedOnRead": {
+      "status": "live",
+      "verifiedAt": "2026-10-09",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/lint/src/validate-expressions.ts#attachedOnReadOf (the read of `obj.attachedOnRead`: block name → its leaf keys); packages/lint/src/validate-expressions.ts#buildFieldIndex (each declared block name joins the names `record.<x>` resolves to); packages/formula/src/validate.ts#checkAttachedLeaf (the second segment of `record.<block>.<leaf>` judged against the block's declared leaves, under the existing `unknown-field` refusal)",
+      "producer": "packages/lint/src/validate-expressions.ts#runStackExpressionPasses (threads the per-object index into the shared validator's `attachedOnRead` hint at both call sites that pass the field index: the predicate `check` closure and the field-formula judge)",
+      "note": "#22211 ruling A (6070963704), built by #22386. `live` on an AUTHORING consumer, the `action.execution` / `dashboard.widgets.suppressWarnings` precedent: the key provisions nothing and changes no dispatch by itself — it is the declaration the shared build validator (`@objectstack/lint` over `@objectstack/formula`) judges `record.<block>` and `record.<block>.<leaf>` against, so `os build` / `os validate` and every door running the shared validator accept a declared leaf and refuse a misspelt one; deleting the key would delete that verdict. Two other field-existence builders read `fields` only and not this key — the MCP expression tool (packages/mcp) and service-automation's flow-registration resolver; their settlement is carried by #22387 (seat note 6075461181). By the ruling NOT a field: no driver, form, list view, export, write path or translation bundle reads it, and the schema refuses a block that repeats a declared field name. The leaf TYPES (the four `Field.returnType` value types) are not read by this consumer, which judges names only: their reader is the ruling's second reader, plugin-approvals' conformance test (#22387, seat order 6074312931), which pins that the keys `attachViewers` emits AND the runtime type of each emitted value equal what `sys_approval_request` declares under `attachedOnRead.viewer` (three `boolean`s). Until that test lands the types are a declaration awaiting its named reader."
+    },
     "datasource": {
       "status": "live",
       "verifiedAt": "2026-08-28",

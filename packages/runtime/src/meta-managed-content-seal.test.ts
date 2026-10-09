@@ -10,8 +10,17 @@
  * package ships for every type it named: a flow, an object (and through it a
  * field), a permission set, a position. With the hatch open the dispatcher now
  * answers what it answers with the hatch shut — `403` `NOT_OVERRIDABLE`, no
- * row — under both spellings the protocol's reader honours, on both kernel
- * shapes; and the read envelope stops promising an edit the door refuses.
+ * row — on both kernel shapes; and the read envelope stops promising an edit
+ * the door refuses.
+ *
+ * [#22411] Only the preferred spelling opens the hatch. The legacy spelling
+ * `OBJECTSTACK_METADATA_WRITABLE`, removed in 11.0, used to be honoured by the
+ * protocol's own copy of the reader and not by the repository's, so the type
+ * listing advertised a hatch the save door then refused. Both now read through
+ * the repository's one reader. The last block pins the card's two readings at
+ * this door: under the legacy spelling alone, the listing and the save door
+ * agree by both refusing, for a type the hatch would name and for one it
+ * would not; the preferred spelling is the control.
  *
  * What stays open, pinned beside it:
  *  - a regime-O overlay: a packaged VIEW is overlaid (`200`, a row), because
@@ -127,6 +136,8 @@ function makeEngine() {
             getItem: (type: string, name: string) => runtimeItems.get(type)?.get(name) ?? artifacts.get(type)?.get(name),
             getArtifactItem: (type: string, name: string) => artifacts.get(type)?.get(name),
             getObject: (name: string) => artifacts.get('object')?.get(name) ?? runtimeItems.get('object')?.get(name),
+            // The type listing (`GET /meta/types`) reads the live types from here.
+            getRegisteredTypes: () => ['flow', 'object', 'permission', 'position', 'view', 'job', 'picklist'],
             getPackage: () => undefined,
             isPackageDisabled: () => false,
             applyNavContributions: (app: unknown) => app,
@@ -234,62 +245,123 @@ afterEach(() => {
 });
 
 describe('[ADR-0131 D6] the dispatcher /meta door: the hatch opens no write onto a managed item', () => {
-    for (const variable of ['OS_METADATA_WRITABLE', 'OBJECTSTACK_METADATA_WRITABLE'] as const) {
-        for (const environmentId of [undefined, 'env_1']) {
-            const kernel = environmentId ? 'environment' : 'host-config';
+    for (const environmentId of [undefined, 'env_1']) {
+        const kernel = environmentId ? 'environment' : 'host-config';
 
-            it(`${variable}=${HATCH}: PUT of a managed flow, object, field, permission set and position — 403 NOT_OVERRIDABLE, no row (${kernel})`, async () => {
-                const shut = makeStack(environmentId);
-                const sealed: Array<NonNullable<HttpDispatcherResult['response']>> = [];
-                for (const [type, name, body] of EDITS) {
-                    sealed.push(responseOf(await shut.dispatcher.handleMetadata(`/${type}/${name}`, ctx(), 'PUT', body)));
-                }
+        it(`OS_METADATA_WRITABLE=${HATCH}: PUT of a managed flow, object, field, permission set and position — 403 NOT_OVERRIDABLE, no row (${kernel})`, async () => {
+            const shut = makeStack(environmentId);
+            const sealed: Array<NonNullable<HttpDispatcherResult['response']>> = [];
+            for (const [type, name, body] of EDITS) {
+                sealed.push(responseOf(await shut.dispatcher.handleMetadata(`/${type}/${name}`, ctx(), 'PUT', body)));
+            }
 
-                process.env[variable] = HATCH;
-                ObjectStackProtocolImplementation.resetEnvWritableCache();
-                resetEnvWritableMetadataTypes();
-                const { engine, dispatcher } = makeStack(environmentId);
-                for (const [i, [type, name, body]] of EDITS.entries()) {
-                    const res = responseOf(await dispatcher.handleMetadata(`/${type}/${name}`, ctx(), 'PUT', body));
-                    expect(res.status, `${type}/${name}`).toBe(403);
-                    expect(res.body?.error?.code, `${type}/${name}`).toBe('NOT_OVERRIDABLE');
-                    // The same refusal the shut hatch gets — sentence included.
-                    expect(res.body?.error?.message, `${type}/${name}`).toBe(sealed[i].body?.error?.message);
-                    expect(activeRow(engine, type, name), `${type}/${name}`).toBeUndefined();
-                }
-                expect(engine.metaRows()).toEqual([]);
+            process.env.OS_METADATA_WRITABLE = HATCH;
+            ObjectStackProtocolImplementation.resetEnvWritableCache();
+            resetEnvWritableMetadataTypes();
+            const { engine, dispatcher } = makeStack(environmentId);
+            for (const [i, [type, name, body]] of EDITS.entries()) {
+                const res = responseOf(await dispatcher.handleMetadata(`/${type}/${name}`, ctx(), 'PUT', body));
+                expect(res.status, `${type}/${name}`).toBe(403);
+                expect(res.body?.error?.code, `${type}/${name}`).toBe('NOT_OVERRIDABLE');
+                // The same refusal the shut hatch gets — sentence included.
+                expect(res.body?.error?.message, `${type}/${name}`).toBe(sealed[i].body?.error?.message);
+                expect(activeRow(engine, type, name), `${type}/${name}`).toBeUndefined();
+            }
+            expect(engine.metaRows()).toEqual([]);
+        });
+
+        it(`OS_METADATA_WRITABLE=${HATCH}: the read envelope promises no edit and no removal of a managed flow (${kernel})`, async () => {
+            process.env.OS_METADATA_WRITABLE = HATCH;
+            ObjectStackProtocolImplementation.resetEnvWritableCache();
+            resetEnvWritableMetadataTypes();
+            const { dispatcher } = makeStack(environmentId);
+            const res = responseOf(await dispatcher.handleMetadata(`/flow/${PACKAGED_FLOW.name}`, ctx(), 'GET', undefined));
+            expect(res.status).toBe(200);
+            const envelope = (res.body?.data ?? res.body) as { editable?: unknown; deletable?: unknown };
+            expect({ editable: envelope?.editable, deletable: envelope?.deletable }).toEqual({ editable: false, deletable: false });
+        });
+
+        it(`OS_METADATA_WRITABLE=${HATCH} — controls: a packaged VIEW is overlaid, and a NEW flow is created (${kernel})`, async () => {
+            process.env.OS_METADATA_WRITABLE = HATCH;
+            ObjectStackProtocolImplementation.resetEnvWritableCache();
+            resetEnvWritableMetadataTypes();
+            const { engine, dispatcher } = makeStack(environmentId);
+
+            const view = responseOf(await dispatcher.handleMetadata(
+                `/view/${PACKAGED_VIEW.name}`, ctx(), 'PUT', { ...strip(PACKAGED_VIEW), label: 'My Leads' },
+            ));
+            expect(view.status, JSON.stringify(view.body)).toBe(200);
+            expect(activeRow(engine, 'view', PACKAGED_VIEW.name)).toBeDefined();
+
+            const created = responseOf(await dispatcher.handleMetadata(
+                '/flow/crm_new_alert', ctx(), 'PUT',
+                { name: 'crm_new_alert', label: 'New Alert', type: 'autolaunched', nodes: [], edges: [] },
+            ));
+            expect(created.status, JSON.stringify(created.body)).toBe(200);
+            expect(activeRow(engine, 'flow', 'crm_new_alert')).toBeDefined();
+        });
+    }
+});
+
+/**
+ * [#22411] The type listing and the save door read ONE setting, so they give
+ * one answer. The legacy spelling `OBJECTSTACK_METADATA_WRITABLE` was removed in
+ * 11.0; the protocol's own copy of the reader kept honouring it, so under that
+ * spelling alone `GET /meta/types` advertised the hatch for a type and a create
+ * of a new item of that type answered `403 NOT_CREATABLE`.
+ *
+ * `job` and `picklist` are both code-only (no create channel, no overlay), so
+ * the hatch is the only thing that could admit a create of either: `job` is
+ * the type the variable names, `picklist` the type it does not.
+ */
+describe('[#22411] the dispatcher /meta door: the type listing and the save door agree on the hatch', () => {
+    const JOB = { name: 'hatch_probe_job', label: 'J', schedule: { type: 'cron', expression: '0 0 * * *' }, handler: 'nope' };
+    const PICKLIST = { name: 'hatch_probe_picklist', label: 'P', options: [{ label: 'One', value: 'one' }] };
+
+    async function readBoth(environmentId: string | undefined) {
+        const { engine, dispatcher } = makeStack(environmentId);
+        const listing = responseOf(await dispatcher.handleMetadata('/types', ctx(), 'GET', undefined));
+        expect(listing.status).toBe(200);
+        const entries = ((listing.body?.data ?? listing.body) as { entries?: any[] })?.entries ?? [];
+        const listed = (type: string) => {
+            const entry = entries.find((e) => e.type === type);
+            expect(entry, `${type} is listed`).toBeDefined();
+            return { allowOrgOverride: entry.allowOrgOverride, overrideSource: entry.overrideSource };
+        };
+        const save = async (type: string, body: { name: string }) => {
+            const res = responseOf(await dispatcher.handleMetadata(`/${type}/${body.name}`, ctx(), 'PUT', body));
+            return { status: res.status, code: res.body?.error?.code, row: activeRow(engine, type, body.name) !== undefined };
+        };
+        return {
+            job: { listed: listed('job'), saved: await save('job', JOB) },
+            picklist: { listed: listed('picklist'), saved: await save('picklist', PICKLIST) },
+        };
+    }
+
+    const SHUT = { allowOrgOverride: false, overrideSource: 'registry' };
+    const REFUSED = { status: 403, code: 'NOT_CREATABLE', row: false };
+
+    for (const environmentId of [undefined, 'env_1']) {
+        const kernel = environmentId ? 'environment' : 'host-config';
+
+        it(`OBJECTSTACK_METADATA_WRITABLE=job alone: both doors refuse, for the named type and for one it does not name (${kernel})`, async () => {
+            process.env.OBJECTSTACK_METADATA_WRITABLE = 'job';
+            ObjectStackProtocolImplementation.resetEnvWritableCache();
+            resetEnvWritableMetadataTypes();
+            expect(await readBoth(environmentId)).toEqual({
+                job: { listed: SHUT, saved: REFUSED },
+                picklist: { listed: SHUT, saved: REFUSED },
             });
+        });
 
-            it(`${variable}=${HATCH}: the read envelope promises no edit and no removal of a managed flow (${kernel})`, async () => {
-                process.env[variable] = HATCH;
-                ObjectStackProtocolImplementation.resetEnvWritableCache();
-                resetEnvWritableMetadataTypes();
-                const { dispatcher } = makeStack(environmentId);
-                const res = responseOf(await dispatcher.handleMetadata(`/flow/${PACKAGED_FLOW.name}`, ctx(), 'GET', undefined));
-                expect(res.status).toBe(200);
-                const envelope = (res.body?.data ?? res.body) as { editable?: unknown; deletable?: unknown };
-                expect({ editable: envelope?.editable, deletable: envelope?.deletable }).toEqual({ editable: false, deletable: false });
-            });
-
-            it(`${variable}=${HATCH} — controls: a packaged VIEW is overlaid, and a NEW flow is created (${kernel})`, async () => {
-                process.env[variable] = HATCH;
-                ObjectStackProtocolImplementation.resetEnvWritableCache();
-                resetEnvWritableMetadataTypes();
-                const { engine, dispatcher } = makeStack(environmentId);
-
-                const view = responseOf(await dispatcher.handleMetadata(
-                    `/view/${PACKAGED_VIEW.name}`, ctx(), 'PUT', { ...strip(PACKAGED_VIEW), label: 'My Leads' },
-                ));
-                expect(view.status, JSON.stringify(view.body)).toBe(200);
-                expect(activeRow(engine, 'view', PACKAGED_VIEW.name)).toBeDefined();
-
-                const created = responseOf(await dispatcher.handleMetadata(
-                    '/flow/crm_new_alert', ctx(), 'PUT',
-                    { name: 'crm_new_alert', label: 'New Alert', type: 'autolaunched', nodes: [], edges: [] },
-                ));
-                expect(created.status, JSON.stringify(created.body)).toBe(200);
-                expect(activeRow(engine, 'flow', 'crm_new_alert')).toBeDefined();
-            });
-        }
+        it(`control — OS_METADATA_WRITABLE=job: both doors admit the named type and refuse the other (${kernel})`, async () => {
+            process.env.OS_METADATA_WRITABLE = 'job';
+            ObjectStackProtocolImplementation.resetEnvWritableCache();
+            resetEnvWritableMetadataTypes();
+            const both = await readBoth(environmentId);
+            expect(both.job.listed).toEqual({ allowOrgOverride: true, overrideSource: 'env' });
+            expect({ status: both.job.saved.status, row: both.job.saved.row }).toEqual({ status: 200, row: true });
+            expect(both.picklist).toEqual({ listed: SHUT, saved: REFUSED });
+        });
     }
 });

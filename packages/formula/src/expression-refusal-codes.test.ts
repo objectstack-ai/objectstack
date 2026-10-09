@@ -235,6 +235,26 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
       params: { field: 'zzz' },
       message: 'unknown field `zzz`',
     },
+    {
+      // A declared read attachment's second segment (#22386): the same code,
+      // the dotted path, and the optional clause naming the declared leaves.
+      produce: () =>
+        onlyError('predicate', 'record.viewer.can_actt', {
+          fields: ['status', 'viewer'],
+          objectName: 'approval',
+          attachedOnRead: { viewer: ['can_act', 'is_submitter'] },
+        }),
+      params: {
+        field: 'viewer.can_actt',
+        objectName: 'approval',
+        suggestion: 'viewer.can_act',
+        block: 'viewer',
+        leaves: ['can_act', 'is_submitter'],
+      },
+      message:
+        'unknown field `viewer.can_actt` on `approval` (the read attachment `viewer` declares `can_act`, `is_submitter`) ' +
+        '— did you mean `viewer.can_act`?',
+    },
   ],
   'unknown-role': [
     {
