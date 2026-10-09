@@ -70,6 +70,7 @@
  * `organization-add-member-team-fallback.test.ts`.
  */
 
+import { inProcessSessionReadInput } from '@objectstack/types';
 import { mapAuthApiError, type EndpointResult } from './admin-user-endpoints.js';
 
 /** Minimal better-auth server-api surface this route drives. */
@@ -82,6 +83,8 @@ export interface AddMemberCapableApi {
       teamId?: string;
     };
     headers?: Headers;
+    /** `disableRefresh` for a cookie request (#22398, see the call below). */
+    query?: { disableRefresh: true };
   }): Promise<Record<string, unknown> | null>;
 }
 
@@ -165,6 +168,11 @@ export async function runOrganizationAddMember(
     // admin's ACTIVE organization (the action metadata's documented
     // behaviour). The vendor endpoint is server-only and does no
     // authorization of its own — the mount's platform-admin gate already ran.
+    // [#22398] The vendor reads the session from those headers in-process, and
+    // a renewal would stage its cookie on a response nobody sends; so the call
+    // takes the same input a `getSession` reader does (better-auth's
+    // `getSessionFromCtx` spreads the call's `query` into that read). A cookie
+    // request does not renew here; a bearer-only one does, as before.
     const member = await authApi.addMember({
       body: {
         userId,
@@ -172,7 +180,7 @@ export async function runOrganizationAddMember(
         ...(organizationId ? { organizationId } : {}),
         ...(teamId ? { teamId } : {}),
       },
-      headers: request.headers,
+      ...inProcessSessionReadInput(request.headers),
     });
     return { status: 200, body: { success: true, data: { member: member ?? null } } };
   } catch (error) {

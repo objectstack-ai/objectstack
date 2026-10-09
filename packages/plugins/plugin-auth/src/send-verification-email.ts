@@ -30,6 +30,7 @@
  */
 
 import type { AuthRequestHandler } from './register-sso-provider.js';
+import { inProcessRedispatchUrl } from './in-process-redispatch.js';
 
 export interface ResendVerificationEmailResult {
   /** HTTP status to return to the caller. */
@@ -60,7 +61,9 @@ async function resolveSessionEmail(
     if (cookie) h.set('cookie', cookie);
     const authz = headers.get('authorization');
     if (authz) h.set('authorization', authz);
-    const resp = await handle(new Request(sessionUrl, { method: 'GET', headers: h }));
+    // [#22398] A cookie request reads without renewal: this response's cookie
+    // is never sent (`in-process-redispatch.ts`).
+    const resp = await handle(new Request(inProcessRedispatchUrl(sessionUrl, h), { method: 'GET', headers: h }));
     if (!resp.ok) return undefined;
     const data: any = await resp.json().catch(() => null);
     // customSession shapes the payload as `{ user, session }`; be tolerant of
@@ -127,7 +130,9 @@ export async function runResendVerificationEmail(
 
   // Re-dispatch to the real better-auth route (the universal handler bypasses
   // this wrapper, so there is no recursion) with the resolved email.
-  const innerReq = new Request(sendUrl, {
+  // [#22398] The real route reads the session as well, and only its status and
+  // body come back from here — the same rule as the lookup above.
+  const innerReq = new Request(inProcessRedispatchUrl(sendUrl, headers), {
     method: 'POST',
     headers,
     body: JSON.stringify({ email, ...(callbackURL ? { callbackURL } : {}) }),

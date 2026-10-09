@@ -15,14 +15,22 @@
 // row's own evidence is the #3022 case: a forged owner_id / organization_id on
 // the anonymous submit never lands on the row.
 // authz-row: public-form-managed-anchors
+//
+// [#22437] The submit answers the created id and nothing the insert stored, so
+// what landed is read back here through a SYSTEM read of that id — the row an
+// administrator would see — never off the anonymous answer.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 
+const SYS = { context: { isSystem: true } } as const;
+
 describe('showcase: web-to-lead public form (ADR-0056 Option A)', () => {
   let stack: VerifyStack;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let ql: any;
 
   beforeAll(async () => {
     stack = await bootStack(showcaseStack, {
@@ -30,7 +38,18 @@ describe('showcase: web-to-lead public form (ADR-0056 Option A)', () => {
         defaultPermissionSets: [...securityDefaultPermissionSets],
       }),
     });
+    ql = await stack.kernel.getServiceAsync('objectql');
   }, 60_000);
+
+  /** The anonymous answer must be exactly the created id; returns the row that landed under it. */
+  const landedUnder = async (r: Response): Promise<Record<string, unknown>> => {
+    const body = (await r.json()) as Record<string, unknown>;
+    expect(body, 'the anonymous answer is the created id, and nothing the insert stored').toEqual({ id: body.id });
+    expect(typeof body.id).toBe('string');
+    const row = await ql.findOne('showcase_inquiry', { where: { id: body.id }, ...SYS });
+    expect(row, 'the answer names the row that landed').toBeTruthy();
+    return row as Record<string, unknown>;
+  };
 
   afterAll(async () => {
     await stack?.stop();
@@ -61,12 +80,11 @@ describe('showcase: web-to-lead public form (ADR-0056 Option A)', () => {
       }),
     });
     expect(r.status, 'anonymous submit must succeed under requireAuth=true').toBe(201);
-    const body = (await r.json()) as { object: string; id: string; record: Record<string, unknown> };
-    expect(body.object).toBe('showcase_inquiry');
-    expect(body.record.name).toBe('Ada Lovelace');
+    const row = await landedUnder(r);
+    expect(row.name).toBe('Ada Lovelace');
     // Server-controlled: whitelist stripped the client `status`, the hook stamped defaults.
-    expect(body.record.status, 'status is server-stamped, not client-set').toBe('new');
-    expect(body.record.source).toBe('web');
+    expect(row.status, 'status is server-stamped, not client-set').toBe('new');
+    expect(row.source).toBe('web');
   });
 
   it('a forged owner_id / organization_id never lands on the row (#3022)', async () => {
@@ -83,12 +101,12 @@ describe('showcase: web-to-lead public form (ADR-0056 Option A)', () => {
       }),
     });
     expect(r.status, 'the submit itself still succeeds — the anchors are stripped, not fatal').toBe(201);
-    const body = (await r.json()) as { record: Record<string, unknown> };
-    expect(body.record.name).toBe('Mallory');
+    const row = await landedUnder(r);
+    expect(row.name).toBe('Mallory');
     // The anchors are server-managed on this surface: never the forged values.
-    expect(body.record.owner_id ?? null, 'anonymous submission must not forge ownership').not.toBe('usr_victim');
-    expect(body.record.organization_id ?? null, 'anonymous submission must not land cross-tenant').not.toBe('org_victim');
-    expect(body.record.created_by ?? null).not.toBe('usr_victim');
+    expect(row.owner_id ?? null, 'anonymous submission must not forge ownership').not.toBe('usr_victim');
+    expect(row.organization_id ?? null, 'anonymous submission must not land cross-tenant').not.toBe('org_victim');
+    expect(row.created_by ?? null).not.toBe('usr_victim');
   });
 
   it('the public grant is create + read-back ONLY — anonymous cannot list inquiries', async () => {

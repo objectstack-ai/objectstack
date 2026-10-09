@@ -66,7 +66,10 @@ import {
   assertEngineUpdateDispatch,
   assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
+import { ListDraftsResponseSchema } from '@objectstack/spec/api';
+import { I18nLabelSchema } from '@objectstack/spec/ui';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
+import { ObjectStackProtocolImplementation } from './protocol.js';
 
 interface Row {
   [k: string]: unknown;
@@ -107,6 +110,8 @@ const INVALID_INSTANT = new Date(NaN);
 const CONFORMS: { [K in keyof DraftHeader]: (value: DraftHeader[K]) => boolean } = {
   type: (v) => typeof v === 'string',
   name: (v) => typeof v === 'string',
+  // [#22200] The draft body's own label: an `I18nLabel` as authored, or `null`.
+  label: (v) => v === null || I18nLabelSchema.safeParse(v).success,
   organizationId: (v) => v === null || typeof v === 'string',
   packageId: (v) => v === null || typeof v === 'string',
   updatedAt: (v) => v === null || typeof v === 'string',
@@ -343,6 +348,168 @@ describe('#14938 — listDrafts emits canonical ISO text for updatedAt, whatever
       expect(drafts.find((d) => d.name === 'case_grid')!.updatedBy).toBe('usr_0');
       expect(drafts.find((d) => d.name === 'lead_grid')!.updatedBy).toBeNull();
       expectConformsToDeclaration(drafts);
+    });
+  });
+});
+
+/**
+ * [#22200] The `_drafts` header carries the draft body's own `label`.
+ *
+ * `GET /meta/_drafts` is the only list of draft-only items a client has, so a
+ * header without a label leaves such an item showable by its machine name
+ * alone — a permission set just created as a draft read `technician`, not
+ * "Technician". The label is read off the row `listDrafts` already holds (no
+ * second query), carried as authored, and `null` when the body declares none:
+ * ⛔ never the item name standing in for it.
+ *
+ * Shares this file's engine double rather than pinning a second one: the
+ * projection under test is the same `listDrafts` map, and the conformance
+ * table above now covers `label` on every case in the file.
+ */
+describe('#22200 — each listDrafts row carries the draft body\'s own label, or null', () => {
+  const HEADER_KEYS = ['label', 'name', 'organizationId', 'packageId', 'type', 'updatedAt', 'updatedBy'];
+
+  describe('§A drafts saved through the real write path', () => {
+    it('a draft whose body declares a label returns it', async () => {
+      const engine = makeFakeEngine();
+      const repo = makeRepo(engine);
+      await repo.put(
+        { org: 'env', type: 'view', name: 'repair_ticket_board' } as never,
+        { name: 'repair_ticket_board', label: 'Repair Ticket Board' },
+        { parentVersion: null, actor: 'usr_1', state: 'draft' } as never,
+      );
+      // Non-vacuity: the writer stored a DRAFT row whose body is serialized
+      // text, the shape the read below has to parse.
+      expect(engine.rows).toHaveLength(1);
+      expect(engine.rows[0]!.state).toBe('draft');
+      expect(typeof engine.rows[0]!.metadata).toBe('string');
+
+      const drafts = await repo.listDrafts();
+      expect(drafts).toHaveLength(1);
+      expect(drafts[0]!.label).toBe('Repair Ticket Board');
+      expectConformsToDeclaration(drafts);
+    });
+
+    it('a draft whose body declares none reads null — not its machine name', async () => {
+      const engine = makeFakeEngine();
+      const repo = makeRepo(engine);
+      await repo.put(
+        { org: 'env', type: 'view', name: 'repair_ticket_board' } as never,
+        { name: 'repair_ticket_board' },
+        { parentVersion: null, actor: 'usr_1', state: 'draft' } as never,
+      );
+
+      const drafts = await repo.listDrafts();
+      expect(drafts).toHaveLength(1);
+      expect(drafts[0]!.label).toBeNull();
+      expect(drafts[0]!.label).not.toBe(drafts[0]!.name);
+      expectConformsToDeclaration(drafts);
+    });
+  });
+
+  describe('§B the label is carried AS AUTHORED', () => {
+    it('an inline locale map (the `I18nLabel` form) is carried verbatim, not resolved to one locale', async () => {
+      // The route takes no locale, so resolving here would be the producer
+      // choosing a language for the reader.
+      const map = { en: 'Field Service', 'zh-CN': '现场服务' };
+      const engine = makeFakeEngine([
+        draftRow({ type: 'app', name: 'field_service', metadata: JSON.stringify({ name: 'field_service', label: map }) }),
+      ]);
+      const repo = makeRepo(engine);
+
+      const drafts = await repo.listDrafts();
+      expect(drafts[0]!.label).toEqual(map);
+      expectConformsToDeclaration(drafts);
+    });
+
+    it('reads a body the driver already materialised as an object (a JSON-column dialect)', async () => {
+      const engine = makeFakeEngine([draftRow({ metadata: { label: 'Cases' } })]);
+      const repo = makeRepo(engine);
+
+      expect(typeof engine.rows[0]!.metadata).toBe('object');
+
+      const drafts = await repo.listDrafts();
+      expect(drafts[0]!.label).toBe('Cases');
+      expectConformsToDeclaration(drafts);
+    });
+  });
+
+  describe('§C null is the declared "no label", never an invented one', () => {
+    it.each([
+      ['a number', 42],
+      ['the retired key-reference form', { key: 'views.case_grid.label', defaultValue: 'Cases' }],
+      ['an array', ['Cases']],
+    ])('a stored label the contract cannot carry (%s) reads null, and the draft is still listed', async (_shape, label) => {
+      const engine = makeFakeEngine([draftRow({ metadata: JSON.stringify({ label }) })]);
+      const repo = makeRepo(engine);
+
+      // Non-vacuity: the stored body really carries a `label` key.
+      expect(JSON.parse(engine.rows[0]!.metadata as string)).toHaveProperty('label');
+
+      const drafts = await repo.listDrafts();
+      expect(drafts).toHaveLength(1);
+      expect(drafts[0]!.label).toBeNull();
+      expectConformsToDeclaration(drafts);
+    });
+
+    it('stored bytes that do not parse read null rather than failing the whole listing', async () => {
+      const engine = makeFakeEngine([
+        draftRow({ name: 'torn_grid', metadata: '{"label":"Torn' }),
+        draftRow({ name: 'lead_grid', metadata: '{"label":"Leads"}' }),
+      ]);
+      const repo = makeRepo(engine);
+
+      expect(() => JSON.parse(engine.rows[0]!.metadata as string)).toThrow();
+
+      const drafts = await repo.listDrafts();
+      expect(drafts.map((d) => [d.name, d.label]).sort()).toEqual([
+        ['lead_grid', 'Leads'],
+        ['torn_grid', null],
+      ]);
+      expectConformsToDeclaration(drafts);
+    });
+  });
+
+  describe('§D the protocol passes it through, and the spec schema agrees', () => {
+    it('ObjectStackProtocolImplementation.listDrafts serves the label, and the response parses as ListDraftsResponseSchema, every member preserved', async () => {
+      const engine = makeFakeEngine([
+        draftRow({ type: 'permission', name: 'technician', metadata: JSON.stringify({ name: 'technician', label: 'Technician' }) }),
+        draftRow({ type: 'object', name: 'repairs_repair_ticket', metadata: JSON.stringify({ name: 'repairs_repair_ticket' }) }),
+      ]);
+      const protocol = new ObjectStackProtocolImplementation(engine as never);
+
+      const response = await protocol.listDrafts();
+      const byName = Object.fromEntries(response.drafts.map((d) => [d.name, d]));
+      expect(byName.technician!.label).toBe('Technician');
+      expect(byName.repairs_repair_ticket!.label).toBeNull();
+
+      const parsed = ListDraftsResponseSchema.safeParse(response);
+      expect(parsed.success).toBe(true);
+      if (parsed.success) expect(parsed.data).toEqual(response);
+    });
+
+    it('the label is the ONLY member read off the body — the header keys are exactly seven (#6599)', async () => {
+      const engine = makeFakeEngine([
+        draftRow({
+          type: 'object',
+          name: 'account',
+          metadata: JSON.stringify({
+            name: 'account',
+            label: 'Account',
+            description: 'internal pricing notes',
+            fields: { salary_grade: { type: 'select', label: 'Salary Grade' } },
+          }),
+        }),
+      ]);
+      const protocol = new ObjectStackProtocolImplementation(engine as never);
+
+      const response = await protocol.listDrafts();
+      expect(Object.keys(response.drafts[0]!).sort()).toEqual(HEADER_KEYS);
+      const wire = JSON.stringify(response);
+      for (const secret of ['internal pricing notes', 'salary_grade', 'Salary Grade', 'fields']) {
+        expect(wire).not.toContain(secret);
+      }
+      expect(response.drafts[0]!.label).toBe('Account');
     });
   });
 });
