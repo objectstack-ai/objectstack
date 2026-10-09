@@ -144,16 +144,21 @@ const rejection = (p: Promise<unknown>) => p.then(() => { throw new Error('expec
 /**
  * The verdict the detached run ends on for `fileId` — the debug line it
  * writes whichever way it went. Waiting on it is waiting on the run itself.
+ * A run that FAILED writes a warn instead and no verdict; the wait then ends
+ * (inside vitest's own test timeout) naming the warn, so a red here says why.
  */
 async function runVerdict(logger: ReturnType<typeof recordingLogger>, fileId: string): Promise<string> {
   const marker = `refused attach of sys_file ${fileId} — `;
   return vi.waitFor(
     () => {
       const line = logger.debug.mock.calls.map((c) => String(c[0])).find((m) => m.includes(marker));
-      if (!line) throw new Error(`no run verdict yet for ${fileId}`);
+      if (!line) {
+        const warns = logger.warn.mock.calls.map((c) => String(c[0]));
+        throw new Error(`no run verdict for sys_file ${fileId}; warn lines: ${JSON.stringify(warns)}`);
+      }
       return line.slice(line.indexOf(marker) + marker.length);
     },
-    { timeout: 5_000, interval: 5 },
+    { timeout: 3_000, interval: 5 },
   );
 }
 
