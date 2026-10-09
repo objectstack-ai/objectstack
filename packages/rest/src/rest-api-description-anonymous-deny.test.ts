@@ -168,6 +168,22 @@ describe('[#22430] a signed-in caller is served as before', () => {
             expect(protocol.getMetaItems).toHaveBeenCalledWith({ type: 'object' });
         });
 
+        it(`the document on ${base} describes both endpoints as needing credentials — now true of them`, async () => {
+            // Neither operation carries its own `security`, so each inherits the
+            // document-level requirement; with the refusal in place that is the
+            // truth about them, where before it under-claimed (see the coverage
+            // note in `openapi-builtin-paths.ts`).
+            const { rest } = signedIn();
+            const doc: any = (await drive(rest, `${base}/openapi.json`, envOf(base))).body;
+            expect(Array.isArray(doc.security) && doc.security.length > 0, 'the document states a requirement').toBe(true);
+            const template = base.replace(':environmentId', '{environmentId}');
+            for (const ep of ENDPOINTS) {
+                const op = doc.paths?.[`${template}${ep.tail}`]?.get;
+                expect(op, `${ep.name} is described in the document`).toBeDefined();
+                expect(op).not.toHaveProperty('security');
+            }
+        });
+
         it(`the viewer on ${base} is the HTML page pointed at its sibling document`, async () => {
             const { rest } = signedIn();
             const r = await drive(rest, `${base}/docs`, envOf(base));
