@@ -28,7 +28,8 @@ import {
   SystemOverviewDatasets,
 } from '@objectstack/platform-objects/apps';
 import { SysOrganizationDetailPage, SysUserDetailPage } from '@objectstack/platform-objects/pages';
-import { PLATFORM_OWNER_EMAIL_ENV, inProcessSessionReadInput, resolvePlatformOwnerEmail, resolveTenancyPosture } from '@objectstack/types';
+import { PLATFORM_OWNER_EMAIL_ENV, resolvePlatformOwnerEmail, resolveTenancyPosture } from '@objectstack/types';
+import { inProcessSessionReadInput } from '@objectstack/types';
 import { postureEnforcesWall, type OrgScopingEntitlement } from '@objectstack/spec/security';
 import type { IDataEngine, IEmailService, II18nService, IObjectQLEngine, ISmsService } from '@objectstack/spec/contracts';
 import {

@@ -45,6 +45,8 @@ vi.mock('./settings-routes.js', async (importOriginal) => {
 
 const { SettingsServicePlugin } = await import('./settings-service-plugin.js');
 
+const capturedSeam = () => captured.contextFromRequest;
+
 const SESSION_COOKIE = 'better-auth.session_token=tok_22258.c2lnbmF0dXJl';
 const BEARER = 'Bearer tok_22258.c2lnbmF0dXJl';
 
@@ -96,7 +98,9 @@ async function resolveContext(headers: Record<string, string>) {
   await plugin.start(ctx);
   await readyHook!();
   expect(http.routes.size, 'the real routes mounted').toBeGreaterThan(0);
-  const contextFromRequest = captured.contextFromRequest;
+  // Read through a getter: the reset above narrows the slot to `undefined`
+  // for the type checker, which cannot see the plugin's boot write it back.
+  const contextFromRequest = capturedSeam();
   if (!contextFromRequest) throw new Error('fixture: the settings routes were not registered');
 
   const context = await contextFromRequest({ headers, method: 'GET', path: '/api/settings' } as unknown as IHttpRequest);
