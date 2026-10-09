@@ -468,7 +468,12 @@ interface RlsFilterOptions {
    *     master", which no gate had authorized;
    *   • `getReadFilter` and `checkAuthoredRowWrite` do not, and need not: the
    *     floor is `update`/`delete`-only so the read path never carries it, and
-   *     the authored-write probe already removes it by provenance.
+   *     the authored-write probe already removes it by provenance;
+   *   • `security/explain`'s record-grained UPDATE verdict sets it on step
+   *     2.7's condition, because explain asks the master gate for that same
+   *     update ({@link SecurityPlugin.checkControlledByParentWrite}) and
+   *     refuses on its refusal; its `delete` verdict asks no master gate and
+   *     does not.
    *
    * `false`/absent leaves the floor exactly where it is. Never affects Layer 0
    * (the tenant wall) or any app-authored policy.
@@ -5425,9 +5430,15 @@ export class SecurityPlugin implements Plugin {
     // path's own inputs, so `record.visible` for `update` / `delete` is the
     // answer the by-id PATCH / DELETE gives:
     //  - Layer 1 carries the pre-image gate's floor decision (step 2.7,
-    //    {@link resolvePreImageFloorDrop}). Not `masterGateCoversThisWrite`:
-    //    that knob VOUCHES that ADR-0055's master gate runs after the filter,
-    //    and explain runs no master gate, so it has nothing to vouch with.
+    //    {@link resolvePreImageFloorDrop}).
+    //  - [ADR-0055] For an `update` it also carries step 2.7's coverage vouch,
+    //    `masterGateCoversThisWrite`, on the same condition (not on behalf of
+    //    anyone): explain asks the master gate for every update of a record
+    //    that exists ({@link checkControlledByParentWrite}, wired below), so a
+    //    `controlled_by_parent` record's ownership floor is handed over to that
+    //    check here exactly as the write path hands it over. `delete` keeps
+    //    the floor: explain asks no master gate for it, so it has nothing to
+    //    vouch with.
     //  - plugin-sharing's per-record gate is asked with `__writeScope` stamped
     //    as the middleware stamps it (step 2.6), always overwritten, so an
     //    `org` / unit writer is not judged owner-only.
@@ -5451,7 +5462,8 @@ export class SecurityPlugin implements Plugin {
       const dropPlatformOwnershipFloor = await this.resolvePreImageFloorDrop(
         engineOp, o, recordId, c, sets, actsOnBehalfOf(c),
       ).catch(() => false);
-      return { dropPlatformOwnershipFloor };
+      const masterGateCoversThisWrite = engineOp === 'update' && !actsOnBehalfOf(c);
+      return { dropPlatformOwnershipFloor, masterGateCoversThisWrite };
     };
     const withWriteScope = async (o: string, c: any): Promise<any> =>
       actsOnBehalfOf(c) ? c : { ...c, __writeScope: await this.resolveWriteScopeForSharing(o, c) };
@@ -5534,6 +5546,12 @@ export class SecurityPlugin implements Plugin {
         // the caller-context by-id read, every data middleware included.
         recordAbsentToCaller: (o: string, rid: string, c: any) =>
           absentUnderCallerRead(() => this.readRowById(o, rid, c)),
+        // [ADR-0055] The master-detail write check an update meets at step
+        // 2.8, served as `ISecurityService.checkControlledByParentWrite` and
+        // asked with the EXPLAINED context. Its presence is what licenses the
+        // update's `masterGateCoversThisWrite` vouch above: the two go together.
+        checkControlledByParentWrite: (o: string, rid: string, c: any) =>
+          this.checkControlledByParentWrite(o, rid, c),
       },
       { object, operation, context: targetContext, recordId },
     );

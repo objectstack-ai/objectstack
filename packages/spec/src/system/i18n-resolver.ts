@@ -2694,6 +2694,24 @@ export function objectValidationMessageKey(objectName: string, ruleName: string)
   return `objects.${objectName}._validations.${ruleName}.message`;
 }
 
+/**
+ * Dot-notation i18n key for a refused `end` node's message —
+ * `flows.<flow>.refusals.<node_id>.message` (#22450).
+ *
+ * A sibling of {@link objectValidationMessageKey}, spelled here for the same
+ * reason: its consumer holds an `II18nService` (which takes a key), not a
+ * `TranslationBundle`. Used by the automation engine, which picks the
+ * translated TEMPLATE in the run's locale (`AutomationContext.locale`) before
+ * it renders the `{{ }}` holes. The run stores the refusal already rendered,
+ * so nothing downstream could translate it afterwards.
+ *
+ * `flowName` is `Flow.name` and `nodeId` is the refusing `end` node's
+ * `FlowNode.id`, the same addressing the `screens` group uses.
+ */
+export function flowRefusalMessageKey(flowName: string, nodeId: string): string {
+  return `flows.${flowName}.refusals.${nodeId}.message`;
+}
+
 export function resolveObjectFieldLabels(
   data: TranslationData | undefined,
   objectName: string,
