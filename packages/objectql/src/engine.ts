@@ -3208,6 +3208,45 @@ export interface EngineReadOptions {
 }
 
 /** Merge read-path execution context from the query and the trailing options. */
+/**
+ * [#22445] Did the read door serve this value AS STORED — can the caller read
+ * the stored value in full? The `update`-mode preview keeps a stored column
+ * only when this holds for it (see `storedRows` in `ObjectQL.validate`).
+ *
+ * Both values come off the same driver read shape (`driver.findOne` under the
+ * same `buildDriverOptions`), so a column nothing transformed compares equal
+ * by construction; what differs is what the read path REWROTE for this caller
+ * (a partial mask, a masked secret, a read hook's rewrite). Structural, not
+ * identity: the two reads are two driver calls, so a `Date`, an array or a
+ * JSON object arrives as two equal objects.
+ *
+ * ⛔ Fails CLOSED: a pair it cannot prove equal — another object kind (a
+ * buffer, a class instance), a nesting past the depth bound — answers `false`,
+ * and the column is judged as empty. That direction can only make the preview
+ * refuse or admit on less than the write knows; the other direction would
+ * judge a value the caller may not read.
+ */
+function servedAsStored(served: unknown, stored: unknown, depth = 0): boolean {
+  if (Object.is(served, stored)) return true;
+  if (depth >= 16) return false;
+  if (served instanceof Date || stored instanceof Date) {
+    return served instanceof Date && stored instanceof Date && served.getTime() === stored.getTime();
+  }
+  if (Array.isArray(served) || Array.isArray(stored)) {
+    return Array.isArray(served) && Array.isArray(stored) && served.length === stored.length
+      && served.every((item, i) => servedAsStored(item, stored[i], depth + 1));
+  }
+  const plain = (v: unknown): v is Record<string, unknown> => {
+    if (v === null || typeof v !== 'object') return false;
+    const proto = Object.getPrototypeOf(v);
+    return proto === Object.prototype || proto === null;
+  };
+  if (!plain(served) || !plain(stored)) return false;
+  const servedKeys = Object.keys(served);
+  return servedKeys.length === Object.keys(stored).length
+    && servedKeys.every((k) => Object.prototype.hasOwnProperty.call(stored, k) && servedAsStored(served[k], stored[k], depth + 1));
+}
+
 function mergeReadContext(
   fromQuery?: ExecutionContext,
   fromOptions?: ExecutionContext,
@@ -13000,10 +13039,12 @@ export class ObjectQL implements IObjectQLEngine {
    * it before it reads anything), so the preview judges no row for it and
    * gives no verdict about its columns. The image itself is the write's own
    * prior-row read ({@link readUpdatePriorRow}), the row as STORED, kept to
-   * the columns the read door returned, so a column the caller may not read
-   * is judged as empty. A refused read propagates as the refusal it is. A row
-   * with no address, or whose id names no row this caller can read, is judged
-   * on the patch alone, as before.
+   * the columns the read door served this caller UNCHANGED: a column it hid,
+   * and one it served transformed (a partial mask keeps the key and replaces
+   * the value), is judged as empty, so the verdict never depends on a value
+   * the caller could not have read in full. A refused read propagates as the
+   * refusal it is. A row with no address, or whose id names no row this
+   * caller can read, is judged on the patch alone, as before.
    *
    * Nothing is written and no sequence is consumed. Reads do happen: the
    * stored row above, and the related rows a traversing rule names (see the
@@ -13218,9 +13259,22 @@ export class ObjectQL implements IObjectQLEngine {
     //     ({@link readUpdatePriorRow}), so the rules judge the row as STORED,
     //     exactly as the write does, and not the read door's served image (a
     //     formula the read door evaluates has no stored column, and the write
-    //     judges it absent). Kept to the columns the read door returned, so a
-    //     column this caller may not read is absent and judged as empty: the
-    //     verdict never depends on a value the caller could not have read.
+    //     judges it absent).
+    //
+    // ⛔ A stored column is kept ONLY where the read door served this caller
+    // that very value ({@link servedAsStored}): the caller can already read it
+    // IN FULL. Every other column is left out and judged as empty — one the
+    // read door hid (field-level security deletes the key), and one it served
+    // TRANSFORMED: a partial mask, which keeps the key and replaces the value,
+    // a masked secret, an `internal` column, a read hook's rewrite. A verdict
+    // over a masked column's stored value is the probe the security plugin
+    // refuses on a query (a partially masked field is as probe-able as a
+    // hidden one), and the preview runs none of the write's gates, so it must
+    // not answer one. So the verdict never depends on a value this caller
+    // could not have read. The read door is asked for file fields in their
+    // stored form (`RAW_FILE_VALUES_CONTEXT_KEY`, the declared opt-out for a
+    // caller whose subject is the stored form), so a readable file reference
+    // compares as the id it is rather than as the expanded object.
     //
     // `undefined` = no stored row: the row is judged on the patch alone, as
     // it was before these reads existed.
@@ -13232,15 +13286,18 @@ export class ObjectQL implements IObjectQLEngine {
         if (dispatch.kind === 'by-id') {
           const visible = await this.findOne(object, {
             where: { id: dispatch.id },
-            context: options?.context,
+            context: { ...(options?.context ?? {}), [RAW_FILE_VALUES_CONTEXT_KEY]: true },
           } as EngineQueryOptions);
           const prior = visible && typeof visible === 'object'
             ? await this.readUpdatePriorRow(object, dispatch.id, options?.context)
             : null;
           if (visible && prior) {
+            const served = visible as Record<string, unknown>;
             stored = {};
             for (const [key, value] of Object.entries(prior)) {
-              if (Object.prototype.hasOwnProperty.call(visible, key)) stored[key] = value;
+              if (Object.prototype.hasOwnProperty.call(served, key) && servedAsStored(served[key], value)) {
+                stored[key] = value;
+              }
             }
           }
         }

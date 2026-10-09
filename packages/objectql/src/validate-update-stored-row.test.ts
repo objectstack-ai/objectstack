@@ -332,6 +332,83 @@ describe('#22445 — an update-mode preview judges the stored row merged with th
       rows.set('c1', { id: 'c1', name: 'one', country: 'cn' });
       expect(await verdictOf(engine, { province: 'zj', id: 'c1' }, { userId: 'dave' })).toMatchObject({ valid: true });
     });
+
+    /**
+     * A partial-masking rule shaped like the security plugin's read mask
+     * (`field-masker.ts` `maskRecord`): the KEY stays, the VALUE is replaced
+     * with its mask (a value too short to keep both ends is masked whole).
+     */
+    function maskCountryFor(ql: ObjectQL, userId: string) {
+      ql.registerMiddleware(async (ctx: any, next: () => Promise<void>) => {
+        await next();
+        if (ctx.context?.userId !== userId || !['find', 'findOne'].includes(ctx.operation)) return;
+        const mask = (r: any) => {
+          if (r && typeof r === 'object' && typeof r.country === 'string') r.country = '*'.repeat(r.country.length);
+        };
+        if (Array.isArray(ctx.result)) ctx.result.forEach(mask);
+        else mask(ctx.result);
+      });
+    }
+
+    it('(d2) a column served partially masked is judged as empty, whatever it holds', async () => {
+      maskCountryFor(engine, 'erin');
+      const verdicts = [];
+      for (const country of ['cn', 'us']) {
+        rows.set('c1', { id: 'c1', name: 'one', country });
+        // Precondition: the read door serves the key, masked.
+        expect(await engine.findOne(OBJECT, { where: { id: 'c1' }, context: { userId: 'erin' } as any })).toMatchObject({ country: '**' });
+        verdicts.push(await verdictOf(engine, { province: 'zj', id: 'c1' }, { userId: 'erin' }));
+      }
+      expect(verdicts[0]).toEqual(verdicts[1]);
+      expect(verdicts[0]!.errors.map((e) => ({ field: e.field, code: e.code }))).toEqual([
+        { field: 'province', code: 'invalid_option' },
+      ]);
+    });
+
+    it('(d3) control: a caller served the column unmasked gets the stored row\'s verdict', async () => {
+      maskCountryFor(engine, 'erin');
+      rows.set('c1', { id: 'c1', name: 'one', country: 'cn' });
+      expect(await verdictOf(engine, { province: 'zj', id: 'c1' }, { userId: 'dave' })).toMatchObject({ valid: true, errors: [] });
+      rows.set('c1', { id: 'c1', name: 'one', country: 'us' });
+      const refused = await verdictOf(engine, { province: 'zj', id: 'c1' }, { userId: 'dave' });
+      expect(refused.errors.map((e) => ({ field: e.field, code: e.code }))).toEqual([
+        { field: 'province', code: 'invalid_option' },
+      ]);
+    });
+  });
+
+  describe('(a) a file reference the caller can read is judged as the id it stores', () => {
+    it('the read door\'s expansion of a file id does not turn the column empty', async () => {
+      const { engine: e2, rows: r2 } = makeEngine([
+        {
+          name: 'sys_file', label: 'File',
+          fields: {
+            name: { name: 'name', label: 'Name', type: 'text' },
+            status: { name: 'status', label: 'Status', type: 'text' },
+            url: { name: 'url', label: 'URL', type: 'text' },
+          },
+        },
+        {
+          name: OBJECT, label: 'Preview Attachment',
+          fields: {
+            attachment: { name: 'attachment', label: 'Attachment', type: 'file' },
+            memo: { name: 'memo', label: 'Memo', type: 'text', requiredWhen: 'record.attachment != null' },
+            title: { name: 'title', label: 'Title', type: 'text' },
+          },
+        },
+      ]);
+      r2.set('f1', { id: 'f1', name: 'a.pdf', status: 'committed', url: '/files/f1' });
+      r2.set('a1', { id: 'a1', attachment: 'f1', memo: 'kept' });
+      // Precondition: the read door serves the file EXPANDED, the store holds the id.
+      const served = await e2.findOne(OBJECT, { where: { id: 'a1' } });
+      expect(typeof served?.attachment).toBe('object');
+
+      // Clearing the memo the stored attachment requires: the write refuses it.
+      const preview = await verdictOf(e2, { memo: null, id: 'a1' });
+      const write = await writeRefusal(() => e2.update(OBJECT, { memo: null, id: 'a1' }));
+      expect(write).toEqual([{ field: 'memo', code: 'required' }]);
+      expect(preview.errors.map((e) => ({ field: e.field, code: e.code }))).toEqual(write);
+    });
   });
 });
 
