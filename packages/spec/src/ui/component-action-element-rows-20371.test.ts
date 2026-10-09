@@ -120,6 +120,9 @@ describe('key sets, asserted whole — measured from the renderers\' read points
   });
 
   it('element:repeater', () => {
+    // `object` / `filter` / `sort` / `limit` are tombstones since v18 (#11509):
+    // a `retiredKey()` stays a key of the walked shape, and the list's query is
+    // the node-level `dataSource` binding.
     expect(keysOf(ElementRepeaterPropsSchema)).toEqual(
       ['object', 'titleField', 'fields', 'filter', 'sort', 'limit', 'emptyText', 'divided'].sort(),
     );
@@ -174,15 +177,16 @@ describe('one accepted authored example per type, taken from objectui', () => {
   });
 
   it('element:repeater — objectui\'s own renderer specimen', () => {
-    const authored = { object: 'showcase_category', fields: ['name'], emptyText: 'Nothing here' };
+    // The specimen's `object` moved onto the node-level binding in v18
+    // (#11509); the props bag keeps the display keys.
+    const authored = { fields: ['name'], emptyText: 'Nothing here' };
     expect(ElementRepeaterPropsSchema.parse(authored)).toEqual(authored);
   });
 });
 
 describe('strict from birth — an unknown key is refused on every row', () => {
   it.each(Object.entries(ROWS))('`%s` refuses an undeclared key, naming its surface', (type, schema) => {
-    const base = type === 'element:repeater' ? { object: 'task' } : {};
-    const issue = unknownKeyIssue(schema.safeParse({ ...base, notARealProp: 1 }));
+    const issue = unknownKeyIssue(schema.safeParse({ notARealProp: 1 }));
     expect(issue.keys).toEqual(['notARealProp']);
     expect(issue.message).toContain(`\`${type}\``);
   });
@@ -322,10 +326,12 @@ describe('what the measurement decided, pinned', () => {
     }
   });
 
-  it('repeater: the `object-*` family\'s `objectName` is refused and renamed to `object`', () => {
-    const issue = unknownKeyIssue(ElementRepeaterPropsSchema.safeParse({ object: 'task', objectName: 'task' }));
+  it('repeater: the `object-*` family\'s `objectName` is refused and pointed at the binding\'s `object`', () => {
+    // Until v18 this renamed to the flat `object`; that key retired onto the
+    // node-level binding (#11509), so the spelling points there instead.
+    const issue = unknownKeyIssue(ElementRepeaterPropsSchema.safeParse({ objectName: 'task' }));
     expect(issue.keys).toEqual(['objectName']);
-    expect(issue.message).toContain('`object`');
+    expect(issue.message).toContain('`dataSource.object`');
   });
 });
 

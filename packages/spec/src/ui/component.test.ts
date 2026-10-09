@@ -1692,7 +1692,8 @@ describe('Content Elements', () => {
   it('should accept element:number component', () => {
     expect(() => PageComponentSchema.parse({
       type: 'element:number',
-      properties: { object: 'order', aggregate: 'count' },
+      dataSource: { object: 'order' },
+      properties: { aggregate: 'count' },
     })).not.toThrow();
   });
 
@@ -1711,90 +1712,10 @@ describe('Content Elements', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// element:number `filter` — the ViewFilterRule ARRAY orthography (ui#6206-B)
-// ---------------------------------------------------------------------------
-describe("element:number `filter` — one filter orthography platform-wide", () => {
-  const number = ComponentPropsMap['element:number'];
-  const relatedList = ComponentPropsMap['record:related_list'];
-  const RULES = [{ field: 'status', operator: 'equals', value: 'won' }];
-  const RECORD_FORM = { status: 'won' };
-  /** The issues a parse raised AT `key` (top-level), whatever else it raised. */
-  const issuesAt = (r: { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; code: string }> } }, key: string) =>
-    r.success ? [] : r.error!.issues.filter((i) => i.path[0] === key);
-
-  it('accepts a ViewFilterRule[] filter — the acceptance criterion', () => {
-    // Before the 2026-08-25 ruling this exact value was REFUSED here (the entry
-    // said `FilterConditionSchema`, the MongoDB-style record) while every
-    // sibling `filter` input in the map accepted it.
-    const r = number.safeParse({ object: 'order', aggregate: 'count', filter: RULES });
-    expect(r.success).toBe(true);
-    expect(r.data!.filter).toEqual(RULES);
-  });
-
-  it('the array carries the REAL ViewFilterRuleSchema, not a lookalike: operators normalize, value shapes are checked', () => {
-    // `eq` is a legacy spelling `normalizeFilterOperator` lowers to `equals` — a
-    // plain `z.array(z.object(...))` would have echoed it back unchanged.
-    const legacy = number.safeParse({
-      object: 'order', aggregate: 'count',
-      filter: [{ field: 'status', operator: 'eq', value: 'won' }],
-    });
-    expect(legacy.success).toBe(true);
-    expect(legacy.data!.filter![0].operator).toBe('equals');
-    // `in` takes an array; a scalar is refused at `filter.0.value` by the rule's
-    // own superRefine — the value-shape check rides in with the schema.
-    const scalarIn = number.safeParse({
-      object: 'order', aggregate: 'count',
-      filter: [{ field: 'status', operator: 'in', value: 'won' }],
-    });
-    expect(scalarIn.success).toBe(false);
-    expect(scalarIn.error!.issues.map((i) => i.path.join('.'))).toContain('filter.0.value');
-  });
-
-  it('the MongoDB-style record form — what this entry alone used to accept — is REFUSED at the `filter` path', () => {
-    // Reverse verification of the convergence, asserted on the issue envelope
-    // rather than on a bare `success === false`: the refusal is located at
-    // `filter` and names the expected kind. Migration:
-    // `element-number-filter-rule-array`.
-    const r = number.safeParse({ object: 'order', aggregate: 'count', filter: RECORD_FORM });
-    expect(r.success).toBe(false);
-    const atFilter = issuesAt(r, 'filter');
-    expect(atFilter).toHaveLength(1);
-    expect(atFilter[0].code).toBe('invalid_type');
-    expect(atFilter[0]).toMatchObject({ expected: 'array' });
-    // An operator-object record (`{ amount: { $gt: 100 } }`) is the same form
-    // and gets the same verdict — no arm accepts any spelling of the record.
-    const opRecord = number.safeParse({ object: 'order', aggregate: 'sum', field: 'amount', filter: { amount: { $gt: 100 } } });
-    expect(opRecord.success).toBe(false);
-    expect(issuesAt(opRecord, 'filter').map((i) => i.code)).toEqual(['invalid_type']);
-  });
-
-  it('shares the array orthography with the sibling `filter` inputs — one value, two doors, the same verdicts', () => {
-    // The ruling is "one filter orthography platform-wide", so the pin is
-    // cross-entry: the same rule array raises no issue at `filter` on either
-    // door, and the same record form is refused at `filter` with the same
-    // issue code on both. Each door is asked only about ITS `filter` — the
-    // other keys the related list requires are not this pin's subject.
-    expect(issuesAt(number.safeParse({ object: 'order', aggregate: 'count', filter: RULES }), 'filter')).toEqual([]);
-    expect(issuesAt(relatedList.safeParse({ filter: RULES }), 'filter')).toEqual([]);
-    const numberRefusal = issuesAt(number.safeParse({ object: 'order', aggregate: 'count', filter: RECORD_FORM }), 'filter');
-    const relatedRefusal = issuesAt(relatedList.safeParse({ filter: RECORD_FORM }), 'filter');
-    expect(numberRefusal.map((i) => i.code)).toEqual(['invalid_type']);
-    expect(relatedRefusal.map((i) => i.code)).toEqual(numberRefusal.map((i) => i.code));
-  });
-
-  it('positive control: a well-formed multi-rule array with a real `in` rule parses through the element', () => {
-    const r = number.safeParse({
-      object: 'order', aggregate: 'sum', field: 'amount',
-      filter: [
-        { field: 'status', operator: 'in', value: ['won', 'closed'] },
-        { field: 'amount', operator: 'greater_than', value: 100 },
-      ],
-    });
-    expect(r.success).toBe(true);
-    expect(r.data!.filter).toHaveLength(2);
-  });
-});
+// `element:number`'s flat `filter` — the ViewFilterRule-array door ui#6206-B
+// converged — retired in v18 with its flat `object` (#11509): the element's
+// filter is `dataSource.filter`, the binding's own rule-array door. The
+// retirement is pinned in `element-flat-binding-retirement.test.ts`.
 
 // ---------------------------------------------------------------------------
 // Element Props Schemas
@@ -1911,28 +1832,23 @@ describe('ElementTextPropsSchema', () => {
 
 describe('ElementNumberPropsSchema', () => {
   it('should accept minimal number props', () => {
-    const props = ElementNumberPropsSchema.parse({
-      object: 'order',
-      aggregate: 'count',
-    });
-    expect(props.object).toBe('order');
+    // The object is the node-level `dataSource.object` since v18 (#11509);
+    // the props bag carries the aggregate alone.
+    const props = ElementNumberPropsSchema.parse({ aggregate: 'count' });
     expect(props.aggregate).toBe('count');
     expect(props.field).toBeUndefined();
   });
 
   it('should accept full number props', () => {
+    // `object` / `filter` are the binding's since v18 (#11509).
     const props = ElementNumberPropsSchema.parse({
-      object: 'order',
       field: 'amount',
       aggregate: 'sum',
-      // The ViewFilterRule array form (ui#6206-B) — this fixture authored the
-      // record form `{ status: 'paid' }` while the entry alone accepted it.
-      filter: [{ field: 'status', operator: 'equals', value: 'paid' }],
       format: 'currency',
       prefix: '$',
       suffix: ' USD',
     });
-    expect(props.filter).toEqual([{ field: 'status', operator: 'equals', value: 'paid' }]);
+    expect(props.field).toBe('amount');
     expect(props.format).toBe('currency');
     expect(props.prefix).toBe('$');
     expect(props.suffix).toBe(' USD');
@@ -1941,20 +1857,20 @@ describe('ElementNumberPropsSchema', () => {
   it('should accept all aggregate functions', () => {
     const aggregates = ['count', 'sum', 'avg', 'min', 'max'] as const;
     aggregates.forEach(aggregate => {
-      expect(() => ElementNumberPropsSchema.parse({ object: 'order', aggregate })).not.toThrow();
+      expect(() => ElementNumberPropsSchema.parse({ aggregate })).not.toThrow();
     });
   });
 
   it('should accept all format options', () => {
     const formats = ['number', 'currency', 'percent'] as const;
     formats.forEach(format => {
-      expect(() => ElementNumberPropsSchema.parse({ object: 'order', aggregate: 'count', format })).not.toThrow();
+      expect(() => ElementNumberPropsSchema.parse({ aggregate: 'count', format })).not.toThrow();
     });
   });
 
   it('should reject without required fields', () => {
     expect(() => ElementNumberPropsSchema.parse({})).toThrow();
-    expect(() => ElementNumberPropsSchema.parse({ object: 'order' })).toThrow();
+    expect(() => ElementNumberPropsSchema.parse({ field: 'amount' })).toThrow();
   });
 });
 
@@ -2015,11 +1931,8 @@ describe('ComponentPropsMap content elements', () => {
   });
 
   it('should parse element:number props', () => {
-    const result = ComponentPropsMap['element:number'].parse({
-      object: 'order',
-      aggregate: 'count',
-    });
-    expect(result.object).toBe('order');
+    const result = ComponentPropsMap['element:number'].parse({ aggregate: 'count' });
+    expect(result.aggregate).toBe('count');
   });
 
   it('should parse element:image props', () => {
@@ -2326,54 +2239,43 @@ describe('element:filter / element:form are refused by name at the node', () => 
 // Interactive Elements — element:record_picker
 // ---------------------------------------------------------------------------
 describe('Interactive Elements — element:record_picker', () => {
+  // Since v18 (#11509) the picker's query — object, view, filter, sort, limit —
+  // is the node-level `dataSource` binding, and the props bag carries display
+  // config only. The four flat binding keys' retirement is pinned in
+  // `element-flat-binding-retirement.test.ts`.
   it('should accept element:record_picker component', () => {
     expect(() => PageComponentSchema.parse({
       type: 'element:record_picker',
-      properties: { object: 'account', labelField: 'name' },
+      dataSource: { object: 'account' },
+      properties: { labelField: 'name' },
     })).not.toThrow();
   });
 
   it('should parse record_picker props with defaults', () => {
-    const props = ElementRecordPickerPropsSchema.parse({
-      object: 'account',
-      labelField: 'name',
-    });
-    expect(props.object).toBe('account');
+    const props = ElementRecordPickerPropsSchema.parse({ labelField: 'name' });
     expect(props.labelField).toBe('name');
   });
 
   it('should accept full record_picker props', () => {
     const props = ElementRecordPickerPropsSchema.parse({
-      object: 'account',
       labelField: 'name',
       valueField: 'id',
       label: 'Account',
-      // The ViewFilterRule array form (ui#6206-B, #14406) — this fixture
-      // authored the record form `{ status: 'active' }` while the entry alone
-      // accepted it.
-      filter: [{ field: 'status', operator: 'equals', value: 'active' }],
       placeholder: 'Search accounts...',
       emptyText: 'No accounts',
     });
     expect(props.labelField).toBe('name');
     expect(props.valueField).toBe('id');
     expect(props.label).toBe('Account');
-    expect(props.filter).toEqual([{ field: 'status', operator: 'equals', value: 'active' }]);
     expect(props.emptyText).toBe('No accounts');
   });
 
-  it('should reject record_picker without its one required field', () => {
-    expect(() => ElementRecordPickerPropsSchema.parse({})).toThrow();
-  });
-
-  // #5775 — `object` is the ONLY required prop. `labelField` is optional
-  // because the renderer defaults it to `name` (`props.labelField ?? 'name'`),
-  // so omitting it is a working picker, not a broken one. This is the half of
-  // the ruling that lets the showcase's `page-variables` page stop reporting
-  // `component-props-invalid` (a required key it had no reason to write).
-  it('accepts a picker with `object` alone — labelField defaults in the renderer', () => {
-    const props = ElementRecordPickerPropsSchema.parse({ object: 'account' });
-    expect(props.object).toBe('account');
+  // #5775 made `object` the ONLY required prop (`labelField` defaults to
+  // `name` in the renderer, so omitting it is a working picker). #11509 moved
+  // that `object` onto the binding, so an empty bag is a complete one: the
+  // requirement is the component-props gate's, at `dataSource.object`.
+  it('accepts an empty props bag — the object is the binding\'s, labelField defaults in the renderer', () => {
+    const props = ElementRecordPickerPropsSchema.parse({});
     expect(props.labelField).toBeUndefined();
   });
 
@@ -2382,222 +2284,114 @@ describe('Interactive Elements — element:record_picker', () => {
       label: 'Project',
       labelField: 'name',
       placeholder: 'Choose a project…',
-      object: 'showcase_project',
     });
     expect(props.labelField).toBe('name');
     expect(props.label).toBe('Project');
+    // …and the node it sits on, binding included.
+    expect(PageComponentSchema.safeParse({
+      type: 'element:record_picker',
+      id: 'project_picker',
+      dataSource: { object: 'showcase_project', limit: 50 },
+      properties: { label: 'Project', labelField: 'name', placeholder: 'Choose a project…' },
+    }).success).toBe(true);
   });
 
   // #5775 tombstones — the prescription IS the payload. `displayField` was a
   // REQUIRED declaration no renderer read; `searchFields` / `multiple` were
   // capability claims the single-select control never kept (ADR-0049).
   it('rejects the retired `displayField` with the rename prescription', () => {
-    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', displayField: 'title' }))
+    expect(() => ElementRecordPickerPropsSchema.parse({ displayField: 'title' }))
       .toThrow(/displayField.*removed.*use `labelField`|displayField.*removed.*`labelField`/s);
   });
 
   it('rejects the retired `searchFields` with its prescription', () => {
-    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', searchFields: ['name'] }))
+    expect(() => ElementRecordPickerPropsSchema.parse({ searchFields: ['name'] }))
       .toThrow(/`searchFields`.*removed.*Delete the key/s);
   });
 
+  it('the `searchFields` prescription names the binding\'s filter, never the retired flat one', () => {
+    const r = ElementRecordPickerPropsSchema.safeParse({ searchFields: ['name'] });
+    const message = r.success ? '' : r.error.issues[0]!.message;
+    expect(message).toContain('use the component-level `dataSource.filter`');
+    expect(message).not.toContain('use `filter`');
+  });
+
   it('rejects the retired `multiple` with its prescription', () => {
-    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', multiple: true }))
+    expect(() => ElementRecordPickerPropsSchema.parse({ multiple: true }))
       .toThrow(/`multiple`.*removed.*Delete the key/s);
   });
 
   it('does not materialize the retired keys on a clean parse', () => {
-    const props = ElementRecordPickerPropsSchema.parse({ object: 'a' });
-    expect(props).not.toHaveProperty('displayField');
-    expect(props).not.toHaveProperty('searchFields');
-    expect(props).not.toHaveProperty('multiple');
-    expect(props).not.toHaveProperty('targetVariable');
+    const props = ElementRecordPickerPropsSchema.parse({});
+    for (const key of ['displayField', 'searchFields', 'multiple', 'targetVariable', 'object', 'filter', 'sort', 'limit']) {
+      expect(props).not.toHaveProperty(key);
+    }
   });
 
   // #9198 tombstone — `targetVariable` was a declarative hint with zero
   // readers; the live binding is the page variable whose `source` names this
   // component's `id` (ADR-0049 enforce-or-remove).
   it('rejects the retired `targetVariable` with its prescription', () => {
-    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', targetVariable: 'selected_id' }))
+    expect(() => ElementRecordPickerPropsSchema.parse({ targetVariable: 'selected_id' }))
       .toThrow(/`targetVariable`.*removed.*Delete the key/s);
   });
 
-  // ── commit 78f0be872 — the flat `sort` / `limit` shorthands ──────────────
-  // The renderer resolves four keys through one pattern
-  // (`ds.<k> ?? props.<k>`); after #5775 two of the four flat spellings were
-  // declared and two were not. These pin the other two, in BOTH halves of what
-  // a declaration buys: the key is retained (not stripped into silence) and the
-  // VALUE is judged (a wrong shape is rejected by name rather than dropped).
-  it('retains the flat `sort` shorthand — declared, not stripped', () => {
-    const props = ElementRecordPickerPropsSchema.parse({
-      object: 'showcase_project',
-      sort: [{ field: 'created_at', order: 'desc' }],
-    });
-    expect(props.sort).toEqual([{ field: 'created_at', order: 'desc' }]);
-  });
-
-  it('retains the flat `limit` shorthand — declared, not stripped', () => {
-    const props = ElementRecordPickerPropsSchema.parse({ object: 'showcase_project', limit: 20 });
-    expect(props.limit).toBe(20);
-  });
-
-  // The exact ADR-0078 trap the issue reported: an author who infers
-  // `properties.limit: 20` from the declared `object`/`filter` spelling used to
-  // get the renderer's default 50 with zero diagnostics, because the key was
-  // stripped before anything could read it.
-  it('rejects a non-integer / non-positive `limit` by name', () => {
-    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: 0 })).toThrow(/limit/);
-    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: -5 })).toThrow(/limit/);
-    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: 2.5 })).toThrow(/limit/);
-    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: 'ten' })).toThrow(/limit/);
-  });
-
-  it('rejects a malformed `sort` by name', () => {
-    // A bare field name — the shape an author reaches for when the key is
-    // undeclared and nothing has ever told them otherwise.
-    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', sort: 'created_at' }))
+  // ── the query's shapes, at the one door that carries them ────────────────
+  // Commit 78f0be872 declared the flat `sort` / `limit` in the binding's own
+  // shapes so the two spellings could not drift into a third dialect; #11509
+  // retired the flat spelling, and these shapes are now the binding's alone.
+  // The renderer's `?? 50` stays a renderer fallback, never a schema default.
+  it('the binding judges `sort` / `limit` by name, and does not default `limit`', () => {
+    for (const limit of [0, -5, 2.5, 'ten']) {
+      expect(() => ElementDataSourceSchema.parse({ object: 'a', limit })).toThrow(/limit/);
+    }
+    expect(() => ElementDataSourceSchema.parse({ object: 'a', sort: 'created_at' })).toThrow(/sort/);
+    expect(() => ElementDataSourceSchema.parse({ object: 'a', sort: [{ field: 'created_at', order: 'descending' }] }))
       .toThrow(/sort/);
-    // Right container, wrong direction vocabulary.
-    expect(() => ElementRecordPickerPropsSchema.parse({
-      object: 'a',
-      sort: [{ field: 'created_at', order: 'descending' }],
-    })).toThrow(/sort/);
-    // Right container, missing the required half of the pair.
-    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', sort: [{ field: 'created_at' }] }))
-      .toThrow(/sort/);
-  });
-
-  // The shorthand IS the `dataSource` key, so one value must parse identically
-  // through both doors. This is what stops the flat spelling drifting into a
-  // third sort dialect (the ledger's `report.zod.ts` row records three already).
-  it('parses `sort` / `limit` identically to `dataSource` (one shape, two spellings)', () => {
-    const sort = [{ field: 'name', order: 'asc' as const }];
-    const viaProps = ElementRecordPickerPropsSchema.parse({ object: 'a', sort, limit: 25 });
-    const viaDataSource = ElementDataSourceSchema.parse({ object: 'a', sort, limit: 25 });
-    expect(viaProps.sort).toEqual(viaDataSource.sort);
-    expect(viaProps.limit).toEqual(viaDataSource.limit);
-    // …and the same rejections on the same values.
-    expect(ElementRecordPickerPropsSchema.safeParse({ object: 'a', limit: 0 }).success)
-      .toBe(ElementDataSourceSchema.safeParse({ object: 'a', limit: 0 }).success);
-    expect(ElementRecordPickerPropsSchema.safeParse({ object: 'a', sort: 'name' }).success)
-      .toBe(ElementDataSourceSchema.safeParse({ object: 'a', sort: 'name' }).success);
-  });
-
-  // The renderer's `?? 50` is a RENDERER fallback, deliberately not a schema
-  // default: `.default(50)` would materialize a limit on every parsed picker
-  // and turn an unset key into an authored one (and would then have to be kept
-  // in sync with objectui by hand).
-  it('does not default `limit` — the 50 is the renderer fallback', () => {
-    const props = ElementRecordPickerPropsSchema.parse({ object: 'a' });
-    expect(props.limit).toBeUndefined();
-    expect(props.sort).toBeUndefined();
+    expect(() => ElementDataSourceSchema.parse({ object: 'a', sort: [{ field: 'created_at' }] })).toThrow(/sort/);
+    const parsed = ElementDataSourceSchema.parse({ object: 'a' });
+    expect(parsed.limit).toBeUndefined();
+    expect(parsed.sort).toBeUndefined();
   });
 });
 
 // ---------------------------------------------------------------------------
-// element:record_picker `filter` — the ViewFilterRule ARRAY orthography (ui#6206-B, #14406)
+// The `filter` doors of ComponentPropsMap — the census of the one orthography
+// (ui#6206-B, #14406). `element:record_picker`'s and `element:number`'s flat
+// `filter` were doors of it until #11509 retired them in v18 onto the binding's
+// own rule-array door, `dataSource.filter`; a retired door is a tombstone that
+// refuses EVERY value, so the census below asks the live doors only.
 // ---------------------------------------------------------------------------
-describe("element:record_picker `filter` — one filter orthography platform-wide", () => {
-  const picker = ComponentPropsMap['element:record_picker'];
-  const number = ComponentPropsMap['element:number'];
-  const relatedList = ComponentPropsMap['record:related_list'];
+describe('the live `filter` doors of ComponentPropsMap — one filter orthography platform-wide', () => {
   const RULES = [{ field: 'status', operator: 'equals', value: 'active' }];
-  const RECORD_FORM = { status: 'active' };
-  type ParseResult = { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; code: string }> } };
+  type ParseResult = { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; code: string; message: string }> } };
+  type Door = { shape?: Record<string, unknown>; safeParse: (v: unknown) => ParseResult };
   /** The issues a parse raised AT `key` (top-level), whatever else it raised. */
   const issuesAt = (r: ParseResult, key: string) =>
     r.success ? [] : r.error!.issues.filter((i) => i.path[0] === key);
+  const door = (type: string) => ComponentPropsMap[type as keyof typeof ComponentPropsMap] as unknown as Door;
+  /** A retired `filter` refuses the rule array with its removal prescription. */
+  const isRetired = (type: string) =>
+    issuesAt(door(type).safeParse({ filter: RULES }), 'filter').some((i) => i.message.includes('was removed'));
 
-  it('accepts a ViewFilterRule[] filter — the acceptance criterion', () => {
-    // Before #14406 this exact value was REFUSED here — the entry said
-    // `FilterConditionSchema`, the MongoDB-style record, the LAST one in the
-    // map — while every sibling `filter` input accepted it. Measured at the
-    // objectui pin before the declaration moved: the renderer hands the value
-    // to `query.$filter`, and `adapter.find()` lowers a rule array through
-    // `translateFilterArray`, so the array reaches the query.
-    const r = picker.safeParse({ object: 'account', filter: RULES });
-    expect(r.success).toBe(true);
-    expect(r.data!.filter).toEqual(RULES);
-  });
-
-  it('the array carries the REAL ViewFilterRuleSchema, not a lookalike: operators normalize, value shapes are checked', () => {
-    // `eq` is a legacy spelling `normalizeFilterOperator` lowers to `equals` — a
-    // plain `z.array(z.object(...))` would have echoed it back unchanged.
-    const legacy = picker.safeParse({
-      object: 'account',
-      filter: [{ field: 'status', operator: 'eq', value: 'active' }],
-    });
-    expect(legacy.success).toBe(true);
-    expect(legacy.data!.filter![0].operator).toBe('equals');
-    // `in` takes an array; a scalar is refused at `filter.0.value` by the rule's
-    // own superRefine — the value-shape check rides in with the schema.
-    const scalarIn = picker.safeParse({
-      object: 'account',
-      filter: [{ field: 'status', operator: 'in', value: 'active' }],
-    });
-    expect(scalarIn.success).toBe(false);
-    expect(scalarIn.error!.issues.map((i) => i.path.join('.'))).toContain('filter.0.value');
-  });
-
-  it('the MongoDB-style record form — what this entry alone used to accept — is REFUSED at the `filter` path', () => {
-    // Reverse verification of the convergence, asserted on the issue envelope
-    // rather than on a bare `success === false`: the refusal is located at
-    // `filter` and names the expected kind. Migration:
-    // `element-record-picker-filter-rule-array`.
-    const r = picker.safeParse({ object: 'account', filter: RECORD_FORM });
-    expect(r.success).toBe(false);
-    const atFilter = issuesAt(r, 'filter');
-    expect(atFilter).toHaveLength(1);
-    expect(atFilter[0].code).toBe('invalid_type');
-    expect(atFilter[0]).toMatchObject({ expected: 'array' });
-    // An operator-object record and a `$and` group are the same form and get
-    // the same verdict — no arm accepts any spelling of the record.
-    const opRecord = picker.safeParse({ object: 'account', filter: { amount: { $gt: 100 } } });
-    expect(issuesAt(opRecord, 'filter').map((i) => i.code)).toEqual(['invalid_type']);
-    const group = picker.safeParse({ object: 'account', filter: { $and: [{ status: 'active' }] } });
-    expect(issuesAt(group, 'filter').map((i) => i.code)).toEqual(['invalid_type']);
-  });
-
-  it('shares the array orthography with the sibling `filter` inputs — one value, three doors, the same verdicts', () => {
-    // The ruling is "one filter orthography platform-wide" and this entry was
-    // the last holdout, so the pin is cross-entry: the same rule array raises
-    // no issue at `filter` on any of the three declared doors, and the same
-    // record form is refused at `filter` with the same issue code on all
-    // three. Each door is asked only about ITS `filter`.
-    expect(issuesAt(picker.safeParse({ object: 'account', filter: RULES }), 'filter')).toEqual([]);
-    expect(issuesAt(number.safeParse({ object: 'account', aggregate: 'count', filter: RULES }), 'filter')).toEqual([]);
-    expect(issuesAt(relatedList.safeParse({ filter: RULES }), 'filter')).toEqual([]);
-    const pickerRefusal = issuesAt(picker.safeParse({ object: 'account', filter: RECORD_FORM }), 'filter').map((i) => i.code);
-    expect(pickerRefusal).toEqual(['invalid_type']);
-    expect(issuesAt(number.safeParse({ object: 'account', aggregate: 'count', filter: RECORD_FORM }), 'filter').map((i) => i.code))
-      .toEqual(pickerRefusal);
-    expect(issuesAt(relatedList.safeParse({ filter: RECORD_FORM }), 'filter').map((i) => i.code)).toEqual(pickerRefusal);
-  });
-
-  it('no top-level `filter` door in ComponentPropsMap refuses the rule array any more — the census the card closes', () => {
+  it('no live top-level `filter` door refuses the rule array any more — the census the card closes', () => {
     // The card's claim is "the last record-form `filter` in `ComponentPropsMap`".
-    // Asserted over the WHOLE map by shape rather than over the entries named
-    // above, so a future entry declaring `FilterConditionSchema` at `filter`
-    // (which refuses an array outright, `invalid_type`) is caught here by
-    // name. The holdout shape is exactly "declares `filter`, refuses the
-    // array". A door declaring `z.unknown()` accepted both forms and was never
-    // a holdout of THIS census by construction — which is why the four
-    // `object-*` doors needed the complementary pin below (#15449): "every
-    // `filter` door refuses the record".
-    type Door = { shape?: Record<string, unknown>; safeParse: (v: unknown) => ParseResult };
+    // Asserted over the WHOLE map by shape rather than over named entries, so a
+    // future entry declaring `FilterConditionSchema` at `filter` (which refuses
+    // an array outright, `invalid_type`) is caught here by name.
     const doors = (Object.entries(ComponentPropsMap) as Array<[string, unknown]>)
       .filter(([, schema]) => {
         const shape = (schema as Door).shape;
         return !!shape && 'filter' in shape;
       })
       .map(([type]) => type);
-    // Guard the probe: the three doors pinned above must be found, or the
-    // shape read has gone wrong and the loop below is vacuous.
-    expect(doors).toEqual(expect.arrayContaining(['element:record_picker', 'element:number', 'record:related_list']));
-    const holdouts = doors.filter((type) => {
-      const r = (ComponentPropsMap[type as keyof typeof ComponentPropsMap] as unknown as Door).safeParse({ filter: RULES });
-      return issuesAt(r, 'filter').length > 0;
-    });
+    // Guard the probe: the retired doors are still keys of their shapes (a
+    // tombstone is a key), and they are exactly the three element rows.
+    const retired = doors.filter(isRetired).sort();
+    expect(retired).toEqual(['element:number', 'element:record_picker', 'element:repeater']);
+    const live = doors.filter((type) => !isRetired(type));
+    expect(live).toEqual(expect.arrayContaining(['record:related_list', 'object-grid']));
+    const holdouts = live.filter((type) => issuesAt(door(type).safeParse({ filter: RULES }), 'filter').length > 0);
     expect(holdouts).toEqual([]);
   });
 });
@@ -2767,15 +2561,15 @@ describe('the four `object-*` `sort` doors — one sort orthography, the array',
     expect(unrecognized.flatMap((i) => i.keys ?? [])).toContain('bogusProp');
   });
 
-  it('`sort` agrees with `dataSource.sort` and with the picker shorthand — one shape, four doors', () => {
+  it('`sort` agrees with `dataSource.sort` — one shape, the four doors and the binding', () => {
     // The map's own copies are the same import (`SortItemSchema`), so this
     // asks the question the copies could not: do the doors AGREE, value for
-    // value, with the binding every data-bound element already carries.
+    // value, with the binding every data-bound element already carries. (The
+    // record picker's flat `sort` was a fifth door until #11509 retired it in
+    // v18 onto that binding.)
     const viaBinding = ElementDataSourceSchema.parse({ object: 'showcase_task', sort: ARRAY_FORM });
-    for (const type of [...SORT_DOORS, 'element:record_picker']) {
-      const value = type === 'element:record_picker'
-        ? { object: 'showcase_task', sort: ARRAY_FORM }
-        : { objectName: 'showcase_task', sort: ARRAY_FORM };
+    for (const type of SORT_DOORS) {
+      const value = { objectName: 'showcase_task', sort: ARRAY_FORM };
       const r = door(type).safeParse(value);
       expect([type, r.success]).toEqual([type, true]);
       expect([type, r.data!.sort]).toEqual([type, viaBinding.sort]);
@@ -2918,11 +2712,8 @@ describe('ComponentPropsMap interactive elements', () => {
   });
 
   it('should parse element:record_picker props', () => {
-    const result = ComponentPropsMap['element:record_picker'].parse({
-      object: 'account',
-      labelField: 'name',
-    });
-    expect(result.object).toBe('account');
+    const result = ComponentPropsMap['element:record_picker'].parse({ labelField: 'name' });
+    expect(result.labelField).toBe('name');
   });
 
   it('should parse element:text_input props', () => {
@@ -3499,41 +3290,16 @@ describe('object-* block props schemas — declared, so the props gate has a sch
     expect(r.error!.issues.some((i) => i.path[0] === 'data')).toBe(true);
   });
 
-  it('`defaultFilters` stays HONOURED — it is a read legacy fallback, not an inert spelling', () => {
-    // ObjectGrid.tsx reads it and lowers it to `$filter` when `filter` is
-    // absent (the routed finding on #7751 verified the read point). Only the
-    // plural `filters` has zero read points.
-    //
-    // [#19514] The VALUE this pin carries moved, and the pin's subject did not.
-    // The key is still honoured and still parses; what changed is that it now
-    // carries `filter`'s own declaration — the same value in the same role,
-    // read through the same lowering sink — instead of `z.unknown()`. The AST
-    // tuple array this pin used to spell is one the pinned objectui grid
-    // APPLIES (`toFilterNode` passes it through and `parseFilterAST` accepts
-    // it), so its refusal here is a spelling change for the author, not the
-    // repair of a filter that failed. Its refusal is pinned below, and in full
-    // at `component-object-grid-default-filters.pin.test.ts`.
-    const rules = [{ field: 'status', operator: 'equals', value: 'open' }];
-    const parsed = ComponentPropsMap['object-grid'].parse({
-      objectName: 'showcase_task',
-      defaultFilters: rules,
-    });
-    expect(parsed.defaultFilters).toEqual(rules);
-  });
-
-  it('`defaultFilters` refuses the AST tuple array the `z.unknown()` door used to receipt', () => {
-    const r = ComponentPropsMap['object-grid'].safeParse({
-      objectName: 'showcase_task',
-      defaultFilters: [['status', '=', 'open']],
-    });
-    expect(r.success).toBe(false);
-    expect(r.error!.issues.some((i) => String(i.path[0]) === 'defaultFilters')).toBe(true);
-  });
+  // `defaultFilters` — the grid's legacy base-filter fallback, read only when
+  // `filter` lowered to nothing — retired in v18 (#11509, ruling A-narrow,
+  // sub-question 1) in the shape `defaultSort` took below; #19514's rule-array
+  // narrowing of it is absorbed. Pinned in
+  // `element-flat-binding-retirement.test.ts`.
 
   // #11805 — the grid's legacy single-sort fallback, retired by maintainer
   // ruling 2026-08-25 (decision-inbox batch 4; the producer half of
-  // objectui#5861 under the objectui#4869 「接受所有」 direction). Unlike
-  // `defaultFilters` above — a read fallback that STAYS — `defaultSort` was
+  // objectui#5861 under the objectui#4869 「接受所有」 direction). Like
+  // `defaultFilters` above, which followed it in v18, `defaultSort` was
   // the second spelling of `sort` (read only when `sort` was absent, and
   // wrapped `[schema.defaultSort]` by the renderer's own header-arrow path),
   // so the one-intent-two-spellings rule retires it at the producer.
