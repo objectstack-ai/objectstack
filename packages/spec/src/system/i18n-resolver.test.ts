@@ -1658,7 +1658,8 @@ describe('translatePage', () => {
       const out = translatePage(homePage(), homeBundle, { locale: 'zh-CN' });
       expect(byId(out, 'quick_create').properties.icon).toBe('plus');
       expect(byId(out, 'kpi_revenue_won').properties.value).toBe(42);
-      expect(byId(out, 'lead_picker').properties.object).toBe('lead');
+      // The picker's object is its node-level binding since v18 (#11509) — kept too.
+      expect(byId(out, 'lead_picker').dataSource.object).toBe('lead');
     });
 
     it('leaves a component with no entry — and one with no id — untouched', () => {
