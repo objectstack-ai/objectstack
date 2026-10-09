@@ -14,6 +14,7 @@ import {
 } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import type { IHttpServer, IDataEngine, IHttpRequest } from '@objectstack/spec/contracts';
+import { inProcessSessionReadInput } from '@objectstack/types';
 import type { SettingsContext } from './settings-service.types.js';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { SettingsService } from './settings-service.js';
@@ -296,7 +297,7 @@ export class SettingsServicePlugin implements Plugin {
               const authService: any = ctx.getService('auth');
               let api: any = authService?.api;
               if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
-              return await api?.getSession?.({ headers: h });
+              return await api?.getSession?.(inProcessSessionReadInput(h));
             } catch {
               return undefined;
             }

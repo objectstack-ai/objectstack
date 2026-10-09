@@ -276,7 +276,7 @@ Five rules decide whether a given value survives:
 | 2 | **Only *caller-supplied* keys are candidates** | The engine snapshots the payload's keys at entry (`suppliedKeys`), *before* middleware and `beforeUpdate` hooks run. Only keys in that snapshot can be stripped. |
 | 3 | **Hook / middleware backfill survives** | A key a `beforeUpdate` hook *adds* to `data` is absent from the entry snapshot, so it is not a candidate — this is why the built-in `updated_by` / `updated_at` stamps land even though those columns are `readonly`. |
 | 4 | **`context.preserveAudit` admits a whitelist — on UPDATE only** | An opt-in historical import reinstates the audit/timestamp family and author-declared business `readonly` fields; platform-managed `system` columns (tenancy, generated) stay stripped. This exemption exists on the **UPDATE** path and nowhere else — see below. |
-| 5 | **Hooks are shown the persist image, not the submission** (#16344) | On UPDATE, a caller-supplied value for a `readonly` field is hidden from `ctx.input.data` *before* `beforeUpdate` is dispatched, so a hook cannot derive a persisted column from a value the row will never hold. What the caller actually sent is on **`ctx.submitted`** — diagnostics only, never the persist image. |
+| 5 | **Hooks are shown the persist image, not the submission** (#16344, #22306) | On UPDATE, a caller-supplied value for a `readonly` field is hidden from `ctx.input.data` *before* `beforeUpdate` is dispatched, so a hook cannot derive a persisted column from a value the row will never hold. What the caller actually sent is on **`ctx.submitted`** — diagnostics only, never the persist image. On INSERT the same value is withheld from `beforeInsert`, before the defaults run, so the hook sees what the create stores; a create has no `ctx.submitted`. |
 
 Rule 2 selects the *candidates*; rules 3 and 5 decide what a hook can do about one. A key
 the caller never sent is not a candidate at all, which is why the built-in `updated_by` /
@@ -304,8 +304,16 @@ same writes. What moved is the hook's view.
   from a read-only column reads `ctx.previous`, the stored row, which is the correct
   source either way.
 
-`beforeInsert` is untouched (#14147), and `readonlyWhen` locks are deliberately still
-hook-writable (#9107).
+`readonlyWhen` locks are deliberately still hook-writable (#9107).
+
+`beforeInsert` follows the same rule since #22306, while the create-side strip itself stays
+after the hooks (#14147). A caller-supplied value the strip will take is withheld *before
+the defaults run*, so the hook sees exactly what an honest caller's hook sees — the field's
+`defaultValue`, or no key — and a hook that stamps an absent read-only column
+(`if (!data.x) data.x = …`) stamps it whether or not the caller sent one. Two values stay
+visible: a runtime-owned `autonumber` (#6339), and, under `preserveAudit`, the audit
+timeline the historical-import channel reinstates through a `beforeInsert` hook. There is
+no `ctx.submitted` on a create.
 </Callout>
 
 <Callout type="warn">

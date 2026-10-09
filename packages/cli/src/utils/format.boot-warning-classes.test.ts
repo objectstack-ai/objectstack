@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import chalk from 'chalk';
 import { LiteKernel, ObjectLogger, type Plugin, type PluginContext } from '@objectstack/core';
 import { runActionGovernanceInventory } from '@objectstack/objectql';
 import { AutomationServicePlugin } from '@objectstack/service-automation';
@@ -93,17 +94,22 @@ const BASE: ServerReadyOptions = {
 };
 
 let transcript: string[];
+/** The same lines with their SGR kept — for the pins that read a line's color. */
+let rawTranscript: string[];
 let errSpy: ReturnType<typeof vi.spyOn>;
 
 /** Strip SGR so assertions hold whether or not chalk colors this run. */
 const plain = (s: string) => s.replace(/\u001b\[[0-9;]*m/g, '');
 
 const linesWith = (needle: string) => transcript.filter((line) => line.includes(needle));
+const rawLinesWith = (needle: string) => rawTranscript.filter((line) => plain(line).includes(needle));
 
 beforeEach(() => {
   transcript = [];
+  rawTranscript = [];
   errSpy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
     for (const line of plain(args.join(' ')).split('\n')) transcript.push(line);
+    rawTranscript.push(...args.join(' ').split('\n'));
   });
 });
 
@@ -206,6 +212,10 @@ describe('a real automation boot with eight scheduled flows and scheduled work o
     // The class's short text is the reason's first sentence — cause and switch.
     expect(scheduleLines[0]).toContain('disabled by deployment policy');
     expect(scheduleLines[0]).toContain(SCHEDULED_WORK_ENV);
+    // [#22255] Information, not a warning — and asserted against the REAL
+    // producer's recorded reason, so the printer's identity with it is pinned
+    // here: a reworded producer turns this line back into a `⚠`.
+    expect(scheduleLines[0]).toMatch(/^ {2}ℹ 8 flows declare /);
   });
 
   it('prints no warning twice — every flow named on exactly one line', async () => {
@@ -280,7 +290,7 @@ describe('one line per warning class (formatter)', () => {
 
     const firstSentence = SCHEDULED_WORK_DISABLED_REASON.slice(0, SCHEDULED_WORK_DISABLED_REASON.indexOf('. This'));
     expect(linesWith('NOT bound')).toEqual([
-      `  ⚠ 1 flow declares a 'schedule' trigger but is NOT bound — ${firstSentence}: a_flow`,
+      `  ℹ 1 flow declares a 'schedule' trigger but is NOT bound — ${firstSentence}: a_flow`,
     ]);
     expect(linesWith(LONG_EXPLANATION)).toEqual([]);
     expect(linesWith('--log-level debug')).toHaveLength(1);
@@ -295,6 +305,111 @@ describe('one line per warning class (formatter)', () => {
     });
     expect(linesWith('NOT bound')).toHaveLength(1);
     expect(linesWith('--log-level debug')).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #22255 — the deployment-policy class is information
+// ---------------------------------------------------------------------------
+
+/**
+ * Flows left unbound because the deployment switched scheduled work off — its
+ * documented default — are an expected degradation, so their class line
+ * prints dim under `ℹ` (the maintainer's direction on #22160, 「预期中的降级记
+ * info」). Every other unbound reason is the author's to fix and keeps its
+ * yellow `⚠`. Only the glyph and color move: the text, the order and the
+ * records the banner hands back to Boot diagnostics are #22073's, unchanged.
+ */
+describe('the deployment-policy class prints as information (#22255, formatter)', () => {
+  const missingTrigger =
+    "no 'schedule' trigger is registered — add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*)";
+  const bindingFailed = "trigger 'schedule' is registered but binding failed — see earlier warnings";
+  const firstSentence = SCHEDULED_WORK_DISABLED_REASON.slice(0, SCHEDULED_WORK_DISABLED_REASON.indexOf('. This'));
+  /** chalk's opening SGR for `dim` and for `yellow`. */
+  const DIM = '\u001b[2m';
+  const YELLOW = '\u001b[33m';
+
+  /** Print with color on whatever this run's stderr is: the color split is half the pin. */
+  function printColored(opts: ServerReadyOptions): void {
+    const prior = chalk.level;
+    chalk.level = 1;
+    try {
+      printServerReady(opts);
+    } finally {
+      chalk.level = prior;
+    }
+  }
+
+  it('prints the policy class dim under ℹ with its flows and first sentence; a missing trigger and a binding failure keep a yellow ⚠', () => {
+    printColored({
+      ...BASE,
+      automation: summary({
+        unbound: [
+          ...policyRefused(['a_flow', 'b_flow']),
+          { flowName: 'c_flow', triggerType: 'schedule', reason: missingTrigger },
+          { flowName: 'd_flow', triggerType: 'schedule', reason: bindingFailed },
+        ],
+      }),
+    });
+
+    expect(linesWith('NOT bound')).toEqual([
+      `  ℹ 2 flows declare a 'schedule' trigger but are NOT bound — ${firstSentence}: a_flow, b_flow`,
+      `  ⚠ 1 flow declares a 'schedule' trigger but is NOT bound — ${missingTrigger}: c_flow`,
+      `  ⚠ 1 flow declares a 'schedule' trigger but is NOT bound — ${bindingFailed}: d_flow`,
+    ]);
+    const [policy, missing, failed] = rawLinesWith('NOT bound');
+    expect(policy.startsWith(DIM), JSON.stringify(policy)).toBe(true);
+    expect(policy).not.toContain(YELLOW);
+    expect(missing.startsWith(YELLOW), JSON.stringify(missing)).toBe(true);
+    expect(failed.startsWith(YELLOW), JSON.stringify(failed)).toBe(true);
+  });
+
+  it('⛔ judges the class by identity with the producer, never by its words — a reason that only quotes the policy keeps ⚠', () => {
+    const quoting = [
+      // A binding failure whose text carries the policy's first sentence.
+      `trigger 'schedule' is registered but binding failed — ${firstSentence}`,
+      // The whole policy sentence inside a longer record — the shape the
+      // schedule trigger's own refusal log takes.
+      `[ScheduleTrigger] flow 'q1_flow' is not armed: ${SCHEDULED_WORK_DISABLED_REASON}`,
+      // The first sentence alone, as a reworded producer could leave it.
+      firstSentence,
+    ];
+    printColored({
+      ...BASE,
+      automation: summary({
+        unbound: quoting.map((reason, i) => ({ flowName: `q${i}_flow`, triggerType: 'schedule', reason })),
+      }),
+    });
+
+    const lines = linesWith('NOT bound');
+    expect(lines, transcript.join('\n')).toHaveLength(quoting.length);
+    for (const line of lines) expect(line).toMatch(/^ {2}⚠ /);
+    for (const line of rawLinesWith('NOT bound')) expect(line.startsWith(YELLOW), JSON.stringify(line)).toBe(true);
+  });
+
+  it('hands back the same restated records under either glyph — each flow is named once, and Boot diagnostics prints nothing', () => {
+    printServerReady({
+      ...BASE,
+      automation: summary({
+        unbound: [
+          ...policyRefused(['a_flow']),
+          { flowName: 'b_flow', triggerType: 'schedule', reason: missingTrigger },
+          { flowName: 'c_flow', triggerType: 'schedule', reason: bindingFailed },
+        ],
+      }),
+      bootDiagnostics: {
+        lines: [
+          auditRecord('a_flow'),
+          auditRecord('b_flow', 'schedule', missingTrigger),
+          auditRecord('c_flow', 'schedule', bindingFailed),
+        ],
+      },
+    });
+
+    for (const name of ['a_flow', 'b_flow', 'c_flow']) {
+      expect(linesWith(name), transcript.join('\n')).toHaveLength(1);
+    }
+    expect(linesWith('Boot diagnostics')).toEqual([]);
   });
 });
 

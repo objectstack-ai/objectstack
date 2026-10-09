@@ -13,10 +13,15 @@
  *     ONE-emitter claim: same code, status and sentence);
  *  2. its matrix is the metadata door's matrix, including the answers that are
  *     deliberately `null` — a name no package ships, a Regime O overlay type,
- *     the #6960 delete carve-out, and the operator hatch.
+ *     and the #6960 delete carve-out. [ADR-0131 D6] The operator hatch is no
+ *     longer one of them: managed content is sealed, so the verdict on an item
+ *     a managed package ships is the same with `OS_METADATA_WRITABLE` set or
+ *     not. [#22411] The legacy spelling `OBJECTSTACK_METADATA_WRITABLE`, which
+ *     11.0 removed, is not read at all: the hatch is shut under it.
  *
- * The registry double serves only `getArtifactItem`, which is all the verdict
- * reads; what it returns is what the real `SchemaRegistry` returns for an
+ * The registry double serves `getArtifactItem`, which is all the verdict
+ * reads, and `getRegisteredTypes`, which the type listing reads to show the
+ * hatch shut under the removed spelling; what `getArtifactItem` returns is what the real `SchemaRegistry` returns for an
  * artifact a code package registered (`_packageId` stamped, package
  * provenance). `@objectstack/objectql` cannot be imported here: it depends on
  * this package.
@@ -43,7 +48,10 @@ const ARTIFACTS = new Map<string, Map<string, unknown>>([
 ]);
 
 function protocolOn(environmentId: string | undefined): ObjectStackProtocolImplementation {
-    const registry = { getArtifactItem: (type: string, name: string) => ARTIFACTS.get(type)?.get(name) };
+    const registry = {
+        getArtifactItem: (type: string, name: string) => ARTIFACTS.get(type)?.get(name),
+        getRegisteredTypes: () => Array.from(ARTIFACTS.keys()),
+    };
     return new ObjectStackProtocolImplementation({ registry } as never, () => new Map(), environmentId);
 }
 
@@ -51,6 +59,7 @@ const shape = (e: any) => (e ? { code: e.code, status: e.status } : null);
 
 afterEach(() => {
     delete process.env.OS_METADATA_WRITABLE;
+    delete process.env.OBJECTSTACK_METADATA_WRITABLE;
     ObjectStackProtocolImplementation.resetEnvWritableCache();
     resetEnvWritableMetadataTypes();
 });
@@ -116,13 +125,79 @@ describe('packagedBaseRefusal — the /meta door\'s locked-base verdict, handed 
             .toThrow('registry unreadable');
     });
 
-    it('reads the operator hatch through the same predicate the metadata door reads', () => {
-        process.env.OS_METADATA_WRITABLE = 'flow';
-        ObjectStackProtocolImplementation.resetEnvWritableCache();
-        const p = protocolOn(undefined);
-        expect(p.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'save' })).toBeNull();
-        expect(p.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'delete' })).toBeNull();
-    });
+    // [ADR-0131 D6] Managed content is sealed: the hatch opens neither verb on
+    // an item a managed package ships — the verdict is the one it gives with
+    // the hatch shut, sentence included. Every door that asks this verdict (the
+    // `/automation` doors, the read envelope) inherits that.
+    for (const environmentId of [undefined, 'env_1']) {
+        it(`OS_METADATA_WRITABLE=flow,page does not open a managed item (${environmentId ? 'environment' : 'host-config'} kernel)`, () => {
+            const shut = protocolOn(environmentId);
+            const sealed = {
+                save: shut.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'save' }) as any,
+                delete: shut.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'delete' }) as any,
+                page: shut.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'save' }) as any,
+            };
+            process.env.OS_METADATA_WRITABLE = 'flow,page';
+            ObjectStackProtocolImplementation.resetEnvWritableCache();
+            const p = protocolOn(environmentId);
+            const open = {
+                save: p.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'save' }) as any,
+                delete: p.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'delete' }) as any,
+                page: p.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'save' }) as any,
+            };
+            for (const verb of ['save', 'delete', 'page'] as const) {
+                expect(shape(open[verb]), verb).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+                expect(open[verb].message, verb).toBe(sealed[verb].message);
+            }
+            // The #6960 carve-out and the regime-O overlay keep their `null`.
+            expect(p.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'delete' })).toBeNull();
+            expect(p.packagedBaseRefusal({ type: 'view', name: 'pkg_view', operation: 'save' })).toBeNull();
+        });
+    }
+
+    // [#22411] The legacy spelling `OBJECTSTACK_METADATA_WRITABLE` was removed in
+    // 11.0, and the protocol now reads the setting through the repository's one
+    // reader, which reads the preferred spelling only. Under the legacy
+    // spelling alone the hatch is SHUT: the type listing reports no env
+    // override, and every verdict is the one the shut hatch gives. Control: the
+    // preferred spelling still opens the listing.
+    for (const environmentId of [undefined, 'env_1']) {
+        it(`OBJECTSTACK_METADATA_WRITABLE=flow,page is not read — the hatch is shut (${environmentId ? 'environment' : 'host-config'} kernel)`, async () => {
+            const shut = protocolOn(environmentId);
+            const sealed = {
+                save: shut.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'save' }) as any,
+                delete: shut.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'delete' }) as any,
+                page: shut.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'save' }) as any,
+            };
+            const hatchOf = async (p: ObjectStackProtocolImplementation) => {
+                const { entries } = await (p as any).getMetaTypes();
+                return Object.fromEntries(['flow', 'page'].map((t) => {
+                    const e = entries.find((x: any) => x.type === t);
+                    return [t, { allowOrgOverride: e?.allowOrgOverride, overrideSource: e?.overrideSource }];
+                }));
+            };
+            const SHUT = { allowOrgOverride: false, overrideSource: 'registry' };
+            expect(await hatchOf(shut)).toEqual({ flow: SHUT, page: SHUT });
+
+            process.env.OBJECTSTACK_METADATA_WRITABLE = 'flow,page';
+            ObjectStackProtocolImplementation.resetEnvWritableCache();
+            const legacy = protocolOn(environmentId);
+            expect(await hatchOf(legacy)).toEqual({ flow: SHUT, page: SHUT });
+            for (const verb of ['save', 'delete', 'page'] as const) {
+                const verdict: any = verb === 'page'
+                    ? legacy.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'save' })
+                    : legacy.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: verb });
+                expect(shape(verdict), verb).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+                expect(verdict.message, verb).toBe(sealed[verb].message);
+            }
+
+            // Control: the preferred spelling is read, so the same names open the listing.
+            process.env.OS_METADATA_WRITABLE = 'flow,page';
+            ObjectStackProtocolImplementation.resetEnvWritableCache();
+            const OPEN = { allowOrgOverride: true, overrideSource: 'env' };
+            expect(await hatchOf(protocolOn(environmentId))).toEqual({ flow: OPEN, page: OPEN });
+        });
+    }
 });
 
 /**
@@ -136,25 +211,30 @@ describe('packagedBaseRefusal — the /meta door\'s locked-base verdict, handed 
  * package's administrator cannot make. [#20910] So do `action` and
  * `permission`, from their own rows: an action names its activation switch and
  * no clone (the action-clone half is not chartered), a permission set names its
- * clone and no switch. Every type with no regime keeps its sentence byte for
- * byte (the control: `page`).
+ * clone and no switch. Every type with no regime reads the managed seal (the
+ * control: `page`). [ADR-0131 D6] Every one of them names the managed package
+ * first: the install mode is what the refusal is about.
  */
 describe('packagedBaseRefusal — the sentence is chosen per ADR-0126 regime', () => {
     const CLONE = 'POST /api/v1/automation/:name/clone';
     const TOGGLE = 'POST /api/v1/automation/:name/toggle';
     const ADR_0126 = 'docs/adr/0126-packaged-metadata-customization-model.md';
 
-    /** The package-less sentence every regime-less type keeps (`refusePackagedBaseOverride`). */
-    const LEGACY_SAVE = (type: string, name: string) =>
-        `Metadata item '${type}/${name}' is provided by a code package `
-        + 'and the type has not opted into per-org overlay writes (allowOrgOverride=false). '
-        + 'Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE to grant a runtime escape hatch. '
-        + 'See docs/adr/0005-metadata-customization-overlay.md.';
-    /** …and its removal twin (`refusePackagedBaseRemoval`). */
-    const LEGACY_DELETE = (type: string, name: string) =>
-        `Metadata item '${type}/${name}' is provided by a code package `
-        + 'and the type has not opted into per-org overlay writes. '
-        + 'See docs/adr/0005-metadata-customization-overlay.md.';
+    /**
+     * [ADR-0131 D6] The package-less sentence every regime-less type reads
+     * (`refusePackagedBaseOverride`): the managed seal, the registry flag that
+     * produced it, the hatch named only to say it does not apply, the remedy.
+     */
+    const SEALED_SAVE = (type: string, name: string) =>
+        `Metadata item '${type}/${name}' is provided by a managed package and is sealed against in-place edits: `
+        + 'its type takes no environment overlay (allowOrgOverride=false), and OS_METADATA_WRITABLE does not open '
+        + 'a managed item. Edit the source artifact and redeploy. '
+        + 'See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.';
+    /** …and its removal twin (`refusePackagedBaseRemoval`), which has no remedy to name. */
+    const SEALED_DELETE = (type: string, name: string) =>
+        `Metadata item '${type}/${name}' is provided by a managed package and is sealed against removal: `
+        + 'its type takes no environment overlay (allowOrgOverride=false), and OS_METADATA_WRITABLE does not open '
+        + 'a managed item. See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.';
 
     for (const environmentId of [undefined, 'env_1']) {
         for (const operation of ['save', 'delete'] as const) {
@@ -164,7 +244,7 @@ describe('packagedBaseRefusal — the sentence is chosen per ADR-0126 regime', (
                     .packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation });
                 expect(shape(refusal)).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
                 const message = String(refusal.message);
-                expect(message.startsWith("Metadata item 'flow/pkg_flow' is provided by a code package")).toBe(true);
+                expect(message.startsWith("Metadata item 'flow/pkg_flow' is provided by a managed package")).toBe(true);
                 expect(message).toContain(CLONE);
                 expect(message).toContain(TOGGLE);
                 expect(message).toContain(ADR_0126);
@@ -194,21 +274,23 @@ describe('packagedBaseRefusal — the sentence is chosen per ADR-0126 regime', (
         expect(del?.message).toContain(TOGGLE);
     });
 
-    it('control: a type with no declared regime (`page`) keeps its sentence byte for byte', () => {
+    it('control: a type with no declared regime (`page`) reads the managed seal', () => {
         const p = protocolOn('env_1');
         const refusal: any = p.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'save' });
         expect(shape(refusal)).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
-        expect(refusal.message).toBe(LEGACY_SAVE('page', 'pkg_page'));
+        expect(refusal.message).toBe(SEALED_SAVE('page', 'pkg_page'));
+        // It names the hatch only to say it does not open the item — never as a remedy.
+        expect(refusal.message).not.toMatch(/set OS_METADATA_WRITABLE|may set OS_METADATA_WRITABLE/);
     });
 
-    it('a regime-less type\'s removal sentence is unchanged too (`object`, no overlay merge at read)', () => {
+    it('a regime-less type\'s removal reads the managed seal too (`object`, no overlay merge at read)', () => {
         // `page` merges its overlay at read, so its removal is the #6960
-        // carve-out and never refused; `object` is refused, and keeps its line.
+        // carve-out and never refused; `object` is refused, and reads the seal.
         const registry = { getArtifactItem: (type: string, name: string) => (type === 'object' ? shipped(name) : undefined) };
         const p = new ObjectStackProtocolImplementation({ registry } as never, () => new Map(), 'env_1');
         const del: any = p.packagedBaseRefusal({ type: 'object', name: 'pkg_object', operation: 'delete' });
         expect(shape(del)).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
-        expect(del.message).toBe(LEGACY_DELETE('object', 'pkg_object'));
+        expect(del.message).toBe(SEALED_DELETE('object', 'pkg_object'));
     });
 });
 
@@ -221,9 +303,12 @@ describe('packagedBaseRefusal — each Regime C type names its OWN sanctioned pa
     const ADR_0126 = 'docs/adr/0126-packaged-metadata-customization-model.md';
     const OPERATOR_ONLY = 'operator-only where one install serves several organizations';
 
-    /** The opening sentence every Regime C refusal shares — the regime's shape, not the type's. */
+    /**
+     * The opening sentence every Regime C refusal shares — the regime's shape,
+     * not the type's. [ADR-0131 D6] It names the managed package.
+     */
     const LOCKED = (type: string, name: string, operation: 'save' | 'delete') =>
-        `Metadata item '${type}/${name}' is provided by a code package, and its packaged base is locked `
+        `Metadata item '${type}/${name}' is provided by a managed package and is sealed `
         + (operation === 'delete' ? 'against removal.' : 'against in-place edits.');
 
     const refusal = (
@@ -247,18 +332,19 @@ describe('packagedBaseRefusal — each Regime C type names its OWN sanctioned pa
         return message;
     };
 
-    it('`flow` — the sentence is byte-identical to the one the row table replaced, on save and on removal', () => {
-        // Spelled out literally, NOT through the builder: this is the pin that
-        // the table refactor moved no byte of the flow sentence.
+    it('`flow` — the sentence, spelled out literally, on save and on removal', () => {
+        // Spelled out literally, NOT through the builder: the builder cannot
+        // move a byte of the flow sentence without this pin seeing it.
+        // [ADR-0131 D6] The opener names the managed package and the seal.
         expect(refusal('flow', 'pkg_flow', 'save').message).toBe(
-            "Metadata item 'flow/pkg_flow' is provided by a code package, and its packaged base is locked "
+            "Metadata item 'flow/pkg_flow' is provided by a managed package and is sealed "
             + 'against in-place edits. Clone it under a new name to customize it (POST /api/v1/automation/:name/clone, '
             + 'body {name, label}), or switch it off (POST /api/v1/automation/:name/toggle, body {enabled: false}; '
             + 'operator-only where one install serves several organizations). '
             + 'See docs/adr/0126-packaged-metadata-customization-model.md.',
         );
         expect(refusal('flow', 'pkg_flow', 'delete').message).toBe(
-            "Metadata item 'flow/pkg_flow' is provided by a code package, and its packaged base is locked "
+            "Metadata item 'flow/pkg_flow' is provided by a managed package and is sealed "
             + 'against removal. Clone it under a new name to customize it (POST /api/v1/automation/:name/clone, '
             + 'body {name, label}), or switch it off (POST /api/v1/automation/:name/toggle, body {enabled: false}; '
             + 'operator-only where one install serves several organizations). '

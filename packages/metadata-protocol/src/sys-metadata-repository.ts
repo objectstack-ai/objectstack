@@ -87,7 +87,7 @@ import type { IObjectQLEngine } from '@objectstack/core';
 // lifecycle gate read, so a third read-only signal added there reaches this
 // door too (that shared-rule argument is the module's whole reason to exist).
 import { isWritablePackage } from './package-writability.js';
-import { isOriginGatedType, packagedBaseRegimePrescription, packagedBaseRegimeSentence } from './packaged-base-regime.js';
+import { isOriginGatedType, managedItemSealedSentence, packagedBaseRegimePrescription } from './packaged-base-regime.js';
 
 /**
  * Canonicalise a driver-materialised timestamp into the ISO-8601 string the
@@ -359,13 +359,22 @@ const OVERLAY_CAPABLE_TYPES: ReadonlySet<string> = new Set(
 /**
  * Phase 3a-env-writable: parse `OS_METADATA_WRITABLE` (comma-
  * separated singular type names). Memoised; tests can reset via
- * {@link resetEnvWritableMetadataTypes}. Mirrors the same helper in
- * ObjectStackProtocolImplementation — both gates must consult the same
- * elevated set so the env-var escape hatch is applied consistently
- * regardless of which write path a caller takes.
+ * {@link resetEnvWritableMetadataTypes}.
+ *
+ * [#22411] The ONE reader of the setting. The repository's write gate and
+ * every protocol consumer of the hatch — `getMetaTypes()`'s listing,
+ * `isOverlayAllowed()` — ask this function, so the listing cannot advertise a
+ * hatch the save door then refuses. There used to be a second, hand-copied
+ * reader in `ObjectStackProtocolImplementation`. The 11.0 removal of
+ * ObjectStack's own legacy env names (`OBJECTSTACK_METADATA_WRITABLE` →
+ * `OS_METADATA_WRITABLE`, published as a breaking change) edited this copy and
+ * missed that one, which went on honouring the removed spelling: the listing
+ * said "writable", the save answered `403 NOT_CREATABLE`. ⛔ Do not add a
+ * second reader, and do not give this one a legacy alias back — the spelling
+ * is removed, and `[]` is that decision.
  */
 let _envWritableMetadataTypes: Set<string> | null = null;
-function envWritableMetadataTypes(): ReadonlySet<string> {
+export function envWritableMetadataTypes(): ReadonlySet<string> {
   if (_envWritableMetadataTypes !== null) return _envWritableMetadataTypes;
   const raw = readEnvWithDeprecation('OS_METADATA_WRITABLE', []) || '';
   const set = new Set<string>();
@@ -381,7 +390,11 @@ function envWritableMetadataTypes(): ReadonlySet<string> {
   return set;
 }
 
-/** Test hook — clear the memoised env-writable cache. */
+/**
+ * Test hook — clear the memoised env-writable cache. The one cache
+ * {@link envWritableMetadataTypes} keeps, so this and
+ * `ObjectStackProtocolImplementation.resetEnvWritableCache()` clear the same set.
+ */
 export function resetEnvWritableMetadataTypes(): void {
   _envWritableMetadataTypes = null;
 }
@@ -1693,9 +1706,12 @@ export class SysMetadataRepository implements MetadataRepository {
    * at `(type, name)`. In that case we accept types with
    * `allowRuntimeCreate: true`, even when `allowOrgOverride` is false.
    *
-   * The env-var escape hatch (`OS_METADATA_WRITABLE`) still
-   * applies to BOTH intents, so operators can opt into artifact
-   * overrides at runtime for emergency fixes.
+   * The env-var escape hatch (`OS_METADATA_WRITABLE`) applies to the
+   * `runtime-only` intent ONLY. [ADR-0131 D6] Managed content is sealed: an
+   * `override-artifact` write is a write onto an item a managed package
+   * ships, and no door — this one included — admits it on the hatch. It used
+   * to apply to both intents, "so operators can opt into artifact overrides
+   * at runtime for emergency fixes"; that use is the one D6 withdraws.
    *
    * ## [#7682] The package door — which fact the refusal reports
    *
@@ -1727,17 +1743,17 @@ export class SysMetadataRepository implements MetadataRepository {
    *    package CHANGELOG's "deliberately does not unlock the org dimension".
    *    A type-level unlock says nothing about the PACKAGE dimension, so a
    *    hatch write that NAMES a read-only base is refused here.
-   *  - **How far that reaches — NARROW, and the measurement it rests on.** The
-   *    door reads the base the caller NAMED, so a package-LESS hatch write is
-   *    untouched and still lands the overlay the documentation promises. That
-   *    is measured, not assumed: on this topology a package-less hatch write
-   *    lands `{ package_id: null, organization_id: null }` env-wide and
-   *    `{ package_id: null, organization_id: <org> }` under an org kernel —
-   *    both pinned in `sys-metadata-repository.package-writability.test.ts`.
-   *    The BROADER reading (the hatch never unlocks a write against an item a
-   *    read-only package provides, named or not) would retire the hatch's only
-   *    documented use and is deliberately NOT implemented: it needs a
-   *    maintainer decision plus a docs/ADR change, not a code edit.
+   *  - **How far that reaches — NARROW, then BROAD by decision.** The door
+   *    reads the base the caller NAMED, so under #8146 a package-LESS hatch
+   *    write still landed an overlay of the artifact (env-wide, or per-org
+   *    under an org kernel). That comment reserved the BROADER reading — the
+   *    hatch never unlocks a write against an item a read-only package
+   *    provides, named or not — for "a maintainer decision plus a docs/ADR
+   *    change". [ADR-0131 D6] That decision is recorded: managed content is
+   *    sealed, and the hatch opens the `runtime-only` intent only (see the
+   *    hatch limb below). The docs entry (`environment-variables.mdx`) says
+   *    so, and `sys-metadata-repository.package-writability.test.ts` pins the
+   *    package-less hatch write refused where it used to land.
    *  - **Beyond the hatch it still refuses nothing new.** For every other
    *    intent this remains the code-selection for writes ALREADY refused; the
    *    difference is which true fact the refusal reports. Widening it into a
@@ -1820,49 +1836,46 @@ export class SysMetadataRepository implements MetadataRepository {
     if (namedBase && !isWritablePackage(this.engine, packageId)) {
       throw intent === 'runtime-only'
         ? SysMetadataRepository.readOnlyBaseCreateError(type, packageId as string, hatchOpen)
-        : SysMetadataRepository.readOnlyBaseOverrideError(type, packageId as string, hatchOpen);
+        : SysMetadataRepository.readOnlyBaseOverrideError(type, packageId as string);
     }
 
     // [#8146] The hatch unlocks the TYPE — for a write that named no base, or
-    // named a writable one. It never reaches the package dimension.
-    if (hatchOpen) return;
+    // named a writable one. It never reaches the package dimension. [ADR-0131
+    // D6] Nor does it reach an item a managed package ships: it opens the
+    // `runtime-only` intent alone, a write of an item no managed package
+    // ships. The `override-artifact` intent falls through to the seal below
+    // with the hatch open or shut.
+    if (hatchOpen && intent === 'runtime-only') return;
 
-    // [#20910, ADR-0126 §2] An item a code package ships, of a type with a
-    // Regime C row, is refused with the row-built sentence — the SAME one the
-    // protocol's package door answers on an environment-scoped kernel, which
-    // never reaches here for this write — naming the type's sanctioned path. A
-    // locked Regime C base is customized by its clone or switched off, never by
-    // opening this hatch, so the list-and-hatch sentence below would prescribe
-    // the wrong door. Reached only with the hatch CLOSED (it returned above).
-    // Every type with no regime row keeps that sentence, byte for byte.
+    // [#20910, ADR-0126 §2, ADR-0131 D6] An item a managed package ships, of a
+    // type with no overlay channel, is SEALED, and is refused with the ONE
+    // sentence the protocol's package doors throw (`managedItemSealedSentence`)
+    // — a Regime C type's row-built sentence naming its sanctioned path, and
+    // the managed seal itself for every other type. Reached with the hatch
+    // open or shut: the hatch decides nothing about such an item, so no
+    // sentence here prescribes it.
     if (intent !== 'runtime-only') {
-      const regimeSentence = packagedBaseRegimeSentence(singular, ref.name, operation);
-      if (regimeSentence !== undefined) {
-        const err: any = new Error(regimeSentence);
-        err.code = 'NOT_OVERRIDABLE';
-        err.status = 403;
-        throw err;
-      }
+      const err: any = new Error(managedItemSealedSentence(singular, ref.name, operation));
+      err.code = 'NOT_OVERRIDABLE';
+      err.status = 403;
+      throw err;
     }
 
+    // `runtime-only` with no create channel: the hatch is the one door that
+    // opens it (a write of an item no managed package ships), so it is named.
     const allowed = [
       ...OVERLAY_ALLOWED_TYPES,
       ...envWritableMetadataTypes(),
     ];
-    const code = intent === 'runtime-only' ? 'NOT_CREATABLE' : 'NOT_OVERRIDABLE';
-    const detail = intent === 'runtime-only'
-      ? `'${type}' has neither allowOrgOverride nor allowRuntimeCreate in the registry. `
-      : `'${type}' is not allowOrgOverride in the registry. `;
-    // ⛔ No `[${code}]` opener: the token below IS the `code` this throw
-    // declares three lines down, so a bracketed restatement duplicates onto the
-    // prose axis a fact the envelope already carries — and, spelled by
-    // interpolation, it is invisible to every grep for a literal tag.
+    // ⛔ No `[NOT_CREATABLE]` opener: that token IS the `code` this throw
+    // declares below, so a bracketed restatement duplicates onto the prose
+    // axis a fact the envelope already carries.
     const err: any = new Error(
-      `${detail}` +
+      `'${type}' has neither allowOrgOverride nor allowRuntimeCreate in the registry. ` +
       `Overlay-allowed: ${Array.from(new Set(allowed)).join(', ') || '(none)'}. ` +
       `Set OS_METADATA_WRITABLE to enable additional types at runtime.`,
     );
-    err.code = code;
+    err.code = 'NOT_CREATABLE';
     err.status = 403;
     throw err;
   }
@@ -1931,14 +1944,15 @@ export class SysMetadataRepository implements MetadataRepository {
    *
    * `ITEM_LOCKED` rather than `WRITABLE_PACKAGE_REQUIRED`: switching packages
    * cannot help — the artifact is code-shipped wherever the caller points —
-   * so the refusal states the lock and prescribes what DOES move it. [#8146]
-   * That prescription is now chosen by `hatchOpen`, because the two cases have
-   * genuinely different remedies: with the hatch CLOSED, opening it (on a
-   * package-less write) is one of the real answers; with it already OPEN, this
-   * door is refusing *despite* it — by ruling — and repeating "set
-   * OS_METADATA_WRITABLE" would be a false prescription of exactly the kind
-   * PR #8185's patch round rejected. Same code and status either way: the
-   * condition is one condition, and only the remedy differs.
+   * so the refusal states the lock and prescribes what DOES move it.
+   * [ADR-0131 D6] The prescription no longer depends on the
+   * `OS_METADATA_WRITABLE` hatch. #8146 chose it by whether the hatch was open
+   * (shut: "set the hatch and write package-less"; open: "retry package-less
+   * to land the overlay the hatch grants"), and both remedies are false now:
+   * the item is managed content, sealed whichever way the write is spelled.
+   * So the sentence names the seal, says the hatch does not open it (the
+   * operator who set it is told why it did nothing, rather than setting it
+   * again), and names the remedy that remains. Same code and status as ever.
    * `lockSource: 'package'` is ADR-0010's own reserved value for a lock the
    * PACKAGE layer asserts, which is what makes this distinguishable from the
    * item-level `_lock` refusal (`assertLockAllowsWrite`) that carries a `lock`
@@ -1955,38 +1969,23 @@ export class SysMetadataRepository implements MetadataRepository {
    * a copy in `protocol.ts` would drift from this one the first time either
    * moves. ⛔ Do not re-privatise without deleting that call site.
    */
-  static readOnlyBaseOverrideError(type: string, packageId: string, hatchOpen = false): Error {
+  static readOnlyBaseOverrideError(type: string, packageId: string): Error {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
-    // [#20910, ADR-0126 §2] With the hatch CLOSED, a type with a Regime C row is
-    // told its row's sanctioned path — not the hatch: a locked Regime C base is
-    // customized by its clone or switched off, and the hatch is not that type's
-    // sanctioned path. The opener is shortened to the lock, so the prescription
-    // and its ADR-0126 citation arrive whole inside the REST door's
-    // 500-character bound (pinned with a long package id). The hatch-OPEN
-    // remedy, the code, the status, `lockSource`, `packageId` and `docs` are
-    // the same for every type; every type with no regime row keeps both
-    // remedies below, byte for byte.
-    const regimePrescription = hatchOpen ? undefined : packagedBaseRegimePrescription(singular);
+    // [#20910, ADR-0126 §2] A type with a Regime C row is told its row's
+    // sanctioned path — never the hatch: a locked Regime C base is customized
+    // by its clone or switched off. The opener is shortened to the lock, so the
+    // prescription and its ADR-0126 citation arrive whole inside the REST
+    // door's 500-character bound (pinned with a long package id). The code,
+    // the status, `lockSource`, `packageId` and `docs` are the same for every
+    // type.
+    const regimePrescription = packagedBaseRegimePrescription(singular);
     const err: any = new Error(regimePrescription !== undefined
       ? `Cannot overlay '${type}' in package '${packageId}': that package is read-only, and its packaged base `
         + `is locked against in-place edits. ${regimePrescription}`
-      : `Cannot overlay '${type}' in package '${packageId}': that package is read-only `
-      + `(provided by code or an installed app) and the type has no per-org overlay channel `
-      + `(allowOrgOverride=false), so this item is locked against runtime edits. `
-      // [#8146] The prescription is chosen by whether the hatch is ALREADY
-      // open, because "set OS_METADATA_WRITABLE" is FALSE once it is set —
-      // this door refuses with it set, by ruling. A refusal that prescribes
-      // the step the caller already took is what makes an automated client
-      // (and an AI agent) retry the same request forever.
-      + (hatchOpen
-        ? `OS_METADATA_WRITABLE=${singular} is set, and it does not apply here: the hatch unlocks the `
-          + `metadata TYPE (treating it as allowOrgOverride), never a package's writability. `
-          + `Retry without '?package=' to land the env-wide / per-org overlay the hatch does grant, `
-          + `or edit the source artifact and redeploy.`
-        : `Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE=${singular} `
-          + `to grant a runtime escape hatch on this TYPE (it does not unlock package writability, `
-          + `so pair it with a package-less write).`)
-      + ` See docs/adr/0010-metadata-protection-model.md.`);
+      : `Cannot overlay '${type}' in package '${packageId}': that package is read-only (a managed package) `
+      + `and the type has no environment overlay channel (allowOrgOverride=false), so this item is sealed `
+      + `against runtime edits, and OS_METADATA_WRITABLE does not open a managed item. `
+      + `Edit the source artifact and redeploy. See docs/adr/0010-metadata-protection-model.md.`);
     err.code = 'ITEM_LOCKED';
     err.status = 403;
     err.lockSource = 'package';

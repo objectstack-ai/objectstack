@@ -5751,6 +5751,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`flow-script-subflow-config-undeclared-keys-refused`.',
   },
   {
+    id: 'flow-text-slot-single-brace-refused',
+    order: 89,
+    text:
+      'It executes ADR-0032 Decision 3 in the flow TEXT slots — a `notify` node\'s `title` and `message`, '
+      + 'a `screen` node\'s `title` and `description`, a refusing `end` node\'s `message`: they render '
+      + 'through the formula template engine, so their placeholders are `{{ }}` holes, a variable path with '
+      + 'an optional formatter (the engine\'s hole grammar now admits a `$`-named variable, so '
+      + '`{{ $error.message }}` is a hole). A single-brace `{…}` token there is refused — by the node contract, '
+      + '`registerFlow` and `objectstack validate` alike — with the hole spelling of each path token, or, for '
+      + 'arithmetic, a function, a date macro or a run-user path, the `assignment` that computes it into a '
+      + 'variable. No D2 conversion exists: the 17.x interpolator and the engine render a `Date` differently '
+      + '(JSON-quoted against ISO text), and a whole-slot object differently in a screen or `end` text, so '
+      + 'the rewrite is the author\'s to check. Every other flow string keeps the single-brace dialect. Its '
+      + 'D3 record is the semantic entry `flow-text-slot-single-brace-refused`.',
+  },
+  {
     id: 'flow-value-slot-template-dialect-refused',
     order: 88,
     text:
@@ -14151,6 +14167,43 @@ const step18: MigrationStep = {
         + '`sys_metadata`. A `script` or `subflow` node whose keys its contract declares parses and registers '
         + 'byte-identically to before.',
     },
+    // The flow text slots read ADR-0032 §3's double-brace template holes, rendered
+    // by the formula template engine; the single brace is deleted from them.
+    // Semantic-only — the two renderers answer differently for some value of every
+    // token spelling, so no D2 conversion rewrites any of them, and no spelling is
+    // kept.
+    {
+      id: 'flow-text-slot-single-brace-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'flows[].nodes[].config of a notify node (title, message), a screen node (title, description) and an end node '
+        + '(message) — a string, or the source of a template envelope, carrying a single-brace template token',
+      replacement:
+        'a double-brace template hole, rendered by the formula template engine over the flow\'s variables: a variable '
+        + 'path with an optional formatter, {{ record.name }}, {{ $error.message }}, {{ rows.0.subject }}, '
+        + '{{ record.amount | currency }}. A token no hole can spell is computed into a variable first, with an '
+        + 'assignment node — arithmetic and functions as a CEL value envelope, the date macros and the run-user paths '
+        + 'as the value-slot spelling that still reads them — and written as {{ variable }}',
+      reason:
+        'ADR-0032 Decision 3 fixes one template delimiter, double braces, and deletes the single brace: it collides '
+        + 'with CEL map literals, and an author who meets both dialects in one flow mixes them. The 17.x interpolator '
+        + 'and the template engine render the same text for a path holding a string, a number, a boolean, null, an '
+        + 'absent key or variable, an ISO date string, an object or an array, but not for every value — a Date '
+        + 'rendered JSON-quoted under the interpolator and as its ISO text under the engine, and a screen title, '
+        + 'screen description or end message that was one token holding an object, an array or a Date rendered '
+        + 'String(value) — so no conversion is lossless (ADR-0087 D2) and none is applied. Arithmetic, function '
+        + 'calls, the date macros and the run-user paths have no hole spelling: a hole is a path with a formatter, '
+        + 'never logic. A flow carrying a single-brace token in a text slot is refused at registration, by '
+        + 'objectstack validate and by the node contract; a stored flow carrying one is skipped at boot with a warn '
+        + 'naming it.',
+      acceptanceCriteria:
+        'Run objectstack validate: it reports each refused text slot as expression-invalid at the node and the '
+        + 'slot\'s key, with the double-brace spelling of every path token. Rewrite each slot as that spelling; for '
+        + 'a token no hole can spell, add the assignment the refusal names and write its variable as a hole. Re-run '
+        + 'the flow paths that send those notifications or show those screens and compare the text with the text '
+        + 'the 17.x renderer produced — in particular any slot that renders a date value or a whole object.',
+    },
     // A value a flow reads, not an authorable key: there is no D2 conversion and
     // nothing for `objectstack migrate meta` to rewrite. The sibling of
     // `18.by-id-write-unreadable-row-not-found` in kind — the entry carries the
@@ -15132,13 +15185,13 @@ const step18: MigrationStep = {
         + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
         + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
         + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-        + 'against, `.objectui-sha` = `a58626c88dc85954bd0af24f16ebb69454c03eee` — names '
+        + 'against, `.objectui-sha` = `f0268ad784854568aa58a2aa791f6a7502259186` — names '
         + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-        + 'the string debounceDelay each occur 0 times across its 7754 tracked files (0 across the 7650 at 0abd4f9f8, the 7632 at 9dfaca654, the 7579 at 2e818d0b5, the 10267 at ab1879721, the 10071 at 89cad75d5, the 9912 at 31971ff1e, the 9800 at e420df310, the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
+        + 'the string debounceDelay each occur 0 times across its 8234 tracked files (0 across the 7754 at a58626c88, the 7650 at 0abd4f9f8, the 7632 at 9dfaca654, the 7579 at 2e818d0b5, the 10267 at ab1879721, the 10071 at 89cad75d5, the 9912 at 31971ff1e, the 9800 at e420df310, the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
         + '8512 at f8a9d0fb0 and the 8303 at 62597c588 too), against lit '
         + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
         + 'which re-count to 13125 and 5043 respectively at 62597c588, to 13347 and 5123 at '
-        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49, to 15352 and 6024 at e420df310, to 15691 and 6206 at 31971ff1e, to 16044 and 6461 at 89cad75d5, to 16377 and 6665 at ab1879721, to 17227 and 7134 at 2e818d0b5, to 17313 and 7186 at 9dfaca654, to 17390 and 7209 at 0abd4f9f8 and to 17468 and 7246 at this pin (git grep -o -F, the method that reproduces '
+        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49, to 15352 and 6024 at e420df310, to 15691 and 6206 at 31971ff1e, to 16044 and 6461 at 89cad75d5, to 16377 and 6665 at ab1879721, to 17227 and 7134 at 2e818d0b5, to 17313 and 7186 at 9dfaca654, to 17390 and 7209 at 0abd4f9f8, to 17468 and 7246 at a58626c88 and to 17956 and 7522 at this pin (git grep -o -F, the method that reproduces '
         + 'every earlier count).',
       acceptanceCriteria:
         'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
@@ -15343,10 +15396,10 @@ const step18: MigrationStep = {
         + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
         + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
         + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-        + '`.objectui-sha` = `a58626c88dc85954bd0af24f16ebb69454c03eee`, re-read from this tree — '
+        + '`.objectui-sha` = `f0268ad784854568aa58a2aa791f6a7502259186`, re-read from this tree — '
         + 'spells resourceLimits.timeout 0 times across '
-        + '7754 tracked files, against lit controls timeout 1431, RuntimeConfig 299 and resourceLimits '
-        + '2 on the same corpus (0 across 7650, and 1360 / 293 / 2, at 0abd4f9f8; 0 across 7632, and 1360 / 293 / 2, at 9dfaca654; 0 across 7579, and 1351 / 276 / 2, at 2e818d0b5; 0 across 10267, and 1348 / 273 / 2, at ab1879721; 0 across 10071, and 1331 / 273 / 2, at 89cad75d5; 0 across 9912, and 1303 / 273 / 2, at 31971ff1e; 0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
+        + '8234 tracked files, against lit controls timeout 1658, RuntimeConfig 337 and resourceLimits '
+        + '2 on the same corpus (0 across 7754, and 1431 / 299 / 2, at a58626c88; 0 across 7650, and 1360 / 293 / 2, at 0abd4f9f8; 0 across 7632, and 1360 / 293 / 2, at 9dfaca654; 0 across 7579, and 1351 / 276 / 2, at 2e818d0b5; 0 across 10267, and 1348 / 273 / 2, at ab1879721; 0 across 10071, and 1331 / 273 / 2, at 89cad75d5; 0 across 9912, and 1303 / 273 / 2, at 31971ff1e; 0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
         + '1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
         + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
         + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. ADR-0087.',
@@ -15582,10 +15635,10 @@ const step18: MigrationStep = {
         + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
         + 'and its test the only occurrences are the generated rows in '
         + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `a58626c88dc85954bd0af24f16ebb69454c03eee` — spells '
+        + 'objectui checkout — `.objectui-sha` = `f0268ad784854568aa58a2aa791f6a7502259186` — spells '
         + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-        + 'across its 7754 tracked files, against lit controls `useState` 2491 and `timeout` 1431 on '
-        + 'the same corpus (all four 0 across 7650, against 2478 and 1360, at 0abd4f9f8, 0 across 7632, against 2477 and 1360, at 9dfaca654, 0 across 7579, against 2477 and 1351, at 2e818d0b5, 0 across 10267, against 2476 and 1348, at ab1879721, 0 across 10071, against 2470 and 1331, at 89cad75d5, 0 across 9912, against 2469 and 1303, at 31971ff1e, 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
+        + 'across its 8234 tracked files, against lit controls `useState` 2622 and `timeout` 1658 on '
+        + 'the same corpus (all four 0 across 7754, against 2491 and 1431, at a58626c88, 0 across 7650, against 2478 and 1360, at 0abd4f9f8, 0 across 7632, against 2477 and 1360, at 9dfaca654, 0 across 7579, against 2477 and 1351, at 2e818d0b5, 0 across 10267, against 2476 and 1348, at ab1879721, 0 across 10071, against 2470 and 1331, at 89cad75d5, 0 across 9912, against 2469 and 1303, at 31971ff1e, 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
         + 'against 2391 and 1096, at f8a9d0fb0, and 0 across '
         + '8303, against 2389 and 1086, at 62597c588).',
       acceptanceCriteria:
@@ -19905,10 +19958,11 @@ const step18: MigrationStep = {
         + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
         + '(1195 again at 9b62f54671); and the objectui '
         + 'checkout this repo builds against — this is the pin, '
-        + '`.objectui-sha` = `a58626c88dc85954bd0af24f16ebb69454c03eee`, re-read from this tree — '
-        + 'spells all six metrics def names and both distinctive keys 0 times across 7754 tracked '
-        + 'files at that sha, against lit controls window 4255, timeout 1431, period 247, '
-        + 'interval 200 and metrics 401 on that same corpus and sha (0 across 7650, against 4194 / '
+        + '`.objectui-sha` = `f0268ad784854568aa58a2aa791f6a7502259186`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 8234 tracked '
+        + 'files at that sha, against lit controls window 4430, timeout 1658, period 249, '
+        + 'interval 213 and metrics 404 on that same corpus and sha (0 across 7754, against 4255 / '
+        + '1431 / 247 / 200 / 401, at a58626c88, 0 across 7650, against 4194 / '
         + '1360 / 238 / 195 / 401, at 0abd4f9f8, 0 across 7632, against 4193 / '
         + '1360 / 238 / 195 / 401, at 9dfaca654, 0 across 7579, against 4175 / '
         + '1351 / 238 / 195 / 374, at 2e818d0b5, 0 across 10267, against 4044 / '
@@ -20129,12 +20183,13 @@ const step18: MigrationStep = {
         + 'dark control of 0; inside packages/spec the '
         + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
         + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-        + 'pinned objectui checkout — `.objectui-sha` = `a58626c88dc85954bd0af24f16ebb69454c03eee` — names none of it: all 37 exports of '
-        + 'tracing.zod.ts and each of the four key names occur 0 times across the 7754 files '
-        + 'tracked at that sha (the 509 Span and 57 SpanSchema hits are objectui\'s own HTML '
+        + 'pinned objectui checkout — `.objectui-sha` = `f0268ad784854568aa58a2aa791f6a7502259186` — names none of it: all 37 exports of '
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 8234 files '
+        + 'tracked at that sha (the 517 Span and 57 SpanSchema hits are objectui\'s own HTML '
         + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
-        + 'two lit controls on that same corpus and sha: 17468 hits for the bare token objectstack, '
-        + 'and 7246 for the package specifier @objectstack/spec (at 0abd4f9f8: 0 across 7650, Span 508, '
+        + 'two lit controls on that same corpus and sha: 17956 hits for the bare token objectstack, '
+        + 'and 7522 for the package specifier @objectstack/spec (at a58626c88: 0 across 7754, Span 509, '
+        + '17468 and 7246; at 0abd4f9f8: 0 across 7650, Span 508, '
         + '17390 and 7209; at 9dfaca654: 0 across 7632, Span 508, '
         + '17313 and 7186; at 2e818d0b5: 0 across 7579, Span 505, '
         + '17227 and 7134; at ab1879721: 0 across 10267, Span 491, '
@@ -20249,9 +20304,9 @@ const step18: MigrationStep = {
         + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
         + 'and its test the only occurrences are the four generated rows in '
         + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `a58626c88dc85954bd0af24f16ebb69454c03eee` — spells it 0 '
-        + 'times across 7754 tracked files, against lit controls `TTL` 184 and `tenant` 1319 on the '
-        + 'same corpus (0 across 7650, against 182 and 1318, at 0abd4f9f8; 0 across 7632, against 182 and 1318, at 9dfaca654; 0 across 7579, against 182 and 1317, at 2e818d0b5; 0 across 10267, against 180 and 1238, at ab1879721; 0 across 10071, against 181 and 1237, at 89cad75d5; 0 across 9912, against 181 and 1237, at 31971ff1e; 0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
+        + 'objectui checkout — `.objectui-sha` = `f0268ad784854568aa58a2aa791f6a7502259186` — spells it 0 '
+        + 'times across 8234 tracked files, against lit controls `TTL` 184 and `tenant` 1338 on the '
+        + 'same corpus (0 across 7754, against 184 and 1319, at a58626c88; 0 across 7650, against 182 and 1318, at 0abd4f9f8; 0 across 7632, against 182 and 1318, at 9dfaca654; 0 across 7579, against 182 and 1317, at 2e818d0b5; 0 across 10267, against 180 and 1238, at ab1879721; 0 across 10071, against 181 and 1237, at 89cad75d5; 0 across 9912, against 181 and 1237, at 31971ff1e; 0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
         + 'and 987, at 62597c588).',
       acceptanceCriteria:
         'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '

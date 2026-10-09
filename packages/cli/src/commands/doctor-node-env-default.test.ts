@@ -47,6 +47,16 @@
  * `#22163` blocks pin the posture itself and the row it selects. The new row's
  * wording is pinned only by the subjects it names (`os dev`, `os start`) and by
  * the production sentence being absent.
+ *
+ * ── #22249: the `Environment files` row above it, in the same posture ────
+ *
+ * #5387's ruling stands — doctor resolves the `.env*` cascade exactly as
+ * `os serve` does, so that row still says `node_env=production` beside a
+ * config `os dev` serves. In that posture only, it now names whose cascade
+ * that is: `os serve` / `os start`. The `#22249` blocks pin the subjects it
+ * names, that the cascade it reports did not move (the production file is
+ * read, the development one is not), and — the control — that outside the
+ * posture the row is the one every caller got before, field for field.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -55,7 +65,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import Doctor, { nodeEnvCheck, nodeEnvSourcePosture, doctorNodeEnv } from './doctor.js';
+import Doctor, {
+  nodeEnvCheck,
+  nodeEnvSourcePosture,
+  doctorNodeEnv,
+  environmentSourcesCheck,
+  readDotenvFiles,
+} from './doctor.js';
 
 /** `packages/cli` — the oclif root the real command is loaded against below. */
 const CLI_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -230,6 +246,60 @@ describe('[#22163] nodeEnvSourcePosture — the source checkout `os dev` serves'
   });
 });
 
+describe('[#22249] environmentSourcesCheck — in the source posture the row names its loaders', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'os-doctor-22249-'));
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const NO_ENV = {} as NodeJS.ProcessEnv;
+  /**
+   * The cascade the run resolves for an unset `NODE_ENV`, in both of the row's
+   * shapes: nothing in it (the freshly scaffolded project), or a file in it.
+   */
+  const SHAPES = ['no .env* file', 'a .env file'] as const;
+  const readingFor = (shape: (typeof SHAPES)[number]) => {
+    if (shape === 'a .env file') fs.writeFileSync(path.join(dir, '.env'), 'OS_TENANCY_POSTURE=isolated\n');
+    return readDotenvFiles(dir, doctorNodeEnv(NO_ENV));
+  };
+
+  it.each(SHAPES)('in the source posture (%s): `os serve` and `os start`, beside node_env=production', (shape) => {
+    const check = environmentSourcesCheck(readingFor(shape), NO_ENV, { sourcePosture: true });
+
+    expect(check.status).toBe('ok');
+    const message = plain(check.message);
+    expect(message).toContain('node_env=production');
+    expect(message).toContain('os serve');
+    expect(message).toContain('os start');
+  });
+
+  it.each(SHAPES)('outside it (%s): the row every caller got before, field for field', (shape) => {
+    // The default IS "outside": a caller that never asked about the posture
+    // keeps the row it always had. Same shape as #22163's pin on nodeEnvCheck.
+    const reading = readingFor(shape);
+    const explicit = environmentSourcesCheck(reading, NO_ENV, { sourcePosture: false });
+
+    expect(explicit).toEqual(environmentSourcesCheck(reading, NO_ENV));
+    expect(plain(explicit.message)).toContain('node_env=production');
+    expect(plain(explicit.message)).not.toContain('os start');
+  });
+
+  it.each(SHAPES)('the posture moves the wording only — verdict, detail and attribution stay (%s)', (shape) => {
+    const reading = readingFor(shape);
+    const source = environmentSourcesCheck(reading, NO_ENV, { sourcePosture: true });
+    const other = environmentSourcesCheck(reading, NO_ENV, { sourcePosture: false });
+
+    expect(source.status).toBe(other.status);
+    expect(source.fix).toBe(other.fix);
+    // The provenance clause closes the message in both postures, unchanged.
+    const attribution = other.message.slice(other.message.lastIndexOf(' — '));
+    expect(source.message.endsWith(attribution)).toBe(true);
+  });
+});
+
 describe('[#5673] os doctor, end to end — the row reaches the report', () => {
   /**
    * `node_modules/` exists in the temp cwd on purpose — without it doctor's
@@ -293,6 +363,36 @@ describe('[#5673] os doctor, end to end — the row reaches the report', () => {
     // reaches `process.exit(1)`.
     expect(run.exitCode).toBeUndefined();
     expect(run.out).toContain('Environment is functional');
+  }, E2E_TIMEOUT);
+
+  /** The report rows whose name column is `Environment files`. */
+  const envFilesRows = (out: string) =>
+    out.split('\n').filter((line) => /^\s*\S+\s+Environment files {2,}/.test(line));
+  /**
+   * The row as every caller got it before #22249 — the posture-less call, which
+   * the unit block above pins equal to `{ sourcePosture: false }` field for
+   * field — for the cascade this run resolved.
+   */
+  const unchangedRow = () =>
+    environmentSourcesCheck(readDotenvFiles(tmp, doctorNodeEnv()), process.env).message;
+
+  // ── #22249 controls: outside the source posture the row does not move ──
+  it.each([
+    ['an empty project directory', () => {}],
+    ['an artifact-only project (no config)', () => {
+      fs.mkdirSync(path.join(tmp, 'dist'));
+      fs.writeFileSync(path.join(tmp, 'dist', 'objectstack.json'), '{}\n');
+    }],
+  ] as const)('[#22249] %s: the Environment files row is the unchanged one', async (_label, arrange) => {
+    delete process.env.NODE_ENV;
+    arrange();
+
+    const run = await runDoctor();
+
+    const rows = envFilesRows(run.out);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].endsWith(unchangedRow())).toBe(true);
+    expect(rows[0]).not.toContain('os start');
   }, E2E_TIMEOUT);
 
   // Both directions, because "no row" has to hold for the environment that
@@ -413,5 +513,50 @@ describe('[#5673] os doctor, end to end — the row reaches the report', () => {
         expect(run.exitCode).toBeUndefined();
       }
     }, E2E_TIMEOUT * 2);
+
+    // ── #22249 — the `Environment files` row above, in the same posture ──
+
+    it('(f) [#22249] the freshly scaffolded project: the sources row names `os serve` / `os start`', async () => {
+      delete process.env.NODE_ENV;
+
+      const run = await runDoctor();
+
+      const rows = envFilesRows(run.out);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toContain('node_env=production');
+      expect(rows[0]).toContain('os serve');
+      expect(rows[0]).toContain('os start');
+      // …directly above #22163's row, which still names `os dev`.
+      expect(nodeEnvRows(run.out)[0]).toContain('os dev');
+    }, E2E_TIMEOUT);
+
+    it('(g) [#22249] …and the cascade it names did not move: the production file is read, the development one is not', async () => {
+      delete process.env.NODE_ENV;
+      // Comment-only files: present in a cascade, contributing no variable, so
+      // nothing but the file list can tell the two cascades apart here.
+      fs.writeFileSync(path.join(tmp, '.env.production'), '# production cascade\n');
+      fs.writeFileSync(path.join(tmp, '.env.development'), '# development cascade\n');
+
+      const run = await runDoctor();
+
+      const rows = envFilesRows(run.out);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toContain('.env.production');
+      expect(rows[0]).not.toContain('.env.development');
+      expect(rows[0]).toContain('node_env=production');
+      expect(rows[0]).toContain('os start');
+    }, E2E_TIMEOUT);
+
+    it('(h) [#22249] a config beside a NAMED artifact is outside the posture: the unchanged sources row', async () => {
+      delete process.env.NODE_ENV;
+      process.env.OS_ARTIFACT_PATH = path.join(tmp, 'release', 'objectstack.json');
+
+      const run = await runDoctor();
+
+      const rows = envFilesRows(run.out);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].endsWith(unchangedRow())).toBe(true);
+      expect(rows[0]).not.toContain('os start');
+    }, E2E_TIMEOUT);
   });
 });

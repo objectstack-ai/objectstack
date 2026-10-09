@@ -24,6 +24,7 @@ import {
   TYPED_EXPRESSION_SOURCE_REQUIRED,
   tmpl,
 } from '../shared/expression.zod.js';
+import { TEXT_SLOT_TEMPLATE_REFUSAL } from './flow-text-slot-template.js';
 
 /** The unknown-key message, or `undefined` when the shape was accepted. */
 function unknownKeyMessage(schema: { safeParse(v: unknown): { success: boolean; error?: { issues: ReadonlyArray<{ code: string; message: string }> } } }, value: unknown): string | undefined {
@@ -381,7 +382,7 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
   // object`). They are typed with the shared template input now: both
   // spellings parse, to ONE value, and everything else is still refused.
   describe('title / message — template slots (the bare string and the template envelope)', () => {
-    const TEXT = '[{record.priority}] {record.subject}';
+    const TEXT = '[{{ record.priority }}] {{ record.subject }}';
 
     /** Issues at exactly `[key]`, as `{ code, message }`, or `[]` when accepted. */
     function issuesAt(value: unknown, key: string): ReadonlyArray<{ code: string; message: string }> {
@@ -397,7 +398,7 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
       const envelope = NotifyConfigSchema.safeParse({
         recipients: ['u1'],
         title: { dialect: 'template', source: TEXT },
-        message: tmpl`[{record.priority}] {record.subject}`,
+        message: tmpl`[{{ record.priority }}] {{ record.subject }}`,
       });
       expect(bare.success, JSON.stringify(bare.error?.issues)).toBe(true);
       expect(envelope.success, JSON.stringify(envelope.error?.issues)).toBe(true);
@@ -412,15 +413,16 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
     });
 
     // A refusal is the one place an author is told exactly what to write, and
-    // an AI author writes it verbatim. These two slots' renderer is the flow
-    // interpolator, which reads single-brace `{token}` only, so their refusals
-    // prescribe `{record.name}` — never the shared template input's
-    // `{{record.name}}`, which the build's `flow-double-brace-interpolation`
-    // rule flags on this very node and the executor would send with a stray
-    // pair of braces (#22081). The lint round trip of each prescribed spelling
-    // is pinned in `@objectstack/lint` (`lint-flow-patterns.test.ts`).
-    const BARE_PRESCRIPTION = "`'{record.name}'`";
-    const ENVELOPE_PRESCRIPTION = "`{ dialect: 'template', source: '{record.name}' }`";
+    // an AI author writes it verbatim. Since protocol 18 these two slots'
+    // renderer is the formula template engine (#22110, ADR-0032 D3), so their
+    // refusals prescribe its `{{ }}` hole — never the 17.x single-brace
+    // `{record.name}`, which is now refused on this very slot. The lint round
+    // trip of each prescribed spelling is pinned in `@objectstack/lint`
+    // (`lint-flow-patterns.test.ts`).
+    const BARE_PRESCRIPTION = "`'{{ record.name }}'`";
+    const ENVELOPE_PRESCRIPTION = "`{ dialect: 'template', source: '{{ record.name }}' }`";
+    /** A single-brace `{record.name}` placeholder — the 17.x prescription. */
+    const SINGLE_BRACE_PLACEHOLDER = /(^|[^{])\{record\.name\}(?!\})/;
     const BLANK = ['', '   '];
     const FOREIGN = [42, true, ['a'], { source: TEXT }, { dialect: 'cel', source: 'record.x' }];
 
@@ -430,7 +432,7 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
       return [issue.message, ...nested.flatMap(messagesIn)];
     }
 
-    it('refuses a blank bare string, or a value that is neither a string nor a template envelope, with one issue prescribing `{record.name}`', () => {
+    it('refuses a blank bare string, or a value that is neither a string nor a template envelope, with one issue prescribing `{{ record.name }}`', () => {
       for (const key of ['title', 'message'] as const) {
         const sentences = new Map<'blank' | 'foreign', Set<string>>([['blank', new Set()], ['foreign', new Set()]]);
         for (const [kind, values] of [['blank', BLANK], ['foreign', FOREIGN]] as const) {
@@ -452,19 +454,33 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
       }
     });
 
-    it('carries no doubled brace anywhere in the refusal — the branch issues the formatters expand included', () => {
+    it('prescribes no single-brace placeholder anywhere in the refusal — the branch issues the formatters expand included', () => {
       // `formatZodIssue` and the wire mapper both expand an `invalid_union`'s
-      // branches beneath its own line, so a branch still naming the shared
-      // input's `{{record.name}}` would reach the author under the right one.
+      // branches beneath its own line, so a branch still naming the 17.x
+      // `{record.name}` would reach the author under the right one.
       for (const key of ['title', 'message'] as const) {
         for (const value of [...BLANK, ...FOREIGN]) {
           const result = NotifyConfigSchema.safeParse({ recipients: ['u1'], title: 'x', [key]: value });
           const refusal = result.error!.issues.find((i) => i.path.length === 1 && i.path[0] === key)!;
           const messages = messagesIn(refusal as unknown as { message: string });
           expect(messages.length, `${key} = ${JSON.stringify(value)}: the tree was not read`).toBeGreaterThan(0);
-          expect(messages.filter((m) => m.includes('{{')), `${key} = ${JSON.stringify(value)}`).toEqual([]);
+          expect(messages.filter((m) => SINGLE_BRACE_PLACEHOLDER.test(m)), `${key} = ${JSON.stringify(value)}`).toEqual([]);
         }
       }
+    });
+
+    it('refuses a single-brace token left from the 17.x dialect, in either spelling, naming its hole spelling (#22110)', () => {
+      for (const key of ['title', 'message'] as const) {
+        for (const value of ['Deal {record.name} won', tmpl`Deal {record.name} won`]) {
+          const label = `${key} = ${JSON.stringify(value)}`;
+          const issues = issuesAt({ recipients: ['u1'], title: 'x', [key]: value }, key);
+          expect(issues.map((i) => i.code), label).toEqual(['custom']);
+          expect(issues[0]!.message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL), label).toBe(true);
+          expect(issues[0]!.message, label).toContain('`Deal {{ record.name }} won`');
+        }
+      }
+      // A hole is the spelling, and a hole whose path starts with `$` is one.
+      expect(NotifyConfigSchema.safeParse({ recipients: ['u1'], title: 'Failed: {{ $error.message }}' }).success).toBe(true);
     });
 
     it('reaches the build with the same prescription — the flow judge `FlowSchema`, `registerFlow` and `os validate` share', () => {
@@ -474,13 +490,13 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
             .filter((r) => r.path === key);
           expect(refusals.map((r) => r.code), `${key} = ${JSON.stringify(value)}`).toEqual(['node-config-refused-by-contract']);
           expect(refusals[0]!.message).toContain(BARE_PRESCRIPTION);
-          expect(refusals[0]!.message).not.toContain('{{');
+          expect(refusals[0]!.message).not.toMatch(SINGLE_BRACE_PLACEHOLDER);
         }
       }
     });
 
-    it('control — the shared template input, whose renderers read `{{var}}`, keeps prescribing `{{record.name}}`', () => {
-      // The notify slots took their own sentences; the shared one did not
+    it('control — the shared template input keeps its own sentences: the notify ones name the slot', () => {
+      // The notify slots take their own sentences; the shared one did not
       // move. `typed-expression-envelope-dialect.test.ts` pins it at the slots
       // that answer with it (`titleFormat`, the prompt template).
       expect(TYPED_EXPRESSION_SOURCE_REQUIRED.template).toContain("`'{{record.name}}'`");
@@ -512,11 +528,11 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
 
     it('keeps the content-path rules exactly: an envelope title still excludes `template`, and one still satisfies "needs a content source"', () => {
       const combined = issuesAt(
-        { recipients: ['u1'], template: 'crm.large_deal_won', title: tmpl`Deal {record.name} won` },
+        { recipients: ['u1'], template: 'crm.large_deal_won', title: tmpl`Deal {{ record.name }} won` },
         'template',
       );
       expect(combined.map((i) => i.code)).toEqual(['custom']);
-      expect(NotifyConfigSchema.safeParse({ recipients: ['u1'], title: tmpl`Deal {record.name} won` }).success)
+      expect(NotifyConfigSchema.safeParse({ recipients: ['u1'], title: tmpl`Deal {{ record.name }} won` }).success)
         .toBe(true);
     });
 
@@ -526,7 +542,7 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
         const doc = shape[key]!.description ?? '';
         expect(doc.length, `${key} .describe() must not be empty`).toBeGreaterThan(0);
         expect(doc).toContain('`{ dialect: \'template\', source }`');
-        expect(doc).toContain('`{token}`');
+        expect(doc).toContain('`{{ }}`');
         // The text is interpolated, so "sent verbatim" was never true of it.
         expect(doc).not.toMatch(/verbatim/);
       }

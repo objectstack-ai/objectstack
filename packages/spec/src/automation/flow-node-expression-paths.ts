@@ -193,8 +193,10 @@ export interface FlowNodeExpressionPath {
  * declared config properties, and both validators already walk them.
  *
  * Also deliberately absent: config values that merely INTERPOLATE `{token}`
- * templates — `script.inputs` / `script.variables` / `subflow.input`,
- * `notify.body` and so on. Those are text-with-holes,
+ * templates — `script.inputs` / `script.variables` / `subflow.input` and so
+ * on — and the TEXT slots, which render `{{ }}` holes since #22110 (a notify
+ * `title` / `message`, a screen `title` / `description`, an `end` `message`;
+ * their one judge and list is `flow-text-slot-template.ts`). Those are text-with-holes,
  * the shape essentially every node config string has, already covered
  * generically (`validate-flow-template-paths`, the CLI flow linter's
  * `collectTemplateStrings`). A `flow-template` ledger entry means something

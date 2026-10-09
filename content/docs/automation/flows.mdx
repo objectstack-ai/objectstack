@@ -222,7 +222,7 @@ missing, empty, whitespace-only or non-string `source`, an `ast` with no
 Everything else is a **literal**, assigned as it is: a string is the text it
 spells (a bare `a + b` is the literal text `a + b`, not CEL), and numbers,
 booleans, arrays and plain objects are what they look like. A later `notify`
-node renders the variable as any other: `message: '{digest}'`, and it renders
+node renders the variable as any other: `message: '{{ digest }}'`, and it renders
 the **evaluated** value.
 
 The same rules hold for the field values of `create_record` / `update_record`
@@ -280,6 +280,54 @@ one) and the run user (`'{$User.Id}'` — the flow's CEL scope binds no user).
 [#19939]: https://github.com/objectstack-ai/objectstack/issues/19939
 
 </Callout>
+
+### Text slots read double-brace holes
+
+A flow's **text** slots — a `notify` node's `title` and `message`, a `screen`
+node's `title` and `description`, and a refusing `end` node's `message` —
+render through the formula template engine ([#22110], ADR-0032 §3): each
+`{{ }}` hole is a **variable path** with an optional **formatter**, and every
+other character is literal.
+
+```typescript
+{
+  id: 'notify_won', type: 'notify', label: 'Deal won',
+  config: {
+    recipients: '{record.owner}',                         // not a text slot: single brace
+    title: 'Deal won: {{ record.name }}',
+    message: '{{ record.amount | currency }} closed on {{ record.close_date | date:long }}.',
+  },
+}
+```
+
+- A hole reads the flow's variables by name — `{{ record.name }}`, a node
+  output `{{ lookup.result }}`, an index `{{ rows.0.subject }}` or
+  `{{ rows[0].subject }}`, and the engine-set `$`-named ones:
+  `{{ $error.message }}` in a fault handler.
+- Value → text is defined per value: `null` and an absent path render nothing,
+  an object or array renders as JSON, a date object as its ISO text. A
+  formatter makes the rest explicit: `upper`, `lower`, `trim`, `number[:digits]`,
+  `currency[:CODE]`, `percent[:digits]`, `date[:short|medium|long|iso]`,
+  `datetime[:…]`, `truncate[:n]`, `default:'fallback'`, `json`.
+- A hole holds **no logic** — `{{ a + b }}` or `{{ round(x) }}` is refused at
+  `objectstack validate` and `registerFlow`. Compute the value first, in an
+  `assignment` node's CEL value envelope, and write the variable as a hole.
+
+A **single-brace** `{…}` token in a text slot is refused — at `objectstack
+validate`, at `registerFlow` and by the node's own contract — with its `{{ }}`
+spelling. Nothing converts it for you: the two renderers answer differently for
+some values (a date object rendered JSON-quoted under the old dialect; a screen
+title holding one object rendered `[object Object]`), so the rewrite is yours to
+check.
+
+| you wrote | write instead |
+|:---|:---|
+| `'Deal won: {record.name}'` | `'Deal won: {{ record.name }}'` |
+| `'Failed: {$error.message}'` | `'Failed: {{ $error.message }}'` |
+| `'Total {amount * 2}'`, `'{round(x)}'` | compute it into a variable (`assignments: { v: { dialect: 'cel', source: 'amount * 2' } }`), then `'Total {{ v }}'` |
+| `'Due {TODAY() + 7}'`, `'By {$User.Id}'` | compute it into a variable with an `assignment` node, whose value slot still reads that spelling (`assignments: { due: '{TODAY() + 7}' }`), then `'Due {{ due }}'` |
+
+[#22110]: https://github.com/objectstack-ai/objectstack/issues/22110
 
 **Create Record:**
 
@@ -591,7 +639,7 @@ second terminal node type).
   label: 'Refused — duplicate',
   config: {
     outcome: 'refused',                 // 'completed' (default) | 'refused'
-    message: 'Refused: {record.name} is a confirmed duplicate of {duplicate.name}',
+    message: 'Refused: {{ record.name }} is a confirmed duplicate of {{ duplicate.name }}',
   },
 }
 ```
@@ -602,8 +650,9 @@ second terminal node type).
   text as `refusalMessage`, and the trigger / resume response carries the same
   (`success: true`, `status: 'refused'`, `refusalMessage` — and **no**
   `successMessage`, so there is nothing to toast).
-- `message` is a `{token}` template interpolated at run time **exactly like a
-  `screen` node's `description`**, so the text names the record. It is
+- `message` is a `{{ }}` template rendered at run time **exactly like a
+  `screen` node's `description`** (see [text slots](#text-slots-read-double-brace-holes)),
+  so the text names the record. It is
   **required** when `outcome` is `refused` (a refusal without text is the shape
   this replaces) and **refused** on a completed end (nothing would ever render
   it — the key would be a silent no-op). The config is strict: an undeclared key
@@ -1932,8 +1981,12 @@ failures so one broken flow does not abort startup.
 
 A flow computes with **one expression dialect, CEL**: every condition is bare
 CEL, and every computed value (a field value, an assignment value) is a CEL
-value envelope. Braces are for **text** slots — a `notify` title or message, a
-screen description — and the date macros a value slot still reads.
+value envelope. **Text** slots — a `notify` title or message, a screen title or
+description, a refusing `end` node's message — are `{{ }}` templates (see
+[text slots](#text-slots-read-double-brace-holes)). Single braces remain only on the
+value-like positions that hand a resolved value over (`recipients`,
+`sourceId`, a `subflow` input, an `http` body, …) and in the date macros a value
+slot still reads.
 
 | Where | Dialect | Write it like | Bindings |
 |:---|:---|:---|:---|
@@ -1942,6 +1995,7 @@ screen description — and the date macros a value slot still reads.
 | Decision-node `conditions[].expression` | **CEL** (bare, no braces) | `order_amount > 10000` | flow variables by name, and `vars.*` |
 | Field values and assignment values, as a **literal** | none — written as it is | `'open'`, `42`, `true`, `['a', 'b']` | — (a `{…}` template token is refused here since [#19939](https://github.com/objectstack-ai/objectstack/issues/19939), except the date macros `{NOW()}` / `{TODAY() ± N}` and `{$User.*}`, which still resolve until CEL can write them) |
 | Field values and assignment values, as a **CEL value envelope** | **CEL** (in an envelope) | `{ dialect: 'cel', source: 'round(price * 100.0) / 100.0' }` | flow variables by name, and `vars.*` — the whole CEL stdlib (`joinNonEmpty`, …) |
+| Text slots — `notify` `title` / `message`, `screen` `title` / `description`, `end` `message` | **template** (`{{ }}` holes) | `'Deal won: {{ record.name }} ({{ record.amount \| currency }})'` | flow variables by name (`$`-named ones too: `{{ $error.message }}`) — a path and an optional formatter, never logic |
 
 A value slot takes either form, chosen by shape: an object naming a `dialect`
 is a CEL envelope, everything else is a literal. The `{token}` template dialect
@@ -1964,13 +2018,17 @@ user.
    braces.
 3. **A `{…}` template in a value slot** — `total: '{round(x * 100) / 100}'`,
    `owner: '{record.owner}'` — is refused with the CEL spelling to write
-   instead. In a text slot, an unsupported function in braces —
-   `'{ROUND(x, 2)}'`, `'{Math.round(x)}'`, `'{(x).toFixed(2)}'` — fails the node
-   with a **named error** listing the supported set and, where one is close,
-   the spelling you meant. Before #11060 this was a *silent* failure: the
-   unknown name was rewritten to `null` and the field was simply written
-   `undefined`. A `fault` edge does not catch this error — the expression
-   itself is wrong, so re-running can never succeed; fix the spelling.
+   instead. In a single-brace position (an `http` body, a `subflow` input), an
+   unsupported function in braces — `'{ROUND(x, 2)}'`, `'{Math.round(x)}'`,
+   `'{(x).toFixed(2)}'` — fails the node with a **named error** listing the
+   supported set and, where one is close, the spelling you meant. Before #11060
+   this was a *silent* failure: the unknown name was rewritten to `null` and the
+   field was simply written `undefined`. A `fault` edge does not catch this
+   error — the expression itself is wrong, so re-running can never succeed; fix
+   the spelling.
+4. **A single-brace token in a text slot** — `title: 'Deal won: {record.name}'`
+   — is refused with its `{{ }}` spelling ([text slots](#text-slots-read-double-brace-holes)): it is no placeholder there,
+   and would go out as literal text.
 </Callout>
 
 <Callout type="info">
@@ -2057,18 +2115,20 @@ curl -b cookies.txt -X POST \
 | `POST /api/v1/automation/:name/runs/:runId/restore-suspension` | Re-arm a run stranded by a failed resume — and, for a nested run, every ancestor whose pause that strand's cascade consumed, deepest first, from whichever member you name. Same gate as `cancel`; body `{ reason? }`. `501 NOT_IMPLEMENTED` when the service does not declare the verb |
 
 **Failures answer real HTTP status codes.** A flow that does not run is not a
-`200`. The route classifies five outcomes, and it reads the engine's own verdict
-to do it — never the message text:
+`200`. The route classifies six outcomes. Five of them it reads off the engine's
+own verdict — never the message text; the `403` is the door's own admission
+check, made before anything is dispatched:
 
 | Status | `error.code` | What happened | What to do |
 |:---|:---|:---|:---|
 | `404` | — | No flow by that name in this deployment | Check the name; nothing was dispatched |
+| `403` | `PERMISSION_DENIED` | The caller is not the system principal, and the flow is declared `runAs: 'system'` with a self-triggered `type` (`autolaunched`, `record_change`, `schedule`). The same answer at every door that starts a flow by name: this route, a `type: 'flow'` action (REST and MCP `run_action`) and a declared `type: 'flow'` endpoint | Let it run on its own trigger, or call it from a parent flow's `subflow` node. If members are meant to start it, declare it `type: 'screen'` (or `'api'` for a signed inbound hook) |
 | `409` | `FLOW_DISABLED` | The flow exists but is switched off | Enable it — the identical request then succeeds |
 | `422` | `FLOW_NO_START_NODE` | The stored definition has no `start` node | Fix the flow; retrying cannot help |
 | `422` | `FLOW_INPUT_SCHEMA_INVALID` | A node's `config` violates the `inputSchema` its own definition declares | Fix the flow; the refusal is non-retryable — even under `errorHandling.strategy: 'retry'` the engine refuses once and never enters the retry loop |
 | `400` | `FLOW_FAILED` | The flow **ran** and was rejected | Read `error.details.summary` for the failing node |
 
-The first four never dispatched anything: no node executed, no record was
+The first five never dispatched anything: no node executed, no record was
 written, and there is no run to look up. Only `400` describes a run. The
 `FLOW_INPUT_SCHEMA_INVALID` verdict is a pure function of the flow definition —
 re-running the guard cannot change the answer — so a `retry` strategy does not
@@ -2079,8 +2139,8 @@ burn its budget on it: the run log holds exactly one refusal row.
 `POST /api/v1/actions/:object/:action`, and calling a declared `type: 'flow'`
 [endpoint](/docs/protocol/kernel/http-protocol) under `/api/v1/apps/`, both
 dispatch the same flow through the same service call and classify the outcome
-the same way — the table above has one definition that all three doors read, so
-they cannot answer one engine outcome differently. Branch on the status and
+the same way — each row of the table above has one definition that all three
+doors read, so they cannot answer one request differently. Branch on the status and
 `error.code` at any of them.
 
 ```
@@ -2210,7 +2270,7 @@ export const hotLeadFollowUp: Flow = {
       config: {
         recipients: '{record.owner}',
         title: 'New hot lead',
-        message: 'Hot lead created: {record.name}',
+        message: 'Hot lead created: {{ record.name }}',
         channels: ['inbox'],
       },
     },

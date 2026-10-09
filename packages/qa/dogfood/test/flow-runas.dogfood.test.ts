@@ -28,6 +28,16 @@
 // different bug and must not pass here.
 // Before the #1888 fix the user flows wrongly succeed (CRUD nodes passed no
 // identity → security skipped) → this file is RED; after the fix → GREEN.
+//
+// The trigger door's own rule (the maintainer's ruling, letter B): a caller that
+// is not the system principal may not start a `runAs: 'system'` flow of a
+// self-triggered type — and both system flows here are `autolaunched` — through
+// `POST /automation/:name/trigger`. So the elevation legs reach each system flow
+// the way the platform keeps open for an elevated write: the member starts a
+// `runAs: 'user'` parent whose `subflow` node calls it. The proof's subject is
+// unchanged — what the CHILD's data nodes run as — and a separate case pins the
+// door's half: the member's DIRECT start of either system flow is refused
+// `403 PERMISSION_DENIED`, the note is untouched and no run is recorded.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
@@ -134,6 +144,35 @@ describe('objectstack verify FLOW: runAs identity enforcement (#flow-runas)', ()
     expect(failed?.status, `no failure entry for node '${failingNodeId}' in ${text}`).toBe('failure');
   }
 
+  /** Run-log entries the engine holds for `flow` — the "nothing ran" witness. */
+  async function runCount(flow: string): Promise<number> {
+    const automation = stack.kernel.getService('automation') as { listRuns(name: string): Promise<unknown[]> };
+    return (await automation.listRuns(flow)).length;
+  }
+
+  /**
+   * Start a flow DIRECTLY as the restricted member and require the trigger door
+   * to refuse it: `403 PERMISSION_DENIED` in the ADR-0112 envelope, no inner
+   * `data`, and no run recorded for the flow — the door refuses before
+   * dispatch, so the engine is never asked.
+   */
+  async function memberDirectTriggerExpectingDoorRefusal(flow: string, noteId: string) {
+    const runsBefore = await runCount(flow);
+    const res = await stack.apiAs(memberToken, 'POST', `/automation/${flow}/trigger`, { params: { noteId } });
+    const text = await res.clone().text();
+    expect(res.status, `direct trigger of ${flow} should be refused 403: ${res.status} ${text}`).toBe(403);
+    const body = (await res.json()) as {
+      success?: boolean;
+      data?: unknown;
+      error?: { code?: string; httpStatus?: number };
+    };
+    expect(body.success).toBe(false);
+    expect(body.error?.code, `expected PERMISSION_DENIED: ${text}`).toBe('PERMISSION_DENIED');
+    expect(body.error?.httpStatus).toBe(403);
+    expect(body.data).toBeUndefined();
+    expect(await runCount(flow), `a refused start of ${flow} still recorded a run`).toBe(runsBefore);
+  }
+
   it('precondition: the automation service is wired and a flow is registered', async () => {
     const res = await stack.apiAs(memberToken, 'GET', '/automation/runas_system_touch');
     expect(res.status, `automation service not wired: ${res.status}`).toBe(200);
@@ -158,10 +197,20 @@ describe('objectstack verify FLOW: runAs identity enforcement (#flow-runas)', ()
 
   it("runAs:'system' ELEVATES — member-triggered system flow WRITES a record the member cannot", async () => {
     const id = await adminCreateNote('sys-touch');
-    const result = await memberTrigger('runas_system_touch', id);
+    // Through the user-mode parent: the parent itself is RLS-bound as the
+    // member, so the write landing is the elevated CHILD's doing.
+    const result = await memberTrigger('runas_system_touch_via_parent', id);
     expect(result.success, `system flow run not successful: ${JSON.stringify(result)}`).toBe(true);
     // The elevated run bypassed RLS and stamped the admin's note.
     expect(await adminStatusOf(id)).toBe('touched-system');
+  });
+
+  it("the trigger door refuses the member a DIRECT start of either runAs:'system' flow — 403, nothing written, no run", async () => {
+    const id = await adminCreateNote('sys-direct');
+    await memberDirectTriggerExpectingDoorRefusal('runas_system_touch', id);
+    // Refused before dispatch: the elevated write never happened.
+    expect(await adminStatusOf(id)).toBe('new');
+    await memberDirectTriggerExpectingDoorRefusal('runas_system_read', id);
   });
 
   it("runAs:'user' DE-ELEVATES — member-triggered user flow is RLS-DENIED on the same record", async () => {
@@ -188,8 +237,12 @@ describe('objectstack verify FLOW: runAs identity enforcement (#flow-runas)', ()
   it("runAs:'system' READS a record the member cannot; runAs:'user' cannot", async () => {
     const id = await adminCreateNote('read-check');
 
-    const sys = await memberTrigger('runas_system_read', id);
-    expect(sys.output?.found, 'system flow could not read the record it should see (elevation broken)').toBeTruthy();
+    // Through the user-mode parent, whose `found` output carries the elevated
+    // child's outputs — so the child's own `found` is `output.found.found`.
+    const sys = await memberTrigger('runas_system_read_via_parent', id);
+    const sysFound = (sys.output?.found as { found?: { id?: unknown } } | undefined)?.found;
+    expect(sysFound, 'system flow could not read the record it should see (elevation broken)').toBeTruthy();
+    expect(sysFound?.id, 'the elevated read returned some row, not the admin note it was asked for').toBe(id);
 
     const usr = await memberTrigger('runas_user_read', id);
     const found = usr.output?.found;
