@@ -345,13 +345,15 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     blindSpot: 0,
     populationRule: 'ledger rows inside REST_ROUTE_LEDGER; reachable = rows carrying a `family` (each distinct value mints a key)',
     controls: { "route: '": 82, "family: '": 82, RestRouteLedgerEntry: 2 },
+    // [#22430] The `openapi` family is the second classified one, by the
+    // `anonymous-deny-api-description` row; the note's 2 / 16 counts it.
     note:
       'The audited disposition of every route @objectstack/rest mounts, enumerated through ' +
       'RestServer.getRoutes() on a booted server and guarded per route by rest-route-ledger.conformance.test.ts. ' +
       'That guard is why this file can be a population source and a regex table cannot: a mounted route with no ' +
       'row here is already RED in another package, so a new family cannot be silently absent from this file, ' +
       'and therefore cannot be silently absent from the authz ratchet either. 18 families; 2 classified by ' +
-      'matrix rows (metadata, and openapi since #22430), 16 enumerated in the shrink-only baseline. Re-measured 83 -> 82 when the anonymous ' +
+      'matrix rows (metadata and openapi), 16 enumerated in the shrink-only baseline. Re-measured 83 -> 82 when the anonymous ' +
       'public-form lookup-picker row left with its route; it carried `family: forms`, which the surviving form rows ' +
       'still carry, so `reachable` moved with `population` and the families stay 18. Earlier re-measured 91 -> 83 (19 -> 18 families) ' +
       'when the whole saved-report `reports` family left with its eight routes, all eight carrying the family, so ' +
