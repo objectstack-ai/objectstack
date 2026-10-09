@@ -38,6 +38,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { ManifestSchema, PluginEnginesSchema } from './manifest.zod';
+import { PROTOCOL_MAJOR } from './protocol-version';
 import { ArtifactPackageSchema, ObjectStackDefinitionSchema } from '../stack.zod';
 import { formatZodError } from '../shared/error-map.zod';
 
@@ -104,6 +105,10 @@ describe("unknown keys inside `manifest:` are refused at parse (the silent-drop 
     const issue = unrecognized(result)!;
     expect(issue.keys).toEqual(['specVersion']);
     expect(issue.message).toContain('engines.protocol');
+    // The range it prescribes is the one the handshake admits: the current
+    // protocol major, never the previous one the handshake refuses.
+    expect(issue.message).toContain(`protocol: '^${PROTOCOL_MAJOR}'`);
+    expect(issue.message).not.toContain(`protocol: '^${PROTOCOL_MAJOR - 1}'`);
     expect(issue.message).not.toContain('Did you mean');
   });
 });

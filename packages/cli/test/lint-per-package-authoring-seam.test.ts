@@ -83,7 +83,7 @@ function twoPackageArtifact(): Record<string, unknown> {
       namespace: 'pp',
       version: '1.0.0',
       type: 'app',
-      engines: { protocol: '^17' },
+      engines: { protocol: '^18' },
     },
     objects: [
       {
@@ -119,7 +119,7 @@ function twoPackageArtifact(): Record<string, unknown> {
       namespace: 'pp',
       version: '1.0.0',
       type: 'module',
-      engines: { protocol: '^17' },
+      engines: { protocol: '^18' },
       dependencies: { 'com.example.lintseam.core': '^1.0.0' },
     },
     objects: [
@@ -161,7 +161,7 @@ function singlePackageStack(): Record<string, unknown> {
       namespace: 'ps',
       version: '1.0.0',
       type: 'app',
-      engines: { protocol: '^17' },
+      engines: { protocol: '^18' },
     },
     objects: [
       {

@@ -392,7 +392,7 @@ describe('批 14 — the file that split, after its dead half was retired', () =
     const notification = fs.readFileSync(path.join(SPEC_SRC, 'ui/notification.zod.ts'), 'utf8');
     const sharing = fs.readFileSync(path.join(SPEC_SRC, 'ui/sharing.zod.ts'), 'utf8');
     for (const source of [notification, sharing]) {
-      expect(source).toContain('#5015');
+      expect(source).toContain('no-door retirement');
       expect(source).toContain('ADR-0049');
     }
     // The surviving module still explains its own live door, so a later reader

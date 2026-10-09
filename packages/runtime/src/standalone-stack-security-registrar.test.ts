@@ -38,7 +38,9 @@ import '@objectstack/service-datasource';
  * Same probe artifact as the two-reader harness: a legacy shape in every
  * security collection, an `engines.protocol` floor that opens the door's
  * conversion window. The values asserted below are the door's measured output
- * for these bytes (DOOR_COPY in the harness).
+ * for these bytes (DOOR_COPY in the harness). The range is `>=17.1.0`, not
+ * `^17.1.0`: this boot runs the ADR-0087 D1 handshake, which refuses a caret on
+ * 17 from protocol 18, and only the floor opens the window.
  */
 const ARTIFACT = {
   manifest: {
@@ -46,7 +48,7 @@ const ARTIFACT = {
     name: 'Single Registrar Boot',
     type: 'app',
     version: '2.0.0',
-    engines: { protocol: '^17.1.0' },
+    engines: { protocol: '>=17.1.0' },
   },
   roles: [{ name: 'sales_rep', label: 'Sales Rep' }],
   permissions: [

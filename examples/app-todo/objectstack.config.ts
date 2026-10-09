@@ -45,7 +45,7 @@ export default defineStack({
     // Protocol major this package is authored against (ADR-0087). The kernel
     // checks the range at load time and refuses a major-incompatible runtime
     // with a structured diagnostic instead of failing deep in a schema parse.
-    engines: { protocol: '^17' },
+    engines: { protocol: '^18' },
   },
 
   // Platform services this app needs — the closed `PLATFORM_CAPABILITY_TOKENS`
