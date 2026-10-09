@@ -431,7 +431,7 @@ describe('MapConfigSchema — an unknown key is refused, not stripped', () => {
 
 // ─── assignment (#14149) ─────────────────────────────────────────────
 
-describe('assignment value contract — a CEL envelope beside literals (#14149; the `{token}` dialect retired, #19939)', () => {
+describe('assignment value contract — a CEL envelope beside literals; the `{token}` dialect retired', () => {
   const DIGEST_SOURCE = 'joinNonEmpty(overdue_tasks.map(t, t.subject), "\\n")';
   const DIGEST_ENVELOPE = { dialect: 'cel', source: DIGEST_SOURCE };
 
@@ -482,7 +482,7 @@ describe('assignment value contract — a CEL envelope beside literals (#14149; 
     expect(AssignmentConfigSchema.safeParse({ decision: 'approved', digest: { dialect: 'cel' } }).success).toBe(true);
   });
 
-  it('[#19939] REFUSES the retired `{token}` dialect at the value\'s path — in the map, nested, and in a bare legacy key', () => {
+  it('REFUSES the retired `{token}` dialect at the value\'s path — in the map, nested, and in a bare legacy key', () => {
     const result = AssignmentConfigSchema.safeParse({
       assignments: {
         owner: '{record.owner}',              // sole token
