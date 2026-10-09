@@ -16283,6 +16283,50 @@ const step18: MigrationStep = {
         + 'set stays exactly `DEFAULT_METADATA_TYPE_REGISTRY` plus item-population growth, '
         + 'before and after.',
     },
+    // ADR-0131 D6 (C5, stage S4) — the protocol half of the door narrowing
+    // `meta-doors-organization-scope-retired` records: the metadata protocol itself
+    // refuses every organization-scoped write, and the per-organization write path
+    // behind it is deleted. Registered because a caller that still names an
+    // organization is refused where it was accepted, and because the
+    // `organizationId` key leaves three declared request shapes.
+    {
+      id: 'metadata-write-organization-scope-refused',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'the organizationId member of the SaveMetaItem, PublishMetaItem and DeleteMetaItem request '
+        + 'schemas of @objectstack/spec; and every organization-scoped write the metadata protocol of '
+        + '@objectstack/metadata-protocol accepted: saveMetaItem (draft and publish), publishMetaItem, '
+        + 'deleteMetaItem, rollbackMetaItem, revertCommit, rollbackToPackageCommit, publishPackageDrafts, '
+        + 'discardPackageDrafts, revertStoredPackage, duplicatePackage and reassignOrphanedMetadata — '
+        + 'including the five types that declared allowOrgOverride (view, dashboard, report, translation, '
+        + 'email_template) and the OS_METADATA_WRITABLE hatch',
+      replacement:
+        'drop `organizationId` from the request: every metadata write lands environment-wide '
+        + '(`organization_id` NULL), where every organization reads it. A request that still names an '
+        + 'organization is refused with 403 `NOT_OVERRIDABLE`, before anything is read or written, '
+        + 'and the message names the tenancy posture in force',
+      reason:
+        'ADR-0131 D6 retires the per-organization overlay axis: environment metadata written by Studio, '
+        + 'by the cloud build agent or by an install belongs to the whole deployment. The /meta doors '
+        + 'already carry no organization (meta-doors-organization-scope-retired); this is the protocol '
+        + 'refusing the same write from every other door — the /packages verbs, the stored-row '
+        + 'migrations, a plugin — so no path is left that stamps an organization on a metadata row. '
+        + 'The audit and commit ledgers are environment-level too (ADR-0131 D7) and record no '
+        + 'organization. Legacy organization-scoped rows are not touched: the stored-metadata migration '
+        + 'reports them as skipped, the flow credential move reports them as not moved, and the '
+        + 'promotion ceremony (ADR-0131 C7) carries them to the environment layer.',
+      acceptanceCriteria:
+        'A protocol write naming an organization — a saveMetaItem of a view with organizationId set, a '
+        + 'publishPackageDrafts or a revertCommit with one — answers 403 NOT_OVERRIDABLE and writes '
+        + 'nothing, for every metadata type and every tenancy posture; the same call without the key '
+        + 'succeeds and stores organization_id NULL. POST /meta/_migrate-stored reports each '
+        + 'organization-scoped row as skipped, naming the promotion ceremony, and re-saves none. A '
+        + 'commit recorded in a legacy organization layer is refused by revertCommit with the same code, '
+        + 'and duplicatePackage and reassignOrphanedMetadata copy or adopt the environment rows only. '
+        + 'Remove organizationId from any typed SaveMetaItem / PublishMetaItem / DeleteMetaItem '
+        + 'request literal: the key no longer type-checks.',
+    },
     // The ADR-0087 D3/D4 surface leaves the package root for its own subpath, so the
     // migration registry's text stops riding in every bundle of the root entry. The
     // conversion layer (D2) stays on the root: the authoring funnel reads it at run time.
@@ -16963,6 +17007,43 @@ const step18: MigrationStep = {
         + 'SDKs from the contract entry, and the route\'s handler emits the same '
         + 'bytes before and after — the retirement removes a false claim, not '
         + 'behaviour.',
+    },
+    // ADR-0131 D6/D12 (C5, stage S4) — the ruled retirement of the uninstall's
+    // organization-scope guard: once every package-owned metadata row is
+    // environment-wide, an uninstall is environment-wide by construction and an
+    // organization names nothing. Retires what `package-uninstall-explicit-all-tenants`
+    // (protocol 17) introduced.
+    {
+      id: 'package-uninstall-environment-wide',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'the organizationId and allTenants members of the deletePackage request of '
+        + '@objectstack/metadata-protocol (DeletePackageRequest), the two TENANT_SCOPE_REQUIRED refusals '
+        + 'of deletePackage, and the organization-scope refusal of DELETE /api/v1/packages/:id on the '
+        + 'runtime dispatcher',
+      replacement:
+        'call `deletePackage({ packageId })` with neither key: the uninstall removes every row bound to '
+        + 'the package in this environment. A request still carrying `organizationId` or `allTenants` '
+        + 'is refused with 400 `INVALID_REQUEST` and removes nothing; drop the key and retry. Who may '
+        + 'uninstall is the package door\'s operator gate',
+      reason:
+        'The guard existed because an uninstall naming no organization once matched every '
+        + 'organization\'s rows, so a cross-tenant uninstall had to be declared (allTenants: true) and a '
+        + 'scoped one named (organizationId). ADR-0131 D6 removes that premise: no metadata write lands '
+        + 'organization-scoped any more, so a package\'s rows belong to the environment and an '
+        + 'organization names nothing. The HTTP door never sent allTenants, so an operator with no active '
+        + 'organization could not uninstall over HTTP at all. The keys are refused rather than ignored, '
+        + 'because a caller still sending one believes it scopes the uninstall. Legacy '
+        + 'organization-scoped rows bound to the package are removed with it, as the declared '
+        + 'cross-tenant uninstall removed them, rather than stranded for the promotion ceremony.',
+      acceptanceCriteria:
+        'DELETE /api/v1/packages/:id by a manage_metadata caller with no active organization succeeds '
+        + 'and removes every sys_metadata row bound to the package, environment-wide and legacy '
+        + 'organization-scoped alike; the same call with an active organization behaves identically. A '
+        + 'deletePackage request carrying organizationId or allTenants (true or false) answers 400 '
+        + 'INVALID_REQUEST and changes nothing. No response carries TENANT_SCOPE_REQUIRED. Remove both '
+        + 'keys from every deletePackage caller, and any deploy script that passed allTenants: true.',
     },
     // The published release row's half of the version canon. It moves in BOTH
     // directions at once — gaining uppercase identifiers, losing the degenerate

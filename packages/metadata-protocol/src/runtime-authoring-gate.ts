@@ -356,8 +356,8 @@ export function findPlatformScheduleOrgGaps(args: {
                 + `the one place the answer can come from for a `
                 + `scheduled run. A NULL ${ORGANIZATION_FIELD} is not merely untidy: an `
                 + `(${ORGANIZATION_FIELD}, …) unique index does not constrain across NULL and org-scoped `
-                + `queries never see the row. Alternatively, publish this flow into an organization, or `
-                + `give it a trigger that resolves one.`,
+                + `queries never see the row. Alternatively, give it a trigger that `
+                + `resolves one.`,
         });
     }
 
