@@ -6,10 +6,11 @@ import type { ISecurityService, ISharingService } from '@objectstack/spec/contra
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 
-import type {
-  AttachmentLifecycleEngine,
-  AttachmentLifecycleLogger,
-  AttachmentReadMiddlewareCtx,
+import {
+  createRefusedAttachTombstoner,
+  type AttachmentLifecycleEngine,
+  type AttachmentLifecycleLogger,
+  type AttachmentReadMiddlewareCtx,
 } from './attachment-lifecycle.js';
 
 /**
@@ -26,7 +27,9 @@ import type {
  *    "Parent EDIT" below; Salesforce parity, #2970 item 3 — v1 asked read
  *    visibility, which is now only the degraded mode). Fail-closed 403
  *    `ATTACHMENT_PARENT_ACCESS`. `uploaded_by` is server-stamped from the
- *    session — a client-supplied value never wins.
+ *    session — a client-supplied value never wins. A refusal also hands the
+ *    refused `file_id` to the lifecycle, which tombstones the caller's own
+ *    never-attached upload (#22466, `createRefusedAttachTombstoner`).
  *  - beforeUpdate (commit da891e0ef): the caller must be the uploader OR hold edit on
  *    the parent record — the delete rule, applied to the verb that could
  *    otherwise rewrite the other two gates away: an ungated update let any
@@ -372,6 +375,15 @@ export function installAttachmentAccessHooks(
   getSecurity?: () => AttachmentSecurityLike | null | undefined,
 ): void {
   /**
+   * [#22466] What a refused attach does about its file. Created HERE, at
+   * installation — outside every engine operation — because the tombstone it
+   * schedules runs in a snapshot of this context: outside the refused write's
+   * unit of work, so a caller's transaction rolling back cannot take the
+   * tombstone with it. See {@link createRefusedAttachTombstoner}.
+   */
+  const tombstoneRefusedAttach = createRefusedAttachTombstoner(engine, logger);
+
+  /**
    * May the caller EDIT the parent record `(object, recordId)`? The one
    * question the attach rule, the row rule's parent-editor limb and the
    * re-point's attach rule all ask — see "Parent EDIT" in the module header for
@@ -573,6 +585,14 @@ export function installAttachmentAccessHooks(
       // its master, as its own update is.
       const allowed = await mayEditParent(ctx, parentObject, parentId, callerContext(ctx), 'attach');
       if (!allowed) {
+        // [#22466] Every refusal leg of the attach rule arrives HERE — sharing
+        // `deny` or a non-verdict, the master-detail check's `deny` or
+        // `unresolvable`, the degraded read probe's miss — so this one call
+        // covers them all and no leg can drift. A REJECTION from either check
+        // (an outage) never reaches this line: it is no verdict, and keeps
+        // its own status. The tombstone is scheduled, never awaited, and is
+        // conditional on the file being the caller's own unheld upload.
+        tombstoneRefusedAttach(data.file_id, ctx.session.userId);
         forbid(
           'ATTACHMENT_PARENT_ACCESS',
           `Cannot attach to ${parentObject}/${parentId}: the parent record does not exist or you cannot edit it`,
