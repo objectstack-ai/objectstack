@@ -38,6 +38,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SqlDriver } from '@objectstack/driver-sql';
+import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { NAMESPACE_CONFLICT_CODE } from '@objectstack/objectql';
 import { SECURITY_PLUGIN_ID } from '@objectstack/plugin-security';
 import { isExitSignal } from '../../utils/format.js';
@@ -230,7 +231,7 @@ beforeAll(async () => {
     jsonOutput: false, databaseUrl: `file:${templateDb}`, projectRoot: dir, hydrateMetadata: false,
   });
   try {
-    const ql: any = seed.kernel.getService('objectql');
+    const ql = seed.kernel.getService('objectql') as IObjectQLEngine;
     const now = new Date().toISOString();
     for (const row of SEED) {
       await ql.insert('sys_metadata', {
