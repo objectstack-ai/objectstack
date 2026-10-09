@@ -8742,8 +8742,8 @@ export class ObjectStackProtocolImplementation implements
         // ── [commit 96326040f] The registry read gate, resolved ONCE, HERE ──────────────────
         //
         // {@link organizationIdForMetaRead} — the predicate the REST `/meta`
-        // read doors have applied since #9454, twin of the write side's
-        // `organizationIdForMetaWrite` (#6190 / #7018). Until this line
+        // read doors applied from #9454 until the doors stopped carrying an
+        // organization at all (ADR-0131 D6). Until this line
         // `getMetaItems` applied NO gate of its own: whatever organization
         // arrived was used for whatever type arrived, so the scope of a
         // metadata sweep was decided per type, BY THE CALLER — and a request
@@ -9884,9 +9884,8 @@ export class ObjectStackProtocolImplementation implements
         let item: unknown;
         // ── [commit d5cbb44f3] The registry read gate, resolved ONCE, HERE ────────────────────
         //
-        // {@link organizationIdForMetaRead} — the read-side twin of
-        // `organizationIdForMetaWrite` (#6190 / #7018), which the REST `/meta`
-        // read doors have applied since #9454 and which commit 96326040f moved INSIDE the
+        // {@link organizationIdForMetaRead} — the predicate the REST `/meta`
+        // read doors applied from #9454, and which commit 96326040f moved INSIDE the
         // plural verb, `getMetaItems` above. Until this line the SINGULAR verb
         // applied no gate of its own: whatever organization arrived was spent on
         // whatever type arrived.
@@ -9956,19 +9955,12 @@ export class ObjectStackProtocolImplementation implements
         //  • That door's CACHED arm reaches here through `getMetaItemCached`,
         //    which folds first and forwards the same hoisted `readOrganizationId`
         //    — the same no-op, one hop later.
-        //  • `organizationIdForMetaWrite` has the identical body, so the
-        //    write-side pre-reads (`saveMetaItem`'s destructive-change probe,
-        //    `publishMetaItem`'s seed-loader adapter, `publishPackageDrafts`'
-        //    build probes) now read the partition their write LANDS in. Read
-        //    scope and write scope cannot disagree — the property #9454 chose
-        //    this predicate for. ⚠️ True BY DEFAULT, and deliberately not under
-        //    the operator hatch: {@link orgScopedWriteRefusal} returns early
-        //    when `isOverlayAllowed` is satisfied via `OS_METADATA_WRITABLE`,
-        //    so a non-overridable type CAN still land an org-scoped write while
-        //    this read resolves env-wide. That divergence is the hatch's own
-        //    stated contract — its refusal message says it "unlocks the write,
-        //    not the read" — and the row it admits is exactly the kind boot
-        //    hydration walks past.
+        //  • [ADR-0131 D6] Every write lands environment-wide (an
+        //    organization-scoped one is refused, {@link
+        //    organizationScopedWriteRefusal}), and the write-side pre-reads
+        //    (`saveMetaItem`'s destructive-change probe, `publishMetaItem`'s
+        //    seed-loader adapter, `publishPackageDrafts`' build probes) carry
+        //    no organization, so they read the partition their write LANDS in.
         //
         // ⇒ What is left to move is the runtime callers that hand this method a
         // RAW active organization. THREE, all in one file — the population is
@@ -10528,8 +10520,7 @@ export class ObjectStackProtocolImplementation implements
         // ── [commit e1d4f9e3f] The registry read gate, resolved AFTER the fold ─────────
         //
         // {@link organizationIdForMetaRead} — the predicate the REST `/meta`
-        // read doors have applied since #9454, twin of the write side's
-        // `organizationIdForMetaWrite` (#6190 / #7018) and the same gate
+        // read doors applied from #9454, and the same gate
         // `getMetaItems` (commit 96326040f) and `getMetaItem` (commit d5cbb44f3) now carry. Until
         // this line `getMetaItemLayered` — the third `/meta` read verb —
         // applied NO gate of its own: whatever organization arrived was spent
@@ -11384,9 +11375,9 @@ export class ObjectStackProtocolImplementation implements
      *   Studio-authored `object` COULD legitimately exist as a per-org row,
      *   invisible to boot hydration, and this gate's fail-closed answer meant
      *   404 for every record in a table that still held the data. The premise
-     *   is now true by enforcement: {@link orgScopedWriteRefusal} refuses an
-     *   org-scoped write of any type the registry declares non-org-overridable,
-     *   on both minting paths, so the only org-scoped `object` rows that can
+     *   is now true by enforcement: {@link organizationScopedWriteRefusal}
+     *   refuses an org-scoped write of every type (ADR-0131 D6), on every
+     *   minting path, so the only org-scoped `object` rows that can
      *   exist are residue written before that gate (#6190's ruling 2 = A:
      *   handled non-destructively — made audible by
      *   {@link reportUnhydratableOrgScopedRows} and disposed of operationally,
@@ -17773,9 +17764,8 @@ export class ObjectStackProtocolImplementation implements
      * against ({@link storedHeadAt}), at the read's own scope — its
      * organization partition and `packageId` — and its lifecycle, or `null`
      * when no stored row is there. The `/meta` save door builds its address
-     * from the same three facts (`organizationIdForMetaWrite` has the body of
-     * `organizationIdForMetaRead`, and `?package=` names the binding on both),
-     * so a read followed by a save with the served token is accepted, and a
+     * from the same facts (no organization on either since ADR-0131 D6, and
+     * `?package=` names the binding on both), so a read followed by a save with the served token is accepted, and a
      * `null` says that save is a create: the state `If-None-Match: *` asserts.
      *
      * ⚠️ The address of the SAVE, not of the served content. A read falls back
@@ -26796,20 +26786,14 @@ export class ObjectStackProtocolImplementation implements
      *    `getMetaTypes()` synthesises `allowOrgOverride: false` for it, so
      *    "not per-org overridable" is its correct reading here.
      *
-     *    ── THE DIVERGENCE FROM THE REFUSAL IS DELIBERATE ──
+     *    ── THE REFUSAL HAS SINCE WIDENED TO MEET IT ──
      *
-     *    {@link orgScopedWriteRefusal} keys off the STATIC registry and
-     *    returns `null` for exactly this family (its "Statically-declared
-     *    types only" bullet); this audit keys off the LIVE set and reports it.
-     *    The two sets are meant to differ, and a future reader should not
-     *    "fix" one to match the other. The asymmetry is this file's own stated
-     *    posture, three bullets up in that method: *warning is free and should
-     *    be maximal; refusing removes a capability*. Widening the refusal
-     *    would extend the 2026-08-08 ruling — reasoned over the 27 declared
-     *    entries — onto a surface nobody measured; widening the warning costs
-     *    an operator one more segment on a line that already exists. Same
-     *    reasoning by which this method ignores `OS_METADATA_WRITABLE` while
-     *    the refusal honours it. Ruled on #6992, scoped to the diagnostic.
+     *    The #6190 refusal keyed off the STATIC registry and let exactly this
+     *    family through, while this audit keyed off the LIVE set (ruled on
+     *    #6992, scoped to the diagnostic). Since ADR-0131 D6 the refusal
+     *    ({@link organizationScopedWriteRefusal}) admits no organization-scoped
+     *    write of ANY type, plugin-registered ones included, hatch or no hatch,
+     *    so the only rows this audit can find are residue.
      *
      *    Measured, not assumed (#6992): at the instant this method runs — in
      *    `ObjectQLPlugin.start()` Phase 2, after every plugin's `init` — a
