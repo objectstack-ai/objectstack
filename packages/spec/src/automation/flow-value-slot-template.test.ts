@@ -8,8 +8,9 @@
  *
  *  1. **Refused, each with its remedy.** Every token class the interpolator
  *     resolves and CEL can spell is refused, led by the rule sentence and
- *     naming the CEL spelling: a path (`a.b`, `list[0]`, `vars["$error"]`)
- *     with its `has()` guard, arithmetic with every divisor a double
+ *     naming the CEL spelling: a path (`a.b`, `items[0]`, `vars["$error"]`,
+ *     `vars["list"][0]` for a head CEL claims) with its `has()` guard where
+ *     `has()` can take it, arithmetic with every divisor a double
  *     (`/ 100.0`), text with holes as one concatenation, a token that
  *     resolves to nothing with the literal-text escape.
  *  2. **Kept.** The date macros and `$User` paths, which CEL cannot spell yet,
@@ -32,6 +33,7 @@ import {
   FlowValueSlotSchema,
   UpdateRecordConfigSchema,
 } from './builtin-node-config.zod';
+import { CEL_CLAIMED_IDENTIFIERS, CEL_KEYWORDS, celPath } from './flow-template-token';
 import {
   VALUE_SLOT_TEMPLATE_REFUSAL,
   flowNodeValueTemplateRefusals,
@@ -60,7 +62,7 @@ describe('a value-slot string in the retired `{…}` dialect is refused, with th
     expect(message).toContain('`has(record.assignee) ? record.assignee : null`');
   });
 
-  it('a numeric segment indexes the list: `list.0` becomes `list[0]`', () => {
+  it('a numeric segment indexes the list: `userList.0` becomes `userList[0]`', () => {
     expect(refusalOf('{userList.0}')).toContain("{ dialect: 'cel', source: 'userList[0]' }");
   });
 
@@ -97,6 +99,66 @@ describe('a value-slot string in the retired `{…}` dialect is refused, with th
 
   it('every message leads with the rule sentence, which names no tracker number', () => {
     expect(VALUE_SLOT_TEMPLATE_REFUSAL).not.toMatch(/#\d/);
+  });
+});
+
+describe('a head CEL claims is read through `vars`, the route a `$`-named head takes', () => {
+  // The set, as `flow-template-token.ts` reads it off cel-js 8.0.0 — restated
+  // here so the pin fails when a name is added or dropped there unreviewed.
+  // That each printed spelling EVALUATES, with a variable of the name in scope,
+  // is pinned through the built engine in `service-automation`'s
+  // `value-slot-template-grammar.test.ts` (the spec cannot import the engine).
+  const CLAIMED = [
+    'bool', 'bytes', 'double', 'int', 'list', 'map', 'null_type', 'string', 'type', 'uint',
+    'cel', 'google', 'optional',
+    'as', 'break', 'const', 'continue', 'else', 'for', 'function', 'if', 'import', 'let', 'loop', 'namespace',
+    'package', 'return', 'var', 'void', 'while', '__proto__', 'prototype',
+    'true', 'false', 'null', 'in',
+  ];
+
+  it('the claimed set is exactly the enumerated one', () => {
+    expect([...CEL_CLAIMED_IDENTIFIERS].sort()).toEqual([...CLAIMED].sort());
+    expect([...CEL_KEYWORDS].sort()).toEqual(['false', 'in', 'null', 'true']);
+  });
+
+  it.each(CLAIMED)('%s', (name) => {
+    expect(celPath(name)).toBe(`vars["${name}"]`);
+    expect(celPath(`${name}.0`)).toBe(`vars["${name}"][0]`);
+    expect(celPath(`${name}.1.key`)).toBe(`vars["${name}"][1].key`);
+    expect(refusalOf(`{${name}.0}`)).toContain(`source: 'vars["${name}"][0]' }`);
+  });
+
+  it('a bare claimed variable keeps its guard, selected off `vars`; a keyword cannot be selected, so it gets none', () => {
+    expect(refusalOf('{list}')).toContain('`has(vars.list) ? vars.list : null`');
+    expect(refusalOf('{list.tags}')).toContain('`has(vars.list.tags) ? vars.list.tags : null`');
+    expect(refusalOf('{for.tags}')).toContain('`has(vars.for.tags) ? vars.for.tags : null`');
+    expect(refusalOf('{null}')).not.toContain('the guarded form');
+    expect(refusalOf('{in.tags}')).not.toContain('the guarded form');
+  });
+
+  it('a later keyword segment is indexed by name; every other later segment stays a field', () => {
+    expect(celPath('record.in')).toBe('record["in"]');
+    expect(celPath('record.null.0')).toBe('record["null"][0]');
+    expect(celPath('record.list.for')).toBe('record.list.for');
+    expect(refusalOf('{record.true}')).not.toContain('the guarded form');
+  });
+
+  it('an index anywhere in the path leaves it unguarded — `has()` refuses one at run time', () => {
+    expect(refusalOf('{rows.0.name}')).toContain("source: 'rows[0].name' }");
+    expect(refusalOf('{rows.0.name}')).not.toContain('the guarded form');
+  });
+
+  it('text with holes reads a claimed head the same way', () => {
+    expect(refusalOf('Hi {list.0}')).toContain(`source: "'Hi ' + vars[\\"list\\"][0]" }`);
+  });
+
+  it('controls: an ordinary head is unchanged, and so is a `$`-named head', () => {
+    for (const ordinary of ['items', 'record', 'timestamp', 'duration', 'dyn', 'lists', 'map_of', 'vars']) {
+      expect(CEL_CLAIMED_IDENTIFIERS.has(ordinary)).toBe(false);
+      expect(celPath(`${ordinary}.0.key`)).toBe(`${ordinary}[0].key`);
+    }
+    expect(refusalOf('{record.assignee}')).toContain('`has(record.assignee) ? record.assignee : null`');
+    expect(celPath('$error.message')).toBe('vars["$error"].message');
   });
 });
 

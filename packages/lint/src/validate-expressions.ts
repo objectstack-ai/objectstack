@@ -180,12 +180,11 @@ function buildFieldIndex(objects: AnyRec[]): Map<string, string[]> {
     // Injected columns come second, de-duplicated by insertion order: a DECLARED
     // `owner_id` is the author's field (the registry lets it win), so the
     // authored spelling keeps its position in the "did you mean?" candidates.
-    // [#22211 ruling A] Declared read attachments come last: a block the
-    // object's service attaches per caller on read is something `record.<x>`
-    // resolves to on a served row, although it is not a field. Its second
-    // segment is judged against the block's own leaves — see
-    // {@link buildAttachedOnReadIndex}.
-    idx.set(name, [...new Set([...names, ...injectedColumnsFor(obj), ...attachedBlockNames(obj)])]);
+    // A declared read attachment is NOT here: it is not a column, so a stored
+    // row never carries it, and this index is what every stored-row site
+    // reads. The sites that bind a served row add the blocks themselves — see
+    // {@link SERVED_ROW_SITES} and {@link withAttachedBlocks}.
+    idx.set(name, [...new Set([...names, ...injectedColumnsFor(obj)])]);
   }
   return idx;
 }
@@ -212,17 +211,14 @@ function attachedOnReadOf(obj: AnyRec): Record<string, string[]> {
   return out;
 }
 
-/** The block names {@link attachedOnReadOf} reads — what joins the field-existence set. */
-function attachedBlockNames(obj: AnyRec): string[] {
-  return Object.keys(attachedOnReadOf(obj));
-}
-
 /**
- * [#22211 ruling A] object name → its declared read attachments (block name →
- * leaf keys), for the shared validator's second-segment judgement of
- * `record.<block>.<leaf>` (`ExprSchemaHint.attachedOnRead`). Only objects that
- * declare at least one block get an entry, so `index.get(name)` is `undefined`
- * — the hint absent — for every other object.
+ * object name → its declared read attachments (block name → leaf keys), for
+ * the served-row sites ({@link SERVED_ROW_SITES}): there each block name joins
+ * the field-existence set, and the shared validator judges the second segment
+ * of `record.<block>.<leaf>` against the block's leaves
+ * (`ExprSchemaHint.attachedOnRead`). Only objects that declare at least one
+ * block get an entry, so `index.get(name)` is `undefined` — the hint absent —
+ * for every other object.
  */
 function buildAttachedOnReadIndex(objects: AnyRec[]): Map<string, Record<string, string[]>> {
   const idx = new Map<string, Record<string, string[]>>();
@@ -233,6 +229,63 @@ function buildAttachedOnReadIndex(objects: AnyRec[]): Map<string, Record<string,
     if (Object.keys(blocks).length > 0) idx.set(name, blocks);
   }
   return idx;
+}
+
+/**
+ * The expression sites whose `record` is a row a service SERVES — the only
+ * sites where a declared read attachment resolves.
+ *
+ * `ObjectSchema.attachedOnRead` declares the blocks a service attaches to the
+ * rows it serves, computed per caller and never stored. A block is therefore
+ * on `record` only where `record` is such a served row, and this list names
+ * those sites:
+ *
+ * - an action's `visible` and `disabled` predicates. The client's action
+ *   runtime evaluates them against the row the surface fetched, and a surface
+ *   that reads the declaring service's own routes holds the row that service
+ *   served — the console reads `sys_approval_request` through the approvals
+ *   routes, whose rows carry the `viewer` block. A surface that fetched the
+ *   row elsewhere has no block, which is why such a predicate guards the
+ *   block with `has()`.
+ *
+ * Every other site binds the STORED row, and judges field existence against
+ * the object's columns alone ({@link buildFieldIndex}):
+ *
+ * - a flow's node and edge conditions: the record-change trigger seeds
+ *   `record` from the write's payload over the stored row, and a flow's
+ *   subject load reads the data engine;
+ * - validation rules, a field's `requiredWhen` / `readonlyWhen` and an
+ *   option's `visibleWhen`: evaluated on the write, against the stored row
+ *   merged with the payload (`rule-validator.ts`);
+ * - field formulas: computed on the stored row;
+ * - sharing-rule and hook conditions: judged against stored rows and the
+ *   write's record.
+ *
+ * A block named at one of those sites is refused as an unknown field, because
+ * at run time it is one: the expression faults on the missing key on every
+ * row. A field's `visibleWhen` is not on the list either — it renders against
+ * whatever row the surface holds, the stored row on an edit form — and no
+ * field predicate reads a block.
+ *
+ * `check` adds the blocks only for a call site that names an entry here, so a
+ * new site is fields-only until its binding is shown to be a served row and it
+ * is listed.
+ */
+const SERVED_ROW_SITES = ['action visible', 'action disabled'] as const;
+type ServedRowSite = (typeof SERVED_ROW_SITES)[number];
+
+/**
+ * The field-existence set at a served-row site: the object's columns, then
+ * each block it declares — last, so a column keeps its place in the
+ * "did you mean?" candidates. `fields` unchanged when the object declares no
+ * block.
+ */
+function withAttachedBlocks(
+  fields: string[] | undefined,
+  blocks: Record<string, string[]> | undefined,
+): string[] | undefined {
+  if (!blocks) return fields;
+  return [...new Set([...(fields ?? []), ...Object.keys(blocks)])];
 }
 
 /**
@@ -1859,14 +1912,23 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      * on the fail-open seams that means the rule stops enforcing entirely.
      */
     traversalHydration?: boolean,
+    /**
+     * Set only where this site's `record` is a row a service serves — an entry
+     * of {@link SERVED_ROW_SITES}. There the object's declared read
+     * attachments join the field-existence set and their leaves are judged;
+     * absent, the site binds the stored row and resolves the object's columns
+     * alone, which is every site that does not name one.
+     */
+    servedRowSite?: ServedRowSite,
   ): void => {
     if (raw == null) return;
-    const fields = objectName ? fieldIndex.get(objectName) : undefined;
+    // Absent unless this is a served-row site on an object that declares a
+    // read attachment.
+    const attachedOnRead = objectName && servedRowSite ? attachedOnReadIndex.get(objectName) : undefined;
+    const fields = objectName ? withAttachedBlocks(fieldIndex.get(objectName), attachedOnRead) : undefined;
     // Field types feed the #1928 tier-4 soundness warning; only consulted for
     // `record`-scoped sites, so it is harmless to pass for flattened ones too.
     const fieldTypes = objectName ? fieldTypeIndex.get(objectName) : undefined;
-    // [#22211 ruling A] Absent for an object that declares no read attachment.
-    const attachedOnRead = objectName ? attachedOnReadIndex.get(objectName) : undefined;
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string },
       objectName ? { objectName, fields, attachedOnRead, fieldTypes, scope, traversalHydration } : { scope });
     for (const e of res.errors) {
@@ -2489,12 +2551,15 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // writes `(record.budget == null ? 0 : record.budget) - …`), so the cost of
         // deciding later is low. Raise it as its own issue rather than widening
         // this call. Ledger: `validate-null-guards.ts`.
+        //
+        // The object's columns alone, never its read attachments: a formula is
+        // computed on the stored row, which carries no block (see
+        // {@link SERVED_ROW_SITES}).
         const res = validateExpression('value', f.expression as string | { dialect?: string; source?: string },
           objectName
             ? {
                 objectName,
                 fields: fieldIndex.get(objectName),
-                attachedOnRead: attachedOnReadIndex.get(objectName),
                 fieldTypes: fieldTypeIndex.get(objectName),
                 scope: 'record',
               }
@@ -2718,9 +2783,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const key = `${obj ?? ''}:${name}`;
     if (seenActions.has(key)) return; // de-dup (actions are merged onto objects AND kept top-level)
     seenActions.add(key);
-    check(`${where} · action '${name}' visible`, action.visible, obj, 'record');
+    // The served-row sites: an action's predicates bind the row the surface
+    // fetched, so a declared read attachment resolves here and nowhere else.
+    check(`${where} · action '${name}' visible`, action.visible, obj, 'record', undefined, undefined, 'action visible');
     if (typeof action.disabled !== 'boolean') {
-      check(`${where} · action '${name}' disabled`, action.disabled, obj, 'record');
+      check(`${where} · action '${name}' disabled`, action.disabled, obj, 'record', undefined, undefined, 'action disabled');
     }
     // No `checkNullGuards` here, and the reason is measured rather than assumed
     // (#4811). These predicates DO reach real CEL — a bare authored string is

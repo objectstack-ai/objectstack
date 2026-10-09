@@ -1473,6 +1473,10 @@ export const ERROR_CODE_LEDGER = {
     // record.
     'INVALID_ARTIFACT_PACKAGES',
   ],
+  '@objectstack/verify': [
+    // [#22301] An in-process test door, no HTTP path: a malformed call to the handle's update doors throws an Error carrying code / status / statusCode.
+    'INVALID_REQUEST',
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 /** A code registered by at least one package (deduped union of the ledger). */
