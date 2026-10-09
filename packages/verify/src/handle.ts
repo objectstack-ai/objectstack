@@ -35,6 +35,14 @@
 //     exposes no lower in-process door with the same contract. The dispatcher
 //     is protocol-neutral by design (`HttpProtocolContext`), so driving it
 //     directly IS the REST path minus HTTP.
+//   the anonymous public-form door       → NOT a method here. [#22301] A
+//     public form's submission is `POST /api/v1/forms/:slug/submit`, a route
+//     with one owner (`@objectstack/rest`'s `registerFormEndpoints`) that
+//     `bootStack` mounts on the stack's Hono app, so on a booted stack it is
+//     `api('/forms/:slug/submit', …)` with no token. The dispatcher above does
+//     not serve it, and a method here that handed the engine a hand-built
+//     `{ publicFormGrant, … }` context would be the stand-in the design rule
+//     below forbids. `handle.public-form-door.test.ts` pins the door.
 //   contextFor(token)                    → the dispatcher's own identity
 //     resolution (`resolveRequestScope` → `resolveExecutionContext` →
 //     `@objectstack/core`'s `resolveAuthzContext`), the exact resolver every
@@ -156,6 +164,12 @@ export interface VerifyHandle {
      * the message alone.
      *
      * `update` and `delete` address the row by `input.id`.
+     *
+     * An ANONYMOUS write, a public-form submission (the write a web-to-lead
+     * or web-to-case branch runs on), is not this door: it is the form's own
+     * route on the stack, `api('/forms/:slug/submit', { method: 'POST',
+     * body })` with no token. That route hands the engine its own guest
+     * context, keeps only the fields the form collects, and answers `{ id }`.
      */
     run(
       object: string,
