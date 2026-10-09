@@ -412,45 +412,41 @@ jobs:
     # shard, because every shard gets its own runner.
     #
     # SIX specifically, and not four or five: sharding is BY PACKAGE, so no
-    # shard can finish faster than its single heaviest package. On the
-    # current dataset (scripts/test-shard-timings.json as #21826 refreshed it,
-    # provenance run 37262126122) that package is `@objectstack/cli` at
-    # 1702.69s, ahead of `@objectstack/spec` at 1134.86s. At five shards or
-    # fewer the partitioner must co-schedule it with others (heaviest bin
-    # 1957s at five); at six it fills bin 1 alone and the other five sit at
-    # 1615-1617s. Six is therefore the smallest count that isolates the
-    # heaviest indivisible suite; past six, the CLI's shard cannot improve,
-    # only the others can. (spec held that place until #21826 measured the
-    # CLI whole: the dataset before it recorded the CLI at 733.33s, summed
-    # from two file-level slices, and #21487 had already retired the slicing.)
+    # shard can finish faster than the heaviest serial task it carries. On the
+    # current dataset (scripts/test-shard-timings.json, the 21-run refresh at
+    # 040184752c) that task is `@objectstack/cli` at 1738.88s, which no shard
+    # count fixes by itself: whole, it is 2.52x the mean predicted shard wall at
+    # six. So it is cut into 3 file-level slices whenever a run's own split
+    # needs it (#22075; FILE_SHARDED_PACKAGES and planShards() in the script),
+    # and the split is graded on predicted shard WALL, not on summed weights --
+    # a shard runs its whole packages four at a time (`--concurrency=4` below)
+    # and each slice after them, so a bin's sum is not its wall. Re-derived with
+    # the partitioner's own planShards(), partition() and shardWalls():
     #
-    # ⚠ THE ARGUMENT ABOVE USED TO BE MADE IN TEST-FILE COUNTS (bins
-    # 415/389/389/389/389/388, spec carrying 415 of ~2360 files). It is now
-    # made in measured seconds, because #10472 replaced the weight input: the
-    # file count was a proxy that ran ~2.8x off on @objectstack/cli, and the
-    # six perfectly count-balanced bins it produced ran 5.0/6.2/6.3/13.6/6.3/
-    # 9.0 min in run 32428961038. The conclusion (six) survived the re-
-    # measurement; only the units it is argued in changed. Weights now come
-    # from scripts/test-shard-timings.json — see partition-test-shards.mjs.
+    #   4 shards -> max 1071s  mean 1011s  ratio 1.06x
+    #   5 shards -> max  910s  mean  816s  ratio 1.12x
+    #   6 shards -> max  667s  mean  663s  ratio 1.01x
+    #   7 shards -> max  580s  mean  568s  ratio 1.02x
+    #   8 shards -> max  580s  mean  517s  ratio 1.12x
+    #  10 shards -> max  580s  mean  455s  ratio 1.27x
+    #
+    # ⚠ THE ARGUMENT ABOVE USED TO BE MADE IN TEST-FILE COUNTS, then in summed
+    # seconds. #10472 replaced the count (a proxy ~2.8x off on the CLI: six
+    # count-balanced bins ran 5.0/6.2/6.3/13.6/6.3/9.0 min in run 32428961038);
+    # #22075 replaced the sum, which read 1.00-1.47x on the runs where shard
+    # 1/6 -- the CLI alone -- ran 2.3-7.6x the other five. Each time the
+    # conclusion (six) survived and only the units it is argued in changed.
     #
     # AND WHY NOT MORE THAN SIX (#10472 asked for 6 -> 8 to be considered).
-    # The floor is the heaviest single package, and it does not move when
-    # shards are added, while the mean falls with every shard — so max/mean,
-    # which is what the acceptance bound is written in, gets WORSE past the
-    # point where the floor becomes the max. Re-derived on the current dataset
-    # with the partitioner's own partition() and balanceOf():
-    #
-    #   6 shards -> max 1703s  mean 1630s  ratio 1.04x
-    #   7 shards -> max 1703s  mean 1397s  ratio 1.22x
-    #   8 shards -> max 1703s  mean 1223s  ratio 1.39x  (past the 1.3x bound)
-    #  10 shards -> max 1703s  mean  978s  ratio 1.74x
-    #
-    # Past six the critical path does not move at all — the CLI's 1703s is
-    # the maximum at every count — so more shards buy only more runners'
-    # fixed overhead and a worse ratio. The partitioner's self-test pins the
-    # half of this that can fail: at SHARD_COUNT the heaviest package must
-    # sit within 1.3x the mean, and when it stops fitting, slicing it below
-    # package granularity is the remedy that failure names.
+    # The floor is the heaviest serial task -- one CLI slice, 580s, beside
+    # `@objectstack/spec`'s 573s -- and it does not move when shards are added,
+    # while the mean falls with every shard. A seventh shard would take the
+    # predicted maximum from 667s to that floor; past seven the maximum does not
+    # move at all, so more shards buy only more runners' fixed overhead and a
+    # worse ratio. The partitioner's self-test pins the half of this that can
+    # fail: at SHARD_COUNT the heaviest serial task must sit within 1.3x the mean
+    # shard wall, and when it stops fitting, slicing it further is the remedy
+    # that failure names.
     #
     # ⚠ THE COST, stated because it is real: per-shard fixed overhead
     # (checkout + pnpm/Turbo cache restore + install, ~60s measured on run
@@ -478,29 +474,38 @@ jobs:
     # margin for a cold Turbo cache; the old 45 left a hung job "running" for
     # half an hour past any plausible healthy finish.
     #
-    # ⚠ RAISED 30 -> 45 (#16173), and the raise is still load-bearing. It was
-    # made because shard 5/6 was being killed at the 30-minute wall (12+
-    # observations at 30:16-30:21 with every other job green; the green band
-    # topped out at 28:56, a ~1 minute margin), and so the tail could be
-    # measured uncensored before anyone re-derived
-    # `scripts/test-shard-timings.json`. Both are done: the dataset was
-    # refreshed (#20388, then #21826) and the split now runs the whole CLI
-    # alone on shard 1/6 (#21487).
+    # ⚠ RAISED 30 -> 45 (#16173, the #16445 "temporary" raise): shard 5/6 was
+    # being killed at the 30-minute wall, and after the dataset refreshes
+    # (#20388, #21826) the split ran the whole CLI alone on shard 1/6, whose job
+    # wall then reached 35m43s (run 37453598388).
     #
-    # ⛔ REVERT CONDITION, restated against measured wall time, not a card:
-    # back to `30` only when the slowest shard's JOB wall time stays at or
-    # under 24 minutes (80% of 30, so the margin the old wall lacked is
-    # there) on every scheduled run for a week. It does not today. On the 16
-    # main runs after the #21826 refresh (37413386379 to 37467882762), shard
-    # 1/6 — the CLI alone — read 6m14s-35m43s of job wall time, over 30
-    # minutes on 9 of them (34m39s run 37415122516, 35m43s run 37453598388,
-    # 34m08s run 37460325624), so the condition as first written ("once
-    # #16173 lands") would now kill that shard; and its slowest reading is
-    # already 79% of this 45. Read the `Test Core (1/6)` job's started and
-    # completed times before touching this value. It carries no other expiry
-    # — a raise with no revert condition beside it becomes permanent by
-    # forgetting — and the stall guard stays the primary hang detector.
-    timeout-minutes: 45
+    # RE-SIZED 45 -> 35 (#22075), from the measured distribution. Window: the
+    # 14 runs after the 21-run dataset refresh (040184752c), 6 pull_request and
+    # 8 merge_group, 37870616843 to 37876969409 (2026-10-09T00:03Z-02:57Z),
+    # read from the jobs API:
+    #
+    #   Test Core job holding the whole CLI   20.5-39.1 min (12 runs)
+    #   every other Test Core job             <= 20.8 min    (72 jobs)
+    #   `Build this shard's dependency closure`  <= 5.6 min; fixed setup <= 2.4 min
+    #
+    # The whole CLI no longer runs on one shard: it is cut into 3 slices whenever
+    # a run carries it. Its test step read 18.7-32.2 min whole, so its heaviest
+    # slice (vitest's hash split puts 1.14x of an even third on slice 2/3) reads
+    # at most ~12.2 min, plus its own `cli#build`, the closure and setup: <= ~24
+    # min. The busiest whole-package shard of a FULL run now carries ~2640s of
+    # windows; at the 2.0x packing the heaviest whole-package shard measured
+    # above, that is <= ~22 min of tests plus the same closure and setup: <= ~30.
+    # 35 keeps that worst prediction under 86% of the wall, the margin the 45
+    # gave the whole CLI's 39.1-minute worst reading.
+    #
+    # ⛔ REVERT CONDITION, against measured wall time, not a card: back to `30`
+    # only when the slowest Test Core JOB wall stays at or under 24 minutes (80%
+    # of 30) on every scheduled run for a week; and if any job reads over 28
+    # minutes (80% of this 35), re-read the split before raising anything --
+    # `partition-test-shards.mjs` prints each shard's predicted wall in the
+    # "Compute this shard's package set" step, so the reading is beside the
+    # measurement. The stall guard stays the primary hang detector.
+    timeout-minutes: 35
     permissions:
       contents: read
     strategy:
@@ -662,8 +667,8 @@ jobs:
       # ⛔ THIS SHARD'S `^build` CLOSURE IS BUILT HERE, ON THE TURBO REMOTE
       # CACHE (#22077), so `Run this shard's tests` REPLAYS it from the local
       # cache instead of building it. Before this step the closure was built
-      # inside the test step's own turbo run (the slice step below runs zero
-      # iterations since #21487). Merge-queue run 37623284168, `Test Core
+      # inside the test step's own turbo run (the slice step below ran zero
+      # iterations from #21487 to #22075). Merge-queue run 37623284168, `Test Core
       # (3/6)`: `Tasks: 72 successful, 72 total` / `Cached: 1 cached, 72
       # total` / `Time: 11m43.373s` for the tests AND their closure in one
       # run. That run cannot read the remote, because `test` / `test:repo`
@@ -677,8 +682,9 @@ jobs:
       # Build Core's hash. A `test` task that `dependsOn: ["build"]` (cli and
       # metadata in turbo.json) also needs its OWN package's build. This filter
       # leaves that out on purpose, so a shard never builds a package its tests
-      # do not need; the test step builds it as before. Today that is one task,
-      # `cli#build` on shard 1/6.
+      # do not need; the test step builds it as before. Today that is
+      # `cli#build`, on each shard carrying a CLI slice: the slice step below
+      # builds it there.
       #
       # Its own guarded step, for the reason the slice step below gives: a
       # guarded SITE is (file, job, step). No `--summarize`: `.turbo/runs/`
@@ -759,11 +765,13 @@ jobs:
       # and `pnpm check:stall-guard-headroom` both read this step, so it keeps
       # its own `--stall-minutes` and its own headroom row.
       #
-      # A shard with no slice runs zero iterations here, and since #21487
-      # emptied FILE_SHARDED_PACKAGES that is every shard: no package is sliced
-      # today, so the paragraphs above describe the mechanism a slice would
-      # use, not anything this job currently runs. Every shard still reaches
-      # the step, so its name is a stable site for those two gates.
+      # A shard with no slice runs zero iterations here. Since #22075 a run
+      # that carries `@objectstack/cli` cuts it into 3 slices on 3 shards
+      # whenever its own split needs them (partition-test-shards.mjs
+      # planShards(), which prints its decision in "Compute this shard's
+      # package set"), so those three shards run one iteration each. Every
+      # shard still reaches the step, so its name is a stable site for those
+      # two gates.
       - name: Build the sliced package's dependency closure
         env:
           NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
@@ -882,9 +890,11 @@ jobs:
           # an unmoved `PKG#test` across a change outside the package; the
           # completeness guard below reads both tasks' summaries. A slice leg
           # stays `test`-only: the CLI, the one package whose slice wiring is
-          # in the tree, is not split. No package is sliced today
-          # (FILE_SHARDED_PACKAGES is empty since #21487), so every shard runs
-          # the whole-package leg alone and the slice branch below is idle.
+          # in the tree, is not split. Since #22075 the CLI is cut into 3
+          # slices whenever a run's own split needs it, so the three shards
+          # carrying one run the whole-package leg and then the slice leg, in
+          # that order -- which is why the partitioner weighs a slice as
+          # holding its shard for its entire window.
           STATUS=0
           LOGS=""
           for LEG in __whole__ $SLICES; do
@@ -1056,9 +1066,15 @@ jobs:
       # with no packages runs no turbo and writes no summary; that is NOT
       # MEASURED here rather than a usage error from the script.
       #
-      # The dataset it reads is scripts/test-shard-timings.json as #21826
-      # refreshed it (provenance run 37262126122): the whole CLI at 1702.69s,
-      # alone on shard 1/6 since FILE_SHARDED_PACKAGES went empty (#21487).
+      # The dataset it reads is scripts/test-shard-timings.json as the 21-run
+      # refresh left it (040184752c): the whole CLI at 1738.88s. Since #22075 a
+      # shard carrying one of its 3 slices is predicted a third of that, from
+      # the slice count the shard's own summary records (the OS_TEST_SHARD
+      # digest) rather than from the config, so the ratio stays one shard's
+      # executed windows against their own prediction on every run, whatever
+      # the affected set -- the meaning the 1.5x red and the 1.3x warning were
+      # written against. Measured before the slicing, on merge_group
+      # 37875522518: shard 1/6 (the whole CLI) 1.07x, shard 2/6 0.74x.
       # The second sample taken before wiring this, executed windows only, from
       # the `Test Core` timing tables of the main runs after that refresh:
       # shard 1/6 read 0.61x-1.05x on all eight scheduled runs (37416453417 to
