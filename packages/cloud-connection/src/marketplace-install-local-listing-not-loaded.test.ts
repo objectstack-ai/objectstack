@@ -89,7 +89,7 @@ const MEMBER_GRANTS: Record<string, unknown[]> = {
     sys_user_position: [],
     sys_position: [],
     sys_position_permission_set: [],
-    sys_user_permission_set: [{ id: 'ups_member', user_id: MEMBER_ID, permission_set_id: 'ps_member', organization_id: null }],
+    sys_user_permission_set: [{ id: 'ups_member', user_id: MEMBER_ID, permission_set_id: 'ps_member', permission_set: 'organization_admin', organization_id: null }],
     sys_permission_set: [{ id: 'ps_member', name: 'organization_admin', system_permissions: ['setup.access', 'manage_org_users'] }],
 };
 
@@ -125,6 +125,8 @@ async function restartWith(manifests: Array<{ id: string; version: string }>, di
                 if (k.startsWith('$') || (v !== null && typeof v === 'object')) {
                     throw new Error(`only scalar equality is implemented here (got '${k}')`);
                 }
+                // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+                if (v === null) return (row[k] ?? null) === null;
                 return row[k] === v;
             }));
             return (typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows).map((row) => ({ ...row }));
