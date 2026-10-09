@@ -40,8 +40,8 @@
 // authz-row: default-profile
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 
@@ -60,7 +60,7 @@ describe('showcase: app-declared default profile (ADR-0056 D7)', () => {
   let memberToken: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       // NOTE: no `fallbackPermissionSet` passed — it MUST resolve from `isDefault`.
       security: new SecurityPlugin({
         defaultPermissionSets: [...securityDefaultPermissionSets, demoDefault],

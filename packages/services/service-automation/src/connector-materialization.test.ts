@@ -24,6 +24,7 @@ import { ConnectorUpstreamUnavailableError } from '@objectstack/spec/integration
 import {
     AutomationServicePlugin,
     createPackageFileLoader,
+    createPackagePathResolver,
     DECLARATIVE_RETRY_BASE_MS,
     type CredentialResolver,
 } from './plugin.js';
@@ -538,6 +539,127 @@ describe('#3016 — file-ref materialization policy (fatal at boot, soft on relo
             reload([providerConnector('billing', { providerConfig: { spec: './specs/missing.json' } })]),
         ).resolves.toBeUndefined();
         expect(engine.getRegisteredConnectors()).toContain('billing');
+        await kernel.shutdown();
+    });
+});
+
+// ── #22434 — package path refs (resolvePackagePath) ─────────────────────────
+//
+// The sibling of `loadPackageFile` for a factory that needs a LOCATION — a
+// launched process's working directory — rather than file contents. Same root,
+// same confinement rule (one shared check), same `process.cwd()` default. It
+// reads nothing, so a resolved path need not exist.
+
+/** The rejection a promise settles with, or a fail-loud marker if it resolved. */
+async function rejectionOf(p: Promise<unknown>): Promise<Error> {
+    return p.then(
+        (value) => { throw new Error(`expected a refusal, got ${JSON.stringify(value)}`); },
+        (err: unknown) => err as Error,
+    );
+}
+
+describe('#22434 — package path resolver (createPackagePathResolver)', () => {
+    const root = path.resolve(fixtureRoot);
+    const resolvePath = createPackagePathResolver(fixtureRoot);
+
+    it('resolves a relative path against the package root, and `.` to the root itself', async () => {
+        await expect(resolvePath('.')).resolves.toBe(root);
+        await expect(resolvePath('./specs/billing.json')).resolves.toBe(path.join(root, 'specs', 'billing.json'));
+        await expect(resolvePath('specs')).resolves.toBe(path.join(root, 'specs'));
+        // Judged on the RESOLVED path: a traversal that lands back inside passes.
+        await expect(resolvePath('./specs/../specs')).resolves.toBe(path.join(root, 'specs'));
+        // A location, not a read: a path that does not exist yet still resolves.
+        await expect(resolvePath('./scripts/not-there.mjs')).resolves.toBe(path.join(root, 'scripts', 'not-there.mjs'));
+    });
+
+    it('refuses a path that escapes the root, naming the ref and the root it is confined to', async () => {
+        for (const ref of ['..', '../outside', 'specs/../../outside']) {
+            const err = await rejectionOf(resolvePath(ref));
+            expect(err).toBeInstanceOf(Error);
+            expect(err).not.toBeInstanceOf(TypeError);
+            expect(err.message).toContain(`'${ref}' escapes the stack/package root`);
+            expect(err.message).toContain(`confined to '${root}'`);
+        }
+    });
+
+    it('refuses an absolute path (posix and windows-drive) and an empty ref', async () => {
+        for (const ref of [path.join(root, 'specs'), '/etc', 'C:\\evil']) {
+            const err = await rejectionOf(resolvePath(ref));
+            expect(err).not.toBeInstanceOf(TypeError);
+            expect(err.message).toContain(`'${ref}' is absolute`);
+        }
+        for (const ref of ['', '   ']) {
+            expect((await rejectionOf(resolvePath(ref))).message).toContain('non-empty relative path');
+        }
+    });
+
+    it('shares the loader\'s rule: a ref is refused for confinement by both members or by neither', async () => {
+        const load = createPackageFileLoader(fixtureRoot);
+        const confinement = /non-empty relative path|is absolute|escapes the stack\/package root/;
+        const refs = ['.', 'specs', './specs/billing.json', './specs/../specs/billing.json', '', '..', '../x',
+            'specs/../../x', '/etc/hostname', 'C:/evil', 'D:\\evil'];
+        for (const ref of refs) {
+            const loaderRefused = await load(ref).then(() => false, (e: Error) => confinement.test(e.message));
+            const resolverRefused = await resolvePath(ref).then(() => false, (e: Error) => confinement.test(e.message));
+            expect(resolverRefused, `ref '${ref}'`).toBe(loaderRefused);
+        }
+    });
+
+    it('defaults to process.cwd() when no packageRoot is given, as the loader does', async () => {
+        await expect(createPackagePathResolver()('.')).resolves.toBe(path.resolve(process.cwd()));
+    });
+});
+
+describe('#22434 — the materializer hands resolvePackagePath anchored to packageRoot', () => {
+    /** A provider whose factory resolves the refs in `providerConfig.paths` before materializing. */
+    function makePathResolvingProvider() {
+        const resolved: string[] = [];
+        const factory: ConnectorProviderFactory = async (ctx) => {
+            for (const ref of (ctx.providerConfig.paths as string[]) ?? []) {
+                resolved.push(await ctx.resolvePackagePath!(ref));
+            }
+            return {
+                def: { name: ctx.name, label: ctx.label, type: 'api', authentication: { type: 'none' }, actions: [{ key: 'ping', label: 'Ping' }] } as unknown as Connector,
+                handlers: { ping: async () => ({ ok: true }) },
+            };
+        };
+        return { factory, resolved };
+    }
+
+    it('a factory resolving `.` and a relative path gets locations under packageRoot', async () => {
+        const { factory, resolved } = makePathResolvingProvider();
+        const kernel = await boot(
+            [providerConnector('tools', { providerConfig: { paths: ['.', './scripts/fixture.mjs'] } })],
+            { providerFactory: factory, packageRoot: fixtureRoot },
+        );
+        expect(automationOf(kernel).getRegisteredConnectors()).toContain('tools');
+        expect(resolved).toEqual([path.resolve(fixtureRoot), path.join(path.resolve(fixtureRoot), 'scripts', 'fixture.mjs')]);
+        await kernel.shutdown();
+    });
+
+    it('fails boot loudly when a factory resolves a path that escapes the package root', async () => {
+        const { factory, resolved } = makePathResolvingProvider();
+        await expect(
+            boot([providerConnector('tools', { providerConfig: { paths: ['../outside'] } })], {
+                providerFactory: factory,
+                packageRoot: fixtureRoot,
+            }),
+        ).rejects.toThrow(/failed to materialize connector instance 'tools'.*'\.\.\/outside' escapes the stack\/package root/s);
+        expect(resolved).toEqual([]);
+    });
+
+    it('a factory that never reads it materializes exactly as before', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([providerConnector('billing')], { providerFactory: factory, packageRoot: fixtureRoot });
+        const engine = automationOf(kernel);
+        expect(engine.getRegisteredConnectors()).toContain('billing');
+        // The member is handed (the factory simply ignores it) …
+        expect(typeof calls[0]?.resolvePackagePath).toBe('function');
+        // … and the connector it materialized is listed exactly as it always was.
+        const desc = engine.getConnectorDescriptors().find((d) => d.name === 'billing');
+        expect(desc?.actions.map((a) => a.key)).toEqual(['ping']);
+        expect(desc?.origin).toBe('declarative');
+        expect(calls).toHaveLength(1);
         await kernel.shutdown();
     });
 });

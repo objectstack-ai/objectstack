@@ -77,8 +77,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { assertArmed, authSettingArmed } from './armed.js';
 
 const SYS = { context: { isSystem: true } };
@@ -137,7 +137,7 @@ describe('#8049: /auth/change-password clears the force-change flag and enforces
   beforeAll(async () => {
     priorScim = process.env.OS_SCIM_ENABLED;
     process.env.OS_SCIM_ENABLED = 'true';
-    stack = await bootStack(showcaseStack, {});
+    stack = await bootShowcase({});
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 
     // Arm ADR-0069 D1's history ring. Default is 0 (off), under which every

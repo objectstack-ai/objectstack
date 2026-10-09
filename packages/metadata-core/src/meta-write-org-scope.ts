@@ -1,70 +1,32 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#7018 — the #6190 ruling's runtime half] Which metadata WRITES carry the
- * session's active organization, and which land env-wide.
+ * The registry-derived "does this type declare a per-organization overlay?"
+ * predicate, and the organization a metadata READ inside the protocol carries.
  *
- * ── The defect this closes ────────────────────────────────────────────────
+ * ── ADR-0131 D6: the doors carry no organization (C5 stage S3) ────────────
  *
- * The dispatcher used to thread `resolveActiveOrganizationId` into
- * `protocol.saveMetaItem` **unconditionally**, and
- * `SysMetadataRepository.put` stamps `organization_id: this.organizationId`
- * whatever the type is. So a session with an active organization minted an
- * org-scoped `sys_metadata` row for EVERY type — including the ones the
- * registry declares NOT per-org overridable.
+ * The per-organization overlay axis is retired. Neither transport's `/meta`
+ * doors (`@objectstack/rest`, and the runtime dispatcher's `/meta` branch)
+ * carry an organization into a metadata write or read any more: every
+ * Studio-authored write lands environment-wide (`organization_id` NULL), and
+ * every door read resolves environment → code. The write-side twin that used
+ * to decide which writes carried the session's organization,
+ * `organizationIdForMetaWrite`, therefore had no caller left and was deleted.
  *
- * Cold boot walks past exactly those rows: `loadMetaFromDb` hydrates
- * `organization_id IS NULL` only, and for `allowOrgOverride: true` types that
- * is the ADR-0005 design (their overlays are loaded on demand by
- * `getMetaItem`/`getMetaItems`). For every other type there is no per-org read
- * channel at all, so the row is a **phantom write**: it works for the life of
- * the process and is silently absent after the next restart. The measured
- * specimens are `flow` (binds its triggers until the restart, then stops
- * firing — `@objectstack/metadata-protocol`'s `reportUnhydratableOrgScopedRows`
- * warns about precisely this) and `object` (every record 404s).
- *
- * The maintainer ruling on #6190 (2026-08-09, Option A) is that the runtime
- * stops minting them: thread the org only for types that declare
- * `allowOrgOverride: true`; otherwise the write lands env-wide — the same row
- * a no-active-org session already produces today.
- *
- * ── Why the STATIC registry flag, and not `isOverlayAllowed` ──────────────
- *
- * `@objectstack/metadata-protocol` gates the *write authorization* through
- * `isOverlayAllowed`, which additionally consults the `OS_METADATA_WRITABLE`
- * escape hatch. This predicate deliberately does NOT: it must agree with the
- * predicate that decides whether the row is readable again, and boot hydration
- * keys off the static registry flag alone. `reportUnhydratableOrgScopedRows`
- * already settled the same question on the read side, in its own words:
- *
- *   "Derived from `DEFAULT_METADATA_TYPE_REGISTRY` and NOT from
- *    `isOverlayAllowed`, because the `OS_METADATA_WRITABLE` escape hatch only
- *    unlocks the WRITE — an env-unlocked type's org rows are hydrated no more
- *    than any other's".
- *
- * An env-unlocked `object` written org-scoped would be the same phantom, so
- * the escape hatch unlocks the write and the write still lands env-wide.
+ * What stays, and why. `@objectstack/metadata-protocol` still gates the reads
+ * an in-process caller hands an organization (`getMetaItem`, `getMetaItems`,
+ * the layered read, history and diff) through {@link organizationIdForMetaRead}.
+ * The one door that still names an organization is the anonymous form door,
+ * whose read of the Default Organization's withdrawals stays, fail-closed,
+ * until the promotion ceremony carries those rows to the environment layer
+ * (ADR-0131 C7). The protocol's own read narrowing (environment → code
+ * everywhere) is a later stage of the same retirement, and deletes this
+ * module with it.
  *
  * ⛔ Registry-derived, never a hand-written list (Prime Directive #8): the set
- * below is computed from `DEFAULT_METADATA_TYPE_REGISTRY` — the very export
- * `ObjectStackProtocolImplementation.OVERLAY_ALLOWED_TYPES` derives from — so a
- * registry entry flipping `allowOrgOverride` moves this predicate with it and
- * there is nothing to keep in sync by hand.
- *
- * ── Why this lives in `metadata-core` and not in the dispatcher [#8805] ────
- *
- * Because the decision belongs to the CALLER, and there is more than one.
- * `@objectstack/metadata-protocol` deliberately does not make it: an org-scoped
- * write of a non-overridable type is REFUSED (`NOT_OVERRIDABLE`, 403) rather
- * than coerced to env-wide, because option B of the #6190 ruling — silently
- * rewriting the tenancy statement the author made — was rejected. So each door
- * that writes metadata must decide, before it calls, which organization the
- * write carries. The dispatcher was the only door that did; the REST `/meta`
- * write doors passed nothing and stamped every `sys_metadata_audit` row
- * env-wide, which is #8805. `@objectstack/rest` cannot import the dispatcher's
- * copy — `runtime` depends on `rest`, so that edge is a cycle — and a second
- * copy of a registry-derived predicate is precisely what the ⛔ above forbids.
- * This package is the one both already depend on and that depends on neither.
+ * below is computed from `DEFAULT_METADATA_TYPE_REGISTRY`, so a registry entry
+ * flipping `allowOrgOverride` moves this predicate with it.
  */
 
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
@@ -85,8 +47,8 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared
  * spellings while storage folded them into an org-scoped type — one item,
  * two partitions, addressed by spelling.
  *
- * The correction landed at the boundary, not here: the REST `/meta` doors
- * fold the segment through `canonicalMetaUrlType` BEFORE the scope decision,
+ * The correction landed at the boundary, not here: a caller folds the
+ * segment through `canonicalMetaUrlType` BEFORE the scope decision,
  * exactly as `metadata-url-spelling.ts` mandates ("folding happens at the
  * boundary and only there; the layers below keep reading the single
  * canonical singular"). ⛔ Do not "complete" this set with the URL map — a
@@ -112,7 +74,7 @@ const ORG_OVERRIDABLE_TYPES: ReadonlySet<string> = (() => {
  * dispatcher-era callers — but ⚠️ [commit 26f3588fb] that tolerance is NOT the URL
  * fold: URL-only spellings (`translations`, `email_templates`) answer
  * `false` here. A caller holding a raw `/meta/:type` segment must fold it
- * through `canonicalMetaUrlType` BEFORE asking, as the REST doors do; see
+ * through `canonicalMetaUrlType` BEFORE asking; see
  * `ORG_OVERRIDABLE_TYPES` above for the measurement and for why this
  * predicate must not grow the URL map itself.
  *
@@ -126,29 +88,13 @@ export function declaresOrgOverride(type: string): boolean {
 }
 
 /**
- * The `organizationId` a metadata write of `type` should carry, given the
- * session's active organization.
- *
- * Returns the active org for a type the registry declares per-org overridable
- * (today's behaviour, unchanged), and `undefined` — env-wide, the same row a
- * no-active-org session produces — for every other type.
- */
-export function organizationIdForMetaWrite(
-    type: string,
-    activeOrganizationId: string | undefined,
-): string | undefined {
-    if (activeOrganizationId === undefined) return undefined;
-    return declaresOrgOverride(type) ? activeOrganizationId : undefined;
-}
-
-/**
- * [#9454] The read-side twin: the `organizationId` a metadata READ of `type`
- * should carry, given the session's active organization.
+ * [#9454] The `organizationId` a metadata READ of `type` should carry, given
+ * the caller's organization.
  *
  * ── Why a read door has to ask this at all ────────────────────────────────
  *
- * `organizationIdForMetaWrite` above stops the runtime MINTING org-scoped rows
- * for types that have no per-org read channel. It says nothing about serving
+ * The (since retired) write-side twin stopped the runtime MINTING org-scoped
+ * rows for types that have no per-org read channel. It says nothing about serving
  * the rows that types WITH such a channel legitimately produce — and the REST
  * `/meta` read doors were never told. A `PUT` of an org-overridable type
  * (`view`, `dashboard`, `report`, `translation`, `email_template`) landed an
@@ -172,10 +118,9 @@ export function organizationIdForMetaWrite(
  * vanishes at the next restart. Gating the read on the same static registry
  * flag keeps the two sides answering one question.
  *
- * ⇒ This is deliberately the same predicate as the write side, not a parallel
- * one: read scope and write scope CANNOT drift, because both are
- * {@link declaresOrgOverride}. If a registry entry flips `allowOrgOverride`,
- * both doors move together and there is nothing to keep in sync by hand.
+ * Since ADR-0131 D6 the `/meta` doors hand the protocol no organization, so
+ * this gate answers `undefined` for every door read; see the module header for
+ * the in-process callers that still name one.
  *
  * Returns the active org for a type the registry declares per-org overridable,
  * and `undefined` — env-wide, today's behaviour for every read — otherwise.

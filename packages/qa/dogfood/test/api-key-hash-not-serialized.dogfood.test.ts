@@ -37,8 +37,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 describe('#7728: sys_api_key.key (hash) never serializes on the generic read path', () => {
   let stack: VerifyStack;
@@ -70,7 +70,7 @@ describe('#7728: sys_api_key.key (hash) never serializes on the generic read pat
   };
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {});
+    stack = await bootShowcase({});
     token = await stack.signIn();
   }, 120_000);
 

@@ -115,6 +115,27 @@ export interface ConnectorProviderContext {
    * factory needing a file must then fail with a clear message.
    */
   readonly loadPackageFile?: (relativePath: string) => Promise<string>;
+  /**
+   * Host-injected package path resolver (ADR-0097 follow-up), the sibling of
+   * {@link loadPackageFile} for a factory that needs a **location** rather than
+   * file contents — e.g. a working directory for a process the provider
+   * launches, so the declaring app's relative paths resolve against the app's
+   * root and not against wherever the server happened to be started.
+   *
+   * Resolves a **relative** path against the root of the stack/package that
+   * declared the entry and returns the absolute path. `'.'` returns the root
+   * itself. It follows the same confinement rule as `loadPackageFile`, and the
+   * host enforces both with one check: an empty path, an absolute path, and a
+   * path that escapes the root after resolution (`../x`, `a/../../x`) are
+   * rejected (throws). The check is on the normalized path, not on symlink
+   * targets. It does not check that the path exists — what to do with a
+   * missing location is the factory's call.
+   *
+   * `undefined` on hosts that cannot provide it (edge/browser kernels, or a
+   * host that predates this member) — a factory then keeps the behaviour it
+   * had without it, or fails with a clear message if it cannot.
+   */
+  readonly resolvePackagePath?: (relativePath: string) => Promise<string>;
 }
 
 /**

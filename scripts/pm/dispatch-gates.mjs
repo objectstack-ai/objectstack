@@ -26397,7 +26397,7 @@ function selfTest() {
   t('exactly at the threshold is under it — strictly greater, as the gate reads it', atLine.includes('under.') && !atLine.includes('HUMAN MERGE'), atLine);
   const noneLine = changedLineLines(null).join('\n');
   t('an explicit path list is NOT MEASURED, said out loud, never a silent under', noneLine.includes('NOT MEASURED') && !noneLine.includes('under.') && noneLine.includes('--pr'), noneLine);
-  t('the threshold is read from the gate — no second copy here — and it is the ruled 5000', HUMAN_MERGE_LINE_THRESHOLD === 5000 && changedLineLines({ additions: 5001, deletions: 0 }).join('\n').includes('OVER'));
+  t('the threshold is read from the gate — no second copy here — and it is the ruled 3000', HUMAN_MERGE_LINE_THRESHOLD === 3000 && changedLineLines({ additions: 3001, deletions: 0 }).join('\n').includes('OVER'));
   t('a text buffer counts its lines, an unterminated last line included', lineCountOf(Buffer.from('a\nb\n')) === 2 && lineCountOf(Buffer.from('a\nb')) === 2 && lineCountOf(Buffer.alloc(0)) === 0);
   t('a buffer with a NUL in its first 8000 bytes is binary: null, which the caller counts as zero lines', lineCountOf(Buffer.from([0x61, 0, 0x62])) === null);
   // Same liveness guards as the mandatory table: dead data reading as

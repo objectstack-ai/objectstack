@@ -1391,7 +1391,10 @@ jobs:
       # redden it. Ordering after the verdict is what makes "cannot delay"
       # true, and the two flags are what make "cannot redden" true — a
       # diagnostics fault here (an artifact-service 403 is the measured one,
-      # #14469) must not evict a green run.
+      # #14469) must not evict a green run. The suite-duration ceiling check
+      # at the end of this job reads the same captures and is the one step
+      # here that DOES red the job, on purpose: it is a gate, not a report, and
+      # a capture that never arrived reads NOT MEASURED there, never red.
       #
       # ⛔ Steps, deliberately, NOT a new `needs:` entry: this job's
       # `OS_AGGREGATOR_MEMBERS` / `OS_AGGREGATOR_NON_MEMBERS` block is asserted
@@ -1446,6 +1449,38 @@ jobs:
           path: ${{ runner.temp }}/test-timing-table/
           if-no-files-found: ignore
           retention-days: 14
+
+      # ── The per-package suite-duration ratchet (#16468) ──────────────────
+      #
+      # A GATE, unlike the two reporting steps above: NO `continue-on-error`,
+      # so a package whose suite ran past its ceiling reds `Test Core`, naming
+      # the package and its slowest test files. The ceiling is the package's
+      # slowest executed run in the refresh window x 1.25, generated into
+      # scripts/test-shard-timings.json (`ceilings`) by the refresh lane and
+      # held by every later refresh; it rises only by a ruled entry in the
+      # script's RULED_CEILING_RAISES. A `provisional` package prints "no
+      # ceiling: provisional" and is not red; a package absent from the dataset
+      # is red (the new-package shape). See the script header for the ruling.
+      #
+      # HERE, in the aggregator, rather than in each shard, because the CLI's
+      # file-level slices land on three shards: the three windows are SUMMED
+      # and the sum graded against the whole package's ceiling -- the quantity
+      # the ceiling was measured in. It reads the shard captures the download
+      # step above already fetched (each package's turbo execution window via
+      # samplesFromSummary, and every vitest file line); a capture that did not
+      # arrive leaves its packages ungraded and says so, never red.
+      #
+      # NOT MEASURED, exit 0, while the dataset carries no `ceilings`: they are
+      # generated only where the run-summary artifacts are downloadable (the
+      # refresh lane), so the first refresh after this lands writes them, and
+      # until then every run prints a warning annotation saying so.
+      #
+      # LAST, after the reporting steps, so the timing table is published
+      # whatever this decides. `always()`: it reads only what the shards already
+      # captured, so a red shard's packages are graded too.
+      - name: Check the per-package suite-duration ceilings
+        if: always()
+        run: node scripts/check-test-suite-ceilings.mjs --captures "$RUNNER_TEMP/test-timings" --label 'Test Core'
 
 
   # ── Temporal conformance against live, non-UTC servers (ADR-0053 D-A3) ─────

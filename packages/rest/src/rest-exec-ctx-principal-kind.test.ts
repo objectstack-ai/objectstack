@@ -55,15 +55,17 @@ const makeQl = () => ({
         }
         if (object === 'sys_user') return [{ id: where.id, email: `${where.id}@example.com` }];
         if (object === 'sys_user_permission_set') {
-            if (where.user_id === 'admin1') return [{ permission_set_id: 'ps_admin', organization_id: null }];
-            if (where.user_id === 'member1') return [{ permission_set_id: 'ps_member', organization_id: null }];
+            if (where.user_id === 'admin1') return [{ permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null }];
+            if (where.user_id === 'member1') return [{ permission_set_id: 'ps_member', permission_set: 'member_default', organization_id: null }];
             return [];
         }
         if (object === 'sys_permission_set') {
+            // By id (a position binding) or by name (a user grant, ADR-0131 D4).
             const ids: string[] = where.id?.$in ?? [];
+            const names: string[] = where.name?.$in ?? [];
             return [
-                ids.includes('ps_admin') ? { id: 'ps_admin', name: 'admin_full_access' } : null,
-                ids.includes('ps_member') ? { id: 'ps_member', name: 'member_default' } : null,
+                ids.includes('ps_admin') || names.includes('admin_full_access') ? { id: 'ps_admin', name: 'admin_full_access' } : null,
+                ids.includes('ps_member') || names.includes('member_default') ? { id: 'ps_member', name: 'member_default' } : null,
             ].filter(Boolean);
         }
         return [];

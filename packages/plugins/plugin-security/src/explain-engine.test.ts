@@ -893,14 +893,14 @@ const NOW = Date.parse('2026-07-10T12:00:00Z');
 describe('buildContextForUser', () => {
   const ql = makeGrantQl({
     sys_user_position: [{ user_id: 'u2', position: 'hr_specialist' }],
-    sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'ps1' }],
+    sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'ps1', permission_set: 'payroll_reader' }],
     sys_permission_set: [{ id: 'ps1', name: 'payroll_reader' }],
   });
 
   it('derives hasPlatformAdminGrant from an UNSCOPED admin_full_access user grant (matches resolveAuthzContext)', async () => {
     const qlUnscoped = makeGrantQl({
       // organization_id absent → unscoped
-      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin' }],
+      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', permission_set: 'admin_full_access' }],
       sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
     });
     const ctx = await buildContextForUser(qlUnscoped, 'u2');
@@ -942,7 +942,7 @@ describe('buildContextForUser', () => {
 
   it('a SCOPED (org-specific) admin_full_access user grant does NOT set hasPlatformAdminGrant', async () => {
     const qlScoped = makeGrantQl({
-      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', organization_id: 'org1' }],
+      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', permission_set: 'admin_full_access', organization_id: 'org1' }],
       sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
     });
     // [#20515] Explained IN org1: a grant scoped to an organization applies
@@ -1085,7 +1085,7 @@ describe('buildContextForUser', () => {
     const qlAbsent = makeGrantQl({
       sys_user_position: [{ user_id: 'u2', position: 'hr_specialist' }],
       sys_position: [{ id: 'pos_hr', name: 'hr_specialist' }],
-      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'ps1' }],
+      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'ps1', permission_set: 'payroll_reader' }],
       sys_permission_set: [{ id: 'ps1', name: 'payroll_reader' }],
     });
     const ctx = await buildContextForUser(qlAbsent, 'u2', NOW);
@@ -1140,7 +1140,7 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
         sys_user_position: [{ user_id: 'u2', position: 'hr_specialist' }],
         sys_position: [{ id: 'pos_hr', name: 'hr_specialist' }],
         sys_position_permission_set: [{ position_id: 'pos_hr', permission_set_id: 'ps_hr_tools' }],
-        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'ps1' }],
+        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'ps1', permission_set: 'payroll_reader' }],
         sys_permission_set: [
           { id: 'ps1', name: 'payroll_reader' },
           { id: 'ps_hr_tools', name: 'hr_tools', system_permissions: ['manage_users'] },
@@ -1179,7 +1179,7 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
       // [ADR-0068 D2] The platform_admin derivation, both polarities.
       name: 'unscoped admin_full_access derives platform_admin',
       tables: {
-        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin' }],
+        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', permission_set: 'admin_full_access' }],
         sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
       },
       expected: {
@@ -1197,7 +1197,7 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
       // organization it would not resolve at all, and the case would pin nothing.
       tenantId: 'org1',
       tables: {
-        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', organization_id: 'org1' }],
+        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', permission_set: 'admin_full_access', organization_id: 'org1' }],
         sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
       },
       expected: {
@@ -1218,7 +1218,7 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
       tenantId: 'org1',
       tables: {
         sys_member: [{ user_id: 'u2', organization_id: 'org1', role: 'admin' }],
-        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psOrg', organization_id: 'org1' }],
+        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psOrg', permission_set: 'organization_admin', organization_id: 'org1' }],
         sys_permission_set: [{ id: 'psOrg', name: 'organization_admin' }],
       },
       expected: {
@@ -1242,8 +1242,8 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
           { user_id: 'u2', position: 'auditor', valid_from: '2026-08-01T00:00:00Z' },
         ],
         sys_user_permission_set: [
-          { user_id: 'u2', permission_set_id: 'ps1' },
-          { user_id: 'u2', permission_set_id: 'psAdmin', valid_until: '2026-06-01T00:00:00Z' },
+          { user_id: 'u2', permission_set_id: 'ps1', permission_set: 'payroll_reader' },
+          { user_id: 'u2', permission_set_id: 'psAdmin', permission_set: 'admin_full_access', valid_until: '2026-06-01T00:00:00Z' },
         ],
         sys_permission_set: [
           { id: 'ps1', name: 'payroll_reader' },
@@ -1469,7 +1469,7 @@ describe('buildContextForUser bypasses the #11971 grants cache (ruled bypass lis
     process.env[TTL_ENV] = '3600000'; // one hour — nothing here may pass by expiry
     try {
       const tables: Rows = {
-        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin' }],
+        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', permission_set: 'admin_full_access' }],
         sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
       };
       const ql = makeSeamGrantQl(tables);
@@ -1788,9 +1788,9 @@ describe('[#20515] buildContextForUser and resolveDelegatorContext resolve in an
     sys_user: [{ id: 'u_x', email: 'u_x@example.com' }],
     sys_member: [{ user_id: 'u_x', organization_id: BETA, role: 'member' }],
     sys_user_permission_set: [
-      { user_id: 'u_x', permission_set_id: 'ps_alpha', organization_id: ALPHA },
-      { user_id: 'u_x', permission_set_id: 'ps_beta', organization_id: BETA },
-      { user_id: 'u_x', permission_set_id: 'ps_global' },
+      { user_id: 'u_x', permission_set_id: 'ps_alpha', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
+      { user_id: 'u_x', permission_set_id: 'ps_beta', permission_set: 'beta_readers', organization_id: BETA },
+      { user_id: 'u_x', permission_set_id: 'ps_global', permission_set: 'global_readers' },
     ],
     sys_permission_set: [
       { id: 'ps_alpha', name: 'alpha_metadata_editors', system_permissions: ['manage_metadata'] },

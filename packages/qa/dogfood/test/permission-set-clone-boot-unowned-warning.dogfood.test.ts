@@ -37,8 +37,8 @@
 // facet added to the action reaches this pin without an edit here.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { securityObjects } from '@objectstack/plugin-security';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -101,7 +101,7 @@ describe('[#21669] a cloned permission set boots without the unowned-declaration
         dbFile = join(dir, 'showcase.db');
 
         // ── boot 1: clone a packaged set through the Setup dialog's own path ──
-        stack = await bootStack(showcaseStack, { databaseFile: dbFile });
+        stack = await bootShowcase({ databaseFile: dbFile });
         const token = await stack.signIn();
         const engine: any = await stack.kernel.getServiceAsync('objectql');
         const [base] = await engine.find('sys_permission_set', { where: { name: BASE }, limit: 1 }, SYS);
@@ -133,7 +133,7 @@ describe('[#21669] a cloned permission set boots without the unowned-declaration
         stack = undefined;
 
         // ── boot 2: same file, nothing authored ───────────────────────────────
-        const second = await captureOutput(() => bootStack(showcaseStack, { databaseFile: dbFile }));
+        const second = await captureOutput(() => bootShowcase({ databaseFile: dbFile }));
         stack = second.value;
         bootLines = second.lines;
         ql = await stack.kernel.getServiceAsync('objectql');

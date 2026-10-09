@@ -18,8 +18,8 @@
 // `examples/app-showcase/src/objects/semantic-zoo.object.ts`.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 
 let stack: VerifyStack;
@@ -56,11 +56,11 @@ async function servedObject(name: string): Promise<Record<string, any>> {
 // run measured 18.3s (vitest-reported `Duration`) / 19.5s wall clock for the
 // whole file even on an otherwise-idle box (boot dominates; the 5 tests
 // themselves run in ~3.5s). 180_000ms follows this package's existing house
-// pattern for the identical `bootStack(showcaseStack, …)` call — see
+// pattern for the identical `bootShowcase(…)` call — see
 // `admin-identity-audit-trail.dogfood.test.ts`'s `beforeAll(…, 180_000)` —
 // rather than inventing a new number for the same operation.
 beforeAll(async () => {
-  stack = await bootStack(showcaseStack);
+  stack = await bootShowcase();
   token = await stack.signIn();
 }, 180_000);
 

@@ -20,9 +20,9 @@
 // dropped.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
 import { hashSpec } from '@objectstack/metadata-core';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 const OBJ = 'dogfood_field_reorder';
 const SYSTEM_CTX = { isSystem: true };
@@ -61,7 +61,7 @@ describe('dogfood: an object designer field reorder publishes and reads back in 
   let ql: Ql;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     token = await stack.signIn();
     ql = (await stack.kernel.getServiceAsync('objectql')) as unknown as Ql;
   }, 90_000);

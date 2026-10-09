@@ -111,8 +111,8 @@ function uid(prefix: string): string {
 }
 
 /**
- * The two kernel services the boot sweep reads the EFFECTIVE templates through
- * (#21785). Both are optional: a host that registers no `protocol` has no
+ * The kernel service the boot sweep reads the EFFECTIVE templates through
+ * (#21785). Optional: a host that registers no `protocol` has no
  * metadata door, so nothing can overlay a declaration there and the registry
  * read below is already the effective one.
  *
@@ -123,8 +123,6 @@ function uid(prefix: string): string {
 export interface EffectiveEmailTemplateSources {
   /** The `protocol` service. `getMetaItems` is the layered list `GET /meta/email_template` serves. */
   protocol?: { getMetaItems(request: GetMetaItemsRequest): Promise<GetMetaItemsResponse> };
-  /** The `tenancy` service. `defaultOrgId()` is the organization an org-less read resolves in. */
-  tenancy?: { defaultOrgId(): Promise<string | null> };
 }
 
 /** {@link readDeclared}'s answer when the effective read did not happen. */
@@ -137,32 +135,26 @@ const EFFECTIVE_READ_FAILED = Symbol('email-template-effective-read-failed');
  * decomposition parks `stack.emailTemplates`), falling back to the metadata
  * service. Every read hands back the authoring document itself.
  *
- * ## [#21785] Why the effective read, and in which organization
+ * ## [#21785] Why the effective read
  *
- * The registry holds the package's declaration and only the ENV-WIDE overlays
- * boot hydration (`loadMetaFromDb`) registers. `email_template` is
- * `allowOrgOverride: true`, so an admin saving through `PUT /meta` with an
- * active organization — every Studio save on a `single`-posture deployment,
- * where the Default Organization is bootstrapped — writes an ORG-SCOPED
- * overlay, which hydration deliberately leaves out of the process-wide
- * registry. The live path projected that overlay into the sending row at save
- * time; this sweep then read the package layer and wrote the package wording
- * back on every boot, while `GET /meta/email_template/:name` kept serving the
- * admin's wording. Measured on the showcase before the fix: the env-wide
- * overlay survived (the registry lists it after the package entry), the
- * org-scoped one reverted.
+ * The registry holds the package's declaration and only the overlays boot
+ * hydration (`loadMetaFromDb`) registered. The live path projects a Studio
+ * overlay into the sending row at save time; a sweep that read the package
+ * layer would write the package wording back on every boot while
+ * `GET /meta/email_template/:name` kept serving the admin's wording.
  *
  * So the sweep reads what the door reads — `protocol.getMetaItems`, the
- * layered list (org overlay over env-wide overlay over package), one item per
- * `(name, locale)` slot — and resolves the organization the way every other
- * org-less reader of org-overridable metadata does: `tenancy.defaultOrgId()`,
- * as the anonymous form doors read a form (`@objectstack/rest`). That answers
- * the Default Organization under `single` (ADR-0131: the organization IS the
- * environment there) and `null` whenever a walled posture was requested (the
- * tenancy contract never guesses an organization there), where the read is
- * env-wide. The sending row stays org-agnostic: template resolution keys on
- * `(name, locale)` only, and per-organization template rows are a capability
- * no ruling has opened.
+ * layered list (environment overlay over package), one item per
+ * `(name, locale)` slot.
+ *
+ * [ADR-0131 D6] It names no organization. The per-organization overlay axis
+ * is retired: every `/meta` write lands environment-wide, and the door reads
+ * environment → code. This sweep used to read in the Default Organization
+ * (`tenancy.defaultOrgId()`), because a `single`-posture Studio save landed
+ * there; such a legacy row is no longer served by the door, so it is no longer
+ * projected either, until ADR-0131 C7 promotes it to the environment layer.
+ * The sending row stays org-agnostic: template resolution keys on
+ * `(name, locale)` only.
  *
  * The served items carry read decorations (`_diagnostics`) the strict schema
  * refuses, so each is passed through the shared `stripReadDecorations` — the
@@ -228,10 +220,7 @@ async function readDeclared(
   const protocol = sources?.protocol;
   if (typeof protocol?.getMetaItems === 'function') {
     try {
-      const organizationId = typeof sources?.tenancy?.defaultOrgId === 'function'
-        ? await sources.tenancy.defaultOrgId()
-        : null;
-      const listed = await protocol.getMetaItems({ type, ...(organizationId ? { organizationId } : {}) });
+      const listed = await protocol.getMetaItems({ type });
       return listed.items.filter(Boolean).map(stripReadDecorations);
     } catch (err: any) {
       logger?.warn?.(

@@ -840,9 +840,10 @@ describe('[#20156] edges', () => {
         for (const layer of LAYERS) expect(navIds(layers.body?.[layer]), layer).toEqual(navIds(plainItem(plainApp)));
     });
 
-    it('[ruling 5856774816] "may write" is the save door\'s WHOLE question, not a capability name: an org-scoped presentation author writes views, not apps, so the app is pruned for them', async () => {
-        // `manage_org_presentation` admits a save only of an org-overridable
-        // type, scoped to the session's own organization — `app` is not one.
+    it('[ruling 5856774816 · ADR-0131 D6] "may write" is the save door\'s WHOLE question, not a capability name: a holder of the retired `manage_org_presentation` writes nothing, so the app is pruned for them', async () => {
+        // `manage_org_presentation` used to admit an org-scoped save of an
+        // org-overridable type; it retired with the per-organization overlay
+        // axis, so its holder is no writer of any type.
         const presenter: Caller = {
             ctx: { userId: 'u_presenter', systemPermissions: ['manage_org_presentation'], tenantId: 'org_1' },
             holdings: [],
@@ -854,14 +855,13 @@ describe('[#20156] edges', () => {
         };
         const { rest, protocol } = setup(presenter);
 
-        // The control: the same caller IS a writer, of a type they may write.
+        // The view's save door refuses them — the door the capability opened...
         const view = await save(rest, 'view', 'all_leads', clone(LEADS_VIEW));
-        expect(view.statusCode).toBe(200);
-        expect(protocol.saveMetaItem).toHaveBeenCalledTimes(1);
-        // The app's save door refuses them...
+        expect(envelope(view)).toEqual({ status: 403, code: 'FORBIDDEN' });
+        // ...and so does the app's.
         const app = await save(rest, 'app', 'crm', clone(CRM_APP));
         expect(envelope(app)).toEqual({ status: 403, code: 'FORBIDDEN' });
-        expect(protocol.saveMetaItem).toHaveBeenCalledTimes(1);
+        expect(protocol.saveMetaItem).not.toHaveBeenCalled();
         // ...so every stored-version door serves them the plain read's pruned app
         // — save `/diff`, an authoring door that refuses them outright
         // ([#20378] ruling 5865708652: they may not read drafts either).

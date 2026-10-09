@@ -13,7 +13,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack, { onEnable } from '@objectstack/example-showcase';
 import { ADMIN_EMAIL, PHONE_DEMO_USER, AUDITOR_DEMO_USER } from '@objectstack/example-showcase/security-personas';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 
 const SYS = { isSystem: true } as const;
@@ -40,7 +41,7 @@ describe('showcase demo personas are created into the admin\'s organization (ADR
   };
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseBundleWithHook, { security: showcaseAppDefaultSecurity(), orgContext: true });
+    stack = await bootShowcase({ security: showcaseAppDefaultSecurity(), orgContext: true }, showcaseBundleWithHook);
     await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
   }, 300_000);

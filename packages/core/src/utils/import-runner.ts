@@ -1022,7 +1022,18 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               // The write path needs no counterpart: `validateRecord` runs
               // there for real, after the hooks, and the row report is built
               // from the very same findings by `toFailedResult`.
-              const verdict = await previewVerdict(data, willUpdate ? 'update' : 'insert', rowCtx);
+              //
+              // [#22445] An update is asked about the row it would write: the
+              // matched record's id rides in the payload exactly as the
+              // write's `updateData` folds it (`{ ...data, id }`), and an
+              // `update`-mode preview reads the row that id names, under this
+              // row's context, and judges the stored row merged with the
+              // patch, as the by-id update does. Nothing new crosses the
+              // protocol: the id is the address every update door already
+              // carries in the payload.
+              const verdict = willUpdate
+                ? await previewVerdict({ ...data, id: (existing as Record<string, any>).id }, 'update', rowCtx)
+                : await previewVerdict(data, 'insert', rowCtx);
               if (verdict && !verdict.valid) {
                 errCount++;
                 const first = verdict.errors[0];

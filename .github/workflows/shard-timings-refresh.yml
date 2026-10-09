@@ -33,6 +33,16 @@
 #      quoted verbatim into the PR body and a human decides. See "THE PINS" below.
 #   ⛔ It never opens a PR when the regenerated file is byte-identical. A weekly
 #      no-op PR trains everyone to ignore this PR.
+#   ⛔ It never moves a suite-duration ceiling (#16468). The dataset also
+#      carries `ceilings`, which `Test Core` grades every executed package
+#      against (scripts/check-test-suite-ceilings.mjs). The generator writes
+#      them in the same pass and HOLDS every ceiling the committed dataset
+#      already has; a package gets a new one only when it had none (its slowest
+#      executed run in this window x 1.25). A ceiling rises only by a ruling,
+#      recorded in that script, so a refresh whose window ran slower REPORTS
+#      the gap in the PR body instead of absorbing it. The first refresh after
+#      the check landed writes the first table; until it merges the check reads
+#      NOT MEASURED.
 #
 # HOW IT GETS ITS INPUTS, AND WHY IT RUNS HERE RATHER THAN IN AN AGENT WORKTREE
 # ----------------------------------------------------------------------------
@@ -634,6 +644,53 @@ jobs:
             }
           ')
 
+          # The suite-duration ceilings (#16468), read out of the dataset like the
+          # two lines above. The prior table is the COMMITTED dataset, read from
+          # git because the bins step has already copied the refreshed file over
+          # it. A refresh never moves a held ceiling, so the line counts what is
+          # new and what is uncapped, and the spread table below marks every
+          # held ceiling this window would have set differently -- and every one
+          # a run of this window already went over.
+          CEILING_LINE=$(node -e '
+            const fs = require("fs");
+            const { execFileSync } = require("child_process");
+            const d = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/refresh/refreshed.json", "utf8"));
+            if (!d.ceilings || typeof d.ceilings !== "object" || !d.uncapped || typeof d.uncapped !== "object") {
+              throw new Error("the refreshed dataset carries no `ceilings` / `uncapped`");
+            }
+            const prior = JSON.parse(execFileSync("git", ["show", "HEAD:scripts/test-shard-timings.json"], { encoding: "utf8" }));
+            const held = prior.ceilings && typeof prior.ceilings === "object" ? prior.ceilings : null;
+            const names = Object.keys(d.ceilings);
+            const fresh = held === null ? names : names.filter((n) => !Object.hasOwn(held, n));
+            const uncapped = Object.entries(d.uncapped).map(([n, why]) => n + " (" + why + ")");
+            const h = d.provenance.ceilingHeadroom;
+            const over = (fs.readFileSync(process.env.RUNNER_TEMP + "/refresh/spread.md", "utf8").match(/OVER its held ceiling/g) || []).length;
+            const lines = [];
+            if (held === null) {
+              lines.push(
+                "⚠️ This refresh writes the FIRST suite-duration ceiling table: " + names.length + " package(s) get a " +
+                "ceiling, each its slowest executed run in this window x " + h + ". From the merge of this PR the `Test Core` " +
+                "check (scripts/check-test-suite-ceilings.mjs) grades every executed package against it -- until then it " +
+                "reads NOT MEASURED. Every later refresh HOLDS these numbers and a ceiling rises only by a ruling, so " +
+                "review the ceiling column below before merging."
+              );
+            } else {
+              lines.push(
+                "Suite-duration ceilings: " + (names.length - fresh.length) + " held unchanged (a refresh never moves one; " +
+                "a raise is a ruling), " + fresh.length + " new" + (fresh.length ? " (" + fresh.join(", ") + ")" : "") +
+                ", each new one its slowest executed run in this window x " + h + "."
+              );
+            }
+            lines.push(uncapped.length ? "No ceiling: " + uncapped.join(", ") + "." : "Every package carries a ceiling.");
+            if (over > 0) {
+              lines.push(
+                "⚠️ " + over + " package(s) ran OVER their held ceiling in this window (marked in the table): the brake " +
+                "fired on main. This refresh does not raise them; that takes a ruling."
+              );
+            }
+            console.log(lines.join("\n\n"));
+          ')
+
           SHARDS=$(node -e '
             const rs = JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/candidates.json", "utf8"));
             const r = rs.find((x) => String(x.run_id) === process.env.RUN_ID);
@@ -675,9 +732,11 @@ jobs:
             echo "because a weekly lane cannot know which cards a given run ought to retire. If this is"
             echo "the first refresh to land, retire those two by hand as part of merging it."
             echo
-            echo "## Sample depth and run-to-run spread"
+            echo "## Sample depth, run-to-run spread and suite-duration ceilings"
             echo
             echo "$DEPTH_LINE"
+            echo
+            echo "$CEILING_LINE"
             echo
             cat "$RUNNER_TEMP/refresh/spread.md"
             echo

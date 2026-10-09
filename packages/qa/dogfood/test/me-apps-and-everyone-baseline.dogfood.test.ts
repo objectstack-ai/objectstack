@@ -29,8 +29,8 @@
 // @proof: me-apps-and-everyone-baseline
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 
 const SYS = { isSystem: true } as const;
@@ -56,7 +56,7 @@ describe('ADR-0090 D5 closures: /me/apps + anchor-bindable baseline', () => {
     // asymmetry #7001 closed. The harness now honours an app's declared default,
     // so the file that genuinely wants the platform's own baseline asks for it.
     // Nothing about the claim below changed; only who is saying it.
-    stack = await bootStack(showcaseStack, { security: new SecurityPlugin() });
+    stack = await bootShowcase({ security: new SecurityPlugin() });
     adminTok = await stack.signIn();
     memberTok = await stack.signUp('baseline-member@verify.test');
     ql = await stack.kernel.getServiceAsync('objectql');

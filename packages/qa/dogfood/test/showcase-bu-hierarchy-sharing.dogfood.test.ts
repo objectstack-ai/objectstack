@@ -30,8 +30,8 @@
 // authz-row: hierarchy-widening
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 
 const OBJ = '/data/showcase_private_note';
@@ -50,7 +50,7 @@ describe('showcase: business-unit hierarchy sharing rule (ADR-0057 D6 / #2077)',
     // grant-less sign-up can no longer create the private note this fixture
     // shares. Boot the showcase the way the CLI does — under its OWN declared
     // default profile, which grants `showcase_private_note` create/read/edit.
-    stack = await bootStack(showcaseStack, { security: showcaseAppDefaultSecurity() });
+    stack = await bootShowcase({ security: showcaseAppDefaultSecurity() });
     await stack.signIn();
     ownerTok = await stack.signUp('bu-owner@verify.test');
     mgrTok = await stack.signUp('bu-mgr@verify.test');       // parent BU

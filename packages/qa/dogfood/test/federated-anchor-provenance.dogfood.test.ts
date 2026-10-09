@@ -35,7 +35,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack, { onEnable } from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import type { IObjectQLEngine, ISecurityService } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
 import {
@@ -105,7 +106,7 @@ describe('[#7865] injected-anchor provenance on a real showcase boot', () => {
 
   beforeAll(async () => {
     await onEnable({ logger: { info() {}, warn() {} } } as never);
-    stack = await bootStack(showcaseStack, { multiTenant: 'posture-only' });
+    stack = await bootShowcase({ multiTenant: 'posture-only' });
     ql = stack.kernel.getService<IObjectQLEngine>('objectql');
     security = stack.kernel.getService<ISecurityService>('security');
     federated = ql.getSchema(FEDERATED) as ServiceObject;

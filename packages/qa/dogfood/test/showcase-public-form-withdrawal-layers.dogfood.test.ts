@@ -7,22 +7,29 @@
 //
 // The showcase ships `showcase_inquiry.contact`, a FormView open to anonymous
 // intake at `/forms/contact-us`. The administrator saves it the way the editor
-// does (`PUT /meta/view/...` at their own session), env-wide (no active
-// organization) or in their organization (`orgContext: true` gives the admin
-// one, and it is the organization the anonymous doors read). Pinned:
+// does (`PUT /meta/view/...` at their own session) — and since ADR-0131 D6
+// retired the per-organization overlay axis, that save lands ENVIRONMENT-WIDE
+// even when the admin has an active organization.
 //
-//   - an organization overlay that keeps the form open does not survive an
-//     env-wide withdrawal: both anonymous doors answer `404 FORM_NOT_FOUND`
-//     and nothing lands;
-//   - an organization-scoped save that would leave it open (a re-save of
-//     the overlay open from before, or a re-open) is refused
-//     (`403 NOT_OVERRIDABLE`) and the doors stay closed;
-//   - withdrawn in the organization while open env-wide: closed;
-//   - open at both layers (control): both doors accept.
+// The anonymous form doors still read the Default Organization's layer for
+// its withdrawals, fail-closed, until ADR-0131 C7 carries those rows to the
+// environment layer (triage ruling Q3 A on the retirement card). No door can
+// write such a row any more, so this file PLANTS legacy organization rows
+// straight through the protocol, the way a door wrote them before the
+// retirement, and pins:
+//
+//   - a legacy organization overlay that keeps the form open does not survive
+//     an environment withdrawal: both anonymous doors answer
+//     `404 FORM_NOT_FOUND` and nothing lands;
+//   - ⭐ a legacy organization WITHDRAWAL still closes the form while it is
+//     open environment-wide (the read Q3 A keeps);
+//   - the admin's save with an active organization is environment-wide;
+//   - open at both layers (control): both doors accept, and the row lands in
+//     the organization the doors resolve.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 
 const VIEW = '/meta/view/showcase_inquiry.contact';
@@ -35,6 +42,8 @@ describe('showcase: a public form withdrawal at any metadata layer holds', () =>
   let ql: any;
   let published: Record<string, any>;
   let organizationId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let protocol: any;
   let probeSeq = 0;
 
   /** Both anonymous doors, plus how many rows a submit with a unique marker left. */
@@ -69,6 +78,16 @@ describe('showcase: a public form withdrawal at any metadata layer holds', () =>
     return { status: res.status, json: (await res.json()) as Record<string, any> };
   };
 
+  /** Plant a LEGACY organization-scoped overlay, as a door wrote one before ADR-0131 D6. */
+  const plantLegacyOrgOverlay = async (allowAnonymous: boolean) => {
+    const item = structuredClone(published);
+    item.config.sharing.allowAnonymous = allowAnonymous;
+    const result = await protocol.saveMetaItem({
+      type: 'view', name: 'showcase_inquiry.contact', item, organizationId,
+    });
+    expect(String(result?.message ?? ''), JSON.stringify(result)).toContain(`org=${organizationId}`);
+  };
+
   const saved = async (allowAnonymous: boolean) => {
     const r = await save(allowAnonymous);
     expect(r.status, JSON.stringify(r.json)).toBe(200);
@@ -76,7 +95,7 @@ describe('showcase: a public form withdrawal at any metadata layer holds', () =>
   };
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       orgContext: true,
       security: new SecurityPlugin({ defaultPermissionSets: [...securityDefaultPermissionSets] }),
     });
@@ -91,48 +110,35 @@ describe('showcase: a public form withdrawal at any metadata layer holds', () =>
     const orgs = await ql.find('sys_organization', { fields: ['id'], limit: 2, context: SYS });
     expect(orgs, 'the showcase boot holds exactly one organization').toHaveLength(1);
     organizationId = orgs[0].id;
+    protocol = await stack.kernel.getServiceAsync('protocol');
   }, 120_000);
 
   afterAll(async () => {
     await stack?.stop();
   });
 
-  it('PRECONDITION: an organization overlay that keeps the form open is served', async () => {
-    await scope(organizationId);
-    expect(await saved(true), 'the save is an organization overlay').toContain(`org=${organizationId}`);
+  it('PRECONDITION: a legacy organization overlay that keeps the form open is served', async () => {
+    await plantLegacyOrgOverlay(true);
     expect(await probe()).toEqual(OPEN);
   });
 
-  it('withdrawn env-wide beneath an open organization overlay: both doors refuse and nothing lands', async () => {
-    await scope(null);
-    expect(await saved(false)).toMatch(/env-wide/);
-    expect(await probe()).toEqual(CLOSED);
-  });
-
-  it('an organization-scoped save that would leave it open is refused, and the doors stay closed', async () => {
+  it('withdrawn by an admin WITH an active organization: the save is environment-wide, and it closes the form beneath the open legacy overlay', async () => {
     await scope(organizationId);
-    // The organization overlay is still open from before the withdrawal:
-    // re-saving it as it is would leave open a withdrawn form.
-    const resave = await save(true);
-    expect(resave.status, JSON.stringify(resave.json)).toBe(403);
-    expect(resave.json.code ?? resave.json.error?.code).toBe('NOT_OVERRIDABLE');
-    // Withdrawing it there is accepted; re-opening it is refused again.
-    expect((await save(false)).status).toBe(200);
-    const reopen = await save(true);
-    expect(reopen.status, JSON.stringify(reopen.json)).toBe(403);
-    expect(reopen.json.code ?? reopen.json.error?.code).toBe('NOT_OVERRIDABLE');
+    expect(await saved(false), 'an org-active admin\'s save is environment-wide (ADR-0131 D6)').toMatch(/env-wide/);
     expect(await probe()).toEqual(CLOSED);
   });
 
-  it('withdrawn in the organization while open env-wide: both doors refuse', async () => {
+  it('⭐ a legacy organization WITHDRAWAL still closes the form while it is open environment-wide (fail-closed until C7)', async () => {
     await scope(null);
     expect(await saved(true)).toMatch(/env-wide/);
+    await plantLegacyOrgOverlay(false);
     expect(await probe()).toEqual(CLOSED);
   });
 
   it('open at both layers (control): both doors accept and the row lands in the organization', async () => {
     await scope(organizationId);
-    expect(await saved(true)).toContain(`org=${organizationId}`);
+    expect(await saved(true)).toMatch(/env-wide/);
+    await plantLegacyOrgOverlay(true);
     const marker = `layer_probe_${probeSeq + 1}`;
     expect(await probe()).toEqual(OPEN);
     const [row] = await ql.find('showcase_inquiry', { where: { name: marker }, context: SYS });

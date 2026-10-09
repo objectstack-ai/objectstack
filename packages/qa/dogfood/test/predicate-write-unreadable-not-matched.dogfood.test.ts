@@ -49,19 +49,19 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { StorageServicePlugin } from '@objectstack/service-storage';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import {
-  AttCase,
-  AttSecret,
-  AttReadonly,
+  buildAttCase,
+  buildAttSecret,
+  buildAttReadonly,
   attFixtureBaselineSet,
   attachmentManagerSet,
 } from './fixtures/attachments-fixture.js';
-import { CmtOpen, CmtPrivate, CmtReadonly, commentManagerSet } from './fixtures/comments-fixture.js';
+import { buildCmtOpen, buildCmtPrivate, buildCmtReadonly, commentManagerSet } from './fixtures/comments-fixture.js';
 import { armedWhen, assertArmed, leaveOrganization, principalArmed, resolveAuthzFor } from './armed.js';
 
 const SYS = { isSystem: true } as const;
 
 /** The plain row-level-security object: reads reach own or shared rows, writes reach own rows or one team's. */
-const PwLedger = ObjectSchema.create({
+const buildPwLedger = () => ObjectSchema.create({
   name: 'pw_ledger',
   label: 'Predicate Write Ledger',
   pluralLabel: 'Predicate Write Ledgers',
@@ -85,17 +85,28 @@ const ledgerMemberSet: PermissionSet = PermissionSetSchema.parse({
   ],
 });
 
-const stackDefinition = defineStack({
-  manifest: {
-    id: 'com.dogfood.predicate-write-unreadable-not-matched',
-    version: '0.0.0',
-    type: 'app',
-    name: 'Predicate write: an unreadable row is not matched',
-    description:
-      'Open, private and read-only parents for sys_attachment and sys_comment, and a row-level-security ledger: the predicate write answer for rows the caller cannot read, beside the answer for a predicate matching nothing.',
-  },
-  objects: [AttCase, AttSecret, AttReadonly, CmtOpen, CmtPrivate, CmtReadonly, PwLedger],
-});
+/**
+ * [#22301] A BUILDER, called once per boot: this file keeps two stacks live at
+ * once (outside and inside the organization), and `bootStack`'s instance rule
+ * refuses a second live boot of one configuration object. A shallow copy would
+ * not be a configuration of its own — a boot keeps live references into the
+ * nested definitions it registers (the registry stores each object as a shallow
+ * copy whose field definitions are the authored objects:
+ * `packages/objectql/src/registry.ts`, `definition: { ...schema, name: fqn }`) —
+ * so every nested definition is built again.
+ */
+const buildStackDefinition = () =>
+  defineStack({
+    manifest: {
+      id: 'com.dogfood.predicate-write-unreadable-not-matched',
+      version: '0.0.0',
+      type: 'app',
+      name: 'Predicate write: an unreadable row is not matched',
+      description:
+        'Open, private and read-only parents for sys_attachment and sys_comment, and a row-level-security ledger: the predicate write answer for rows the caller cannot read, beside the answer for a predicate matching nothing.',
+    },
+    objects: [buildAttCase(), buildAttSecret(), buildAttReadonly(), buildCmtOpen(), buildCmtPrivate(), buildCmtReadonly(), buildPwLedger()],
+  });
 
 function security(): SecurityPlugin {
   return new SecurityPlugin({
@@ -129,7 +140,7 @@ interface Booted {
  */
 async function boot(inside: boolean, email: string): Promise<Booted> {
   const rootDir = mkdtempSync(join(tmpdir(), 'predicate-write-nm-'));
-  const stack = await bootStack(stackDefinition as never, {
+  const stack = await bootStack(buildStackDefinition() as never, {
     orgContext: inside,
     security: security(),
     extraPlugins: [

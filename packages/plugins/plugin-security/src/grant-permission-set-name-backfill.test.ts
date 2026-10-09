@@ -364,14 +364,25 @@ describe('[ADR-0131 D4] grant name backfill — every name agrees with the id an
   }
 });
 
-describe('[ADR-0131 D4] grant name backfill — no principal’s grants change', () => {
+describe('[ADR-0131 D4] grant name backfill — every principal’s grants are back once the names are', () => {
   for (const posture of ['single', 'isolated'] as const) {
-    it(`${posture}: platform administrator, organization administrator, member and agent resolve to the golden before and after`, async () => {
+    it(`${posture}: an unnamed grant confers nothing through the resolver; after the backfill every principal resolves to the golden`, async () => {
       const world = await boot(posture);
       await seedPrincipals(world, posture);
       await clearAllNames(world.engine);
 
-      expect(await grantsByPrincipal(world.engine)).toEqual(GOLDEN[posture]);
+      // The resolver reads a grant's set by its name (ADR-0131 C2 stage S5a),
+      // so a grant the backfill has not named yet confers nothing.
+      const unnamed = (await grantsByPrincipal(world.engine)) as Record<string, any>;
+      expect(unnamed.member.permissions).not.toContain('viewer_readonly');
+      expect(unnamed.organizationAdmin.permissions).toEqual([]);
+      expect(unnamed.organizationAdmin.posture).toBe('MEMBER');
+      if (posture === 'single') {
+        // The promoted first user's grant row is the anchor; walled, the
+        // declared owner is, and no grant row carries it.
+        expect(unnamed.platformAdmin.permissions).not.toContain('admin_full_access');
+        expect(unnamed.platformAdmin.posture).not.toBe('PLATFORM_ADMIN');
+      }
       const outcome = await runOneTimeGrantPermissionSetNameBackfill(world.engine as any, {
         catalog: world.catalog, logger: newLogger(),
       });
@@ -675,8 +686,8 @@ describe('[ADR-0131 D4] grant name backfill — boot wiring', () => {
 
 /**
  * The resolver's envelope per principal — recorded from the tree BEFORE the
- * name column existed (the S4a grant-equivalence golden), and unchanged by
- * clearing the names or by the backfill: no reader reads the name yet.
+ * name column existed (the S4a grant-equivalence golden). The backfill brings
+ * every principal back to it once the resolver reads the name (stage S5a).
  */
 const GOLDEN: Record<Posture, unknown> = {
   single: {

@@ -10,7 +10,7 @@
 // consulted the predicate directly, so those two spellings read and wrote
 // env-wide while their singular twins were org-scoped.
 //
-// The correction is at the boundary: doors fold through
+// The correction is at the boundary: callers fold through
 // `canonicalMetaUrlType` BEFORE asking. These cases pin BOTH halves:
 //
 //   1. the COMPOSED contract (fold → predicate) answers the registry flag
@@ -24,10 +24,10 @@
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { META_URL_TO_SINGULAR, canonicalMetaUrlType } from '@objectstack/spec/meta-spelling';
+import * as metadataCore from './index.js';
 import {
     declaresOrgOverride,
     organizationIdForMetaRead,
-    organizationIdForMetaWrite,
 } from './meta-write-org-scope.js';
 
 const ORG = 'org_alpha';
@@ -44,10 +44,6 @@ describe('#10340 org scope composed with the boundary fold', () => {
         // arrives already covered.
         for (const [spelling, folded] of Object.entries(META_URL_TO_SINGULAR)) {
             const expected = REGISTRY_FLAG.get(folded) === true ? ORG : undefined;
-            expect(
-                organizationIdForMetaWrite(canonicalMetaUrlType(spelling), ORG),
-                `composed write scope for '${spelling}' (folds to '${folded}')`,
-            ).toBe(expected);
             expect(
                 organizationIdForMetaRead(canonicalMetaUrlType(spelling), ORG),
                 `composed read scope for '${spelling}' (folds to '${folded}')`,
@@ -77,5 +73,13 @@ describe('#10340 org scope composed with the boundary fold', () => {
         // callers, stays: manifest spellings of overridable types hold.
         expect(declaresOrgOverride('views')).toBe(true);
         expect(declaresOrgOverride('emailTemplates')).toBe(true);
+    });
+});
+
+describe('ADR-0131 D6 — the write-side twin retired', () => {
+    it('`organizationIdForMetaWrite` is no longer exported: no `/meta` door threads an organization into a write', () => {
+        expect('organizationIdForMetaWrite' in metadataCore).toBe(false);
+        // Control: the read gate the protocol still runs is exported from the same barrel.
+        expect('organizationIdForMetaRead' in metadataCore).toBe(true);
     });
 });
