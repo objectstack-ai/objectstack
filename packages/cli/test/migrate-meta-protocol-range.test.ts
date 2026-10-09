@@ -40,8 +40,10 @@
  *     land is caught by the re-check and restored; the planner refuses a range
  *     literal it cannot prove, by the same refusal kinds.
  *
- * The 17 → 18 shape is a second row of {@link SHAPES}, once the runtime
- * implements protocol 18.
+ * {@link SHAPES} pins cases 1 and 2 once per major migrated from: the
+ * `--from 16` shape the fix was first pinned on, while the runtime implemented
+ * protocol 17, and the `--from 17` shape the defect was filed on, reachable
+ * since the runtime implements protocol 18.
  *
  * In-process over the real command (`MigrateMeta.run`) and the real load seam
  * (`AppPlugin.init` with a context double), against temp projects that link
@@ -87,8 +89,8 @@ const RUN_TIMEOUT = 120_000;
  * The shapes the load refuses on this runtime, one row per major migrated
  * FROM: the major, and one authored member the chain converts out of it — a
  * key the current schema tombstones, so the authored-source load hands it to
- * the chain as written. The 17 → 18 row joins once this runtime implements
- * protocol 18, with a member the protocol-18 step converts.
+ * the chain as written. The `--from 16` row's member is converted by the
+ * protocol-17 step, and the `--from 17` row's by the protocol-18 step.
  */
 const SHAPES = [
   {
@@ -98,6 +100,7 @@ const SHAPES = [
     before: ', striped: true',
     after: '',
   },
+  { from: 17, member: "dashboards: [{ name: 'ops', label: 'Ops', widgets: [], refreshInterval: 300 }]", converted: ['dashboard-refresh-interval-to-refresh-interval-seconds'], before: 'refreshInterval: 300', after: 'refreshIntervalSeconds: 300' },
 ];
 
 /** The range `--write` writes on this build: the scaffold's spelling, at this runtime's major. */

@@ -1629,8 +1629,8 @@ function coldBootConflictMessage(conflicts: readonly SecurityCatalogNameConflict
     `assignment names a position or a permission set by its bare name, so with two holders the environment's ` +
     `stored item would be served in place of the package's definition. The environment catalog loads from ` +
     `sys_metadata before this check, so the boot is refused. Rename the item in the package, or rename or ` +
-    `delete the environment's item (its environment-wide sys_metadata row: through the metadata API on a boot ` +
-    `that leaves the package out of the configuration, or in the database), then restart. ` +
+    `delete the environment's item (its environment-wide sys_metadata row: \`os migrate security-catalog-overlays\` ` +
+    `lists every such row with no server running, and with --apply deletes them), then restart. ` +
     `See ADR-0048.`
   );
 }
@@ -1720,6 +1720,32 @@ export class SecurityCatalogNameConflictError extends Error {
  */
 export function findEnvironmentHeldSecurityCatalogNames(registry: SchemaRegistry): SecurityCatalogNameConflict[] {
   return registry['environmentHeldSecurityCatalogConflicts']();
+}
+
+/**
+ * Every position and permission-set name a package holds, with the packages
+ * that hold it, read off `registry` — the PACKAGE half of the reading the
+ * cold-boot check refuses with ({@link findEnvironmentHeldSecurityCatalogNames}
+ * is this list met with the environment catalog's bare slot, and nothing else).
+ *
+ * Public for the one consumer that has the other half somewhere the registry
+ * does not: `os migrate security-catalog-overlays` (`@objectstack/cli`) boots
+ * the deployment's composition with `sys_metadata` hydration off, so the cold
+ * boot's environment half is empty there, and meets this list with the stored
+ * rows instead (maintainer ruling letter B on #22371, record 6074838935: one
+ * reading of "who holds a name", never a second one beside the cold boot's).
+ *
+ * The rule each entry obeys is the cold boot's, because it is the same private
+ * reading: a package holds a name through an item registered under it (its
+ * composite slot) or its install claim, never through the bare slot; only the
+ * types the environment catalog can hold are read; built-in names are skipped.
+ * Sorted by type (positions first), then name, as the cold-boot refusal lists
+ * its conflicts. Read-only: it records nothing.
+ */
+export function findPackageHeldSecurityCatalogNames(
+  registry: SchemaRegistry,
+): Array<{ readonly catalogType: SecurityCatalogType; readonly name: string; readonly packageIds: readonly string[] }> {
+  return registry['packageHeldSecurityCatalogNames']();
 }
 
 /**
@@ -2490,26 +2516,59 @@ export class SchemaRegistry {
    *
    * Sorted by type, then name, so two boots of one database report alike.
    *
-   * Private, like the rest of this rule's registry half, so the public surface
-   * does not grow; the engine plugin, which owns the boot sequence it is asked
-   * in, reaches it through the module-level {@link findEnvironmentHeldSecurityCatalogNames},
-   * which the package entries do not re-export.
+   * Computed as {@link packageHeldSecurityCatalogNames} met with the bare slot,
+   * so the package half is ONE reading: the cold boot asks it here, and
+   * `os migrate security-catalog-overlays` asks it through the exported
+   * {@link findPackageHeldSecurityCatalogNames} and meets it with the stored rows
+   * (maintainer ruling letter B on #22371, record 6074838935).
+   *
+   * Private, like the rest of this rule's registry half; the engine plugin,
+   * which owns the boot sequence it is asked in, reaches it through the
+   * module-level {@link findEnvironmentHeldSecurityCatalogNames}, which the
+   * package entries do not re-export.
    */
   private environmentHeldSecurityCatalogConflicts(): SecurityCatalogNameConflict[] {
     const conflicts: SecurityCatalogNameConflict[] = [];
-    for (const type of ENVIRONMENT_HELD_SECURITY_CATALOG_TYPES) {
-      const collection = this.metadata.get(type);
-      if (!collection) continue;
-      const environmentNames = [...collection.keys()]
-        .filter((key) => !key.includes(':') && !BUILT_IN_SECURITY_CATALOG_NAMES[type].has(key))
-        .sort();
-      for (const name of environmentNames) {
-        for (const packageId of this.securityCatalogPackageHolders(type, name)) {
-          conflicts.push({ catalogType: type, name, incomingPackageId: packageId, existingHolder: { kind: 'environment' } });
-        }
+    for (const { catalogType, name, packageIds } of this.packageHeldSecurityCatalogNames()) {
+      // The environment's item: the bare slot, whatever `_packageId` it wears.
+      // A held name never contains `:` and is never a built-in, so this is the
+      // bare-slot reading the method header states.
+      if (!this.metadata.get(catalogType)?.has(name)) continue;
+      for (const packageId of packageIds) {
+        conflicts.push({ catalogType, name, incomingPackageId: packageId, existingHolder: { kind: 'environment' } });
       }
     }
     return conflicts;
+  }
+
+  /**
+   * Every position and permission-set name a package holds, with its holders —
+   * the package half of {@link environmentHeldSecurityCatalogConflicts}, and the
+   * reading {@link findPackageHeldSecurityCatalogNames} exports.
+   *
+   * The candidate names are every composite slot's name and every install
+   * claim of the two types the environment catalog can hold
+   * ({@link ENVIRONMENT_HELD_SECURITY_CATALOG_TYPES}); each one's holders are
+   * {@link securityCatalogPackageHolders}'s answer, the one predicate. Built-in
+   * names are skipped, as the cold boot skips them (see the method above).
+   * Sorted by type in that list's order, then name.
+   */
+  private packageHeldSecurityCatalogNames(): Array<{ catalogType: SecurityCatalogType; name: string; packageIds: string[] }> {
+    const held: Array<{ catalogType: SecurityCatalogType; name: string; packageIds: string[] }> = [];
+    for (const type of ENVIRONMENT_HELD_SECURITY_CATALOG_TYPES) {
+      const candidates = new Set<string>();
+      for (const key of this.metadata.get(type)?.keys() ?? []) {
+        const sep = key.lastIndexOf(':');
+        if (sep > 0) candidates.add(key.slice(sep + 1));
+      }
+      for (const name of this.securityCatalogClaims.get(type)?.keys() ?? []) candidates.add(name);
+      for (const name of [...candidates].sort()) {
+        if (name === '' || BUILT_IN_SECURITY_CATALOG_NAMES[type].has(name)) continue;
+        const packageIds = this.securityCatalogPackageHolders(type, name);
+        if (packageIds.length > 0) held.push({ catalogType: type, name, packageIds });
+      }
+    }
+    return held;
   }
 
   /**

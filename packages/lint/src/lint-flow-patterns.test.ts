@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { TimeRelativeTriggerSchema, LoopConfigSchema, ParallelConfigSchema, TryCatchConfigSchema, HttpConfigSchema, FlowSchema, NotifyConfigSchema } from '@objectstack/spec/automation';
+import { TimeRelativeTriggerSchema, LoopConfigSchema, ParallelConfigSchema, TryCatchConfigSchema, HttpConfigSchema, FlowSchema, NotifyConfigSchema, textSlotTemplateRefusal } from '@objectstack/spec/automation';
 import { TYPED_EXPRESSION_DIALECT_ONLY, TYPED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec/shared';
 // [#5659] The shared identity reduction, asserted beside the rule that consumes
 // it — the rule's verdict and the drivers' verdict are one object now.
@@ -2532,6 +2532,34 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         expect(fnds.map((f) => f.rule)).toEqual([FLOW_BARE_DOLLAR_REF]);
         expect(fnds[0].message).toContain('notify title');
         expect(fnds[0].hint).toContain('{{ $error.message }}');
+      });
+
+      // [#22477] The hole a bare `$User.Id` would become is refused by the
+      // spec's text-slot judge (the engine binds no `$User`), so the hint gives
+      // the judge's own remedy — asked of the judge, not re-listed here.
+      it('gives the judge\'s remedy, not a refused hole, for a bare `$User.Id`', () => {
+        const fnds = notifyText('Closed by $User.Id');
+        expect(fnds.map((f) => f.rule)).toEqual([FLOW_BARE_DOLLAR_REF]);
+        const refusal = textSlotTemplateRefusal('{{ $User.Id }}');
+        expect(refusal).toBeDefined();
+        expect(fnds[0].hint).toContain(refusal!);
+        expect(fnds[0].hint).toContain("assignments: { v: '{$User.Id}' }");
+        expect(fnds[0].hint).not.toContain('{{ $User.Id }}');
+      });
+
+      it('control: a bare engine-bound `$error.message` keeps the hole prescription and no remedy', () => {
+        const fnds = notifyText('Failed: $error.message');
+        expect(fnds.map((f) => f.rule)).toEqual([FLOW_BARE_DOLLAR_REF]);
+        expect(fnds[0].hint).toContain('`{{ $error.message }}`');
+        expect(fnds[0].hint).not.toContain('assignments:');
+      });
+
+      it('answers each bare reference on its own when one slot carries both kinds', () => {
+        const fnds = notifyText('Failed: $error.message, closed by $User.Id');
+        expect(fnds).toHaveLength(1);
+        expect(fnds[0].hint).toContain('`{{ $error.message }}`');
+        expect(fnds[0].hint).toContain(textSlotTemplateRefusal('{{ $User.Id }}')!);
+        expect(fnds[0].hint).not.toContain('{{ $User.Id }}');
       });
     });
   });
