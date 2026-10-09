@@ -275,7 +275,21 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       // aliases are removed in a future major, so both carry a ledger row.
       'ui/page.zod.ts:PageComponentSchema.visibleWhen',
       'ui/page.zod.ts:PageComponentSchema.visibility',
-      'ui/view.zod.ts:ListViewShapeSchema.condition',
+      // [#22228] The conditional formatting rule's `condition`. Declared inline
+      // in `ListViewSchema` (`ui/view.zod.ts:ListViewShapeSchema.condition`)
+      // until it moved to its own module so a field definition could mount the
+      // same element. ONE declaring position, TWO mounts, and this row speaks
+      // for the position: the list view's row rule (and the `object-grid` /
+      // `object-kanban` blocks that reuse that member) is what objectui
+      // evaluates today. The second mount, `FieldSchema.conditionalFormatting`
+      // (a field's cell rule, scope `value` + `record`), has NO evaluator yet:
+      // its reader is objectui's cell renderer, its own card after the spec
+      // publishes. Its CEL is judged at authoring by lint's field walk
+      // (`validate-expressions.ts`), a reader of the source, not an evaluator.
+      // The position is this ledger's unit, so the field mount cannot carry a
+      // row of its own; the liveness ledger's `field.json` row
+      // `conditionalFormatting` (`planned`) is where its state is recorded.
+      'shared/conditional-formatting.zod.ts:ConditionalFormattingRuleSchema.condition',
       'ui/view.zod.ts:FormFieldBaseSchema.visibleWhen', 'ui/view.zod.ts:FormSectionSchema.visibleWhen',
       'ui/view.zod.ts:FormFieldBaseSchema.visibleOn', 'ui/view.zod.ts:FormSectionSchema.visibleOn',
       // `ui/component.zod.ts:onSubmit` (element:form's submit CEL) sat here

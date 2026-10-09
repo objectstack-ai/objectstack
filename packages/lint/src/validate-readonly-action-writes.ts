@@ -108,7 +108,7 @@ import {
   extractHookBodyWriteSet,
   type BodyWritePatternExclusion,
 } from './validate-hook-body-writes.js';
-import { buildReadonlyIndex } from './validate-readonly-flow-writes.js';
+import { buildReadonlyIndex, READONLY_WHEN_STRIP_SCOPE } from './validate-readonly-flow-writes.js';
 import { recordsOf } from './object-graph.js';
 
 export type ReadonlyActionWriteSeverity = 'warning';
@@ -304,12 +304,12 @@ export function validateReadonlyActionWrites(stack: AnyRec): ReadonlyActionWrite
         where,
         path: site.path,
         // The conditional strip is #3042; that `isSystem` is not an exemption
-        // for it is #9107's LOCK 2. Both ids stay in this comment.
+        // for it is #9107's LOCK 2. Both ids stay in this comment. [#22161] One
+        // verdict sentence; which strip elevation waives and which it does not
+        // is `os explain action-api-update-readonly-when-field`.
         message:
-          `body writes field '${w.field}' through ${call}, and object '${objectName}' declares it ` +
-          `readonlyWhen. An action body runs elevated, which exempts it from the STATIC readonly strip but ` +
-          `NOT from the conditional one - on records whose predicate is TRUE that UPDATE still drops the ` +
-          `field, so this write may silently not land depending on the record's state.`,
+          `body's ${call} writes readonlyWhen field '${w.field}', silently stripped ${READONLY_WHEN_STRIP_SCOPE} ` +
+          `even though an action body runs elevated`,
         hint:
           `Elevation is not a workaround here: an action body is already system-elevated and the ` +
           `readonlyWhen lock still applies, so ctx.api.sudo() changes nothing. Either confirm this call ` +

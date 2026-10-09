@@ -1041,9 +1041,15 @@ const appTranslationDataShape = () => ({
    *   pages.<name>.components.<componentId>.<key>
    *                             → that component's `properties.<key>` (#6080)
    *
-   * `title` falls back to `label` when omitted, since a page's header title
-   * and its nav/breadcrumb label are usually the same string — translators
-   * only author `title` separately when the two genuinely differ.
+   * When `title` is omitted, the header keeps the title its author wrote.
+   * `label` stands in for it only where the header authors no title, or where
+   * its title restates the page's own `label`: a page's header title and its
+   * nav/breadcrumb label are usually the same string, so translators only
+   * author `title` separately when the two genuinely differ (and
+   * `os i18n extract` offers `title` exactly then). A label never replaces a
+   * header title that says something else, such as a dynamic `'{name}'`: a
+   * bundle translates an attribute, it does not swap one attribute for
+   * another over authored text.
    *
    * Header copy lives at the TOP level here rather than under `components`
    * because `page:header` instances carry no stable `id`; the page name is the
@@ -1067,7 +1073,7 @@ const appTranslationDataShape = () => ({
   }, {
     label: z.string().optional().describe('Translated page label (nav / breadcrumb)'),
     description: z.string().optional().describe('Translated page description'),
-    title: z.string().optional().describe('Translated `page:header` title (defaults to `label`)'),
+    title: z.string().optional().describe('Translated `page:header` title. When omitted the header keeps its authored title; `label` stands in only where the header authors no title or its title restates the page label'),
     subtitle: z.string().optional().describe('Translated `page:header` subtitle'),
     /**
      * Per-component copy, keyed by the component's `id`

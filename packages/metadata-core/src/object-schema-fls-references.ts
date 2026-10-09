@@ -617,6 +617,13 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // this object's record. Deleted when it mentions a denied field: the caller
     // could not evaluate it, so their view keeps the overdue affordance.
     settledWhen: expression,
+    // A field's cell formatting rules (#22228): each `{ condition, style }`
+    // condition is CEL over this object's record (plus the field's own
+    // `value`). A rule that mentions a denied field is dropped WHOLE — dropping
+    // only its condition would leave a bare `style` that reads as always-on —
+    // and an emptied list is deleted. The `style` map names CSS properties,
+    // never a field.
+    conditionalFormatting: ruleEntries,
     relatedListFilter: fieldKeyed,
     defaultValue: expression,
     autonumberFormat: expression,

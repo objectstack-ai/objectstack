@@ -406,16 +406,17 @@ const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * A component that declares no props at all — `app:launcher`, `nav:menu`,
  * `nav:breadcrumb`, `global:search`, `global:notifications`,
- * `element:divider`, and the three plugin console widgets
+ * `element:divider`, the three plugin console widgets
  * `cloud-connection:panel` and `marketplace:installed-list` (#11575) and
- * `mcp:connect-agent` (#12344). `user:profile` left this list at #14159 — it
+ * `mcp:connect-agent` (#12344), and `record:approval_decision` (#22472), which
+ * reads the record context alone. `user:profile` left this list at #14159 — it
  * is not author-placeable at all, so its row refuses the whole bag
  * ({@link retiredComponentProps}).
  *
  * A factory rather than one shared `EmptyProps` const, because the surface name
  * is the whole value of the rejection here: an empty shape has no candidate
  * keys, so the edit-distance fallback can say nothing, and "unrecognized key on
- * this component" would leave the author guessing which of the nine it meant.
+ * this component" would leave the author guessing which of the ten it meant.
  * One `strictObject(` call site either way — the ledger counts sites from the
  * AST, and this is one.
  *
@@ -9376,6 +9377,22 @@ export const ComponentPropsMap = {
   // makes it known. Key set measured at the `.objectui-sha` pin; see the
   // schema's own header.
   'record:line_items': RecordLineItemsProps,
+  // #22472 — the approval decision panel (objectui#12045, ruling 6079807016,
+  // letter 乙: the props of the request page's decision node are checked by
+  // `os validate`). A `PageComponentType` member, declared spec first; see the
+  // enum's own note for why it is not a row-only string-arm type. The accepted
+  // key set is EMPTY, measured from the renderer's read points on objectui
+  // `main` at `d03b022` (`app-shell/src/views/approval-decision/
+  // ApprovalDecisionPanel.tsx`, landed in objectui `a368ccb`, still
+  // module-internal there): `ApprovalDecisionRenderer` discards the schema node
+  // (`schema: _schema`) and draws from the record context alone (the request
+  // row the page binds, with its `viewer` and `decision_progress`) and from
+  // `sys_approval_request`'s own declared actions. `className` and the designer
+  // attributes it reads are node-level, never `properties`. So the row is
+  // strict and refuses every key: a misspelled prop is a
+  // `component-props-unknown-key` finding instead of a silently dropped one.
+  // The panel draws nothing outside a `sys_approval_request` record page.
+  'record:approval_decision': emptyProps('record:approval_decision'),
 
   // Navigation
   'app:launcher': emptyProps('app:launcher'),
