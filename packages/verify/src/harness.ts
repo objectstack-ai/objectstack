@@ -146,7 +146,8 @@ function harnessCryptoProvider(): LocalCryptoProvider {
 /**
  * A booted stack: the HTTP surface (`api` / `raw` / `signIn` / `signUp` /
  * `apiAs`) plus the in-process handle (`hooks` / `validate` / `flows` /
- * `actions` / `seed` / `rows` / `metadata` / `tenancy` / `contextFor`) on the
+ * `actions` / `automation` / `seed` / `rows` / `metadata` / `tenancy` /
+ * `contextFor`) on the
  * same kernel — see `./handle.ts` for what each method is a facade over.
  */
 export interface VerifyStack extends VerifyHandle {
