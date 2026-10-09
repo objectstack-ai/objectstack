@@ -2602,20 +2602,22 @@ export const ElementTextPropsSchema = lazySchema(() => strictObject({
 
 /**
  * The three elements whose flat data-binding keys retired in v18 (#11509,
- * ruling A-narrow), and the keys each one carried. The single source for the
- * tombstones below, the `element-flat-data-binding-to-data-source` conversion
- * and the component-props gate's "no `dataSource.object`" refusal
- * (`@objectstack/lint`), so the three cannot disagree about which element owes
- * a binding.
+ * ruling A-narrow), and the keys each one carried — the source of the
+ * tombstones below. Module-private on purpose: exporting it would widen the
+ * published surface of a retirement that only narrows. The two readers that
+ * need the set — the `element-flat-data-binding-to-data-source` conversion and
+ * the component-props gate's missing-binding refusal (`@objectstack/lint`) —
+ * keep their own copy, and each copy is pinned against these tombstones by
+ * probing `ComponentPropsMap`, so none of the three can drift alone.
  */
-export const RETIRED_ELEMENT_FLAT_BINDING_KEYS = {
+const RETIRED_ELEMENT_FLAT_BINDING_KEYS = {
   'element:record_picker': ['object', 'filter', 'sort', 'limit'],
   'element:number': ['object', 'filter'],
   'element:repeater': ['object', 'filter', 'sort', 'limit'],
 } as const satisfies Readonly<Record<string, readonly ('object' | 'filter' | 'sort' | 'limit')[]>>;
 
 /** An element whose query is the node-level `dataSource` binding only. */
-export type RetiredFlatBindingElementType = keyof typeof RETIRED_ELEMENT_FLAT_BINDING_KEYS;
+type RetiredFlatBindingElementType = keyof typeof RETIRED_ELEMENT_FLAT_BINDING_KEYS;
 
 /** What the value of each retired key is — it moves unchanged. */
 const ELEMENT_FLAT_BINDING_VALUE = {

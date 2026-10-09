@@ -12,10 +12,12 @@
 // something.
 import { describe, expect, it } from 'vitest';
 import { normalizeStackInput } from '@objectstack/spec';
+import { ComponentPropsMap } from '@objectstack/spec/ui';
 import {
   validateComponentProps,
   COMPONENT_PROPS_UNKNOWN_KEY,
   COMPONENT_PROPS_INVALID,
+  DATA_SOURCE_BOUND_ELEMENT_TYPES,
 } from './validate-component-props.js';
 import { runAuthoringRules, AUTHORING_RULES } from './authoring-rules.js';
 
@@ -289,85 +291,118 @@ describe('validateComponentProps — value verdicts', () => {
   });
 
   /**
-   * `ElementDataSourceSchema` is the component-node binding that "overrides
-   * page-level object context", and objectui's element renderers read it FIRST
-   * (`ds.object ?? props.object`). A component that binds through it has not
-   * omitted the flat shorthand — so reporting the props schema's required
-   * `object` here would be a WRONG verdict, not a strict one.
+   * #11509 (v18, ruling A-narrow) — the waiver turned into a refusal. This
+   * rule used to WAIVE the props schema's required flat `object` whenever the
+   * node's `dataSource.object` was present, for every type alike; the flat
+   * binding keys of the three data-source-bound elements are retired now, and
+   * the requirement sits on the binding the renderers actually read. One of
+   * the three with no `dataSource.object` is a `component-props-invalid`
+   * finding AT that path — the rule's existing finding, not a new rule.
    */
-  it('does not report the required `object` prop when `dataSource` supplies it', () => {
-    const withDataSource = validateComponentProps(
-      stackWith([
-        {
-          type: 'element:record_picker',
-          id: 'picker',
-          dataSource: { object: 'project', limit: 50 },
-          properties: { labelField: 'name' },
-        },
-      ]),
-    );
-    expect(withDataSource).toEqual([]);
+  describe('the data-source-bound elements owe `dataSource.object` (#11509)', () => {
+    const BOUND = ['element:record_picker', 'element:number', 'element:repeater'] as const;
+    /** The props each element needs to parse clean on its own, binding aside. */
+    const PROPS: Record<(typeof BOUND)[number], Record<string, unknown>> = {
+      'element:record_picker': { labelField: 'name' },
+      'element:number': { aggregate: 'count' },
+      'element:repeater': { titleField: 'subject' },
+    };
 
-    // …and still reports it when nothing supplies it (or the suppression above
-    // would be indistinguishable from the rule never looking).
-    const without = validateComponentProps(
-      stackWith([{ type: 'element:record_picker', properties: { labelField: 'name' } }]),
-    );
-    expect(invalid(without).map((f) => f.path)).toEqual([
-      'pages[0].regions[0].components[0].properties.object',
-    ]);
-  });
+    it.each(BOUND)('%s with its object on the binding: no finding', (type) => {
+      const findings = validateComponentProps(
+        stackWith([{ type, dataSource: { object: 'deal' }, properties: PROPS[type] }]),
+      );
+      expect(findings).toEqual([]);
+    });
 
-  /**
-   * The waiver above covers a MISSING `object` only — no key, or `undefined`.
-   * A present value the row rejects is the author's own, and the binding
-   * supplies nothing in its place, so the row's verdict on it must reach the
-   * author exactly as it does with no binding at all. Each case is judged
-   * twice, beside the binding and without it, and the two answers must be the
-   * same finding: equality rather than wording, so the pin measures that the
-   * waiver lets the row's issue through unchanged.
-   */
-  it.each([
-    ['a number', 7],
-    ['null', null],
-  ])('reports a present-but-wrong `object` (%s) beside a `dataSource` binding, as it does without one', (_label, value) => {
-    const component = { type: 'element:number', properties: { object: value, aggregate: 'count' } };
-    const withBinding = validateComponentProps(
-      stackWith([{ ...component, dataSource: { object: 'contact' } }]),
-    );
-    const without = validateComponentProps(stackWith([component]));
+    it.each(BOUND)('%s with no binding: one finding, at `dataSource.object`', (type) => {
+      const findings = validateComponentProps(stackWith([{ type, properties: PROPS[type] }]));
+      expect(findings.map((f) => [f.rule, f.path, f.severity])).toEqual([
+        [COMPONENT_PROPS_INVALID, 'pages[0].regions[0].components[0].dataSource.object', 'warning'],
+      ]);
+      expect(findings[0]!.message).toContain(`\`${type}\` reads its records from the node-level \`dataSource\` binding`);
+      expect(findings[0]!.hint).toContain('dataSource: {');
+    });
 
-    // Control first: with nothing supplying `object`, the row reports it.
-    expect(without.map((f) => [f.rule, f.path])).toEqual([
-      [COMPONENT_PROPS_INVALID, 'pages[0].regions[0].components[0].properties.object'],
-    ]);
-    // The binding does not silence it.
-    expect(withBinding.map((f) => [f.rule, f.path])).toEqual([
-      [COMPONENT_PROPS_INVALID, 'pages[0].regions[0].components[0].properties.object'],
-    ]);
-    expect(withBinding).toEqual(without);
-  });
+    it.each([
+      ['a binding with no object', { view: 'hot_deals' }],
+      ['an empty object name', { object: '' }],
+      ['a non-string object', { object: 7 }],
+    ])('a binding that names no object (%s) is the same finding', (_label, dataSource) => {
+      const findings = validateComponentProps(
+        stackWith([{ type: 'element:number', dataSource, properties: { aggregate: 'count' } }]),
+      );
+      expect(invalid(findings).map((f) => f.path)).toEqual([
+        'pages[0].regions[0].components[0].dataSource.object',
+      ]);
+    });
 
-  it('still waives `object: undefined` beside a binding — an explicit undefined is a missing value', () => {
-    const findings = validateComponentProps(
-      stackWith([
-        {
-          type: 'element:number',
-          dataSource: { object: 'contact' },
-          properties: { object: undefined, aggregate: 'count' },
-        },
-      ]),
-    );
-    expect(findings).toEqual([]);
+    it('a node with no `properties` bag at all is judged too — the binding is a key of the node', () => {
+      const findings = validateComponentProps(stackWith([{ type: 'element:repeater' }]));
+      expect(invalid(findings).map((f) => f.path)).toEqual([
+        'pages[0].regions[0].components[0].dataSource.object',
+      ]);
+    });
 
-    // …and the same bag with no binding is reported, so the silence above is
-    // the waiver and not the row accepting `undefined`.
-    const without = validateComponentProps(
-      stackWith([{ type: 'element:number', properties: { object: undefined, aggregate: 'count' } }]),
-    );
-    expect(invalid(without).map((f) => f.path)).toEqual([
-      'pages[0].regions[0].components[0].properties.object',
-    ]);
+    it('control: an element outside the set owes no binding, and the old waiver is gone with the flat `object`', () => {
+      // `element:metadata_viewer` declares an `object` of its own (the metadata
+      // owner), unrelated to any binding — no binding is required of it.
+      const findings = validateComponentProps(
+        stackWith([
+          { type: 'element:text', properties: { content: 'Hi' } },
+          { type: 'element:metadata_viewer', properties: { type: 'flow', name: 'approve_deal' } },
+        ]),
+      );
+      expect(findings).toEqual([]);
+    });
+
+    /**
+     * THE REPEATER TRAP, closed from both sides. Before: a repeater bound only
+     * through `dataSource` passed this rule (the type-blind waiver) while its
+     * renderer read the flat keys alone and drew "No records"; the measured
+     * reading was 0 findings against the control's 1. After: that node is the
+     * clean shape (the renderer reads the binding, objectui#11880), and the
+     * node the old renderer DID read — a flat `object` — is refused twice: the
+     * tombstone at the key, with its prescription, and the missing binding.
+     */
+    it('the repeater trap: bound only through `dataSource` is clean; aimed by a flat `object` is refused', () => {
+      const bound = validateComponentProps(
+        stackWith([{ type: 'element:repeater', dataSource: { object: 'deal_note', limit: 5 }, properties: { titleField: 'subject' } }]),
+      );
+      expect(bound).toEqual([]);
+
+      const flat = validateComponentProps(
+        stackWith([{ type: 'element:repeater', properties: { object: 'deal_note', titleField: 'subject' } }]),
+      );
+      expect(invalid(flat).map((f) => f.path).sort()).toEqual([
+        'pages[0].regions[0].components[0].dataSource.object',
+        'pages[0].regions[0].components[0].properties.object',
+      ]);
+      const tombstone = invalid(flat).find((f) => f.path.endsWith('.properties.object'))!;
+      expect(tombstone.message).toMatch(/`element:repeater` property `object` was removed in @objectstack\/spec 18.*`dataSource\.object`/s);
+    });
+
+    /**
+     * The gate keeps its own copy of the set, because the spec publishes none
+     * (an export would widen a retirement that only narrows). This pin derives
+     * the set from `ComponentPropsMap` — every row whose flat `object` is a
+     * tombstone pointing at `dataSource.object` — so a fourth element retired
+     * the same way, or one of the three un-retired, reds here.
+     */
+    it('the set is the spec rows whose flat `object` is retired onto the binding', () => {
+      const derived = Object.entries(ComponentPropsMap)
+        .filter(([, schema]) => {
+          const parsed = (schema as { safeParse: (v: unknown) => { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; message: string }> } } })
+            .safeParse({ object: 'probe' });
+          return !parsed.success && parsed.error!.issues.some((i) =>
+            i.path.length === 1 && i.path[0] === 'object'
+            && i.message.includes('was removed') && i.message.includes('`dataSource.object`'));
+        })
+        .map(([type]) => type)
+        .sort();
+      expect(derived).toEqual([...BOUND].sort());
+      expect([...DATA_SOURCE_BOUND_ELEMENT_TYPES].sort()).toEqual(derived);
+    });
   });
 
   /**
@@ -382,7 +417,8 @@ describe('validateComponentProps — value verdicts', () => {
       stackWith([
         {
           type: 'element:record_picker',
-          properties: { object: 'project', displayField: 'name' },
+          dataSource: { object: 'project' },
+          properties: { displayField: 'name' },
         },
       ]),
     );
@@ -412,15 +448,15 @@ describe('validateComponentProps — value verdicts', () => {
   });
 
   /**
-   * #6276 — the #5068 worklist entry #5775's key-by-key ruling left behind.
-   * The picker's renderer reads FOUR keys through one `ds.<k> ?? props.<k>`
-   * pattern; two of the flat spellings were declared and two were not, so this
-   * gate reported `sort`/`limit` as undeclared while the renderer honoured
-   * them. Both halves of the rule are asserted, because they fail differently:
-   * the key must stop being an unknown-key finding, and its VALUE must now be
-   * judged (before the declaration a wrong `limit` was stripped in silence).
+   * #6276 declared the picker's flat `sort` / `limit` beside `object` /
+   * `filter`, because the renderer read all four through one
+   * `ds.<k> ?? props.<k>` pattern. #11509 (v18) retired the four: the
+   * renderer reads the binding alone since objectui#11880. Each flat key is
+   * now a tombstone whose prescription reaches the author through this rule's
+   * value verdict — whatever value was written, a valid one included — and
+   * the missing binding is its own finding beside them.
    */
-  it('reports nothing on the flat `sort` / `limit` shorthands the picker honours (#6276)', () => {
+  it('refuses the picker\'s four retired flat binding keys with their prescriptions (#11509)', () => {
     const findings = validateComponentProps(
       stackWith([
         {
@@ -429,28 +465,28 @@ describe('validateComponentProps — value verdicts', () => {
           properties: {
             object: 'showcase_project',
             labelField: 'name',
+            filter: [{ field: 'status', operator: 'equals', value: 'active' }],
             sort: [{ field: 'created_at', order: 'desc' }],
             limit: 20,
           },
         },
       ]),
     );
-    expect(findings).toEqual([]);
-  });
-
-  it('now judges the VALUE of a flat `limit` instead of stripping it (#6276)', () => {
-    const findings = validateComponentProps(
-      stackWith([
-        {
-          type: 'element:record_picker',
-          properties: { object: 'showcase_project', limit: 'twenty' },
-        },
-      ]),
-    );
-    expect(invalid(findings).map((f) => f.path)).toEqual([
-      'pages[0].regions[0].components[0].properties.limit',
+    const base = 'pages[0].regions[0].components[0]';
+    expect(invalid(findings).map((f) => f.path).sort()).toEqual([
+      `${base}.dataSource.object`,
+      `${base}.properties.filter`,
+      `${base}.properties.limit`,
+      `${base}.properties.object`,
+      `${base}.properties.sort`,
     ]);
-    expect(invalid(findings)[0].message).toContain('expected number, received string');
+    for (const key of ['object', 'filter', 'sort', 'limit']) {
+      const at = invalid(findings).find((f) => f.path === `${base}.properties.${key}`)!;
+      expect(at.message).toMatch(
+        new RegExp(`\`element:record_picker\` property \`${key}\` was removed in @objectstack/spec 18.*\`dataSource\\.${key}\``, 's'),
+      );
+    }
+    expect(unknownKeys(findings)).toEqual([]);
   });
 
   /**

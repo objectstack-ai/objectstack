@@ -7302,10 +7302,12 @@ const elementFilterRemoved: MetadataConversion = {
  * The element layer's retired flat data-binding keys, per element type — the
  * keys {@link elementFlatDataBindingToDataSource} moves onto the node-level
  * `dataSource`. Declared here rather than imported from
- * `ui/component.zod.ts` (its `RETIRED_ELEMENT_FLAT_BINDING_KEYS`), because this
- * module is kept free of the page-component schemas it would drag into every
- * bundle of the `./shared` entry (see {@link CONVERSIONS_BY_MAJOR});
- * `element-flat-data-binding-to-data-source.test.ts` holds the two equal.
+ * `ui/component.zod.ts`, whose list is module-private (exporting it would widen
+ * a retirement that only narrows) and which this module is kept free of, so
+ * the page-component schemas are not dragged into every bundle of the
+ * `./shared` entry (see {@link CONVERSIONS_BY_MAJOR}).
+ * `element-flat-data-binding-to-data-source.test.ts` holds this list equal to
+ * the tombstones `ComponentPropsMap` carries.
  */
 const ELEMENT_FLAT_BINDING_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   'element:record_picker': ['object', 'filter', 'sort', 'limit'],
