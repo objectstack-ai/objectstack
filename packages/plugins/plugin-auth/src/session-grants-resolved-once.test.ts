@@ -15,8 +15,9 @@
 // The measurement is a read count on the engine double, taken around one
 // `resolveAuthzContext` call whose `getSession` is the real better-auth one:
 //
-//   - with the engine's write-epoch seam present, the grant tables are read by
-//     ONE resolution;
+//   - with the engine's write-epoch and middleware seams present (the double
+//     runs them the way the engine does), on a warm engine, the grant tables
+//     are read by ONE resolution;
 //   - with the seam removed, core's memo declines and the same request reads
 //     them twice — the count before the memo existed, measured on the same
 //     engine and the same session;
@@ -80,10 +81,12 @@ const userIdFor = (engine: any, email: string): string => {
 };
 
 /**
- * Give the double the write-epoch seam a real ObjectQL engine carries, bumped
- * on every write verb, plus a read recorder switched on only around the
- * request being measured. Wraps the instance's own methods; the double itself
- * is unchanged.
+ * Give the double the two engine seams core's memo requires, run the way
+ * `ObjectQL.executeWithMiddleware` runs them: a write bumps the epoch FIRST,
+ * then the middleware chain runs with the driver step innermost; reads go
+ * through the same chain. Plus a read/write recorder switched on only around
+ * the request being measured. Wraps the instance's own methods; the double
+ * itself is unchanged.
  */
 function instrument(engine: any) {
   const epoch = {
@@ -92,6 +95,20 @@ function instrument(engine: any) {
     subscribe(_listener: (epoch: number, reason: string) => void) { return () => {}; },
   };
   engine.writeEpoch = epoch;
+  type Mw = (ctx: { object: string; operation: string }, next: () => Promise<void>) => Promise<void>;
+  const middlewares: Mw[] = [];
+  engine.registerMiddleware = (fn: Mw) => { middlewares.push(fn); };
+  const chain = async (ctx: { object: string; operation: string }, innermost: () => Promise<unknown>) => {
+    const applicable = [...middlewares];
+    let index = 0;
+    let result: unknown;
+    const next = async (): Promise<void> => {
+      if (index < applicable.length) await applicable[index++](ctx, next);
+      else result = await innermost();
+    };
+    await next();
+    return result;
+  };
   const reads: string[] = [];
   const writes: string[] = [];
   let recording = false;
@@ -100,16 +117,21 @@ function instrument(engine: any) {
     engine[verb] = async (...args: any[]) => {
       epoch.bump('write');
       if (recording) writes.push(`${verb} ${String(args[0])}`);
-      return original(...args);
+      return chain({ object: String(args[0]), operation: verb }, () => original(...args));
     };
+  }
+  for (const verb of ['findOne', 'count'] as const) {
+    const original = engine[verb].bind(engine);
+    engine[verb] = async (...args: any[]) => chain({ object: String(args[0]), operation: verb }, () => original(...args));
   }
   const originalFind = engine.find.bind(engine);
   engine.find = async (name: string, q?: any) => {
     if (recording) reads.push(name);
-    return originalFind(name, q);
+    return chain({ object: name, operation: 'find' }, () => originalFind(name, q));
   };
   return {
     reads,
+    middlewareCount: () => middlewares.length,
     async measure<T>(fn: () => Promise<T>): Promise<{ value: T; reads: string[]; writes: string[] }> {
       reads.length = 0;
       writes.length = 0;
@@ -175,8 +197,12 @@ const arrange = async () => {
  */
 const arrangeWarm = async () => {
   const a = await arrange();
-  const auth: any = await a.manager.getAuthInstance();
-  await auth.api.getSession({ headers: new Headers({ authorization: `Bearer ${a.bearers.owner}` }) });
+  // One request through the resolver: it generates the signing key AND
+  // registers core's write observer on the engine (that request stores nothing
+  // for the engine, and reads twice). Every later request is the warm one.
+  const warm = await resolveRequest(a, a.bearers.owner);
+  expect(warm.writes).toContain('insert sys_jwks');
+  expect(a.probe.middlewareCount()).toBe(1);
   return a;
 };
 
@@ -309,6 +335,12 @@ describe('the real customSession hook and resolveAuthzContext resolve the caller
 
   it('the kernel\'s first request writes its signing key inside the request: the memo declines, the envelope is unchanged', async () => {
     const a = await arrange();
+    // Register core's write observer with an anonymous request first (no
+    // session, no key generated), so the ONLY reason left for the member's
+    // first request to read twice is the write inside it.
+    const anonymous = await resolveRequest(a, null);
+    expect(anonymous.writes).toEqual([]);
+    expect(a.probe.middlewareCount()).toBe(1);
     const first = await resolveRequest(a, a.bearers.member);
     // The write happened between the hook's resolution and step 2…
     expect(first.writes).toContain('insert sys_jwks');

@@ -29,10 +29,11 @@
  * store, so two requests interleaving across their awaits each see only their
  * own, and it is CLOSED when `resolveAuthzContext` settles: a continuation that
  * outlives the resolution (a background task the session read started) reads
- * nothing and stores nothing. There is no module-level state and nothing
- * survives the request — ⛔ this is not a cache and must not become one; the
- * cross-request cache is `resolve-user-grants-cache.ts`, behind its own ruled
- * default-off switch.
+ * nothing and stores nothing. No envelope survives the request — ⛔ this is not
+ * a cache and must not become one; the cross-request cache is
+ * `resolve-user-grants-cache.ts`, behind its own ruled default-off switch. The
+ * only module-level state is the per-engine write observer below: two
+ * counters per engine, no grant data.
  *
  * A host whose async context does not propagate (WebContainer's
  * `node:async_hooks`) simply finds no scope, and every resolution is fresh —
@@ -47,13 +48,27 @@
  *    user is a different entry, and the engine (`ql`) is the outer key. Seeds
  *    are part of the key because they are part of the answer (see
  *    `resolve-user-grants-cache.ts`, "Keying").
- *  - **No write in between.** The engine's write epoch is read when the
- *    resolution OPENS, before its first read, and an entry is served only while
- *    that epoch has not moved — so a write through this engine that starts
- *    while the first resolution is reading, or between the two, makes the
- *    second one read afresh. A `ql` without the epoch seam declines entirely:
- *    an answer whose staleness cannot be observed is not served, not even for
- *    milliseconds.
+ *  - **No write has landed, or is landing, since the resolution opened.** Two
+ *    signals, both read when the resolution OPENS (before its first read) and
+ *    again when the entry is looked up:
+ *      1. The engine's write epoch. The engine bumps it when a write STARTS,
+ *         ahead of its middleware chain (and for non-write reasons: a declared
+ *         permission set, a peer's hint). It says nothing about when a write
+ *         LANDS, so on its own it would serve an entry read while a write that
+ *         had already bumped was still in flight, after that write landed.
+ *      2. The engine write observer: a middleware this module registers on
+ *         first sight of an engine, counting every write that enters it and,
+ *         in a `finally` around `next()`, every write whose driver step has
+ *         settled. The driver step runs INSIDE that `next()`, so a write cannot
+ *         land without first moving `started` and cannot finish without moving
+ *         `completed`.
+ *    An entry is served only when the epoch, `started` and `completed` all read
+ *    what they read at the open AND no write is inside the observer
+ *    (`started === completed`). So a write that started before the open and
+ *    lands after it, one that starts after it, and one still in flight at the
+ *    lookup all make step 2 read afresh. A `ql` without the epoch seam or
+ *    without `registerMiddleware` declines entirely: an answer whose staleness
+ *    cannot be observed is not served, not even for milliseconds.
  *  - **No validity boundary in between.** An ADR-0091 window flips with no
  *    write at all, so an entry is served only to a call whose clock lies in
  *    `[resolvedAt, nextBoundary)` — the interval on which every `isGrantActive`
@@ -68,23 +83,111 @@
  * session payload and the resolver puts its own into the request context, and
  * downstream code may mutate either; the two must never alias.
  *
- * ⚠️ What remains different from issuing every read twice, by design: the
- * request's grants are read at the FIRST resolution, a few milliseconds
- * earlier than the second used to read them. A write from another process —
- * invisible to this engine's epoch — that commits inside those milliseconds is
- * seen by the next request instead of this one, the same answer a write
- * committing just after the second read always got.
+ * ⚠️ What the observer cannot see, stated exactly. The engine snapshots its
+ * middleware list when a write starts, so a write that STARTED before the
+ * observer was registered on that engine never passes it. The observer is
+ * registered at the entry of the first `resolveAuthzContext` call that names
+ * the engine (and on first sight of any other engine a resolution reads), and
+ * the scope that registers it stores nothing for that engine — that request
+ * reads twice. What stays open is narrower: a write that began before that
+ * first call and is still in flight when a LATER request's resolution opens,
+ * landing between that resolution and its step 2. It is invisible to the
+ * epoch (it bumped before) and to the observer (it never enters it). Writes
+ * from another process are invisible here too: their rows are read as of the
+ * first resolution, a few milliseconds earlier than the second used to read
+ * them — the same answer a write committing just after the second read always
+ * got.
+ *
+ * The cost: on an engine with a concurrent write, step 2 reads afresh. That
+ * includes a session read that writes inside the request (the first request on
+ * a fresh auth instance generates its signing key; `enforceSessionControls`
+ * stamps `sys_session.last_activity_at` about once a minute per session when an
+ * idle timeout is configured) — the safe direction, with no saving on that
+ * request.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import type { ResolveUserAuthzGrantsOptions, UserAuthzGrants } from './resolve-authz-context.js';
 
+// ── The engine write observer ────────────────────────────────────────────────
+
+/**
+ * Per-engine write counters, advanced by {@link observeEngineWrites}'s
+ * middleware. `started - completed` is the number of writes inside the
+ * observer right now.
+ */
+interface EngineWriteObserver {
+  started: number;
+  completed: number;
+}
+
+/**
+ * Keyed on the engine instance: two engines in one process never share
+ * counters, and a dropped engine takes its counters with it. `null` records an
+ * engine whose middleware registration THREW — poisoned, never memoised
+ * behind, as the grants cache poisons a half-wired seam.
+ */
+const engineWriteObservers = new WeakMap<object, EngineWriteObserver | null>();
+
+/**
+ * The engine operations that read. Everything else the chain runs is counted
+ * as a write — including an operation this list has never heard of, so a new
+ * write verb is observed by default (the safe direction: a new READ verb would
+ * only cost a declined memo while one is in flight). The engine's own epoch
+ * advances for `insert` / `update` / `delete`.
+ */
+const READ_OPERATIONS: ReadonlySet<string> = new Set(['find', 'findOne', 'count', 'aggregate']);
+
+interface MiddlewareSeam {
+  registerMiddleware?: unknown;
+}
+
+/**
+ * Fetch — and on first sight of an engine, register — the write observer.
+ * Returns `{ observer, attachedNow }`, or `undefined` for an engine without
+ * `registerMiddleware` and for one whose registration threw.
+ */
+function observeEngineWrites(ql: object): { observer: EngineWriteObserver; attachedNow: boolean } | undefined {
+  const existing = engineWriteObservers.get(ql);
+  if (existing !== undefined) return existing ? { observer: existing, attachedNow: false } : undefined;
+
+  const register = (ql as MiddlewareSeam).registerMiddleware;
+  if (typeof register !== 'function') return undefined;
+
+  const observer: EngineWriteObserver = { started: 0, completed: 0 };
+  try {
+    (register as (
+      fn: (ctx: { operation?: unknown }, next: () => Promise<void>) => Promise<void>,
+    ) => void).call(ql, async (ctx, next) => {
+      const operation = ctx?.operation;
+      if (typeof operation === 'string' && READ_OPERATIONS.has(operation)) return next();
+      observer.started += 1;
+      try {
+        await next();
+      } finally {
+        observer.completed += 1;
+      }
+    });
+  } catch {
+    engineWriteObservers.set(ql, null);
+    return undefined;
+  }
+  engineWriteObservers.set(ql, observer);
+  return { observer, attachedNow: true };
+}
+
+// ── The request scope ────────────────────────────────────────────────────────
+
 interface RequestGrantsMemoEntry {
   /** A private clone of the resolved envelope. Never handed out directly. */
   value: UserAuthzGrants;
   /** The engine write epoch read when the resolution opened, before any read. */
   epochAtOpen: number;
+  /** The observer's `started` when the resolution opened. */
+  startedAtOpen: number;
+  /** The observer's `completed` when the resolution opened. */
+  completedAtOpen: number;
   /** The clock every `isGrantActive` verdict of the resolution was taken at. */
   resolvedAtMs: number;
   /** The earliest validity boundary after `resolvedAtMs`, if any row has one. */
@@ -96,6 +199,12 @@ interface RequestGrantsMemoScope {
   open: boolean;
   /** Outer key: the engine. Inner key: {@link memoKey}. */
   entries: WeakMap<object, Map<string, RequestGrantsMemoEntry>>;
+  /**
+   * Engines whose observer THIS scope registered. A write already in flight at
+   * registration never passes the observer, so this scope stores nothing for
+   * them.
+   */
+  attachedHere: WeakSet<object>;
 }
 
 const scopeStorage = new AsyncLocalStorage<RequestGrantsMemoScope>();
@@ -103,9 +212,12 @@ const scopeStorage = new AsyncLocalStorage<RequestGrantsMemoScope>();
 /**
  * Run `fn` — one `resolveAuthzContext` body — inside a fresh memo scope, and
  * close the scope when it settles. Nested calls each get their own scope.
+ * `ql` is the engine the body resolves against; its write observer is
+ * registered here, before any read, when this is the first call to name it.
  */
-export async function withRequestGrantsMemo<T>(fn: () => Promise<T>): Promise<T> {
-  const scope: RequestGrantsMemoScope = { open: true, entries: new WeakMap() };
+export async function withRequestGrantsMemo<T>(ql: unknown, fn: () => Promise<T>): Promise<T> {
+  const scope: RequestGrantsMemoScope = { open: true, entries: new WeakMap(), attachedHere: new WeakSet() };
+  if (ql && typeof ql === 'object' && observeEngineWrites(ql)?.attachedNow) scope.attachedHere.add(ql);
   try {
     return await scopeStorage.run(scope, fn);
   } finally {
@@ -144,9 +256,10 @@ export interface RequestGrantsMemoAttempt {
 
 /**
  * Open the memo for one resolution. Returns `undefined` — the plain fresh
- * path, no side effects — outside a `resolveAuthzContext` scope or after it
- * closed, for a `bypassGrantsCache` caller, and for a `ql` that is not an
- * object or carries no write epoch (`epochNow` undefined).
+ * path, no side effects beyond registering the engine's write observer — outside
+ * a `resolveAuthzContext` scope or after it closed, for a `bypassGrantsCache`
+ * caller, and for a `ql` that is not an object, carries no write epoch
+ * (`epochNow` undefined) or cannot register a middleware.
  *
  * `epochNow` is the engine's write epoch as `resolveUserAuthzGrants` reads it
  * (`readWriteEpoch`), passed in rather than re-derived so that the one
@@ -162,6 +275,10 @@ export function openRequestGrantsMemo(
   const scope = scopeStorage.getStore();
   if (!scope || !scope.open) return undefined;
   if (!ql || typeof ql !== 'object' || epochNow === undefined) return undefined;
+  const observed = observeEngineWrites(ql);
+  if (!observed) return undefined;
+  if (observed.attachedNow) scope.attachedHere.add(ql);
+  const { observer } = observed;
 
   const key = memoKey(userId, opts);
   const now = opts.nowMs ?? Date.now();
@@ -169,15 +286,20 @@ export function openRequestGrantsMemo(
   if (
     existing
     && existing.epochAtOpen === epochNow
+    && existing.startedAtOpen === observer.started
+    && existing.completedAtOpen === observer.completed
+    && observer.started === observer.completed
     && existing.resolvedAtMs <= now
     && (existing.nextBoundaryMs === undefined || now < existing.nextBoundaryMs)
   ) {
     return { hit: structuredClone(existing.value), commit: () => {} };
   }
 
+  const startedAtOpen = observer.started;
+  const completedAtOpen = observer.completed;
   return {
     commit(grants, resolvedAtMs, nextBoundaryMs) {
-      if (!scope.open) return;
+      if (!scope.open || scope.attachedHere.has(ql)) return;
       let perEngine = scope.entries.get(ql);
       if (!perEngine) {
         perEngine = new Map();
@@ -186,6 +308,8 @@ export function openRequestGrantsMemo(
       perEngine.set(key, {
         value: structuredClone(grants),
         epochAtOpen: epochNow,
+        startedAtOpen,
+        completedAtOpen,
         resolvedAtMs,
         nextBoundaryMs,
       });

@@ -358,7 +358,7 @@ async function tryFind(
  * The scope closes when this call settles; nothing outlives the request.
  */
 export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<ResolvedAuthzContext> {
-  return withRequestGrantsMemo(() => resolveAuthzContextInScope(input));
+  return withRequestGrantsMemo(input.ql, () => resolveAuthzContextInScope(input));
 }
 
 async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<ResolvedAuthzContext> {
@@ -746,11 +746,12 @@ export async function resolveUserAuthzGrants(
   //
   // Consulted first, the request-scoped memo (`request-grants-memo.ts`): inside
   // one `resolveAuthzContext` call, a resolution with these exact arguments that
-  // already completed — with no write through this engine since it opened and
-  // no validity boundary since its clock — is served instead of re-read. The
-  // epoch is read HERE, before any read of this resolution is issued. Outside
-  // that scope (every direct caller of this function) it is `undefined` and
-  // nothing changes.
+  // already completed — with no write started, landed or in flight on this
+  // engine since it opened, and no validity boundary since its clock — is
+  // served instead of re-read. The epoch and the engine's write counters are
+  // read HERE, before any read of this resolution is issued. Outside that
+  // scope (every direct caller of this function) it is `undefined` and nothing
+  // changes.
   const requestMemo = openRequestGrantsMemo(ql, userId, opts, readWriteEpoch(ql));
   if (requestMemo?.hit) return requestMemo.hit;
 
