@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from './registry.js';
 
 /**
@@ -419,32 +419,22 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             // this name, the row genuinely customizes it and the historical
             // sentence is the true one. Pinned so the split cannot collapse
             // into "never say overlay".
-            // A clone: `registerItem` stamps `_packageId` onto the item it is
-            // given, and `sampleApp` is shared by every case in this file.
-            registry.registerItem('app', { ...sampleApp }, 'name', 'com.acme.showcase');
+            // [ADR-0131 D6] The specimen is a packaged VIEW, the regime-O type
+            // whose overlay the registry allows. It was a packaged `app` behind
+            // the `OS_METADATA_WRITABLE=app` hatch (commit ee58392e1 rolled
+            // `app`'s `allowOrgOverride` back to `false`), but managed content
+            // is sealed now and the hatch no longer opens that overlay.
+            const sampleView = { name: 'test_grid', label: 'Test Grid', object: 'account', list: { columns: ['name'] } };
+            registry.registerItem('view', { ...sampleView }, 'name', 'com.acme.showcase');
 
-            // Commit ee58392e1 rolled `app`'s `allowOrgOverride` back to `false`
-            // (ADR-0005 table: ❌ for page/app/action), so overriding this
-            // packaged app needs the one documented door that remains — the
-            // `OS_METADATA_WRITABLE` operator escape hatch. The receipt
-            // wording pinned here is what an operator behind it would see.
-            process.env.OS_METADATA_WRITABLE = 'app';
-            (ObjectStackProtocolImplementation as any).resetEnvWritableCache();
-            resetEnvWritableMetadataTypes();
-            try {
-                const result = await protocol.saveMetaItem({
-                    type: 'app', name: 'test_app', item: sampleApp, organizationId: 'org_alpha',
-                });
+            const result = await protocol.saveMetaItem({
+                type: 'view', name: 'test_grid', item: sampleView, organizationId: 'org_alpha',
+            });
 
-                expect(result.success).toBe(true);
-                expect(result.message).toMatch(
-                    /^Saved customization overlay \(org=org_alpha, state=active\) — type=app, name=test_app \[seq=\d+\]$/,
-                );
-            } finally {
-                delete process.env.OS_METADATA_WRITABLE;
-                (ObjectStackProtocolImplementation as any).resetEnvWritableCache();
-                resetEnvWritableMetadataTypes();
-            }
+            expect(result.success).toBe(true);
+            expect(result.message).toMatch(
+                /^Saved customization overlay \(org=org_alpha, state=active\) — type=view, name=test_grid \[seq=\d+\]$/,
+            );
         });
 
         it('should fail-fast when DB findOne is unavailable (ADR-0005)', async () => {
