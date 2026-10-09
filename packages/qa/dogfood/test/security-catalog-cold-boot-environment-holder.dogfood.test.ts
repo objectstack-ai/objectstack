@@ -38,12 +38,20 @@
 //  - CONTROL: a package whose names the environment does not hold boots on a
 //    database whose environment holds others, and restarts.
 //
-// Each case boots its own database file. A refused boot leaves no kernel to
-// stop, so the files live in this test file's own working directory, which the
-// dogfood run removes at its end, rather than being removed here.
+// Each case boots its own database file, in a directory of its own directly
+// under the system temp directory. A refused boot leaves no kernel to stop, but
+// its directory can still be removed, so this file removes every directory it
+// created in its `afterAll`, once `afterEach` has stopped the last kernel. The
+// harness leaves a `databaseFile`'s lifetime to its caller.
+//
+// The base is spelled `join(tmpdir(), ...)` on purpose: the tree's
+// scratch-directory scan must be able to read every `mkdtempSync` base
+// (`scripts/pm/dispatch-gates.mjs`, "no mkdtempSync site in this tree takes a
+// base the scan cannot read"), and `process.cwd()` is not a base it reads.
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
@@ -104,14 +112,24 @@ const environmentConflicts = (set: string, position: string) => [
   { catalogType: 'permission', name: set, incomingPackageId: ADDON_ID, existingHolder: { kind: 'environment' } },
 ];
 
-/** A fresh database file in this test file's working directory (see the header). */
-const databaseFile = () => join(mkdtempSync(join(process.cwd(), 'catalog-cold-boot-')), 'deployment.db');
+/** Every directory `databaseFile()` created; the `afterAll` below removes them (see the header). */
+const createdRoots: string[] = [];
+
+/** A fresh database file in a directory of its own under the system temp directory (see the header). */
+const databaseFile = () => {
+  const root = mkdtempSync(join(tmpdir(), 'catalog-cold-boot-'));
+  createdRoots.push(root);
+  return join(root, 'deployment.db');
+};
 
 describe('ADR-0048 N.3: a package-held position or permission-set name the environment catalog holds refuses the cold boot, as it refuses a hot install', () => {
   let stack: VerifyStack | undefined;
   afterEach(async () => {
     await stack?.stop();
     stack = undefined;
+  });
+  afterAll(() => {
+    for (const root of createdRoots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 
   // The built-in control saves under two built-in position names, which the
