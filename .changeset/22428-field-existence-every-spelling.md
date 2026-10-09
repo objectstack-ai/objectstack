@@ -4,7 +4,7 @@
 
 fix(formula)!: the unknown-field check judges every spelling of a `record` / `previous` member, not only the dot, so `os build` and the object save door refuse `record['typo']`, `previous['typo']`, `record.?typo` and `record[?'typo']` (#22428)
 
-Clause-②: yes
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) A refusal at `os build` and at the object save door of an expression that names an undeclared field in a non-dot member spelling: no authorable key, spelling, export or stored shape moves, and no stored row is read, rewritten or converted. A stored object whose expression is refused keeps loading until it is next saved, and the repair is the author's own (declare the field or fix the typo), which no ledger entry can derive. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this verdict and this diff adds none (not registered / already-registered); and no exported TypeScript declaration changes (not runtime-interface-only / type-surface-only). -->
 
@@ -24,7 +24,6 @@ The pass now reads members through the same AST member reader the relationship-t
 
 - A computed key (`record[record.kind]`, `record[someVar]`) names no member before evaluation, so it is not judged.
 - A method call on a member (`record.name.startsWith('A')`) still judges the member (`name`).
-- Three shapes the regex misread as a member of the root are no longer refused, because none of them names one: text inside a string literal (`record.name == 'record.typo'` judges `name` only), a root name after another root (`vars.record.x`), and a method call on the root itself (`record.size()`).
 - Stored rows are not migrated or refused on read; an object stored before this change keeps loading until it is next saved, and that save is judged. Drafts are not gated.
 - Measured before crossing: the stacks this repository ships give the same expression findings before and after the change. That covers `examples/app-todo`, `examples/app-crm`, both `examples/app-multi-package` sub-stacks, the objects, actions, flows, views and pages of `examples/app-showcase`, the 51 objects `@objectstack/platform-objects` exports, and `plugin-approvals`' `sys_approval_request`, whose eight action predicates read the leaves of its declared `viewer` read attachment and pass. No in-repo producer writes a non-dot spelling of an undeclared field.
 - No public export or signature moves; only the doc comments of `ExprSchemaHint.fields` and `ExprSchemaHint.attachedOnRead` change. `analyzeRelationshipTraversals` answers exactly what it answered before: measured identical, set order included, on 4,528 analyses of the 2,264 `record` / `previous` expressions in this repository's TypeScript sources.
