@@ -99,8 +99,8 @@ describe('sys_file public-scope backfill (#22443 ruling B) — a real ObjectQL o
     try { await engine?.destroy(); } catch { /* already torn down */ }
   });
 
-  const sysFile = (id: string) => engine.findOne('sys_file', { where: { id }, ...SYSTEM } as any);
-  const allFiles = () => engine.find('sys_file', { orderBy: [{ field: 'id', order: 'asc' }], ...SYSTEM } as any);
+  const sysFile = (id: string) => engine.findOne('sys_file', { where: { id } });
+  const allFiles = () => engine.find('sys_file', { orderBy: [{ field: 'id', order: 'asc' }] });
 
   /**
    * A record write that names a file already owned by ANOTHER slot — the one
