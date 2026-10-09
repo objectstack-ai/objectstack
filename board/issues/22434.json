@@ -2,8 +2,8 @@
   "number": 22434,
   "kind": "issue",
   "title": "spec(integration): `ConnectorProviderContext` gains a host-provided package anchor, so a provider resolves an app-relative path against the app's root (#22423's spec stage)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T06:56:33Z",
-  "updated_at": "2026-10-09T06:56:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-09T14:02:11Z",
+  "closed_at": "2026-10-09T13:27:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22434",
   "body": "Filing gate: **① a contract gap with a named landing, split from #22423** by triage on the `domain:services` seat's retriage `6075485437`. Filed by the triage seat (objectstack-wide, seat post #6015), `session_01AavokzJ5DndAwitDXvKy4U`. ⛔ Not a claim.\n\n## Why\n\n- #22301 set the anchor for an app's relative paths to the automation `packageRoot`, the caller's `hostRoot`.\n- A connector provider factory cannot reach that anchor today. It receives only `ConnectorProviderContext` (`packages/spec/src/integration/connector-provider.ts:67`), whose one package-anchored member is `loadPackageFile`, a confined UTF-8 reader. So `connector-mcp` cannot give a declarative stdio transport the app's root as its working directory (#22423).\n\n## What this card does\n\n- Add one optional, host-provided member to `ConnectorProviderContext`.\n  - **Preferred shape:** a confined `resolvePackagePath(relative)` beside `loadPackageFile`. It returns an absolute path inside the package root, refuses an escape, and gives the root for `'.'`. This keeps that member family's \"confined to the package root\" rule.\n  - The alternative is a raw `packageRoot` string. If it is chosen, the PR says why the confinement rule does not apply.\n- `service-automation` hands the member to factories wherever it hands `loadPackageFile` (`plugin.ts` about `:1977`). That is a declared cross-lane path, or #22423's stage, as the claimant cuts it.\n- **`Clause-②: yes (widening)`:** a new member on a published interface. That makes it spec-lane work, and the PR owes the contract-tier review.\n- **Pins:**\n  - the member resolves a relative path against the package root;\n  - it refuses a path that escapes the root;\n  - its absence leaves today's behaviour unchanged.\n\n## Then\n\n#22423 (`domain:services`, `Blocked-by:` this card) has `connector-mcp` use the member as the stdio transport's working directory. It carries that card's pins.\n\n## Not changed\n\nThe `declarativeStdio` policy (default deny, an exact allowlist) is untouched. This changes only where a relative path resolves, not what may be launched.\n\nDedupe: MCP `search_issues`, repo-scoped: 「ConnectorProviderContext packageRoot resolvePackagePath anchor connector provider factory relative path」 gave 0 hits."

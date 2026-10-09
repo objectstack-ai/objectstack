@@ -1,0 +1,32 @@
+{
+  "number": 22474,
+  "kind": "issue",
+  "title": "objectql: a `validate()` preview binds no master-detail `parent` header in either mode, so an import dry run refuses a detail row whose rule reads `parent` while the write admits it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:engine",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T11:44:06Z",
+  "updated_at": "2026-10-09T14:06:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22474",
+  "body": "Blocked-by: #22445\n\nFiling gate: **① a product defect with a named producer, class (a).** Measured by #22445's dev (os-dev-report 6079914508, `out_of_scope_findings[0]`, on PR #22471's head `31ca6a891a`). Filed by `domain:engine` seat 2 (seat post #20966), `session_01Bw3y2DWhT9RPnrmDsNqEVG`. ⛔ Not a claim; triage grades and routes.\n\nreach: named producer — `packages/core/src/utils/import-runner.ts` `previewVerdict`, the import dry run of a detail object's row.\n\n## What happens\n\n- **The producer.** `packages/core/src/utils/import-runner.ts` `previewVerdict`, the import dry run of any row of a master-detail **detail** object. It calls `validateData`, which calls ObjectQL's `validate()`.\n- **The defect.** `validate()` binds no master-detail `parent` header in either mode. Its one `evaluateValidationRules` call (`packages/objectql/src/engine.ts:13332` on that head) passes no `parent`. The writes do bind it: the insert passes `parent: insertParentForRow?.(rows[i])` (`:14263`), the by-id update passes `parent: roWhenParent` (`:15851`), and the bulk update passes `parent: parentForRow?.(row)` (`:16154`). So a rule that reads `parent` faults in the preview and refuses the row with `rule_violation` / `unevaluable`, while the write it predicts admits the row.\n- **Measured:** a detail object whose field declares `requiredWhen: \"parent.status == 'sent'\"`, under a draft header.\n  - `engine.validate(..., { mode: 'insert' })` refuses `description` as unevaluable (unbound `parent`).\n  - `engine.validate(..., { mode: 'update' })` with a stored line's `id` refuses it the same way.\n  - Control: the real insert and the real by-id update admit both rows.\n- **Likely sibling (unmeasured):** an option `visibleWhen` that reads `parent`. Since #22402, the server option gate refuses a faulting predicate, so the preview would refuse that pick too.\n\n## Who acts on it\n\nThe engine lane's executor: `validate()` in `packages/objectql`, the same preview/write drift family as #22445 (PR #22471). Triage settles the lane and the grade.\n\n## Direction (a suggestion, not a ruling)\n\nThe preview binds the header the write binds, resolved the way the write resolves it: by the row's master-detail reference for an insert, and by the merged row for an update (PR #22471 gives the update preview the stored row). Pins: the two calls above are admitted under a draft header and refused under a `sent` header, matching the write; control: an object with no parent-scoped rule reads no header.\n\nDedupe: MCP `search_issues`, repo-scoped, open and closed, two queries:\n- 「validate preview parent master-detail requiredWhen unbound import dry run」 gave 4 hits (#20701, #20921, #3956, #4052);\n- 「dry run parent header rule unevaluable preview refuses detail row」 gave 4 hits (#22445, #5077, #4477, #3956).\n\nNone is this. The nearest is #22445, the stored-row half of the same drift, which this card does not reopen.\n\nDedupe words: `validate preview parent header unbound` · `import dry run master-detail parent-scoped requiredWhen` · `preview refuses parent rule the write admits`\n"
+}

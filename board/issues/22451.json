@@ -1,0 +1,33 @@
+{
+  "number": 22451,
+  "kind": "issue",
+  "title": "governance: lower the human-merge line threshold from 5,000 to 3,000 changed lines (`HUMAN_MERGE_LINE_THRESHOLD`), per the maintainer's 2026-10-09 ruling",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T09:31:58Z",
+  "updated_at": "2026-10-09T14:10:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22451",
+  "body": "Filing gate: **a maintainer ruling, recorded for execution.** Filed by the director seat (summon #35, `session_01VYToj6PQehTEKNrjGM9akg`, GitHub `os-zhuang`; written as `objectstack-fleet[bot]` via the relay), on the maintainer's words in the session chat, verbatim: 「这种大额改动就应该人工审核,我还是建议5000行的人工审核门槛降到 3000,立卡。」 ⛔ Not a decision card: the letter is given. ⛔ Not a claim; triage grades and routes it.\n\n## The ruling\n\nThe human-merge line threshold moves from **5,000 to 3,000 changed lines** (`additions + deletions`, generated files included). A pull request whose changed lines exceed 3,000 lands the way a Tier H surface does: an authorized APPROVED review (`os-zhuang` or `hotlong`) and then the owning seat, or a human merge. The predicate stays strictly greater: exactly 3,000 is under, 3,001 is over. Nothing else about the rule changes: the four-piece terminal set, no Tier S exception, generated files included, the per-repo coverage of `GOVERNED_REPOS`.\n\nLineage: 2026-09-18 「修改代码量超过某个行数(比如5000)就应该人工审核」; 2026-09-27 「所以阈值写死成 5000 行 , 维护者已经批准了就是可以合并。」 (objectstack#20153); 2026-10-09 the words above. The occasion was PR #22215 (7,802 + 756 changed lines, the protocol 17 → 18 bump), which the maintainer approved at its size; the maintainer's reading is that changes of that class need a human review, and the line that triggers one moves down.\n\n## Where the number lives (read on `origin/main` `440bed63e7`)\n\n- `scripts/pm/check-governed-merges.mjs:1105`: `export const HUMAN_MERGE_LINE_THRESHOLD = 5000;`, declared once; the predicate, the words it prints, `dispatch-gates.mjs`'s dispatch-time reading and the self-test read it from here (`:1098`–`:1104`: \"moving it is one word from the maintainer and one edit\").\n- Self-test pins on the number: `:5979` (the ruled default is 5000), `:5982`–`:5983` (exactly 5,000 is under), `:6052`, `:6172`, and the fixture subjects at `:6330` / `:6358`.\n- `scripts/pm/check-governed-queue-guard.mjs:336` (states 5,000 as the declared value), its printed guidance at `:1863` and `:1907`–`:1908`, its pins at `:3459`–`:3460` and `:3547`. These quote the earlier rulings verbatim; the quotes stay, the stated value changes.\n- `scripts/pm/check-skill-line-ratchet.mjs:324`–`:325` (describes the rule line).\n- `.claude/skills/pm-dispatch/SKILL.md:187` and `.claude/skills/pm-dispatch/references/landing-operations.md:58` (Tier S, `.claude/**`).\n- `AGENTS.md:510` (Tier H).\n\nobjectui and cloud carry no copy of the number in their governance files (grep on both `main`: 0 hits); `GOVERNED_REPOS` covers them from this script.\n\n## Acceptance\n\n- `HUMAN_MERGE_LINE_THRESHOLD = 3000`, still declared once; every reader above reads it from there; the self-test pins move with it (exactly 3,000 under, 3,001 over, the ruled default 3,000). The earlier maintainer quotes stay verbatim, with the 2026-10-09 words added beside them.\n- The skill lines, `landing-operations.md`, `AGENTS.md:510` and the queue guard's printed guidance say 3,000.\n- `check-governed-merges.mjs --self-test`, `check-governed-queue-guard.mjs --self-test` and `check-skill-line-ratchet.mjs` green.\n- Measured in the PR, for the record: how many pull requests merged in the last 30 days fell between 3,001 and 5,000 changed lines, the population the new line adds, so the maintainer sees the review load the ruling buys.\n- `Clause-②: no` (no published surface). The PR touches Tier H (`AGENTS.md`) and Tier S (`.claude/**`), so it waits on the maintainer's APPROVED review and then lands by the owning seat.\n\n## Not this card\n\n- No retroactive review of pull requests already approved or merged; PR #22215 is unaffected (approved by the maintainer at its size).\n- No change to which surfaces are governed, nor to the four-piece terminal set.\n\nDedupe: 115 open objectstack issues scanned (titles and bodies) for `5000`, `5,000`, `人工审核门槛`, `review threshold`, `line threshold`: no card on the threshold; the hits are seat posts. GitHub search is unavailable in this session (repo-scoped proxy).\n\nDedupe words: `HUMAN_MERGE_LINE_THRESHOLD 3000` · `human-merge line threshold lowered` · `changed lines exceed 3,000`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

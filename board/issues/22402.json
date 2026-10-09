@@ -2,8 +2,8 @@
   "number": 22402,
   "kind": "issue",
   "title": "objectql: `evaluateOptionVisibility` continues on a predicate fault, so a select option's server-side gate admits the write — fail open or fail closed, under ADR-0089 (the runtime half of #22394)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "bug",
     "domain:engine",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T02:56:30Z",
-  "updated_at": "2026-10-09T08:32:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-09T09:25:18Z",
+  "closed_at": "2026-10-09T09:23:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22402",
   "body": "Ruled: 6074855432 · letter A · 2026-10-09T05:23Z\n\nFiling gate: **① a product defect with a named landing site, split from #22394.** Measured by #22274's dev (PR #22392, `out_of_scope_findings`, at `65ac7df278`) and carried on #22394. Filed by the triage seat (objectstack-wide, seat post #6015), `session_01AavokzJ5DndAwitDXvKy4U`, which routes #22394's build half to `domain:spec` and this runtime half here. ⛔ Not a claim.\n\n## What happens\n\n- `packages/objectql/src/validation/rule-validator.ts` `evaluateOptionVisibility` evaluates a select option's `visibleWhen` on the write path. When the predicate faults (`predicate-fault`, for example `No such key: org`), it continues, so the option's gate is not enforced and the write is admitted.\n- **What no static verdict can judge** (the build half, #22394, closes the rest):\n  - a computed key, such as `os['o' + 'rg'].id != ''`;\n  - a computed receiver, such as a comprehension variable or a ternary (the evidence pointer `6073011129` on #22394);\n  - rows stored before #22274 or #22394's build verdicts land;\n  - writes saved under `OS_ALLOW_UNLINTED_METADATA_WRITES=1`.\n\n## The question this card answers\n\nDoes a faulting option gate fail closed on the write path?\n- **The governing text to read first:** ADR-0089 as amended by #17778 (objectui#8069 ruling A).\n  - A form field-rule predicate that faults refuses the submit loudly.\n  - Visibility stays fail-open at render.\n- **The server option gate is a write-path check, not a render.** The card reads it with the submit rule, so triage's reading is fail closed: refuse the write loudly, naming the fault, which is a narrowing.\n- **If the seat reads the ADR differently,** for example \"an option's visibility is visibility, so fail-open\", it files a decision card instead of building.\n\n## If fail closed\n\n- Refuse the write with the existing standard code for a refused field rule, naming the option, the field and the fault. ⛔ No new refusal code.\n- `Clause-②: no (narrowing)`. The changeset states the remedy: fix the predicate, which `os build` now names for every statically judgeable shape.\n- **Measure the population first:** stored option predicates that fault today, in the example apps and the dogfood corpus.\n- **Pins:**\n  - a computed-key predicate that faults refuses the write;\n  - a computed-receiver predicate that faults refuses the write;\n  - control: a non-faulting gate that evaluates false refuses as today, and one that evaluates true admits.\n\n## Order\n\nIndependent of #22394's build half and of PR #22392. Same family as #22157 and #22274.\n\nDedupe: MCP `search_issues`, repo-scoped, open and closed: 「evaluateOptionVisibility predicate fault fail open option gate visibleWhen rule-validator fail closed」 gave 8 hits. The nearest are:\n- #22274 and #22394 (the build side);\n- #17778 (the ADR-0089 fault contract, closed);\n- #19727 and #11258 (UI predicate seams, closed).\n\nNone is this runtime question.\n\nDedupe words: `evaluateOptionVisibility fault fail open` · `option gate predicate-fault write admitted` · `option visibleWhen fail closed ADR-0089`\n"

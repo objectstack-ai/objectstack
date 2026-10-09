@@ -1,0 +1,34 @@
+{
+  "number": 22455,
+  "kind": "issue",
+  "title": "security(attachments): the attach / delete gate asks plugin-sharing's canEdit, which reads every controlled_by_parent object as public — a member with sys_attachment create/delete writes files on child records they cannot edit",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:services",
+    "pm:blocked",
+    "priority:p1",
+    "security",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T09:57:37Z",
+  "updated_at": "2026-10-09T10:55:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22455",
+  "body": "Blocked-by: #22464\n\nFiling gate: **① product defect with reach measured. Class (a), security: a write past record-level authority.** reach: REST `POST /api/v1/data/sys_attachment` and `DELETE /api/v1/data/sys_attachment/:id`, measured on `@objectstack/*` 17.7.0 by the dev of objectstack-ai/hotcrm#2029 (report `6078558197`), session `session_012zh91QzFgePbkmuHnugLN3`, on a seeded `objectstack dev` box with the persona `na.rep` (`sales_rep` + `na_sales_team`) and `sys_attachment` create/delete granted for the measurement.\n\n**Who acts on it:** the objectstack triage seat routes it; the fix sits at the seam between `@objectstack/service-storage` (`attachment-access-hooks.ts`) and `@objectstack/plugin-sharing` (`sharing-service.ts`). Filed by the `repo:hotcrm` seat. ⛔ Not a claim. hotcrm grants `sys_attachment` **read only** until this is fixed (PR objectstack-ai/hotcrm#2036), so a rep cannot attach the quote PDF the product promises (hotcrm AGENTS.md §2: wait, no workaround).\n\n## What happens\n\n- `service-storage`'s attachment hooks gate an attach on `canEdit(parent)`, and a delete on uploader-or-`canEdit(parent)`, asked of the sharing service (`packages/services/service-storage/src/attachment-access-hooks.ts`, the `canEdit` port at `:70`).\n- `plugin-sharing`'s `effectiveSharingModel` maps `controlled_by_parent` to `'public'` (`packages/plugins/plugin-sharing/src/sharing-service.ts:116` on `main` `05c7c3fa3b`). Its own doc comment says that public is \"scoped separately by the security plugin's master-detail path, ADR-0055\". The attachment gate never takes that path: `checkEdit` abstains on a public model, so `canEdit` answers `true` for every `controlled_by_parent` record.\n\n## Measured (17.7.0)\n\nWith `sys_attachment` create and delete granted to `sales_rep`:\n- `na.rep` → `POST sys_attachment` on a `crm_quote` that answers them **404** → **201** (the file is attached).\n- On a `crm_contract` whose own `PATCH` answers them **403**: attach → **201**, and `DELETE` of the admin's executed-contract file → **200**.\n- **Control:** an attach to a private `crm_account` they cannot read → **403** `ATTACHMENT_PARENT_ACCESS`. The gate works on a model it does not collapse.\n\nIn hotcrm, `crm_contact`, `crm_quote` and `crm_contract` are `controlled_by_parent`. Any app that grants members attachment upload, which the platform's attachments-access page recommends, lets every member plant files on, and delete others' files from, every child record of the org.\n\n**Likely the same, NOT measured:** `plugin-audit`'s `sys_comment` gate asks the same `canEdit`.\n\n## Acceptance\n\n- The attach and delete gates resolve a `controlled_by_parent` parent through its master: the same answer `PATCH` gives on the parent record. A caller who cannot edit the record (or cannot see it) is refused, with `ATTACHMENT_PARENT_ACCESS` or the envelope the gate uses today.\n- Pins: an attach on a child whose master the caller cannot edit is refused, and a delete of another user's file on such a child is refused. Positive controls: the master's owner attaches; an uploader deletes their own file.\n- The same check for `sys_comment` if it shares the gate.\n\n## Related\n\n- #4630 and #7144 (closed): comment parent gates. #2970 (closed): attachments v2 parent-visibility inheritance. #5815 (closed): `getReadFilter` missing the `controlled_by_parent` derivation, the READ half of this same collapse.\n- The console's Attachments panel shows Upload and delete to a read-only grant; the upload then fails at the final attach (403) and leaves a committed `sys_file` with no attachment. Measured in the same run; separate (renderer), listed here for triage.\n\n## Duplicate check\n\n`gh search` is refused in this container (GraphQL and REST search answer 403). So all objectstack issues were listed into a local index (`/issues?state=all` through #22292, plus every issue updated since 2026-10-08) and matched case-insensitively:\n- `controlled_by_parent canEdit`: 1, closed (#7665: by-id writes without select-scope RLS, not attachments).\n- `effectiveSharingModel`: 3, closed (#9698, #7858, #5815).\n- `attachment parent canEdit`: 5, closed (#7145, #7144, #4647, #4630, #2970).\n- `ATTACHMENT_PARENT_ACCESS`: 3, closed (QA runs and #4647).\n- `sys_attachment create controlled`: 0.\n\nNone is this defect.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}

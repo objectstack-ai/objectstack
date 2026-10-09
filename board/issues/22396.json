@@ -2,7 +2,7 @@
   "number": 22396,
   "kind": "pull_request",
   "title": "fix(auth,services): the services-lane in-process session reads stop renewing a cookie session (#22258)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -23,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T02:23:32Z",
-  "updated_at": "2026-10-09T07:18:14Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-09T09:41:18Z",
+  "closed_at": "2026-10-09T09:41:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-09T09:41:16Z",
   "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/22396",

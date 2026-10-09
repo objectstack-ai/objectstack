@@ -1,0 +1,31 @@
+{
+  "number": 22487,
+  "kind": "issue",
+  "title": "platform-checklist: retire the drag-reorder step and acceptance clause of platform-core.shell-nav-personalization — end users do not reorder the runtime sidebar (maintainer ruling 2026-10-09)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T12:58:17Z",
+  "updated_at": "2026-10-09T13:58:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22487",
+  "body": "## Ruling\n\n**The maintainer, in chat on 2026-10-09** (session `64cb68a6-01c7-4dc6-acc6-ccb459c90ef2`), verbatim:\n\n> 右侧浏览器，左侧菜单在用户界面不应该显示拖动按钮，拖动设计是studio的工作。\n\nEnd users do not reorder the runtime sidebar; navigation order is authored in Studio. The implementation change is objectstack-ai/objectui#12059.\n\n## What to change\n\n`docs/qa/platform-checklist/areas/platform-core.json`, item `platform-core.shell-nav-personalization` (revision 1):\n- **Remove** step 3, `drag-reorder: reorder nav items by drag (UnifiedSidebar useNavOrder, enableReorder / onReorder=handleReorder); reload — the order persists (localStorage per-app key)`, and the acceptance clause that verifies it (acceptance[2], the one objectstack-ai/objectui#11626 was filed against).\n- **Optionally replace it** with a negative clause: the runtime sidebar draws no drag grip (`aria-roledescription=\"sortable\"`), and the rendered order is the app's authored order.\n- **Drop \"reorder\"** from the item's title and from the \"record which persistence each feature uses\" step (\"reorder + collapse are local\" becomes \"collapse is local\"). Bump `revision`.\n- **Unchanged:** collapse, pin/unpin, favorites, recents and breadcrumbs.\n\nWhy now: if the checklist keeps the clause, the next release run fails it again and re-files objectui#11626's opposite.\n"
+}

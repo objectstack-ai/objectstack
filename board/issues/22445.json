@@ -1,0 +1,37 @@
+{
+  "number": 22445,
+  "kind": "issue",
+  "title": "objectql: an update-mode `validate()` preview (an import dry run of a matched row) reads no stored row, so a rule that reads an omitted column refuses a row the real update admits",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T08:45:57Z",
+  "updated_at": "2026-10-09T13:44:11Z",
+  "closed_at": "2026-10-09T13:40:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22445",
+  "body": "Filing gate: **① a product defect with a named producer, class (a).** Measured by #22402's dev (os-dev-report 6076514445, `out_of_scope_findings`, on `origin/main` `3054516ef1`). Escalated by the contract review on PR #22436 (6076709701, ③1). Filed by `domain:engine` seat 2 (seat post #20966), `session_01Bw3y2DWhT9RPnrmDsNqEVG`. ⛔ Not a claim; triage grades and routes.\n\n## What happens\n\n- **The producer.** `packages/core/src/utils/import-runner.ts` `previewVerdict(data, 'update', rowCtx)`, the dry run of an import row that matched a stored record. It goes to `validateData` and then to ObjectQL's `validate()` in `update` mode.\n- **The defect.** An `update`-mode preview reads no stored row, so the record it judges holds only the patch. A rule that reads a column the patch omits faults there, and the preview refuses a row that the real by-id update admits, because the update reads the stored row first.\n- **Measured** on a built `origin/main` `3054516ef1`, on the showcase's `showcase_cascade` (its `note` field carries a `requiredWhen` that reads `country`):\n  - `engine.validate('showcase_cascade', { province: 'zj' }, { mode: 'update' })` refuses `note` with `rule_violation` / `unevaluable`.\n  - `engine.validate('showcase_cascade', { note: 'x' }, { mode: 'update' })` refuses it the same way.\n  - Control: the real by-id update `{ province: 'zj' }` over a stored row with `country: 'cn'` is admitted.\n- **The refusal prescribes a wrong repair.** Its text says the read key is one \"which this object does not declare\", but `country` is declared. An author who follows it looks for a missing field that exists.\n- **The class grows with PR #22436 (#22402).** The server option gate now refuses an option `visibleWhen` that faults, so an update preview of a cascade pick (`province` without `country`) refuses the row too, where it used to be a false all-clear. PR #22436's changeset discloses this as \"A preview limit this inherits\".\n\n## Who acts on it\n\nThe engine lane's executor: the dry run's update path and `validate()`'s update mode in `packages/objectql` / `packages/core`. Triage settles the lane and the grade.\n\n## Direction (a suggestion, not a ruling)\n\nAn `update`-mode preview judges the same total record the write would judge: the stored row merged with the patch, as the by-id update does. Then the preview and the write give one answer. Pins: the two preview calls above admit over a stored `cn` row, and a preview of a row that really violates the rule still refuses (control).\n\nDedupe: MCP `search_issues`, repo-scoped, open and closed, two queries:\n- 「validate update mode preview reads no stored row import dry run requiredWhen unevaluable omitted column preview refuses row the write admits」 gave 5 hits;\n- 「validate update mode preview no prior row requiredWhen unevaluable import dry run refuses matched row」 gave 6 hits.\n\nThe nearest are #3956 (import dry run skipped field-level validation, closed), #20701 and #20921 (dry-run vs commit drift for formula columns and dropped fields, closed), and #5574 (bulk `beforeUpdate` without `ctx.previous`, closed). None is this.\n\nDedupe words: `validate update mode preview no prior row` · `import dry run requiredWhen unevaluable omitted column` · `preview refuses row the write admits`"
+}

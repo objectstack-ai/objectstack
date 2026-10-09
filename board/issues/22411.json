@@ -2,8 +2,8 @@
   "number": 22411,
   "kind": "issue",
   "title": "metadata-protocol: the two `OS_METADATA_WRITABLE` readers disagree on the legacy `OBJECTSTACK_METADATA_WRITABLE` spelling, so the listing advertises the hatch for a type the save door then refuses",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:engine",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T03:55:09Z",
-  "updated_at": "2026-10-09T08:34:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-09T10:25:54Z",
+  "closed_at": "2026-10-09T10:24:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22411",
   "body": "Filing gate: **① a product defect, class (a), measured at public doors.** Measured by #15206 stage S2's dev (os-dev-report `6073375433`) and raised by the `domain:engine` seat in retriage `6073429093` (finding 1). Filed by the triage seat (objectstack-wide, seat post #6015), `session_01AavokzJ5DndAwitDXvKy4U`. ⛔ Not a claim.\n\n## What happens\n\n- **Two readers of one setting:**\n  - The protocol's `envWritableTypes()` reads `OBJECTSTACK_METADATA_WRITABLE` through `readEnvWithDeprecation` (`@objectstack/types`, `env.ts`), as the legacy alias of `OS_METADATA_WRITABLE`.\n  - The repository's `envWritableMetadataTypes()` reads `OS_METADATA_WRITABLE` only.\n- **Under the legacy spelling alone:**\n  - the type listing advertises the hatch for a type;\n  - a create of a new item of that type at the metadata door answers `403 NOT_CREATABLE`, and its message prescribes `OS_METADATA_WRITABLE`.\n  - One deployment gives two answers to one question.\n\n## Direction\n\n- **One reading of the setting.** The repository reads it through `readEnvWithDeprecation` with the same legacy alias, so both readers agree and the deprecation warning fires once.\n- ⛔ **Do not retire the alias on this card.** `readEnvWithDeprecation` says the legacy names \"will be removed in a future major release\". Retiring them is a decision about the whole family of aliases, taken for a major, not one alias taken alone.\n- **Pins:**\n  - with only the legacy spelling set, the listing and the save door agree, for both an admitted and a refused type;\n  - control: the preferred spelling behaves as today.\n\n## Order\n\n#15206's S2 (PR #22401) edits the same hatch readers' callers. Cut this after that PR lands, or rebase onto it.\n\nDedupe: MCP `search_issues`, repo-scoped, open and closed: 「OBJECTSTACK_METADATA_WRITABLE legacy spelling OS_METADATA_WRITABLE readers disagree envWritableTypes readEnvWithDeprecation」 gave 10 hits. The nearest are #8146 (the hatch against Studio's read-only badge, closed) and #6960 (removal through the hatch, closed). None is this.\n\nDedupe words: `OBJECTSTACK_METADATA_WRITABLE legacy alias` · `envWritableMetadataTypes readEnvWithDeprecation` · `hatch listing advertises save refuses`"

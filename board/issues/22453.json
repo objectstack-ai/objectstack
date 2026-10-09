@@ -1,0 +1,34 @@
+{
+  "number": 22453,
+  "kind": "issue",
+  "title": "[Decision] lift the ruling-208 freeze on scripts/pm/dispatch-gates.mjs for exactly the roster-as-data split (W3 of the skills-lane diet program; carries the Clause-② note remainder), or keep it frozen",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T09:38:03Z",
+  "updated_at": "2026-10-09T12:18:35Z",
+  "closed_at": "2026-10-09T12:18:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22453",
+  "body": "Ruled: 6079780639 · letter A (freeze lifted for this split, restored on landing) · 2026-10-09T11:16Z\n\nFiling gate: **② a decision only the maintainer can make** — lifting the ruling-208 freeze on `scripts/pm/dispatch-gates.mjs` for exactly one refactor (work item **W3** of the program anchor #22060, dispatch hold lifted 「skills 车道所有卡都可以派发」 on 2026-10-09). Reader: the maintainer (decision box: a letter), then the `domain:skills` seat executes per 裁后执行 below; #22167's remainder (`pm:blocked` on this W3) rides the same letter. Filed by skills seat 1 (seat post #7623), `session_01JmWtcHfGbC4ncw4GFKWuRA`. Dedupe: REST listing `labels=tooling` since 2026-09-20, open and closed (500 cards over 5 pages), titles grepped for `dispatch-gates|split|freeze|unfreeze|roster` → #22320 (closed, a derivation blind spot of the same script — not this), nothing else; the global search endpoint is not reachable from a seat container.\n\n**Governing text:** ruling 208 (card 19491, record 5755284987), as `references/instrument-discipline.md` carries it: 「工具位只有一个,先花在删除上;`dispatch-gates.mjs` 冻结,只在它喂的 workflow 坏了时碰」 and 「新增门禁、巡查行或棘轮须在卡上引维护者原话,⛔ 无原话不新增」; #22167's ruling C (record 6053791774): \"The `--tier` note in `scripts/pm/dispatch-gates.mjs` is reworded to the same meaning when #22060 W3 unfreezes that file (ruling 208 R6; the freeze is read as whole-file)\". Protocol declared: the freeze is a maintainer ruling; lifting it for a scoped refactor needs the maintainer's letter — no seat reads itself out of it. No protocol text changes under any option.\n\n**Premises, each with its re-check command (read on `origin/main` `da159f74e6`, 2026-10-09):**\n- The file is 30,049 lines — `wc -l scripts/pm/dispatch-gates.mjs` (29,870 at the anchor's filing two days earlier; it still grows under the freeze through its own self-test rows).\n- Its self-test battery held the shared verify lock 842.7 s and 1,023.8 s in two dev reports on 2026-10-07 (the anchor's table; #21719, closed `not_planned`, measured the same hold) — re-check: `grep -n \"pm-dispatch-gates\" package.json` names the battery; the next dev report's `gates` field carries its seconds.\n- The `--tier` note still contradicts the lane's Clause-② rule (#22167, ruled C, first half landed as PR #22223) — `grep -c \"changes contract accept/reject\" scripts/pm/dispatch-gates.mjs` → 2 (0 after the rewording).\n- `scripts/pm` as a whole: 180,590 lines over 36 files (`wc -l scripts/pm/*.mjs`); the two largest, this file and `check-half-states.mjs` (34,938), are 36% of it.\n\n**一句话问题**:每个 dev 每次交付都要为一台三万行的单体检测仪付 14–17 分钟的自检,而它说明书里那句关于\"什么卡欠契约复核\"的话与车道规则相矛盾 —— 现行裁决不许任何人碰这个文件。\n\n**具体问题**:是否把 `dispatch-gates.mjs` 的冻结(裁决 208 R6)解除给恰好一次重构:门禁名册改为数据、引擎缩小、自检分快慢两档,判定逐字节不变;顺带把 #22167 的 `--tier` 注释改成裁决 C 的同义。\n\n**选项 × 真实代价**\n\n| 选项 | 做什么 | 客户可感知后果 / 代价 |\n|:--|:--|:--|\n| **A** 解冻给恰好这一次拆分 | 名册(哪些路径喂哪些门禁族)出为数据文件,引擎只剩读名册与派生;自检分快档(每次 dev 跑)/ 慢档(CI 或按需);既有 1,976 例自检钉死判定逐字节不变;#22167 的注释同 PR 改写;拆完冻结自动恢复(仍只在 workflow 坏时碰) | 每次交付少排 10+ 分钟锁;名册可读、可审;一次性重构风险:名册搬运错一行即某门禁族静默漏派 —— 由\"派生结果逐字节相同\"的自检捕获(实测:现有自检是否覆盖全部派生路径未量) |\n| **B** 保持冻结 | W3 作废;#22167 的余项以 `not_planned` 关闭,注释矛盾留着;battery 成本照付 | 零风险、零收益;每位席位继续按\"更严的一条\"手工读两段矛盾文字;dev 的 14–17 分钟锁持续 |\n| **C** 只解冻一行 | 只改 `--tier` 注释那一句(#22167 余项),不拆分 | 矛盾消失,成本不变;下次再要拆仍需再裁 |\n\n**业务含义直译**:A = 把一台拼在一起的检测仪拆成\"检查清单 + 小机器\",每次体检从一刻钟变几分钟,清单谁都能审;B = 继续用,忍着;C = 只把仪器上贴错的标签换掉。\n\n## 四维分析(业务立场)\n\nos-decision-facets\n① 项目长远合理性:A 缩小特例 —— 名册即数据、引擎即契约,新门禁族只加一行数据,与\"仪器只减不增\"的方向一致;B 把一个 3 万行的单体当永久债务;C 不改结构。\n② 实际业务拉动:今天撞上的是每一个 dev(两份报告实测 842.7 s / 1,023.8 s 的锁持有;#21719 同一测量)与 #22167 的在案矛盾(两处命中);零新增能力声明。\n③ 防 AI 犯错:A 让\"哪条路径喂哪族\"成为闭合枚举(数据),AI 改错一行时由逐字节判定 pin 响亮拒绝;B 让 AI 在 3 万行里改散文与代码混合体;C 不变。\n④ 创业阶段不扩散:A 不加门禁、不加标签、不加脚本文件数之外的任何零件(名册文件是既有零件的一半搬家),判定不变;B 最保守;C 最小。\nPrior rulings read: ruling 208 (19491 / 5755284987) · #22167 ruling C (6053791774) · #21719 (closed, the lock hold) → 3 hits; ADR none; thread: none.\n\n**推荐 + 回退 + 置信缺口**:推荐 **A**;回退 **C**。终态句:两年后车道的门禁派生是一份可审的名册数据加一个几百行的引擎,每次交付的本地自检在分钟级 —— 与主流 monorepo 的 \"路径 → 任务图\"做法(turbo / nx 的声明式过滤)同形。看不见的:① 现有 1,976 例自检是否覆盖每条派生路径(拆分前先量,量不到的路径补 pin 再拆);② 快档自检的作用域边界未定(建议:快档 = 名册加载 + 路径匹配 + 派生,慢档 = 全 fixture 回放)。\n自检:只看①选 A;②③④ 是否翻转:否(② 今天就在付锁;③ A 更响亮;④ A 零新增零件)。\n\n**裁后执行**(维护者只裁方向):**A** ⇒ 本席在本卡记录裁决,把 W3 作 `tooling` 子卡入队并派发一名 os-dev:先量既有自检对派生路径的覆盖并补 pin,再拆(名册数据 + 引擎 + 快慢档),PR 正文带\"派生输出逐字节相同\"的证明与 battery 前后秒数,#22167 的注释同 PR 改写并以 `Fixes #22167` 关卡;拆完冻结自动恢复。**B** ⇒ 本卡与 #22167 以 `not_planned` 关闭,矛盾读数留在 #22167。**C** ⇒ 本席派一个一行 PR 改注释,`Fixes #22167`,W3 作废。\n\nDedupe words: `dispatch-gates freeze lift` · `gate roster as data` · `self-test fast slow tiers`\n"
+}

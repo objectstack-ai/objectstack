@@ -14,20 +14,22 @@
     "area:access",
     "bug",
     "domain:cli",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p1",
     "security",
     "target:v18"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T06:30:54Z",
-  "updated_at": "2026-10-09T08:20:37Z",
+  "updated_at": "2026-10-09T11:55:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22432",
   "body": "Filing gate: **① a product defect with a named landing and a measured reach**, `reach:` an anonymous HTTP request, measured on a booted reference deployment (the G2 sweep, `os-dev-report` `6074331185` on #22146; route-level readings are kept private, as the card body there requires). Readers who act: triage, to route (the landing `packages/runtime` is `domain:cli` in the pm-dispatch domain table; the companion is objectui's); then the owning seat. Blocks: ADR-0138 acceptance (#22146 criterion 2).\n\nFiled by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`, under the ruling [`6074960686`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6074960686) on #22146 (batch #300 item 1, letter A, maintainer 「同意」): \"The spec seat files three defect cards, public and at function level, for triage to route\". ⛔ Not a claim.\n\n## What happens\n\n`packages/runtime/src/domains/i18n.ts#handleI18nRequest` serves the `/i18n` dispatcher domain with no anonymous refusal. On `origin/main` `27a8b33dec` it calls `shouldDenyAnonymous` in 0 files, while the other eight dispatcher domains (`actions`, `ai`, `analytics`, `auth`, `automation`, `meta`, `packages`, `security`) each do. So an unauthenticated caller reads the application's translation bundle (labels of every object and field, apps, pages, dashboards and more), while the same object's metadata read answers 401. Neither ADR-0138 D2's five door classes nor the control-plane allowlist (`packages/core/src/security/auth-gate.ts#isAuthGateAllowlisted`) names this domain.\n\n## The ruling's direction, quoted verbatim (`6074960686`, item 1)\n\n> **The `/i18n` dispatcher domain** gains the domain-level anonymous refusal every other dispatcher domain has (ADR-0056 D2; 401), **with an objectui companion**: the Console serves its sign-in page from the built-in packs and loads the application's translations after sign-in. The dev measures first whether the Console re-fetches translations once signed in today, and sizes the companion from that reading; the two land together so no signed-in user sees raw keys.\n\nThe director's reading on objectui `main` `8f8f760fa4`, recorded in the ruling: `apps/console/src/main.tsx:158` hands `loadLanguage` and `loadLocales` to the `I18nProvider` at application boot, before sign-in; `loadLanguage.ts:19` and `loadLocales.ts:23` fetch the translations and locales with no Authorization header and degrade to the built-in packs on any failure.\n\n## Acceptance\n\n- An anonymous request to every `/i18n` route answers 401 `UNAUTHENTICATED`, decided once as the domain's first statement (ADR-0138 D2's \"per domain, never surface by surface\"); a signed-in caller is served as today. A reject-path test asserts `code` and `status`.\n- The objectui companion lands in the same window, sized from the first measurement, so the sign-in page renders from the built-in packs and a signed-in user never sees raw keys.\n- The authorization conformance matrix (`packages/qa/dogfood/test/authz-conformance.matrix.ts`) no longer lists this domain as unclassified (`packages/qa/dogfood/test/authz-ledger-population.baseline.ts`).\n\n## Dedupe\n\nREST page loop over issues and PRs updated since 2026-09-15 (`state=all`, 47 pages, 4,608 items), titles and bodies grepped for the i18n / OpenAPI / unscoped-download anonymous patterns → i18n 1 hit (#19621, closed, unrelated), OpenAPI 0, storage 8 (QA run records #21784, #21720, #21318 and closed findings #19775, #19652, #19514, #19300, #18831, none about anonymous download). None is this case."
