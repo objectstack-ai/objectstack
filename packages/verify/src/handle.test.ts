@@ -17,7 +17,7 @@
 // permission check at all), so it is pinned with a control that FIRES: the
 // admin, on the identical call, is admitted by both doors.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 
 import { bootStack, bootStackOnce, type VerifyStack, type BootOptions } from './harness.js';
 import { isVerifyRefusal } from './handle.js';
@@ -50,6 +50,22 @@ afterAll(async () => {
   // must not do this (see `bootStackOnce`).
   await stack?.stop().catch(() => undefined);
 });
+
+/**
+ * [#22301] A configuration of its own, for a stack that must be live BESIDE
+ * this file's shared boot. `bootStack`'s instance rule refuses a second live
+ * boot of one configuration object, and a shallow `{ ...handleFixtureStack }`
+ * copy would not be a configuration of its own: a boot keeps live references
+ * into the configuration's nested definitions (the registry stores each object
+ * as a shallow copy whose field definitions are the authored objects —
+ * `packages/objectql/src/registry.ts`, `definition: { ...schema, name: fqn }`).
+ * So the fixture is BUILT AGAIN: a fresh module instance of `./handle.fixture.js`
+ * runs its builder once more, and every nested definition is new.
+ */
+async function freshHandleFixtureStack(): Promise<typeof handleFixtureStack> {
+  vi.resetModules();
+  return (await import('./handle.fixture.js')).handleFixtureStack;
+}
 
 /** Unique per run, so list assertions never see another test's rows. */
 const uniq = (prefix: string): string => `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
@@ -337,7 +353,7 @@ describe('tenancy — the service AuthPlugin registered', () => {
   // breaks the service's isolation probe turns this red while leaving the
   // `single` case above green.
   it('reports the walled posture a multi-tenant boot runs under — same reader, other stack', async () => {
-    const walled = await bootStack(handleFixtureStack, { multiTenant: 'posture-only' });
+    const walled = await bootStack(await freshHandleFixtureStack(), { multiTenant: 'posture-only' });
     try {
       const t = walled.tenancy();
       expect(t.requestedPosture).toBe('isolated');
@@ -361,8 +377,11 @@ describe('bootStackOnce — one boot per (config, opts) identity', () => {
     expect(() => bootStackOnce('not-a-config' as never)).toThrow(/identity/);
   });
 
-  it('bootStack (unshared) still returns a distinct stack', async () => {
-    const other = await bootStack(handleFixtureStack, { automation: true });
+  it('bootStack (unshared) still returns a distinct stack — on a configuration of its own', async () => {
+    // [#22301] Not on `handleFixtureStack` itself: this file's shared boot of
+    // it is live, and the instance rule refuses a second live boot of one
+    // configuration (`harness.one-composition.test.ts` pins the refusal).
+    const other = await bootStack(await freshHandleFixtureStack(), { automation: true });
     try {
       expect(other).not.toBe(stack);
       expect(typeof other.hooks.run).toBe('function');

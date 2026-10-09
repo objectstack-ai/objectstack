@@ -401,8 +401,13 @@ posture, then decide which shape is wanted).
 - a `group`/`isolated` posture boot recipe → unblocks the §5 operator-gate legs
   (`access-security.activation-write-operator-gate`) and card row D2.
 - a documented no-automation lean-composition boot for manual runners → the dogfood
-  harness (`bootStack(showcaseStack)` minus automation) is currently the only path for
-  `platform-core.activation-ledger-registration-home`'s 503-turnaround leg.
+  harness is currently the only path for
+  `platform-core.activation-ledger-registration-home`'s 503-turnaround leg. It boots a
+  showcase-derived configuration that does not declare automation: the `automation`
+  token is taken out of `requires`, and the app plugins that depend on the automation
+  service are left out (`packaged-activation-ledger-reach`). Since #22301,
+  `bootStack(showcaseStack)` composes what `os serve` composes, so it mounts automation
+  whether or not the `automation` option is passed.
 
 ### 8e. Checked and CLEAN (so the next sweep does not re-derive)
 

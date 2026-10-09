@@ -49,8 +49,8 @@
 // @proof: no-active-organization-write-refusal
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { resolveAuthzContext } from '@objectstack/core';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -74,7 +74,7 @@ describe('[ADR-0123 D2 / #8208] a tenant-scoped write with no active organizatio
   beforeAll(async () => {
     // `posture-only` is the mode #8208 measured on: it requests the `isolated`
     // posture (the wall is ACTIVE) without the organizations runtime.
-    stack = await bootStack(showcaseStack, { multiTenant: 'posture-only' });
+    stack = await bootShowcase({ multiTenant: 'posture-only' });
     ql = stack.kernel.getService<IObjectQLEngine>('objectql');
     adminToken = await stack.signIn();
 

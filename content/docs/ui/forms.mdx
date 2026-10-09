@@ -211,17 +211,13 @@ curl -X POST http://localhost:3000/api/v1/forms/contact-us/submit \
   }'
 ```
 
-Response on success (HTTP `201 Created`):
+Response on success (HTTP `201 Created`) — the created record's id, and nothing else:
 
 ```json
-{ "object": "lead", "id": "r7p8cUZoBJbFWudt", "record": {
-    "id": "r7p8cUZoBJbFWudt",
-    "first_name": "Ada", "last_name": "Lovelace",
-    "status": "new",         // ← hook default
-    "lead_source": "web",    // ← hook default
-    "owner": null            // ← whitelist stripped, hook deleted
-} }
+{ "id": "r7p8cUZoBJbFWudt" }
 ```
+
+The anonymous caller is never shown the stored row. It already knows what it submitted, and everything else on the row — a `defaultValue`, a field a `beforeInsert` / `afterInsert` hook stamped, a value an elevated hook derived from existing records — belongs to readers the form grants nothing. So the whitelist-stripped `status` and the hook defaults in the example above land on the row but are not in the answer. A host that needs the stored record reads it through an authenticated read (`GET /api/v1/data/:object/:id`) with a principal allowed to see it.
 
 Errors:
 
@@ -271,7 +267,7 @@ async function submit(slug: string, payload: Record<string, unknown>) {
     body:    JSON.stringify(payload),
   });
   if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  return r.json(); // { id } — the created record's id only
 }
 ```
 
@@ -368,7 +364,7 @@ formViews: {
 `url` is **not** a free-form address. It was ruled on 2026-08-11 ([#7496](https://github.com/objectstack-ai/objectstack/issues/7496)) and the schema enforces it, so a URL outside this shape is a parse error at authoring time rather than a surprise in the browser:
 
 1. **Relative paths only.** The value must start with a single `/`. Absolute URLs (`https://example.com/thanks`, and equally `javascript:` / `data:`), protocol-relative `//example.com/thanks`, backslashes, and smuggled whitespace or control characters are all refused. A post-submit redirect is authored metadata that sends a real browser somewhere — leaving it open to any address makes every form an open redirect waiting for one careless copy-paste. To send someone **out** of the app deliberately, that is an app navigation item (`{ type: 'url', url }`), which is declared for external addresses.
-2. **Interpolation only from declared record fields**, spelled `{{record.field_name}}` — the same double-brace template dialect the rest of the platform uses, narrowed to the record that was just submitted and to a flat field name. Every interpolated value is **URL-escaped** when the redirect is built, so a token is a *value* in the path or query and can never add path structure.
+2. **Interpolation only from declared record fields**, spelled `{{record.field_name}}` — the same double-brace template dialect the rest of the platform uses, narrowed to the record that was just submitted and to a flat field name. Every interpolated value is **URL-escaped** when the redirect is built, so a token is a *value* in the path or query and can never add path structure. On the **public** path the submit answers only the created id, so a token resolves from the values the visitor submitted plus `{{record.id}}`; a field the server fills in (a default, a hook stamp) has no value there.
 3. **A verbatim redirect on the resolved relative path is the intended consumption** — what the renderer navigates to is exactly this string with its tokens substituted.
 
 ```ts

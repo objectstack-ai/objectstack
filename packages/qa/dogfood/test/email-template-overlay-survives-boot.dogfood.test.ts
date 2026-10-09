@@ -38,8 +38,8 @@
 //     `customized: true` that survived the boot.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { EmailServicePlugin } from '@objectstack/plugin-email';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -64,7 +64,7 @@ const emailPlugin = () => new EmailServicePlugin({
 });
 
 const boot = (databaseFile: string) =>
-    bootStack(showcaseStack, { databaseFile, orgContext: true, extraPlugins: [emailPlugin()] });
+    bootShowcase({ databaseFile, orgContext: true, extraPlugins: [emailPlugin()] });
 
 describe('[#21785] a metadata-door email template edit survives a cold boot (showcase)', () => {
     let prevCwd: string;

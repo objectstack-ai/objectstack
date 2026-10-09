@@ -12,8 +12,15 @@
 // What is asserted, by class: the scene is real (a system read carries the
 // stored value), and the door refuses at object admission (403,
 // `PERMISSION_DENIED`) — the record door for the read and for a query alike.
-// The masker's zero-set reading is still reached on a real boot through the
-// public form submit's echo, pinned by `public-form-read-back-masking`.
+// The masker's zero-set reading no longer reaches a caller through any door on
+// a real boot. Its last door was the public form submit's echo: the form grant
+// admits ahead of object admission, and its read-back still passes the masker
+// inside the engine. [#22437] The submit now answers the created id alone, so
+// nothing that read-back holds leaves the door. `public-form-read-back-masking`
+// pins that the masked fields are ABSENT from that answer. The masker's
+// zero-set output itself is pinned at the security middleware, in
+// plugin-security's `public-form-grant-masking.test.ts`, on a synthetic harness
+// and not a boot.
 //
 // [#21180] There used to be a second door — the public form's anonymous lookup
 // picker, re-pinned to this 403 by #21079. Ruling E retired the picker and

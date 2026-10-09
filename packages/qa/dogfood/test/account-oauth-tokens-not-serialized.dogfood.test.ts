@@ -71,8 +71,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { assertArmed, armedWhen } from './armed.js';
 
 const MEMBER_EMAIL = 'account-oauth-member@verify.test';
@@ -129,7 +129,7 @@ describe('#7987: sys_account OAuth tokens never serialize on the generic data pa
   };
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {});
+    stack = await bootShowcase({});
     ql = await stack.kernel.getServiceAsync<any>('objectql');
     adminToken = await stack.signIn();
     memberToken = await stack.signUp(MEMBER_EMAIL, MEMBER_PASSWORD);

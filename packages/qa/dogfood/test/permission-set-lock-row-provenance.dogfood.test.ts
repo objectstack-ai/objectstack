@@ -55,8 +55,8 @@
 // three shapes again before anything is written.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { securityObjects } from '@objectstack/plugin-security';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -142,7 +142,7 @@ describe('[#21789] the permission-set lock reads the row\'s provenance — the t
         process.chdir(SHOWCASE_DIR);
         dir = mkdtempSync(join(tmpdir(), 'dogfood-21789-'));
         dbFile = join(dir, 'showcase.db');
-        stack = await bootStack(showcaseStack, { databaseFile: dbFile });
+        stack = await bootShowcase({ databaseFile: dbFile });
         token = await stack.signIn();
         ql = await stack.kernel.getServiceAsync('objectql');
 
@@ -247,7 +247,7 @@ describe('[#21789] the permission-set lock reads the row\'s provenance — the t
         beforeAll(async () => {
             await stack?.stop();
             stack = undefined;
-            stack = await bootStack(showcaseStack, { databaseFile: dbFile });
+            stack = await bootShowcase({ databaseFile: dbFile });
             token = await stack.signIn();
             ql = await stack.kernel.getServiceAsync('objectql');
         }, 300_000);

@@ -76,27 +76,43 @@ const memo = (namespace: string) =>
  * `isDefault` set is the `everyone` baseline suggestion (ADR-0090 D5) and the
  * D7 anchor gate refuses high-privilege bits on one.
  */
-const AppDefaultProfile = PermissionSetSchema.parse({
-  name: APP_DEFAULT_SET,
-  label: 'App Member (Default)',
-  isDefault: true,
-  objects: {
-    appdefault_memo: { allowRead: true, allowCreate: true },
-  },
-});
+const appDefaultProfile = () =>
+  PermissionSetSchema.parse({
+    name: APP_DEFAULT_SET,
+    label: 'App Member (Default)',
+    isDefault: true,
+    objects: {
+      appdefault_memo: { allowRead: true, allowCreate: true },
+    },
+  });
 
-/** Declares an `isDefault` profile — the #5491 migration the CLI already honours. */
-const appWithDeclaredDefault = defineStack({
-  manifest: {
-    id: 'com.example.app-default-profile',
-    namespace: 'appdefault',
-    version: '0.0.1',
-    type: 'app',
-    name: 'App Default Profile Fixture',
-  },
-  objects: [memo('appdefault')],
-  permissions: [AppDefaultProfile],
-});
+/**
+ * Declares an `isDefault` profile — the #5491 migration the CLI already honours.
+ *
+ * [#22301] A BUILDER, called once per boot. This file keeps every stack it
+ * boots live until `afterAll`, and `bootStack`'s instance rule refuses a second
+ * live boot of one configuration object. A shallow `{ ...config }` copy would
+ * not be a configuration of its own: a boot keeps live references into the
+ * configuration's nested definitions (the registry stores each object as a
+ * shallow copy — `packages/objectql/src/registry.ts`, `definition: { ...schema,
+ * name: fqn }` — whose field definitions are the authored objects). So each boot
+ * builds every nested definition again.
+ */
+const buildAppWithDeclaredDefault = () =>
+  defineStack({
+    manifest: {
+      id: 'com.example.app-default-profile',
+      namespace: 'appdefault',
+      version: '0.0.1',
+      type: 'app',
+      name: 'App Default Profile Fixture',
+    },
+    objects: [memo('appdefault')],
+    permissions: [appDefaultProfile()],
+  });
+
+/** The declared-default configuration the non-booting cases read. */
+const appWithDeclaredDefault = buildAppWithDeclaredDefault();
 
 /** Declares NO default profile — the shape the vast majority of apps still have. */
 const appWithoutDeclaredDefault = defineStack({
@@ -129,7 +145,7 @@ describe('bootStack honours the app-declared default permission set (#7001)', ()
   it(
     'wires the SAME profile `serve` wires for the same config',
     async () => {
-      const stack = await boot(appWithDeclaredDefault);
+      const stack = await boot(buildAppWithDeclaredDefault());
 
       // The exact expression `serve.ts` evaluates for its `fallbackPermissionSet`.
       const servesChoice = appDefaultPermissionSetName(appWithDeclaredDefault.permissions);
@@ -146,7 +162,7 @@ describe('bootStack honours the app-declared default permission set (#7001)', ()
   it(
     'and that profile is load-bearing: a fresh member holds the declared grants',
     async () => {
-      const stack = await boot(appWithDeclaredDefault);
+      const stack = await boot(buildAppWithDeclaredDefault());
       await stack.signIn(); // first user is the seeded dev admin
       const memberToken = await stack.signUp('appdefault-member@verify.test');
 
@@ -178,7 +194,7 @@ describe('bootStack honours the app-declared default permission set (#7001)', ()
       // choice rather than the silent default. A caller-supplied plugin wins
       // whole: it already carries its own constructor options, and quietly
       // rewriting one of them would be a second, worse surprise.
-      const stack = await boot(appWithDeclaredDefault, { security: new SecurityPlugin() });
+      const stack = await boot(buildAppWithDeclaredDefault(), { security: new SecurityPlugin() });
       await expect(wiredBaseline(stack)).resolves.toBe('member_default');
     },
     BOOT_TIMEOUT,

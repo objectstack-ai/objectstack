@@ -977,6 +977,8 @@ describe('the ledger-sourced population and its baseline bite', () => {
       'dispatcher-domain:route-ledger.ts:/meta',
       'dispatcher-domain:route-ledger.ts:/packages',
       'rest-family:rest-route-ledger.ts:metadata',
+      // [#22430] classified by `anonymous-deny-api-description`.
+      'rest-family:rest-route-ledger.ts:openapi',
     ]);
     // …and the two halves partition the population exactly: nothing minted by
     // a ledger probe is both, and nothing is neither.

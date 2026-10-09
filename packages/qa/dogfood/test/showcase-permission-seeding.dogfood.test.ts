@@ -13,15 +13,15 @@
 // authz-row: declarative-permission-seeding
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 describe('showcase: declared permission-set seeding (ADR-0086 D5)', () => {
   let stack: VerifyStack;
   let ql: any;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
   }, 60_000);

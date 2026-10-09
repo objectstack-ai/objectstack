@@ -14,11 +14,11 @@
     {
       "id": 2,
       "prompt": "When an opportunity moves into stage `closed_won`, send the account owner an inbox notification with the deal name.",
-      "expected_output": "Emits a `record_change` flow whose binding lives on the `start` node `config`: `objectName: 'opportunity'`, `triggerType: 'record-after-update'`, and a bare-CEL `condition` `previous.stage != 'closed_won' && record.stage == 'closed_won'` so it fires only on the transition. A `notify` node with `recipients: '{record.owner_id}'`, `title` with single-brace interpolation, `channels: ['inbox']`. Reminds that `requires` must list `automation`, `triggers` and `messaging` (otherwise notify reports success with `skipped: true`).",
+      "expected_output": "Emits a `record_change` flow whose binding lives on the `start` node `config`: `objectName: 'opportunity'`, `triggerType: 'record-after-update'`, and a bare-CEL `condition` `previous.stage != 'closed_won' && record.stage == 'closed_won'` so it fires only on the transition. A `notify` node with `recipients: '{record.owner_id}'`, `title: 'Won: {{ record.name }}'`, `channels: ['inbox']`. Reminds that `requires` must list `automation`, `triggers` and `messaging` (otherwise notify reports success with `skipped: true`).",
       "files": [],
       "assertions": {
-        "must_contain": ["triggerType", "record-after-update", "previous.", "notify", "recipients", "messaging"],
-        "must_not_contain": ["trigger:", "{{"]
+        "must_contain": ["triggerType", "record-after-update", "previous.", "notify", "recipients", "messaging", "{{"],
+        "must_not_contain": ["trigger:"]
       }
     },
     {

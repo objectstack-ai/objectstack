@@ -146,7 +146,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 代执行他人指令的关闭、摘标、回收认领,评论带出处三件:谁的指令、原话、在哪说。
 - 标签写恒四步:取现集 → 只增删目标 → 写合并集 → 回读 diff 对 union(现集, 增删)。
 - union 有而回读缺 = 被并发剥掉,重挂并报告。
-- 多席可写面恒读回;API 200 不等于落地正确。
 - PM 写进 GitHub 的文本 ⛔ 不用尖括号路径占位符,改写成后跟显式路径的说法。
 - 携带易损片段的评论(派发令与裁决)post 后读回;写侧形状见 `references/platform-readings.md`。
 
@@ -316,4 +315,5 @@ Clause-②: yes | no
 Responsibility: `<whose code produces the risk | the platform path that already covers it, or none | who reaches it, and whether anyone uses it today>` (defect cards only, else `n/a — not a defect card`; the dispatch prompt's ruling section repeats the three answers)
 Thread-read: <id of the newest comment on the card at the moment this claim is written, or none>
 Serial constraints cleared: `<点名同文件/同包的前驱 PR 与在飞认领,及分诊点名的任意车道在飞兄弟卡中本卡 pin 断言其行为者;无则 none>`
+Resume-from: `BRANCH@SHA` (only when the card's newest `Release:` carries one; the dev starts from that sha, never from zero)
 ```

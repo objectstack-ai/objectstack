@@ -48,8 +48,8 @@
 //      Scope every list assertion to records the file itself created (unique
 //      emails / name prefixes).
 // Anything else stays in the `isolated` project (plain vitest defaults).
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 
 /**
@@ -81,7 +81,9 @@ let booted: Promise<VerifyStack> | undefined;
 
 /** Boot (once per worker) and return the shared plain-showcase stack. */
 export function getSharedShowcase(): Promise<VerifyStack> {
-  booted ??= bootStack(showcaseStack, { security: showcaseAppDefaultSecurity(SHARED_FIXTURE_GRANTS) }).then(async (stack) => {
+  // [#22301] Anchored at the showcase's own directory by `bootShowcase`, the
+  // one owner of the showcase's test root (see `./showcase-boot.ts`).
+  booted ??= bootShowcase({ security: showcaseAppDefaultSecurity(SHARED_FIXTURE_GRANTS) }).then(async (stack) => {
     // First sign-in provisions the dev admin; later files' own signIn() calls
     // are idempotent (~0.16s) and just mint fresh admin tokens.
     await stack.signIn();

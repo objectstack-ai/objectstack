@@ -247,6 +247,7 @@ describe('MAIN — the preprocess-wrapped collection key is IN the refusal set',
     expect(derived).toContain(NAMES.preprocess);
     // …and the keys it carried before this change are all still there, in order.
     expect(derived.filter((k) => k !== NAMES.preprocess)).toEqual([
+      'attachedOnRead',
       'indexes',
       'fieldGroups',
       'requiredPermissions',
@@ -302,6 +303,7 @@ describe("TODAY-INVARIANCE — the fix moves no key on today's ObjectSchema", ()
     expect(setUnder(shape, authorableWalk), 'the landed rule moved a key on the real shape').toEqual(inOnly);
     expect(setUnder(shape, eitherSideWalk), '`in || out` would move a key on the real shape').toEqual(inOnly);
     expect(inOnly).toEqual([
+      'attachedOnRead',
       'indexes',
       'fieldGroups',
       'requiredPermissions',

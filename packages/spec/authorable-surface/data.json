@@ -650,6 +650,7 @@
     "data/Object:access",
     "data/Object:actions",
     "data/Object:activityMilestones",
+    "data/Object:attachedOnRead",
     "data/Object:datasource",
     "data/Object:description",
     "data/Object:displayNameField",

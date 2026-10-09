@@ -23,8 +23,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { StorageServicePlugin } from '@objectstack/service-storage';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 
@@ -95,7 +95,7 @@ describe('[#22431] a download of a file with no attachments scope and no field o
 
   beforeAll(async () => {
     rootDir = mkdtempSync(join(tmpdir(), 'unclaimed-download-'));
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       security: showcaseAppDefaultSecurity(),
       extraPlugins: [new StorageServicePlugin({ adapter: 'local', local: { rootDir }, bindToSettings: false })],
     });

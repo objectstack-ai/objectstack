@@ -41,9 +41,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
 import crmStack from '@objectstack/example-crm';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { LocalManifestSource, MarketplaceInstallLocalPlugin } from '@objectstack/cloud-connection';
 import { PROTOCOL_MAJOR, type ExecutionContext } from '@objectstack/spec/kernel';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -154,7 +154,7 @@ describe('dogfood: reseed and purge refuse a package the restart refused to load
   let recordedAfterPurge: unknown;
   let uninstall: Answer;
 
-  const boot = (databaseFile: string) => bootStack(showcaseStack, {
+  const boot = (databaseFile: string) => bootShowcase({
     databaseFile,
     extraPlugins: [new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir })],
   });

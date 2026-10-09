@@ -235,11 +235,12 @@ function owdOf(obj: AnyRec): unknown {
  * receiver that does not exist.
  */
 function owdAliasProvenance(value: string): string {
+  // [#22161] One clause. Which values ADR-0090 D4 retired, and where a
+  // non-OWD value such as 'public' IS legal, is this rule id's `os explain`
+  // entry (`rule-explanations.ts`).
   return OWD_RETIRED_ALIAS_FIX[value]
     ? `is a retired alias (ADR-0090 D4)`
-    : `is not an OWD value and never was — ADR-0090 D4 retired 'read', 'read_write' and 'full', ` +
-        `not this. '${value}' is legal on the neighbouring keys 'access' (its 'default') and ` +
-        `'publicSharing' (its 'allowedAudiences'), just not on this one`;
+    : `is not an OWD value — '${value}' belongs to 'access' and 'publicSharing', not this key`;
 }
 
 /**
@@ -505,8 +506,8 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           where: `object "${objName}"`,
           path: `${objPath}.sharingModel`,
           message:
-            `sharingModel '${owd}' ${owdAliasProvenance(owd)}. The runtime fails CLOSED ` +
-            `to 'private' on unknown values, so this object is NOT ${owd === 'read' ? 'readable' : 'writable'} org-wide.`,
+            `sharingModel '${owd}' ${owdAliasProvenance(owd)}; the runtime fails CLOSED to 'private', ` +
+            `so this object is NOT ${owd === 'read' ? 'readable' : 'writable'} org-wide`,
           hint: `Replace with the canonical value: sharingModel: '${OWD_ALIAS_FIX[owd]}'.`,
         });
       } else if (typeof owd === 'string' && !(CANONICAL_OWD as readonly string[]).includes(owd)) {
@@ -546,13 +547,12 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         rule: SECURITY_CBP_NO_RELATION,
         where: `object "${objName}"`,
         path: `${objPath}.sharingModel`,
+        // [#22161] One verdict sentence; the ADR-0055 precedence it tested and
+        // why the object is unusable rather than locked down are this id's
+        // `os explain` entry.
         message:
-          `"${objName}" declares sharingModel 'controlled_by_parent' but has no relation the platform ` +
-          `can derive access from. ADR-0055 resolves the master through a required master_detail, then ` +
-          `any master_detail, then a required lookup — each of which must also name a reference target — ` +
-          `and this object matches none of the three. At runtime every read is DENIED and every write is ` +
-          `refused with 422 INVALID_METADATA, as a metadata defect rather than a permission denial, so the ` +
-          `object is unusable rather than merely locked down.`,
+          `declares sharingModel 'controlled_by_parent' but has no master relation to derive access ` +
+          `from, so every read is denied and every write refused (422 INVALID_METADATA)`,
         hint:
           `Add the master relation this object is derived from, e.g. fields.parent: ` +
           `{ type: 'master_detail', reference: '<master_object>', required: true }. If the object has no ` +
@@ -586,22 +586,18 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     const cbpTier = owd === 'controlled_by_parent' ? cbpMasterCandidates(obj) : undefined;
     if (cbpTier && cbpTier.candidates.length > 1) {
       const winner = cbpTier.candidates[0];
-      const roster = cbpTier.candidates
-        .map((cand) => `"${cand.field}" (${cand.type} -> "${cand.master}")`)
-        .join(', ');
+      const roster = cbpTier.candidates.map((cand) => `"${cand.field}" → ${cand.master}`).join(', ');
       findings.push({
         severity: 'error',
         rule: SECURITY_CBP_AMBIGUOUS_RELATION,
         where: `object "${objName}"`,
         path: `${objPath}.fields`,
+        // [#22161] One verdict sentence; why a tie is decided by declaration
+        // order, and what reordering does to the security boundary, are this
+        // id's `os explain` entry.
         message:
-          `"${objName}" declares sharingModel 'controlled_by_parent' and ${cbpTier.candidates.length} of its ` +
-          `fields tie for the master relation: ${roster}. ADR-0055 resolves the master through a required ` +
-          `master_detail, then any master_detail, then a required lookup, and takes the FIRST match in the ` +
-          `tier that wins — here the ${cbpTier.tier} tier — so which object this one derives its access from ` +
-          `is decided by FIELD DECLARATION ORDER. Today "${winner.field}" wins and every row's record-level ` +
-          `access derives from "${winner.master}"; reordering these fields moves that security boundary to ` +
-          `another object, and the runtime reports nothing when it does.`,
+          `the controlled_by_parent master is decided by field order: ${cbpTier.candidates.length} fields ` +
+          `tie in the ${cbpTier.tier} tier (${roster}) and "${winner.field}" wins today`,
         hint:
           `Leave exactly ONE candidate in the winning tier, so the master is authored rather than positional. ` +
           `Either promote the intended master into a higher tier — make it the object's only required ` +
@@ -775,20 +771,14 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
       const wrote = emptyField
         ? `field-permission key '${flsKey}' names NO field — everything after the '${flsObject}.' prefix is empty`
         : `field-permission key '${flsKey}' is object-qualified but "${flsObject}" declares no field '${flsField}'`;
-      const looksRight = emptyField
-        ? `A truncated key is what a half-finished edit leaves behind.`
-        : `Unlike an unqualified key this one looks correct in review, and it is exactly what a field rename leaves behind.`;
       findings.push({
         severity: 'error',
         rule: SECURITY_FLS_UNKNOWN_FIELD,
         where: `permission set "${psName}"`,
         path: `${psPath}.fields["${flsKey}"]`,
-        message:
-          `${wrote}. The runtime resolves an FLS key by stripping the '${flsObject}.' prefix and ` +
-          `looking the remainder up as a column, so this key matches NOTHING: the masking it declares ` +
-          `NEVER ENFORCES, and the field it was meant to cover stays as readable and as editable as the ` +
-          `object-level grant leaves it — for every holder of this set. Nothing reports that at runtime. ` +
-          `${looksRight}`,
+        // [#22161] One verdict sentence; how the runtime resolves an FLS key,
+        // and why this shape survives review, are this id's `os explain` entry.
+        message: `${wrote}, so the key matches nothing and the masking it declares never enforces`,
         hint:
           `Point the key at a field "${flsObject}" really declares (${roster}), or delete the entry if the ` +
           `field is gone — an entry that cannot match is not protection. If the masking is still wanted, ` +
@@ -977,12 +967,11 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           rule: SECURITY_MASTER_DETAIL_UNGRANTED,
           where: `object "${objName}"`,
           path: `objects[${i}].fields.${md.name}`,
+          // [#22161] One verdict sentence; why object-level CRUD is never
+          // derived from the master is this id's `os explain` entry.
           message:
             `detail object "${objName}" (${md.type} "${md.name}"${parentText}) has no object-level ` +
-            `CRUD grant in any permission set. A master-detail child derives its RECORD-level access ` +
-            `from the master (ADR-0055 controlled_by_parent), but object-level CRUD is a SEPARATE gate ` +
-            `that is never derived — role-bound non-admin users are denied (403) before the ` +
-            `parent-derived access is ever consulted (the silent "can't submit the subtable" trap).`,
+            `CRUD grant in any permission set, so non-admin users are denied it (403)`,
           hint:
             `Grant "${objName}" in at least one permission set that already grants its master` +
             `${md.parent ? ` "${md.parent}"` : ''} — e.g. permissions[i].objects.${objName} = ` +
@@ -1063,9 +1052,8 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
             where,
             path: `data[${i}].records[${j}].reason`,
             message:
-              `delegation row (delegated_from = ${JSON.stringify(delegatedFrom)}) has no reason. ` +
-              `ADR-0091 D3 requires a mandatory reason on every delegation for the dual audit trail ` +
-              `(granted_by = writer, delegated_from = authority source, reason = why).`,
+              `delegation row (delegated_from = ${JSON.stringify(delegatedFrom)}) has no reason, which ` +
+              `ADR-0091 D3 requires on every delegation`,
             hint: `Add reason: 'vacation stand-in for 张三, 2026-08-01..15' (free text, required).`,
           });
         }

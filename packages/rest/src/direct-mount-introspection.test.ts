@@ -177,7 +177,14 @@ async function serveOpenApi(server: ReturnType<typeof createMockServer>, base = 
     header: () => res,
     send: () => {},
   };
-  await (call as any)[1]({ headers: { host: 'example.test' }, params: {}, query: {}, path: `${base}/openapi.json` }, res);
+  // [#22430] The document refuses an anonymous caller, so it is read as a
+  // signed-in one — the reader whose document this file is about.
+  const signedIn = vi.spyOn(RestServer.prototype as any, 'resolveExecCtx').mockResolvedValue({ userId: 'u_docs_reader' });
+  try {
+    await (call as any)[1]({ headers: { host: 'example.test' }, params: {}, query: {}, path: `${base}/openapi.json` }, res);
+  } finally {
+    signedIn.mockRestore();
+  }
   return body;
 }
 
