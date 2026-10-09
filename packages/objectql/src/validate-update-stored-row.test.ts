@@ -356,7 +356,7 @@ describe('#22445 — an update-mode preview judges the stored row merged with th
       for (const country of ['cn', 'us']) {
         rows.set('c1', { id: 'c1', name: 'one', country });
         // Precondition: the read door serves the key, masked.
-        expect(await engine.findOne(OBJECT, { where: { id: 'c1' }, context: { userId: 'erin' } as any })).toMatchObject({ country: '**' });
+        expect(await engine.findOne(OBJECT, { where: { id: 'c1' }, context: { userId: 'erin' } })).toMatchObject({ country: '**' });
         verdicts.push(await verdictOf(engine, { province: 'zj', id: 'c1' }, { userId: 'erin' }));
       }
       expect(verdicts[0]).toEqual(verdicts[1]);
