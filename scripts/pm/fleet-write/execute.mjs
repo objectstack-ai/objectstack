@@ -50,6 +50,11 @@
  * then sends `transferIssue` with both node ids and accepts only an answer
  * that places the card on the target. A transfer that fails prints the
  * installation remedy `transferRemedy` spells, in the log and the summary.
+ * A `workflow_dispatch` is one POST the platform answers 204 to with no body
+ * — its row reads `accepted`; the run it started is read back by the SEAT
+ * (`dispatch.mjs`), never here, because the answer carries no run id, and the
+ * token that request spends `actions: write` on reaches that one path and no
+ * other (`ops.mjs`, `REFUSED_PATH_FAMILIES`).
  * The FIRST failure stops the run — later actions are NOT attempted, and the
  * summary says which — because a seat that dispatched five related writes
  * must be able to read exactly where the board was left. A 404 on a directed
@@ -283,8 +288,9 @@ export async function confirmUpdateBranch(req, answer, payload, api, t, { sleep,
   return { ok: false, why: `HTTP ${UPDATE_BRANCH_ACCEPTED} accepted, but the head ${head === null ? 'could not be read' : `is still ${shortSha(head)}`} ${windowMs} ms later — UNCONFIRMED: the merge may still land; read the pull before anything else, ⛔ do not re-send` };
 }
 
-/** The one thing a seat needs from an answer: the id / number / url of what was written. */
-export function resultOf(req, json) {
+/** The one thing a seat needs from an answer: the id / number / url of what was written — or that a bodiless 204 accepted it. */
+export function resultOf(req, json, status = null) {
+  if (status === 204 && (json === null || json === undefined)) return 'accepted (HTTP 204, no body)';
   if (req.graphql) {
     const moved = json?.data?.[req.graphql.mutation]?.issue;
     if (moved) return [`#${moved.number}`, moved.url, moved.repository?.nameWithOwner ? `(now on ${moved.repository.nameWithOwner})` : ''].filter(Boolean).join(' ');
@@ -513,7 +519,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
       // The base sync is confirmed by MEASURE (header): the head polled off the expected sha, or a 422 judged by the compare.
       const landed = req.updateBranch ? await confirmUpdateBranch(req, r, payload, api, t, ub) : requestLanded(req, r);
       const call = req.graphql ? `POST /graphql ${req.graphql.mutation}` : r.call;
-      rows.push({ action: i + 1, op: action.op, call, status: r.status, result: landed.ok ? (landed.idempotent ? 'already absent (idempotent)' : scrub(landed.result ?? resultOf(req, r.json), [token])) : `FAILED: ${scrub(landed.why, [token])}` });
+      rows.push({ action: i + 1, op: action.op, call, status: r.status, result: landed.ok ? (landed.idempotent ? 'already absent (idempotent)' : scrub(landed.result ?? resultOf(req, r.json, r.status), [token])) : `FAILED: ${scrub(landed.why, [token])}` });
       if (!landed.ok) {
         stoppedAt = { action: i + 1, op: action.op, why: scrub(landed.why, [token]) };
         log(`  ✗ action ${i + 1} ${action.op}: ${call} -> ${stoppedAt.why}`);
@@ -558,8 +564,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the CLI: environment inputs, the payload refusal, the exit ladder': 7,
   "the annotations: ONE notice per landed op that creates or moves a card — op, number and url read from the platform's answer, never the request; none for any other op, a failed request or an answer that cannot be reported; the reader's own parser reads back exactly what was emitted": 12,
   'the transfer: the sender gated on BOTH repositories, both node ids first, a pull or a moved card refused before the mutation, landing only on the target, the remedy on failure': 11,
+  'the workflow_dispatch: ONE POST to the dispatch endpoint of the allowlisted file with { ref: main } under the App token, a bodiless 204 lands as accepted, a 422 or 403 is a failed action, no other actions/* request leaves, no annotation': 7,
 });
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 14;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -766,7 +773,7 @@ export async function selfTest() {
       const bare = { verb: 'POST', path: '/graphql', graphql: { mutation: 'enablePullRequestAutoMerge', query: 'q', pull: 21 } };
       t('⛔ a pull mutation whose descriptor declares no landed state is never judged landed', requestLanded(bare, { status: 200, json: { data: { enablePullRequestAutoMerge: { pullRequest: { number: 21, autoMergeRequest: { mergeMethod: 'SQUASH' } } } } } }).ok, false);
       // The table half: every pull mutation the op table can issue carries its entry, and selects every field that entry reads.
-      const pullRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'] }, REPO).filter((r) => r.graphql?.pull !== undefined).map((r) => [op, r.graphql]));
+      const pullRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'], workflow: 'shard-timings-refresh.yml', ref: 'main' }, REPO).filter((r) => r.graphql?.pull !== undefined).map((r) => [op, r.graphql]));
       const selects = (query, field) => new RegExp(`\\b${field}\\b`).test(query.slice(query.indexOf('pullRequest {')));
       t('every pull mutation in the op table carries its PR_LANDED_STATE entry, and its query selects every field that entry reads', [pullRows.map(([op]) => op).sort(), pullRows.every(([op, g]) => g.landed === PR_LANDED_STATE[op] && g.landed.fields.every((f) => selects(g.query, f)))], [Object.keys(PR_LANDED_STATE).sort(), true]);
     }
@@ -848,6 +855,25 @@ export async function selfTest() {
       t('…nor is one that carries no issue', requestLanded(req, { status: 200, json: { data: { transferIssue: { issue: null } } } }).ok, false);
       const plain = await run(base([{ op: 'comment', issue: 1, body: 'x' }]), { ...allowed, [`POST /repos/${REPO}/issues/1/comments`]: { status: 403, json: { message: 'Resource not accessible by integration' } } });
       t('a failure that is not a transfer carries no transfer remedy, and its token reached one repository only', [plain.exit, plain.summary.includes('Remedy:'), plain.summary.includes('the token also reaches')], [EXIT_ACTION_FAILED, false, false]);
+    }
+
+    // ── the workflow_dispatch ───────────────────────────────────────────────
+    battery('the workflow_dispatch: ONE POST to the dispatch endpoint of the allowlisted file with { ref: main } under the App token, a bodiless 204 lands as accepted, a 422 or 403 is a failed action, no other actions/* request leaves, no annotation');
+    {
+      const FILE = 'shard-timings-refresh.yml';
+      const DISPATCHES = `POST /repos/${REPO}/actions/workflows/${FILE}/dispatches`;
+      const start = base([{ op: 'workflow_dispatch', workflow: FILE, ref: 'main' }]);
+      const ok = await run(start, { ...allowed, [DISPATCHES]: { status: 204, json: null } }, { file: paceFile });
+      t('the one write is POST …/actions/workflows/{file}/dispatches with { ref: main } and nothing else in the body, exit 0', [ok.exit, writes(ok.seen).map((s) => [s.call, s.body])], [EXIT_OK, [[DISPATCHES, { ref: 'main' }]]]);
+      t('…under the App token, after the sender gate on the ONE repository the stroke names', [ok.seen.map((s) => s.call), ok.seen.every((s) => s.auth === `Bearer ${TOKEN}`)], [[PERM, DISPATCHES], true]);
+      t('a bodiless 204 lands: the row says accepted, the summary row carries 204, and the log counts one request landed', [ok.rows[0]?.status, ok.rows[0]?.result, ok.summary.includes(`| 1 | \`workflow_dispatch\` | \`${DISPATCHES}\` | 204 | accepted (HTTP 204, no body) |`), ok.logs.some((l) => l.includes('1 request(s) landed'))], [204, 'accepted (HTTP 204, no body)', true, true], ok.summary);
+      t('⛔ no other actions/* request leaves — no cancel, re-run, delete, cache or artifact call — and no annotation is emitted (the answer carries no run)', [ok.seen.filter((s) => s.call.includes('/actions/') && s.call !== DISPATCHES), ok.annotations, ok.logs.filter((l) => l.startsWith('::'))], [[], [], []]);
+      const noTrigger = await run(start, { ...allowed, [DISPATCHES]: { status: 422, json: { message: 'Workflow does not have \'workflow_dispatch\' trigger' } } });
+      t('a 422 (the workflow declares no workflow_dispatch trigger, or refuses the ref) is a FAILED action, exit 5, with the platform\'s sentence', [noTrigger.exit, noTrigger.rows[0]?.status, noTrigger.rows[0]?.result.includes('workflow_dispatch\' trigger')], [EXIT_ACTION_FAILED, 422, true]);
+      const noGrant = await run(start, { ...allowed, [DISPATCHES]: { status: 403, json: { message: 'Resource not accessible by integration' } } });
+      t('a 403 (the token was minted without actions write) is a FAILED action, exit 5, naming the platform\'s sentence', [noGrant.exit, noGrant.rows[0]?.result.includes('Resource not accessible by integration')], [EXIT_ACTION_FAILED, true]);
+      const offList = await run(base([{ op: 'workflow_dispatch', workflow: 'release.yml', ref: 'main' }]), allowed);
+      t('the validator is the executor\'s gate too: an off-list workflow is refused here with ZERO writes, exit 2', [offList.exit, writes(offList.seen).length], [EXIT_REFUSED, 0]);
     }
 
     // ── the summary ─────────────────────────────────────────────────────────
