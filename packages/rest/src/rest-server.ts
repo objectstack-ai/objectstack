@@ -5095,8 +5095,25 @@ export class RestServer {
     private registerOpenApiEndpoints(basePath: string): void {
         const isScoped = basePath.includes('/environments/:environmentId');
 
+        // [#22430] Both API-description endpoints — the document and its
+        // viewer — refuse an anonymous caller with the shared anonymous-deny
+        // 401, the same body the `/data` and `/meta` routes answer (ADR-0056 D2
+        // is default-deny, and no ADR-0138 D2 door class names these two). The
+        // refusal is each handler's FIRST act: before the bundled artifact is
+        // loaded and before any protocol is resolved, so a refused request
+        // costs no work and its answer does not even say whether a document is
+        // bundled here. A signed-in caller is served exactly as before, under
+        // the same ADR-0069 auth-policy gate every other protected route
+        // applies. The viewer page fetches the document from the browser, and
+        // that request carries the browser's session, so a signed-in browser is
+        // served on both endpoints.
+
         const openApiHandler = async (req: any, res: any) => {
             try {
+                const environmentId = isScoped ? req.params?.environmentId : undefined;
+                const context = await this.resolveExecCtx(environmentId, req);
+                if (this.enforceAuth(req, res, context)) return;
+
                 const spec = await this.loadOpenApiSpec();
                 if (!spec) {
                     res.status?.(503);
@@ -5149,7 +5166,6 @@ export class RestServer {
                 // must not silently blank the other.
                 let protocol: RestProtocol | undefined;
                 try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
                     protocol = await this.resolveProtocol(environmentId, req);
                 } catch {
                     // Enrichment is best-effort — never fail the spec serve.
@@ -5304,14 +5320,19 @@ export class RestServer {
             method: 'GET',
             path: `${basePath}/docs`,
             handler: async (req: any, res: any) => {
-                // Resolve the openapi.json URL relative to the current
-                // request so the docs page works for any host / scoped
-                // base path (e.g. /api/v1 vs /api/v1/environments/abc).
-                const reqPath: string = req.path || req.url || `${basePath}/docs`;
-                // Strip the trailing /docs to get the API base.
-                const apiBase = reqPath.replace(/\/docs\/?$/, '');
-                const specUrl = `${apiBase}/openapi.json`;
-                const html = `<!doctype html>
+                try {
+                    const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    const context = await this.resolveExecCtx(environmentId, req);
+                    if (this.enforceAuth(req, res, context)) return;
+
+                    // Resolve the openapi.json URL relative to the current
+                    // request so the docs page works for any host / scoped
+                    // base path (e.g. /api/v1 vs /api/v1/environments/abc).
+                    const reqPath: string = req.path || req.url || `${basePath}/docs`;
+                    // Strip the trailing /docs to get the API base.
+                    const apiBase = reqPath.replace(/\/docs\/?$/, '');
+                    const specUrl = `${apiBase}/openapi.json`;
+                    const html = `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8" />
@@ -5323,10 +5344,16 @@ export class RestServer {
 <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
 </body>
 </html>`;
-                if (res.setHeader) res.setHeader('content-type', 'text/html; charset=utf-8');
-                if (res.send) res.send(html);
-                else if (res.body) res.body = html;
-                else res.json?.(html);
+                    if (res.setHeader) res.setHeader('content-type', 'text/html; charset=utf-8');
+                    if (res.send) res.send(html);
+                    else if (res.body) res.body = html;
+                    else res.json?.(html);
+                } catch (error: any) {
+                    // Only the identity read above can throw here (a
+                    // permission-store outage), which keeps its declared answer.
+                    logError('[REST] docs viewer error:', error);
+                    sendThrownError(res, error);
+                }
             },
             metadata: {
                 summary: 'Interactive API docs (Scalar viewer)',
