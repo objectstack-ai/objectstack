@@ -287,7 +287,10 @@ export interface ProbeTableReading {
 // table as a GATE_PIN on `packages/runtime/src/domains/analytics.ts`, and the
 // `anonymous-deny-analytics` row covers its key plus the `/analytics`
 // dispatcher-domain key that left the shrink-only ledger baseline.
-export const PROBE_TABLE: ProbeTableReading = { entries: 19, files: 14, keys: 17 };
+// [#22430] 19 / 14 / 17 -> 19 / 14 / 18: no probe and no file joined; the
+// `anonymous-deny-api-description` row covers one more key, the `openapi` REST
+// family, which left the shrink-only ledger baseline.
+export const PROBE_TABLE: ProbeTableReading = { entries: 19, files: 14, keys: 18 };
 
 /**
  * The probe count `authz-conformance.matrix.ts`'s header states.
@@ -347,8 +350,8 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'RestServer.getRoutes() on a booted server and guarded per route by rest-route-ledger.conformance.test.ts. ' +
       'That guard is why this file can be a population source and a regex table cannot: a mounted route with no ' +
       'row here is already RED in another package, so a new family cannot be silently absent from this file, ' +
-      'and therefore cannot be silently absent from the authz ratchet either. 18 families; 1 classified by a ' +
-      'matrix row (metadata), 17 enumerated in the shrink-only baseline. Re-measured 83 -> 82 when the anonymous ' +
+      'and therefore cannot be silently absent from the authz ratchet either. 18 families; 2 classified by ' +
+      'matrix rows (metadata, and openapi since #22430), 16 enumerated in the shrink-only baseline. Re-measured 83 -> 82 when the anonymous ' +
       'public-form lookup-picker row left with its route; it carried `family: forms`, which the surviving form rows ' +
       'still carry, so `reachable` moved with `population` and the families stay 18. Earlier re-measured 91 -> 83 (19 -> 18 families) ' +
       'when the whole saved-report `reports` family left with its eight routes, all eight carrying the family, so ' +
@@ -499,6 +502,13 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // not move: the handler never called `enforceAuth` (the public-form routes
     // bypass it), so that stays 56, and `registerFormEndpoints` survives, so
     // `private register*Endpoints(` stays 16.
+    // [#22430] `enforceAuth` 56 -> 58, and nothing else on this row moved:
+    // 71 / 19 / 52 and every other control re-derived unchanged. The two
+    // API-description handlers in `registerOpenApiEndpoints` (the document and
+    // its viewer) now open with `if (this.enforceAuth(req, res, context))
+    // return;` — two call sites, no prose mention. Both routes were already in
+    // the population and stay outside `registerMetadataEndpoints`, so the blind
+    // spot is unchanged: guarding a route is not reaching it with a key.
     controls: {
       'private register*Endpoints(': 16,
       'this.routeManager.register(': 64,
@@ -509,7 +519,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'registerPerItemRoute(': 8,
       'const registerPerItemRoute =': 1,
       'forwarder slice: this.routeManager.register(': 1,
-      enforceAuth: 56,
+      enforceAuth: 58,
     },
     note:
       'The single non-tripwire probe names ONE registrar of 16. The other 15 can never mint a key: ' +
