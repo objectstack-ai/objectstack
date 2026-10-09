@@ -37,7 +37,9 @@
  * where values interpolate), so `{token}` templates pass and resolve at the
  * executor's existing interpolation points. The value slots are the exception
  * since #19939: the `{token}` dialect is retired there (the "value slots"
- * section below).
+ * section below). So are the text slots since #22110: a screen `title` /
+ * `description` and an `end` `message` render `{{ }}` holes, and a `{token}`
+ * there is refused (`flow-text-slot-template.ts`).
  *
  * ## Unknown keys — closed here too, as of #4001 批 9
  *
@@ -96,6 +98,10 @@ import { isExpressionEnvelopeShaped } from './flow-node-expression-paths';
 // one judge, composed into every value slot's contract below rather than
 // re-spelled here.
 import { valueSlotTemplateRefusals } from './flow-value-slot-template';
+// [#22110] ADR-0032 §3's `{{ }}` delimiter in the text slots — the one judge of
+// the single-brace tokens they still carry, composed into the screen and end
+// contracts below rather than re-spelled here.
+import { textSlotTemplateRefusal } from './flow-text-slot-template';
 
 /** What a rejected key on these contracts silently did before #4001 批 9. */
 const BUILTIN_NODE_CONFIG_HISTORY =
@@ -739,6 +745,14 @@ export type ScreenFieldConfig = z.input<typeof ScreenFieldConfigSchema>;
  * screen (`objectName` set → the object's full create/edit form; `mode`,
  * `recordId`, `defaults`, `idVariable` apply only there). `recordId` is what
  * makes `mode: 'edit'` usable — it names the record the form edits.
+ *
+ * `title` and `description` are TEXT slots (#22110, ADR-0032 D3): they render
+ * through the formula template engine, so their placeholders are `{{ }}`
+ * holes over the flow's variables (`{{ record.name }}`), and a single-brace
+ * `{token}` left from the 17.x dialect is refused by the `superRefine` below —
+ * the one text-slot judge (`flow-text-slot-template.ts`) `registerFlow` and
+ * `objectstack validate` share. `recordId` and `defaults` keep the flow's
+ * single-brace `{token}` dialect: each hands its resolved value over, not text.
  */
 export const ScreenConfigSchema = lazySchema(() => strictObject({
   surface: 'this screen node config',
@@ -751,10 +765,12 @@ export const ScreenConfigSchema = lazySchema(() => strictObject({
   // be said out loud.
   aliases: { object: 'objectName' },
 }, {
-  /** Heading (falls back to the node label). Interpolates `{token}`. */
-  title: z.string().optional().describe('Heading shown above the screen'),
-  /** Body text. Interpolates `{token}`. */
-  description: z.string().optional().describe('Body text shown under the heading'),
+  /** Heading (falls back to the node label when it renders nothing). A `{{ }}` template. */
+  title: z.string().optional()
+    .describe('Heading shown above the screen — a template rendered per run with `{{ }}` holes over the flow\'s variables (`{{ record.name }}`); falls back to the node label when it renders nothing'),
+  /** Body text. A `{{ }}` template. */
+  description: z.string().optional()
+    .describe('Body text shown under the heading — a template rendered per run with `{{ }}` holes (`{{ record.name }}`)'),
   /** Input fields for a flat screen; empty means message-only. */
   fields: z.array(ScreenFieldConfigSchema).optional()
     .describe('Input fields collected on this screen'),
@@ -799,6 +815,15 @@ export const ScreenConfigSchema = lazySchema(() => strictObject({
   /** Object form only: prefilled values; interpolates `{token}` templates. */
   defaults: z.record(z.string(), z.unknown()).optional()
     .describe('Object form only: prefilled values'),
+}).superRefine((config, ctx) => {
+  // [#22110] The two text slots render `{{ }}` holes; a single-brace token is
+  // no placeholder any more and would show as literal text.
+  for (const key of ['title', 'description'] as const) {
+    const value = config[key];
+    if (typeof value !== 'string') continue;
+    const refusal = textSlotTemplateRefusal(value);
+    if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: [key], message: refusal });
+  }
 }));
 
 export type ScreenConfig = z.input<typeof ScreenConfigSchema>;
@@ -842,10 +867,13 @@ export type ScreenConfigParsed = z.infer<typeof ScreenConfigSchema>;
  *
  * ## `message` — required by a refusal, refused by a completion
  *
- * `message` is a `{token}` template rendered at the engine's existing
- * interpolation points, exactly as a `screen` node's `description` is —
- * `'Refused: {record.name} is a confirmed duplicate'` yields per-record text at
- * run time. Two refinements keep the pair honest, in both directions:
+ * `message` is a `{{ }}` template rendered by the engine's one text renderer,
+ * exactly as a `screen` node's `description` is —
+ * `'Refused: {{ record.name }} is a confirmed duplicate'` yields per-record text
+ * at run time (#22110, ADR-0032 D3: a single-brace `{token}` left from the 17.x
+ * dialect is refused, through the one text-slot judge,
+ * `flow-text-slot-template.ts`). Two refinements keep the pair honest, in both
+ * directions:
  *
  *  - `outcome: 'refused'` with no `message` is REFUSED — a refusal without
  *    text is exactly the shape this contract exists to make expressible, and
@@ -882,11 +910,12 @@ export const EndConfigSchema = lazySchema(() => strictObject({
     + 'successful evaluation that says no — carries the rendered `message`, is never resumed, and a runner shows '
     + 'the message with Close only: no Submit, no completion toast.',
   ),
-  /** Why the run was refused. Interpolates `{token}` like a screen `description`. */
+  /** Why the run was refused. A `{{ }}` template, rendered like a screen `description`. */
   message: z.string().min(1).optional().describe(
-    'Why the run was refused, as a `{token}` template interpolated at run time exactly like a screen '
-    + '`description` (`{record.name}` etc.), so the text names the record. Required when `outcome` is `refused`; '
-    + 'refused when it is `completed` — a completion renders nothing, so the key would be a silent no-op.',
+    'Why the run was refused, as a template rendered at run time exactly like a screen `description` — `{{ }}` '
+    + 'holes over the flow\'s variables (`{{ record.name }}`), so the text names the record. Required when '
+    + '`outcome` is `refused`; refused when it is `completed` — a completion renders nothing, so the key would be '
+    + 'a silent no-op.',
   ),
 }).superRefine((config, ctx) => {
   if (config.outcome === 'refused') {
@@ -896,10 +925,14 @@ export const EndConfigSchema = lazySchema(() => strictObject({
         path: ['message'],
         message:
           "`outcome: 'refused'` requires a `message` — a refusal with no text is the shape this contract exists to "
-          + 'replace (a screen pretending to be a notice). Say why, as a `{token}` template so the text names the '
-          + "record: `message: 'Refused: {record.name} is a confirmed duplicate'`.",
+          + 'replace (a screen pretending to be a notice). Say why, as a `{{ }}` template so the text names the '
+          + "record: `message: 'Refused: {{ record.name }} is a confirmed duplicate'`.",
       });
+      return;
     }
+    // [#22110] A text slot: `{{ }}` holes, never a single-brace token.
+    const refusal = textSlotTemplateRefusal(config.message);
+    if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['message'], message: refusal });
     return;
   }
   if (config.message !== undefined) {

@@ -119,8 +119,8 @@ describe('notify (baseline node)', () => {
             engine.registerFlow('notify_flow', notifyFlow({
                 topic: 'deal.won',
                 recipients: ['user_1', 'user_2'],
-                title: 'Deal {dealName} closed',
-                message: 'Congrats on {dealName}',
+                title: 'Deal {{ dealName }} closed',
+                message: 'Congrats on {{ dealName }}',
                 channels: ['inbox', 'email'],
                 severity: 'info',
                 actionUrl: '/opps/{dealId}',
@@ -149,7 +149,7 @@ describe('notify (baseline node)', () => {
         it('forwards a click-through target via sourceObject/sourceId, interpolating the id (#2675)', async () => {
             engine.registerFlow('notify_flow', notifyFlow({
                 recipients: ['user_1'],
-                title: 'Quote {dealName} approved',
+                title: 'Quote {{ dealName }} approved',
                 message: 'Fill in the line items',
                 channels: ['inbox'],
                 sourceObject: 'mtc_quotation',

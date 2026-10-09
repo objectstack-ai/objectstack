@@ -31,16 +31,21 @@
  * and nothing said why.
  *
  * The interpolator walks objects, arrays, and primitives recursively so it
- * can be applied wholesale to a node's `config.filter` block and its text
- * slots. The value slots (`fields.*`, `assignments.*`) no longer read this
- * dialect (#19939): a `{…}` token there is refused before it gets here, except
- * the date macros and `$User` paths, which CEL cannot spell yet
- * (`@objectstack/spec/automation`'s `flow-value-slot-template.ts`).
+ * can be applied wholesale to a node's `config.filter` block and its other
+ * value-like positions. The value slots (`fields.*`, `assignments.*`) no
+ * longer read this dialect (#19939): a `{…}` token there is refused before it
+ * gets here, except the date macros and `$User` paths, which CEL cannot spell
+ * yet (`@objectstack/spec/automation`'s `flow-value-slot-template.ts`). Nor do
+ * the TEXT slots — a notify `title` / `message`, a screen `title` /
+ * `description`, a refusing `end` node's `message` (#22110, ADR-0032 D3):
+ * they render ADR-0032 §3's `{{ }}` holes through the formula template engine,
+ * via {@link renderTextSlot} below, and a `{…}` token there is refused
+ * (`flow-text-slot-template.ts`).
  */
 
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { isKnownFilterToken } from '@objectstack/spec/data';
-import { nearestName } from '@objectstack/formula';
+import { nearestName, templateEngine } from '@objectstack/formula';
 import { markGuardRefusal } from '../guard-refusal.js';
 
 export type VariableMap = Map<string, unknown>;
@@ -366,33 +371,103 @@ export function interpolateString(
 }
 
 /**
- * Render an authored TEXT slot — a screen `title` / `description`, an `end`
- * node's refusal `message` — through {@link interpolate}, coerced to a string.
- *
- * [#15788] Hoisted out of `screen-nodes.ts`'s local `interp` closure so the
- * refusing `end` node (#14945 lane 2) renders through the SAME implementation
- * rather than a second one. The ruling's words are the requirement: the
- * refusal message "goes through the same interpolation a screen `description`
- * gets" — ⛔ never a second template engine. A second spelling would start
- * byte-identical and drift on the first fix that landed in only one of them,
- * and the drift would be invisible from either side: both would still
- * substitute `{record.name}`.
- *
- * Absent in, absent out — a slot the author left unset renders nothing rather
- * than the string `"undefined"`, and a whole-string token that resolved to
- * `null` is the same "nothing" ({@link interpolateString} preserves the raw
- * value for a single-token string, so an unresolved `{missing}` arrives here as
- * `null`). Every other value is stringified exactly as an embedded
- * substitution would be, which is what keeps ONE rendering for both slots.
+ * A text slot's `{{ }}` template that does not compile (#22110) — a hole
+ * holding logic or an unknown formatter (`{{ a + b }}`, `{{ x | bogus }}`), or
+ * unbalanced delimiters. The doors (`registerFlow`, `objectstack validate`)
+ * compile every text slot first, so this is met only by a flow that reached the
+ * executor without them. A guard refusal (#3863): the metadata is wrong,
+ * re-running the flow unchanged can never succeed, and a `fault` edge must not
+ * swallow it into a notification sent with its holes unfilled.
  */
-export function interpolateText(
-    value: unknown,
-    variables: VariableMap,
-    context: AutomationContext,
-): string | undefined {
+export class FlowTextTemplateError extends Error {
+    /** The template text as authored. */
+    readonly source: string;
+
+    constructor(source: string, message: string) {
+        super(message);
+        this.name = 'FlowTextTemplateError';
+        this.source = source;
+        markGuardRefusal(this);
+    }
+}
+
+/**
+ * The flow's variables as the scope a text slot's `{{ }}` holes read — each
+ * variable a root (`{{ record.name }}`, `{{ summary }}`, `{{ $error.message }}`),
+ * and a node output stored under a flat dotted key (`n1.result`) reachable as
+ * the path it spells (`{{ n1.result }}`).
+ *
+ * The nesting follows the interpolator's precedence: a declared variable wins
+ * over a flat key sharing its head (`{a.b}` walked `a`'s value and never read a
+ * flat `a.b`), so such a key is not merged into the variable. And it builds
+ * fresh containers only — a variable's own object is never written into.
+ */
+export function textTemplateScope(variables: VariableMap): Record<string, unknown> {
+    const scope: Record<string, unknown> = {};
+    const fresh = new WeakSet<object>();
+    const dotted: Array<[string, unknown]> = [];
+    for (const [key, value] of variables) {
+        if (key.includes('.')) dotted.push([key, value]);
+        else scope[key] = value;
+    }
+    for (const [key, value] of dotted) {
+        const segments = key.split('.');
+        let cursor: Record<string, unknown> | undefined = scope;
+        for (let i = 0; i < segments.length - 1 && cursor; i++) {
+            const next: unknown = cursor[segments[i]!];
+            if (next === undefined) {
+                const container: Record<string, unknown> = {};
+                fresh.add(container);
+                cursor[segments[i]!] = container;
+                cursor = container;
+            } else {
+                cursor = typeof next === 'object' && next !== null && fresh.has(next)
+                    ? (next as Record<string, unknown>)
+                    : undefined;
+            }
+        }
+        if (cursor) cursor[segments[segments.length - 1]!] = value;
+    }
+    return scope;
+}
+
+/**
+ * Render a flow TEXT slot — a notify `title` / `message`, a screen `title` /
+ * `description`, a refusing `end` node's `message` — through the formula
+ * template engine (#22110, ADR-0032 D3): `{{ path }}` and
+ * `{{ path | formatter[:arg] }}` holes over {@link textTemplateScope}, every
+ * other character literal. ONE renderer for every text slot — ⛔ never a second
+ * template engine: the refusing `end` node's message "goes through the same
+ * interpolation a screen `description` gets" (#15788), and so does a
+ * notification.
+ *
+ * Value→string is the engine's, defined per value (ADR-0032 §3): `null` /
+ * absent renders nothing, an object or array renders as JSON, a `Date` as its
+ * ISO text, and a formatter makes the rest explicit (`{{ amount | currency }}`,
+ * `{{ due | date:iso }}`). A flow variable named `locale` is also the
+ * formatters' locale — the engine reads its scope's `locale` for that.
+ *
+ * Absent in, absent out: a slot the author left unset — or one that renders
+ * no text at all — returns `undefined`, so a screen falls back to its node
+ * label and a notification with no title fails its own guard.
+ *
+ * A template that does not compile throws {@link FlowTextTemplateError}, a
+ * guard refusal. A single-brace `{token}` is NOT read here: it is refused by
+ * every door before a run starts (`flow-text-slot-template.ts`), and reaching
+ * this renderer it is literal text.
+ */
+export function renderTextSlot(value: unknown, variables: VariableMap): string | undefined {
     if (value == null) return undefined;
-    const rendered = interpolate(value, variables, context);
-    return rendered == null ? undefined : String(rendered);
+    const source = String(value);
+    const result = templateEngine.evaluate(
+        { dialect: 'template', source },
+        { extra: textTemplateScope(variables) },
+    );
+    if (!result.ok) {
+        throw new FlowTextTemplateError(source, `flow text template \`${source}\`: ${result.error.message}`);
+    }
+    const text = String(result.value);
+    return text === '' ? undefined : text;
 }
 
 /**
@@ -438,9 +513,9 @@ export function interpolate<T = unknown>(
  * when both could match, and a token belonging to neither dialect is left to
  * the caller's collapse guard to report.
  *
- * Only filter blocks use this. Everywhere else (`title`, `message`, `fields`,
- * `url`) keeps plain {@link interpolate}, where a bare `{current_year_start}`
- * is a nonsense reference rather than a query bound.
+ * Only filter blocks use this. Every other single-brace position (`url`,
+ * `recipients`, …) keeps plain {@link interpolate}, where a bare
+ * `{current_year_start}` is a nonsense reference rather than a query bound.
  */
 export function interpolateFilter<T = unknown>(
     value: T,

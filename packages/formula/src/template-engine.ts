@@ -184,7 +184,18 @@ interface ParsedHole {
   filter?: { name: string; arg?: string };
 }
 
-const PATH_ONLY_RE = /^[\w.[\]]+$/;
+/**
+ * A hole's path: identifier characters, `.` segments and `[i]` indices.
+ *
+ * `$` is an identifier character here (#22110): a host scope may name a
+ * variable with it — a flow's engine-set `$error` (the fault a `try_catch` or
+ * fault edge caught), `$runId`, `$flowLabel` — and since protocol 18 a flow's
+ * text slots render through this engine, so `{{ $error.message }}` is how a
+ * fault-handler notification names the error. Without it the hole failed to
+ * compile and the variable had no template spelling at all. A `$` name that no
+ * scope binds resolves to nothing, like every other unknown path.
+ */
+const PATH_ONLY_RE = /^[\w$.[\]]+$/;
 
 /**
  * Parse a hole's inner content into a path + optional single formatter.
