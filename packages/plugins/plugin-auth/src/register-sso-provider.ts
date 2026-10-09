@@ -335,12 +335,53 @@ export async function runRegisterSamlProviderFromForm(
 // through the real endpoints (so the per-provider admin gate runs) and reshape
 // the response into the `{ success, data }` envelope the action `resultDialog`
 // reads — request returns the ready-to-paste DNS record; verify returns a
-// friendly success/error message. A `404` from the inner endpoint means the
-// feature is OFF for this env (endpoints unmounted) → surfaced as such, not a
-// bare "not found".
+// friendly success/error message.
+//
+// [#22463] The vendor answers two different `404`s, neither with a `code`: the
+// feature OFF (the inner route is not mounted, empty body) and, with it ON, an
+// unknown `providerId` (`checkProviderAccess`). The bridge does not tell them
+// apart by the body — its wording is the vendor's, not a contract — but by the
+// environment's own setting, which the caller hands in
+// (`AuthManager.isSsoDomainVerificationEnabled()`, the decision
+// `buildPluginList` makes for `sso({ domainVerification })`):
+//   • `false` → `400 DOMAIN_VERIFICATION_DISABLED`, without calling the vendor;
+//   • `true`  → the inner route exists, so a code-less `404` is the provider
+//               lookup missing → `404 RESOURCE_NOT_FOUND`;
+//   • omitted → the two cannot be told apart, and both keep the earlier answer,
+//               `400 DOMAIN_VERIFICATION_DISABLED` (a caller that hands no flag,
+//               such as the cloud auth proxy, sees no change).
 
 /** @better-auth/sso default verification token prefix (we don't override `tokenPrefix`). */
 const SSO_DOMAIN_TOKEN_PREFIX = 'better-auth-token';
+
+/** What the caller knows about this environment's domain-verification setting. */
+interface SsoDomainVerificationBridgeOptions {
+  /**
+   * Whether `@better-auth/sso` mounted the inner domain-verification routes on
+   * this environment. Omitted: the bridge cannot tell a feature-off `404` from
+   * an unknown provider's, and answers both as `DOMAIN_VERIFICATION_DISABLED`.
+   */
+  domainVerificationEnabled?: boolean;
+}
+
+type DomainVerificationBridgeResult = RegisterSsoFormResult & { body: RegisterSsoFormResult['body'] & { data?: any } };
+
+/** The feature is off on this environment — one answer for both routes (#10859). */
+function domainVerificationDisabled(): DomainVerificationBridgeResult {
+  return { status: 400, body: { success: false, error: { code: 'DOMAIN_VERIFICATION_DISABLED', message: 'Domain verification is not enabled for this environment (set OS_SSO_DOMAIN_VERIFICATION).' } } };
+}
+
+/**
+ * The answer to a vendor `404` that carries no `code` (see the block above).
+ * Only a caller that says the feature is on gets the not-found answer; with no
+ * flag the earlier mapping stands.
+ */
+function codelessVendorNotFound(providerId: string, options: SsoDomainVerificationBridgeOptions): DomainVerificationBridgeResult {
+  if (options.domainVerificationEnabled === true) {
+    return { status: 404, body: { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `SSO provider "${providerId}" was not found.` } } };
+  }
+  return domainVerificationDisabled();
+}
 
 /**
  * Strip protocol / path / port so `https://acme.com/` → `acme.com` for the DNS
@@ -390,11 +431,15 @@ function forwardAuthHeaders(request: Request, origin: string): Headers {
  * return the ready-to-paste DNS record (for a one-shot `resultDialog`).
  *
  * Body: `{ providerId, domain? }` (domain only shapes the displayed record name).
+ *
+ * @param options `domainVerificationEnabled` — the environment's own setting
+ *                (see the block above); omitted keeps the earlier mapping.
  */
 export async function runRequestDomainVerification(
   handle: AuthRequestHandler,
   request: Request,
-): Promise<RegisterSsoFormResult & { body: RegisterSsoFormResult['body'] & { data?: any } }> {
+  options: SsoDomainVerificationBridgeOptions = {},
+): Promise<DomainVerificationBridgeResult> {
   let body: any;
   try { body = await request.json(); } catch { body = {}; }
   const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
@@ -406,6 +451,8 @@ export async function runRequestDomainVerification(
 
   const rw = rewriteSsoAdminUrl(request, /\/admin\/sso\/request-domain-verification$/, '/sso/request-domain-verification');
   if (!rw) return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Bad request URL' } } };
+  // [#22463] Off: the inner route is not mounted, so there is nothing to ask.
+  if (options.domainVerificationEnabled === false) return domainVerificationDisabled();
   const headers = forwardAuthHeaders(request, rw.origin);
 
   // [#22398] The inner route reads the session (`sessionMiddleware`); only its
@@ -414,9 +461,7 @@ export async function runRequestDomainVerification(
   let parsed: any = {};
   try { const t = await resp.text(); parsed = t ? JSON.parse(t) : {}; } catch { parsed = {}; }
   if (!resp.ok) {
-    if (resp.status === 404 && !parsed?.code) {
-      return { status: 400, body: { success: false, error: { code: 'DOMAIN_VERIFICATION_DISABLED', message: 'Domain verification is not enabled for this environment (set OS_SSO_DOMAIN_VERIFICATION).' } } };
-    }
+    if (resp.status === 404 && !parsed?.code) return codelessVendorNotFound(providerId, options);
     // ADR-0112: `parsed?.code` is better-auth's own code passing through — never
     // overwritten. The DEFAULT is ours, so it is the registered SCREAMING ledger
     // entry for this feature (`DOMAIN_VERIFICATION_FAILED`, @objectstack/plugin-auth)
@@ -443,11 +488,15 @@ export async function runRequestDomainVerification(
  * envelope so the action surfaces a clear toast.
  *
  * Body: `{ providerId }`.
+ *
+ * @param options `domainVerificationEnabled` — the environment's own setting
+ *                (see the block above); omitted keeps the earlier mapping.
  */
 export async function runVerifyDomain(
   handle: AuthRequestHandler,
   request: Request,
-): Promise<RegisterSsoFormResult & { body: RegisterSsoFormResult['body'] & { data?: any } }> {
+  options: SsoDomainVerificationBridgeOptions = {},
+): Promise<DomainVerificationBridgeResult> {
   let body: any;
   try { body = await request.json(); } catch { body = {}; }
   const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
@@ -458,6 +507,8 @@ export async function runVerifyDomain(
 
   const rw = rewriteSsoAdminUrl(request, /\/admin\/sso\/verify-domain$/, '/sso/verify-domain');
   if (!rw) return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Bad request URL' } } };
+  // [#22463] Off: the inner route is not mounted, so there is nothing to ask.
+  if (options.domainVerificationEnabled === false) return domainVerificationDisabled();
   const headers = forwardAuthHeaders(request, rw.origin);
 
   // [#22398] The inner route reads the session (`sessionMiddleware`); only its
@@ -468,18 +519,15 @@ export async function runVerifyDomain(
   if (resp.ok) {
     return { status: 200, body: { success: true, data: { providerId, verified: true, message: 'Domain ownership verified — this provider can now sign users in.' } } };
   }
-  // The feature is OFF for this env: `@better-auth/sso` never mounted the inner
-  // endpoint, so its `404` describes the INNER route. THIS route is mounted
-  // unconditionally, so passing that status through says "no such endpoint"
-  // about a resource that exists. Answer the sibling's answer instead — same
-  // condition, same code, same status (#10859). Before this, the branch
-  // rewrote only the `message` and let the code fall through to the generic
-  // default below, so the machine-readable field said "verification failed"
-  // while the human-readable one said "the feature is off"; a caller can only
-  // act on the first.
-  if (resp.status === 404 && !parsed?.code) {
-    return { status: 400, body: { success: false, error: { code: 'DOMAIN_VERIFICATION_DISABLED', message: 'Domain verification is not enabled for this environment (set OS_SSO_DOMAIN_VERIFICATION).' } } };
-  }
+  // A code-less `404`: with the feature on, the provider lookup missed; with no
+  // flag, the earlier answer (see the block above). When the feature is OFF,
+  // `@better-auth/sso` never mounted the inner endpoint, so its `404` describes
+  // the INNER route, while THIS route is mounted unconditionally: passing that
+  // status through would say "no such endpoint" about a resource that exists,
+  // so the off case answers the sibling's answer — same condition, same code,
+  // same status (#10859). A `404` that carries a code (`NO_PENDING_VERIFICATION`)
+  // is the vendor's own diagnosis and passes through below.
+  if (resp.status === 404 && !parsed?.code) return codelessVendorNotFound(providerId, options);
   // Friendlier copy for the expected failure modes.
   let message = parsed?.message || 'Domain verification failed';
   if (parsed?.code === 'NO_PENDING_VERIFICATION') {

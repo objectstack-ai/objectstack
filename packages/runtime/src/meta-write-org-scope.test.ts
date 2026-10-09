@@ -1,6 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
+ * [ADR-0131 D6, C5 stage S3] The dispatcher threads NO organization into a
+ * metadata write: every type, an `allowOrgOverride: true` one included, lands
+ * environment-wide (`organization_id` NULL) whatever the session's active
+ * organization. The per-organization overlay axis is retired; the CONTROL cases
+ * that used to pin `view` landing org-scoped are the stage's pins now, and they
+ * read the stored ROW through the real stack.
+ *
+ * History, kept below for the reverse-verification record it carries:
  * #7018 — the runtime threads the session's organization into a metadata WRITE
  * only for types the registry declares `allowOrgOverride: true`.
  *
@@ -68,8 +76,9 @@ import {
     // REST `/meta` write doors share it. This suite still drives the DISPATCHER
     // through the real stack — that is why it stays in this package.
     declaresOrgOverride,
-    organizationIdForMetaWrite, assertEngineFindOnePredicate,
+    assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
+import * as metadataCore from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 // [commit 67ceb9aef] The URL spelling contract itself — the map storage folds through,
@@ -365,8 +374,8 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         // channel either, so it is env-wide too. (`webhook` took this slot
         // from `theme` at commit 35ad101bc — the retired kind left the contract.)
         expect(declaresOrgOverride('webhook')).toBe(false);
-        // No active org in, no org out — for every type.
-        expect(organizationIdForMetaWrite('view', undefined)).toBeUndefined();
+        // [ADR-0131 D6] The write-side predicate is gone: no door asks it.
+        expect('organizationIdForMetaWrite' in metadataCore).toBe(false);
     });
 
     // ── PUT /meta/:type/:name — the dispatcher's metadata write ───────────
@@ -419,24 +428,26 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         expect(a.body.data).toMatchObject({ success: true, state: 'active' });
     });
 
-    it('CONTROL — an `allowOrgOverride: true` type keeps its org scoping exactly as before', async () => {
+    it('⭐ [ADR-0131 D6] an `allowOrgOverride: true` type lands env-wide too, and the read serves it', async () => {
         const { engine, dispatcher } = makeStack(ACTIVE_ORG);
 
         const res = responseOf(await dispatcher.handleMetadata(`/view/${VIEW.name}`, ctx(ACTIVE_ORG), 'PUT', VIEW));
 
         expect(res.status).toBe(200);
-        // ADR-0005's per-org overlay is the point of the flag and must survive
-        // this change untouched — `getMetaItem`/`getMetaItems` load it on demand.
-        expect(metaRow(engine, 'view', VIEW.name)!.organization_id).toBe(ACTIVE_ORG);
+        // The per-organization overlay axis is retired: the Studio save of a
+        // view belongs to the whole deployment.
+        expect(metaRow(engine, 'view', VIEW.name)!.organization_id).toBeNull();
+        const read = responseOf(await dispatcher.handleMetadata(`/view/${VIEW.name}`, ctx(ACTIVE_ORG), 'GET'));
+        expect(read.status).toBe(200);
     });
 
-    it('CONTROL — the plural URL spelling of an overridable type is scoped the same way', async () => {
+    it('[ADR-0131 D6] the plural URL spelling of an overridable type lands env-wide the same way', async () => {
         const { engine, dispatcher } = makeStack(ACTIVE_ORG);
 
         const res = responseOf(await dispatcher.handleMetadata(`/views/${VIEW.name}`, ctx(ACTIVE_ORG), 'PUT', VIEW));
 
         expect(res.status).toBe(200);
-        expect(metaRow(engine, 'view', VIEW.name)!.organization_id).toBe(ACTIVE_ORG);
+        expect(metaRow(engine, 'view', VIEW.name)!.organization_id).toBeNull();
     });
 
     // ── POST /packages/:id/publish-drafts — the ADR-0045 visibility flip ──
@@ -567,7 +578,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
  * pass the red cases and fail there, re-minting the #6190 phantom rows.
  * Measured result recorded in the PR body.
  */
-describe('#10503 the dispatcher /metadata transport decides org scope on the FOLDED type', () => {
+describe('#10503 · ADR-0131 D6 no spelling carries an organization through the dispatcher /metadata transport', () => {
     beforeEach(() => {
         vi.spyOn(console, 'warn').mockImplementation(() => {});
         vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -606,7 +617,7 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
     ] as const;
 
     for (const { plural, singular, item } of MEMBERS) {
-        it(`PUT /metadata/${plural}/:name lands ORG-SCOPED, where its ${singular} twin lands`, async () => {
+        it(`PUT /metadata/${plural}/:name lands env-wide, where its ${singular} twin lands`, async () => {
             // THE assertion, and it is the stored row rather than the status:
             // before the fold this write persisted with `organization_id
             // NULL` while the author's own org-scoped read looked elsewhere —
@@ -618,7 +629,7 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
             expect(resPlural.status).toBe(200);
             const pluralRow = metaRow(viaPlural.engine, singular, item.name);
             expect(pluralRow).toBeDefined();
-            expect(pluralRow!.organization_id).toBe(ACTIVE_ORG);
+            expect(pluralRow!.organization_id).toBeNull();
 
             // The live control, in the same file and the same direction: the
             // singular twin's scoping is what the plural must equal, and it
@@ -629,7 +640,7 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
             );
             expect(resSingular.status).toBe(200);
             const singularRow = metaRow(viaSingular.engine, singular, item.name);
-            expect(singularRow!.organization_id).toBe(ACTIVE_ORG);
+            expect(singularRow!.organization_id).toBeNull();
             expect(pluralRow!.organization_id).toBe(singularRow!.organization_id);
         });
 
@@ -651,7 +662,7 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
                 (r: any) => r.type === singular && r.name === item.name && r.state === 'active',
             );
             expect(rows).toHaveLength(1);
-            expect(rows[0].organization_id).toBe(ACTIVE_ORG);
+            expect(rows[0].organization_id).toBeNull();
         });
 
         it(`CONTROL — with NO active org, /${plural} still lands env-wide`, async () => {
@@ -690,7 +701,7 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
 
     // ── the class, not the two specimens ──────────────────────────────────
 
-    it('decides scope for EVERY spelling in the URL contract exactly as for its folded type', async () => {
+    it('names no organization for EVERY spelling in the URL contract', async () => {
         // The class-closing sweep. For every key of `META_URL_TO_SINGULAR` the
         // transport's decision must equal the predicate's decision on the
         // FOLDED type — the property the two maps' disagreement broke. A future
@@ -712,8 +723,8 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
 
             expect(
                 saveMetaItem.mock.calls[0][0].organizationId,
-                `PUT /metadata/${spelling} scope disagreed with its fold '${folded}'`,
-            ).toBe(organizationIdForMetaWrite(folded, ACTIVE_ORG));
+                `PUT /metadata/${spelling} (folds to '${folded}') threaded an organization`,
+            ).toBeUndefined();
         }
     });
 
@@ -731,7 +742,7 @@ describe('#10503 the dispatcher /metadata transport decides org scope on the FOL
 
         const request = saveMetaItem.mock.calls[0][0];
         expect(request.type).toBe('translations');
-        expect(request.organizationId).toBe(ACTIVE_ORG);
+        expect(request.organizationId).toBeUndefined();
     });
 
     // ── the smaller second site: GET /metadata/:type/:name/published ──────

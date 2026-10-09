@@ -106,6 +106,8 @@ later ships. See [ADR-0070](https://github.com/objectstack-ai/objectstack/blob/m
 
 In shared-database multi-tenancy, **most metadata types must not be per-org customizable** — overriding them would break the physical schema. The whitelist lives in **one** place: `MetadataTypeRegistryEntry.allowOrgOverride` in `packages/spec/src/kernel/metadata-plugin.zod.ts`.
 
+> **ADR-0131 D6 — the per-organization overlay axis is retired.** The `/meta` doors (REST and the runtime dispatcher) carry no organization into a metadata write or read: a Studio or `PUT /api/v1/meta/...` write of the five ✅ types below lands **environment-wide** (`organization_id` NULL) and is served to every organization, and an organization admin holding only the retired `manage_org_presentation` capability is refused (`403`). An overlay row an earlier release stored under an organization — under the `single` posture, every Studio save of these types, filed under the Default Organization — is not served by any `/meta` read until the promotion ceremony (ADR-0131 C7) carries it to the environment layer; re-save the item in Studio to make the edit live on the `/meta` doors now. Public forms are the exception: until that ceremony the anonymous form doors read a form `view` in the Default Organization and prefer its overlay for the form's body, while a withdrawal in either layer closes the form, fail-closed. So a legacy organization overlay of a public form keeps serving its body there: a Studio re-save of that body (an environment row) does not change the body the public form serves, and a Studio withdrawal (an environment row) still closes it. The table still records which types take an overlay of a shipped item.
+
 | Type | `allowOrgOverride` | Rationale |
 | :--- | :---: | :--- |
 | `view`, `dashboard`, `report`, `email_template`, `translation` | ✅ | Pure rendering / render-time content. Per-org customization is safe. |
@@ -228,7 +230,7 @@ The hash is `sha256:` + 64-hex of a canonical JSON serialization of the body, wi
 |:---|:---|:---|
 | `defineView(...)` / `defineFlow(...)` / any source file → compiled into `dist/objectstack.json` | ❌ Never. Loaded into the in-memory registry on boot; refreshed via HMR in dev. | ❌ The artifact's own version history *is* Git. The metadata layer does not duplicate it. |
 | Editing a `.json` under `<root>/<type>/<name>.json` (FS overlay, e.g. `<root>/view/case_grid.json`) | ❌ FS layer is independent of DB. | ✅ Appended to the change log at `<root>/.objectstack/.log/main.jsonl` by `FileSystemRepository`. |
-| Studio inline edit, or `PUT /api/v1/meta/...` (REST) on an `allowOrgOverride: true` type | ✅ Written by `SysMetadataRepository.put()` as an **overlay row** scoped to `organization_id`. | ✅ Appended to `sys_metadata_history` (per-org `event_seq`) in the **same transaction** as the `sys_metadata` write. No-op puts (identical hash) skip the history row entirely. |
+| Studio inline edit, or `PUT /api/v1/meta/...` (REST) on an `allowOrgOverride: true` type | ✅ Written by `SysMetadataRepository.put()` as an **overlay row**, environment-wide (`organization_id` NULL) since ADR-0131 D6. | ✅ Appended to `sys_metadata_history` in the **same transaction** as the `sys_metadata` write. No-op puts (identical hash) skip the history row entirely. |
 | Deploying a new build (new `dist/objectstack.json`) | ❌ The artifact is loaded into memory, not synced into `sys_metadata`. | ❌ Use Git tags / your deployment platform's release log; that's where artifact "version history" lives. |
 
 ### Why artifact never enters the database

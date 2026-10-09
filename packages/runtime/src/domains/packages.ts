@@ -68,9 +68,6 @@ import type { MetadataProtocol, PackageProtocol } from '@objectstack/spec/api';
 // private restatement of "when may a caught sentence be quoted" is where the
 // two copies start answering differently.
 import { clientFacingFailureText, seedRequestValidationError } from '@objectstack/metadata-protocol';
-// [#8805] Moved to `metadata-core` so the REST `/meta` write doors decide this
-// the same way rather than through a second copy. Behaviour unchanged.
-import { organizationIdForMetaWrite } from '@objectstack/metadata-core';
 // [#15591] The DECLARED removal of our OWN read-time annotations, imported
 // from the list that defines them (`METADATA_READ_DECORATIONS`) rather than
 // re-spelled here. `applyPublishedSeeds` below re-parses a SERVED document, and
@@ -1609,8 +1606,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // one.
                     //
                     // [#7018 / the #6190 ruling, Option A] `app` declares
-                    // `allowOrgOverride: false`, so this flip does NOT carry the
-                    // session's active organization — it lands env-wide, on the
+                    // `allowOrgOverride: false`, so this flip carries no
+                    // organization — it lands env-wide, on the
                     // very row boot hydrates and the App Switcher reads. An
                     // org-scoped flip was a phantom: the app looked published for
                     // the life of the process and went back to `_unpublished:
@@ -1635,7 +1632,6 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // write scope now answer one question through one registry
                     // flag; ⛔ never "restore" the organization to this read.
                     const flipped: string[] = [];
-                    const flipOrganizationId = organizationIdForMetaWrite('app', organizationId);
                     try {
                         if (
                             typeof protocol.getMetaItems === 'function' &&
@@ -1662,7 +1658,6 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                                         // app carries is copied through untouched.
                                         item: { ...app, _unpublished: false },
                                         packageId: id,
-                                        ...(flipOrganizationId ? { organizationId: flipOrganizationId } : {}),
                                         ...(body?.actor ? { actor: body.actor } : {}),
                                     });
                                     flipped.push(app.name);
