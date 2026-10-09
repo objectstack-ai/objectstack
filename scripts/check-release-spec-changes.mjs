@@ -524,14 +524,31 @@ function recordIds(record) {
   };
 }
 
+/** Registry ids the artifact and a fresh generation disagree on, in both directions. */
+function compareIds(label, packedIds, freshIds, problems) {
+  const packedSet = new Set(packedIds);
+  const freshSet = new Set(freshIds);
+  const stale = [...packedSet].filter((id) => !freshSet.has(id)).sort();
+  const omitted = [...freshSet].filter((id) => !packedSet.has(id)).sort();
+  if (stale.length > 0) {
+    problems.push(
+      `${label}: ${stale.length} id(s) the artifact carries and the registries no longer project:`,
+      ...listNames(stale),
+    );
+  }
+  if (omitted.length > 0) {
+    problems.push(`${label}: ${omitted.length} id(s) the registries project and the artifact OMITS:`, ...listNames(omitted));
+  }
+}
+
 /** Name how one registry-derived record differs, id by id where ids differ. */
 function compareRecord(label, packed, fresh, problems) {
   if (canonical(packed) === canonical(fresh)) return true;
   const p = recordIds(packed);
   const f = recordIds(fresh);
   const before = problems.length;
-  compareArray(`${label}.converted`, p.conversionIds, f.conversionIds, problems);
-  compareArray(`${label}.migrated`, p.migrationIds, f.migrationIds, problems);
+  compareIds(`${label}.converted`, p.conversionIds, f.conversionIds, problems);
+  compareIds(`${label}.migrated`, p.migrationIds, f.migrationIds, problems);
   if (problems.length === before) {
     const keys = [...new Set([...Object.keys(packed ?? {}), ...Object.keys(fresh ?? {})])].sort();
     const differing = keys.filter((k) => canonical(packed?.[k]) !== canonical(fresh?.[k]));
