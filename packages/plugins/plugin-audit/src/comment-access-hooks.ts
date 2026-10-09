@@ -24,9 +24,9 @@
  *      OWD/sharing, RLS and object-level CRUD all apply. `author_id` is
  *      server-stamped from the session; a client-supplied value never wins.
  *    * `beforeUpdate` / `beforeDelete`: the caller must be the comment's
- *      AUTHOR, or hold EDIT on the parent record (sharing's `canEdit`;
- *      public-model parents are editable by design) — the attachment kit's
- *      uploader-or-parent-editor rule. A multi-row write requires EVERY
+ *      AUTHOR, or hold EDIT on the parent record (see "Parent EDIT" below) —
+ *      the attachment kit's uploader-or-parent-editor rule. A multi-row write
+ *      requires EVERY
  *      matched row to pass, and an update that re-points `thread_id` must
  *      additionally satisfy the insert rule on the NEW thread. A write
  *      carrying NEITHER an id NOR a `where` is refused outright rather than
@@ -45,9 +45,26 @@
  *
  * Why read gating requires EDIT on write but only READ on insert: posting a
  * comment is collaboration — a user who may READ a record may discuss it (the
- * attachment kit's stricter `canEdit` on insert exists because attaching a
+ * attachment kit's stricter parent-EDIT rule on insert exists because attaching a
  * FILE mutates the record's content surface). Rewriting or removing someone
  * else's words is moderation, hence the tighter author-or-parent-editor rule.
+ *
+ * ## Parent EDIT
+ *
+ * The moderation limb asks the question the attachment kit's four limbs ask —
+ * may the caller edit the parent record? — and answers it the same way:
+ * plugin-sharing's TRI-STATE `checkEdit` first (`allow` admits, `deny`
+ * refuses); on `abstain` (record sharing does not enforce on the parent), the
+ * security service's ADR-0055 master-detail write check
+ * (`ISecurityService.checkControlledByParentWrite`, the answer the parent's own
+ * by-id update gets), whose `allow` and `not_applicable` admit and whose `deny`
+ * and `unresolvable` refuse; a rejection propagates unchanged. A kernel whose
+ * security service does not serve that member composes no master check, so the
+ * abstention admits there, as the parent's own update would. ⛔ Never `canEdit`:
+ * it folds `abstain` into `true`, and `effectiveSharingModel` maps every
+ * `controlled_by_parent` parent to `public`, so that fold let any member holding
+ * the `sys_comment` delete bit remove other people's comments from every
+ * master-detail child record of the org.
  *
  * Everything fails CLOSED. A `thread_id` that names no parseable parent (the
  * dangling `"crm_opportunity:"` of #4630, a free-form thread, a thread on
@@ -67,7 +84,7 @@
 
 import { withoutOperationPrivateKeys } from '@objectstack/core';
 import type { StandardErrorCode } from '@objectstack/spec/api';
-import type { ISharingService } from '@objectstack/spec/contracts';
+import type { ISecurityService, ISharingService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 
@@ -111,12 +128,20 @@ export interface CommentReadMiddlewareCtx {
 }
 
 /**
- * The single method of plugin-sharing's contract this gate consults. Taken as
- * a `Pick` of the real `ISharingService` rather than re-declared locally: the
- * narrow surface is the point, a second hand-written shape for it is not
- * (AGENTS.md PD #12 — one contract, no dialects).
+ * The single method of plugin-sharing's contract this gate consults — the
+ * TRI-STATE edit verdict (see "Parent EDIT" above). Taken as a `Pick` of the
+ * real `ISharingService` rather than re-declared locally: the narrow surface is
+ * the point, a second hand-written shape for it is not (AGENTS.md PD #12 — one
+ * contract, no dialects).
  */
-export type CommentSharingLike = Pick<ISharingService, 'canEdit'>;
+export type CommentSharingLike = Pick<ISharingService, 'checkEdit'>;
+
+/**
+ * The single member of the security service's contract this gate consults: the
+ * ADR-0055 master-detail write check, for a `controlled_by_parent` parent.
+ * OPTIONAL on the contract, so the gate handles its absence by construction.
+ */
+export type CommentSecurityLike = Pick<ISecurityService, 'checkControlledByParentWrite'>;
 
 export interface CommentAccessLogger {
   info(msg: string, meta?: unknown): void;
@@ -369,25 +394,59 @@ async function callerCanRead(ctx: any, target: CommentThreadTarget): Promise<boo
  * refusal, because the i18n service is contributed by another plugin that may
  * start after this one. Absent, the built-in catalog still renders the
  * caller's locale.
+ *
+ * `getSecurity` resolves the security service, lazily for the same reason, for
+ * its ADR-0055 master-detail write check (see "Parent EDIT" in the module
+ * header). Absent — or serving no such member — a `controlled_by_parent`
+ * parent meets no master check here, exactly as its own update meets none.
  */
 export function installCommentAccessHooks(
   engine: CommentAccessEngine,
   getSharing: () => CommentSharingLike | null | undefined,
   logger: CommentAccessLogger,
   messageTranslator?: () => ValidationMessageTranslator | undefined,
+  getSecurity?: () => CommentSecurityLike | null | undefined,
 ): void {
-  /** May the caller EDIT the parent record behind `target`? Sharing's
-   * `canEdit` when the service is present, else caller-scoped parent read
-   * visibility (degraded mode). */
+  /** May the caller EDIT the parent record behind `target`? The composition
+   * "Parent EDIT" in the module header sets out; caller-scoped parent read
+   * visibility when no sharing service is present (degraded mode). */
   const canEditParent = async (ctx: any, target: CommentThreadTarget, verb: string): Promise<boolean> => {
     const sharing = getSharing();
-    if (sharing && typeof sharing.canEdit === 'function') {
-      return sharing.canEdit(target.object, target.recordId, callerContext(ctx));
+    if (!sharing || typeof sharing.checkEdit !== 'function') {
+      logger.debug?.(
+        `[audit] comment access: sharing service absent — ${verb} gated on parent read visibility`,
+      );
+      return callerCanRead(ctx, target);
     }
-    logger.debug?.(
-      `[audit] comment access: sharing service absent — ${verb} gated on parent read visibility`,
-    );
-    return callerCanRead(ctx, target);
+    const callerCtx = callerContext(ctx);
+    const verdict = await sharing.checkEdit(target.object, target.recordId, callerCtx);
+    if (verdict === 'allow') return true;
+    // `deny`, and anything that is not one of the three verdicts, refuses.
+    if (verdict !== 'abstain') return false;
+
+    // Record sharing does not enforce on this parent. Whether that is
+    // permission is the master-detail check's question (ADR-0055): it answers
+    // `not_applicable` for a parent that derives nothing from a master.
+    let security: CommentSecurityLike | null | undefined;
+    try {
+      security = getSecurity?.();
+    } catch {
+      security = undefined;
+    }
+    if (!security || typeof security.checkControlledByParentWrite !== 'function') {
+      // No master-detail check is composed in this kernel, and the parent's own
+      // update meets none either. ⛔ Not "the master was judged editable" —
+      // nothing measured it.
+      logger.debug?.(
+        `[audit] comment access: record sharing abstains on ${target.object} and the security service composes no ` +
+          `master-detail write check — ${verb} admitted on the abstention, as the parent's own update would be`,
+      );
+      return true;
+    }
+    // A rejection (a datasource fault, a context the write path refuses) is a
+    // refusal of the request, and propagates as it is.
+    const answer = await security.checkControlledByParentWrite(target.object, target.recordId, callerCtx);
+    return answer.outcome === 'allow' || answer.outcome === 'not_applicable';
   };
 
   // ── Create: parent-record READ access + author_id stamping ──────────

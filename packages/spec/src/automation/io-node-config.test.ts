@@ -469,7 +469,7 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
       }
     });
 
-    it('refuses a single-brace token left from the 17.x dialect, in either spelling, naming its hole spelling (#22110)', () => {
+    it('refuses a single-brace token left from the 17.x dialect, in either spelling, naming its hole spelling', () => {
       for (const key of ['title', 'message'] as const) {
         for (const value of ['Deal {record.name} won', tmpl`Deal {record.name} won`]) {
           const label = `${key} = ${JSON.stringify(value)}`;

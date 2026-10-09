@@ -201,6 +201,21 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     ],
   },
   {
+    // #22227 — the deadline's settle predicate (objectui#11815 ruling D). A row
+    // of its own rather than a fourth `cel-field-rule` cover: that row is
+    // `enforced` and names the evaluators of its three slots, and neither reads
+    // this one. The CEL is judged at authoring as the family's is; what is
+    // missing is the reader, so the honest tier is `unevaluated`.
+    id: 'cel-field-deadline-settled',
+    summary: "a date / datetime deadline's settle predicate (Field.settledWhen) — display only, declared ahead of its renderer",
+    dialect: 'cel', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
+    enforcement:
+      'NO EVALUATOR FOUND — no runtime consumer yet, in either repo: nothing in this checkout reads the slot, and objectui @55e90fd has no `settledWhen` read at all (measured by grep). PARSE ONLY at the spec seam: `FieldSchema` refuses it off `date` / `datetime` and without `dueLike: true`. Its build-time reader is lint\'s field-rule pass (`validate-expressions.ts`), which judges the CEL as it judges `visibleWhen` (it parses, `record.<field>` only, the family\'s bound roots) at `os build`, `os validate` and the object save door — a reader of the source, not an evaluator of it',
+    covers: ['data/field.zod.ts:FieldSchema.settledWhen'],
+    // The reader is objectui#11815, Blocked-by #22227.
+    note: 'EXPERIMENTAL until its one reader lands: objectui\'s date cell, whose host evaluates the predicate per row and hands the cell one boolean. Re-state as `enforced`, naming that evaluator and its fail policy, when it lands. Display only by declaration: nothing on the write path will read it, so this row never carries a write-path refusal.',
+  },
+  {
     // Split out of `cel-field-rule` by #15500. Both keys used to be spelled
     // `data/field.zod.ts:visibleWhen` and were therefore ONE ratchet key, so
     // this per-OPTION predicate was classified by the row describing the

@@ -1732,17 +1732,23 @@ const ATTACHED_ON_READ_NAME = /^[a-z_][a-z0-9_]*$/;
  *
  * The shared BUILD validator — `@objectstack/lint`'s expression rule over
  * `@objectstack/formula`, the pair `os build` / `os validate` run, and no other
- * field-existence check. `@objectstack/lint`'s field index adds every
- * declared block name to the names `record.<x>` may resolve to, and
- * `@objectstack/formula`'s field-existence pass judges the SECOND segment of
- * `record.<block>.<leaf>` against the block's declared leaves, under its
- * existing `unknown-field` refusal — so `record.viewer.can_actt` is refused and
- * the refusal names the leaves `viewer` declares. An object without this key
- * keeps exactly the verdicts it had. Two other doors build their own
- * `record.*` field set from `fields` alone and do not read this key — the MCP
- * expression tool (`packages/mcp`) and flow registration's schema resolver
- * (`service-automation`); the first package to declare a block settles them
- * (#22387).
+ * field-existence check. A block is on `record` only where `record` is a row
+ * the declaring service SERVED, so the validator reads this key only at those
+ * sites: an action's `visible` and `disabled` predicates (`SERVED_ROW_SITES`
+ * in `@objectstack/lint`). There each declared block name joins the names
+ * `record.<x>` may resolve to, and `@objectstack/formula`'s field-existence
+ * pass judges the SECOND segment of `record.<block>.<leaf>` against the
+ * block's declared leaves, under its existing `unknown-field` refusal — so
+ * `record.viewer.can_actt` is refused and the refusal names the leaves
+ * `viewer` declares. Every other site binds the STORED row, which never
+ * carries a block — a flow's conditions, a validation rule, a field's rule
+ * slots and formula, an option's `visibleWhen`, a sharing rule, a hook — and
+ * there `record.<block>` is refused as an unknown field, which is the fault it
+ * is at run time. An object without this key keeps exactly the verdicts it
+ * had. Two other doors build their own `record.*` field set from `fields`
+ * alone and do not read this key — the MCP expression tool (`packages/mcp`)
+ * and flow registration's schema resolver (`service-automation`); a flow binds
+ * the stored row, so the resolver's columns-only answer is this reading's own.
  *
  * The collision refusal reads the AUTHORED field map only. A block named like
  * an injected system column (`id`, `organization_id`, the audit family, the
@@ -2250,8 +2256,11 @@ const ObjectSchemaBase = strictObject(
     + 'block name → { leaf key → value type (number | text | boolean | date) }. NOT a field — no column, '
     + 'form, list view, export, write path or translation bundle reads it, and a block name may not repeat '
     + 'a declared field name. Its reader is the shared build validator (`@objectstack/lint` over '
-    + '`@objectstack/formula`, as `os build` / `os validate` run it): `record.<block>` resolves, and '
-    + '`record.<block>.<leaf>` resolves only to a leaf the block declares.',
+    + '`@objectstack/formula`, as `os build` / `os validate` run it), and only where `record` is a row the '
+    + 'service served: in an action\'s `visible` and `disabled` predicates `record.<block>` resolves, and '
+    + '`record.<block>.<leaf>` resolves only to a leaf the block declares. Every other expression site binds '
+    + 'the stored row, which never carries a block — a flow condition, a validation rule, a field rule or '
+    + 'formula, an option `visibleWhen`, a sharing rule, a hook — and refuses `record.<block>` as an unknown field.',
   ),
   indexes: z.array(IndexSchema).optional().describe('Database performance indexes'),
 

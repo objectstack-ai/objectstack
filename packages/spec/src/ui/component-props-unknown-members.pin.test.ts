@@ -319,7 +319,7 @@ on(['object-grid'], ['pagination.*'], {
 // none.
 on(['object-timeline'], ['items[].content'], {
   kind: 'opaque',
-  ruling: 'decision card #21704, fork 4, letter B (record 5979239990)',
+  ruling: 'decision card on the five members the last typing stage stopped on, fork 4, letter B (record 5979239990)',
   why: 'child schema nodes no measured writer authors; it becomes a slot position the page walks judge once one does',
 });
 
@@ -414,7 +414,7 @@ describe('§2 each recorded reason holds', () => {
     expect(opaque.map(([key]) => key)).toEqual(['object-timeline items[].content']);
     for (const [key, reason] of opaque) {
       expect(members.get(key)?.describe ?? '', key).toMatch(/Held opaque/);
-      expect(reason.kind === 'opaque' && reason.ruling, key).toMatch(/#21704/);
+      expect(reason.kind === 'opaque' && reason.ruling, key).toMatch(/the five members the last typing stage stopped on/);
     }
   });
 

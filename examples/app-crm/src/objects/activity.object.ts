@@ -1,5 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { P } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Activity = ObjectSchema.create({
@@ -41,8 +42,12 @@ export const Activity = ObjectSchema.create({
         { label: 'Cancelled',    value: 'cancelled',                   color: '#EF4444' },
       ],
     }),
+    // A deadline, declared (objectui#11815 ruling D): past it the activity
+    // reads as overdue until it is completed.
     due_date: Field.datetime({
       label: 'Due Date / Time',
+      dueLike: true,
+      settledWhen: P`record.status == 'completed'`,
     }),
     contact: Field.lookup('crm_contact', {
       label: 'Contact',

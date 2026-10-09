@@ -670,11 +670,16 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // action predicates on 16 objects, and the example stacks as `defineStack`
     // composes them (33 objects, standalone actions merged in) carry 59 on 5
     // → the build refuses 8, all `visible` on the platform's
-    // `sys_approval_request` (they read `record.viewer`, a block the approvals
-    // service attaches on read and the object does not declare; the producer
-    // fix is #22211), and the door refuses the same 8 after the lift and none
-    // before it. 0 other refusals and 0 advisories, against a refusal at each
-    // for a bare `amount > 1` action in the same harness.
+    // `sys_approval_request`: they read `record.viewer`, the block the
+    // approvals service attaches to the rows it serves, which the object did
+    // not declare when this was measured. The door refuses the same 8 after
+    // the lift and none before it. 0 other refusals and 0 advisories, against
+    // a refusal at each for a bare `amount > 1` action in the same harness.
+    // The object now declares that block under `attachedOnRead`, and an
+    // action predicate is a served-row site (`SERVED_ROW_SITES` in
+    // `validate-expressions.ts`), where a declared block resolves and its
+    // leaves are judged: the build and the door accept all 8, and refuse a
+    // misspelt leaf.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object'],
     run: (stack, ctx) =>
