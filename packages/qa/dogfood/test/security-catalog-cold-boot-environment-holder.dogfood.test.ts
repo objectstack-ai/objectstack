@@ -67,7 +67,7 @@ const SET = 'coldboot_env_set';
 const POSITION = 'coldboot_env_position';
 
 const manifestOf = (id: string, namespace: string) => ({
-  id, namespace, version: '0.0.1', type: 'app' as const, name: id, engines: { protocol: '^17' },
+  id, namespace, version: '0.0.1', type: 'app' as const, name: id, engines: { protocol: '^18' },
 });
 
 const Note = ObjectSchema.create({
