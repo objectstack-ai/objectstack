@@ -1003,9 +1003,15 @@ const SPEC_EXAMPLE_SLOTS = [
  * tripwire — a slot of one of these types that carries an `@example` and is not
  * registered is reported, never judged, because its scope is not knowable from
  * the type (header, point 3).
+ *
+ * Includes the two package-internal constructors the public typed inputs are
+ * built from (`packages/spec/src/shared/typed-expression-input.ts`): a slot
+ * that builds its own copy to carry its own refusal text — a notify `title` /
+ * `message` is `templateExpressionInput(…)` — names neither public schema, and
+ * without these two names an `@example` added to it later would go unreported.
  */
 const EXPRESSION_SLOT_TYPES =
-  /\b(ExpressionInputSchema|PredicateInputSchema|CronExpressionInputSchema|TemplateExpressionInputSchema)\b/;
+  /\b(ExpressionInputSchema|PredicateInputSchema|CronExpressionInputSchema|TemplateExpressionInputSchema|templateExpressionInput|cronExpressionInput)\b/;
 
 /**
  * Sites deliberately not judged, each with its reason. See the header: named,
