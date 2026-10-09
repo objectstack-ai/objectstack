@@ -3507,7 +3507,7 @@ describe('AuthManager', () => {
       find: vi.fn(async (object: string, _query?: any) => {
         if (object === 'sys_user_permission_set') {
           return opts.platformAdmin
-            ? [{ user_id: 'u-1', permission_set_id: 'ps-admin', organization_id: null }]
+            ? [{ user_id: 'u-1', permission_set_id: 'ps-admin', permission_set: 'admin_full_access', organization_id: null }]
             : [];
         }
         if (object === 'sys_permission_set') {
@@ -4800,7 +4800,7 @@ describe('isPlatformAdminUserId – the /sso/register criterion is platform-admi
       if (opts.throws) throw new Error('db down');
       if (object === 'sys_user_permission_set') {
         return opts.platformAdmin
-          ? [{ user_id: 'u-1', permission_set_id: 'ps-admin', organization_id: opts.orgScopedGrant ? 'org-1' : null }]
+          ? [{ user_id: 'u-1', permission_set_id: 'ps-admin', permission_set: 'admin_full_access', organization_id: opts.orgScopedGrant ? 'org-1' : null }]
           : [];
       }
       if (object === 'sys_permission_set') return [{ id: 'ps-admin', name: 'admin_full_access' }];

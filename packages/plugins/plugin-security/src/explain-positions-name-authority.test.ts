@@ -108,6 +108,8 @@ function makeAuthzQl(tables: Record<string, Array<Record<string, unknown>>>) {
     Object.entries(where ?? {}).every(([k, v]) => {
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(row[k]);
+      // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+      if (v === null) return (row[k] ?? null) === null;
       return row[k] === v;
     });
   return {
@@ -134,7 +136,7 @@ function authzTables(shape: 'name-only' | 'genuine') {
     sys_position_permission_set: [],
     sys_user_permission_set:
       shape === 'genuine'
-        ? [{ user_id: USER, permission_set_id: PS_ADMIN, organization_id: null }]
+        ? [{ user_id: USER, permission_set_id: PS_ADMIN, permission_set: ADMIN_FULL_ACCESS, organization_id: null }]
         : [],
     sys_permission_set: [{ id: PS_ADMIN, name: ADMIN_FULL_ACCESS, active: true }],
   };
