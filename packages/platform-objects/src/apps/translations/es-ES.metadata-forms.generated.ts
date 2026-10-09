@@ -628,6 +628,14 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Referencia mediante",
         helpText: "Convierte este campo de texto en la mitad de id de un puntero polimórfico: nombra el campo HERMANO del mismo objeto que guarda, fila a fila, el nombre del objeto destino (ADR-0052 §5). En snake_case; solo campos de texto y excluyente con `reference`."
       },
+      dueLike: {
+        label: "Deadline",
+        helpText: "Marks this date as a deadline: once it has passed, views may show it as overdue (relative wording and an overdue colour). Off or unset: not a deadline, and nothing is guessed from the field's name."
+      },
+      settledWhen: {
+        label: "Settled When",
+        helpText: "CEL predicate over the record (e.g. record.status == 'done') — while it is TRUE the deadline is settled, and no overdue wording or colour applies to that record. Display only."
+      },
       options: {
         label: "Opciones",
         helpText: "Opciones disponibles (pares label/value)"

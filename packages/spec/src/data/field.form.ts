@@ -135,8 +135,8 @@ export const fieldForm = defineForm({
         // shows exactly where its key parses. `settledWhen` copies the
         // field-level predicate rows' face below (`type: 'code'`,
         // `language: 'expression'`) — it is the same CEL family.
-        { field: 'dueLike', visibleWhen: "data.type in ['date','datetime']", helpText: "Marks this date as a deadline: once it has passed, views may show it as overdue (relative wording and an overdue colour). Off or unset: not a deadline, and nothing is guessed from the field's name." },
-        { field: 'settledWhen', type: 'code', language: 'expression', visibleWhen: "data.type in ['date','datetime'] && data.dueLike == true", helpText: "CEL predicate over the record (e.g. record.status == 'done') — while it is TRUE the deadline is settled, and no overdue wording or colour applies to that record. Display only." },
+        { field: 'dueLike', label: 'Deadline', visibleWhen: "data.type in ['date','datetime']", helpText: "Marks this date as a deadline: once it has passed, views may show it as overdue (relative wording and an overdue colour). Off or unset: not a deadline, and nothing is guessed from the field's name." },
+        { field: 'settledWhen', label: 'Settled When', type: 'code', language: 'expression', visibleWhen: "data.type in ['date','datetime'] && data.dueLike == true", helpText: "CEL predicate over the record (e.g. record.status == 'done') — while it is TRUE the deadline is settled, and no overdue wording or colour applies to that record. Display only." },
         // Select field options
         {
           field: 'options',

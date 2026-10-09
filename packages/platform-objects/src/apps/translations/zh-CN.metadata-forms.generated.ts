@@ -628,6 +628,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "多态指针伴随字段",
         helpText: "把该文本字段声明为多态指针的 id 半边：此处填写同一对象上保存目标对象名的另一个字段，目标逐行决定（ADR-0052 §5）。使用 snake_case；仅限文本字段，且与 `reference` 互斥。"
       },
+      dueLike: {
+        label: "Deadline",
+        helpText: "Marks this date as a deadline: once it has passed, views may show it as overdue (relative wording and an overdue colour). Off or unset: not a deadline, and nothing is guessed from the field's name."
+      },
+      settledWhen: {
+        label: "Settled When",
+        helpText: "CEL predicate over the record (e.g. record.status == 'done') — while it is TRUE the deadline is settled, and no overdue wording or colour applies to that record. Display only."
+      },
       options: {
         label: "选项",
         helpText: "可选项（label/value 对）"

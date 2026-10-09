@@ -628,6 +628,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ポリモーフィック参照の相棒項目",
         helpText: "このテキスト項目をポリモーフィック参照の id 側にします。ここには、対象オブジェクト名を行ごとに保持する同一オブジェクト上の別項目名を指定します（ADR-0052 §5）。snake_case で記述し、テキスト項目のみ、`reference` とは併用できません。"
       },
+      dueLike: {
+        label: "Deadline",
+        helpText: "Marks this date as a deadline: once it has passed, views may show it as overdue (relative wording and an overdue colour). Off or unset: not a deadline, and nothing is guessed from the field's name."
+      },
+      settledWhen: {
+        label: "Settled When",
+        helpText: "CEL predicate over the record (e.g. record.status == 'done') — while it is TRUE the deadline is settled, and no overdue wording or colour applies to that record. Display only."
+      },
       options: {
         label: "選択肢",
         helpText: "使用可能な選択肢（label/value ペア）"
