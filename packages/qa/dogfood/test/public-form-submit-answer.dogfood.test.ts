@@ -180,16 +180,17 @@ async function submitAndRead(stackDef: unknown): Promise<void> {
     expect(stored.match_kind).toBe(MATCH_KIND);
     expect(stored.stage, 'the default was stored').toBe(DEFAULTED);
 
-    // The answer is the id, and nothing the insert stored.
-    expect(body).toEqual({ id });
+    // The answer is the id, and nothing the insert stored: no stored field is
+    // named at any depth of it.
     for (const key of Object.keys(stored)) {
       if (key === 'id') continue;
-      expect(body, `stored field ${key} must not reach the anonymous caller`).not.toHaveProperty(key);
+      expect(wire, `stored field ${key} must not reach the anonymous caller`).not.toContain(JSON.stringify(key));
     }
     for (const value of [existing.id, MATCH_KIND, DEFAULTED]) {
       expect(wire, 'a derived or defaulted value must not reach the anonymous caller under any key')
         .not.toContain(String(value));
     }
+    expect(body).toEqual({ id });
   } finally {
     await stack.stop();
   }

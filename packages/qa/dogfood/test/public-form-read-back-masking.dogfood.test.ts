@@ -134,9 +134,10 @@ async function submitAndRead(stackDef: unknown): Promise<void> {
     expect(stored?.pfmask_stamp, 'the default was stored').toBe(DEFAULTED);
     expect(stored?.owner_id ?? null, 'a server-managed field the submitter supplies never lands').not.toBe(FORGED_OWNER);
 
-    // Absent, which is stronger than masked: no key, and no stored value under any key.
+    // Absent, which is stronger than masked: the field is named at no depth of
+    // the answer, and its stored value rides no key of it.
     for (const [field, value] of Object.entries(MASKED)) {
-      expect(body, `${field} is absent from the answer`).not.toHaveProperty(field);
+      expect(wire, `${field} is absent from the answer, at any depth`).not.toContain(JSON.stringify(field));
       expect(wire, `${field}'s stored value reaches no key of the answer`).not.toContain(value);
     }
     expect(body, 'the answer is the created id, and nothing the insert stored').toEqual({ id });
