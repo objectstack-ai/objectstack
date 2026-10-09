@@ -84,7 +84,11 @@ describe('a non-system caller is refused an elevated self-triggered flow at the 
                 const name = `secret_${type}_flow`;
                 const { dispatcher } = makeDispatcher([{ name, type, runAs: 'system' }]);
                 const res = await dispatcher.handleAutomation(route.path(name), 'POST', {}, MEMBER);
+                // A refusal first — so the absence checks below cannot pass
+                // over an answer that carries no message at all.
+                expect(res.response?.status).toBe(403);
                 const message = String(res.response?.body?.error?.message ?? '');
+                expect(message.length).toBeGreaterThan(0);
                 // Neither the flow's name, its type nor its run-as declaration.
                 expect(message).not.toContain(name);
                 expect(message).not.toContain(type);
