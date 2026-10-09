@@ -1,0 +1,22 @@
+---
+'@objectstack/core': patch
+'@objectstack/plugin-auth': patch
+---
+
+perf(core,plugin-auth): an authenticated request resolves its caller's grants once, not twice
+
+Clause-②: no
+
+`resolveAuthzContext` learns who the caller is from the transport's `getSession`. Against `@objectstack/plugin-auth` that is better-auth's `getSession`, whose `customSession` hook resolves the principal's grants for the session payload's `positions[]` and `isPlatformAdmin`; `resolveAuthzContext` then resolved the same grants again, with the same arguments, for the request's envelope. Every authenticated request on a door that resolves identity through `resolveAuthzContext` with a better-auth session read (the runtime dispatcher and the REST server among them) paid every grant read twice: eight reads per resolution for a caller in an organization.
+
+`resolveAuthzContext` now runs inside a request-scoped grants memo. A resolution that already completed inside the same call, with the same user, organization and seeds, is served to the next caller that asks for exactly that resolution, so the hook's resolution serves the resolver's own. The decision a request is authorised with is unchanged:
+
+- The memo lives for one `resolveAuthzContext` call (an `AsyncLocalStorage` scope, closed when the call settles). Nothing is cached across requests; the cross-request grants cache keeps its own default-off switch, `OS_AUTHZ_GRANTS_CACHE_TTL_MS`.
+- An entry is served only when a fresh read would agree with it. No write may have started, been executed at the driver, or still be in flight on the engine since the first resolution opened: the engine's write epoch (bumped when a write starts) and a write observer the memo registers as an engine middleware (counting writes into the chain and, after the driver step, out of it) must both read what they read at the open, with nothing inside the chain. The observer sees statement execution, not commit visibility. A write inside an `engine.transaction()` becomes visible only at its COMMIT, outside every chain. On driver-sql (not on the Turso remote face, which opens no transaction), a request whose step 2 falls inside that one commit round trip is authorised as of its first resolution, and the next request reads fresh — the same answer as a write from another process. No grant validity boundary may lie between the two clocks. The organization must be the same (the session arm's dropped-claim re-resolution is its own entry). A `bypassGrantsCache` caller is never served, a failed resolution is never stored, and an engine without the write-epoch seam or `registerMiddleware` declines entirely.
+- `plugin-auth`'s hook now passes the session's email as its seed email, exactly as `resolveAuthzContext` does for the same session, so the two calls ask for the same resolution. The seed reaches only the envelope's `email`, which the hook does not read: the payload's `positions[]` and `isPlatformAdmin` are unchanged, and platform-admin standing still compares the stored `sys_user.email`, never a seed.
+
+Where the saving does not apply, the request reads the grants twice, as before — always the safe direction:
+
+- a request that meets a concurrent write on its engine;
+- a request whose session read itself writes: the first request on a fresh auth instance generates its signing key, and with an idle timeout configured `enforceSessionControls` stamps `sys_session.last_activity_at` about once a minute per session;
+- the first `resolveAuthzContext` call on an engine, which registers the write observer and stores nothing for it.
