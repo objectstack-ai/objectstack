@@ -222,8 +222,10 @@ describe('#22445 — an update-mode preview judges the stored row merged with th
         ],
       }]);
       const out = await e2.validate(OBJECT, { name: 'renamed' }, { mode: 'update' });
-      const entries = out.results![0]!.errors.filter((e) => e.constraint && (e.constraint as any).rule !== 'requiredWhen');
-      expect(entries.map((e) => (e.constraint as any).rule).sort()).toEqual(['us_branch', 'us_needs_note']);
+      // The engine's findings carry `constraint` beyond the wire triple the response type names.
+      const ruleOf = (e: object) => (e as { constraint?: { rule?: string } }).constraint?.rule;
+      const entries = out.results![0]!.errors.filter((e) => ruleOf(e) !== undefined && ruleOf(e) !== 'requiredWhen');
+      expect(entries.map(ruleOf).sort()).toEqual(['us_branch', 'us_needs_note']);
       for (const entry of entries) {
         expect(entry).toMatchObject({ code: 'rule_violation', constraint: expect.objectContaining({ reason: 'unevaluable' }) });
         expect(entry.message).toContain(NOT_SUPPLIED);
