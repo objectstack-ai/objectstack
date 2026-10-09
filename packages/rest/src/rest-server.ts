@@ -10801,7 +10801,8 @@ export class RestServer {
      * as they answer a withdrawn form. Two routes are registered:
      *
      *   GET  {basePath}/forms/:slug          → resolved form spec
-     *   POST {basePath}/forms/:slug/submit   → INSERT record (no auth required)
+     *   POST {basePath}/forms/:slug/submit   → INSERT record (no auth required),
+     *                                          answering `{ id }` only (#22437)
      *
      * Both routes bypass `enforceAuth` even though anonymous-deny is on for the
      * deployment (e.g. ObjectOS multi-tenant). Security is delegated to the
@@ -11221,7 +11222,22 @@ export class RestServer {
                         context,
                     };
                     const result = await p.createData(formCreateRequest);
-                    res.status(201).json(result);
+                    // [#22437] The answer is the created record's id, and
+                    // nothing the insert stored. `createData` answers
+                    // `{ object, id, record, droppedFields? }`, and its `record`
+                    // is the row as stored AFTER the insert pipeline: defaults,
+                    // and whatever a `beforeInsert` / `afterInsert` hook stamped
+                    // — including a value an elevated (`runAs: 'system'`) hook
+                    // derived from existing records this anonymous caller's
+                    // grant may never read. The whitelist above filters what the
+                    // caller WRITES; this line is what filters what it is SHOWN.
+                    // The caller already knows what it submitted, so the one
+                    // fact it lacks is the id. Projecting the row to the form's
+                    // declared fields would not do: a hook may rewrite a
+                    // declared field too. The key stays the top-level `id` of a
+                    // bare body — where the console's public form page reads
+                    // the created id — and no second read builds this answer.
+                    res.status(201).json({ id: result.id });
                 } catch (error: any) {
                     const mapped = mapDataError(error);
                     // Distinct message (this is not the "unhandled" channel),
