@@ -479,33 +479,46 @@ jobs:
     # (#20388, #21826) the split ran the whole CLI alone on shard 1/6, whose job
     # wall then reached 35m43s (run 37453598388).
     #
-    # RE-SIZED 45 -> 35 (#22075), from the measured distribution. Window: the
-    # 14 runs after the 21-run dataset refresh (040184752c), 6 pull_request and
-    # 8 merge_group, 37870616843 to 37876969409 (2026-10-09T00:03Z-02:57Z),
-    # read from the jobs API:
+    # HELD AT 45 BY #22075; THE RE-SIZE IS OWED AFTER IT LANDS, carried by
+    # #22075. That change stops running the whole CLI on one shard (it is cut
+    # into 3 slices whenever a run carries it), which removes the reason for
+    # this raise -- but a wall is re-sized from a MEASURED distribution, and
+    # the post-change one does not exist until runs execute the new split.
+    # What the re-size will start from, and nothing here has been applied:
+    #
+    # INPUT 1, measured before the change. Window: the 14 runs after the 21-run
+    # dataset refresh (040184752c), 6 pull_request and 8 merge_group,
+    # 37870616843 to 37876969409 (2026-10-09T00:03Z-02:57Z), from the jobs API:
     #
     #   Test Core job holding the whole CLI   20.5-39.1 min (12 runs)
     #   every other Test Core job             <= 20.8 min    (72 jobs)
     #   `Build this shard's dependency closure`  <= 5.6 min; fixed setup <= 2.4 min
     #
-    # The whole CLI no longer runs on one shard: it is cut into 3 slices whenever
-    # a run carries it. Its test step read 18.7-32.2 min whole, so its heaviest
-    # slice (vitest's hash split puts 1.14x of an even third on slice 2/3) reads
-    # at most ~12.2 min, plus its own `cli#build`, the closure and setup: <= ~24
-    # min. The busiest whole-package shard of a FULL run now carries ~2640s of
-    # windows; at the 2.0x packing the heaviest whole-package shard measured
-    # above, that is <= ~22 min of tests plus the same closure and setup: <= ~30.
-    # 35 keeps that worst prediction under 86% of the wall, the margin the 45
-    # gave the whole CLI's 39.1-minute worst reading.
+    # INPUT 2, PREDICTED, not measured. The CLI's test step read 18.7-32.2 min
+    # whole, so its heaviest slice (vitest's hash split puts 1.14x of an even
+    # third on slice 2/3) should read at most ~12.2 min, plus its own
+    # `cli#build`, the closure and setup: <= ~24 min of job. The busiest
+    # whole-package shard of a FULL run will carry ~2640s of windows, a size no
+    # run has executed; at the 2.0x packing measured on ~1400s shards that is
+    # <= ~22 min of tests, <= ~30 min of job. The wall model reads LOW on
+    # whole-package legs (run 37872770181: predicted 573/442/442/442/491s,
+    # stepped 905/737/704/668/388s), so these two figures are a floor for the
+    # reading, never a substitute for it.
+    #
+    # THE RE-SIZE: once at least 3 pull_request and 2 merge_group runs print
+    # `slicing: @objectstack/cli: sliced x3` in "Compute this shard's package
+    # set", take the slowest Test Core JOB wall of each from the jobs API and
+    # size this value from that distribution, with the margin rule below.
     #
     # ⛔ REVERT CONDITION, against measured wall time, not a card: back to `30`
     # only when the slowest Test Core JOB wall stays at or under 24 minutes (80%
-    # of 30) on every scheduled run for a week; and if any job reads over 28
-    # minutes (80% of this 35), re-read the split before raising anything --
-    # `partition-test-shards.mjs` prints each shard's predicted wall in the
-    # "Compute this shard's package set" step, so the reading is beside the
-    # measurement. The stall guard stays the primary hang detector.
-    timeout-minutes: 35
+    # of 30) on every scheduled run for a week. A miss here kills merge_group
+    # runs for every lane, so this value moves on a reading, never on a
+    # prediction. `partition-test-shards.mjs` prints each shard's predicted
+    # wall in the "Compute this shard's package set" step, so the prediction
+    # sits beside the measurement it is checked against. The stall guard (a
+    # 20-minute cap) stays the primary hang detector.
+    timeout-minutes: 45
     permissions:
       contents: read
     strategy:
