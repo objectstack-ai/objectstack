@@ -1222,11 +1222,19 @@ let optionVisibleWhenUserMembersMemo: readonly string[] | undefined;
  */
 function optionVisibleWhenUserMembers(): readonly string[] {
   if (optionVisibleWhenUserMembersMemo !== undefined) return optionVisibleWhenUserMembersMemo;
-  const declared = Object.keys(EvalUserSchema.shape);
+  const declaredUserMembers = Object.keys(EvalUserSchema.shape);
   const actingUser = buildScope({ user: OPTION_CHECK_ACTING_USER })['current_user'];
-  const bound = actingUser !== null && typeof actingUser === 'object' ? Object.keys(actingUser) : [];
-  optionVisibleWhenUserMembersMemo = declared.filter((m) => bound.includes(m));
+  const boundUserMembers = actingUser !== null && typeof actingUser === 'object' ? Object.keys(actingUser) : [];
+  optionVisibleWhenUserMembersMemo = declaredUserMembers.filter((m) => boundUserMembers.includes(m));
   return optionVisibleWhenUserMembersMemo;
+}
+
+/** `` `a`, `b` and `c` `` — names spelled for a message, in the order given. */
+function tickedList(listedNames: readonly string[]): string {
+  const tickedNames = listedNames.map((n) => '`' + n + '`');
+  return tickedNames.length > 1
+    ? `${tickedNames.slice(0, -1).join(', ')} and ${tickedNames[tickedNames.length - 1]}`
+    : tickedNames.join('');
 }
 
 /** The members read under one root, in name order: hop, value and deeper reads alike. */
@@ -1384,13 +1392,13 @@ function optionVisibleWhenMemberIssue(
     if (namespaceMembers === undefined && !isUserRoot) continue;
     const found = analyzeRelationshipTraversals(source, root);
     if (found === null) continue;
-    const read = membersReadUnder(found);
+    const membersRead = membersReadUnder(found);
     if (isUserRoot) {
-      const member = read.find((m) => !optionVisibleWhenUserMembers().includes(m));
+      const member = membersRead.find((m) => !optionVisibleWhenUserMembers().includes(m));
       if (member !== undefined) return optionVisibleWhenUserMemberIssue(objectName, field, option, root, member);
       continue;
     }
-    const member = read.find((m) => !namespaceMembers!.includes(m));
+    const member = membersRead.find((m) => !namespaceMembers!.includes(m));
     if (member !== undefined) {
       return optionVisibleWhenNamespaceMemberIssue(objectName, field, option, root, member);
     }
@@ -1463,11 +1471,9 @@ function optionVisibleWhenUserMemberIssue(
   receiver: string,
   member: string,
 ): { root: string; message: string } {
-  const bound = optionVisibleWhenUserMembers();
   const path = celMemberPath(receiver, member);
   const owner = objectName ? `'${objectName}'` : 'this object';
-  const ticked = bound.map((m) => '`' + m + '`');
-  const carried = ticked.length > 1 ? `${ticked.slice(0, -1).join(', ')} and ${ticked[ticked.length - 1]}` : ticked.join('');
+  const carried = tickedList(optionVisibleWhenUserMembers());
   const declared = Object.keys(EvalUserSchema.shape).includes(member);
   const prescription = member === 'roles' || member === 'role'
     ? `The acting user has no \`${member}\`: ADR-0090 D3 renamed its membership array ` +
@@ -1475,9 +1481,9 @@ function optionVisibleWhenUserMemberIssue(
       `holds — with no alias. Write \`'NAME' in ${receiver}.positions\` instead.`
     : declared
       ? `\`${member}\` is declared on the acting user (\`EvalUser\`) but the server builds the user ` +
-        `for this check from the caller's id, positions and organization only, so it is never set ` +
-        `here, whichever surface sets it elsewhere. Gate on a member the check binds, or on a column ` +
-        `${owner} declares.`
+        `for this check from the caller's ${tickedList(Object.keys(OPTION_CHECK_ACTING_USER))} only, ` +
+        `so it is never set here, whichever surface sets it elsewhere. Gate on a member the check ` +
+        `binds, or on a column ${owner} declares.`
       : `\`${member}\` is not a member of the acting user (\`EvalUser\`). Gate on a member the check ` +
         `binds, or on a column ${owner} declares.`;
   return {

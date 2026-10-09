@@ -3467,6 +3467,11 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // `grammar` excuse #19938 added here left with the import it excused:
       // this file no longer imports `'./flow-template-grammar.js'`.)
       'templateRefusal',
+      // [#22394] The acting user's member allowlist, derived in this file from
+      // `EvalUserSchema` and `buildScope`, and the message helpers around it.
+      // Every one is a `string[]` of member NAMES whose keys are Array methods,
+      // never metadata keys — each named so no metadata receiver hides behind it.
+      'declaredUserMembers', 'boundUserMembers', 'listedNames', 'tickedNames', 'membersRead',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
