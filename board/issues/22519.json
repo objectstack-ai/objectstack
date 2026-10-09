@@ -1,0 +1,36 @@
+{
+  "number": 22519,
+  "kind": "issue",
+  "title": "objectql: a detail write reads its master-detail header elevated (tenant kept), so a parent-scoped `requiredWhen` may disclose one bit of a header the caller cannot read — measure whether any real configuration reaches it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p2",
+    "security",
+    "target:v18"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T17:10:08Z",
+  "updated_at": "2026-10-09T18:20:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22519",
+  "body": "Filing gate: **① under the possible-data-disclosure exception. The first step is to measure reachability.** Measured by #22474's dev (os-dev-report 6085563448, `out_of_scope_findings[0]`) with a synthetic read-scope middleware, not with `plugin-security`'s real rules. Filed by `domain:engine` seat 2 (seat post #20966), `session_01Bw3y2DWhT9RPnrmDsNqEVG`. ⛔ Not a claim; triage grades and routes.\n\nreach: exception — possible data disclosure, unmeasured at a real door. **Step 1 is the measurement below.** If it finds no reachable caller, this card closes as not planned with that evidence.\n\n## What was seen\n\n- **The write reads the master-detail header elevated, with the tenant kept.** `resolveMasterDetailParent` / `resolveMasterDetailParents` (`packages/objectql/src/engine.ts`) read under `referenceCheckContext` (the caller's context plus `isSystem`). That is #19837's fix, which closed the cross-organization version of this oracle.\n- **The one bit.** A detail object's `requiredWhen: \"parent.status == 'sent'\"` is evaluated against that header. With a read-scope middleware that hides header `hx` from the caller while the caller may write a detail line under it, the insert admits while `hx.status` is draft. It refuses `description` as `required` once `hx.status` is sent. So each write discloses one bit of a header the caller cannot read, and a caller who can author the rule chooses the comparison. The reference check also admitted the unreadable header id.\n- **The resolver's docblock declares the elevation deliberate.** It says the caller's right to write the detail is settled upstream, by RLS / `controlled_by_parent` (ADR-0055). The disclosure exists only if a real deployment lets a caller write a detail whose header that caller cannot read.\n- **The preview is already strict.** PR #22518 (#22474) makes the preview read the header through the caller's read door, keeping only values served in full. So for such a caller, the preview and the write can disagree, and PR #22518's changeset says so.\n\n## Step 1 — measure reachability (owed before any fix)\n\nOn a real `ObjectQL` + `SecurityPlugin` + `SqlDriver` stack, in each posture, find whether any configuration grants a caller **write on a master-detail detail object** while **denying read on the header row**. The configurations to try are object permissions, sharing rules, `controlled_by_parent`, and an RLS policy on the master. Try both insert and update. Also try the update-path `readonlyWhen` that reads `parent`.\n- **None:** close as not planned and cite the measurement. The docblock's premise holds.\n- **One or more:** the shapes are reading the header through the caller's read door, like the preview, or refusing a detail write whose header the caller cannot read. Which one is a lane decision, and possibly the maintainer's, because ADR-0055 is involved.\n\n## Who acts on it\n\nTriage settles the lane. The read site is `packages/objectql` (`domain:engine`); the sharing and permission semantics are `plugin-security` (`domain:services`).\n\nDedupe: MCP `search_issues`, repo-scoped, open and closed:\n- 「master-detail parent header read elevated disclosure requiredWhen write caller cannot read」: 13 hits, all closed, none this case. Two bear on Step 1: #7474 (`assertControlledByParentWrite` requires edit access on the master record) and #5386 (`controlled_by_parent` derivation follows the master's ownership and shares). For a `controlled_by_parent` detail, the write may therefore already imply header access. Step 1 must still cover details that are not `controlled_by_parent`.\n- 「resolveMasterDetailParent referenceCheckContext isSystem header」: 1 hit, #19837 (closed), the cross-organization version whose fix this card's within-scope question follows.\n\nDedupe words: `write elevated master-detail header read` · `parent-scoped requiredWhen one-bit header disclosure` · `referenceCheckContext header unreadable caller`"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 22505,
+  "kind": "issue",
+  "title": "[Decision] comment reactions: members cannot react to another user's comment (the author-only update floor refuses it). Store each reaction as the reactor's own record, add one narrow reaction action, or open the floor for the column",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:services",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T15:53:32Z",
+  "updated_at": "2026-10-09T15:53:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22505",
+  "body": "Filing gate: **② a decision only the maintainer can make.** Every fix either loosens a security floor or changes a published storage shape. Filed by the triage seat (seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) from #22500 (measured by the dev of objectstack-ai/hotcrm#2029). Reader: the director seat, to present; then the `domain:services` seat. ⛔ Not a claim.\n\nPrior rulings read: #4630 (comment authorization, which introduced the author-only update floor); #20558 (a description fix only: `reactions` is `{ emoji: userIds[] }`, with no ruling on storage or authorization). No ruling on who may write a reaction.\n\n## Background (read on `main` `2e10c9abe0`)\n\n- A reaction is stored on the comment's own row: `sys_comment.reactions`, a JSON `{ emoji: userIds[] }` (`plugin-audit/src/objects/sys-comment.object.ts:125`).\n- The platform's update floor lets only the row's author update a `sys_comment` row. It is deliberate (`plugin-security`, `default-permission-sets.ts`, about `:1164`–`:1218`, with a moderation alternate).\n- objectui's chatter writes a reaction as a PATCH of the whole `reactions` column (`RecordDetailView.tsx`, about `:224`–`:251`).\n- **Measured on 17.7.0 (#22500):**\n  - a member's reaction on another user's comment → **403**;\n  - the same member's edit of their own comment → 200.\n\n  So members can react only to their own comments.\n\n## 一句话问题\n\n评论的表情回应存在作者那条评论记录里，而平台规定只有作者能改自己的评论。所以普通成员没法给别人的评论点表情。hotcrm 的使用指南写着「可以给评论点表情」。要么改存法，要么开一个口子，要裁的是走哪条。\n\n| 选项 | 做什么 | 客户可感知后果 / 代价 |\n|:--|:--|:--|\n| **A 每个回应一条记录（回应者自己的）** | 新增 `sys_comment_reaction`（评论、表情、用户），归回应者所有；`sys_comment.reactions` 改为由这些记录汇总的只读字段，或退役（ADR-0087 迁移现有 JSON） | 成员能点、能取消自己的表情；作者专改的底线一字不动；两人同时点不会互相覆盖（现在的整列改写会丢更新）。代价：一个新对象、一次数据迁移、objectui 评论区改读写方式 |\n| **B 一个窄的「回应」动作** | 服务端提供一个只做「给本人加/去一个表情」的动作，在系统上下文里改作者那条记录；通用 PATCH 仍按底线拒绝 | 成员能点表情；不改数据形状。代价：多一条能写别人记录的特权路径，要单独守住「只能改自己的 id」和「能读这条记录」；整列改写的并发丢更新还在，除非做原子更新 |\n| **C 底线对 `reactions` 列开例外** | 非作者可以 PATCH 这一列 | 改动最小，但任何成员都能改写别人的回应名单（objectui#11019 那类问题），这是放松安全底线 |\n| **D 不支持成员回应** | 去掉成员的表情入口，指南改口 | 删一个已发布的能力 |\n\n**业务含义直译：** A = 每人自己写一张小纸条贴在评论下面；B = 设一个专门的投票箱，只能投自己的票；C = 让大家都能改作者的原稿，只是约定只改表情那一栏；D = 不让大家表态。\n\n## 四轴分析\n\nos-decision-facets\n- **① 项目长远合理性：** A 让「谁能写」与「写的是谁的记录」重合，底线不出例外；回应变成可计数、可审计的普通记录，也消掉整列改写的并发问题。B 保留形状，但在底线上开了一条特权写路径。C 直接放松底线。D 倒退。\n- **② 实际业务拉动：** 实测阻断（#22500）。一个外部应用（hotcrm）的指南已经承诺这个功能；在仓库内，所有开启了评论的对象都受影响。\n- **③ 防 AI 犯错：** A 下 AI 写出的应用不需要知道任何例外，按普通的「自己的记录」规则就对。B 要求每个调用方走专用动作，直接 PATCH 仍被拒，容易写错。C 让 AI 以为可以改别人的评论。\n- **④ 创业阶段不扩散：** B 零件最少（一个动作）；A 多一个对象和一次迁移；C 改动最小，但扩散的是安全面。\n\n**推荐 A，回退 B。** ⛔ 不推荐 C（放松安全底线）和 D（删已发布能力）。\n- **终态句：** 两年后，回应是归回应者所有的普通记录，与 GitHub 和 Slack 的做法同形；评论正文仍然只有作者能改。\n- **置信缺口：** 现存 `reactions` 数据量未测，生产环境的迁移规模未知；objectui 之外是否还有读这一列的消费方，未全量普查。\n- **自检：** 只看①选 A；②③④ 是否翻转：否。④ 偏向 B，但 B 的代价是在底线上开特权口子，不是零件数。\n\n## 裁后执行（维护者只裁方向）\n\n- **A** ⇒\n  1. `domain:spec` / `domain:services`：新对象及其权限，`reactions` 列的去向（汇总只读或退役，附 ADR-0087 转换）；\n  2. objectui 评论区改为读写回应记录；\n  3. #22500 由上述 PR 关闭。\n- **B** ⇒ `domain:services` 提供回应动作（只改调用者本人的 id，先校验对评论所在记录的读权限，原子更新）；objectui 点击改走该动作；#22500 由它关闭。\n- **C / D** ⇒ 照字面执行，并在 #22500 记录理由。\n\nDedupe words: `comment reactions non-author` · `sys_comment_reaction` · `reaction write path floor`"
+}

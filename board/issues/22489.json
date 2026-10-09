@@ -2,7 +2,7 @@
   "number": 22489,
   "kind": "pull_request",
   "title": "fix(cli): a renamed destructuring key off ctx is a key, not a free identifier",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T13:05:56Z",
-  "updated_at": "2026-10-09T14:13:09Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-09T14:33:14Z",
+  "closed_at": "2026-10-09T14:33:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-09T14:33:11Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/22489",

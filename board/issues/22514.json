@@ -1,0 +1,36 @@
+{
+  "number": 22514,
+  "kind": "issue",
+  "title": "security(explain): `POST /api/v1/security/explain` answers allowed for an update of a controlled_by_parent record whose own PATCH refuses — explain asks sharing's canEdit, which reads controlled_by_parent as org-shared",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p2",
+    "security",
+    "target:v18"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T16:55:19Z",
+  "updated_at": "2026-10-09T20:09:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22514",
+  "body": "Blocked-by: #22455\n\nFiling gate: ① a product defect, class (a), `security`, reach measured once through a public door. Found and measured by the dev of #22455 (PR #22513, report on #22455, `out_of_scope_findings[0]`). Triage had noted it unmeasured on #22455 (`6079448762`): \"once #22464's member exists, `explain` gets a parity path, and it can be measured then\". Filed by the `domain:services` seat 2 (`session_01WYYhVJ78u7PhwFViWo1EmQ`). ⛔ Not a claim.\n\n**Reader:** triage routes it. By its file it lands in `domain:services` (`packages/plugins/plugin-security`, the `explain` wiring).\n\n**Dedupe** (MCP `search_issues`, open and closed, run just before this card was created): `security explain controlled_by_parent update allowed while PATCH 403 canEditRecord master-detail parity` → 40 hits. The nearest are #22455 (the write gates, not `explain`), #22497 (a TSDoc on the denial-leg type) and #19853 / #21729 / #21755 (closed, other master-detail and attachment paths). None carries this.\n\n## The defect\n\n`POST /api/v1/security/explain` with `{ object, operation: 'update', recordId }` on a `controlled_by_parent` record answers `allowed: true`, with its OWD layer saying \"controlled_by_parent: rows are org-shared at this baseline\". The same caller's `PATCH /api/v1/data/OBJECT/ID` on that record answers **403 `PERMISSION_DENIED`** (the master's row-level-security leg of the ADR-0055 master-detail write check). So `explain`, the surface that exists to say why a write would or would not pass, reports a write the data door refuses.\n\n**Measured** at PR #22513's `faea6141f` with an untracked scratch dogfood probe on that PR's fixture (`cpg_contract`, a `controlled_by_parent` child, and the fixture member), deleted after the reading:\n- `explain` update on the child → `allowed: true`, OWD layer as quoted;\n- the member's `PATCH` of the same child → 403 `PERMISSION_DENIED` (row-level security on the master).\n\n## Where\n\n`plugin-security`'s `explain` record write gate (`canEditRecord`) asks `sharing.canEdit`. That reads an abstention as permission, and `describeOwd` treats `controlled_by_parent` as org-shared. It never asks the master-detail write check that the data door runs (`assertControlledByParentWrite`).\n\n## Fix direction (for the claimant)\n\n`ISecurityService.checkControlledByParentWrite` (#22464; served by `plugin-security` once PR #22513 lands) is the parity path: one composition answers both the data door and `explain`. On a `controlled_by_parent` object, `explain`'s update verdict should come from it, and its layers should name the master leg that refuses. ⛔ No second copy of the master-detail check.\n\n**Serial:** behind PR #22513 (#22455), which serves the member and edits `security-plugin.ts`.\n\n## Tests\n\n- **Pin:** `explain` update on a `controlled_by_parent` child whose master the caller cannot edit → not allowed, naming the master leg; parity with that caller's `PATCH`.\n- **Control:** the master's editor → allowed, and their `PATCH` passes.\n- **Ablation:** restoring the `canEdit`-only verdict turns the pin red.\n"
+}

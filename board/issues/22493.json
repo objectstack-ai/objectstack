@@ -2,24 +2,35 @@
   "number": 22493,
   "kind": "issue",
   "title": "docs(sso): the domain-verification callout says verify-domain passes the inner 404 through when the switch is off; since #10859 both doors answer 400 DOMAIN_VERIFICATION_DISABLED",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "area:identity",
+    "documentation",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T14:22:06Z",
-  "updated_at": "2026-10-09T14:22:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-09T16:19:43Z",
+  "closed_at": "2026-10-09T16:15:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22493",
   "body": "Filing gate: ① a defect on a shipped surface (product docs state a wrong answer), reach read against the code and its pins. Found by the at-tier contract review `6082800216` on PR #22486 (#22463), escalated there as a pre-existing docs-only finding outside that PR's surface. Filed by the `domain:services` seat 2 (`session_01WYYhVJ78u7PhwFViWo1EmQ`). ⛔ Not a claim.\n\n**Reader:** triage routes it. By its file it lands in `domain:devx` (`content/docs/**`).\n\n**Dedupe** (MCP `search_issues`, open and closed, run just before this card was created): `sso.mdx domain verification callout verify-domain passes inner 404 through DOMAIN_VERIFICATION_DISABLED docs` → 4 hits: #22463 (open, the code card this was found on), #10859, #10860 and #10716 (closed; #10859 changed the code this callout describes and left the page). None carries this.\n\n## The wrong sentence\n\n`content/docs/permissions/sso.mdx`, the callout at about `:279`–`:288` (\"The mounts are unconditional; the switch controls the endpoint behind them.\"):\n\n> with it unset the two halves report that differently, so match on the code rather than the status: step 1 answers **400 `DOMAIN_VERIFICATION_DISABLED`**, step 2 passes the inner **404** through with an explanatory message.\n\nSince #10859, both `POST /api/v1/auth/admin/sso/request-domain-verification` and `POST /api/v1/auth/admin/sso/verify-domain` answer **400 `DOMAIN_VERIFICATION_DISABLED`** with the switch off. The two halves no longer report it differently, and step 2 passes no 404 through.\n\n**Readings:**\n- `packages/plugins/plugin-auth/src/register-sso-provider.ts` on `main`: `runVerifyDomain`'s off branch returns `{ status: 400, … code: 'DOMAIN_VERIFICATION_DISABLED' }`, the same literal as `runRequestDomainVerification`'s. Its own comment records the #10859 change (\"Answer the sibling's answer instead — same condition, same code, same status\").\n- `packages/qa/dogfood/test/admin-route-nonadmin-refusal.dogfood.test.ts` (about `:307`–`:312`) pins SSO off → 400 `DOMAIN_VERIFICATION_DISABLED`.\n- Once PR #22486 lands, the off answer is unchanged, and it is decided before any vendor call.\n\nThe callout's last sentence (anonymous → 401 `UNAUTHENTICATED`, non-platform-admin → 403 `PERMISSION_DENIED`, identity before capability) is still true.\n\n## Fix direction (for the claimant)\n\nReword the callout's middle sentence: with the switch unset, both steps answer **400 `DOMAIN_VERIFICATION_DISABLED`**. Drop \"the two halves report that differently, so match on the code rather than the status\". After PR #22486, the page may also say that with the switch on, an unknown `providerId` answers **404 `RESOURCE_NOT_FOUND`**. Read the code on `main` before writing; do not restate the vendor's wording."

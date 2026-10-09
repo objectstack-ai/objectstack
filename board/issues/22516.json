@@ -1,0 +1,32 @@
+{
+  "number": 22516,
+  "kind": "issue",
+  "title": "[Decision] Test Core shard timeout: land 40 as ruled, keep 45, or raise to 50 so the stall guard's cap verdict lands before the job dies",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "needs-user-decision",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T17:01:06Z",
+  "updated_at": "2026-10-09T17:01:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22516",
+  "body": "This card carries the value of the `Test Core` shard `timeout-minutes`. Its parent, objectstack-ai/objectstack#22075, keeps everything else; its ruled re-size is built as PR #22512 (45 → 40), held in draft until this answer. Filed by `domain:devx` seat 1 · `os-bill` · `session_01LYXc6ckoWuZyVZpWYizdMh`. The platform dates this card.\n\n### 维护者速读\n\n一小时前你选了 #22075 的 A,其中一项是「按实测把 45 分钟的分片超时**下调**」。「下调」这两个字是席位写的，席位当时没有核对卡死守卫(stall guard)。dev 实测 396 个分片 job 后发现：超时降到 40,守卫最重要的那条「封顶判定」会有 15% 的情形来不及开口，任务就被超时直接杀掉，只留一个没有说明的超时;保持 45 是 2%;升到 50 是 0%。正常运行的耗时不受这个值影响，它只决定卡死时谁先说话。**推荐 C:升到 50。** 回复一行即可，例如「C」。\n\n**一句话问题。** 测试分片卡死时，应该先由守卫报出「卡在哪里」,还是早 5 分钟被超时无声杀掉?\n\n### Governing text\n\n- 裁决 `6083012192`(#22075,维护者「A 停在 3 片收口 (Recommended)」):\"re-size the `Test Core` shard `timeout-minutes` … from the measured job-wall distribution after `5919483472`\"。所选选项的说明写的是「按实测分布**下调** 45 分钟分片超时」。\n- `scripts/measure-stall-guard-headroom.mjs` 文件头:\"The deferred path is the one that matters most and is checked least: … losing that report to an unlabelled job timeout is the exact state the guard exists to abolish.\"\n- `.github/workflows/ci.yml` 该 job 注释:\"the stall guard stays the primary hang detector\"(超时只是兜底)。\n- 是否改协议：不改。三个选项都只改一个数和它的注释。\n\n### 前提(每条带复核命令)\n\n1. 静态预算门禁在 40 下仍然通过(守卫窗口 10 分钟、封顶 20 分钟)。复核:`node scripts/check-stall-guard-budget.mjs --list`(在 PR #22512 head `a549ca3a` 上 exit 0,席位已重跑)。\n2. 实测值(dev 报告 `6085414584`,席位未重测):窗口内 396 个 `Test Core (N/6)` job,最慢一个是 27m05s(run 37923333449,3/6);守卫所在步骤结束时最晚已是 job 开始后 26m38s。\n   - 窗口判定(+10 分钟)最晚在 36m38s 落下:40 下来得及,35 下来不及。\n   - 封顶判定(+20 分钟)最晚在 46m38s 落下,要求超时至少 47 分钟。来不及的比例:45 下 8/396,40 下 60/396,50 下 0/396。\n   - 复核:`node scripts/measure-stall-guard-headroom.mjs --run 37923333449`。\n3. 正常运行的耗时与这个值无关;它只决定卡死的 job 在第几分钟被杀。复核:读 `ci.yml` 该 job 的 `timeout-minutes` 上方注释。\n\n### 选项\n\n| 选项 | 做什么 | 后果 |\n|:--|:--|:--|\n| A. 40(按裁决字面，即 PR #22512 现状) | 合并 PR #22512 | 卡死的 job 早 5 分钟结束;封顶判定 15% 的情形失声，变成无说明的超时 |\n| B. 保持 45 | PR #22512 改成只更新注释(写入实测窗口和守卫读数),数值不变 | 与今天一样:2% 的情形失声 |\n| **C. 升到 50** | PR #22512 改成 50,注释写明「由守卫两条判定路径 + 实测墙钟推导」,回退到 30 的条件同步改写 | 守卫两条路径都先于超时开口;卡死的 job 多跑 5 分钟才被兜底杀掉 |\n\n**业务含义直译:** 超时是火警铃响后的强制断电,守卫是先报「哪里着火」的烟感器。A 是把断电提前 5 分钟，代价是更多时候烟感器还没来得及报;C 是让烟感器总能先报，再断电。\n\n### 四轴(业务立场)\n\n- **① 项目长远合理性:** 两年后的样子：超时只做兜底，数值由守卫的两条判定路径和实测墙钟推导，守卫永远先开口(主流 CI 的超时也是 watchdog 之外的最后一道)。C 是这个终态;A 让兜底抢在守卫前面。\n- **② 实际业务拉动:** 正常运行不受影响;卡死本身罕见。拉动在于卡死时开发者能否看到「卡在哪」,而不是早 5 分钟拿到一个红叉。\n- **③ 防 AI 犯错:** 无说明的超时会把流水线 bug 藏起来，下一个 agent 只会重跑;守卫的判定会点名卡住的步骤。C、B 优于 A。\n- **④ 创业阶段不扩散:** 三个选项都只改一个数，不加门禁、不加零件。\n\n```\nos-decision-facets\n① 项目长远合理性:超时是兜底，应由守卫两条判定路径与实测墙钟推导;C 是终态,A 让兜底抢在守卫之前。\n② 实际业务拉动:正常运行耗时不变;拉动是卡死时能否看到卡在哪一步。\n③ 防 AI 犯错:守卫点名卡住的步骤，无说明超时只会诱导重跑;C、B 优于 A。\n④ 创业阶段不扩散:三者都只改一个数，零新增。\nPrior rulings read: ruling 6083012192 (#22075, A: the re-size, worded 下调 by the seat's option text); scripts/check-stall-guard-budget.mjs and measure-stall-guard-headroom.mjs headers; ADR none; thread: 0 rulings on the value itself\n```\n\n**推荐 C,回退 B。** 自检：只看①选 C;②③④ 是否翻转：否。\n\n**置信缺口:** 窗口只有约 5.6 小时;封顶判定只在缓冲层把活着的测试藏起来时才会用到(守卫自己的说法是这本身是一个流水线 bug),多罕见没有读数。同样的封顶缺口在 `dogfood` 与 `temporal-conformance` 两步上也存在(需 33 与 31 分钟，现为 30),本卡不处理。\n\n### 裁后执行\n\n- **A:** 席位把 PR #22512 转 ready 并入队,#22075 随之关闭。\n- **B / C:** 席位给原 dev 一轮补丁(同分支、同 PR),改数值和注释;C 同时改写回退到 30 的条件，使之也要求守卫覆盖。复核后入队,#22075 随之关闭。"
+}

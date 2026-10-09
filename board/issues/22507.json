@@ -1,0 +1,32 @@
+{
+  "number": 22507,
+  "kind": "issue",
+  "title": "A screen flow's select options and screen `description` have no key in the `flows` translation face — the zh-CN intake wizard translates its labels and placeholders and keeps its options and body text in English (17.7.0)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T16:00:46Z",
+  "updated_at": "2026-10-09T16:57:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22507",
+  "body": "Blocked-by: #22450\n\nFiling class: ① product defect (user-visible) — reach: browser, zh-CN Console, measured once on 17.7.0.\n\n**Reader:** objectstack triage → the spec lane (`TranslationDataSchema.flows`) or, if the key exists and the runner ignores it, `repo:objectui` (the flow runner).\n\n## Symptom\n\nMeasured in `objectstack-ai/hotclm` on 17.7.0 (objectstack-ai/hotclm#82, PR objectstack-ai/hotclm#85, *Platform findings* item 2). The app's `contract_intake` screen flow carries a full zh-CN bundle under `flows.contract_intake.screens.<node>.{title, fields.<field>.{label, placeholder}}`, and those render in Chinese. In the same wizard:\n\n- select-field options render in English (`Head office`, `USD — US Dollar`) — the face has no key for a screen field's options;\n- the screen's body text (`description`) renders in English — the schema's own guidance places `description` outside the face.\n\nSo a fully translated app shows a half-English wizard, and no bundle the author can write fixes it.\n\n## Expected\n\nEither the face addresses screen-field options (and, if intended, screen `description`), or the runner resolves options that mirror an object field through that object's translated option labels. Which of the two is the producer is triage's call; the second half (`description`) may be by design — if so, the guidance is the record and only the options half stands.\n\n## Dedupe\n\nMCP `search_issues` on this repo, query `flow screen translation select options description not translatable flows translation face screen field options` → 6 hits, all closed and none on options: #7646 (bundle had no screen-flow surface), #11287 (nothing read `flows`), #17306 (screen field numeric bound / help text), #20318 (launcher header key). Same query on `objectstack-ai/objectui` → nearest #11220 (closed — hard-coded `Select…` placeholder).\n\n---\n_Filed by the `repo:hotclm` PM seat from a measured dev finding._\n"
+}

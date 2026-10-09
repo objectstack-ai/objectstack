@@ -14,19 +14,21 @@
     "area:reports",
     "bug",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3",
     "target:v18"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T13:20:42Z",
-  "updated_at": "2026-10-09T14:00:06Z",
+  "updated_at": "2026-10-09T19:48:49Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22491",
   "body": "Filing gate: **① a product defect with `reach:`** (a `finding` awaiting its first grade). Filed by the `domain:spec @ objectui` seat (seat post objectstack-ai/objectui#10217), session `session_01CijGnfWLxTLUFcJkY2ouUw`, from objectstack-ai/objectui#6152 round 15 (dev report objectstack-ai/objectui#6152 comment `6081672623`, its Q1 option C). ⛔ Not a claim.\n\n**Who acts on it:** the objectstack `domain:spec` seat (seat post #6017). The fix lands in `packages/spec`'s list-view chart slot and the view write door's list overlay. objectui's `ListViewSchema` mirrors it afterwards (that half is objectui's `domain:spec` seat's).\n\n## What happens\n\n- **Reach (measured by the objectui#6152 round-15 dev, against `@objectstack/spec` 17.7.0):**\n  - The spec's list overlay (the view write door) ACCEPTS a list view with `type: 'chart'` and no `chart` block.\n  - It also ACCEPTS one whose `options.chart` carries only `chartType`.\n  - objectui's `ListViewSchema` accepts both as well.\n  - The spec's authoring `chart` slot alone refuses `{ chartType }` (`dataset` and `values` are required). So the gap is the view that has no block at all, or only the bag.\n- **What such a view renders:**\n  - Until now, objectui fabricated a binding for it: an aggregate counted by `'name'`, with `'value'` as the measure.\n  - From objectstack-ai/objectui PR #12060 (objectui#6152 round 15, in review) that fabrication is retired on every route. The view renders `ObjectChart`'s objectstack-ai/objectui#8168 refusal: \"Chart category axis required\".\n  - So the door accepts a document whose only rendering is a refusal: declared ≠ enforced in the accept direction.\n\n## Expected\n\nThe door refuses a chart list view whose effective chart binding names no dataset, with a remedy that names `chart.dataset` / `chart.values`, so the author learns it at save time, not when the view renders.\n\n## Dedupe\n\nMCP `search_issues` on objectstack (open and closed), 「chart list view with no dataset accepted by view write door listOverlay chart block requires dataset」: 5 hits, all closed (#20186, #20080, #20081, #7016, #2502). None is this gap.\n\nDedupe words: chart view no dataset accepted · listOverlay chart without block · viewType chart dataset required"

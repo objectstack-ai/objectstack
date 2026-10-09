@@ -2,8 +2,8 @@
   "number": 22464,
   "kind": "issue",
   "title": "spec(contracts): ISecurityService declares an optional member answering the master-detail write check — the packages/spec half of #22455, split out under 强制条款②",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:access",
     "domain:spec",
-    "pm:dispatched",
     "priority:p1",
     "security",
     "target:v18"
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T10:52:56Z",
-  "updated_at": "2026-10-09T13:52:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-09T14:46:04Z",
+  "closed_at": "2026-10-09T14:44:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22464",
   "body": "Unblocks: #22455\n\nFiling gate: **the `packages/spec` stage of a p1 security card, split out under 强制条款②** (as #19578 split the spec half of #18783). Filed by the triage seat (seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`). The split was asked by the `domain:services` seat in `6079158667`, on the dev's measured stop (`6079124329`). ⛔ Not a claim. ⛔ Classes, positions and functions only.\n\n## Why this exists\n\n#22455's fix makes the attachment and comment parent gates judge a `controlled_by_parent` parent through the master-detail write check that a by-id update of that parent already runs (ADR-0055). The fix must reuse that check. Triage excluded a second copy.\n\nOn `main` `3ca71b6e05`, nothing can reach the check from outside plugin-security:\n- the check is the private `SecurityPlugin.assertControlledByParentWrite` (`packages/plugins/plugin-security/src/security-plugin.ts:9061`), reached only from the write middleware (`:3323`, `:3333`);\n- the security service serves only `ISecurityService` members (`packages/spec/src/contracts/security-service.ts`), and none of them runs this check;\n- `registered-security-service-members.pin.test.ts` holds served members to the contract. Its `SERVED_NOT_DECLARED` ledger (`:87`) is empty by design.\n\nSo reuse needs one declared member. The precedent for this exact storage-to-security seam is PR #21781 (`045f764c26`), which declared two optional, feature-detected members.\n\n## What to declare\n\n- **One optional, feature-detected member on `ISecurityService`.** It answers the existing master-detail write check for an update of `(object, recordId)` in the caller's context. ⛔ It adds no new verdict: it exposes the one a by-id update already gets.\n- **Its outcome type** covers:\n  - the check's authorization legs (deny);\n  - not-applicable (the object is not `controlled_by_parent`);\n  - the check's non-verdict outcomes (a broken declaration, a missing master row, a null master FK). The services seat's ruling says the gates fail closed on these;\n  - the store fault, which keeps its declared `503`.\n- **TSDoc** states three things:\n  - the answer equals what a by-id update of the same record gets, including the ADR-0090 D10 delegator leg;\n  - a kernel without the member is not a kernel that admits by policy: it is the absence of a master check, and the parent's own update gets the same answer there;\n  - the member is optional, so every consumer must handle its absence.\n- The regenerated api-surface artifacts, plus the changeset the spec lane's rules require.\n\n## Not this card (it is #22455's, `domain:services`, `Blocked-by:` this card)\n\n- `plugin-security` serving the member, and the pin's `DECLARED_MEMBERS` row;\n- the attachment gates (attach, delete of another user's file, and the update and re-point limbs) and `plugin-audit`'s comment delete limb consuming it through `checkEdit`;\n- the BREAKING narrowing and its remedy.\n\n⛔ No change to `effectiveSharingModel` or to `checkEdit`'s abstain set. That is #22455's triage direction, and the seat ruled B out.\n\n## Acceptance\n\n- The member is declared optional, with its outcome type and TSDoc as above. `Clause-②: yes` (a contract member is added; no accept-set changes).\n- The contract-tier review is recorded on the PR.\n- The spec lane's gates are green: api-surface, its regeneration check, and the contract tests.\n- A type-level pin shows that a consumer which does not handle absence fails to compile, matching the existing optional members.\n\nDedupe: search over objectstack for an `ISecurityService` member exposing the master-detail write check found only #22455. #21756 and #19578 (closed) are earlier member declarations, not this one."

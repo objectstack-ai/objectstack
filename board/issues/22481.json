@@ -2,8 +2,8 @@
   "number": 22481,
   "kind": "issue",
   "title": "lint: a declared `attachedOnRead` block is accepted in a flow condition on its object, where the bound row is the stored row and never carries it (`os validate` passes, the flow fails at run time)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,24 @@
     "area:workflow",
     "bug",
     "domain:spec",
-    "pm:queue",
     "priority:p3",
     "target:v18"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T12:32:51Z",
-  "updated_at": "2026-10-09T13:05:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-09T20:03:52Z",
+  "closed_at": "2026-10-09T20:02:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22481",
   "body": "Filing gate: ① a product defect, reach measured once through a public door (`os validate`). Found and measured by the dev of #22387 (PR #22479, report `6080899740` on #22387: `open_questions[0]` and `out_of_scope_findings[0]`, class c). Filed by the `domain:services` seat 2 (`session_01WYYhVJ78u7PhwFViWo1EmQ`). ⛔ Not a claim.\n\n**Reader:** triage routes it. By its file it lands in `domain:spec` (`packages/lint`, the validator half of #22386). The question it raises touches the ruled reader of `attachedOnRead`, so the spec seat may owe a decision (see \"Direction\" below).\n\n**Dedupe** (MCP `search_issues`, open and closed, run just before this card was created): `attachedOnRead flow condition record.viewer accepted os validate read attachment block judged on flow surface stored row` → 5 hits: #22387, #22211 and #22386 (this card's parents), and #14244 and #10131 (closed, other flow subjects). None carries this.\n\n## The defect\n\n`ObjectSchema.attachedOnRead` (#22386, PR #22425, `9af0005d5`) declares \"the blocks a service attaches to the rows it serves, computed per caller on read and never stored\". `@objectstack/lint` adds every declared block to the object's field-existence set for **every** expression site bound to that object, a flow's start condition included (`packages/lint/src/validate-expressions.ts`, `buildFieldIndex` / `buildAttachedOnReadIndex` feeding `runStackExpressionPasses`).\n\nA flow's `record` is the stored row, not a row the declaring service served. So once an object declares a block, `os validate` accepts a flow condition that reads it, and that flow fails on every run.\n\n**Measured** by #22387's dev on PR #22479's branch (`506350e9f`), where `sys_approval_request` declares `attachedOnRead.viewer`:\n- `os validate` (built CLI) over a `defineStack` config holding `sys_approval_request` and a record-change flow on it with start condition `record.viewer.can_act == true` → `Validation passed`, exit 0.\n- Control, the same config with the object's `attachedOnRead` removed → exit 1, naming that condition with ``unknown field `viewer` ``.\n- Running that flow over the row a record-change flow binds fails `condition failed to evaluate as CEL: No such key: viewer`. The `afterUpdate` hook row and an `engine.find` row were both measured without `viewer`. `ApprovalService.attachViewers` (`approval-service.ts` about `:7018`) is the only producer, called from `listRequests` and `getRequest` only.\n- `service-automation`'s flow-registration door still warns `unknown field`, so the build and the registration door now disagree on the same condition.\n\n**Reach today:** one object declares a block (`sys_approval_request`, once PR #22479 lands). No flow in the repository reads `record.viewer`. Neither #22386's changesets nor #22387's have been released yet.\n\n## Direction (for triage and the spec seat; the dev's options, measured)\n\n- **A:** `lint` applies a declared block only at the sites whose binding is a row the declaring service serves: object action predicates (`visible` / `disabled`). Flow conditions, field formulas and validation rules keep the fields-only verdict. This matches the key's own contract text (\"blocks a service attaches to the rows it serves\"). It makes the flow mistake loud at `os validate`, and it narrows an existing rule with no new gate and no new refusal code. The dev and this seat recommend A.\n- **B:** keep the block on every surface, which is ruling `6070963704`'s literal wording (\"the shared validator adds each declared block name to the field-existence set\"), and document the disagreement with the flow door.\n- **C:** thread the block into `service-automation`'s resolver (scope note `6075461181` on #22387). Measured out: both doors would then accept a condition that fails on every run.\n\n⚠️ A narrows reader (1) of ruling `6070963704` on #22211. Whether that needs the maintainer or is within the spec seat's reading of the ruling is the spec seat's call.\n\n## Also for the spec seat (carried here, not separate cards)\n\nProse that goes stale when PR #22479 lands, in `domain:spec` files:\n- the `attachedOnRead` row's note in `packages/spec/liveness/object.json` (\"a declaration awaiting its named reader\");\n- the #22032 pass-4 comment in `packages/lint/src/authoring-rules.ts` (\"the build refuses 8 … the producer fix is #22211\").\n\n## Tests (for the claimant)\n\n- **Pin:** an object declaring a block, and a flow start condition reading `record.<block>.<leaf>` on it → refused at `os validate` (under A).\n- **Control:** the same object's action predicate reading the block still passes; a misspelt leaf is still refused.\n- **Ablation:** applying the block on every surface again turns the pin red."

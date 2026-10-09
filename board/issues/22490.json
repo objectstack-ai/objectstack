@@ -2,7 +2,7 @@
   "number": 22490,
   "kind": "pull_request",
   "title": "chore(governance): the human-merge line threshold is 3,000 changed lines (HUMAN_MERGE_LINE_THRESHOLD), per the maintainer's 2026-10-09 ruling",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/s",
     "skip-changeset"
   ],
@@ -22,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T13:06:17Z",
-  "updated_at": "2026-10-09T14:14:46Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-09T14:46:15Z",
+  "closed_at": "2026-10-09T14:44:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-09T14:44:37Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/22490",
