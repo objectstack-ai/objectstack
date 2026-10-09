@@ -156,8 +156,15 @@ function mountedKeys(table: Map<string, Handler>): string[] {
 async function serveOpenApi(table: Map<string, Handler>, base: string) {
   const entry = resolveRoute(table, 'GET', `${base}/openapi.json`);
   expect(entry, `GET ${base}/openapi.json must be mounted for this pin to mean anything`).toBeDefined();
-  const { body } = await drive(entry!, { path: `${base}/openapi.json` });
-  return body;
+  // [#22430] The document refuses an anonymous caller, so it is read as a
+  // signed-in one — the reader whose document this file is about.
+  const signedIn = vi.spyOn(RestServer.prototype as any, 'resolveExecCtx').mockResolvedValue({ userId: 'u_docs_reader' });
+  try {
+    const { body } = await drive(entry!, { path: `${base}/openapi.json` });
+    return body;
+  } finally {
+    signedIn.mockRestore();
+  }
 }
 
 async function readDiscovery(table: Map<string, Handler>, base: string) {

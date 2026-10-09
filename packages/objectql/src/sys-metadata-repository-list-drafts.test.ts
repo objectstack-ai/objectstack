@@ -109,26 +109,33 @@ describe('SysMetadataRepository.listDrafts (ADR-0033)', () => {
    * `GET /api/v1/meta/_drafts` (`packages/rest/src/rest-server.ts`) and
    * `GET /metadata/_drafts` (`packages/runtime/src/domains/meta.ts`) both call
    * `protocol.listDrafts()` and serve the result verbatim — no ADR-0106
-   * `applyObjectSchemaMask`, no capability gate, nothing beyond `requireAuth`.
-   * That is safe today for exactly one reason: this function reads six columns
-   * and never touches the row's stored body. #6599 was filed believing the body
-   * DID come through (`.item.fields.salary_grade`); it does not, and this case
-   * is what keeps that true.
+   * `applyObjectSchemaMask`. Both now GATE per caller (#6599's authoring gate,
+   * `mayReadPendingDrafts`), but the projection is still what decides what an
+   * authoring caller receives on a list surface. #6599 was filed believing the
+   * body DID come through (`.item.fields.salary_grade`); it does not, and this
+   * case is what keeps that true.
+   *
+   * [#22200] Exactly ONE member is read off the stored body: the item's own
+   * top-level `label`, because this header is the only list of draft-only
+   * items a client has and without it such an item can be shown by its machine
+   * name alone. That is a label, not the body — so the pin below names seven
+   * keys, and the sweep still holds every field-level secret off the wire.
    *
    * So the moment anyone "helpfully" widens the projection to carry the item —
    * a Studio diff view wanting field-level detail is the obvious pull — both
    * routes start serving full object schemas, `requiredPermissions`, picklist
-   * option values and `formula` business IP to any authenticated caller, and
-   * ADR-0106's mask is bypassed wholesale via a route it never covered. This
-   * test goes red at that instant. If you are here because it went red: the
-   * widening needs the ADR-0106 projection (or an authoring gate) on BOTH
-   * routes FIRST — see #6599 for the (a)/(b) fork.
+   * option values and `formula` business IP, and ADR-0106's mask is bypassed
+   * wholesale via a route it never covered. This test goes red at that
+   * instant. If you are here because it went red: a field-level widening needs
+   * the ADR-0106 projection on BOTH routes FIRST — see #6599 for the (a)/(b)
+   * fork.
    */
   it('projects headers ONLY — a draft row\'s stored body never reaches the caller (#6599)', async () => {
     // A draft row carrying everything ADR-0106 names as leaking with a field:
     // a sensitive picklist, the capability guarding it, and a formula.
     const sensitive = {
       name: 'account',
+      label: 'Account',
       fields: {
         salary_grade: {
           type: 'select',
@@ -148,7 +155,10 @@ describe('SysMetadataRepository.listDrafts (ADR-0033)', () => {
         organization_id: null,
         updated_at: 't1',
         updated_by: 'ai',
-        // Both spellings the repository layer has used for the stored document.
+        // The column the repository reads the stored document from today
+        // (`metadata`, the one `label` is now read out of) beside both
+        // spellings it has used before — the sweep has to cover all three.
+        metadata: JSON.stringify(sensitive),
         body: JSON.stringify(sensitive),
         metadata_json: JSON.stringify(sensitive),
       },
@@ -156,8 +166,9 @@ describe('SysMetadataRepository.listDrafts (ADR-0033)', () => {
     const { repo } = makeRepo(rows as any);
     const out = await repo.listDrafts({ type: 'object' });
 
-    // Exactly the six header keys — no `item`, no `body`, no `fields`.
+    // Exactly the seven header keys — no `item`, no `body`, no `fields`.
     expect(Object.keys(out[0]).sort()).toEqual([
+      'label',
       'name',
       'organizationId',
       'packageId',
@@ -181,5 +192,7 @@ describe('SysMetadataRepository.listDrafts (ADR-0033)', () => {
     ]) {
       expect(wire).not.toContain(secret);
     }
+    // [#22200] …while the one member read off the body arrives, as authored.
+    expect(out[0].label).toBe('Account');
   });
 });
