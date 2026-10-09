@@ -71,8 +71,8 @@
 // @proof: showcase-fls-read-mask-strip
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 
 const SYS = { isSystem: true } as const;
@@ -102,7 +102,7 @@ describe('showcase FLS read side: a readable:false field is STRIPPED, not masked
   let storedSpent: number;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, { security: showcaseAppDefaultSecurity() });
+    stack = await bootShowcase({ security: showcaseAppDefaultSecurity() });
     adminTok = await stack.signIn();
     memberTok = await stack.signUp(MEMBER);
     ql = await stack.kernel.getServiceAsync('objectql');

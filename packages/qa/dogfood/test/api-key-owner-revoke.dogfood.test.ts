@@ -61,8 +61,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 describe('#8053: a member revokes their OWN sys_api_key', () => {
   let stack: VerifyStack;
@@ -107,7 +107,7 @@ describe('#8053: a member revokes their OWN sys_api_key', () => {
   };
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {});
+    stack = await bootShowcase({});
     adminToken = await stack.signIn();
     memberToken = await stack.signUp(MEMBER_EMAIL);
   }, 180_000);

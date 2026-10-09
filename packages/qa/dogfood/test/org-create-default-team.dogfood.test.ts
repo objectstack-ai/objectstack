@@ -21,8 +21,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 /**
  * ── How this fixture opens the route (#5261) ─────────────────────────────────
@@ -56,7 +56,7 @@ describe('#3624: org create provisions its default team', () => {
   let token: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, { multiTenant: 'posture-only' });
+    stack = await bootShowcase({ multiTenant: 'posture-only' });
     token = await stack.signIn();
   }, 120_000);
 

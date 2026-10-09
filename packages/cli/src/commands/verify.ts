@@ -189,10 +189,21 @@ export default class Verify extends Command {
 
     const multiTenant = resolveVerifyMultiTenant(flags);
 
+    // [#22301] The app's root — the directory holding its `objectstack.config.ts`,
+    // where `os serve` anchors the same app. `bootStack` composes what `serve`
+    // composes (the providers `requires` names, the app's own `plugins`), and it
+    // anchors every app-relative read at `hostRoot`: a declarative connector's
+    // package-relative file ref, a string `plugins` entry, the multi-tenant
+    // package. Left to its default (the process cwd), `os verify --app
+    // examples/app-showcase/objectstack.config.ts` run from the repository root
+    // resolved the showcase's `./src/system/connectors/status-openapi.json`
+    // against the root, and the boot refused it (ENOENT).
+    const hostRoot = dirname(absolutePath);
+
     // Data fidelity runs on its own pristine stack.
     let crud: VerifyReport;
     {
-      const stack = await bootStack(config, { multiTenant });
+      const stack = await bootStack(config, { multiTenant, hostRoot });
       try {
         const adminToken = await stack.signIn();
         crud = await runCrudVerification(stack, adminToken, config);
@@ -216,7 +227,7 @@ export default class Verify extends Command {
       // `rlsProbeSecurity` registers the capability #7665's acceptance
       // criterion 2 names (object read+edit, owner-scoped SELECT only) and
       // carries the app's declared default profile through unchanged.
-      const rlsStack = await bootStack(config, { multiTenant, security: rlsProbeSecurity(config) });
+      const rlsStack = await bootStack(config, { multiTenant, hostRoot, security: rlsProbeSecurity(config) });
       try {
         const adminToken = await rlsStack.signIn();
         let probeToken: string;

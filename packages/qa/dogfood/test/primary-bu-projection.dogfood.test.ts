@@ -13,8 +13,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 const SYS = { context: { isSystem: true } } as const;
 const EMAIL = 'd12-primary-bu@verify.test';
@@ -32,7 +32,7 @@ describe('ADR-0057 D12: sys_user.primary_business_unit_id projection', () => {
     (await findOne('sys_user', { id }, ['id', 'primary_business_unit_id']))?.primary_business_unit_id ?? null;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {});
+    stack = await bootShowcase({});
     await stack.signIn();
     await stack.signUp(EMAIL);
     ql = await stack.kernel.getServiceAsync('objectql');

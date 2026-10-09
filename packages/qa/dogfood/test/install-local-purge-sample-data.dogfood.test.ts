@@ -47,9 +47,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
 import crmStack from '@objectstack/example-crm';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { LocalManifestSource, MarketplaceInstallLocalPlugin } from '@objectstack/cloud-connection';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -149,7 +149,7 @@ describe('dogfood: install-local purge on the single-tenant posture — the card
 
   beforeAll(async () => {
     storageDir = mkdtempSync(join(tmpdir(), 'dogfood-install-local-purge-'));
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       extraPlugins: [new AuditPlugin(), new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir })],
     });
     ql = stack.kernel.getService<IObjectQLEngine>('objectql');
@@ -250,7 +250,7 @@ describe('dogfood: install-local purge under an organization wall — one organi
     // `posture-only` requests the `isolated` posture — the wall is ACTIVE —
     // without the organizations runtime; the memberships are written by hand
     // (the shape `no-active-organization-write-refusal.dogfood.test.ts` uses).
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       multiTenant: 'posture-only',
       extraPlugins: [new AuditPlugin(), new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir })],
     });

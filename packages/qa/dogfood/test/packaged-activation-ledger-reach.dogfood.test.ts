@@ -50,7 +50,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 // The showcase declares `connectors:` bound to these providers, and the
 // automation service REFUSES TO START without their factories (ADR-0097) —
 // exactly as `objectstack dev` would. Only the automation-carrying boot needs
@@ -98,14 +99,40 @@ async function actionRows(stack: VerifyStack): Promise<Array<Record<string, unkn
     return ql.find(LEDGER, { where: { metadata_type: 'action' }, context: SYSTEM_CTX });
 }
 
+/**
+ * [#22301] #12359's subject is a composition WITHOUT the automation service.
+ * `bootStack` now composes what `objectstack serve` composes, and the
+ * showcase's own `requires` names `automation`, so the showcase itself can no
+ * longer be booted without the service — exactly as it cannot be served
+ * without it. The composition #12359 is about is an app that does NOT declare
+ * `automation`: the showcase with that one token taken out of its `requires`,
+ * and with the plugins of its own `plugins` array that hard-depend on the
+ * automation service (its connector plugins, ADR-0097) left out, since a
+ * served app that does not declare automation could not mount those either.
+ * Its boot is stopped before this file's second describe boots the showcase.
+ */
+const AUTOMATION_PROVIDER = 'com.objectstack.service-automation';
+function showcaseWithoutAutomation(): Record<string, unknown> {
+    const declared = showcaseStack as unknown as {
+        requires?: string[];
+        plugins?: Array<{ dependencies?: readonly string[] }>;
+    };
+    return {
+        ...(showcaseStack as unknown as Record<string, unknown>),
+        requires: (declared.requires ?? []).filter((token) => token !== 'automation'),
+        plugins: (declared.plugins ?? []).filter((p) => !(p.dependencies ?? []).includes(AUTOMATION_PROVIDER)),
+    };
+}
+
 describe('#12359 — actions and NO automation service: the ledger is there', () => {
     let stack: VerifyStack;
     let token: string;
 
     beforeAll(async () => {
-        // The exact boot #12359 measured: no `automation` option, so
-        // `@objectstack/service-automation` is not composed at all.
-        stack = await bootStack(showcaseStack);
+        // The composition #12359 measured: `@objectstack/service-automation`
+        // is not composed at all — no `automation` option, and (since #22301)
+        // a configuration that does not declare it either.
+        stack = await bootShowcase({}, showcaseWithoutAutomation());
         token = await stack.signIn();
     }, 120_000);
 
@@ -211,7 +238,7 @@ describe('#12159 Part 1 — a composition WITH automation: flows and actions bot
     beforeAll(async () => {
         prevCwd = process.cwd();
         process.chdir(SHOWCASE_DIR);
-        stack = await bootStack(showcaseStack, {
+        stack = await bootShowcase({
             automation: true,
             extraPlugins: [
                 new ConnectorRestPlugin(),

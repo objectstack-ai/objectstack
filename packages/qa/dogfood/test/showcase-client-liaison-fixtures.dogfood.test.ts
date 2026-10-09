@@ -34,8 +34,8 @@
 // `applyRedaction` and the field masker actually do.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 
 const SYS = { isSystem: true } as const;
@@ -73,7 +73,7 @@ describe('showcase client-liaison fixtures (#9308 fixtures 2 + 4)', () => {
   let projectId = '';
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, { security: showcaseAppDefaultSecurity() });
+    stack = await bootShowcase({ security: showcaseAppDefaultSecurity() });
     adminTok = await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
 
