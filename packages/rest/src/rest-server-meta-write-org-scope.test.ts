@@ -1,52 +1,38 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #8805 — the REST `/meta` WRITE doors passed no organization, so every audit
-// row a REST-authored metadata write produced was stamped env-wide
-// (`recordMetadataAudit`: `organization_id: entry.organizationId ?? null`).
-// Composed with #8803's scoped READ — own-org rows PLUS env-wide ones, a limb
-// that is required rather than optional — that made every REST-authored audit
-// row readable by every tenant, carrying its `actor`, `note`, `lock_state` and
-// `request_id`.
+// [ADR-0131 D6, C5 stage S3] The REST `/meta` WRITE doors carry NO organization.
 //
-// ── What these assertions are ABOUT, and why they are argument-level ───────
+// History. #8805 found these doors passing no organization and made them
+// thread the caller's active one for the five types the registry declared
+// `allowOrgOverride` (through `organizationIdForMetaWrite`, the dispatcher's
+// predicate), so a tenant admin's overlay landed in that tenant's partition and
+// its audit row with it. ADR-0131 D6 retires the per-organization overlay
+// axis: environment metadata belongs to the whole deployment. The doors now
+// thread no organization for any type — every write lands environment-wide
+// (`organization_id` NULL) and audits there — and the predicate is deleted.
 //
-// The composition has three links, and two were already pinned before this
-// card: `request.organizationId → sys_metadata_audit.organization_id` lives in
-// `@objectstack/metadata-protocol`'s own suites, and the DISPATCHER twin's
-// end-to-end row is pinned in `@objectstack/runtime`'s
-// `meta-write-org-scope.test.ts` (measured for #8805: a `view` written by a
-// session with an active org lands `organization_id: 'org_alpha'` on both the
-// `sys_metadata` row and the audit row; a `flow` lands `null` on both). The
-// missing link — the only one this package owns — is whether the REST door
-// SUPPLIES the organization at all. That is an argument, so these are argument
-// assertions, exactly as #8747's sibling suite next door reasons about its own.
+// ── What these assertions are ABOUT ───────────────────────────────────────
 //
-// ── The trap this file exists to pin, which is NOT the obvious one ─────────
+// The link this package owns is whether the door SUPPLIES an organization,
+// so these are argument assertions on the request each door builds. That the
+// protocol stores an absent organization as `organization_id` NULL is pinned in
+// `@objectstack/metadata-protocol`'s own suites, and the dispatcher twin's
+// end-to-end row in `@objectstack/runtime`'s `meta-write-org-scope.test.ts`.
 //
-// Threading `ctx.tenantId` raw would close the disclosure and open an OUTAGE.
-// `saveMetaItem`'s `organizationId` is one value feeding two things — the
-// `sys_metadata` partition the row lands in AND the audit row — and the
-// protocol REFUSES an org-scoped write of a type the registry declares
-// `allowOrgOverride: false` (`NOT_OVERRIDABLE`, 403 — the #6190 ruling, which
-// deliberately refuses rather than silently coercing the row to env-wide,
-// because coercion rewrites the tenancy statement the author made). So a raw
-// tenant would turn every `PUT /meta/object/*` from a tenant-admin session into
-// a 403. `organizationIdForMetaWrite` is the registry-derived predicate that
-// answers this, and it is the dispatcher's OWN — the cases below pin that the
-// two doors now answer identically for the same request, which is the property
-// the card is really about.
+// Reverse verification of the PUT pin (re-threading `ctx.tenantId` into the
+// save request) turns the first two cases red; recorded in the stage's PR.
 
 import { describe, it, expect, vi } from 'vitest';
-import { organizationIdForMetaWrite } from '@objectstack/metadata-core';
+import * as metadataCore from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { RestServer } from './rest-server.js';
 
 const META = '/api/v1/meta';
 const ORG = 'org_alpha';
 
-/** `allowOrgOverride: true` — a tenant admin's own overlay really is theirs. */
+/** `allowOrgOverride: true` — until ADR-0131 D6, written into the caller's organization. */
 const OVERRIDABLE = 'views';
-/** `allowOrgOverride: false` — an org-scoped write here is refused by the protocol. */
+/** `allowOrgOverride: false` — always written environment-wide. */
 const ENV_WIDE = 'object';
 
 function mockServer() {
@@ -141,48 +127,37 @@ async function writeWith(type: string, execCtx: any) {
     return requestFrom(b.saveMetaItem);
 }
 
-describe('#8805 the REST /meta write doors carry the caller organization', () => {
+describe('[ADR-0131 D6] the REST /meta write doors carry no organization', () => {
     describe('PUT /meta/:type/:name', () => {
-        it('threads the execution-context tenant for an org-overridable type', async () => {
+        it('⭐ a caller WITH an active organization writes an org-overridable type environment-wide', async () => {
             const request = await writeWith(OVERRIDABLE, AUTHORIZED);
-            expect(request.organizationId).toBe(ORG);
+            expect(request.organizationId).toBeUndefined();
+            expect('organizationId' in request).toBe(false);
         });
 
-        it('⛔ does NOT thread it for a type the registry declares non-overridable', async () => {
-            // THE case that makes the fix safe rather than a trade. The protocol
-            // answers `NOT_OVERRIDABLE` (403) to an org-scoped write of one of
-            // these, so a raw `ctx.tenantId` here would turn a working
-            // `PUT /meta/object/*` into an outage for every tenant-admin session
-            // — swapping a disclosure for a regression. The write genuinely IS
-            // env-wide (#6190 option A), so `null` is its truthful audit scope.
+        it('⭐ no registered type carries the organization — the twin-parity property, now trivially one answer', async () => {
+            for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
+                const request = await writeWith(entry.type, AUTHORIZED);
+                expect(
+                    request.organizationId,
+                    `the REST door threaded an organization for type ${entry.type}`,
+                ).toBeUndefined();
+            }
+        });
+
+        it('a non-overridable type stays environment-wide, as before', async () => {
             const request = await writeWith(ENV_WIDE, AUTHORIZED);
             expect(request.organizationId).toBeUndefined();
         });
 
-        it('is env-wide when the caller resolves no organization', async () => {
+        it('is environment-wide when the caller resolves no organization, as before', async () => {
             const request = await writeWith(OVERRIDABLE, AUTHORIZED_NO_ORG);
             expect(request.organizationId).toBeUndefined();
         });
 
         it('judges the plural URL spelling identically to the singular', async () => {
-            // `/meta/views/x` and `/meta/view/x` are the same item; a predicate
-            // that scoped only one spelling would partition by URL style.
-            expect((await writeWith('views', AUTHORIZED)).organizationId).toBe(ORG);
-            expect((await writeWith('view', AUTHORIZED)).organizationId).toBe(ORG);
-        });
-
-        it('never omits the decision — the pre-fix call shape is unreachable', async () => {
-            // The defect was an ABSENT key, not a wrong value: `orgId =
-            // request.organizationId ?? null` reads absent and undefined the
-            // same way downstream, so this asserts the door DECIDED rather than
-            // forgot. An omitted key is what every REST-authored row had.
-            for (const type of [OVERRIDABLE, ENV_WIDE]) {
-                const request = await writeWith(type, AUTHORIZED);
-                expect(
-                    'organizationId' in request,
-                    `door omitted organizationId for type ${type}`,
-                ).toBe(true);
-            }
+            expect((await writeWith('views', AUTHORIZED)).organizationId).toBeUndefined();
+            expect((await writeWith('view', AUTHORIZED)).organizationId).toBeUndefined();
         });
 
         it('leaves the rest of the write request untouched', async () => {
@@ -200,20 +175,16 @@ describe('#8805 the REST /meta write doors carry the caller organization', () =>
             expect(request.parentVersion).toBe('sha256:abc');
             expect(request.packageId).toBe('pkg_a');
         });
+
+        it('the write-side predicate is gone from `@objectstack/metadata-core`', () => {
+            expect('organizationIdForMetaWrite' in metadataCore).toBe(false);
+            // Control: the barrel is the real one.
+            expect('metaWriteCapabilityVerdict' in metadataCore).toBe(true);
+        });
     });
 
     describe('[#12195] the compound-name PUT twin is retired', () => {
-        /**
-         * This drove `PUT /meta/:type/:section/:name` and asserted it carried
-         * the caller's organization, because #8805 measured that scoping one
-         * door and not its twin leaves the twin as a bypass — a tenant writing
-         * through the unscoped spelling reached the env-wide row.
-         *
-         * The arity is retired, so the bypass is closed by removal. The pin
-         * inverts to the absence: a re-mounted compound door arrives org-BLIND
-         * unless whoever mounts it re-derives #8805.
-         */
-        it('mounts no compound `:section` arity to leave unscoped', () => {
+        it('mounts no compound `:section` arity', () => {
             const b = boot(AUTHORIZED);
             const compound = b.routes()
                 .map((r: any) => String(r.path))
@@ -223,89 +194,53 @@ describe('#8805 the REST /meta write doors carry the caller organization', () =>
     });
 
     describe('DELETE /meta/:type/:name', () => {
-        it('scopes the reset, so a tenant cannot destroy the env-wide row', async () => {
+        it('names no organization: the reset reaches the environment-wide row', async () => {
             const b = boot(AUTHORIZED);
             await b.drive('DELETE', `${META}/:type/:name`, {
                 params: { type: OVERRIDABLE, name: 'shared_grid' },
-            });
-            expect(requestFrom(b.deleteMetaItem).organizationId).toBe(ORG);
-        });
-
-        it('stays env-wide for a non-overridable type', async () => {
-            const b = boot(AUTHORIZED);
-            await b.drive('DELETE', `${META}/:type/:name`, {
-                params: { type: ENV_WIDE, name: 'task' },
             });
             expect(requestFrom(b.deleteMetaItem).organizationId).toBeUndefined();
         });
     });
 
     describe('POST /meta/:type/:name/publish', () => {
-        it('scopes the publish — without it the save fix would break the draft loop', async () => {
-            // `promoteDraftForPublish` resolves the draft through
-            // `getOverlayRepo(orgId)`. Once `PUT ?mode=draft` lands org-scoped,
-            // an unscoped publish looks in the env-wide partition and answers
-            // `no_draft`. The two halves are one change, not two.
+        it('names no organization: the promotion looks in the environment partition the save wrote', async () => {
             const b = boot(AUTHORIZED);
             await b.drive('POST', `${META}/:type/:name/publish`, {
                 params: { type: OVERRIDABLE, name: 'shared_grid' },
             });
-            expect(requestFrom(b.publishMetaItem).organizationId).toBe(ORG);
+            expect(requestFrom(b.publishMetaItem).organizationId).toBeUndefined();
         });
     });
 
     describe('POST /meta/:type/:name/rollback', () => {
-        it('scopes the rollback so it restores into the partition the caller named', async () => {
+        it('names no organization: it restores a version of the environment-wide row', async () => {
             const b = boot(AUTHORIZED);
             await b.drive('POST', `${META}/:type/:name/rollback`, {
                 params: { type: OVERRIDABLE, name: 'shared_grid' },
                 body: { toVersion: 2 },
             });
             const request = requestFrom(b.rollbackMetaItem);
-            expect(request.organizationId).toBe(ORG);
+            expect(request.organizationId).toBeUndefined();
             expect(request.toVersion).toBe(2);
         });
     });
 
-    describe('GET /meta/:type/:name/published — the read that had to move with the write', () => {
-        it('scopes the published read with the RAW tenant, not the write predicate', async () => {
-            // This route's comment used to justify omitting the organization by
-            // symmetry: "this door resolves exactly the publishes this door can
-            // produce". The write-side fix ends that symmetry, so left unscoped
-            // this read would 404 about a `view` the same caller published a
-            // moment earlier through the same transport. The RAW tenant is
-            // correct here because `getMetaItemLayered` is org-first-then-
-            // env-wide: fail-open in the safe direction.
+    describe('GET /meta/:type/:name/published — the read that moves with the write', () => {
+        it('names no organization for a caller with one: it resolves exactly the publishes the doors produce', async () => {
             const b = boot(AUTHORIZED);
-            await b.drive('GET', `${META}/:type/:name/published`, {
-                params: { type: OVERRIDABLE, name: 'shared_grid' },
-            });
-            expect(requestFrom(b.getMetaItemLayered).organizationId).toBe(ORG);
-        });
-
-        it('omits it entirely for a caller with no organization', async () => {
-            const b = boot(AUTHORIZED_NO_ORG);
             await b.drive('GET', `${META}/:type/:name/published`, {
                 params: { type: OVERRIDABLE, name: 'shared_grid' },
             });
             expect(requestFrom(b.getMetaItemLayered)).not.toHaveProperty('organizationId');
         });
-    });
 
-    describe('twin parity — the property the card is actually about', () => {
-        it('answers what the dispatcher answers, for every registered type', async () => {
-            // Both doors call the SAME predicate now; this pins that the REST
-            // door's answer is that predicate's answer rather than a
-            // coincidence, across the whole registry rather than the two
-            // specimens above. A registry entry flipping `allowOrgOverride`
-            // moves both sides of this assertion together (Prime Directive #8).
-            for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
-                const request = await writeWith(entry.type, AUTHORIZED);
-                expect(
-                    request.organizationId,
-                    `REST door disagreed with the dispatcher for type ${entry.type}`,
-                ).toBe(organizationIdForMetaWrite(entry.type, ORG));
-            }
+        it('nor for a caller with no organization', async () => {
+            const b = boot(AUTHORIZED_NO_ORG);
+            await b.drive('GET', `${META}/:type/:name/published`, {
+                params: { type: OVERRIDABLE, name: 'shared_grid' },
+            });
+            expect(requestFrom(b.getMetaItemLayered)).not.toHaveProperty('organizationId');
         });
     });
 });
