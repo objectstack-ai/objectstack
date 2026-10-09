@@ -6132,9 +6132,9 @@ export class AutomationEngine implements IAutomationService {
         if (runIsUnscopedUserMode(runContext) && flowTouchesData(flow)) {
             this.logger.warn(
                 `[runAs] flow '${flow.name}' executes with runAs:'user' but its trigger resolved no user ` +
-                `— its data operations will be REFUSED. Running them would execute UNSCOPED ` +
-                `(elevated, RLS-bypassing) rather than restricted, which is the fail-open ADR-0049 ` +
-                `forbids. Declare runAs:'system' to make the elevation explicit and intended, or arrange ` +
+                `— its data operations will be REFUSED. Without a user they would carry no principal: ` +
+                `refused by the security plugin where one is composed, unscoped where none is (the fail-open ADR-0049 forbids). ` +
+                `Declare runAs:'system' to make the elevation explicit and intended, or arrange ` +
                 `for the trigger to supply a user. Note a user-less trigger is NOT only a schedule: a ` +
                 `record-change flow fired by a system write carries no user either (ADR-0049).`,
             );
