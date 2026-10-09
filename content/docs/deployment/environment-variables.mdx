@@ -374,7 +374,7 @@ the hosted ObjectOS Cloud control plane.
 
 Some env vars accept a legacy alias for compatibility. **Ecosystem-standard names** (e.g. `DATABASE_URL`, `AUTH_SECRET`, `BETTER_AUTH_*`, `PORT`, `CORS_*`, `MCP_SERVER_*`) are permanently accepted and no longer warn. ObjectStack's own former names are deprecated — prefer the canonical `OS_*`.
 
-> **Removed in 11** (rename required): `OS_MULTI_TENANT` → `OS_MULTI_ORG_ENABLED`, `AUTH_BASE_URL`/`OS_AUTH_BASE_URL` → `OS_AUTH_URL`.
+> **Removed in 11** (rename required): `OS_MULTI_TENANT` → `OS_MULTI_ORG_ENABLED`, `OBJECTSTACK_METADATA_WRITABLE` → `OS_METADATA_WRITABLE`, `AUTH_BASE_URL`/`OS_AUTH_BASE_URL` → `OS_AUTH_URL`.
 
 | Canonical | Legacy |
 |:---|:---|
@@ -391,6 +391,5 @@ Some env vars accept a legacy alias for compatibility. **Ecosystem-standard name
 | `OS_MCP_SERVER_ENABLED` | `MCP_SERVER_ENABLED` |
 | `OS_MCP_SERVER_NAME` | `MCP_SERVER_NAME` |
 | `OS_MCP_SERVER_TRANSPORT` | `MCP_SERVER_TRANSPORT` |
-| `OS_METADATA_WRITABLE` | `OBJECTSTACK_METADATA_WRITABLE` |
 | `OS_HOME` | `OBJECTSTACK_HOME` |
 | `OS_DEV_CRYPTO_KEY` | `OBJECTSTACK_DEV_CRYPTO_KEY` |
