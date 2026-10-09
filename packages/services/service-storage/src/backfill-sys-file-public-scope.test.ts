@@ -22,7 +22,10 @@
 //     of a stored `public` row is refused, while reads and scope-free updates
 //     of that row are unaffected;
 //   - the rollback's precondition: on this release the inverse write
-//     (`user` → `public`) is refused by the engine.
+//     (`user` → `public`) is refused by the engine;
+//   - the operator step as the changeset writes it: the four functions and
+//     their report types come from the package entry (`./index.ts`), because a
+//     deployment runs the published package, never a source checkout.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
@@ -37,6 +40,16 @@ import {
   planSysFilePublicScopeBackfill,
   runSysFilePublicScopeBackfill,
 } from './backfill-sys-file-public-scope.js';
+// The operator step imports the sweep from the PACKAGE, not from this module:
+// the published `dist` is built from `./index.ts`, so the pin below reads the
+// entry itself, values and report types both.
+import * as packageEntry from './index.js';
+import type {
+  PlannedSysFileScopeRow as EntryPlannedRow,
+  SysFilePublicScopeBackfillEngine as EntryEngine,
+  SysFilePublicScopeBackfillOptions as EntryOptions,
+  SysFilePublicScopeBackfillReport as EntryReport,
+} from './index.js';
 
 const SYSTEM = { context: { isSystem: true } };
 
@@ -246,5 +259,29 @@ describe('sys_file public-scope backfill (#22443 ruling B) — a real ObjectQL o
       fields: [expect.objectContaining({ field: 'scope', code: 'invalid_option' })],
     });
     expect((await sysFile('f_pub'))?.scope).toBe(REWRITTEN_SYS_FILE_SCOPE);
+  });
+
+  it('the operator step as the changeset writes it: the sweep imported from the package entry plans, applies, and then writes zero', async () => {
+    // The entry exports the very functions this file drives, not copies of them.
+    expect(packageEntry.planSysFilePublicScopeBackfill).toBe(planSysFilePublicScopeBackfill);
+    expect(packageEntry.applySysFilePublicScopeBackfill).toBe(applySysFilePublicScopeBackfill);
+    expect(packageEntry.runSysFilePublicScopeBackfill).toBe(runSysFilePublicScopeBackfill);
+    expect(packageEntry.formatSysFilePublicScopeBackfillReport).toBe(formatSysFilePublicScopeBackfillReport);
+
+    await sql.create('sys_file', legacyPublicRow('f_pub'));
+    const operatorEngine = engine as unknown as EntryEngine;
+    const options: EntryOptions = { pageSize: 50 };
+
+    const plan: EntryReport = await packageEntry.planSysFilePublicScopeBackfill(operatorEngine, options);
+    const planned: EntryPlannedRow[] = plan.rows;
+    expect(planned).toEqual([{ id: 'f_pub', key: 'public/f_pub.png', from: 'public', to: 'user' }]);
+    expect(packageEntry.formatSysFilePublicScopeBackfillReport(plan)).toContain('DRY RUN');
+
+    const applied: EntryReport = await packageEntry.applySysFilePublicScopeBackfill(operatorEngine, plan, options);
+    expect(applied).toMatchObject({ dryRun: false, scanned: 1, written: 1, failures: [] });
+    expect((await sysFile('f_pub'))?.scope).toBe(REWRITTEN_SYS_FILE_SCOPE);
+
+    const again: EntryReport = await packageEntry.runSysFilePublicScopeBackfill(operatorEngine, { ...options, dryRun: false });
+    expect(again).toMatchObject({ scanned: 0, planned: 0, written: 0 });
   });
 });
