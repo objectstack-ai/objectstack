@@ -172,7 +172,12 @@ import {
   hookBodyFindingLocation,
   type BodyWritePatternExclusion,
 } from './validate-hook-body-writes.js';
-import { buildReadonlyIndex, buildInsertStripExemptObjects } from './validate-readonly-flow-writes.js';
+import {
+  buildReadonlyIndex,
+  buildInsertStripExemptObjects,
+  READONLY_INSERT_STRIP_OUTCOME,
+  READONLY_WHEN_STRIP_SCOPE,
+} from './validate-readonly-flow-writes.js';
 import { recordsOf } from './object-graph.js';
 
 export type ReadonlyHookWriteSeverity = 'error' | 'warning';
@@ -446,17 +451,14 @@ export function validateReadonlyHookWrites(
           path,
           // The static-`readonly` write-path strip is #2948 on UPDATE and, since
           // the 2026-09-03 ruling, #14147 on INSERT; the ids stay here, out of
-          // the message an author reads and cannot resolve.
-          message: (isCreate
-            ? `body writes field '${w.field}' through ${call}, and object '${objectName}' declares it ` +
-              `readonly:true. A hook's ctx.api is a ScopedContext over the TRIGGERING operation's context, so ` +
-              `on every non-system trigger the engine strips readonly keys from that INSERT payload exactly ` +
-              `as it does from an UPDATE - the row is created WITHOUT this column (it falls back to the ` +
-              `field's defaultValue), while the call still returns success.`
-            : `body writes field '${w.field}' through ${call}, and object '${objectName}' declares it ` +
-              `readonly:true. A hook's ctx.api is a ScopedContext over the TRIGGERING operation's context, so ` +
-              `on every non-system trigger the engine strips readonly keys from that UPDATE payload - ` +
-              `the write never lands, while the call still returns success.`) + loc.messageSuffix,
+          // the message an author reads and cannot resolve. [#22161] One
+          // verdict sentence; why a hook's ctx.api write is a caller's, and
+          // that the call still returns success, is
+          // `os explain hook-api-update-readonly-field`.
+          message:
+            `body's ${call} writes readonly field '${w.field}', silently stripped on a non-system trigger` +
+            (isCreate ? `, ${READONLY_INSERT_STRIP_OUTCOME}` : '') +
+            loc.messageSuffix,
           hint: isCreate
             ? `Seeding a readonly column at create time is a SYSTEM act. To keep writing it from here, ` +
               `declare runAs: 'system' on this hook: the strip skips a system context, so the write lands, ` +
@@ -483,10 +485,11 @@ export function validateReadonlyHookWrites(
           // The conditional strip is #3042. #9107 REMOVED its one over-reach:
           // the strip now judges the CALLER's entry snapshot, so a value a
           // beforeUpdate hook derives is no longer deleted. Both ids stay here.
+          // [#22161] One verdict sentence; the reasoning is
+          // `os explain hook-api-update-readonly-when-field`.
           message:
-            `body writes field '${w.field}' through ${call}, and object '${objectName}' declares it ` +
-            `readonlyWhen. On records whose predicate is TRUE that UPDATE strips the field, so this ` +
-            `write may silently not land depending on the record's state.` + loc.messageSuffix,
+            `body's ${call} writes readonlyWhen field '${w.field}', silently stripped ${READONLY_WHEN_STRIP_SCOPE}` +
+            loc.messageSuffix,
           hint:
             `Either confirm this call only targets records whose readonlyWhen predicate is FALSE, or ` +
             `derive '${w.field}' in a beforeUpdate hook on '${objectName}' - a hook-derived value is not ` +

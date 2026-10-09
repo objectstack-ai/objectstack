@@ -92,13 +92,10 @@ import {
   indexObjectFields,
   judgeableFieldsOf,
   IMPLICIT_FIELDS,
-  unprovisionedAnchorWriteConsequence,
+  UNDECLARED_FIELD_WRITE_REFUSAL,
+  unprovisionedAnchorWriteVerdict,
 } from './validate-hook-body-writes.js';
-import {
-  indexUnprovisionedAnchors,
-  unprovisionedAnchorCause,
-  unprovisionedAnchorHint,
-} from './system-fields.js';
+import { indexUnprovisionedAnchors, unprovisionedAnchorHint } from './system-fields.js';
 import { walkFlowNodes, flowNodeLabel } from './flow-walk.js';
 import { recordsOf } from './object-graph.js';
 
@@ -266,9 +263,7 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
             rule: FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR,
             where: `flow "${flowName}" › ${nodeWhere}`,
             path: `${nodePath}.config.fields.${fieldName}`,
-            message:
-              `${node.type} writes '${fieldName}', and ${unprovisionedAnchorCause(objectName, fieldName)} — ` +
-              unprovisionedAnchorWriteConsequence(),
+            message: unprovisionedAnchorWriteVerdict(objectName, fieldName, `this ${node.type} write`),
             hint: unprovisionedAnchorHint(objectName, fieldName),
           });
           continue;
@@ -282,19 +277,21 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
           rule: FLOW_NODE_WRITE_UNKNOWN_FIELD,
           where: `flow "${flowName}" › ${nodeWhere}`,
           path: `${nodePath}.config.fields.${fieldName}`,
+          // [#13858] The node hands `fields` to the data engine directly
+          // (`data.insert` / `data.update` in service-automation's
+          // crud-nodes), so it is a CALLER payload and the #8682/#8738
+          // declared-field door refuses it before any datasource is reached.
+          // Measured on driver-sql and driver-memory alike. [#22161] The
+          // verdict ends on the refusal clause the hook and action body rules
+          // share; that reasoning, and that the correctly named fields of the
+          // same payload never land either, is
+          // `os explain flow-node-write-unknown-field`.
           message:
-            // [#13858] The node hands `fields` to the data engine directly
-            // (`data.insert` / `data.update` in service-automation's
-            // crud-nodes), so it is a CALLER payload and the #8682/#8738
-            // declared-field door refuses it before any datasource is reached.
-            // Measured on driver-sql and driver-memory alike.
-            `${node.type} writes '${fieldName}', but object '${objectName}' declares no such field. The ` +
-            `node hands its fields map to the engine as an ordinary caller payload, so the ` +
-            `declared-field door REFUSES the whole write — INVALID_FIELD / 400, identically on every ` +
-            `datasource, before any statement is built. The correctly named fields in this same payload ` +
-            `never land either${
-              node.type === 'create_record' ? ' and the record is never created at all' : ''
-            }, and the step fails the run.`,
+            `${node.type} writes '${fieldName}', but object '${objectName}' declares no such field, ` +
+            UNDECLARED_FIELD_WRITE_REFUSAL +
+            (node.type === 'create_record'
+              ? ', the record is never created and the step fails the run'
+              : ' and the step fails the run'),
           hint: fixHint(fieldName, [...known]),
         });
       }
