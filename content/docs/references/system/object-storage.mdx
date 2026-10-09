@@ -10,7 +10,7 @@ Object Storage Protocol
 
 Unified storage protocol that combines:
 - Object storage systems (S3, Azure Blob, GCS, MinIO)
-- Scoped storage configuration (temp, cache, data, logs, config, public)
+- Scoped storage configuration (temp, cache, data, logs, config)
 - Multi-cloud storage providers
 - Bucket/container configuration
 - Access control and permissions
@@ -258,7 +258,7 @@ Lifecycle policy action type
 | **name** | `string` | ✅ | Storage configuration identifier |
 | **label** | `string` | ✅ | Display label |
 | **provider** | `Enum<'s3' \| 'azure_blob' \| 'gcs' \| 'minio' \| 'r2' \| 'spaces' \| 'wasabi' \| 'backblaze' \| 'local'>` | ✅ | Primary storage provider |
-| **scope** | `Enum<'global' \| 'tenant' \| 'user' \| 'session' \| 'temp' \| 'cache' \| 'data' \| 'logs' \| 'config' \| 'public'>` | optional (default: `"global"`) | Storage scope |
+| **scope** | `Enum<'global' \| 'tenant' \| 'user' \| 'session' \| 'temp' \| 'cache' \| 'data' \| 'logs' \| 'config'>` | optional (default: `"global"`) | Storage scope |
 | **connection** | `{ accessKeyId?: string; secretAccessKey?: string; sessionToken?: string; accountName?: string; … }` | ✅ | Connection credentials |
 | **buckets** | `{ name: string; label: string; bucketName: string; region?: string; … }[]` | optional (default: `[]`) | Configured buckets |
 | **defaultBucket** | `string` | optional | Default bucket name for operations |
@@ -413,7 +413,6 @@ Storage scope classification
 * `data`
 * `logs`
 * `config`
-* `public`
 
 
 ---

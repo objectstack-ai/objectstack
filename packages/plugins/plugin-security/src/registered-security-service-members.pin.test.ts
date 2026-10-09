@@ -38,6 +38,9 @@
  * direction is used only as this pin's non-vacuity control: every REQUIRED
  * member must be among the enumerated members, which fails if the boot stopped
  * reaching the registration or the enumeration stopped seeing the members.
+ * The one exception is `MUST_SERVE_OPTIONAL`: an optional member whose absence
+ * its consumers read as a fallback that admits, which this plugin therefore
+ * must keep serving.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -86,6 +89,21 @@ const DECLARED_MEMBERS = {
  * contract, and belongs on `ISecurityService` instead.
  */
 const SERVED_NOT_DECLARED: Readonly<Record<string, string>> = {};
+
+/**
+ * OPTIONAL members this plugin must SERVE, each with the reason its absence is
+ * not harmless here. An optional member's absence is legal for the contract,
+ * and its consumers read it as a declared fallback — so a plugin that stopped
+ * serving one would not fail anywhere: every consumer would quietly take that
+ * fallback. Listed here, a member that is no longer served turns this pin red
+ * by name.
+ */
+const MUST_SERVE_OPTIONAL: Readonly<Partial<Record<keyof ISecurityService, string>>> = {
+  checkControlledByParentWrite:
+    'the sys_attachment and sys_comment parent gates read its absence as "no master-detail check composed" ' +
+    'and ADMIT on a controlled_by_parent parent; this plugin runs that check on every by-id write, so it ' +
+    'must serve it, or those gates write past the master the record\'s own update is refused by',
+};
 
 /**
  * Every member name the object exposes, along its whole prototype chain up to
@@ -166,6 +184,15 @@ describe('the registered `security` service serves only what ISecurityService de
       expect(served, `ledger entry '${name}' is not served — delete it`).toContain(name);
       expect(Object.hasOwn(DECLARED_MEMBERS, name), `ledger entry '${name}' is declared — delete it`).toBe(false);
       expect(reason.trim().length, `ledger entry '${name}' carries no reason`).toBeGreaterThan(0);
+    }
+  });
+
+  it('every optional member this plugin must serve is served, and is still declared optional', async () => {
+    const served = servedMembers(await registeredSecurityService());
+    for (const [name, reason] of Object.entries(MUST_SERVE_OPTIONAL)) {
+      expect(DECLARED_MEMBERS[name as keyof typeof DECLARED_MEMBERS], `'${name}' is not declared optional`).toBe('optional');
+      expect(reason!.trim().length, `'${name}' carries no reason`).toBeGreaterThan(0);
+      expect(served, `'${name}' is no longer served: ${reason}`).toContain(name);
     }
   });
 

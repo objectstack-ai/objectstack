@@ -712,6 +712,89 @@ describe('Storage REST Routes', () => {
     });
   });
 
+  // ── [#22443] `scope: 'public'` never made a file public — the download doors
+  // above judge `acl`, the attachments scope and field ownership alone — so the
+  // two upload-starting doors refuse it by name, with the remedy, instead of
+  // storing a private file under a name that says otherwise.
+  describe("an upload naming scope 'public' is refused with the acl remedy (#22443)", () => {
+    const PRESIGNED = '/api/v1/storage/upload/presigned';
+    const CHUNKED = '/api/v1/storage/upload/chunked';
+    const bodyFor = (path: string, scope?: string) => ({
+      filename: 'logo.png',
+      mimeType: 'image/png',
+      ...(path === PRESIGNED ? { size: 3 } : { totalSize: 3 }),
+      ...(scope === undefined ? {} : { scope }),
+    });
+    const post = async (path: string, body: Record<string, unknown>) => {
+      const res = createMockRes();
+      await httpServer._getHandler('POST', path)!(createMockReq({ method: 'POST', body }), res);
+      return res;
+    };
+
+    it('refuses both doors 400 INVALID_REQUEST, naming acl public_read, before anything is stored or started', async () => {
+      const createFile = vi.spyOn(store, 'createFile');
+      const createSession = vi.spyOn(store, 'createSession');
+      const presign = vi.spyOn(adapter, 'getPresignedUpload');
+      const initiate = vi.spyOn(adapter, 'initiateChunkedUpload');
+      for (const path of [PRESIGNED, CHUNKED]) {
+        const res = await post(path, bodyFor(path, 'public'));
+        expect(res._status, path).toBe(400);
+        expect(res._json?.success, path).toBe(false);
+        expect(res._json?.error?.code, path).toBe('INVALID_REQUEST');
+        expect(res._json?.error?.message, path).toMatch(/^scope 'public' is not accepted/);
+        expect(res._json?.error?.message, path).toContain("acl 'public_read'");
+      }
+      expect(createFile).not.toHaveBeenCalled();
+      expect(createSession).not.toHaveBeenCalled();
+      expect(presign).not.toHaveBeenCalled();
+      expect(initiate).not.toHaveBeenCalled();
+      for (const spy of [createFile, createSession, presign, initiate]) spy.mockRestore();
+    });
+
+    it('takes every other scope, and an omitted one, exactly as before (control)', async () => {
+      for (const path of [PRESIGNED, CHUNKED]) {
+        for (const scope of ['user', 'tenant', 'private', 'temp', 'attachments', undefined]) {
+          const res = await post(path, bodyFor(path, scope));
+          expect(res._status, `${path} ${scope}`).toBe(200);
+          const file = await store.getFile(res._json.data.fileId);
+          expect(file?.scope, `${path} ${scope}`).toBe(scope ?? 'user');
+          expect(file?.acl, `${path} ${scope}`).toBe('private');
+        }
+      }
+    });
+
+    it('is right that the upload request carries no acl: a body acl is not stored', async () => {
+      // The refusal sends the caller to the stored file record, not to this
+      // request — because this is what the request does with an acl.
+      const res = await post(PRESIGNED, { ...bodyFor(PRESIGNED, 'user'), acl: 'public_read' });
+      expect(res._status).toBe(200);
+      expect((await store.getFile(res._json.data.fileId))?.acl).toBe('private');
+    });
+
+    it("leaves the download doors' verdict on an already-stored public-scoped row unchanged", async () => {
+      const server = createMockHttpServer();
+      const s = new StorageMetadataStore(null);
+      registerStorageRoutes(server as any, adapter, s, {
+        basePath: '/api/v1/storage',
+        resolveSession: async (req: any) => (req.headers?.authorization ? { userId: 'user-7' } : null),
+      });
+      await s.createFile({
+        id: 'legacy-public', key: 'public/legacy-public.png', name: 'logo.png',
+        status: 'committed', acl: 'private', scope: 'public',
+      } as any);
+      const download = async (headers: Record<string, string>) => {
+        const res = createMockRes();
+        await server._getHandler('GET', '/api/v1/storage/files/:fileId/url')!(
+          createMockReq({ params: { fileId: 'legacy-public' }, headers }), res);
+        return res;
+      };
+      const anonymous = await download({});
+      expect(anonymous._status).toBe(401);
+      expect(anonymous._json?.error?.code).toBe('AUTH_REQUIRED');
+      expect((await download({ authorization: 'Bearer t' }))._status).toBe(200);
+    });
+  });
+
   describe('PUT/GET /_local/raw/:token', () => {
     it('should accept raw upload with valid token and serve download', async () => {
       // Generate a presigned upload

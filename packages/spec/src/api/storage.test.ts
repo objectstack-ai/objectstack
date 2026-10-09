@@ -34,10 +34,10 @@ describe('GetPresignedUrlRequestSchema', () => {
       filename: 'image.png',
       mimeType: 'image/png',
       size: 2048,
-      scope: 'public',
+      scope: 'tenant',
       bucket: 'media-bucket',
     });
-    expect(req.scope).toBe('public');
+    expect(req.scope).toBe('tenant');
     expect(req.bucket).toBe('media-bucket');
   });
 
