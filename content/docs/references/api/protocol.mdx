@@ -2984,7 +2984,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | The object name. |
 | **data** | `Record<string, any> \| Record<string, any>[]` | ✅ | A candidate record, or an array of them. Nothing is persisted. |
-| **mode** | `Enum<'insert' \| 'update'>` | optional | Which write the verdict should predict. `insert` (default) walks every declared field, so a missing required field is a finding; `update` judges only the supplied keys, matching a PATCH. |
+| **mode** | `Enum<'insert' \| 'update'>` | optional | Which write the verdict should predict. `insert` (default) walks every declared field, so a missing required field is a finding; `update` checks only the supplied keys, matching a PATCH. An `update` row that carries its `id` is judged as the by-id update judges it: its rules read the stored row that id names, merged with the supplied keys. The stored row is read with the caller's own read access, so a row the caller cannot read is judged on the supplied keys alone, as a row with no `id` is. |
 
 
 ---
