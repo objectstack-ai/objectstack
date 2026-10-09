@@ -5,7 +5,7 @@ import { lazySchema } from '../shared/lazy-schema';
 
 /**
  * Build-progress PHASE vocabulary for the `data-build-progress` stream frame
- * (cloud#2172 ruling A).
+ * (the cloud build-progress card, ruling A).
  *
  * ## How to read the claims in this module
  *
@@ -24,7 +24,7 @@ import { lazySchema } from '../shared/lazy-schema';
  * ## Producer
  *
  * The cloud AI-studio **agent loop** — deliberately not the tool it just ran.
- * **Declared by ruling**: cloud#2172 ruling A owns WHERE in the loop a frame is
+ * **Declared by ruling**: the cloud build-progress card's ruling A owns WHERE in the loop a frame is
  * emitted; this module declares only what such a frame may SAY.
  *
  * A build turn applies its change through `apply_blueprint` / `apply_edit` and
@@ -74,15 +74,15 @@ import { lazySchema } from '../shared/lazy-schema';
  * (**measured on named reachable sources** — each reading is recorded in the
  * source beside its surface: on `BUILD_PROGRESS_PHASES` for the phase, and on
  * the `hop` / `tool` field declarations). They stand on a ruling instead
- * (**declared by ruling**): cloud#2172 ruled the vocabulary in, and
+ * (**declared by ruling**): the cloud build-progress card ruled the vocabulary in, and
  * objectui#7388 asked the panel to be able to name the phase. That is a good
  * reason, and it is not a measurement.
  *
  * ⛔ No gate watches this. The ADR-0049 liveness ledger is rooted in the
  * metadata-type registry, and `BuildProgressFrame` is not a registered
  * metadata type, so the liveness job stays green however long these three go
- * unused. Two named carriers are meant to close it — cloud#2172 for the
- * emitter, objectui#7388 block 2 for the consumer's strict parse. If neither
+ * unused. Two named carriers are meant to close it — the cloud build-progress card for the
+ * emitter, block 2 of the objectui build-panel card for the consumer's strict parse. If neither
  * lands, the three become enforce-or-remove candidates with nothing watching
  * them, and the only thing that notices is a person reading this paragraph.
  */
@@ -105,7 +105,7 @@ import { lazySchema } from '../shared/lazy-schema';
  *   `dda8f3815`; line numbers drift, the two symbols are the anchor.
  * - `verify` — **declared by ruling**, ⛔ not measured: the post-apply
  *   verification window objectui#7388 asks the panel to be able to name, and
- *   the reason cloud#2172 ruled this vocabulary into the spec. At objectui
+ *   the reason the cloud build-progress card ruled this vocabulary into the spec. At objectui
  *   `dda8f3815` `packages/plugin-chatbot` has ZERO occurrences of `'verify'`
  *   (bright control, same instrument: `'structure'` hits 4 files there), and
  *   this repository emits no frame at all, so `verify` has no reachable
@@ -120,7 +120,7 @@ import { lazySchema } from '../shared/lazy-schema';
  * assuming every phase occurs. The two illustrations of a phase being skipped
  * — a turn that applies no seed data never reporting `data`, and `apply_edit`
  * turns not reporting `structure` — are **inferred**: no reachable repository
- * records either, and cloud#2172's emitter has not landed. ⛔ The guidance
+ * records either, and the cloud build-progress card's emitter has not landed. ⛔ The guidance
  * does not rest on them; treat every phase as optional whatever a producer
  * turns out to do.
  *
@@ -174,7 +174,7 @@ export const BuildProgressFrameSchema = lazySchema(() => z.looseObject({
    *
    * Typed as a non-negative integer rather than pinned to a base: whether the
    * loop counts its first hop as 0 or 1 is part of the emitter's placement,
-   * which cloud#2172 owns and this card does not decide. ⛔ Consumers render it
+   * which the cloud build-progress card owns and this card does not decide. ⛔ Consumers render it
    * as progress, never as an index into anything here.
    *
    * ⛔ Zero emitters and zero readers in every reachable repository at this
