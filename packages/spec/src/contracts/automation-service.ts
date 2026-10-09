@@ -92,6 +92,39 @@ export interface AutomationContext {
      */
     tenantId?: string;
     /**
+     * The language of the person who started the run (BCP-47, e.g. `zh-CN`):
+     * the door's already-resolved `ExecutionContext.locale`, forwarded as-is.
+     * It is never resolved a second time here. The request's own
+     * `Accept-Language` wins over the user's and the workspace's `localization`
+     * settings, and that precedence lives in one place, the shared
+     * execution-context assembler.
+     *
+     * Who sets it: the two doors that start a run on a person's behalf, from the
+     * request's execution context —
+     *  - the trigger door, `buildAutomationContext` in `@objectstack/runtime`'s
+     *    `domains/automation.ts` (`POST /api/v1/automation/:name/trigger`, the
+     *    legacy trigger route, and a declarative `type: 'flow'` endpoint);
+     *  - the action door, `dispatchFlowAction` in `@objectstack/runtime`'s
+     *    `action-execution.ts` (REST `POST /api/v1/actions/...` and the MCP
+     *    `run_action` bridge).
+     *
+     * Its reader: the engine's refusing `end` node, which picks the translated
+     * message at `flows.<flow>.refusals.<node_id>.message`
+     * (`flowRefusalMessageKey`) in this locale before it renders the `{{ }}`
+     * holes (#22450). With no locale, or no translation, the authored message
+     * renders.
+     *
+     * It lives as long as the run: it is persisted with a suspended run, so a
+     * resumed leg renders in the STARTER's locale whoever resumes it (a resume
+     * carries no locale of its own), and a `subflow` / `map` child inherits it
+     * with the rest of the parent's context. Absent on a run no person started:
+     * a record-change, schedule or webhook trigger, or code calling `execute`
+     * directly. Such a run stores the authored message.
+     *
+     * Presentation, not authorization: no security middleware keys on it.
+     */
+    locale?: string;
+    /**
      * Effective execution identity for the run's DATA operations, established by
      * the engine from {@link FlowParsed.runAs} at run setup (ADR-0049 / #1888):
      *  - `'system'` runs elevated — a full-access, RLS-bypassing system principal;

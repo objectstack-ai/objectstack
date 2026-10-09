@@ -156,6 +156,11 @@ export function buildAutomationContext(body: any, context: HttpProtocolContext):
     if (Array.isArray(ec?.positions) && ec.positions.length) automationContext.positions = ec.positions;
     if (Array.isArray(ec?.permissions) && ec.permissions.length) automationContext.permissions = ec.permissions;
     if (ec?.tenantId) automationContext.tenantId = ec.tenantId;
+    // [#22450] The caller's language, already resolved (the request's
+    // `Accept-Language` first, then the `localization` settings) — forwarded,
+    // never re-derived, so a refused run's message renders in the language of
+    // the console around it. `AutomationContext.locale` names its reader.
+    if (typeof ec?.locale === 'string' && ec.locale.length > 0) automationContext.locale = ec.locale;
     return automationContext;
 }
 
