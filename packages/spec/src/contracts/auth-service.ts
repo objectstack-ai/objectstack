@@ -184,11 +184,12 @@ export interface IAuthService {
  *   `{ headers }` alone, renewal included.
  *
  * Their one source is `inProcessSessionReadInput(headers)` in
- * `@objectstack/types` (`packages/types/src/in-process-session-read.ts`); a
- * reader calls `api.getSession(inProcessSessionReadInput(headers))` and never
- * builds either form by hand. `query` is declared because readers send it
- * (#22258): `rest-server.ts` in `@objectstack/rest` (twice); in
- * `@objectstack/runtime`, `http-dispatcher.ts` (twice),
+ * `@objectstack/types` (`packages/types/src/in-process-session-read.ts`):
+ * read with `api.getSession(inProcessSessionReadInput(headers))`, not with a
+ * hand-built input — a hand-built `{ headers }` on a cookie-carrying request
+ * renews the session behind a cookie nobody re-issues. `query` is declared
+ * because readers send it (#22258): `rest-server.ts` in `@objectstack/rest`
+ * (twice); in `@objectstack/runtime`, `http-dispatcher.ts` (twice),
  * `security/resolve-session-principal.ts` and
  * `security/resolve-execution-context.ts`; `current-user-endpoints.ts` in
  * `@objectstack/plugin-hono-server`; and in `@objectstack/cloud-connection`,
