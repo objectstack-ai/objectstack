@@ -108,6 +108,7 @@
  *   flows.<flow>.screens.<node_id>.fields.<field>.label
  *   flows.<flow>.screens.<node_id>.fields.<field>.placeholder
  *   flows.<flow>.screens.<node_id>.fields.<field>.inlineHelpText
+ *   flows.<flow>.refusals.<node_id>.message                    (#22450)
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
  *       (see `authorWarnedTranslationGroups`)
@@ -1675,6 +1676,13 @@ function walkPicklists(config: any, out: ExpectedEntry[]): void {
 const SCREEN_NODE_TYPE = 'screen';
 
 /**
+ * [#22450] The node whose message `flows.<flow>.refusals.<node_id>.message`
+ * addresses: an `end` node declaring `outcome: 'refused'` (`EndConfigSchema`).
+ */
+const END_NODE_TYPE = 'end';
+const REFUSED_OUTCOME = 'refused';
+
+/**
  * Depth ceiling for the region recursion, mirroring the ceiling the spec-side
  * walks use (`conversions/walk.ts`, `automation/control-flow.zod.ts`) and for
  * the same reason: a stack handed to `defineStack` is hand-built objects rather
@@ -1876,6 +1884,26 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
           }
         }
       }
+    }
+
+    // `flows.<flow>.refusals.<node_id>.message` (#22450) — the message of every
+    // `end` node declaring `outcome: 'refused'`, at any depth of the same node
+    // universe. The engine reads that key (`flowRefusalMessageKey`) in the
+    // run's locale before it renders the holes, so the seed is the authored
+    // TEMPLATE, holes and all: a translator keeps the `{{ }}` holes, and the
+    // schema judges the translation as the same text slot. Unlike the flow
+    // `label`, this is demanded for a flow with no screen too: the trigger and
+    // action doors start any flow by name for a person, and the refusal is the
+    // answer that person reads (hotcrm's `quote_generation` refuses before its
+    // first screen). A run no person started carries no locale and stores the
+    // authored message.
+    for (const node of nodes) {
+      if (!node || typeof node !== 'object' || node.type !== END_NODE_TYPE) continue;
+      const cfg = node.config && typeof node.config === 'object' ? node.config : {};
+      if (cfg.outcome !== REFUSED_OUTCOME) continue;
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      if (!nodeId) continue;
+      pushOptional(out, ['flows', flowName, 'refusals', nodeId, 'message'], inlineText(cfg.message), 'flow', scope);
     }
   }
 }
