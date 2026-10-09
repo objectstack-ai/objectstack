@@ -204,7 +204,7 @@ describe('#22445 — an update-mode preview judges the stored row merged with th
       }]);
       r2.set('a1', { id: 'a1', amount: 80 });
       // Precondition: the read door SERVES the formula, the store holds no column for it.
-      expect((await e2.findOne(OBJECT, { where: { id: 'a1' } } as any))?.doubled).toBe(160);
+      expect((await e2.findOne(OBJECT, { where: { id: 'a1' } }))?.doubled).toBe(160);
 
       const preview = await verdictOf(e2, { title: 't', id: 'a1' });
       const write = await writeRefusal(() => e2.update(OBJECT, { title: 't', id: 'a1' }));
@@ -248,7 +248,10 @@ describe('#22445 — an update-mode preview judges the stored row merged with th
       const entries = out.results![0]!.errors.filter((e) => ruleOf(e) !== undefined && ruleOf(e) !== 'requiredWhen');
       expect(entries.map(ruleOf).sort()).toEqual(['us_branch', 'us_needs_note']);
       for (const entry of entries) {
-        expect(entry).toMatchObject({ code: 'rule_violation', constraint: expect.objectContaining({ reason: 'unevaluable' }) });
+        // A `validations[]` rule with no `fields` reports against the record.
+        expect(entry).toMatchObject({
+          field: '_record', code: 'rule_violation', constraint: expect.objectContaining({ reason: 'unevaluable' }),
+        });
         expect(entry.message).toContain(NOT_SUPPLIED);
         expect(entry.message).not.toContain(NOT_DECLARED);
       }
