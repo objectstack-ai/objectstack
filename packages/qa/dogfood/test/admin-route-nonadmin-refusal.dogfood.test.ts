@@ -174,8 +174,8 @@
 // @proof: admin-route-nonadmin-refusal
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 const SYS = { isSystem: true };
 const AUTH_BASE = '/api/v1/auth';
@@ -473,7 +473,7 @@ describe('#9482 C9: every derived /admin/ route refuses a non-admin', () => {
     // uses. Read when the auth manager is constructed, so it must precede boot.
     priorScim = process.env.OS_SCIM_ENABLED;
     process.env.OS_SCIM_ENABLED = 'true';
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     adminToken = await stack.signIn(); // seeded dev admin (platform admin)
     memberToken = await stack.signUp('refusal.probe.member@example.com', 'Member-Pass-123');
 

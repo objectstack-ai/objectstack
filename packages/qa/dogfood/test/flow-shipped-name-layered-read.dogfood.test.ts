@@ -43,8 +43,8 @@
 // answers for a shipped name is left to the card's decision.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { RecordChangeTriggerPlugin } from '@objectstack/trigger-record-change';
 import { ConnectorRestPlugin } from '@objectstack/connector-rest';
 import { ConnectorOpenApiPlugin } from '@objectstack/connector-openapi';
@@ -109,7 +109,7 @@ const plugins = () => [
 ];
 
 async function boot(databaseFile: string): Promise<VerifyStack> {
-    return bootStack(showcaseStack, { automation: true, databaseFile, extraPlugins: plugins() });
+    return bootShowcase({ automation: true, databaseFile, extraPlugins: plugins() });
 }
 
 const nodeIds = (flow: FlowBody | null | undefined) => (flow?.nodes ?? []).map((n) => n.id);

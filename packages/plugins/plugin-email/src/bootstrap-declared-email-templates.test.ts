@@ -458,12 +458,13 @@ describe('declared email templates carrying the `content` alias spelling (#8378)
  * Every request is recorded, so the organization the sweep read in is
  * asserted rather than assumed.
  */
-function layeredProtocol(declared: any[], overlay?: { organizationId: string; items: any[] }) {
+function layeredProtocol(declared: any[], overlay?: { organizationId?: string; items: any[] }) {
   const requests: Array<{ type: string; organizationId?: string }> = [];
   return {
     requests,
     async getMetaItems(request: { type: string; organizationId?: string }) {
       requests.push({ ...request });
+      // `organizationId` absent on both sides is the environment layer.
       const items = overlay && request.organizationId === overlay.organizationId ? overlay.items : declared;
       return { type: request.type, items: items.map((i) => ({ ...i, _diagnostics: { valid: true } })) };
     },
@@ -488,47 +489,41 @@ function rowProjectedFromOverlay(over: Record<string, any> = {}): any {
 }
 
 describe('bootstrapDeclaredEmailTemplates — the effective template (#21785)', () => {
-  it('projects the org-scoped overlay the metadata door serves, read in the default organization', async () => {
-    // The registry holds ONLY the declaration: boot hydration leaves an
-    // org-scoped overlay out of it. Reading it is the reverted-on-restart defect.
+  it('projects the environment overlay the metadata door serves', async () => {
+    // The registry holds ONLY the declaration; the door's layered list serves
+    // the overlay. Reading the registry is the reverted-on-restart defect.
     const engine = new FakeEngine({
       rows: { [TABLE]: [rowProjectedFromOverlay()] },
       declared: { email_template: [declaredTemplate()] },
     });
     const protocol = layeredProtocol(
       [declaredTemplate()],
-      { organizationId: ORG, items: [declaredTemplate({ subject: OVERLAY_WORDING })] },
+      { items: [declaredTemplate({ subject: OVERLAY_WORDING })] },
     );
 
-    const result = await bootstrapEffectiveEmailTemplates(engine as any, undefined, {
-      protocol,
-      tenancy: { defaultOrgId: async () => ORG },
-    });
+    const result = await bootstrapEffectiveEmailTemplates(engine as any, undefined, { protocol });
 
-    expect(protocol.requests).toEqual([{ type: 'email_template', organizationId: ORG }]);
+    expect(protocol.requests).toEqual([{ type: 'email_template' }]);
     expect(result).toEqual({ seeded: 1, skipped: 0 });
     expect(rowsOf(engine)).toHaveLength(1);
     expect(rowsOf(engine)[0].subject).toBe(OVERLAY_WORDING);
   });
 
-  it('reads env-wide when the tenancy service names no organization (a walled posture never guesses one)', async () => {
+  it('[ADR-0131 D6] names no organization: a legacy Default-Organization overlay is not projected', async () => {
+    // Before the per-organization overlay axis retired, a single-posture
+    // Studio save landed under the Default Organization and this sweep read
+    // there. The door no longer serves that row, so neither does the sweep.
     const engine = new FakeEngine({ rows: { [TABLE]: [rowProjectedFromOverlay()] } });
     const protocol = layeredProtocol(
       [declaredTemplate()],
       { organizationId: ORG, items: [declaredTemplate({ subject: OVERLAY_WORDING })] },
     );
 
-    await bootstrapEffectiveEmailTemplates(engine as any, undefined, {
-      protocol,
-      tenancy: { defaultOrgId: async () => null },
-    });
+    await bootstrapEffectiveEmailTemplates(engine as any, undefined, { protocol });
 
-    // No organization on the request: the tenancy contract named none, so the
-    // read is env-wide and the declaration is what the row carries.
     expect(protocol.requests).toEqual([{ type: 'email_template' }]);
     expect(rowsOf(engine)[0].subject).toBe(PACKAGE_WORDING);
   });
-
   it('projects nothing on a failed effective read, never the package layer in its place', async () => {
     const engine = new FakeEngine({
       rows: { [TABLE]: [rowProjectedFromOverlay()] },
@@ -539,10 +534,7 @@ describe('bootstrapDeclaredEmailTemplates — the effective template (#21785)', 
       async getMetaItems(): Promise<never> { throw new Error('sys_metadata read failed'); },
     };
 
-    const result = await bootstrapEffectiveEmailTemplates(engine as any, undefined, {
-      protocol,
-      tenancy: { defaultOrgId: async () => ORG },
-    }, { warn });
+    const result = await bootstrapEffectiveEmailTemplates(engine as any, undefined, { protocol }, { warn });
 
     expect(result).toEqual({ seeded: 0, skipped: 0 });
     expect(rowsOf(engine)[0].subject).toBe(OVERLAY_WORDING);
@@ -561,17 +553,13 @@ describe('bootstrapDeclaredEmailTemplates — the effective template (#21785)', 
     });
     const warn = vi.fn();
     const protocol = layeredProtocol([], {
-      organizationId: ORG,
       items: [
         declaredTemplate({ name: 'ops.digest', category: 'notification', subject: 'Overlay digest' }),
         declaredTemplate({ subject: OVERLAY_WORDING }),
       ],
     });
 
-    const result = await bootstrapEffectiveEmailTemplates(engine as any, undefined, {
-      protocol,
-      tenancy: { defaultOrgId: async () => ORG },
-    }, { warn });
+    const result = await bootstrapEffectiveEmailTemplates(engine as any, undefined, { protocol }, { warn });
 
     expect(result).toEqual({ seeded: 0, skipped: 2 });
     expect(rowsOf(engine).map((r) => r.subject)).toEqual(['Admin original', 'Data-door wording']);

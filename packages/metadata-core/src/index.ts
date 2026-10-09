@@ -95,26 +95,18 @@ export * from './object-schema-fls.js';
 // `ITEM_KEY_DISCRIMINATORS` from `registry.ts`, so its surface is unchanged.
 export * from './item-key-discriminators.js';
 
-// [#6190 / #7018 / #8805] Which metadata WRITES carry the caller's active
-// organization — sunk here from `@objectstack/runtime` by the same criterion as
-// the FLS projection above, and for a defect of the same shape. The #6190
-// ruling is a decision the CALLER must make (the protocol deliberately REFUSES
-// an org-scoped write of a non-overridable type rather than coercing it, so the
-// tenancy statement the author made is never silently rewritten) — which means
-// every door that writes metadata needs the same predicate. The dispatcher owned
-// the only implementation, and `@objectstack/rest` cannot import it: `runtime`
-// depends on `rest`, so the reverse edge is a cycle turbo refuses — the exact
-// situation this package exists to resolve. `runtime` imports it from here now,
-// so its behaviour is unchanged and there is no second copy to drift.
+// [#9454 · ADR-0131 D6] The registry-derived per-organization overlay
+// predicate (`declaresOrgOverride`) and the organization a protocol READ
+// carries (`organizationIdForMetaRead`). The write-side twin retired with the
+// per-organization overlay axis: the `/meta` doors carry no organization into
+// a metadata write. See the module header for what still reads through it.
 export * from './meta-write-org-scope.js';
 
-// [#12702] The capability half of the same decision: which CALLERS a `/meta`
-// item write door admits — `manage_metadata` as before, plus the org-scoped
-// `manage_org_presentation` for org-overridable types written to the caller's
-// own active organization. Sunk here by the same criterion as the scope half
-// above: the doors live in `@objectstack/runtime` and `@objectstack/rest`,
-// which share no other common home, and the predicate is registry-coupled
-// (through `declaresOrgOverride`) so a second copy is forbidden drift.
+// [#12702 · ADR-0131 D6] Which CALLERS a `/meta` item write door admits:
+// `manage_metadata` (or `isSystem`), on both transports. The org-scoped
+// `manage_org_presentation` arm retired with the per-organization overlay
+// axis. Sunk here because the doors live in `@objectstack/runtime` and
+// `@objectstack/rest`, which share no other common home.
 export * from './meta-write-capability.js';
 
 // [commit 1408fe385 / #10101] The shared platform-row organization resolver — sunk here

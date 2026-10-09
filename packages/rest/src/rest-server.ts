@@ -64,18 +64,12 @@ import {
     resolveObjectSchemaRuntimeView,
     OBJECT_SCHEMA_MASK_NOT_APPLICABLE,
     type ObjectSchemaMaskPosture,
-    // [#8805] The organization a metadata WRITE carries, given the caller's
-    // active one — the SAME predicate the runtime `/metadata` dispatcher calls
-    // (`domains/meta.ts`), not a REST-local restatement of it. See the module's
-    // own header for why the decision belongs to the caller and why it lives in
-    // `metadata-core`.
-    organizationIdForMetaRead,
-    organizationIdForMetaWrite,
-    // [#12702] The capability half of the same decision, from the same home:
-    // `manage_metadata` as before, plus `manage_org_presentation` for
-    // org-overridable types written org-scoped to the caller's own active
-    // organization. One predicate for every `/meta` item write door on both
-    // transports — never a REST-local restatement.
+    // [#12702 · ADR-0131 D6] Which callers a `/meta` item write door admits:
+    // `manage_metadata` (or `isSystem`). One predicate for every `/meta` item
+    // write door on both transports — never a REST-local restatement. Since
+    // the per-organization overlay axis retired, no `/meta` door carries an
+    // organization into a metadata write or read: every write lands
+    // environment-wide and every read resolves environment → code.
     metaWriteCapabilityVerdict,
     type MetaWriteCapabilityVerdict,
     // Which form candidates the anonymous form doors serve — the one rule the
@@ -3425,7 +3419,7 @@ export class RestServer {
                 if (!withItemWriteVerdict || !caller) return caller;
                 return (withVerdict ??= {
                     ...caller,
-                    mayWriteItem: RestServer.metaSaveVerdict(caller, req.params.type).allowed,
+                    mayWriteItem: RestServer.metaSaveVerdict(caller).allowed,
                 });
             },
             resolveSecurityService: async () => (
@@ -3453,27 +3447,19 @@ export class RestServer {
 
     /**
      * [#20156] The CURRENT document of `:type/:name`, fetched the way the plain
-     * read's uncached arm fetches it — same request shape, same org partition
-     * ({@link organizationIdForMetaRead} over the folded type) — for a door that
+     * read's uncached arm fetches it — same request shape, environment → code
+     * (ADR-0131 D6: no organization) — for a door that
      * serves no document of its own (`/history` and `/audit` serve events,
      * `/diff` a comparison) and so judges the item the plain read would judge.
      * `undefined` when nothing is behind the name.
      */
     private async fetchCurrentMetaDocument(
-        environmentId: string | undefined,
         req: any,
         p: RestProtocol,
     ): Promise<any | undefined> {
-        const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-        const organizationId = organizationIdForMetaRead(
-            // [folded-type commit 26f3588fb] (the original card no longer
-            // resolves) FOLDED, not raw — see the PUT door's org-scope comment.
-            canonicalMetaUrlType(req.params.type), ctx?.tenantId,
-        );
         const currentRequest: GetMetaItemRequest = {
             type: req.params.type,
             name: req.params.name,
-            ...(organizationId ? { organizationId } : {}),
         };
         const envelope = await p.getMetaItem(currentRequest) as Record<string, any>;
         return envelope?.item ?? undefined;
@@ -3498,7 +3484,7 @@ export class RestServer {
         const metaType = RestServer.metaTypeSingular(req.params.type);
         const policy: MetaReadGatePolicy = { arms: 'per-caller', app: 'gate' };
         if (!RestServer.gatesPerCaller(metaType)) return undefined;
-        const current = await this.fetchCurrentMetaDocument(environmentId, req, p);
+        const current = await this.fetchCurrentMetaDocument(req, p);
         if (current == null) return undefined;
         const verdict = await this.metaItemReadGate(
             environmentId, req, p, metaType, req.params.name, [current], policy,
@@ -3610,19 +3596,13 @@ export class RestServer {
      *
      * The whole admission is this verdict: the save door refuses on nothing
      * else about the CALLER before `saveMetaItem` (whose own refusals judge the
-     * item and the scope, the same for every admitted caller). `rawType` is
-     * the URL segment, folded here at the boundary ([folded-type commit
-     * 26f3588fb] — see the PUT door's org-scope comment) so the verdict and
-     * the door's scope decision read one spelling; the organization is the
-     * context's `tenantId`, the very value `organizationIdForMetaWrite`
-     * threads.
+     * item, the same for every admitted caller). Since ADR-0131 D6 the verdict
+     * reads the caller alone: no type and no organization enters it.
      */
-    private static metaSaveVerdict(ctx: any, rawType: string): MetaWriteCapabilityVerdict {
+    private static metaSaveVerdict(ctx: any): MetaWriteCapabilityVerdict {
         return metaWriteCapabilityVerdict({
             isSystem: ctx?.isSystem === true,
             systemPermissions: ctx?.systemPermissions,
-            canonicalType: canonicalMetaUrlType(rawType),
-            activeOrganizationId: ctx?.tenantId,
             operation: 'save',
         });
     }
@@ -3925,8 +3905,8 @@ export class RestServer {
      * plain read prunes it for everyone else) and the ADR-0106 mask on every
      * layer with its cache posture — which the runtime dispatcher serves both
      * spellings through too. ⛔ A step is added there, never here. The read
-     * stays this transport's, scoped by `metaReadOrganizationId`, the one
-     * answer the dispatcher's layered read asks.
+     * stays this transport's, environment → code like the dispatcher's
+     * layered read (ADR-0131 D6: no organization).
      *
      * Not translated and not cached, both deliberately: this is a diagnostic
      * view of what is STORED at each layer, so locale-collapsing it (or serving
@@ -3951,26 +3931,10 @@ export class RestServer {
         if (refuseRepeatedQueryParams(req, res, ['package'])) return;
         // [#22188] Read through {@link metaItemPackageBinding}: `all` names no package.
         const layeredPackageId = metaItemPackageBinding(req.query?.package);
-        // [#9454] State the ORG scope, exactly as the `/published` overlay read
-        // already does. Without it the layered view resolved the env-wide row
-        // only, so an author who had just saved an org overlay opened Studio to
-        // `overlay: null` and the code layer — the write receipted as live, the
-        // editor reporting it absent. This is the DIAGNOSTIC view of what is
-        // stored per layer, so an unstated scope does not merely miss a row: it
-        // misreports the very thing being diagnosed.
-        // ⚠️ NOT a new org-resolution seam — `resolveExecCtx` is memoised per
-        // request (WeakMap keyed by `req`), the same result 40+ handlers here
-        // already share. Registry-gated via `organizationIdForMetaRead` so a
-        // non-overridable type keeps reading env-wide (see that predicate for
-        // why naming the org unconditionally would resurrect #6190's phantoms).
-        const layeredCtx = await this.resolveExecCtx(environmentId, req)
-            .catch(rethrowAuthzStoreUnavailable);
-        // [folded-type commit 26f3588fb] (the original card no longer
-        // resolves) FOLDED, not raw — see the PUT door's org-scope comment for
-        // the measurement. [#20478] Asked of `metaReadOrganizationId` (the
-        // same fold over the vetted `tenantId`), the one answer the runtime
-        // dispatcher's layered read asks too.
-        const layeredOrganizationId = metaReadGate.metaReadOrganizationId(req.params.type, layeredCtx);
+        // [ADR-0131 D6] No organization: the per-organization overlay axis is
+        // retired, so the layered read is environment → code — the row every
+        // `/meta` write now lands in. A legacy organization-scoped row is not
+        // served here; its promotion to the environment layer is ADR-0131 C7's.
         // [commit 2a29caa53] This door never carried an `as any`, but `p: any` meant its
         // request literal was never checked either — the same blind spot with
         // a different spelling. Typing the literal (spec shape + the
@@ -3981,7 +3945,6 @@ export class RestServer {
             name: req.params.name,
             ...(layeredPackageId ? { packageId: layeredPackageId } : {}),
             ...(environmentId ? { environmentId } : {}),
-            ...(layeredOrganizationId ? { organizationId: layeredOrganizationId } : {}),
         };
         const layered = await p.getMetaItemLayered(layeredRequest);
         // [#20156 · #20478] THE per-caller gate on every layer, then the mask —
@@ -5095,8 +5058,25 @@ export class RestServer {
     private registerOpenApiEndpoints(basePath: string): void {
         const isScoped = basePath.includes('/environments/:environmentId');
 
+        // [#22430] Both API-description endpoints — the document and its
+        // viewer — refuse an anonymous caller with the shared anonymous-deny
+        // 401, the same body the `/data` and `/meta` routes answer (ADR-0056 D2
+        // is default-deny, and no ADR-0138 D2 door class names these two). The
+        // refusal is each handler's FIRST act: before the bundled artifact is
+        // loaded and before any protocol is resolved, so a refused request
+        // costs no work and its answer does not even say whether a document is
+        // bundled here. A signed-in caller is served exactly as before, under
+        // the same ADR-0069 auth-policy gate every other protected route
+        // applies. The viewer page fetches the document from the browser, and
+        // that request carries the browser's session, so a signed-in browser is
+        // served on both endpoints.
+
         const openApiHandler = async (req: any, res: any) => {
             try {
+                const environmentId = isScoped ? req.params?.environmentId : undefined;
+                const context = await this.resolveExecCtx(environmentId, req);
+                if (this.enforceAuth(req, res, context)) return;
+
                 const spec = await this.loadOpenApiSpec();
                 if (!spec) {
                     res.status?.(503);
@@ -5149,7 +5129,6 @@ export class RestServer {
                 // must not silently blank the other.
                 let protocol: RestProtocol | undefined;
                 try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
                     protocol = await this.resolveProtocol(environmentId, req);
                 } catch {
                     // Enrichment is best-effort — never fail the spec serve.
@@ -5304,14 +5283,19 @@ export class RestServer {
             method: 'GET',
             path: `${basePath}/docs`,
             handler: async (req: any, res: any) => {
-                // Resolve the openapi.json URL relative to the current
-                // request so the docs page works for any host / scoped
-                // base path (e.g. /api/v1 vs /api/v1/environments/abc).
-                const reqPath: string = req.path || req.url || `${basePath}/docs`;
-                // Strip the trailing /docs to get the API base.
-                const apiBase = reqPath.replace(/\/docs\/?$/, '');
-                const specUrl = `${apiBase}/openapi.json`;
-                const html = `<!doctype html>
+                try {
+                    const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    const context = await this.resolveExecCtx(environmentId, req);
+                    if (this.enforceAuth(req, res, context)) return;
+
+                    // Resolve the openapi.json URL relative to the current
+                    // request so the docs page works for any host / scoped
+                    // base path (e.g. /api/v1 vs /api/v1/environments/abc).
+                    const reqPath: string = req.path || req.url || `${basePath}/docs`;
+                    // Strip the trailing /docs to get the API base.
+                    const apiBase = reqPath.replace(/\/docs\/?$/, '');
+                    const specUrl = `${apiBase}/openapi.json`;
+                    const html = `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8" />
@@ -5323,10 +5307,16 @@ export class RestServer {
 <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
 </body>
 </html>`;
-                if (res.setHeader) res.setHeader('content-type', 'text/html; charset=utf-8');
-                if (res.send) res.send(html);
-                else if (res.body) res.body = html;
-                else res.json?.(html);
+                    if (res.setHeader) res.setHeader('content-type', 'text/html; charset=utf-8');
+                    if (res.send) res.send(html);
+                    else if (res.body) res.body = html;
+                    else res.json?.(html);
+                } catch (error: any) {
+                    // Only the identity read above can throw here (a
+                    // permission-store outage), which keeps its declared answer.
+                    logError('[REST] docs viewer error:', error);
+                    sendThrownError(res, error);
+                }
             },
             metadata: {
                 summary: 'Interactive API docs (Scalar viewer)',
@@ -5689,161 +5679,16 @@ export class RestServer {
                         const severityParam = (req.query?.severity as string | undefined) ?? 'error';
                         const severity = severityParam === 'warning' ? 'warning' : 'error';
                         const diagnosticsType = (req.query?.type as string | undefined) || undefined;
-                        // [#13753, #15622] STATE THE ORG PARTITION — on BOTH
-                        // arms. They differ only in whether the fold happens
-                        // HERE or is left entirely to the callee.
-                        //
-                        // `getMetaDiagnostics` reads each swept type through
-                        // `getMetaItems({ type: t, organizationId })`.
-                        //
-                        // ⚠️ [commit 96326040f] `getMetaItems` NOW APPLIES THE REGISTRY GATE
-                        // ITSELF — `organizationIdForMetaRead(request.type,
-                        // request.organizationId)`, one statement after it folds the
-                        // type through `canonicalizeMetaRequestType`. That is the
-                        // ONE inner gate this call site now sits above; the sibling
-                        // gate in the same file guards `getMetaItem` (the singular
-                        // overlay read, commit d5cbb44f3), which this arm never reaches.
-                        //
-                        // ⛔ Until commit 96326040f this comment said `getMetaItems` applied NO
-                        // registry gate of its own and the scope was therefore
-                        // decided HERE, per type, by the caller. That sentence is
-                        // FALSE on today's tree — do not reintroduce it, and do not
-                        // reason from it.
-                        //
-                        // ⇒ The `?type=` arm is exactly one type
-                        // (`targetTypes = [request.type]`), so the predicate
-                        // over that one type IS the request's whole scope and
-                        // the answer is correct by construction. That is the
-                        // arm Studio's per-type directory drill-down uses, and
-                        // it is the arm #13753 repaired.
-                        //
-                        // ── WHY THE FOLD IS DOUBLED, AND STAYS DOUBLED (commit abf9101f1) ──
-                        //
-                        // The VALUE is redundant, and measured to be. Both sites fold
-                        // the identical string through the identical map — here
-                        // `canonicalMetaUrlType`, inside `getMetaItems` the same
-                        // function reached through `canonicalizeMetaRequestType` →
-                        // `canonicalMetaType` — so `f(t, f(t, o)) === f(t, o)` and the
-                        // inner application is the algebraic no-op. MEASURED: replace
-                        // this predicate with a raw `diagnosticsCtx?.tenantId` and
-                        // `rest-server-meta-read-org-scope.test.ts` stays GREEN IN FULL
-                        // (30/30 at that revision; the file has grown since);
-                        // the inner gate re-folds it, phantom control included.
-                        //
-                        // ⭐ It is KEPT anyway, and the reason is TRUST DOMAIN rather
-                        // than value. `getMetaDiagnostics` is not a member of
-                        // `MetadataProtocol` at all — not required, not optional —
-                        // which is why it is reached through the `(p as any)` cast and
-                        // why the 501 above exists. The inner gate therefore belongs
-                        // to ONE implementation of an UNDECLARED extension, while this
-                        // predicate sits on the REST boundary and holds for every
-                        // `RestProtocol` a host can mount. Delete it and a REST door's
-                        // tenant scope becomes a function of which kernel is mounted —
-                        // and no pin can see that happen, because the harness boots the
-                        // bundled implementation. Defence in depth, on a seam the type
-                        // system does not cover.
-                        //
-                        // ── [#15622] THE UNTYPED SWEEP FORWARDS THE
-                        // ORGANIZATION TOO, and passes it RAW ───────────────
-                        //
-                        // ⛔ This arm used to be a RECORDED GAP, left env-wide
-                        // on this argument: `targetTypes` is then the whole
-                        // registry — five `allowOrgOverride: true` types and
-                        // every other declared type together — while the
-                        // request carries ONE `organizationId`, and one org id
-                        // could not express a per-type scope from here without
-                        // a fan-out per overridable type plus a REST-side
-                        // re-aggregation of `total`/`stats`/`scannedTypes`.
-                        //
-                        // ⚠️ Commit 96326040f DISSOLVED THAT OBSTACLE (commit abf9101f1 recorded
-                        // it, #15622 acted on it). `getMetaDiagnostics` does
-                        // not spend the organization once: it loops `for (const
-                        // t of targetTypes)` calling `getMetaItems({ type: t,
-                        // organizationId, … })`, and the FIRST thing
-                        // `getMetaItems` does with that organization is
-                        // `organizationIdForMetaRead(request.type, …)` on its
-                        // OWN folded type. So one `organizationId` handed to
-                        // this arm is already narrowed PER TYPE by the callee —
-                        // the org for the five overridable types, `undefined`
-                        // for every other, phantoms of non-overridable types
-                        // dropped. That is precisely the scope the paragraph
-                        // above said one id could not say. No fan-out, no
-                        // REST-side re-aggregation, no second owner of the
-                        // sweep's arithmetic: `stats` / `total` /
-                        // `scannedTypes` are untouched by the gate.
-                        //
-                        // ⭐ RULED that the gap CLOSES rather than being
-                        // re-recorded. A governance summary whose whole job is
-                        // surfacing problems, and which structurally cannot see
-                        // a class of them WHILE ITS OWN drill-down can, issues a
-                        // false all-clear — since #13753 repaired the `?type=`
-                        // arm, this summary undercounts relative to the screen
-                        // you reach by clicking into it. An org-scoped caller
-                        // now sees items THEIR OWN organization authored, on the
-                        // five overridable types only, which for a governance
-                        // report is the correct set.
-                        //
-                        // ⛔ RAW, and deliberately NOT pre-folded with
-                        // `organizationIdForMetaRead(...)` the way the `?type=`
-                        // arm folds above. There is no single type to fold on
-                        // here, and folding on any one of them would suppress
-                        // the organization for EVERY type at once. The per-type
-                        // decision belongs to the callee's loop. Identical in
-                        // shape to the `/references` door below, whose
-                        // narrowness control measured the same callee gate; both
-                        // halves are pinned in
-                        // `rest-server-meta-read-org-scope.test.ts`, where ONE
-                        // request shows an overridable type's org-authored row
-                        // present and a planted pre-#6190 phantom on a
-                        // NON-overridable type absent.
-                        //
-                        // ⚠️ ADR-0131 D6/D7 retires the per-organization
-                        // metadata partition in v18 (#15206, C5), so this
-                        // behaviour has ONE MAJOR to live and reverts to
-                        // environment-wide when the partition goes. An existing
-                        // value handed to an existing parameter: no new
-                        // parameter, response field, status code or contract
-                        // surface. ⛔ Nothing is to be built on it.
-                        //
-                        // ⚠️ NOT a new org-resolution seam: `resolveExecCtx` is
-                        // memoised per request (WeakMap keyed by `req`), the
-                        // same result 40+ handlers here already share. It is now
-                        // resolved for BOTH arms — which is why this reads as a
-                        // statement rather than a ternary: the LOCALLY CAUGHT
-                        // continuation-line spelling is the one the sibling
-                        // doors use and the one `execctx-consumer-census`
-                        // reads, and a third layout would be invisible to it.
-                        // This door does not sit behind the shared anonymous
-                        // floor, so it decides an authz-store outage for itself
-                        // rather than laundering it into an org-unscoped 200 —
-                        // and the untyped arm now shares that, deliberately.
-                        const diagnosticsCtx = await this.resolveExecCtx(environmentId, req)
-                            .catch(rethrowAuthzStoreUnavailable);
-                        const diagnosticsOrganizationId: string | undefined = diagnosticsType
-                            ? organizationIdForMetaRead(
-                                // [commit 26f3588fb] FOLDED, not raw — see the PUT door's
-                                // org-scope comment for the measurement. The
-                                // protocol keeps receiving the caller's own
-                                // spelling (it normalises, and refuses an
-                                // unrecognised one with its own 400); only the
-                                // scope decision reads the canonical singular.
-                                canonicalMetaUrlType(diagnosticsType), diagnosticsCtx?.tenantId,
-                            )
-                            // [#15622] The whole-registry arm — raw, per above.
-                            : diagnosticsCtx?.tenantId;
+                        // [ADR-0131 D6] No organization: the sweep reads each
+                        // type environment → code, the partition every `/meta`
+                        // write now lands in. A legacy organization-scoped row
+                        // is not swept; its promotion is ADR-0131 C7's.
                         const result = await (p as any).getMetaDiagnostics({
                             type: diagnosticsType,
                             severity,
                             // [#22188] The list's reading ({@link metaItemPackageBinding}):
                             // each swept type is a list read, so `all` names no package.
                             packageId: metaItemPackageBinding(req.query?.package),
-                            // SPREAD, never `organizationId: x ?? null` — the
-                            // implementation declares `organizationId?: string`
-                            // (optional plain string, not nullable), and a
-                            // `null` would travel into `getMetaItems` as an
-                            // explicit env-partition statement rather than as
-                            // "unstated".
-                            ...(diagnosticsOrganizationId ? { organizationId: diagnosticsOrganizationId } : {}),
                         });
                         res.json(result);
                     } catch (error: any) {
@@ -5919,24 +5764,14 @@ export class RestServer {
                         // [#6877] Both narrow the draft list to one package /
                         // one type; an array reached `listDrafts` untouched.
                         if (refuseRepeatedQueryParams(req, res, ['packageId', 'type'])) return;
-                        // [#11087] Read in the CALLER'S org scope, symmetric with
-                        // the save route (`saveMetaItem`'s `organizationId:
-                        // ctx?.tenantId`, below): a draft saved by a session
-                        // carrying an active org lands in that org's overlay
-                        // scope, and this route used to read with NO org —
-                        // `getOverlayRepo(null)` sees only env-wide
-                        // (`organization_id IS NULL`) rows, so every org-scoped
-                        // draft was invisible to the pending-changes surfaces
-                        // while single reads (which thread the ctx) and the
-                        // publisher (which resolves each draft's own scope)
-                        // saw it fine — the write-org/read-null split behind
-                        // cloud#1593. With the org threaded, the repository's
-                        // own `$or` contract surfaces BOTH the caller's org
-                        // overlay and env-wide drafts.
+                        // [ADR-0131 D6] No organization: a draft is saved
+                        // environment-wide, so the list reads the environment
+                        // partition, symmetric with the save door. A legacy
+                        // organization-scoped draft is not listed; its
+                        // promotion is ADR-0131 C7's.
                         const result = await (p as any).listDrafts({
                             packageId: (req.query?.packageId as string | undefined) || undefined,
                             type: (req.query?.type as string | undefined) || undefined,
-                            organizationId: ctx?.tenantId ?? undefined,
                         });
                         res.json(result);
                     } catch (error: any) {
@@ -6091,22 +5926,11 @@ export class RestServer {
                         // rule on a READ door, and why it throws instead of
                         // building a body.
                         await this.refuseUnknownMetaListType(p, req.params?.type);
-                        // [#9454] The scoped listing is the second door the
-                        // card measured absent (`?object=` unchanged after a
-                        // runtime PUT). `getMetaItems` unions the env-wide and
-                        // org scopes under org-wins precedence — but only when
-                        // the caller names an org; unnamed, it returns the
-                        // env-wide partition alone and the author's new item is
-                        // simply not in the list. Same memoised `resolveExecCtx`
-                        // and same registry gate as every other read door here.
+                        // [#20338] The caller, for the draft-preview admission
+                        // below. The list names no organization (ADR-0131 D6):
+                        // it reads environment → code.
                         const listCtx = await this.resolveExecCtx(environmentId, req)
                             .catch(rethrowAuthzStoreUnavailable);
-                        // [folded-type commit 26f3588fb] (the original card no
-                        // longer resolves) FOLDED, not raw — see the PUT door's
-                        // org-scope comment for the measurement. [#20408] Asked of
-                        // `metaReadOrganizationId`, the one answer the runtime
-                        // dispatcher's list asks too.
-                        const listOrganizationId = metaReadGate.metaReadOrganizationId(req.params.type, listCtx);
                         // ADR-0033/0037 draft-overlay preview: `?preview=draft`
                         // overlays pending drafts on the active list, exactly as
                         // the runtime dispatcher's /metadata/:type route does —
@@ -6131,7 +5955,6 @@ export class RestServer {
                             packageId,
                             ...(previewDrafts ? { previewDrafts: true } : {}),
                             ...(environmentId ? { environmentId } : {}),
-                            ...(listOrganizationId ? { organizationId: listOrganizationId } : {}),
                         };
                         const items = await p.getMetaItems(listRequest);
 
@@ -6236,64 +6059,13 @@ export class RestServer {
                             });
                             return;
                         }
-                        // ── [#13753] STATE THE ORG PARTITION — and pass it
-                        // RAW, which is the whole of the decision ───────────
-                        //
-                        // The admin "Used by" panel renders its empty case as
-                        // "Nothing in the metadata graph points at this item.
-                        // Safe to delete." (objectui `metadata-admin/i18n.ts`),
-                        // shown to an operator about to delete something. With
-                        // no organization stated, the sweep read the env
-                        // partition only: an org-scoped `view` referencing the
-                        // item was invisible and the panel issued a false
-                        // clearance — the ADR-0110 D3 harm this route's own 501
-                        // refusal (#9326) exists to prevent, delivered by the
-                        // door after the protocol had refused to deliver it.
-                        //
-                        // ⛔ NOT pre-gated with `organizationIdForMetaRead(
-                        // canonicalMetaUrlType(req.params.type), ...)`, the way
-                        // the sibling `/meta` doors gate. Here `req.params.type`
-                        // is the TARGET, and `findReferencesToMeta` spends the
-                        // organization on the SOURCES: it resolves
-                        // `REFERENCE_SITES.byTarget.get(target)`, groups the
-                        // sites by `fromType` and reads each through
-                        // `getMetaItems({ type: matcher.fromType, ... })`. The
-                        // target's own registry flag therefore says nothing
-                        // about the types actually read, and gating on it would
-                        // suppress the organization for exactly the `object` /
-                        // `flow` / `app` deletes this card is about — the card's
-                        // own false clearance, left standing by a change that
-                        // looks like its repair.
-                        //
-                        // ⭐ And RAW is not the unconditional tenant that
-                        // predicate exists to prevent, because since commit 96326040f
-                        // `getMetaItems` applies it ITSELF, to its OWN
-                        // `request.type`, after the fold. The per-SOURCE-type
-                        // decision is already the callee's: an overridable
-                        // source (`view`, `dashboard`, `report`, `translation`,
-                        // `email_template`) honours the organization, every
-                        // other source drops it and stays env-wide, so no
-                        // pre-#6190 phantom row is resurrected into a
-                        // destructive-action clearance. `request.organizationId`
-                        // has exactly ONE use inside `findReferencesToMeta` —
-                        // that `getMetaItems` spread — so passing it raw carries
-                        // no other consequence. Both halves are pinned in
-                        // `rest-server-meta-read-org-scope.test.ts`, the second
-                        // as the narrowness control.
-                        //
-                        // ⚠️ ADR-0131 D6/D7 retires the per-organization
-                        // metadata partition in v18 (#15206, C5), so this is a
-                        // repair inside a mechanism being removed: an existing
-                        // value handed to an existing parameter, no new contract
-                        // surface. ⛔ Nothing is to be built on it.
-                        //
-                        // The same memoised resolution the sibling read doors
-                        // share, in the same locally-caught spelling: this door
-                        // does not sit behind the shared anonymous floor, so it
-                        // decides an authz-store outage for itself rather than
-                        // laundering it into an org-unscoped 200.
-                        const referencesCtx = await this.resolveExecCtx(environmentId, req)
-                            .catch(rethrowAuthzStoreUnavailable);
+                        // [#13753 · ADR-0131 D6] The sweep reads the sources
+                        // environment → code, the world the `/meta` doors serve:
+                        // the per-organization overlay axis is retired, so no
+                        // organization is stated. A legacy organization-scoped
+                        // source row is served by no door until ADR-0131 C7
+                        // promotes it, and that ceremony re-judges what it
+                        // carries; it is not swept here.
                         // [#15685] The protocol's OWN refusal is re-answered in
                         // the nested envelope the branch above already uses —
                         // see {@link notImplementedRefusalAnswer} for why the
@@ -6308,11 +6080,6 @@ export class RestServer {
                             result = await (p as any).findReferencesToMeta({
                                 type: req.params.type,
                                 name: req.params.name,
-                                // SPREAD, never `organizationId: x ?? null` — the
-                                // implementation declares `organizationId?: string`
-                                // (optional plain string, not nullable), and it
-                                // forwards on truthiness.
-                                ...(referencesCtx?.tenantId ? { organizationId: referencesCtx.tenantId } : {}),
                                 ...(environmentId ? { environmentId } : {}),
                             });
                         } catch (raised: any) {
@@ -6583,8 +6350,7 @@ export class RestServer {
                         // published checksum and drafts are out-of-band.
                         const isAppType = metaType === 'app';
                         // [#20338] The caller, resolved ABOVE the two draft
-                        // switches because each is admitted per caller; the
-                        // #9454 org resolution below reads the same value.
+                        // switches because each is admitted per caller.
                         // Memoised per request — not a new seam.
                         const readCtx = await this.resolveExecCtx(environmentId, req)
                             .catch(rethrowAuthzStoreUnavailable);
@@ -6680,24 +6446,6 @@ export class RestServer {
                         // ADR-0046 §6.7 — the two audience-gated types, excluded
                         // from the cache so {@link metaItemReadGate} judges them.
                         const isAudienceGatedType = metaType === 'book' || metaType === 'doc';
-                        // [#9454] ONE org resolution for BOTH arms of the fork
-                        // below, computed ABOVE it on purpose. `view` takes the
-                        // cached arm; `dashboard` bypasses it via
-                        // `isDashboardType` and takes the uncached arm. A scope
-                        // threaded into only one arm fixes exactly ONE of the
-                        // five org-overridable types while the receipt keeps
-                        // claiming success for the rest — the half-fix this
-                        // card's pin exists to forbid. Hoisting it makes the
-                        // two arms incapable of disagreeing about scope.
-                        // ⚠️ NOT a new seam: memoised per request, and this
-                        // handler resolves the same context again further down.
-                        // [#20338] `readCtx` is resolved above the draft switches.
-                        // [folded-type commit 26f3588fb] (the original card no
-                        // longer resolves) FOLDED, not raw — see the PUT door's
-                        // org-scope comment for the measurement. [#20408] Asked of
-                        // `metaReadOrganizationId`, the one answer the runtime
-                        // dispatcher's item read asks too.
-                        const readOrganizationId = metaReadGate.metaReadOrganizationId(req.params.type, readCtx);
                         if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDashboardType && !isDraftRead && !previewDrafts && !packageScoped && !isAudienceGatedType) {
                             // [ADR-0106 D3] When a projection applies, the
                             // protocol is NOT allowed to judge the conditional
@@ -6752,13 +6500,6 @@ export class RestServer {
                                 ...(cacheLocale ? { locale: cacheLocale } : {}),
                                 ...(environmentId ? { environmentId } : {}),
                                 // [#9454] The cached door is the `view` arm, and
-                                // it used to hard-code a two-key delegation to
-                                // `getMetaItem` — it could not express an org at
-                                // all, so this threading is paired with a widened
-                                // signature in `metadata-protocol`. The org also
-                                // enters the ETag there, so the validator states
-                                // the scope rather than inheriting it.
-                                ...(readOrganizationId ? { organizationId: readOrganizationId } : {}),
                             };
                             const result = await p.getMetaItemCached(cachedRequest);
 
@@ -6913,11 +6654,6 @@ export class RestServer {
                                 // never `req.query` re-read here.
                                 ...(isDraftRead ? { state: 'draft' as const } : {}),
                                 ...(previewDrafts ? { previewDrafts: true } : {}),
-                                // [#9454] The uncached arm — `dashboard`'s route
-                                // (`isDashboardType`), and every read the cache
-                                // exclusions divert here. Same hoisted scope as
-                                // the cached arm above, by construction.
-                                ...(readOrganizationId ? { organizationId: readOrganizationId } : {}),
                             };
                             const envelope = await p.getMetaItem(itemRequest) as Record<string, any>;
 
@@ -7094,15 +6830,13 @@ export class RestServer {
                     // item is authoring; `isSystem` bypasses, matching every
                     // other capability gate on the platform.
                     //
-                    // [#12702] The gate is the shared `metaWriteCapabilityVerdict`
-                    // (`@objectstack/metadata-core`, beside the org-scope
-                    // predicate this door already runs): beside `manage_metadata`
-                    // it admits `manage_org_presentation`, ONLY for a type whose
-                    // registry entry declares `allowOrgOverride: true` AND a
-                    // session with an active organization — `ctx.tenantId`, the
-                    // very value `organizationIdForMetaWrite` threads below, so
-                    // an admitted write can only land org-scoped in the caller's
-                    // own partition: never env-wide, never another org's.
+                    // [#12702 · ADR-0131 D6] The gate is the shared
+                    // `metaWriteCapabilityVerdict` (`@objectstack/metadata-core`):
+                    // `manage_metadata` or `isSystem`. The org-scoped
+                    // `manage_org_presentation` arm retired with the
+                    // per-organization overlay axis — this door threads no
+                    // organization, so that arm would have admitted its holders
+                    // to environment-wide authoring.
                     //
                     // [#20156] Asked through {@link metaSaveVerdict}, the ONE
                     // spelling the stored-version read doors' author exemption
@@ -7112,7 +6846,7 @@ export class RestServer {
                     // everything that was stored.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
                     {
-                        const verdict = RestServer.metaSaveVerdict(ctx, req.params.type);
+                        const verdict = RestServer.metaSaveVerdict(ctx);
                         if (!verdict.allowed) {
                             res.status(403).json({
                                 error: {
@@ -7210,72 +6944,16 @@ export class RestServer {
                     // ({@link metaItemPackageBinding}, the item read's too).
                     const packageId = metaItemPackageBinding(req.query?.package);
 
-                    // [#8805] THE WRITE-SIDE ORGANIZATION. Until this landed the
-                    // door passed none, so `recordMetadataAudit` stamped
-                    // `organization_id: null` on EVERY row a REST-authored
-                    // metadata write produced (`entry.organizationId ?? null`).
-                    // Composed with #8803's scoped read — own-org rows PLUS
-                    // env-wide ones, a limb that is required, not optional —
-                    // that made every REST-authored audit row readable by every
-                    // tenant, carrying its `actor`, `note`, `lock_state` and
-                    // `request_id`. The read half could not close it: the rows
-                    // were genuinely unscoped, so no filter could separate them.
-                    //
-                    // Two measurements decided the SHAPE, and neither is
-                    // obvious from the defect:
-                    //
-                    //  1. The organization must NOT be threaded unconditionally.
-                    //     `saveMetaItem`'s `organizationId` is one value feeding
-                    //     two things — the `sys_metadata` partition the row
-                    //     lands in AND the audit row — and the protocol REFUSES
-                    //     an org-scoped write of a type the registry declares
-                    //     `allowOrgOverride: false` (`NOT_OVERRIDABLE`, 403;
-                    //     `orgScopedWriteRefusal`, the #6190 ruling). Passing
-                    //     `ctx.tenantId` raw would turn every `PUT /meta/object/*`
-                    //     from a tenant-admin session into a 403 — trading a
-                    //     disclosure for an outage. `organizationIdForMetaWrite`
-                    //     is the registry-derived predicate that answers this,
-                    //     and it is the DISPATCHER's own: this door now behaves
-                    //     identically to its `/metadata` twin for the same
-                    //     request, which is the whole point.
-                    //  2. So a non-overridable type still audits env-wide — and
-                    //     that is correct rather than residue. Its WRITE is
-                    //     env-wide (#6190 option A: the runtime stops minting
-                    //     rows boot never reads), so an env-wide audit row is
-                    //     the truthful scope for it, symmetric with what the
-                    //     `/published` route's comment argues further down this
-                    //     file. `null` stays reserved for writes that really are
-                    //     environment-wide.
-                    //
-                    // ⚠️ NOT a new org-resolution seam — the thing the
-                    // `/published` comment forbids. `ctx` is the SAME
-                    // `resolveExecCtx` result the capability gate above already
-                    // resolved (memoised per request, called in 40+ handlers
-                    // here); no `resolveActiveOrganizationId` is minted, exactly
-                    // as #8803 did for the audit READ on the sibling route.
-                    // `computeExecCtx` assembles `tenantId` from the shared
-                    // `resolveAuthzContext` — an API key's principal tenant,
-                    // else the session's `activeOrganizationId`, which is the
-                    // very field the dispatcher twin reads.
-                    //
-                    // [commit 26f3588fb] The type is FOLDED before the scope decision,
-                    // never the raw URL spelling. Storage folds `:type`
-                    // through `META_URL_TO_SINGULAR` — the COMPLETE map —
-                    // while `declaresOrgOverride` tolerates only the
-                    // manifest-collection spellings (incomplete by design;
-                    // see its header). Measured on `origin/main` for the two
-                    // registry-derived spellings, `translations` and
-                    // `email_templates`: the raw segment read and wrote
-                    // ENV-WIDE where the singular twin was org-scoped — one
-                    // item, two partitions, addressed by spelling (#4432 /
-                    // #7894's defect one layer down). Folding HERE keeps the
-                    // scope decision and the storage fold answering one
-                    // question, which is what `metadata-url-spelling.ts`
-                    // mandates: folding happens at the boundary and only
-                    // there; the layers below read the canonical singular.
-                    const organizationId = organizationIdForMetaWrite(
-                        canonicalMetaUrlType(req.params.type), ctx?.tenantId,
-                    );
+                    // [ADR-0131 D6] THE WRITE NAMES NO ORGANIZATION. The
+                    // per-organization overlay axis is retired: every write this
+                    // door admits lands environment-wide (`organization_id`
+                    // NULL), its audit row included, whatever the caller's
+                    // active organization. Until this stage the door threaded
+                    // the active organization for the five types the registry
+                    // declared `allowOrgOverride`; a single-posture Studio save
+                    // of those types therefore sits under the Default
+                    // Organization, and is not served again until ADR-0131 C7
+                    // promotes it to the environment layer.
                     // [#12004] The `as any` cast this call carried came off
                     // when `SaveMetaItemRequestSchema` caught up with the
                     // members this door sends. `saveMetaItem` is a REQUIRED
@@ -7295,7 +6973,6 @@ export class RestServer {
                         type: req.params.type,
                         name: req.params.name,
                         item,
-                        organizationId,
                         // [commit d806081dd] This door answers with an ADR-0112 error
                         // envelope that carries the refusal's `issues[]`
                         // structurally beside the message (`sendError` threads a
@@ -7358,22 +7035,14 @@ export class RestServer {
                     // `deleteMetaItem` has run would still be the bug.
                     // `isSystem` bypasses, as everywhere else.
                     //
-                    // [#12702] Same shared verdict as the PUT door. On THIS
-                    // verb the org condition is also what bounds the blast
-                    // radius: an admitted org-presentation reset threads the
-                    // caller's own organization, and `orgId` selects the
-                    // overlay repository — so the only row such a caller can
-                    // discard is their own org's overlay, never the env-wide
-                    // one (see the [#8805] comment below). `?dropStorage=true`
-                    // is `object`-only, and `object` is not org-overridable,
-                    // so the org capability can never reach it.
+                    // [#12702 · ADR-0131 D6] Same shared verdict as the PUT
+                    // door. The reset names no organization either, so it
+                    // discards the environment-wide row.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
                     {
                         const verdict = metaWriteCapabilityVerdict({
                             isSystem: ctx?.isSystem === true,
                             systemPermissions: ctx?.systemPermissions,
-                            canonicalType: canonicalMetaUrlType(req.params.type),
-                            activeOrganizationId: ctx?.tenantId,
                             operation: 'reset',
                         });
                         if (!verdict.allowed) {
@@ -7434,23 +7103,8 @@ export class RestServer {
                     // orphan table. Destructive — opt-in, defaults off.
                     const dropStorage = req.query?.dropStorage === 'true' || req.query?.dropStorage === '1';
 
-                    // [#8805] Same write-side organization as the `PUT` twins —
-                    // and on this verb it is not only the audit row. `orgId`
-                    // selects the overlay repository, so it decides WHICH row a
-                    // reset destroys. Once a `view` authored here lands
-                    // org-scoped, a delete that passed no organization would
-                    // reach past the caller's own overlay and reset the ENV-WIDE
-                    // row instead — one tenant's "reset to default" blanking the
-                    // item for every other tenant and the control plane, which
-                    // is the failure `restoreArtifactRegistryView` records having
-                    // already been paid for once. The two halves have to move
-                    // together. `ctx` is the capability gate's own
-                    // `resolveExecCtx` result, resolved above.
-                    const organizationId = organizationIdForMetaWrite(
-                        // [commit 26f3588fb] FOLDED, not raw — see the PUT door's
-                        // org-scope comment for the measurement.
-                        canonicalMetaUrlType(req.params.type), ctx?.tenantId,
-                    );
+                    // [ADR-0131 D6] No organization, as on the `PUT` twin: the
+                    // reset reaches the environment-wide row.
                     // [#11679] The `(p as any)` cast this call carried came off
                     // when `DeleteMetaItemRequestSchema` caught up with the
                     // eight members this door sends. Unlike the publish door's
@@ -7470,7 +7124,6 @@ export class RestServer {
                     const deleteRequest: TransportScopedMetaRequest<DeleteMetaItemRequest> = {
                         type: req.params.type,
                         name: req.params.name,
-                        organizationId,
                         ...(environmentId ? { environmentId } : {}),
                         ...(parentVersion !== undefined ? { parentVersion } : {}),
                         ...(actor ? { actor } : {}),
@@ -7526,8 +7179,7 @@ export class RestServer {
                     // door and `/diff` only: `/layers` and `?layers=true` read
                     // the active row and keep the pruned plain-read answer.
                     //
-                    // `historyCtx` is this door's one caller resolution; the org
-                    // partition below reads the same value. The refusal is
+                    // `historyCtx` is this door's one caller resolution. The refusal is
                     // {@link refuseNonAuthoringCaller}, shared with `/diff` and
                     // `/audit` (#20441) so the three cannot drift apart.
                     const historyCtx = await this.resolveExecCtx(environmentId, req)
@@ -7584,45 +7236,14 @@ export class RestServer {
                             return;
                         }
                     }
-                    // [#13406] STATE THE ORG PARTITION. `sys_metadata_history`
-                    // is a per-org log — `SysMetadataRepository.history()`
-                    // filters `organization_id = this.organizationId` by strict
-                    // equality (no `$or`), and `event_seq` is documented as a
-                    // "Per-organization monotonic event log cursor". So a door
-                    // that names no organization does not read "everything": it
-                    // reads the ENV partition (`organizationId ?? null` in
-                    // `historyMetaItem`), and an item whose overlay was authored
-                    // org-scoped answered `{ events: [] }` while its log was
-                    // full. The write door that produced those rows has stated
-                    // the org since #8805; only the read door had not.
+                    // [#13406 · ADR-0131 D6] The ENV partition, stated by
+                    // omission: `sys_metadata_history` is filtered by strict
+                    // equality on `organization_id`, and since the
+                    // per-organization overlay axis retired every `/meta` write
+                    // logs there (`organizationId ?? null` in
+                    // `historyMetaItem`). A legacy organization-scoped log is
+                    // not served; its promotion is ADR-0131 C7's.
                     //
-                    // ⭐ `organizationIdForMetaRead`, NOT the audit twin's raw
-                    // `ctx?.tenantId ?? null`, and the difference is measured
-                    // rather than stylistic. `auditMetaItem` reads with
-                    // `$or: [{organization_id: org}, {organization_id: null}]`,
-                    // so naming an org there can only ADD rows. This door's
-                    // repository does strict equality, so a raw tenant id would
-                    // ask the org partition for the history of a type whose
-                    // rows land ENV-WIDE — every `allowOrgOverride: false` type
-                    // that is still runtime-writable (`object`, `hook`, `page`,
-                    // `app`, `dataset`), because `organizationIdForMetaWrite`
-                    // deliberately writes those env-wide (#6190). That would
-                    // turn a working read into `{ events: [] }` for them: the
-                    // card's own defect, newly minted one type family over.
-                    // Gating the read on the same registry predicate the WRITE
-                    // uses is what makes the two sides incapable of drifting —
-                    // the reasoning `organizationIdForMetaRead` was written for.
-                    //
-                    // ⚠️ NOT a new org-resolution seam: `historyCtx` is the
-                    // caller resolved at the head of this door (#20378), and
-                    // `resolveExecCtx` is memoised per request (WeakMap keyed by
-                    // `req`), the same result the audit twin and 40+ handlers
-                    // here already share.
-                    const historyOrganizationId = organizationIdForMetaRead(
-                        // [commit 26f3588fb] FOLDED, not raw — see the PUT door's
-                        // org-scope comment for the measurement.
-                        canonicalMetaUrlType(req.params.type), historyCtx?.tenantId,
-                    );
                     // Typed through `TransportScopedMetaRequest` like the
                     // reset door above, NOT as a plain `HistoryMetaItemRequest`
                     // like the audit door below: this door still spreads the
@@ -7633,39 +7254,10 @@ export class RestServer {
                     // member on. Every OTHER key is compiled against the spec
                     // contract — an undeclared member here is now TS2353
                     // instead of a payload member no contract has ever seen.
-                    //
-                    // ⛔ [#13406] `organizationId` is SPREAD, never written as
-                    // `organizationId: x ?? null`. `HistoryMetaItemRequestSchema`
-                    // declares it `z.string().optional()` — optional plain
-                    // string, NOT nullable, mirroring the implementation's
-                    // `organizationId?: string` — and the spec's own describe
-                    // text names the asymmetry against the audit twin, which
-                    // declares `string | null`. Copying the audit door's
-                    // expression here is a **TS2322** compile error, measured:
-                    // `error TS2322: Type 'string | null' is not assignable to
-                    // type 'string | undefined'`. It is also a no-op at runtime
-                    // (`null ?? null` is `null`).
-                    //
-                    // ⚠️ TS2322, NOT the TS2353 the paragraph directly above
-                    // names, and the difference is the whole point: TS2353 is
-                    // the UNDECLARED-member code, and `organizationId` IS
-                    // declared — so this is an assignability failure, not an
-                    // unknown-property one. This comment said TS2353 when it
-                    // landed, copied from its neighbour nine lines up, which is
-                    // correct in ITS context and wrong here. Comment drift by
-                    // adjacency; named so the next reader standing in the same
-                    // spot does not repeat it.
-                    //
-                    // ⚠️ And the guard is WEAKER one door over, not stronger:
-                    // the `/diff` twin reaches `diffMetaItem` through
-                    // `(p as any)`, so `?? null` there reddens with NOTHING and
-                    // is a silent runtime no-op. Do not generalise "the
-                    // compiler catches this" from here to that door.
                     const historyRequest: TransportScopedMetaRequest<HistoryMetaItemRequest> = {
                         type: req.params.type,
                         name: req.params.name,
                         ...(environmentId ? { environmentId } : {}),
-                        ...(historyOrganizationId ? { organizationId: historyOrganizationId } : {}),
                         // Both already finite or absent — the declared parses above
                         // refuse anything else, so no `Number.isFinite` drop is left here.
                         ...(sinceSeq !== undefined ? { sinceSeq } : {}),
@@ -7720,10 +7312,9 @@ export class RestServer {
                     // the protocol is resolved (no 501-vs-200 probe), before the
                     // query is parsed, and before any item or event is read.
                     // Whoever it admits reads exactly what they read before,
-                    // the per-caller refusal and the org scope below included.
+                    // the per-caller refusal below included.
                     //
-                    // `auditCtx` is this door's one caller resolution; the org
-                    // scope below reads the same value.
+                    // `auditCtx` is this door's one caller resolution.
                     const auditCtx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
                     if (refuseNonAuthoringCaller(auditCtx, res, 'Reading a metadata item\'s audit trail')) return;
                     const p = await this.resolveProtocol(environmentId, req);
@@ -7802,41 +7393,15 @@ export class RestServer {
                             return;
                         }
                     }
-                    // [#8747] SCOPE THE READ. Without an organization this
-                    // route returned every tenant's audit rows for a
-                    // `(type, name)` — measured, not inferred — and it carried
-                    // no capability gate then (unlike its `PUT` twin, which
-                    // gates on `manage_metadata`), so the cohort was any
-                    // authenticated principal of any tenant, on the published
-                    // SDK surface. [#20441] It carries the authoring-door gate
-                    // now, and the scope still matters: that gate admits a
-                    // builder of ONE organization, never a reader of another's
-                    // trail, so the tenant separation stays this scope's job.
+                    // [#8747 · ADR-0131 D6] SCOPE THE READ: the
+                    // environment-wide rows only (`organization_id: null`),
+                    // never every tenant's. Since the per-organization overlay
+                    // axis retired every `/meta` write audits there; a legacy
+                    // organization-scoped audit row is not served.
                     //
-                    // The organization comes from `resolveExecCtx`, which this
-                    // file already calls in 40+ handlers including the `PUT`
-                    // twin — `computeExecCtx` assembles `tenantId` from the
-                    // shared `resolveAuthzContext` (an API key's principal
-                    // tenant, else the session's `activeOrganizationId`).
-                    //
-                    // ⚠️ This deliberately does NOT mint the seam the
-                    // `/published` route's comment forbids further down this
-                    // file: no `resolveActiveOrganizationId`, no new org
-                    // plumbing in `packages/rest`. It reads a field the
-                    // execution context already carries. `?? null` keeps the
-                    // fail-closed direction — an unresolved organization reads
-                    // env-wide rows, never everyone's.
-                    //
-                    // `environmentId` is GONE from this payload, and that is a
-                    // deletion of dead weight rather than a behaviour change:
-                    // `auditMetaItem`'s request type never declared it and its
-                    // body never read it. Environment scoping is unaffected
-                    // because it comes from WHICH protocol `resolveProtocol`
-                    // hands back — the same reasoning the `/published` route
-                    // states below — not from the request payload. It is still
-                    // read on the two lines that need it.
-                    //
-                    // `auditCtx` is the caller resolved at the head of this door
+                    // `environmentId` is not in this payload: `auditMetaItem`'s
+                    // request type never declared it. Environment scoping comes
+                    // from WHICH protocol `resolveProtocol` hands back.
                     // (#20441), not a second resolution.
                     //
                     // The `(p as any)` casts this door carried came off when
@@ -7853,7 +7418,7 @@ export class RestServer {
                     const auditRequest: AuditMetaItemRequest = {
                         type: req.params.type,
                         name: req.params.name,
-                        organizationId: auditCtx?.tenantId ?? null,
+                        organizationId: null,
                         // Already finite or absent — the declared parse above
                         // refuses anything else.
                         ...(limit !== undefined ? { limit } : {}),
@@ -7907,21 +7472,14 @@ export class RestServer {
                     // before the refusal. `isSystem` bypasses, matching every other
                     // capability gate on the platform.
                     //
-                    // [#12702] Same shared verdict as the save door, because
-                    // promotion is the second half of the save→publish loop: a
-                    // caller admitted to author an org-scoped draft must be able
-                    // to promote it, and the SAME conditions bound what a
-                    // promotion can reach — `promoteDraftForPublish` resolves
-                    // the draft through `getOverlayRepo(orgId)`, so an admitted
-                    // org-presentation publish promotes only the caller's own
-                    // org partition.
+                    // [#12702 · ADR-0131 D6] Same shared verdict as the save
+                    // door, because promotion is the second half of the
+                    // save→publish loop.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
                     {
                         const verdict = metaWriteCapabilityVerdict({
                             isSystem: ctx?.isSystem === true,
                             systemPermissions: ctx?.systemPermissions,
-                            canonicalType: canonicalMetaUrlType(req.params.type),
-                            activeOrganizationId: ctx?.tenantId,
                             operation: 'publish',
                         });
                         if (!verdict.allowed) {
@@ -7993,29 +7551,9 @@ export class RestServer {
                     if (refuseRepeatedQueryParams(req, res, ['package'])) return;
                     const packageId = metaItemPackageBinding(req.query?.package);
 
-                    // [#8805] The publish half of the same organization, and it
-                    // is REQUIRED for the `PUT` fix to be usable rather than a
-                    // separate improvement: `promoteDraftForPublish` resolves the
-                    // draft through `getOverlayRepo(orgId)`, so once a draft
-                    // authored through `PUT ?mode=draft` lands org-scoped, a
-                    // publish carrying no organization looks in the env-wide
-                    // partition, finds nothing, and answers `no_draft` — the
-                    // Studio designer's save→publish loop, broken. Scoping the
-                    // save without scoping the publish is not a smaller change,
-                    // it is a broken one.
-                    //
-                    // [commit b5378550e] The context is now the one the capability gate above
-                    // already resolved, so the caller a publish is SCOPED to can
-                    // never drift from the caller it was AUTHORIZED against — the
-                    // same single-resolution shape the `PUT` door carries.
-                    // `resolveExecCtx` is memoised per request and called in 40+
-                    // handlers in this file (see the `/published` comment's seam
-                    // warning, which stands).
-                    const organizationId = organizationIdForMetaWrite(
-                        // [commit 26f3588fb] FOLDED, not raw — see the PUT door's
-                        // org-scope comment for the measurement.
-                        canonicalMetaUrlType(req.params.type), ctx?.tenantId,
-                    );
+                    // [ADR-0131 D6] No organization, as on the `PUT` twin: a
+                    // draft is saved environment-wide, so the promotion looks in
+                    // the environment partition.
                     // [#11145] The `(p as any)` cast this call carried came off
                     // when `MetadataProtocol` declared `publishMetaItem` (commit cccbe51bf,
                     // maintainer ruling 2026-08-22, option B). What the cast was
@@ -8050,7 +7588,6 @@ export class RestServer {
                     const publishRequest: TransportScopedMetaRequest<PublishMetaItemRequest> = {
                         type: req.params.type,
                         name: req.params.name,
-                        organizationId,
                         ...(environmentId ? { environmentId } : {}),
                         ...(actor ? { actor } : {}),
                         ...(message ? { message } : {}),
@@ -8098,20 +7635,13 @@ export class RestServer {
                     // leaks no kernel capability and nothing is restored before the
                     // refusal. `isSystem` bypasses, as everywhere else.
                     //
-                    // [#12702] Same shared verdict as the sibling doors. The
-                    // org condition bounds this verb too: `rollbackMetaItem`
-                    // resolves the row AND its history through the organization
-                    // (see the [#8805] comment below), so an admitted
-                    // org-presentation rollback restores only a version of the
-                    // caller's own org overlay — the env-wide row and its
-                    // history stay out of reach.
+                    // [#12702 · ADR-0131 D6] Same shared verdict as the
+                    // sibling doors.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
                     {
                         const verdict = metaWriteCapabilityVerdict({
                             isSystem: ctx?.isSystem === true,
                             systemPermissions: ctx?.systemPermissions,
-                            canonicalType: canonicalMetaUrlType(req.params.type),
-                            activeOrganizationId: ctx?.tenantId,
                             operation: 'rollback',
                         });
                         if (!verdict.allowed) {
@@ -8152,25 +7682,12 @@ export class RestServer {
                     // resolveMetaWriteActor). `X-Actor` is not consulted.
                     const actor = await this.resolveMetaWriteActor(environmentId, req);
                     const message = typeof body.message === 'string' ? body.message : undefined;
-                    // [#8805] The rollback half. Same argument as publish, one
-                    // step sharper: `rollbackMetaItem` resolves the row AND its
-                    // history through the organization, so an unscoped rollback
-                    // of an org-scoped item restores the env-wide body over the
-                    // env-wide row — a write to a partition the caller never
-                    // named, audited as `null`. See the `PUT` door above.
-                    //
-                    // [commit b5378550e] `ctx` is the one the capability gate above resolved,
-                    // so scope and authorization read the same identity.
-                    const organizationId = organizationIdForMetaWrite(
-                        // [commit 26f3588fb] FOLDED, not raw — see the PUT door's
-                        // org-scope comment for the measurement.
-                        canonicalMetaUrlType(req.params.type), ctx?.tenantId,
-                    );
+                    // [ADR-0131 D6] No organization, as on the `PUT` twin: the
+                    // rollback restores a version of the environment-wide row.
                     const result = await (p as any).rollbackMetaItem({
                         type: req.params.type,
                         name: req.params.name,
                         toVersion,
-                        organizationId,
                         ...(environmentId ? { environmentId } : {}),
                         ...(actor ? { actor } : {}),
                         ...(message ? { message } : {}),
@@ -8221,8 +7738,7 @@ export class RestServer {
                     // door and `/history` only: `/layers` and `?layers=true`
                     // read the active row and keep the pruned plain-read answer.
                     //
-                    // `diffCtx` is this door's one caller resolution; the org
-                    // partition below reads the same value. The refusal is
+                    // `diffCtx` is this door's one caller resolution. The refusal is
                     // {@link refuseNonAuthoringCaller}, shared with `/history`
                     // and `/audit` (#20441) so the three cannot drift apart.
                     const diffCtx = await this.resolveExecCtx(environmentId, req)
@@ -8279,52 +7795,23 @@ export class RestServer {
                     }
                     const diffGated = RestServer.gatesPerCaller(diffMetaType);
                     const diffCurrent = diffGated
-                        ? await this.fetchCurrentMetaDocument(environmentId, req, p)
+                        ? await this.fetchCurrentMetaDocument(req, p)
                         : undefined;
                     if (diffGated && diffCurrent == null) {
                         sendMetaItemAbsent(res);
                         return;
                     }
-                    // [#13406] STATE THE ORG PARTITION — the history twin's
-                    // omission, on the door that reads the SAME table. See the
-                    // history door above for why the predicate is
-                    // `organizationIdForMetaRead` and not the audit twin's raw
-                    // `ctx?.tenantId ?? null`; both arguments carry over
-                    // unchanged, because `diffMetaItem` reads
-                    // `sys_metadata_history` with the identical strict-equality
-                    // `where` (`organization_id: orgId`, no `$or`) and derives
-                    // `orgId` from the identical `request.organizationId ?? null`.
-                    //
-                    // Version identity is the second reason the partition is
-                    // strict rather than unioned here, and it is sharper on this
-                    // door than on `/history`: `version` is a PER-(org,type,name)
-                    // lineage counter, so an org revision 1 and an env revision 1
-                    // both exist. `?from=1&to=2` unioned across partitions would
-                    // have two candidate bodies per bound and would answer a diff
-                    // between revisions of two different lineages — a well-formed
-                    // 200 that is simply not the comparison anyone asked for.
-                    //
-                    // ⚠️ This door reaches `diffMetaItem` through `(p as any)`,
-                    // so — unlike the history twin — the compiler checks NOTHING
-                    // about this literal; measured, not assumed. The omit-spread
-                    // is therefore load-bearing by RUNTIME contract alone: the
-                    // implementation declares `organizationId?: string` and does
-                    // `request.organizationId ?? null`, so an `?? null` copied
-                    // from the audit door would type-check here and still be a
-                    // silent no-op — the exact fix-shaped-non-fix this card is.
-                    //
-                    // `diffCtx` is the caller resolved at the head of this door
-                    // (#20378), not a second resolution.
-                    const diffOrganizationId = organizationIdForMetaRead(
-                        // [commit 26f3588fb] FOLDED, not raw — see the PUT door's
-                        // org-scope comment for the measurement.
-                        canonicalMetaUrlType(req.params.type), diffCtx?.tenantId,
-                    );
+                    // [#13406 · ADR-0131 D6] The ENV partition, stated by
+                    // omission, as on the history twin: `diffMetaItem` reads
+                    // `sys_metadata_history` by strict equality on
+                    // `organization_id` (`request.organizationId ?? null`), and
+                    // `version` is a per-(org, type, name) lineage counter, so
+                    // the environment lineage is the one every `/meta` write
+                    // now extends.
                     const result = await (p as any).diffMetaItem({
                         type: req.params.type,
                         name: req.params.name,
                         ...(environmentId ? { environmentId } : {}),
-                        ...(diffOrganizationId ? { organizationId: diffOrganizationId } : {}),
                         ...(fromVersion !== undefined ? { fromVersion } : {}),
                         ...(toVersion !== undefined ? { toVersion } : {}),
                     });
@@ -8610,41 +8097,12 @@ export class RestServer {
                         // layer into its own answer, so this route could no longer
                         // tell the two stores apart.
                         //
-                        // [#8805] SCOPED, and this reverses what this comment
-                        // used to say. It read: "NO `organizationId`, and that
-                        // is the ONE deliberate divergence from the dispatcher
-                        // twin" — justified because omitting it read the
-                        // env-wide row, "symmetric with what an org-less
-                        // `publishPackageDrafts` writes, so this door resolves
-                        // exactly the publishes this door can produce."
-                        //
-                        // That symmetry was the whole argument, and #8805's
-                        // write-side fix is what ends it: `POST /meta/:type/
-                        // :name/publish` now carries the caller's organization
-                        // for `allowOrgOverride: true` types, so this door can
-                        // now produce an ORG-SCOPED publish. Left unscoped, this
-                        // read would answer 404 about a `view` the very same
-                        // caller published a moment earlier through the very
-                        // same transport — the #8278 defect this route exists to
-                        // close, reopened one partition over. A statement that
-                        // was true of the old write path is not evidence about
-                        // the new one.
-                        //
-                        // ⚠️ Still NOT the forbidden seam. `packages/rest` mints
-                        // no `resolveActiveOrganizationId` — the warning
-                        // `package-routes.ts` echoes at its `deletePackage` call
-                        // ("the dispatcher twin owns that seam") is about
-                        // inventing org RESOLUTION here, and this reads
-                        // `tenantId` off the execution context `resolveExecCtx`
-                        // already resolves, exactly as #8803 did for the audit
-                        // read. [commit e1d4f9e3f] The CALLEE gates: `getMetaItemLayered`
-                        // resolves `organizationIdForMetaRead` AFTER its canonical
-                        // fold, so the tenant goes over RAW. ⛔ Pre-gating HERE, on
-                        // the unfolded `:type`, would be the defect commit 26f3588fb fixed. ⛔ And
-                        // the old "fail-open in the safe direction" reading is the
-                        // argument the predicate refutes: an org named on a type
-                        // the registry does not declare overridable resurrects the
-                        // phantoms #6190 stopped minting.
+                        // [ADR-0131 D6] NO `organizationId`: the per-organization
+                        // overlay axis is retired, so every publish this
+                        // transport produces lands environment-wide, and this
+                        // door resolves exactly those. A legacy
+                        // organization-scoped row is not served; its promotion is
+                        // ADR-0131 C7's.
                         //
                         // Environment scoping still holds: it comes from WHICH
                         // protocol `resolveProtocol` hands back, not from the
@@ -8710,14 +8168,9 @@ export class RestServer {
                         let publishedOverlay: unknown;
                         if (typeof publishedProtocol?.getMetaItemLayered === 'function') {
                             try {
-                                const publishedCtx = await this.resolveExecCtx(environmentId, req)
-                                    .catch(rethrowAuthzStoreUnavailable);
                                 const layered = await publishedProtocol.getMetaItemLayered({
                                     type,
                                     name,
-                                    ...(publishedCtx?.tenantId
-                                        ? { organizationId: publishedCtx.tenantId }
-                                        : {}),
                                 });
                                 if (layered?.overlay !== undefined && layered?.overlay !== null) {
                                     // [#21002, #21986, ADR-0126 §2, ADR-0062 D4]
@@ -10801,7 +10254,8 @@ export class RestServer {
      * as they answer a withdrawn form. Two routes are registered:
      *
      *   GET  {basePath}/forms/:slug          → resolved form spec
-     *   POST {basePath}/forms/:slug/submit   → INSERT record (no auth required)
+     *   POST {basePath}/forms/:slug/submit   → INSERT record (no auth required),
+     *                                          answering `{ id }` only (#22437)
      *
      * Both routes bypass `enforceAuth` even though anonymous-deny is on for the
      * deployment (e.g. ObjectOS multi-tenant). Security is delegated to the
@@ -11221,7 +10675,22 @@ export class RestServer {
                         context,
                     };
                     const result = await p.createData(formCreateRequest);
-                    res.status(201).json(result);
+                    // [#22437] The answer is the created record's id, and
+                    // nothing the insert stored. `createData` answers
+                    // `{ object, id, record, droppedFields? }`, and its `record`
+                    // is the row as stored AFTER the insert pipeline: defaults,
+                    // and whatever a `beforeInsert` / `afterInsert` hook stamped
+                    // — including a value an elevated (`runAs: 'system'`) hook
+                    // derived from existing records this anonymous caller's
+                    // grant may never read. The whitelist above filters what the
+                    // caller WRITES; this line is what filters what it is SHOWN.
+                    // The caller already knows what it submitted, so the one
+                    // fact it lacks is the id. Projecting the row to the form's
+                    // declared fields would not do: a hook may rewrite a
+                    // declared field too. The key stays the top-level `id` of a
+                    // bare body — where the console's public form page reads
+                    // the created id — and no second read builds this answer.
+                    res.status(201).json({ id: result.id });
                 } catch (error: any) {
                     const mapped = mapDataError(error);
                     // Distinct message (this is not the "unhandled" channel),

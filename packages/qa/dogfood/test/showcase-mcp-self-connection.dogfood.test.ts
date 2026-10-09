@@ -17,8 +17,8 @@
 // separate, carefully-gated follow-up.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { MCPServerPlugin } from '@objectstack/mcp';
 import { createMcpConnector } from '@objectstack/connector-mcp';
 
@@ -30,7 +30,7 @@ describe('showcase: the platform connects to its OWN MCP endpoint (#3167 self-co
   beforeAll(async () => {
     // Serve side up (isMcpServerEnabled default-on; the lean harness injects the
     // plugin the way `os dev`/`serve` auto-load it).
-    stack = await bootStack(showcaseStack, { extraPlugins: [new MCPServerPlugin()] });
+    stack = await bootShowcase({ extraPlugins: [new MCPServerPlugin()] });
     const adminToken = await stack.signIn();
 
     // Mint an osk_ key — the self-connection's identity (acts AS the admin caller).

@@ -55,6 +55,9 @@ function makeRest(api: Record<string, unknown>) {
     makeProtocol(),
     { api: { version: 'v1', enableProjectScoping: true, projectResolution: 'auto', ...api } } as any,
   );
+  // [#22430] Both doors refuse an anonymous caller; the overlay is what a
+  // signed-in reader is served, so that is the caller these cases drive.
+  (rest as any).resolveExecCtx = async () => ({ userId: 'u_docs_reader' });
   rest.registerRoutes();
   return rest;
 }

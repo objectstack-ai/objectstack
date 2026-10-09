@@ -23,8 +23,8 @@
 // and it exercises the exact path the Reaper sweeps.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
-import showcaseStack from '@objectstack/example-showcase';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at MODULE
 // LOAD. Each is reached below through a dynamic `import()` inside an `it()` body or a
@@ -74,7 +74,7 @@ describe('objectstack verify LIFECYCLE (ADR-0057): declared policies bound growt
   const backdated = (days: number) => new Date(Date.now() - days * DAY_MS);
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     engine = stack.kernel.getService('objectql') as unknown as EngineLike;
     lifecycle = stack.kernel.getService('lifecycle') as unknown as LifecycleLike;
     expect(lifecycle?.sweep, 'the ObjectQLPlugin must register the ADR-0057 lifecycle service').toBeTruthy();

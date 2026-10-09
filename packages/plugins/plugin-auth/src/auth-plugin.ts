@@ -3164,7 +3164,10 @@ export class AuthPlugin implements Plugin {
         // Forward request headers so better-auth can resolve the caller's
         // session (sessionMiddleware on /oauth2/create-client). Without
         // the session the row would lack `user_id` and never appear in
-        // the My Applications view.
+        // the My Applications view. [#22398] That read is in-process, so it
+        // takes the `getSession` reader's input: a cookie request reads
+        // without renewal (its cookie would be staged on a response nobody
+        // sends); a bearer-only one renews as before.
         let result: any;
         try {
           result = await authApi.createOAuthClient({
@@ -3173,7 +3176,7 @@ export class AuthPlugin implements Plugin {
               redirect_uris: redirectUris,
               type: safeType,
             },
-            headers: c.req.raw.headers,
+            ...inProcessSessionReadInput(c.req.raw.headers),
           });
         } catch (err: any) {
           const status = typeof err?.status === 'number' ? err.status : 500;

@@ -138,8 +138,11 @@ describe('runRegisterSamlProviderFromForm (ADR-0069 P3)', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.acsUrl).toBe('http://localhost:3000/api/v1/auth/sso/saml2/sp/acs/acme-saml');
     expect(res.body.spMetadataUrl).toBe('http://localhost:3000/api/v1/auth/sso/saml2/sp/metadata?providerId=acme-saml');
-    // re-dispatched to the real /sso/register with the nested shape
-    expect(dispatched!.url).toBe('http://localhost:3000/api/v1/auth/sso/register');
+    // re-dispatched to the real /sso/register with the nested shape — with
+    // `disableRefresh`, because this request carries a session cookie (#22398:
+    // the inner read must not renew a session whose cookie this bridge never
+    // sends back; `in-process-session-renewal.pin.test.ts` measures it).
+    expect(dispatched!.url).toBe('http://localhost:3000/api/v1/auth/sso/register?disableRefresh=true');
     expect(dispatched!.body).toMatchObject({
       providerId: 'acme-saml',
       issuer: 'https://idp.acme.com/entity',

@@ -37,8 +37,8 @@
 // so a verdict on a change to either is a verdict on its last build.
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { assertArmed, armedWhen } from './armed.js';
 
 const SYS = { isSystem: true } as const;
@@ -77,7 +77,7 @@ describe('a permission-set assignment grants only inside its validity window (AD
   const door = async (who: string) => (await stack.apiAs(tok[who], 'GET', `${DOOR}?$top=1`)).status;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     adminTok = await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
 

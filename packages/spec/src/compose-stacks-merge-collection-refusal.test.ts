@@ -60,6 +60,7 @@ const shared = (out: ObjectStackDefinition) => (out.objects ?? []).find((o) => o
  * refusal prints it in. `fields` is absent by rule.
  */
 const COLLECTION_KEYS_IN_SHAPE_ORDER = [
+  'attachedOnRead',
   'indexes',
   'fieldGroups',
   'requiredPermissions',
@@ -135,6 +136,7 @@ describe("composeStacks objectConflict: 'merge' — a collection both objects de
     ['highlightFields', ['title'], ['body']],
     ['activityMilestones', [{ name: 'm_a' }], [{ name: 'm_b' }]],
     ['requiredPermissions', ['crm.read'], ['billing.read']],
+    ['attachedOnRead', { viewer: { can_act: 'boolean' } }, { viewer: { can_act: 'boolean', is_submitter: 'boolean' } }],
   ] as const)("refuses two objects declaring different '%s'", (key, left, right) => {
     const a = defineStack({ manifest: mf('com.example.a'), objects: [obj('shared', { [key]: left })] }, { strict: false });
     const b = defineStack({ manifest: mf('com.example.b'), objects: [obj('shared', { [key]: right })] }, { strict: false });

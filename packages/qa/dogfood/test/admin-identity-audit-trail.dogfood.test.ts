@@ -51,8 +51,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 
 const SYSTEM_CTX = { isSystem: true };
@@ -99,7 +99,7 @@ describe('#4940: what an admin identity operation leaves in sys_audit_log', () =
   beforeAll(async () => {
     priorScim = process.env.OS_SCIM_ENABLED;
     process.env.OS_SCIM_ENABLED = 'true';
-    stack = await bootStack(showcaseStack, { extraPlugins: [new AuditPlugin()] });
+    stack = await bootShowcase({ extraPlugins: [new AuditPlugin()] });
     adminToken = await stack.signIn(); // the seeded dev admin (platform admin)
     ql = await stack.kernel.getServiceAsync<any>('objectql');
     const [admin] = await findRows(ql, 'sys_user', { email: 'admin@objectos.ai' }, 1);

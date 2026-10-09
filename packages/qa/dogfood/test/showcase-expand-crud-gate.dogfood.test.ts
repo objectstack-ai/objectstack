@@ -33,8 +33,8 @@
 // unregistered orphan to `proof-registry.mts`.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 
 const SYS = { isSystem: true } as const;
@@ -56,7 +56,7 @@ describe('showcase: $expand honours the referenced object’s CRUD gate + OWD (#
   let foreignInvoiceId: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, { security: showcaseAppDefaultSecurity() });
+    stack = await bootShowcase({ security: showcaseAppDefaultSecurity() });
     adminTok = await stack.signIn();
     contribTok = await stack.signUp(CONTRIB_EMAIL);
     ql = await stack.kernel.getServiceAsync('objectql');

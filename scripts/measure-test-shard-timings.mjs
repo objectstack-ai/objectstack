@@ -155,6 +155,92 @@ export function median(values) {
 // lane exists to end.
 export const MINIMUM_EXECUTED_RUNS = 3;
 
+// The headroom of the per-package suite-duration ceiling (#16468). A ruled
+// number, not a tunable: the maintainer's ruling put it at 25% over "the
+// refreshed measurement", and the ruling that followed read that measurement
+// as the package's SLOWEST executed run in the refresh window -- not its
+// median, which is this file's weight. Measured on the 21-run refresh that
+// landed as 040184752c: 31 of the 71 measured packages had a window maximum
+// above median x 1.25, so a ceiling built on the median would have been red on
+// the dataset's own runs, the standing-red shape a brake is learned around.
+//
+// The ceiling travels with the dataset as its own field (`ceilings`), beside
+// the weights rather than in place of them: the partitioner and the drift gate
+// keep reading `packages` as name -> median, unchanged.
+export const CEILING_HEADROOM = 1.25;
+
+// One package's ceiling from its executed per-run readings in this refresh:
+// the slowest of them times the headroom, rounded UP to the hundredth, so the
+// rounding can never put the window's own slowest run over its own line.
+// A file-sharded package's readings are already per-run SUMS of its slices
+// (collectSamples), so this is the slowest whole-suite run, never one slice.
+export function ceilingOf(values, headroom = CEILING_HEADROOM) {
+  if (!Array.isArray(values) || values.length === 0) throw new Error('ceilingOf: no executed readings');
+  return Math.ceil(Math.max(...values) * headroom * 100) / 100;
+}
+
+// The per-package ceilings a refresh writes (#16468), and the packages that
+// get none, with the reason. Every package in `packages` lands in exactly one
+// of the two.
+//
+//   HELD      a package the prior dataset already gave a ceiling keeps it,
+//             byte for byte. A refresh NEVER raises a ceiling -- the ruling
+//             is "a ceiling rises only by a ruling", and a refresh that
+//             re-derived it from a slower window would raise it by the very
+//             growth the ratchet exists to stop (the line ratchets' rule,
+//             which the card cites). A raise is a ruled record in
+//             scripts/check-test-suite-ceilings.mjs, never an edit here.
+//             Nor does a refresh LOWER one: a quieter window is variance, not
+//             a faster suite, and a ceiling ratcheted down on variance is red
+//             on the next ordinary run.
+//   NEW       a package with no prior ceiling, not provisional, and executed
+//             in this refresh: its slowest executed run x the headroom.
+//   uncapped  `provisional` -- fewer than `minimumRuns` executed runs is not a
+//             baseline (#22014), so no ceiling and, per the ruling, no red;
+//             `carried` -- re-confirmed by a cache HIT but executed in no run
+//             of this window, so there is no slowest run to read. The next
+//             refresh that executes it gives it one.
+//
+// A prior ceiling for a package no longer in `packages` is dropped with it.
+export function suiteCeilings({ bySample, packages, provisional, prior = null, headroom = CEILING_HEADROOM }) {
+  if (prior !== null) {
+    if (typeof prior !== 'object' || Array.isArray(prior)) {
+      throw new Error(
+        `the prior dataset's \`ceilings\` is ${JSON.stringify(prior)}, not a map of package -> seconds. ` +
+          'Refusing to guess which ceilings to hold.'
+      );
+    }
+    for (const [name, seconds] of Object.entries(prior)) {
+      if (typeof seconds !== 'number' || !Number.isFinite(seconds) || !(seconds > 0)) {
+        throw new Error(
+          `the prior dataset's ceiling for ${name} is ${JSON.stringify(seconds)}, not a positive duration. ` +
+            'Refusing to hold or replace it by guessing.'
+        );
+      }
+    }
+  }
+  const short = new Set(provisional);
+  const ceilings = {};
+  const uncapped = {};
+  for (const name of Object.keys(packages).sort((a, b) => a.localeCompare(b, 'en'))) {
+    if (prior !== null && Object.hasOwn(prior, name)) {
+      ceilings[name] = prior[name];
+      continue;
+    }
+    if (short.has(name)) {
+      uncapped[name] = 'provisional';
+      continue;
+    }
+    const values = bySample.get(name);
+    if (!values || values.length === 0) {
+      uncapped[name] = 'carried';
+      continue;
+    }
+    ceilings[name] = ceilingOf(values, headroom);
+  }
+  return { ceilings, uncapped };
+}
+
 // Which file-level slice a summary's tasks were run as, or null for a whole
 // package (#16173).
 //
@@ -569,6 +655,9 @@ export function buildDataset({
   provenance,
   carryFrom = null,
   carryProvisional = null,
+  // The prior dataset's `ceilings`, or null when it has none -- a dataset
+  // written before the ceilings existed, read as "nothing to hold" (#16468).
+  carryCeilings = null,
   minimumRuns = MINIMUM_EXECUTED_RUNS,
 }) {
   const { bySample, cachedNames, incompleteSlices } = collectSamples(perSummary);
@@ -628,6 +717,8 @@ export function buildDataset({
   if (!Number.isInteger(minimumRuns) || minimumRuns < 1) {
     throw new Error(`minimumRuns must be a positive integer, got ${JSON.stringify(minimumRuns)}`);
   }
+  const provisional = provisionalPackages({ bySample, carriedOver, carryProvisional, minimumRuns });
+  const { ceilings, uncapped } = suiteCeilings({ bySample, packages, provisional, prior: carryCeilings });
   return {
     note:
       'GENERATED by scripts/measure-test-shard-timings.mjs -- do not hand-edit. Per-package ' +
@@ -636,10 +727,15 @@ export function buildDataset({
       'Every weight is a real measurement: the ones in `carriedOver` were measured by an earlier ' +
       'refresh and re-confirmed unchanged by a turbo cache HIT in this one. A weight is the median ' +
       'of the executed runs that measured it; the ones in `provisional` rest on fewer than ' +
-      '`provenance.minimumRuns` of them -- fit to balance on, NOT a baseline to set a ceiling from.',
+      '`provenance.minimumRuns` of them -- fit to balance on, NOT a baseline to set a ceiling from. ' +
+      '`ceilings` is each package\'s suite-duration ceiling, graded by scripts/check-test-suite-ceilings.mjs: ' +
+      'its slowest executed run in the refresh window that first set it, times `provenance.ceilingHeadroom`, ' +
+      'then held by every later refresh -- raised only by a ruling, never by a refresh. `uncapped` names ' +
+      'the packages with none, and why.',
     // The bar `provisional` was judged against travels with the list, so a
     // reader never has to know which version of this script wrote the file.
-    provenance: { ...provenance, minimumRuns },
+    // The ceiling headroom travels the same way (#16468).
+    provenance: { ...provenance, minimumRuns, ceilingHeadroom: CEILING_HEADROOM },
     secondsPerTestFileFallback: fallbackRate(measured, fileCounts),
     packages,
     skippedAsCached: [...cachedNames].sort((a, b) => a.localeCompare(b, 'en')),
@@ -657,20 +753,35 @@ export function buildDataset({
     // the drift gate read `packages` as name -> number. Always present -- an
     // empty list and an absent key must not read the same way, since an absent
     // key is exactly how a dataset that predates this rule is recognised.
-    provisional: provisionalPackages({ bySample, carriedOver, carryProvisional, minimumRuns }),
+    provisional,
+    // #16468. The per-package suite-duration ceilings and the packages with
+    // none (see suiteCeilings). Beside the weights, never in place of them --
+    // the same reason as `carriedOver` and `provisional`. Always present, for
+    // the same reason as `provisional`: an ABSENT `ceilings` is how the check
+    // recognises a dataset written before the ceilings existed, which it reads
+    // as NOT MEASURED rather than as a table with no rows.
+    ceilings,
+    uncapped,
   };
 }
 
 // The run-to-run spread of every package, as the Markdown table the refresh
 // PR's body carries (#22014). One row per package in the dataset:
 //
-//   package | runs | min | median | max | max/min
+//   package | runs | min | median | max | max/min | ceiling
 //
 // where `runs` counts the executed runs behind the weight and the three
 // seconds columns are those runs' readings. A carried package has no reading in
 // this pass, so it says `carried` instead of inventing numbers; a provisional
 // one is marked in its own column. Rows sort by max/min, widest first, so the
 // noisiest suites are the ones a reviewer meets first.
+//
+// `ceiling` (#16468) is the dataset's own `ceilings` entry, `—` for an
+// uncapped package with the reason in the last column. A HELD ceiling that this
+// window would have set differently says so -- `held; this window: N` -- so the
+// reviewer sees the growth a refresh deliberately did not absorb (a raise is a
+// ruling), and a window reading already OVER its held ceiling is called out
+// rather than left to be inferred from two columns.
 //
 // ⛔ Kept OUT of the dataset file. Nothing machine-reads a spread -- the
 // partitioner and the drift gate read the weights, and the one machine fact a
@@ -679,12 +790,30 @@ export function buildDataset({
 export function renderSpread({ bySample, dataset }) {
   const fmt = (n) => n.toFixed(2);
   const provisional = new Set(dataset.provisional);
+  const ceilings = dataset.ceilings ?? {};
+  const uncapped = dataset.uncapped ?? {};
+  const headroom = dataset.provenance?.ceilingHeadroom ?? CEILING_HEADROOM;
+  const ceilingCells = (name, values) => {
+    const flags = [];
+    if (provisional.has(name)) flags.push('provisional');
+    if (!Object.hasOwn(ceilings, name)) {
+      if (uncapped[name] === 'carried') flags.push('carried: no ceiling');
+      return ['—', flags.join('; ')];
+    }
+    const ceiling = ceilings[name];
+    if (values && !provisional.has(name)) {
+      const fresh = ceilingOf(values, headroom);
+      if (fresh !== ceiling) flags.push(`held; this window: ${fmt(fresh)}`);
+      if (Math.max(...values) > ceiling) flags.push('⚠ a window run is OVER its held ceiling');
+    }
+    return [fmt(ceiling), flags.join('; ')];
+  };
   const rows = [];
   for (const name of Object.keys(dataset.packages)) {
     const values = bySample.get(name);
-    const flag = provisional.has(name) ? 'provisional' : '';
+    const [ceilingCell, flag] = ceilingCells(name, values);
     if (!values) {
-      rows.push({ ratio: -1, name, cells: [`\`${name}\``, '0', 'carried', 'carried', 'carried', '—', flag] });
+      rows.push({ ratio: -1, name, cells: [`\`${name}\``, '0', 'carried', 'carried', 'carried', '—', ceilingCell, flag] });
       continue;
     }
     const lo = Math.min(...values);
@@ -700,6 +829,7 @@ export function renderSpread({ bySample, dataset }) {
         fmt(Math.round(median(values) * 100) / 100),
         fmt(hi),
         Number.isFinite(ratio) ? `${ratio.toFixed(2)}×` : '∞',
+        ceilingCell,
         flag,
       ],
     });
@@ -707,10 +837,12 @@ export function renderSpread({ bySample, dataset }) {
   rows.sort((a, b) => b.ratio - a.ratio || a.name.localeCompare(b.name, 'en'));
   const minimumRuns = dataset.provenance?.minimumRuns;
   const lines = [
-    `Each package's executed runs in this refresh (minimum ${minimumRuns}), and the spread of its readings in seconds.`,
+    `Each package's executed runs in this refresh (minimum ${minimumRuns}), the spread of its readings in seconds, ` +
+      `and the suite-duration ceiling \`Test Core\` grades it against: its slowest executed run x ${headroom} when ` +
+      'first set, then held by every refresh -- a ceiling is raised only by a ruling.',
     '',
-    '| package | runs | min s | median s | max s | max/min | |',
-    '|---|--:|--:|--:|--:|--:|---|',
+    '| package | runs | min s | median s | max s | max/min | ceiling s | |',
+    '|---|--:|--:|--:|--:|--:|--:|---|',
     ...rows.map((r) => `| ${r.cells.join(' | ')} |`),
   ];
   return `${lines.join('\n')}\n`;
@@ -748,11 +880,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'env-carried slices (#19278)': 11,
   // #22014: the per-package minimum of executed runs, and the spread table.
   'minimum executed runs per package': 14,
+  // #16468: the per-package suite-duration ceilings the refresh writes.
+  'suite-duration ceilings (#16468)': 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 3;
+const SELF_TEST_BATTERY_FLOOR = 4;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1664,12 +1798,114 @@ function selfTest() {
     const table = renderSpread({ bySample: collectSamples(runs).bySample, dataset: ds });
     const body = table.split('\n').filter((l) => l.startsWith('| `'));
     if (body.length !== 3) throw new Error(`spread: expected one row per package, got ${body.length}:\n${table}`);
-    if (body[0] !== '| `a` | 3 | 10.00 | 20.00 | 30.00 | 3.00× |  |') throw new Error(`spread: the widest row is wrong: ${body[0]}`);
-    if (!body.some((l) => l.startsWith('| `b` | 1 | 20.00 | 20.00 | 20.00 | 1.00× | provisional |'))) {
+    if (body[0] !== '| `a` | 3 | 10.00 | 20.00 | 30.00 | 3.00× | 37.50 |  |') throw new Error(`spread: the widest row is wrong: ${body[0]}`);
+    if (!body.some((l) => l.startsWith('| `b` | 1 | 20.00 | 20.00 | 20.00 | 1.00× | — | provisional |'))) {
       throw new Error(`spread: the provisional row is wrong:\n${table}`);
     }
     if (!body.some((l) => l.startsWith('| `cached` | 0 | carried |'))) throw new Error(`spread: the carried row is wrong:\n${table}`);
     if (!table.includes(`minimum ${MINIMUM_EXECUTED_RUNS}`)) throw new Error('spread: the table does not state the minimum');
+  });
+
+  // -- The suite-duration ceilings (#16468) -------------------------------
+  //
+  // The ruled reading: a package's ceiling is its SLOWEST executed run in the
+  // refresh window x 1.25 (not its median, which is the weight), a provisional
+  // package gets none, and a refresh never moves a ceiling it already set.
+  battery('suite-duration ceilings (#16468)');
+  const windowRuns = [
+    runOf('r1', [testTask('a', 0, 10_000), testTask('b', 0, 20_000), testTask('cached', 0, 90, 'HIT')]),
+    runOf('r2', [testTask('a', 0, 30_000), testTask('cached', 0, 90, 'HIT')]),
+    runOf('r3', [testTask('a', 0, 20_000), testTask('cached', 0, 90, 'HIT')]),
+  ];
+  const ceilingSet = (extra = {}) => depthSet(windowRuns, { carryFrom: { cached: 500 }, carryProvisional: [], ...extra });
+  check(() => {
+    // The ruled headroom. Changing it is a ruling, not a tune.
+    if (CEILING_HEADROOM !== 1.25) throw new Error(`ceilings: CEILING_HEADROOM is ${CEILING_HEADROOM}, not the ruled 1.25`);
+  });
+  check(() => {
+    // THE RULED READING: the window MAXIMUM (30s) x 1.25 = 37.5s, not the
+    // median (20s) x 1.25 = 25s -- which the window's own slowest run is over.
+    const first = ceilingSet();
+    if (first.ceilings.a !== 37.5) throw new Error(`ceilings: a read ${first.ceilings.a}, not its slowest run x 1.25 (37.5)`);
+  });
+  check(() => {
+    // The weights are untouched: `a` still weighs its median.
+    if (ceilingSet().packages.a !== 20) throw new Error(`ceilings: the median weight moved (${ceilingSet().packages.a})`);
+  });
+  check(() => {
+    // Provisional: one executed run is not a baseline -- no ceiling, named why.
+    const first = ceilingSet();
+    if (Object.hasOwn(first.ceilings, 'b') || first.uncapped.b !== 'provisional') {
+      throw new Error(`ceilings: a provisional package got ${JSON.stringify(first.ceilings.b)} / ${JSON.stringify(first.uncapped.b)}`);
+    }
+  });
+  check(() => {
+    // Carried and not provisional, with nothing to hold: no slowest run exists
+    // in this window, so no ceiling, and the reason is named.
+    const first = ceilingSet();
+    if (Object.hasOwn(first.ceilings, 'cached') || first.uncapped.cached !== 'carried') {
+      throw new Error(`ceilings: a carried package got ${JSON.stringify(first.ceilings.cached)} / ${JSON.stringify(first.uncapped.cached)}`);
+    }
+  });
+  check(() => {
+    // Every package lands in exactly one of the two maps.
+    const first = ceilingSet();
+    const names = Object.keys(first.packages);
+    const both = names.filter((n) => Object.hasOwn(first.ceilings, n) === Object.hasOwn(first.uncapped, n));
+    if (both.length) throw new Error(`ceilings: ${both.join(', ')} is in both maps or in neither`);
+  });
+  check(() => {
+    // HELD, never raised: a prior 30s stays 30s although this window gives 37.5.
+    const held = ceilingSet({ carryCeilings: { a: 30 } });
+    if (held.ceilings.a !== 30) throw new Error(`ceilings: a refresh raised a held ceiling to ${held.ceilings.a}`);
+  });
+  check(() => {
+    // HELD, never lowered: a quieter window is variance, not a faster suite.
+    const held = ceilingSet({ carryCeilings: { a: 100 } });
+    if (held.ceilings.a !== 100) throw new Error(`ceilings: a refresh lowered a held ceiling to ${held.ceilings.a}`);
+  });
+  check(() => {
+    // A carried package keeps the ceiling an earlier window gave it, and a
+    // ceiling for a package gone from the dataset goes with it.
+    const held = ceilingSet({ carryCeilings: { cached: 640, gone: 9 } });
+    if (held.ceilings.cached !== 640 || Object.hasOwn(held.uncapped, 'cached')) {
+      throw new Error(`ceilings: a carried package lost its held ceiling (${JSON.stringify(held.ceilings)})`);
+    }
+    if (Object.hasOwn(held.ceilings, 'gone')) throw new Error('ceilings: a ceiling outlived its package');
+  });
+  check(() => {
+    // A malformed prior table is refused, never guessed around.
+    if (!threw(() => ceilingSet({ carryCeilings: [30] }))) throw new Error('ceilings: a prior list was read as a map');
+    if (!threw(() => ceilingSet({ carryCeilings: { a: -1 } }))) throw new Error('ceilings: a negative prior ceiling was held');
+  });
+  check(() => {
+    // A file-sharded package's ceiling is from its per-run SUMS: the slowest
+    // whole run (650s), never the slowest slice (330s).
+    const sliceRun = (run, x, y) => [
+      runOf(run, [slicedTask('cli', 0, x, 1, 2)]),
+      runOf(run, [slicedTask('cli', 0, y, 2, 2)]),
+    ];
+    const ds = depthSet([...sliceRun('r1', 300_000, 300_000), ...sliceRun('r2', 310_000, 310_000), ...sliceRun('r3', 320_000, 330_000)]);
+    if (ds.ceilings.cli !== 812.5) throw new Error(`ceilings: a sliced package read ${ds.ceilings.cli}, not its slowest whole run x 1.25 (812.5)`);
+  });
+  check(() => {
+    // The headroom travels with the table, like the minimum.
+    if (ceilingSet().provenance.ceilingHeadroom !== CEILING_HEADROOM) throw new Error('ceilings: provenance does not record the headroom');
+  });
+  check(() => {
+    // Rounding is UP, so the window's slowest run is never over its own line.
+    if (ceilingOf([1.0001]) < 1.0001 * CEILING_HEADROOM) throw new Error(`ceilings: rounding put the line under max x headroom (${ceilingOf([1.0001])})`);
+    if (!threw(() => ceilingOf([]))) throw new Error('ceilings: an empty reading set produced a ceiling');
+  });
+  check(() => {
+    // The spread table shows a held ceiling this window would have set
+    // differently, and a run already over it.
+    const held = ceilingSet({ carryCeilings: { a: 25 } });
+    const table = renderSpread({ bySample: collectSamples(windowRuns).bySample, dataset: held });
+    const row = table.split('\n').find((l) => l.startsWith('| `a` |'));
+    if (row !== '| `a` | 3 | 10.00 | 20.00 | 30.00 | 3.00× | 25.00 | held; this window: 37.50; ⚠ a window run is OVER its held ceiling |') {
+      throw new Error(`spread: the held row is wrong: ${row}`);
+    }
   });
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) ----
@@ -1840,6 +2076,7 @@ function main() {
   // from the numbers actually in the file rather than from a subset of them.
   let carryFrom = null;
   let carryProvisional = null;
+  let carryCeilings = null;
   if (mergeInto !== null) {
     const prior = JSON.parse(readFileSync(mergeInto, 'utf8'));
     if (!prior || typeof prior.packages !== 'object' || prior.packages === null) {
@@ -1853,6 +2090,10 @@ function main() {
     // dataset with no `provisional` key never recorded one, which buildDataset
     // reads as "not shown to meet the minimum" -- null, deliberately not [].
     carryProvisional = Object.hasOwn(prior, 'provisional') ? prior.provisional : null;
+    // The ceilings it set are HELD (#16468): a refresh never raises or lowers
+    // one. A prior dataset with no `ceilings` key predates them -- nothing to
+    // hold, so this refresh sets the first table.
+    carryCeilings = Object.hasOwn(prior, 'ceilings') ? prior.ceilings : null;
   }
 
   const fileCounts = new Map();
@@ -1870,6 +2111,7 @@ function main() {
     fileCounts,
     carryFrom,
     carryProvisional,
+    carryCeilings,
     provenance: {
       measuredAt: new Date().toISOString().slice(0, 10),
       summaries: inputs.map((i) => path.basename(i.file)),
@@ -1924,6 +2166,26 @@ function main() {
         `measured by fewer than ${dataset.provenance.minimumRuns} executed runs (or carried from a ` +
         `dataset that never showed they were): ${dataset.provisional.join(', ')}. Feed more runs, or ` +
         'read them as balancing inputs only.'
+    );
+  }
+  // The ceilings (#16468), on the same stderr: how many a package now has, which
+  // packages have none and why, and -- the line a reviewer most needs -- any
+  // HELD ceiling a run of this very window already went over, which on `main`
+  // is the brake having fired, not a number to absorb.
+  const uncappedNames = Object.entries(dataset.uncapped);
+  const bySampleNow = collectSamples(perSummary).bySample;
+  const over = Object.entries(dataset.ceilings)
+    .filter(([name, ceiling]) => !dataset.provisional.includes(name) && Math.max(...(bySampleNow.get(name) ?? [0])) > ceiling)
+    .map(([name, ceiling]) => `${name} (${Math.max(...bySampleNow.get(name)).toFixed(2)}s > ${ceiling}s)`);
+  console.error(
+    `measure-test-shard-timings: ${Object.keys(dataset.ceilings).length} suite-duration ceiling(s)` +
+      `${carryCeilings === null ? ' -- the FIRST table: every one is its slowest executed run x ' + dataset.provenance.ceilingHeadroom : ', the prior ones held'}` +
+      `; ${uncappedNames.length} uncapped${uncappedNames.length ? ` (${uncappedNames.map(([n, why]) => `${n}: ${why}`).join(', ')})` : ''}.`
+  );
+  if (over.length > 0) {
+    console.error(
+      `measure-test-shard-timings: ⚠ ${over.length} package(s) ran OVER their held ceiling in this window: ` +
+        `${over.join(', ')}. A refresh never raises a ceiling; that takes a ruling.`
     );
   }
   if (dataset.skippedIncompleteSlices.length > 0) {

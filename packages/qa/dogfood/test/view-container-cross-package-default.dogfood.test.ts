@@ -35,8 +35,8 @@
 // in-process, in `packages/metadata-protocol/src/view-container-runtime-expansion.test.ts`.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 const OBJECT = 'showcase_task';
 const DEFAULT = `${OBJECT}.default`;
@@ -62,7 +62,7 @@ describe('dogfood: a bare-list container on another package\'s object leaves its
   let token: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     token = await stack.signIn();
   }, 180_000);
 

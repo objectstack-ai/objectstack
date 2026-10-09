@@ -22,12 +22,17 @@
 // leaves out of the registry the sweep used to read. The harness default is an
 // org-less admin, whose save lands env-wide — and that shape kept the admin's
 // wording before the fix as well (measured), so a pin booted that way would
-// pass against the defect. The first case asserts the overlay really is
-// org-scoped, so this file cannot drift into the vacuous shape unnoticed.
+// pass against the defect.
+//
+// [ADR-0131 D6] Since the per-organization overlay axis retired, the metadata
+// door carries no organization, so even this org-active admin's save lands
+// ENVIRONMENT-WIDE, and the boot sweep reads the environment layer (it names
+// no organization either). `orgContext: true` stays: it is the deployment
+// shape, and the first case now pins that the save is environment-wide there.
 //
 // ## What each case pins
 //
-//   - the metadata-door edit is org-scoped and projected at once (preconditions);
+//   - the metadata-door edit is environment-wide and projected at once (preconditions);
 //   - after a cold boot the sending row, `GET /meta` and a real `sendTemplate`
 //     all carry the admin's wording;
 //   - control: the organization DATA door is closed (ADR-0131 D6, ruling C on
@@ -38,8 +43,8 @@
 //     `customized: true` that survived the boot.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { EmailServicePlugin } from '@objectstack/plugin-email';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -64,7 +69,7 @@ const emailPlugin = () => new EmailServicePlugin({
 });
 
 const boot = (databaseFile: string) =>
-    bootStack(showcaseStack, { databaseFile, orgContext: true, extraPlugins: [emailPlugin()] });
+    bootShowcase({ databaseFile, orgContext: true, extraPlugins: [emailPlugin()] });
 
 describe('[#21785] a metadata-door email template edit survives a cold boot (showcase)', () => {
     let prevCwd: string;
@@ -109,7 +114,7 @@ describe('[#21785] a metadata-door email template edit survives a cold boot (sho
         if (dir) rmSync(dir, { recursive: true, force: true });
     });
 
-    it('precondition: the metadata-door edit lands org-scoped and is projected into the sending row at once', async () => {
+    it('precondition: an org-active admin\'s metadata-door edit lands environment-wide and is projected into the sending row at once', async () => {
         const [seeded] = await sendingRows();
         expect({ subject: seeded?.subject, managed_by: seeded?.managed_by, customized: seeded?.customized })
             .toEqual({ subject: PACKAGE_SUBJECT, managed_by: 'package', customized: false });
@@ -125,12 +130,11 @@ describe('[#21785] a metadata-door email template edit survives a cold boot (sho
         expect(put.status, JSON.stringify(put.json)).toBe(200);
         expect(put.json?.projectionApplied).toEqual({ success: true });
 
-        // ⛔ Without this the restart below proves nothing: an env-wide overlay
-        // survived the restart before the fix too.
+        // [ADR-0131 D6] The door names no organization, whatever the admin's.
         const ql: any = await stack!.kernel.getServiceAsync('objectql');
         const stored = await ql.find('sys_metadata', { where: { type: 'email_template', name: NAME }, context: SYS });
         expect(stored).toHaveLength(1);
-        expect(stored[0].organization_id, 'the overlay is org-scoped').toEqual(expect.any(String));
+        expect(stored[0].organization_id ?? null, 'the overlay is environment-wide').toBeNull();
 
         expect((await sendingRows()).map((r: any) => r.subject)).toEqual([ADMIN_SUBJECT]);
     });

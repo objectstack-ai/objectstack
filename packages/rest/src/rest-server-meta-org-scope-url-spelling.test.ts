@@ -23,6 +23,14 @@
 // boundary consuming the URL spelling contract is the repair
 // `metadata-url-spelling.ts`'s own header forbids.
 //
+// ── [ADR-0131 D6] What changed ─────────────────────────────────────────────
+//
+// The per-organization overlay axis is retired: no `/meta` door supplies an
+// organization for any type, so the two spellings cannot land in two
+// partitions any more — they land in the one environment partition. The pins
+// below keep the spelling-twin property (one namespace per item, whatever the
+// spelling) and assert it as "no organization", per door and per spelling.
+//
 // ── What these assertions are ABOUT, and why they are argument-level ───────
 //
 // Same reasoning as the #8805 suite next door: the link from
@@ -40,7 +48,6 @@
 // suite cannot be read as licensing a fold there.
 
 import { describe, it, expect, vi } from 'vitest';
-import { organizationIdForMetaWrite } from '@objectstack/metadata-core';
 import { META_URL_TO_SINGULAR } from '@objectstack/spec/meta-spelling';
 import { RestServer } from './rest-server.js';
 
@@ -153,7 +160,7 @@ async function readWith(type: string) {
     return requestFrom(b.getMetaItem);
 }
 
-describe('#10340 the /meta doors decide org scope on the FOLDED type, not the raw spelling', () => {
+describe('#10340 · ADR-0131 D6 — no spelling of any type carries an organization through the /meta doors', () => {
     describe('the two measured members — spelling twins are ONE namespace again', () => {
         for (const { plural, singular } of MEMBERS) {
             it(`PUT /meta/${plural}/:name lands where PUT /meta/${singular}/:name lands`, async () => {
@@ -163,46 +170,46 @@ describe('#10340 the /meta doors decide org scope on the FOLDED type, not the ra
                 // shadowed — persisted, receipted as live, served by nothing.
                 const viaPlural = await writeWith(plural);
                 const viaSingular = await writeWith(singular);
-                expect(viaPlural.organizationId).toBe(ORG);
+                expect(viaPlural.organizationId).toBeUndefined();
                 expect(viaPlural.organizationId).toBe(viaSingular.organizationId);
             });
 
             it(`GET /meta/${plural}/:name resolves the same partition as the singular`, async () => {
                 const viaPlural = await readWith(plural);
                 const viaSingular = await readWith(singular);
-                expect(viaPlural.organizationId).toBe(ORG);
+                expect(viaPlural.organizationId).toBeUndefined();
                 expect(viaPlural.organizationId).toBe(viaSingular.organizationId);
             });
 
-            it(`scopes every remaining door for /meta/${plural} — list, layers, compound, delete, publish, rollback`, async () => {
+            it(`names no organization on any remaining door for /meta/${plural} — list, layers, delete, publish, rollback`, async () => {
                 const b = boot(AUTHORIZED);
                 await b.drive('GET', `${META}/:type`, { params: { type: plural } });
-                expect(requestFrom(b.getMetaItems).organizationId).toBe(ORG);
+                expect(requestFrom(b.getMetaItems).organizationId).toBeUndefined();
 
                 const b2 = boot(AUTHORIZED);
                 await b2.drive('GET', `${META}/:type/:name/layers`, {
                     params: { type: plural, name: 'greeting' },
                 });
-                expect(requestFrom(b2.getMetaItemLayered).organizationId).toBe(ORG);
+                expect(requestFrom(b2.getMetaItemLayered).organizationId).toBeUndefined();
 
                 const b4 = boot(AUTHORIZED);
                 await b4.drive('DELETE', `${META}/:type/:name`, {
                     params: { type: plural, name: 'greeting' },
                 });
-                expect(requestFrom(b4.deleteMetaItem).organizationId).toBe(ORG);
+                expect(requestFrom(b4.deleteMetaItem).organizationId).toBeUndefined();
 
                 const b5 = boot(AUTHORIZED);
                 await b5.drive('POST', `${META}/:type/:name/publish`, {
                     params: { type: plural, name: 'greeting' },
                 });
-                expect(requestFrom(b5.publishMetaItem).organizationId).toBe(ORG);
+                expect(requestFrom(b5.publishMetaItem).organizationId).toBeUndefined();
 
                 const b6 = boot(AUTHORIZED);
                 await b6.drive('POST', `${META}/:type/:name/rollback`, {
                     params: { type: plural, name: 'greeting' },
                     body: { toVersion: 1 },
                 });
-                expect(requestFrom(b6.rollbackMetaItem).organizationId).toBe(ORG);
+                expect(requestFrom(b6.rollbackMetaItem).organizationId).toBeUndefined();
 
                 // [commit 7986d973f] The compound-name GET and PUT were driven here too,
                 // as the doors most likely to be left org-BLIND while their
@@ -214,7 +221,7 @@ describe('#10340 the /meta doors decide org scope on the FOLDED type, not the ra
     });
 
     describe('the whole contract, not the two specimens — every spelling in the URL map', () => {
-        it('decides scope for every URL spelling exactly as for its folded type', async () => {
+        it('names no organization for any URL spelling of any type', async () => {
             // The class-closing sweep. For EVERY key of `META_URL_TO_SINGULAR`
             // the door's decision must equal the predicate's decision on the
             // FOLDED type — the property the two maps' disagreement broke. A
@@ -225,8 +232,8 @@ describe('#10340 the /meta doors decide org scope on the FOLDED type, not the ra
                 const request = await writeWith(spelling);
                 expect(
                     request.organizationId,
-                    `PUT door scope for '${spelling}' disagreed with its fold '${folded}'`,
-                ).toBe(organizationIdForMetaWrite(folded, ORG));
+                    `PUT door threaded an organization for '${spelling}' (folds to '${folded}')`,
+                ).toBeUndefined();
             }
         });
 
@@ -269,17 +276,13 @@ describe('#10340 the /meta doors decide org scope on the FOLDED type, not the ra
             expect(requestFrom(b.listDrafts).type).toBe('translations');
         });
 
-        it('threads the CALLER org into GET /meta/_drafts — read scope symmetric with the save route (#11087)', async () => {
-            // A draft saved by a session carrying an active org lands in that
-            // org's overlay scope (`saveMetaItem`'s `organizationId:
-            // ctx?.tenantId`). Reading with NO org sees only env-wide rows
-            // (`getOverlayRepo(null)` → `organization_id IS NULL`), so every
-            // org-scoped draft was invisible to the pending-changes surfaces —
-            // the write-org/read-null split behind cloud#1593. The repository's
-            // own `$or` contract surfaces BOTH scopes once the org is threaded.
+        it('[ADR-0131 D6] names no organization on GET /meta/_drafts — read scope symmetric with the save route (#11087)', async () => {
+            // A draft is saved environment-wide (the save door threads no
+            // organization), so the pending-changes list reads the environment
+            // partition: write and read scope stay one answer.
             const b = boot(AUTHORIZED);
             await b.drive('GET', `${META}/_drafts`, {});
-            expect(requestFrom(b.listDrafts).organizationId).toBe(ORG);
+            expect(requestFrom(b.listDrafts).organizationId).toBeUndefined();
         });
     });
 
@@ -291,7 +294,7 @@ describe('#10340 the /meta doors decide org scope on the FOLDED type, not the ra
             // would hide a drift between them from the protocol's own tests.
             const request = await writeWith('translations');
             expect(request.type).toBe('translations');
-            expect(request.organizationId).toBe(ORG);
+            expect(request.organizationId).toBeUndefined();
         });
     });
 });

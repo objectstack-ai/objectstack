@@ -38,6 +38,20 @@
 // that behaves differently under a test runner would make every log reading
 // in tests a reading of something other than production. The request lives
 // HERE, in the harness, where the test author can see it.
+//
+// ── #22301: this suite declines the marketplace, DECLARATIVELY ──────────────
+//
+// `bootStack` composes what `objectstack serve` composes (ruling A), so a
+// showcase boot mounts the showcase's own `plugins` array — and that array
+// wires the marketplace-facing `@objectstack/cloud-connection` plugins at the
+// URL `resolveCloudUrl()` reads from `OS_CLOUD_URL` when the configuration
+// module is imported, which defaults to the PUBLIC catalog. `OS_CLOUD_URL=off`
+// is the configuration's own switch for a fully-offline run (it then wires no
+// marketplace plugin at all), the one `@objectstack/verify`'s `bootStack`
+// documents for offline CI. Measured: CI sets no `OS_CLOUD_URL`, and turbo's
+// strict env mode would not hand one to `@objectstack/dogfood#test` anyway
+// (its task `env` declares only `OS_TEST_TIERS` / `OS_TEST_SHARD`), so the
+// run declares it here, per project, beside `OS_REGISTRY_LOG`.
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 import { parseCLI, type TestUserConfig } from 'vitest/node';
@@ -167,7 +181,7 @@ export default defineConfig({
           // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
           // default. Header docblock carries the measurement and the rationale.
           // PER PROJECT for the same measured reason as the line above.
-          env: { OS_REGISTRY_LOG: 'warn' },
+          env: { OS_REGISTRY_LOG: 'warn', OS_CLOUD_URL: 'off' },
           name: 'shared-showcase',
           include: SHARED_SHOWCASE,
           isolate: false,
@@ -337,7 +351,7 @@ export default defineConfig({
           // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
           // default. Header docblock carries the measurement and the rationale.
           // PER PROJECT for the same measured reason as the line above.
-          env: { OS_REGISTRY_LOG: 'warn' },
+          env: { OS_REGISTRY_LOG: 'warn', OS_CLOUD_URL: 'off' },
           name: 'isolated',
           include: ['test/**/*.test.ts'],
           exclude: SHARED_SHOWCASE,

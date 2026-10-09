@@ -12,7 +12,6 @@ import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
 // [commit 67ceb9aef] `canonicalMetaUrlType` is the FOLD this transport was missing.
-// See the two call sites below for what each one was deciding raw.
 import { canonicalMetaUrlType, pluralToSingular } from '@objectstack/spec/shared';
 import { CoreServiceName } from '@objectstack/spec/system';
 // [ADR-0106 / #3682] Metadata-plane FLS — the SAME projection the REST `/meta`
@@ -27,13 +26,10 @@ import {
     relateObjectSchemaMaskPosture,
     resolveObjectSchemaMaskPosture,
     type ObjectSchemaMaskPosture,
-    // [#8805] Moved to `metadata-core` so the REST `/meta` write doors decide
-    // this the same way rather than through a second copy. Behaviour unchanged.
-    organizationIdForMetaWrite,
-    // [#12702] The capability half of the same decision, from the same home
-    // and for the same no-second-copy reason: `manage_metadata` as before,
-    // plus `manage_org_presentation` for org-overridable types written
-    // org-scoped to the caller's own active organization.
+    // [#12702 · ADR-0131 D6] Which callers a `/meta` item write admits:
+    // `manage_metadata` (or `isSystem`), the one predicate the REST doors run
+    // too. No `/meta` branch here carries an organization into a metadata
+    // write or read: the per-organization overlay axis is retired.
     metaWriteCapabilityVerdict,
 } from '@objectstack/metadata-core';
 // [#15238] The DECLARED protocol contracts this domain's request literals are
@@ -71,10 +67,8 @@ import {
     createMetaLayeredAnswer,
     createMetaListAnswer,
     isPublicAudienceRead,
-    metaCallerOrganizationId,
     metaItemLayersDeprecationHeaders,
     metaItemPackageBinding,
-    metaReadOrganizationId,
     metaRequestLocale,
     metaSaveRequestOptions,
     metaTypeReadRefusal,
@@ -673,10 +667,7 @@ async function answerMetaItem(
 }
 
 /** [#20320] This transport's save-door admission of `:type/:name` — see `saveVerdict` in {@link handleMetadataRequest}. */
-type MetaSaveVerdict = (
-    canonicalType: string,
-    activeOrganizationId: string | undefined,
-) => ReturnType<typeof metaWriteCapabilityVerdict>;
+type MetaSaveVerdict = () => ReturnType<typeof metaWriteCapabilityVerdict>;
 
 /**
  * [#20320] `GET /meta/:type/:name?state=draft` for a caller who may read
@@ -700,12 +691,8 @@ type MetaSaveVerdict = (
  * Only an admitted caller arrives: the switch is declared with
  * {@link mayReadPendingDrafts} at the item read's entry.
  *
- * [#20408] Scoped to the caller's VETTED organization — the read to
- * {@link metaReadOrganizationId}'s partition, the author exemption to the save
- * door's verdict over {@link metaCallerOrganizationId} — exactly as
- * `RestServer`'s plain read scopes both. It read the session's claim as stored,
- * so a member removed from an organization read that organization's pending
- * drafts here.
+ * [ADR-0131 D6] Environment → code, exactly as `RestServer`'s plain read: the
+ * per-organization overlay axis is retired, so no organization is named.
  */
 async function readPendingDraft(
     deps: DomainHandlerDeps,
@@ -722,18 +709,17 @@ async function readPendingDraft(
     if (!protocol || typeof protocol.getMetaItem !== 'function') {
         return { handled: true, response: deps.error('Not found', 404) };
     }
-    const caller = context.executionContext as MetaReadGateCaller | undefined;
     let envelope: any;
     try {
         envelope = await protocol.getMetaItem({
-            type: singularType, name, packageId, organizationId: metaReadOrganizationId(type, caller), state: 'draft', previewDrafts,
+            type: singularType, name, packageId, state: 'draft', previewDrafts,
         });
     } catch (e: any) {
         return { handled: true, response: deps.errorFromThrown(e, 404) };
     }
     if (envelope?.item == null) return { handled: true, response: deps.error('Not found', 404) };
 
-    const mayWriteItem = saveVerdict(canonicalMetaUrlType(type), metaCallerOrganizationId(caller)).allowed;
+    const mayWriteItem = saveVerdict().allowed;
     return answerMetaItem(
         deps, context, protocol,
         { metaType: singularType, name, policy: STORED_VERSION_DOOR_POLICY, maskPosture: item.maskPosture },
@@ -776,9 +762,8 @@ type MetaLayeredProtocol = MetaDomainProtocol & Required<Pick<MetaDomainProtocol
  * serves both spellings through; ⛔ no step lives here) and write its answer on
  * this transport's wire.
  *
- * The read is scoped to the caller's VETTED organization
- * ({@link metaReadOrganizationId}, the partition the plain read reads — ⛔ never
- * the session's claim as stored) and to `?package=` (ADR-0048). The chain
+ * The read is environment → code (ADR-0131 D6: no organization), as the plain
+ * read's, and scoped to `?package=` (ADR-0048). The chain
  * judges every present layer under `STORED_VERSION_DOOR_POLICY` — whole for a
  * caller this transport's save door admits (`saveVerdict`, the `PUT` branch's
  * own admission, carried as `mayWriteItem`), pruned as the plain read prunes
@@ -807,16 +792,13 @@ async function answerMetaLayered(
     headers: Readonly<Record<string, string | undefined>> = {},
 ): Promise<HttpDispatcherResult> {
     const { type, name, packageId, maskPosture } = request;
-    const caller = context.executionContext as MetaReadGateCaller | undefined;
-    const organizationId = metaReadOrganizationId(type, caller);
-    const mayWriteItem = saveVerdict(canonicalMetaUrlType(type), metaCallerOrganizationId(caller)).allowed;
+    const mayWriteItem = saveVerdict().allowed;
     let answer: MetaLayeredAnswer;
     try {
         const layered = await protocol.getMetaItemLayered({
             type,
             name,
             ...(packageId ? { packageId } : {}),
-            ...(organizationId ? { organizationId } : {}),
         });
         answer = await createMetaLayeredAnswer(
             metaItemReadGateSources(deps, context, protocol, mayWriteItem),
@@ -889,17 +871,14 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // whole, or a save drops entries silently」), which
     // `MetaReadGateCaller.mayWriteItem` says must be the transport's own
     // save-door answer. A second spelling at a read could drift from the door
-    // it stands for. `canonicalType` is the folded segment and
-    // `activeOrganizationId` the one resolution each caller already made, so
-    // authorization and scope read one value. [#20478] Declared here, above
-    // every branch, so the `/layers` branch asks the same one.
-    const saveVerdict: MetaSaveVerdict = (canonicalType, activeOrganizationId) => {
+    // it stands for. Since ADR-0131 D6 it reads the caller alone. [#20478]
+    // Declared here, above every branch, so the `/layers` branch asks the same
+    // one.
+    const saveVerdict: MetaSaveVerdict = () => {
         const ec: any = _context.executionContext;
         return metaWriteCapabilityVerdict({
             isSystem: ec?.isSystem === true,
             systemPermissions: ec?.systemPermissions,
-            canonicalType,
-            activeOrganizationId,
             operation: 'save',
         });
     };
@@ -1177,16 +1156,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         let publishedOverlay: unknown;
         if (protocol && typeof protocol.getMetaItemLayered === 'function') {
             try {
-                // [#20408] The caller's VETTED organization, as `RestServer`'s
-                // `/published` reads it (`ctx.tenantId`, raw — the protocol's
-                // layered read gates it by type itself). The session's claim as
-                // stored served a removed member the overlay of the organization
-                // they had left.
-                const organizationId = metaCallerOrganizationId(_context.executionContext as MetaReadGateCaller | undefined);
+                // [ADR-0131 D6] No organization, as `RestServer`'s `/published`:
+                // every publish lands environment-wide.
                 const layered = await protocol.getMetaItemLayered({
                     type,
                     name,
-                    ...(organizationId ? { organizationId } : {}),
                 });
                 if (layered?.overlay !== undefined && layered?.overlay !== null) {
                     // [#21002, #21986, ADR-0126 §2, ADR-0062 D4] As
@@ -1309,35 +1283,15 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // engine self-invocation (`isSystem`) bypasses, matching
             // `actionPermissionError` and the migrate-stored gate below.
             //
-            // [#12702] The gate is the shared `metaWriteCapabilityVerdict`
-            // (`@objectstack/metadata-core` — the same home as the org-scope
-            // predicate below, for the same no-second-copy reason): beside
-            // `manage_metadata` it admits `manage_org_presentation`, ONLY for
-            // a type whose registry entry declares `allowOrgOverride: true`
-            // AND a session with an active organization — which is exactly the
-            // organization `organizationIdForMetaWrite` threads below, so an
-            // admitted write can only land org-scoped in the caller's own
-            // partition, never env-wide and never another org's. The active
-            // organization is resolved HERE, once, and reused by the write
-            // threading below — authorization and scope read one value (the
-            // single-resolution shape the REST doors carry, commit b5378550e). Resolving
-            // it is a session read, not a protocol probe: the 403-vs-501
-            // discipline above is untouched.
-            // [commit 67ceb9aef] Folded at the boundary, once — the verdict and the
-            // scope decision below must read the same spelling.
-            const canonicalType = canonicalMetaUrlType(type);
-            // [#20408] The caller's VETTED organization — the `tenantId`
-            // `resolveAuthzContext` left on the execution context, the value
-            // `RestServer`'s `PUT` door reads — ⛔ never the session's claim as
-            // stored: under a walled posture a claim naming an organization the
-            // caller has LEFT is dropped there, and this door read it anyway, so
-            // a removed member's write landed in that organization's partition.
-            // No read at all now, so the 403-vs-501 discipline above is
-            // untouched.
-            const activeOrganizationId = metaCallerOrganizationId(_context.executionContext as MetaReadGateCaller | undefined);
+            // [#12702 · ADR-0131 D6] The gate is the shared
+            // `metaWriteCapabilityVerdict` (`@objectstack/metadata-core`):
+            // `manage_metadata` or `isSystem`. The org-scoped
+            // `manage_org_presentation` arm retired with the per-organization
+            // overlay axis — this branch threads no organization, so that arm
+            // would have admitted its holders to environment-wide authoring.
             // [#20320] Spelled once (`saveVerdict` above), because the
             // `?state=draft` read's author exemption asks this same question.
-            const verdict = saveVerdict(canonicalType, activeOrganizationId);
+            const verdict = saveVerdict();
             if (!verdict.allowed) {
                 // `deps.error(msg, 403)` derives the code from the status —
                 // `PERMISSION_DENIED`, this transport's pinned spelling.
@@ -1383,54 +1337,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
             if (protocol && typeof protocol.saveMetaItem === 'function') {
                 try {
-                    // [#7018 / the #6190 ruling, Option A] The session's active
-                    // organization rides this write ONLY for types the registry
-                    // declares `allowOrgOverride: true`. For every other type it
-                    // is dropped and the write lands env-wide — byte-identical to
-                    // what a no-active-org session already produces today.
-                    //
-                    // Threading it unconditionally is how the runtime minted rows
-                    // boot never reads: `SysMetadataRepository.put` stamps
-                    // `organization_id` for EVERY type, while `loadMetaFromDb`
-                    // hydrates `organization_id IS NULL` only. See
-                    // `@objectstack/metadata-core`'s `meta-write-org-scope.ts`
-                    // for why the predicate is the static registry flag and not
-                    // `isOverlayAllowed` — and, since #8805, why it lives there:
-                    // the REST `/meta` write doors run the same one.
-                    //
-                    // [#12702] `activeOrganizationId` is the ONE resolution the
-                    // capability gate above already made — scope and
-                    // authorization read the same value by construction.
-                    //
-                    // [commit 67ceb9aef] The segment is FOLDED before the scope decision
-                    // — the correction commit 26f3588fb landed for the REST `/meta`
-                    // doors, arriving on the second transport. This branch read
-                    // the RAW `parts[0]`, while `protocol.saveMetaItem` below
-                    // folds the same string through `canonicalizeMetaRequestType`
-                    // for storage. Two maps that must agree did not: storage
-                    // folds through `META_URL_TO_SINGULAR` (every spelling),
-                    // while `declaresOrgOverride` tolerates only the MANIFEST
-                    // collection spellings. For the two URL-only spellings of
-                    // `allowOrgOverride: true` types — `translations` and
-                    // `email_templates` — an org-active caller's write therefore
-                    // landed ENV-WIDE where the singular twin landed org-scoped:
-                    // one item, two partitions, addressed by spelling.
-                    //
-                    // ⛔ NOT repaired by widening `declaresOrgOverride`'s set —
-                    // a predicate below the boundary consuming the URL spelling
-                    // contract is what `metadata-url-spelling.ts`'s own header
-                    // forbids ("folding happens at the boundary and only
-                    // there"), and `meta-write-org-scope.ts`'s
-                    // `ORG_OVERRIDABLE_TYPES` header pins that limit.
-                    //
-                    // Only the scope ARGUMENT is folded. The request `type`
-                    // stays the raw segment, exactly as the REST doors leave
-                    // it: the protocol boundary folds it itself, and two
-                    // pre-folds would hide a drift between them from the
-                    // protocol's own tests.
-                    const organizationId = organizationIdForMetaWrite(
-                        canonicalType, activeOrganizationId,
-                    );
+                    // [ADR-0131 D6] THE WRITE NAMES NO ORGANIZATION, as on
+                    // `RestServer`'s `PUT` twin: every admitted write lands
+                    // environment-wide (`organization_id` NULL), whatever the
+                    // caller's active organization.
                     // [commit d806081dd] Server-stated face: this branch answers through
                     // `deps.errorFromThrown`, which carries the refusal's
                     // `issues[]` in `details` (see the `details.issues` pin in
@@ -1462,7 +1372,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // cannot smuggle a `force` (or a `writeFace`) through it.
                     // Pinned both ways in `meta-save-destructive-remedy.test.ts`.
                     const result = await protocol.saveMetaItem({
-                        type, name, item, organizationId,
+                        type, name, item,
                         writeFace: 'meta-dispatch',
                         ...(packageId ? { packageId } : {}),
                         // [#22141] `parentVersion` and `mode`, each present
@@ -1601,11 +1511,8 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             && query.preview.toLowerCase() === 'draft'
             && mayReadPendingDrafts(_context.executionContext);
 
-        // [#20408] The caller's VETTED organization (`metaReadOrganizationId`
-        // gates it by the folded type): the partition `RestServer`'s plain read
-        // reads. The session's claim as stored served a member removed from an
-        // organization that organization's overlays here.
-        const caller = _context.executionContext as MetaReadGateCaller | undefined;
+        // [ADR-0131 D6] The item read names no organization: environment →
+        // code, the partition `RestServer`'s plain read reads.
         const singularType = pluralToSingular(type);
 
         // [ADR-0106 D2/D3 · #20408] ONE posture for this caller × this item,
@@ -1691,9 +1598,8 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 const protocolFirst = scoped || previewDrafts;
 
                 // The protocol read `RestServer`'s plain read makes: the same
-                // `?package=` scope (ADR-0048), the same admitted switch and the
-                // same org partition — `organizationIdForMetaRead` never names an
-                // organization for `object`, so no phantom org row resurrects.
+                // `?package=` scope (ADR-0048), the same admitted switch and no
+                // organization (ADR-0131 D6).
                 const readFromProtocol = async (): Promise<any> => {
                     // [#15238] `protocol &&` spelled out: the `any` cast this
                     // branch used to resolve through let two sibling guards drift
@@ -1703,7 +1609,6 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                         const data = await protocol.getMetaItem({
                             type: 'object',
                             name,
-                            organizationId: metaReadOrganizationId(type, caller),
                             ...(packageId ? { packageId } : {}),
                             ...(previewDrafts ? { previewDrafts: true } : {}),
                         });
@@ -1748,7 +1653,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // `previewDrafts` is the ADMITTED switch declared above
                     // this block's branches (#20338).
                     const data = await protocol.getMetaItem({
-                        type: singularType, name, packageId, organizationId: metaReadOrganizationId(type, caller), previewDrafts,
+                        type: singularType, name, packageId, previewDrafts,
                     });
                     // [#18401] The SAME hit test the `object` branch above runs,
                     // asked here for the same reason. `getMetaItem` answers a
@@ -1842,15 +1747,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         const protocol = await resolveProtocol(deps, _context);
         if (protocol && typeof protocol.listDrafts === 'function') {
             try {
-                // [#20408] The caller's VETTED organization, raw — what
-                // `RestServer`'s `_drafts` hands down (`ctx.tenantId`). The
-                // session's claim as stored listed a removed member the pending
-                // drafts of the organization they had left.
-                const organizationId = metaCallerOrganizationId(ec);
+                // [ADR-0131 D6] No organization, as `RestServer`'s `_drafts`:
+                // every draft is saved environment-wide.
                 const data = await protocol.listDrafts({
                     packageId: query?.packageId || undefined,
                     type: query?.type || undefined,
-                    organizationId,
                 });
                 return { handled: true, response: deps.success(data) };
             } catch (e: any) {
@@ -1884,11 +1785,9 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // publishing metadata, which is exactly what a rewrite is; engine
         // self-invocation (`isSystem`) bypasses, matching `actionPermissionError`.
         //
-        // [#12702] Deliberately NOT `metaWriteCapabilityVerdict`: an
-        // install-wide stored-metadata rewrite is env-wide by definition, so
-        // `manage_org_presentation`'s "org-scoped to the caller's own active
-        // organization" condition can never hold here. `manage_metadata`-only,
-        // unchanged — do not copy the item doors' acceptance in.
+        // [#12702] Its own `manage_metadata` gate rather than
+        // `metaWriteCapabilityVerdict`: an install-wide stored-metadata rewrite
+        // is not an item door, and its refusal sentence is its own.
         const ec: any = _context.executionContext;
         if (!ec?.isSystem && !new Set<string>(ec?.systemPermissions ?? []).has('manage_metadata')) {
             return {
@@ -1986,12 +1885,9 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         let listed: any;
         if (protocol && typeof protocol.getMetaItems === 'function') {
             try {
-                // [#20408] The caller's VETTED organization, gated by the folded
-                // type — the partition `RestServer`'s list reads.
-                const organizationId = metaReadOrganizationId(
-                    typeOrName, _context.executionContext as MetaReadGateCaller | undefined,
-                );
-                const data = await protocol.getMetaItems({ type: typeOrName, packageId, organizationId, previewDrafts });
+                // [ADR-0131 D6] No organization: environment → code, the
+                // partition `RestServer`'s list reads.
+                const data = await protocol.getMetaItems({ type: typeOrName, packageId, previewDrafts });
                 // Return any valid response from protocol (including empty items arrays)
                 if (data && (data.items !== undefined || Array.isArray(data))) listed = data;
             } catch (e: any) {

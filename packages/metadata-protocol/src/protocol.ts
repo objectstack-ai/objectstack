@@ -22833,7 +22833,10 @@ export class ObjectStackProtocolImplementation implements
      * by `packageId` and/or `type`. The list reads of `getMetaItems` only see
      * the ACTIVE registry; this exposes what an AI authored but a human hasn't
      * published yet, so the console can show a "pending changes" surface and a
-     * just-built app package isn't displayed as empty. No body is returned.
+     * just-built app package isn't displayed as empty. No body is returned —
+     * only its own `label` ([#22200]), the one member a draft-only item can be
+     * shown by other than its machine name, passed through from
+     * {@link SysMetadataRepository.listDrafts} as the repository projects it.
      */
     async listDrafts(request?: {
         packageId?: string;
@@ -22843,6 +22846,8 @@ export class ObjectStackProtocolImplementation implements
         drafts: Array<{
             type: string;
             name: string;
+            /** The draft body's own top-level `label`, as authored; `null` when it declares none. */
+            label: I18nLabel | null;
             organizationId: string | null;
             packageId: string | null;
             updatedAt: string | null;
@@ -22909,8 +22914,9 @@ export class ObjectStackProtocolImplementation implements
      * ## Why the batch's existing enumeration cannot supply the bodies
      *
      * `listDrafts` — the read that DEFINES this batch — is a declared header
-     * projection: it maps rows to `(type, name, organizationId, packageId,
-     * updatedAt, updatedBy)` and drops `metadata` on purpose, because its other
+     * projection: it maps rows to `(type, name, label, organizationId,
+     * packageId, updatedAt, updatedBy)` and drops `metadata` on purpose — of the
+     * body only its own top-level `label` leaves ([#22200]) — because its other
      * caller is the console's "pending changes" list. Widening it would put
      * every draft BODY on that listing, and it would not even remove the guard
      * below: the doubles that lack `repo.get` stub `listDrafts` too, so a

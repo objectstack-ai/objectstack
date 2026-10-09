@@ -28,12 +28,31 @@
  *
  * ## What is refused BY CONSTRUCTION
  *
- * An op is only what this table names. There is no row for a merge, a review
- * submission, a branch or ref write, a contents or workflow write, a release,
- * or any organization / administration endpoint, so a payload naming one is
- * refused at the validator with zero writes — the `--self-test` of
- * `validate.mjs` pins that every path spelled here stays clear of those
- * families and that no row issues a whole-set `PUT`.
+ * An op is only what this table names. There is no row for a merge of a pull,
+ * a review submission, a direct branch or ref write (`/git/**`, `/branches/**`,
+ * `/contents/**`), a workflow-file write, a run cancel / re-run / delete, a
+ * cache or artifact write, a release, or any organization / administration
+ * endpoint, so a payload naming one is refused at the validator with zero
+ * writes — the `--self-test` of `validate.mjs` pins that every path spelled
+ * here stays clear of those families and that the table's one `PUT`
+ * (`pr_update_branch`, below) reaches no whole-set replace of labels or
+ * assignees.
+ *
+ * ## The one row that moves a branch — `pr_update_branch`
+ *
+ * `PUT /repos/{o}/{r}/pulls/{n}/update-branch` is GitHub's own base sync: the
+ * PLATFORM merges the pull's base into its head and authors that merge commit
+ * as the identity that asked — through the relay, `objectstack-fleet[bot]`;
+ * as bare REST under a seat's session token, the seat's personal account, the
+ * identity exchange every other relay write already refuses. The relay sends
+ * no ref write of its own. GitHub's permission ledger (the file cited below)
+ * lists the endpoint under `pull_requests: write`, server-to-server, with no
+ * additional permission, so the row spends `pull-requests` and the mint step
+ * widens nothing. `expected_head_sha` is REQUIRED and full-length (`FIELDS`,
+ * kind `sha`): a short or malformed sha is refused by the validator before the
+ * dispatch, never left to the platform's 422; a stale one IS the platform's
+ * 422. How the executor tells that 422 from the "nothing to merge" one, and
+ * how it confirms a 202, is `execute.mjs`'s (`confirmUpdateBranch`).
  *
  * ## The permissions the relay's token is narrowed to
  *
@@ -45,18 +64,48 @@
  * `disablePullRequestAutoMerge`) additionally require `contents: write` —
  * measured on the first live use, where a token without it answered
  * "Resource not accessible by integration" — and those two rows are the ONLY
- * spenders of it: the table has no contents op (no file, ref or branch write);
- * the sender gate's `GET /repos/{o}/{r}/collaborators/{login}/permission` is
- * `metadata: read`. `PERMISSIONS` is that set and nothing wider; the workflow
- * declares exactly it on `actions/create-github-app-token`, and
- * `validate.mjs --self-test` pins the two spellings equal.
+ * spenders of it: the table has no contents op (no direct file, ref or branch
+ * write; `pr_update_branch` is the platform's own merge, `pull_requests: write`
+ * in that ledger); the one workflow-run dispatch (`workflow_dispatch`, below)
+ * is `actions: write`, the one row spending it; the sender gate's
+ * `GET /repos/{o}/{r}/collaborators/{login}/permission` is `metadata: read`.
+ * `PERMISSIONS` is that set and nothing wider. The workflow declares the four
+ * grants every stroke gets as literal `permission-*` inputs on
+ * `actions/create-github-app-token`, and the one grant a stroke gets only when
+ * it spends it (`STROKE_SCOPED_PERMISSIONS`) as an input read from the
+ * validator's output; `validate.mjs --self-test` pins both spellings equal to
+ * this table.
+ *
+ * ## The one row whose token carries `actions: write` — `workflow_dispatch`
+ *
+ * `POST /repos/{repo}/actions/workflows/{file}/dispatches` starts a run of a
+ * workflow file at a ref and needs `actions: write` on the token — a grant that
+ * also reaches cancelling, re-running and deleting runs, and the cache,
+ * artifact, secret and variable endpoints. So the row is fenced four ways:
+ * `workflow` is a closed enum — `WORKFLOW_DISPATCH_ALLOWLIST`, one file name
+ * per entry, matched whole, joined only by a PR that adds the entry here and
+ * never at request time; `ref` is a closed enum of exactly
+ * `WORKFLOW_DISPATCH_REF`; a stroke carrying this op carries exactly that one
+ * action (`alone`), so the wider token serves one request and nothing beside
+ * it; and the grant is minted only for such a stroke — the validator writes
+ * `permission_actions=write` for it and an empty value for every other stroke,
+ * and the mint action skips an empty `permission-*` input, so every other
+ * stroke's token is what it was before this row. The op sends no `inputs`: the
+ * one allowlisted workflow declares none and the platform refuses inputs on a
+ * workflow that declares none, so a workflow with inputs joins the list by the
+ * PR that also spells its inputs here. `REFUSED_PATH_FAMILIES` refuses every
+ * other `actions/*` path, and `validate.mjs --self-test` pins that the dispatch
+ * call is the only one the table reaches. The dispatch answers 204 with no
+ * body, so the run it starts is read back by the SEAT (`dispatch.mjs`): the
+ * newest `workflow_dispatch` run of that file created since the dispatch.
  *
  * ## The one row whose token reaches a SECOND repository — `transfer`
  *
  * GitHub's `transferIssue` mutation (GraphQL only; REST has no transfer
  * endpoint) needs `issues: write` on the repository the card is in AND on the
  * one it moves to, so a transfer stroke's token is minted for both. That is
- * the only widening the relay makes, and it is fenced four ways: the target is
+ * the only widening of the token's repository reach the relay makes (the one
+ * widening of its permissions is the next section), and it is fenced four ways: the target is
  * a closed enum — `TRANSFER_TARGETS`, the fleet's governed-repository roster
  * reused from `check-governed-merges.mjs`, never a second roster and never
  * free text; the target is never the source; a stroke carrying a transfer
@@ -114,6 +163,18 @@ export const TARGET_OWNER = 'objectstack-ai';
  */
 export const TRANSFER_TARGETS = Object.freeze(GOVERNED_REPOS.map((r) => r.slug));
 
+/**
+ * The workflow files a `workflow_dispatch` may start — one file name per
+ * entry, matched whole (never a path, never a glob), joined only by a PR that
+ * adds the entry here. `validate.mjs --self-test` pins that every entry is a
+ * file under `.github/workflows/` declaring a `workflow_dispatch` trigger.
+ */
+export const WORKFLOW_DISPATCH_ALLOWLIST = Object.freeze(['shard-timings-refresh.yml']);
+/** The one ref a `workflow_dispatch` may start a run at. ⛔ Never a free string. */
+export const WORKFLOW_DISPATCH_REF = 'main';
+/** The shape of the one `actions/*` path the table reaches — the dispatch call, nothing beside it. */
+export const WORKFLOW_DISPATCH_PATH_SHAPE = /\/actions\/workflows\/[^/]+\/dispatches$/;
+
 /** The seat-side transport selector and its three values. */
 export const TRANSPORT_ENV = 'OS_FLEET_TRANSPORT';
 export const TRANSPORTS = Object.freeze(['direct', 'dispatch', 'auto']);
@@ -161,6 +222,8 @@ export const PAYLOAD_KEYS = Object.freeze(['request_id', 'repo', 'session', 'act
 
 export const REQUEST_ID_SHAPE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export const SESSION_SHAPE = /^session_[A-Za-z0-9]{6,}$/;
+/** A full commit sha, as GitHub spells one — the only shape `expected_head_sha` takes. */
+export const SHA_SHAPE = /^[0-9a-f]{40}$/;
 /** The container variable's shape; group 1 is the tail `session_` is prefixed to. */
 export const CONTAINER_SESSION_SHAPE = /^cse_([A-Za-z0-9]{6,})$/;
 export const TARGET_REPO_SHAPE = new RegExp(`^${TARGET_OWNER}/[A-Za-z0-9_.-]+$`);
@@ -170,7 +233,9 @@ export const TARGET_REPO_SHAPE = new RegExp(`^${TARGET_OWNER}/[A-Za-z0-9_.-]+$`)
  *   `int`   a positive integer (never a numeric string);
  *   `str`   a non-empty string of at most `max` UTF-8 bytes;
  *   `list`  an array of 1..`max` non-empty strings, each at most `itemMax` bytes;
- *   `enum`  one of `values`.
+ *   `enum`  one of `values`;
+ *   `sha`   a full commit sha — exactly 40 lowercase hex characters, never a
+ *           short one (that is refused here, not by the platform's 422).
  */
 export const FIELDS = Object.freeze({
   issue: Object.freeze({ kind: 'int' }),
@@ -180,6 +245,7 @@ export const FIELDS = Object.freeze({
   title: Object.freeze({ kind: 'str', max: MAX_TITLE_BYTES }),
   head: Object.freeze({ kind: 'str', max: MAX_REF_BYTES }),
   base: Object.freeze({ kind: 'str', max: MAX_REF_BYTES }),
+  expected_head_sha: Object.freeze({ kind: 'sha' }),
   labels: Object.freeze({ kind: 'list', max: MAX_LABELS_PER_ACTION, itemMax: MAX_LABEL_BYTES }),
   assignees: Object.freeze({ kind: 'list', max: MAX_LOGINS_PER_ACTION, itemMax: MAX_LOGIN_CHARS }),
   reviewers: Object.freeze({ kind: 'list', max: MAX_LOGINS_PER_ACTION, itemMax: MAX_LOGIN_CHARS }),
@@ -187,15 +253,32 @@ export const FIELDS = Object.freeze({
   state: Object.freeze({ kind: 'enum', values: Object.freeze(['open', 'closed']) }),
   state_reason: Object.freeze({ kind: 'enum', values: Object.freeze(['completed', 'not_planned', 'duplicate', 'reopened']) }),
   target_repo: Object.freeze({ kind: 'enum', values: TRANSFER_TARGETS }),
+  workflow: Object.freeze({ kind: 'enum', values: WORKFLOW_DISPATCH_ALLOWLIST }),
+  ref: Object.freeze({ kind: 'enum', values: Object.freeze([WORKFLOW_DISPATCH_REF]) }),
 });
 
 /**
  * The App permissions the relay token is narrowed to — the union of every
  * row's `permission`, plus the sender gate's read. `contents: write` is spent
  * by the two auto-merge rows alone (GitHub's requirement for those mutations);
- * no row writes a file, a ref or a branch.
+ * no row writes a file, a ref or a branch itself — `pr_update_branch`'s merge
+ * is the platform's, under `pull-requests`. `actions: write` is spent by the
+ * `workflow_dispatch` row alone, and minted only for a stroke carrying it
+ * (`STROKE_SCOPED_PERMISSIONS`).
  */
-export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'write', contents: 'write', metadata: 'read' });
+export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'write', contents: 'write', metadata: 'read', actions: 'write' });
+
+/**
+ * The permissions minted ONLY for a stroke carrying an op that spends them —
+ * `actions: write`, the `workflow_dispatch` row's alone. `validate.mjs`
+ * computes a stroke's permission set (`tokenPermissionsOf`) and writes each of
+ * these to `$GITHUB_OUTPUT` as `permission_<name>=<level>` or empty; the
+ * workflow's mint step reads that output for exactly these inputs, and
+ * `actions/create-github-app-token` skips an empty `permission-*` input
+ * (`lib/get-permissions-from-inputs.js`: an empty value returns the set
+ * unchanged), so every other stroke's token carries the literal grants alone.
+ */
+export const STROKE_SCOPED_PERMISSIONS = Object.freeze(['actions']);
 
 const issues = (repo, n) => `/repos/${repo}/issues/${n}`;
 const pulls = (repo, n) => `/repos/${repo}/pulls/${n}`;
@@ -290,13 +373,17 @@ export function transferRemedy(source, target) {
  *   `atLeastOne`  (optional) of these keys, at least one must be present;
  *   `secondRepo`  (optional) the key naming a SECOND repository the token
  *                 must reach — `transfer`'s alone (header above);
+ *   `alone`       (optional) true for a row whose stroke carries exactly that
+ *                 one action — `workflow_dispatch`'s alone (header above);
  *   `requests`    the request descriptors the executor issues, in order:
- *                 `{ verb, path, body?, idempotent404?, graphql? }` — a
- *                 `graphql` descriptor names the mutation and the pull (or
+ *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch? }`
+ *                 — a `graphql` descriptor names the mutation and the pull (or
  *                 the issue and target) whose node ids it needs; a pull's
  *                 descriptor also carries `landed`, its `PR_LANDED_STATE`
  *                 entry, which is how the executor tells a landing from a
- *                 bare 200.
+ *                 bare 200; an `updateBranch` descriptor carries the pull and
+ *                 the expected head `confirmUpdateBranch` (execute.mjs) judges
+ *                 the answer against.
  */
 export const OPS = Object.freeze({
   comment: Object.freeze({
@@ -378,6 +465,17 @@ export const OPS = Object.freeze({
       return [{ verb: 'POST', path: `${pulls(repo, a.pull)}/requested_reviewers`, body }];
     },
   }),
+  // The base sync — GitHub's own update-branch action (header): the platform merges the pull's base into
+  // its head and authors the merge commit as the App, so the relay writes no ref itself. `expected_head_sha`
+  // is REQUIRED and full-length; the validator refuses a short one before the dispatch. The executor confirms
+  // a 202 by polling the head off that sha and measures a 422 as a no-op only when the compare says the head
+  // is not behind its base (`confirmUpdateBranch`, execute.mjs) — never by the answer's spelling.
+  pr_update_branch: Object.freeze({
+    permission: 'pull-requests',
+    required: Object.freeze(['pull', 'expected_head_sha']),
+    optional: Object.freeze([]),
+    requests: (a, repo) => [{ verb: 'PUT', path: `${pulls(repo, a.pull)}/update-branch`, body: { expected_head_sha: a.expected_head_sha }, updateBranch: { pull: a.pull, expectedHeadSha: a.expected_head_sha } }],
+  }),
   pr_ready: Object.freeze({
     permission: 'pull-requests',
     required: Object.freeze(['pull']),
@@ -413,6 +511,15 @@ export const OPS = Object.freeze({
     secondRepo: 'target_repo',
     requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'transferIssue', query: TRANSFER_MUTATION, issue: a.issue, target_repo: a.target_repo } }],
   }),
+  // The one row whose token carries `actions: write`, minted for a stroke carrying this op alone — see the header.
+  // `workflow` and `ref` are closed enums; the body carries no `inputs` (the allowlisted workflow declares none).
+  workflow_dispatch: Object.freeze({
+    permission: 'actions',
+    required: Object.freeze(['workflow', 'ref']),
+    optional: Object.freeze([]),
+    alone: true,
+    requests: (a, repo) => [{ verb: 'POST', path: `/repos/${repo}/actions/workflows/${enc(a.workflow)}/dispatches`, body: { ref: a.ref } }],
+  }),
 });
 
 export const OP_NAMES = Object.freeze(Object.keys(OPS));
@@ -428,7 +535,16 @@ export const REFUSED_PATH_FAMILIES = Object.freeze([
   /\/git\//,
   /\/branches\//,
   /\/contents\//,
-  /\/actions\/workflows/,
+  // Every `actions/*` path but the one dispatch call (`WORKFLOW_DISPATCH_PATH_SHAPE`), then the run,
+  // job, cache, artifact, secret / variable / runner and workflow enable / disable endpoints
+  // `actions: write` would otherwise reach, each named — a loosened catch-all still reds on them.
+  /\/actions\/(?!workflows\/[^/]+\/dispatches$)/,
+  /\/actions\/runs\//,
+  /\/actions\/jobs\//,
+  /\/actions\/caches/,
+  /\/actions\/artifacts/,
+  /\/actions\/workflows\/[^/]+\/(enable|disable)$/,
+  /\/actions\/(secrets|variables|permissions|runners|oidc)/,
   /\/releases/,
   /^\/orgs\//,
   /^\/admin\//,

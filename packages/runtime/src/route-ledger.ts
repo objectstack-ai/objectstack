@@ -494,7 +494,7 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'GET /meta/:type', domain: '/meta', disposition: 'sdk', client: 'meta.getItems' },
   { route: 'GET /meta/:type/:name', domain: '/meta', disposition: 'sdk', client: 'meta.getItem' },
   { route: 'PUT /meta/:type/:name', domain: '/meta', disposition: 'sdk', client: 'meta.saveItem',
-    note: 'Gated on `manage_metadata` (ADR-0066 D1) — the dispatcher transport of the REST save door. The gate is the shared `metaWriteCapabilityVerdict` (`@objectstack/metadata-core`): `manage_org_presentation` is also admitted, ONLY for an `allowOrgOverride: true` type written org-scoped to the caller\'s own active organization, so a tenant org admin authors their own org\'s overlays without platform-wide `manage_metadata`; refusals answer 403 `PERMISSION_DENIED`, this transport\'s pinned spelling' },
+    note: 'Gated on `manage_metadata` (ADR-0066 D1) — the dispatcher transport of the REST save door. The gate is the shared `metaWriteCapabilityVerdict` (`@objectstack/metadata-core`); the write names no organization and lands environment-wide (ADR-0131 D6), so the org-scoped `manage_org_presentation` admission retired with it; refusals answer 403 `PERMISSION_DENIED`, this transport\'s pinned spelling' },
   { route: 'GET /meta/:type/:name/published', domain: '/meta', disposition: 'sdk', client: 'meta.getPublished',
     responseSchema: 'GetPublishedMetaItemResponseSchema',
     note: 'Enveloped on THIS surface — the named schema is the `data`, and it is DELIBERATELY OPAQUE (`z.unknown()`): the route answers an arbitrary metadata item body, never a union frozen against the type registry. The REST twin (`rest-route-ledger.ts`) answers the same payload BARE' },

@@ -19,8 +19,8 @@
 // @proof: showcase-scope-depth-fallback
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { SecurityPlugin, appDefaultPermissionSetName } from '@objectstack/plugin-security';
 
 const OBJ = '/data/showcase_private_note';
@@ -51,7 +51,7 @@ interface World { stack: VerifyStack; tokens: Record<Who, string>; }
 // into `sys_permission_set` (the runtime home of an app-declared `permission`)
 // and reached only by NAME via `fallbackPermissionSet`.
 async function bootFallbackWorld(withResolver = true): Promise<World> {
-  const stack = await bootStack(showcaseStack, {
+  const stack = await bootShowcase({
     // Mirror the CLI exactly: the app's isDefault profile name, computed off the
     // declared `permissions[]`, handed to SecurityPlugin as the fallback. No
     // `defaultPermissionSets` carry the scope profile — it must resolve from DB.

@@ -7,7 +7,6 @@
 - 出口代理按设计只放 repo-scoped 路径(`/repos/{o}/{r}/...`)加 `/rate_limit`;org 级端点未实测。
 - ✓ 按席位类别限定:每个 ✓ = 会话门开着的席位实调通过,⛔ 无 ✓ 不当已验证事实。
 - 403 后 `/rate_limit` 判凭据形态:15000/时 = 凭据活被 repo-scoping 拒;60/时或 auth 错 = 无凭据。
-- 两只桶:MCP 记链接用户 5000/时,兄弟会话共享同桶;REST/CCR 记 App 安装 15000/时。
 - `objectstack-fleet[bot]` 经 `fleet-write` 中继:五个写工具与 `with-fleet.sh --via auto` 共一选择器。
 - 三条件全立才 `dispatch`:`CCR_AGENT_PROXY_ENABLED=1`、会话 id、中继活着;否则 `direct`,印一行。
 - 会话 id 由容器 `CLAUDE_CODE_REMOTE_SESSION_ID` 派生;`OS_FLEET_SESSION` 只覆盖本地检出与测试。
@@ -46,9 +45,10 @@
 - ✓ 该 `PATCH` 带 `state` 关卡/重开,`state_reason` 交付 `completed`、撤单 `not_planned`,走裸 REST。
 - 请求体走文件(`-d @file`)或引号定界 heredoc(`<<'EOF'`),⛔ 永不内联双引号串。
 - ✓ 请求复审 `POST .../pulls/{n}/requested_reviewers` · 开 PR `POST .../pulls` 带 `draft=true`。
-- ✓ `origin/main` 合进 PR head:`PUT .../pulls/{n}/update-branch`,PM 席位、零文件写、真合并提交。
-- `expected_head_sha` 须完整 40 字符 SHA(短 SHA 回 422);base 未动回 422 = 无事可做,不是失败。
+- ✓ `origin/main` 合进 PR head:中继 op `pr_update_branch`(`pull` + 40 位 `expected_head_sha`),真合并提交。
+- ⛔ 裸 `PUT .../pulls/{n}/update-branch` 落个人账号;短 SHA 派发前即拒;base 未动 422 = op 报 no-op。
 - ✓ 落地经中继 `node scripts/pm/fleet-write/dispatch.mjs --repo O/N --actions-file F`;`--via dispatch` 同载。
+- ✓ 启动 run 走 op `workflow_dispatch`:解锁物是白名单 run 才启;入表只经 workflow 自己的 PR。
 - ⛔ 裸 `PATCH /pulls/{n}` 带 `{"draft": false}` 回 200 零改;状态码不作数,`GET /pulls/{n}` 才作数。
 - 线程自己建:`POST .../pulls/{n}/comments` 带 `commit_id`·`path`·`line`,回读看 `review_threads`。
 - ✓ `POST .../ccr/comments/{id}/resolve` · `/unresolve`;`{id}` 是评审评论 id,⛔ 只在自己 PR 上探。
@@ -71,7 +71,7 @@
 
 - `merged_by` 是入队者,⛔ 不是绕队证据:队列合并归属给入队的账户,对队列与直合零分辨力。
 - 判据 ①:直接合并 `PUT .../pulls/{n}/merge` 在强制队列 ruleset 下回 405。
-- ②:PR 上的 `added_to_merge_queue` timeline 事件。③:对已入队 PR 调 update-branch 回不能更新。
+- ②:PR 上的 `added_to_merge_queue` timeline 事件。③:对已入队 PR 发 `pr_update_branch` 回不能更新。
 - ①② 的拼写与边界住 `platform-readings.md` 队列段,本条只归拢判据。
 - 队列 required 集按 job 与 check-run 名匹配,workflow 名从不作为 check context 出现,搜也搜不到。
 - 改任一 job 名或 test 分片矩阵的形状,必须同一笔更新队列 required 集,否则队列静默挂起。

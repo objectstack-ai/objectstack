@@ -3637,10 +3637,14 @@ function unevaluableRuleError(
   error: { kind: string; message: string },
   what: 'predicate' | 'when-predicate',
   subject: { prose: string; detail?: string } = { prose: `Validation rule '${ruleName}'` },
+  isDeclaredColumn?: (key: string) => boolean,
 ): FieldValidationError {
   const described = describeCelFault(error, {
     what,
     undeclaredKeyFix: "fix the rule's condition, or declare the field",
+    // [#22445] A declared column the judged record lacks was not supplied —
+    // see {@link declaredColumnRead}.
+    ...(isDeclaredColumn ? { isDeclaredColumn } : {}),
   });
   const { summary, nullOverload } = described;
   // A subject that words its own detail has read the fault more precisely than
@@ -3718,7 +3722,26 @@ function unevaluableFieldRuleError(
   return unevaluableRuleError(slot, name, error, 'predicate', {
     prose: `Field '${name}' ${slot}`,
     ...(detail !== undefined ? { detail } : {}),
-  });
+  }, declaredColumnRead(fields, source));
+}
+
+/**
+ * [#22445] The `isDeclaredColumn` answer for one predicate: is `key` a column
+ * this object declares (`fields`), read directly off `record` / `previous` by
+ * `source`? Both halves, because a `No such key` fault on a key reached any
+ * other way (through a reference, a computed key or receiver) is not a column
+ * of the judged record, and "its value was not supplied" would be as wrong
+ * there as "this object does not declare" is for a declared column.
+ *
+ * `undefined` — keep the undeclared-key sentence — when there is no field map
+ * or no CEL source to read.
+ */
+function declaredColumnRead(
+  fields: Record<string, ConditionalFieldDef> | undefined,
+  source: string,
+): ((key: string) => boolean) | undefined {
+  if (!fields || !source) return undefined;
+  return (key) => Object.prototype.hasOwnProperty.call(fields, key) && readsRecordColumn(source, key);
 }
 
 /** The CEL source of a predicate, or `''` for a non-CEL dialect or an AST-only envelope. */
@@ -3819,7 +3842,7 @@ function unevaluableOptionGateError(
     ...unevaluableRuleError('visibleWhen', name, error, 'predicate', {
       prose: `Option '${String(value)}' of field '${name}' visibleWhen`,
       ...(detail !== undefined ? { detail } : {}),
-    }),
+    }, declaredColumnRead(fields, source)),
     value: String(value),
   };
 }
@@ -4205,7 +4228,10 @@ function checkPredicate(
     logger?.warn?.(
       `Validation rule '${rule.name}' predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — write rejected: a rule that cannot be evaluated fails closed, it is never skipped`,
     );
-    const unevaluable = unevaluableRuleError(rule.name, field, result.error, 'predicate');
+    const unevaluable = unevaluableRuleError(
+      rule.name, field, result.error, 'predicate', undefined,
+      declaredColumnRead(fields, celSourceOfPredicate(rule.condition)),
+    );
     // [#20006] Same verdict; on a delete's reference cleanup, a text that names it.
     const onCleanup = expr.dialect === 'cel'
       ? referentialClearRefusal(rule.name, expr, unevaluable, record, previous, related, fields)
@@ -4369,7 +4395,10 @@ function checkConditional(
     ctx.logger?.warn?.(
       `Validation rule '${rule.name}' when-predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — write rejected: a rule that cannot be evaluated fails closed, it is never skipped`,
     );
-    return unevaluableRuleError(rule.name, '_record', result.error, 'when-predicate');
+    return unevaluableRuleError(
+      rule.name, '_record', result.error, 'when-predicate', undefined,
+      declaredColumnRead(ctx.fields, celSourceOfPredicate(rule.when)),
+    );
   }
 
   const branch = result.value === true ? rule.then : rule.otherwise;

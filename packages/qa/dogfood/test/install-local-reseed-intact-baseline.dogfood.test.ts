@@ -34,9 +34,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
 import crmStack from '@objectstack/example-crm';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { MarketplaceInstallLocalPlugin } from '@objectstack/cloud-connection';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -109,7 +109,7 @@ describe('dogfood: install-local reseed over an intact baseline, then after a pu
 
   beforeAll(async () => {
     storageDir = mkdtempSync(join(tmpdir(), 'dogfood-install-local-reseed-intact-'));
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       extraPlugins: [new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir })],
     });
     ql = stack.kernel.getService<IObjectQLEngine>('objectql');
@@ -183,7 +183,7 @@ describe('dogfood: install-local reseed of a package with no seed record for thi
 
   beforeAll(async () => {
     storageDir = mkdtempSync(join(tmpdir(), 'dogfood-install-local-reseed-none-'));
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       extraPlugins: [new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir })],
     });
     ql = stack.kernel.getService<IObjectQLEngine>('objectql');

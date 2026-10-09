@@ -27,7 +27,13 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 
-export const AttCase = ObjectSchema.create({
+/**
+ * [#22301] Builds `AttCase` again, every nested definition new — for a suite that
+ * keeps two stacks live at once and so boots each on a configuration of its
+ * own (`bootStack`'s instance rule; a boot keeps live references into the
+ * definitions it registers).
+ */
+export const buildAttCase = () => ObjectSchema.create({
   name: 'att_case',
   label: 'Attachment Case',
   pluralLabel: 'Attachment Cases',
@@ -37,8 +43,15 @@ export const AttCase = ObjectSchema.create({
     name: Field.text({ label: 'Name', required: true }),
   },
 });
+export const AttCase = buildAttCase();
 
-export const AttSecret = ObjectSchema.create({
+/**
+ * [#22301] Builds `AttSecret` again, every nested definition new — for a suite that
+ * keeps two stacks live at once and so boots each on a configuration of its
+ * own (`bootStack`'s instance rule; a boot keeps live references into the
+ * definitions it registers).
+ */
+export const buildAttSecret = () => ObjectSchema.create({
   name: 'att_secret',
   label: 'Attachment Secret',
   pluralLabel: 'Attachment Secrets',
@@ -50,6 +63,7 @@ export const AttSecret = ObjectSchema.create({
     owner_id: Field.text({ label: 'Owner' }),
   },
 });
+export const AttSecret = buildAttSecret();
 
 export const AttNoFiles = ObjectSchema.create({
   name: 'att_nofiles',
@@ -61,7 +75,13 @@ export const AttNoFiles = ObjectSchema.create({
   },
 });
 
-export const AttReadonly = ObjectSchema.create({
+/**
+ * [#22301] Builds `AttReadonly` again, every nested definition new — for a suite that
+ * keeps two stacks live at once and so boots each on a configuration of its
+ * own (`bootStack`'s instance rule; a boot keeps live references into the
+ * definitions it registers).
+ */
+export const buildAttReadonly = () => ObjectSchema.create({
   name: 'att_readonly',
   label: 'Attachment Readonly',
   pluralLabel: 'Attachment Readonlys',
@@ -74,6 +94,7 @@ export const AttReadonly = ObjectSchema.create({
     owner_id: Field.text({ label: 'Owner' }),
   },
 });
+export const AttReadonly = buildAttReadonly();
 
 /**
  * The domain grant a real app ships when it turns the attachments panel on

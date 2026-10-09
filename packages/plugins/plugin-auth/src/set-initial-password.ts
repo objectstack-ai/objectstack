@@ -21,9 +21,14 @@
  * route on one path but not the other).
  */
 
-/** Minimal shape of the better-auth server API we depend on. */
+import { inProcessSessionReadInput } from '@objectstack/types';
+
+/**
+ * Minimal shape of the better-auth server API we depend on. `query` carries
+ * `disableRefresh` for a cookie request (#22398, see the call below).
+ */
 export interface SetPasswordCapableApi {
-  setPassword(opts: { body: { newPassword: string }; headers: Headers }): Promise<unknown>;
+  setPassword(opts: { body: { newPassword: string }; headers: Headers; query?: { disableRefresh: true } }): Promise<unknown>;
 }
 
 export interface SetInitialPasswordResult {
@@ -62,7 +67,13 @@ export async function runSetInitialPassword(
   try {
     // better-auth's session middleware reads the session from `headers`;
     // length checks + the "already set" guard happen inside setPassword.
-    await authApi.setPassword({ body: { newPassword }, headers: request.headers });
+    // [#22398] That read is an in-process session read whose renewed cookie
+    // would be staged on a response nobody sends, so it takes the same input
+    // a `getSession` reader does: better-auth's `getSessionFromCtx` spreads
+    // the call's `query` into the read, and the endpoint declares no query
+    // schema that would strip it. A cookie request does not renew here; a
+    // bearer-only one does, as before.
+    await authApi.setPassword({ body: { newPassword }, ...inProcessSessionReadInput(request.headers) });
     return { status: 200, body: { success: true } };
   } catch (error) {
     return mapSetPasswordError(error);

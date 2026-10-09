@@ -24,6 +24,7 @@ model: opus
 
 1. **Worktree-first。** 任何编辑之前建专用 worktree,`cd` 进去 `pnpm install`。
    - `git fetch origin main && git worktree add --no-track ../<repo>-issue-<n> -b claude/issue-<n>-<slug> origin/main`
+   - 认领带 `Resume-from: BRANCH@SHA` ⇒ 从 `origin/BRANCH` 建同名分支续写,先合 `origin/main`。
    - ⛔ 永不编辑共享检出(PreToolUse 钩子会拦);修复横跨姊妹仓时一仓一 worktree。
    - 动笔前记下基点 `BASE=$(git rev-parse HEAD)`,它是标准条款节里家族规则的锚。
    - 建好分支后的第一个动作是推空分支:任何编辑之前 `git push -u origin <branch>`。
@@ -111,7 +112,6 @@ model: opus
 - `--workspace-concurrency=2` 只对过滤后的 run-command(`run` / `build`)成立,放在 `--filter` 之前。
 - 放在 filter 之后会被转发给底层脚本,且该 flag 不叫 `--concurrency`。
 - pnpm 10 在 `install` 上直接拒绝它(`ERROR Unknown option: 'workspace-concurrency'`)。
-- 新 worktree 里写裸 `pnpm install`。
 - pnpm `overrides` 只住在 `pnpm-workspace.yaml`;加进 `package.json` 的那份什么都不改。
 - OSV override 的上界 ⛔ 永不写成恰好排除修复版:上界放在 major 边界,只挪替换目标。
 - 新 fake engine 的 `delete()` 开头用 `@objectstack/objectql` 的 `assertEngineDeleteDispatch(options)`。

@@ -38,7 +38,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { SecurityPlugin, appDefaultPermissionSetName } from '@objectstack/plugin-security';
 
 // Mirror the CLI: pull the app-declared default profile's name off the stack
@@ -61,7 +62,7 @@ describe('showcase: app-declared default profile, CLI-wired (ADR-0056 D7)', () =
     // `defaultPermissionSets` — that declares one permission set under two
     // packages, and the boot is refused (`NAMESPACE_CONFLICT`, both holders
     // named): a permission set holds one name per deployment.
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       security: new SecurityPlugin({ fallbackPermissionSet: appDefault }),
     });
     await stack.signIn();

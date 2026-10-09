@@ -55,8 +55,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 
@@ -112,7 +112,7 @@ describe('#21328: GET /share-links is self-scoped for a plain member', () => {
   };
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, { security: showcaseAppDefaultSecurity() });
+    stack = await bootShowcase({ security: showcaseAppDefaultSecurity() });
     adminTok = await stack.signIn(); // the seeded admin first, so the sign-ups below are plain members
     aTok = await stack.signUp(A_EMAIL);
     bTok = await stack.signUp(B_EMAIL);
