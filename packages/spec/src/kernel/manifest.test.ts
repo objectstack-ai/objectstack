@@ -678,7 +678,7 @@ describe('manifest.id — reverse-domain identifier', () => {
       for (const example of MANIFEST_ID_EXAMPLES) expect(msg).toContain(example);
     });
 
-    it('reads as product guidance: a headline in product words, neutral examples (#22093)', () => {
+    it('reads as product guidance: a headline in product words, neutral examples', () => {
       // The Studio-measured case: a display name typed where the id goes.
       const r = ManifestSchema.safeParse(legal('Repairs Center'));
       const issue = r.success ? undefined : r.error.issues.find((i) => i.path[0] === 'id');

@@ -223,7 +223,7 @@ describe('GetMetaItemLayeredResponseSchema — the three-layer projection', () =
   });
 });
 
-describe('[#22114] the read serves the version token; the conflict carries the current one as data', () => {
+describe('the read serves the version token; the conflict carries the current one as data', () => {
   const TOKEN = 'hmac-sha256:' + 'a'.repeat(64);
 
   it('GetMetaItemResponseSchema keeps `version` through a parse — a token, `null`, or absent', () => {
